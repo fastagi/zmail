@@ -15,6 +15,7 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(domain.ErrPasswordResetTokenExpired, http.StatusUnauthorized, domain.CodePasswordResetTokenExpired)
 	mapper.Register(domain.ErrSignInThrottled, http.StatusTooManyRequests, domain.CodeRateLimited)
 	mapper.Register(domain.ErrAccountDisabled, http.StatusForbidden, domain.CodeAccountDisabled)
+	mapper.Register(domain.ErrRegistrationDisabled, http.StatusForbidden, response.ErrorCodeForbidden)
 	mapper.Register(domain.ErrEmailAlreadyExists, http.StatusConflict, domain.CodeEmailAlreadyExists)
 	mapper.Register(domain.ErrUsernameAlreadyExists, http.StatusConflict, domain.CodeUsernameAlreadyExists)
 }

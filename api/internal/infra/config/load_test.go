@@ -751,3 +751,26 @@ func TestDatabaseIdlePoolDefaultsToTheOpenLimit(t *testing.T) {
 		t.Fatalf("explicit idle pool = %d, want 5", cfg.Database.MaxIdleConns)
 	}
 }
+
+func TestLoad_RegistrationIsOpenUnlessDisabled(t *testing.T) {
+	withoutEnv(t, "AUTH_REGISTRATION_ENABLED")
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("DB_ENABLED", "false")
+
+	cfg, err := LoadFresh()
+	if err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	if cfg.Authentication.RegistrationDisabled {
+		t.Fatal("registration should stay open by default")
+	}
+
+	t.Setenv("AUTH_REGISTRATION_ENABLED", "false")
+	cfg, err = LoadFresh()
+	if err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	if !cfg.Authentication.RegistrationDisabled {
+		t.Fatal("AUTH_REGISTRATION_ENABLED=false should close registration")
+	}
+}

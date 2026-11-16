@@ -15,6 +15,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/capabilities/idgen"
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/events"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
@@ -87,6 +88,8 @@ type service struct {
 	admin          userAdministrationStore
 	verifyPassword func(hashedPassword, password []byte) error
 	signIns        signInThrottle
+	// registrationOpen is false when AUTH_REGISTRATION_ENABLED=false closes public sign-up.
+	registrationOpen bool
 	// runPasswordReset starts reset delivery; tests replace it with an inline runner.
 	runPasswordReset func(ctx context.Context, task func(context.Context))
 }
@@ -110,13 +113,14 @@ func NewService(
 	deletionPolicy *AccountDeletionPolicy,
 ) *service {
 	svc := &service{
-		repo:           repo,
-		passwordResets: passwordResets,
-		sessions:       sessions,
-		eventBus:       eventBus,
-		mailer:         mailer,
-		deletionPolicy: deletionPolicy,
-		verifyPassword: bcrypt.CompareHashAndPassword,
+		repo:             repo,
+		passwordResets:   passwordResets,
+		sessions:         sessions,
+		eventBus:         eventBus,
+		mailer:           mailer,
+		deletionPolicy:   deletionPolicy,
+		verifyPassword:   bcrypt.CompareHashAndPassword,
+		registrationOpen: true,
 		runPasswordReset: newBackgroundRunner(
 			"user.password_reset", passwordResetConcurrency, passwordResetTimeout,
 		).run,
@@ -136,9 +140,13 @@ func ProvideService(
 	mailer UserMailer,
 	deletionPolicy *AccountDeletionPolicy,
 	guard *AuthAbuseGuard,
+	cfg *config.Config,
 ) *service {
 	svc := NewService(repo, passwordResets, sessions, eventBus, mailer, deletionPolicy)
 	svc.signIns = guard.loginThrottle()
+	if cfg != nil {
+		svc.registrationOpen = !cfg.Authentication.RegistrationDisabled
+	}
 	return svc
 }
 
@@ -148,6 +156,10 @@ func ProvideService(
 
 // Register handles user registration
 func (s *service) Register(ctx context.Context, req *UserRegisterRequest) (*domain.User, error) {
+	if !s.registrationOpen {
+		return nil, domain.ErrRegistrationDisabled
+	}
+
 	existingByUsername, err := s.repo.FindByUsername(ctx, req.Username)
 	if err == nil && existingByUsername != nil {
 		return nil, domain.ErrUsernameAlreadyExists

@@ -15,7 +15,9 @@ type Seeder interface {
 
 Each seeder registers itself in `init()` with `register(&YourSeeder{})`. The default `user` starter
 ships `UserSeeder` (`users`), which creates `admin@example.com` and `user@example.com` with the
-password `secret` for local development only.
+password `secret` for local development only. The `2025_06_18_000001_seed_default_users` migration
+creates the same `admin` account when the users table is empty, except in production
+(`APP_ENV=production`), where it creates nothing.
 
 ## Writing A Seeder
 

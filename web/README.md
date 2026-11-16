@@ -283,6 +283,13 @@ Yarn. Build, start, health-check, and terminate it with:
 bash scripts/verify-container.sh fastbuild-web:container-check
 ```
 
+`NEXT_PUBLIC_*` values are compiled into the bundle, so the image takes them as build arguments
+(`NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_OPTIONAL_FEATURES`,
+`NEXT_PUBLIC_DEFAULT_LOCALE`, `NEXT_PUBLIC_LOCALE_SWITCHER_ENABLED`) with the scaffold defaults. An
+image is therefore built for one public origin: the adapter accepts browser mutations only from
+`NEXT_PUBLIC_APP_URL`. Server-only values (`API_*`, `SESSION_SECRET`, `SHIPLAND_PUBLIC_API_URL`)
+stay runtime environment.
+
 The root [container security contract](../docs/CONTAINER_SECURITY.md) defines BuildKit evidence,
 CycloneDX 1.7 inventory, Trivy policy, CI artifacts, and the downstream signing boundary.
 
