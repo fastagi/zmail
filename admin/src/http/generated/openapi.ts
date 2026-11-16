@@ -1899,6 +1899,8 @@ export interface components {
             created_at: string;
             display_name: string;
             id: components["schemas"]["PositiveID"];
+            /** @description Number of unread inbound messages in the mailbox. */
+            unread_count: number;
         };
         MailboxDomain: {
             domain: string;

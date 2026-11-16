@@ -50,6 +50,8 @@ type Mailbox struct {
 	UserID      uint
 	Address     string
 	DisplayName string
+	// UnreadCount is the number of unread inbound messages. Only listings fill it.
+	UnreadCount int
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

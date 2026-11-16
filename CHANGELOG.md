@@ -8,6 +8,8 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Unread counts.** `GET /v1/mailboxes` returns `unread_count` for each mailbox, and the Web
+  console shows it as a badge that follows read state.
 - **Programmatic sending.** Backend services send mail with an API key through
   `POST /v1/outbound-mail-messages` (scope `mail:send`) and check a message with
   `GET /v1/outbound-mail-messages/:message_id` (scope `mail:read`). Both send routes accept an

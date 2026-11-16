@@ -64,10 +64,14 @@ has no browser route: only the mail edge calls it.
     "id": 12,
     "address": "hello@mail.example.com",
     "display_name": "Hello Team",
+    "unread_count": 0,
     "created_at": "2026-11-16T10:00:00Z"
   }
 }
 ```
+
+`unread_count` is the number of unread inbound messages in the mailbox; sent messages never
+count.
 
 Deleting a mailbox deletes its messages in the same transaction. Deleting the account
 (`DELETE /v1/users/account`) does the same for every mailbox the user owns, inside the account

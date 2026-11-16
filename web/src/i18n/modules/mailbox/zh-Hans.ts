@@ -8,6 +8,7 @@ const messages = {
     title: '我的邮箱',
     count: '已用 {count} / {max}',
     noDisplayName: '未设置显示名称',
+    unreadCount: '{count} 封未读',
     emptyTitle: '还没有邮箱',
     empty: '创建一个地址，即可开始收发邮件。',
   },

@@ -107,7 +107,12 @@ export function useUpdateMailMessage(mailboxId: number) {
     onSuccess: message => {
       queryClient.setQueryData(mailboxKeys.message(mailboxId, message.id), message);
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: mailboxKeys.messages(mailboxId) }),
+    // Read state changes the unread count shown in the mailbox list.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.messages(mailboxId) }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list() }),
+      ]),
   });
 }
 
@@ -119,6 +124,11 @@ export function useDeleteMailMessage(mailboxId: number) {
     onSuccess: (_result, messageId) => {
       queryClient.removeQueries({ queryKey: mailboxKeys.message(mailboxId, messageId) });
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: mailboxKeys.messages(mailboxId) }),
+    // Deleting an unread message lowers the unread count shown in the mailbox list.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.messages(mailboxId) }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list() }),
+      ]),
   });
 }

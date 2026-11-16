@@ -112,6 +112,19 @@ describe('mailbox workspace', () => {
     expect(state.listCalls.at(-1)).toEqual({ mailboxId: 2, direction: 'inbound', page: 1 });
   });
 
+  it('shows an unread badge only on mailboxes with unread mail, capped at 99+', () => {
+    state.mailboxes.data = [
+      mailbox(1, 'hello', 'Hello Team', 3),
+      mailbox(2, 'sales', '', 0),
+      mailbox(3, 'busy', '', 250),
+    ];
+    renderWorkspace();
+
+    expect(screen.getByLabelText('3 unread')).toHaveTextContent('3');
+    expect(screen.getByLabelText('250 unread')).toHaveTextContent('99+');
+    expect(screen.queryByLabelText('0 unread')).not.toBeInTheDocument();
+  });
+
   it('creates a mailbox with a normalized address and selects it', async () => {
     state.createMailbox.mutateAsync.mockResolvedValue(mailbox(3, 'support-team', 'Support Team'));
     renderWorkspace();
@@ -431,11 +444,12 @@ function fillValidMessage(dialog: HTMLElement) {
   fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Body' } });
 }
 
-function mailbox(id: number, localPart: string, displayName: string) {
+function mailbox(id: number, localPart: string, displayName: string, unreadCount = 0) {
   return {
     id,
     address: `${localPart}@mail.example.com`,
     display_name: displayName,
+    unread_count: unreadCount,
     created_at: now(),
   };
 }

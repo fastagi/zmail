@@ -37,10 +37,22 @@ describe('mailbox service boundary', () => {
           id: 12,
           address: 'hello@mail.example.com',
           display_name: '',
+          unread_count: 3,
           created_at: '2026-11-16T10:00:00Z',
         },
       ]).success
     ).toBe(true);
+    // A mailbox without its unread count is not a valid API answer.
+    expect(
+      mailboxListSchema.safeParse([
+        {
+          id: 12,
+          address: 'hello@mail.example.com',
+          display_name: '',
+          created_at: '2026-11-16T10:00:00Z',
+        },
+      ]).success
+    ).toBe(false);
     const page = (data: unknown[]) => ({
       code: 0,
       message: 'success',

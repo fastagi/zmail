@@ -66,6 +66,7 @@ export const mailboxSchema = strictObject({
   id: safeIdSchema,
   address: string(),
   display_name: string(),
+  unread_count: nonnegativeIntegerSchema,
   created_at: timestampSchema,
 });
 export const mailboxListSchema = array(mailboxSchema);
