@@ -34,6 +34,8 @@ import {
   EmptyState,
   ErrorAlert,
   MailHtmlFrame,
+  MailStatusBadge,
+  mailBadgeKey,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
@@ -526,6 +528,8 @@ function MessageList({
                     {unread ? <span className="sr-only">{t('list.unread')}</span> : null}
                     {message.status === 'failed' ? (
                       <Badge variant="destructive">{t('list.failed')}</Badge>
+                    ) : message.last_event !== '' ? (
+                      <MailStatusBadge message={message} label={t(mailBadgeKey(message))} />
                     ) : null}
                     {message.status === 'failed' && message.failure_code ? (
                       <code className="truncate text-xs text-muted-foreground">

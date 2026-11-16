@@ -35,9 +35,12 @@ import {
   EmptyState,
   ErrorAlert,
   MailStatusBadge,
+  mailBadgeKey,
   mailStatusKey,
   nativeSelectClassName,
+  relativeTime,
   useDateTimeFormat,
+  useRelativeTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import {
   MAIL_STATS_DAYS,
@@ -429,12 +432,8 @@ function EmailTable({
   onOpen: (entry: MailLogEntry) => void;
 }) {
   const t = useT('mailbox');
-  const locale = useLocale();
   const absolute = useDateTimeFormat();
-  const relative = useMemo(
-    () => new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' }),
-    [locale]
-  );
+  const relative = useRelativeTimeFormat();
   const [now] = useState(() => Date.now());
   const organizationId = useMailOrganizationId();
   const { page, ...filters } = view;
@@ -552,10 +551,7 @@ function EmailTable({
                       className="flex flex-col items-start gap-0.5"
                       title={entry.failure_code || undefined}
                     >
-                      <MailStatusBadge
-                        status={entry.status}
-                        label={t(mailStatusKey[entry.status])}
-                      />
+                      <MailStatusBadge message={entry} label={t(mailBadgeKey(entry))} />
                       {entry.status === 'failed' && entry.failure_code ? (
                         <code className="max-w-40 truncate text-xs text-muted-foreground">
                           {entry.failure_code}
@@ -612,19 +608,4 @@ function EmailTable({
       </div>
     </div>
   );
-}
-
-const relativeUnits: readonly [Intl.RelativeTimeFormatUnit, number][] = [
-  ['day', 86_400_000],
-  ['hour', 3_600_000],
-  ['minute', 60_000],
-];
-
-/** "5 min. ago", "2 days ago": the largest whole unit, down to minutes. */
-function relativeTime(format: Intl.RelativeTimeFormat, then: number, now: number): string {
-  const elapsed = then - now;
-  for (const [unit, size] of relativeUnits) {
-    if (Math.abs(elapsed) >= size) return format.format(Math.trunc(elapsed / size), unit);
-  }
-  return format.format(0, 'minute');
 }

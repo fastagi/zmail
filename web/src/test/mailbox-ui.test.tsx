@@ -511,6 +511,53 @@ describe('mailbox workspace', () => {
     expect(screen.queryByRole('button', { name: 'Mark unread' })).toBeNull();
   });
 
+  it('shows the delivery summary of sent messages and keeps a failed send as failed', () => {
+    const outbound = { direction: 'outbound', status: 'sent', read: true };
+    state.sent.data = page([
+      summary({
+        ...outbound,
+        id: 24,
+        subject: 'Gone',
+        to: ['a@example.com'],
+        last_event: 'bounced',
+      }),
+      summary({
+        ...outbound,
+        id: 23,
+        subject: 'Arrived',
+        to: ['b@example.com'],
+        last_event: 'delivered',
+      }),
+      summary({ ...outbound, id: 22, subject: 'Pending', to: ['c@example.com'] }),
+      summary({
+        ...outbound,
+        id: 21,
+        subject: 'Refused',
+        to: ['d@example.com'],
+        status: 'failed',
+        failure_code: 'provider.rejected',
+        last_event: 'rejected',
+      }),
+    ]);
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Sent' }));
+
+    const row = (subject: string) => screen.getByRole('button', { name: new RegExp(subject, 'u') });
+    expect(within(row('Gone')).getByText('Bounced')).toHaveAttribute('data-event', 'bounced');
+    expect(within(row('Gone')).getByText('Bounced')).toHaveClass('text-error');
+    expect(within(row('Arrived')).getByText('Delivered')).toHaveAttribute(
+      'data-event',
+      'delivered'
+    );
+    expect(within(row('Arrived')).getByText('Delivered')).toHaveClass('text-success');
+    // Without an event a sent message carries no badge, as before.
+    expect(row('Pending').querySelector('[data-slot="badge"]')).toBeNull();
+    // The provider never took it: "Failed" and its code win over any event.
+    expect(within(row('Refused')).getByText('Failed')).toBeInTheDocument();
+    expect(within(row('Refused')).getByText('provider.rejected')).toBeInTheDocument();
+    expect(within(row('Refused')).queryByText('Rejected')).toBeNull();
+  });
+
   it('pages through a folder and shows empty states', () => {
     state.inbox.data = page([summary({ id: 11 })], { current_page: 1, last_page: 3 });
     const view = renderWorkspace();
@@ -706,6 +753,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     subject: 'Unread question',
     read: false,
     failure_code: '',
+    last_event: '',
     created_at: now(),
     ...overrides,
   };
@@ -718,6 +766,7 @@ function message(overrides: Record<string, unknown> = {}) {
     html_body: '<p>Formatted question</p>',
     message_id: 'question-1@example.com',
     in_reply_to: '',
+    events: [],
     ...overrides,
   };
 }

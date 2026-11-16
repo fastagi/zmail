@@ -8,14 +8,14 @@ import (
 
 const testInboundSecret = "0123456789abcdef0123456789abcdef"
 
-func signedHeader(secret string, at time.Time, recipient string, raw []byte) string {
-	return fmt.Sprintf("t=%d,v1=%s", at.Unix(), signInbound(secret, at.Unix(), recipient, raw))
+func signedHeader(at time.Time, recipient string, raw []byte) string {
+	return fmt.Sprintf("t=%d,v1=%s", at.Unix(), signInbound(testInboundSecret, at.Unix(), recipient, raw))
 }
 
 func TestVerifyInbound(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	raw := []byte("From: a@b.c\r\n\r\nbody")
-	header := signedHeader(testInboundSecret, now, "hello@mail.example", raw)
+	header := signedHeader(now, "hello@mail.example", raw)
 	tolerance := 5 * time.Minute
 
 	if !verifyInbound(testInboundSecret, header, "hello@mail.example", raw, now, tolerance) {

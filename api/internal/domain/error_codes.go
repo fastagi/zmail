@@ -106,6 +106,7 @@ const (
 	CodeMailInboundSignature      = "MAILBOX.INBOUND_SIGNATURE_INVALID"
 	CodeMailInboundUnparseable    = "MAILBOX.INBOUND_UNPARSEABLE"
 	CodeMailInboundTooLarge       = "MAILBOX.INBOUND_TOO_LARGE"
+	CodeMailDeliveryEventInvalid  = "MAILBOX.DELIVERY_EVENT_INVALID"
 	CodeMailRecipientNotFound     = "MAILBOX.RECIPIENT_NOT_FOUND"
 
 	CodeOperatorForbidden       = "OPERATOR.FORBIDDEN"

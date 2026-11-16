@@ -18,6 +18,7 @@ const testCreator = 99
 type fakeRepository struct {
 	mailboxes map[uint]*domain.Mailbox
 	messages  map[uint]*domain.MailMessage
+	events    map[uint][]domain.MailEvent
 	nextID    uint
 	// hideIdempotencyLookup simulates a concurrent request that stores its message between
 	// this request's lookup and its insert.
@@ -30,7 +31,11 @@ type fakeRepository struct {
 var _ domain.MailboxRepository = (*fakeRepository)(nil)
 
 func newFakeRepository() *fakeRepository {
-	return &fakeRepository{mailboxes: map[uint]*domain.Mailbox{}, messages: map[uint]*domain.MailMessage{}}
+	return &fakeRepository{
+		mailboxes: map[uint]*domain.Mailbox{},
+		messages:  map[uint]*domain.MailMessage{},
+		events:    map[uint][]domain.MailEvent{},
+	}
 }
 
 func (r *fakeRepository) id() uint {
@@ -217,15 +222,55 @@ func (r *fakeRepository) StatsForOrganization(_ context.Context, _ uint, since t
 	return r.stats, nil
 }
 
-// fakeTransport records what the service hands to the provider.
-type fakeTransport struct {
-	sent []mailtransport.Message
-	err  error
+func (r *fakeRepository) AddMessageEvents(_ context.Context, messageID uint, events []domain.MailEvent) (int, domain.MailEventType, error) {
+	message, ok := r.messages[messageID]
+	if !ok {
+		return 0, "", ErrMailMessageNotFound
+	}
+	added := 0
+	for _, event := range events {
+		duplicate := false
+		for _, stored := range r.events[messageID] {
+			if event.ProviderEventID != "" && stored.ProviderEventID == event.ProviderEventID {
+				duplicate = true
+			}
+		}
+		if duplicate {
+			continue
+		}
+		event.ID = r.id()
+		event.MessageID = messageID
+		r.events[messageID] = append(r.events[messageID], event)
+		added++
+	}
+	message.LastEvent = domain.SummarizeMailEvents(r.events[messageID])
+	return added, message.LastEvent, nil
 }
 
-func (t *fakeTransport) Send(_ context.Context, mail mailtransport.Message) error {
+func (r *fakeRepository) ListMessageEvents(_ context.Context, messageID uint) ([]domain.MailEvent, error) {
+	return append([]domain.MailEvent(nil), r.events[messageID]...), nil
+}
+
+func (r *fakeRepository) FindOutboundMessageByProviderID(_ context.Context, providerMessageID string) (*domain.MailMessage, error) {
+	for _, message := range r.messages {
+		if message.Direction == domain.MailDirectionOutbound && message.MessageID == providerMessageID && providerMessageID != "" {
+			copied := *message
+			return &copied, nil
+		}
+	}
+	return nil, ErrMailMessageNotFound
+}
+
+// fakeTransport records what the service hands to the provider.
+type fakeTransport struct {
+	sent   []mailtransport.Message
+	result mailtransport.Result
+	err    error
+}
+
+func (t *fakeTransport) Send(_ context.Context, mail mailtransport.Message) (mailtransport.Result, error) {
 	t.sent = append(t.sent, mail)
-	return t.err
+	return t.result, t.err
 }
 
 type serviceFixture struct {
@@ -394,8 +439,8 @@ func TestSendMessageRecordsOutcomeAfterTheCallerCancels(t *testing.T) {
 
 type transportFunc func(context.Context, mailtransport.Message) error
 
-func (f transportFunc) Send(ctx context.Context, mail mailtransport.Message) error {
-	return f(ctx, mail)
+func (f transportFunc) Send(ctx context.Context, mail mailtransport.Message) (mailtransport.Result, error) {
+	return mailtransport.Result{}, f(ctx, mail)
 }
 
 type cancelingRepository struct {
@@ -466,7 +511,7 @@ func inboundRaw(messageID string) []byte {
 func (f *serviceFixture) delivery(recipient string, raw []byte) InboundDelivery {
 	return InboundDelivery{
 		Recipient: recipient,
-		Signature: signedHeader(testInboundSecret, f.now, recipient, raw),
+		Signature: signedHeader(f.now, recipient, raw),
 		Raw:       raw,
 	}
 }
@@ -755,6 +800,206 @@ func TestStatsCoversEveryDayOfTheWindow(t *testing.T) {
 	for _, days := range []int{0, -1, MaxStatsDays + 1} {
 		if _, err := fixture.service.Stats(context.Background(), 1, days); !errors.Is(err, domain.ErrInvalidInput) {
 			t.Fatalf("days %d error = %v; want ErrInvalidInput", days, err)
+		}
+	}
+}
+
+func TestSendMessageRecordsWhatTheProviderSaidPerRecipient(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+	mailbox := fixture.mailbox(t, 1, "hello")
+	fixture.transport.result = mailtransport.Result{
+		MessageID:  "prov-1@mail.example",
+		Delivered:  []string{"Bob@Example.com"},
+		Queued:     []string{"amy@example.org"},
+		Bounced:    []string{"gone@example.net"},
+		Suppressed: []string{"blocked@example.net"},
+	}
+
+	message, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{
+		To: []string{"bob@example.com", "amy@example.org", "gone@example.net", "blocked@example.net"}, Subject: "s", Text: "b",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if message.MessageID != "prov-1@mail.example" || fixture.repo.messages[message.ID].MessageID != "prov-1@mail.example" {
+		t.Fatalf("provider message id not stored: %q", message.MessageID)
+	}
+	// The worst current state among the recipients is what a listing shows.
+	if message.LastEvent != domain.MailEventBounced {
+		t.Fatalf("summary = %q; want bounced", message.LastEvent)
+	}
+	detail, err := fixture.service.GetMessage(ctx, 1, mailbox.ID, message.ID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	got := map[string]domain.MailEventType{}
+	for _, event := range detail.Events {
+		got[event.Recipient] = event.Type
+	}
+	want := map[string]domain.MailEventType{
+		"":                    domain.MailEventAccepted,
+		"bob@example.com":     domain.MailEventDelivered,
+		"gone@example.net":    domain.MailEventBounced,
+		"blocked@example.net": domain.MailEventRejected,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("events = %v; want %v (a queued recipient has no event yet)", got, want)
+	}
+	for recipient, eventType := range want {
+		if got[recipient] != eventType {
+			t.Fatalf("event for %q = %q; want %q", recipient, got[recipient], eventType)
+		}
+	}
+}
+
+func TestSendMessageRecordsRefusalsEvenWhenNobodyIsAccepted(t *testing.T) {
+	fixture := newServiceFixture(t)
+	mailbox := fixture.mailbox(t, 1, "hello")
+	fixture.transport.result = mailtransport.Result{Suppressed: []string{"blocked@example.net"}}
+	fixture.transport.err = &mailtransport.Error{Code: "transport.suppressed", Permanent: true}
+
+	message, _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, SendInput{To: []string{"blocked@example.net"}, Subject: "s", Text: "b"})
+	if !errors.Is(err, ErrMailDeliveryFailed) || message.Status != domain.MailStatusFailed {
+		t.Fatalf("send = %+v, %v; want a failed message", message, err)
+	}
+	events := fixture.repo.events[message.ID]
+	if len(events) != 1 || events[0].Type != domain.MailEventRejected || events[0].Detail != "suppressed" {
+		t.Fatalf("events = %+v; want one rejected event and no accepted event", events)
+	}
+}
+
+func deliveryEventBody(eventType, eventID, messageID, recipient string) []byte {
+	return []byte(`{"type":"cf.email.sending.message.` + eventType + `","source":{"type":"email.sending","domain":"mail.example"},` +
+		`"payload":{"eventId":"` + eventID + `","messageId":"` + messageID + `","sender":"hello@mail.example","recipient":"` + recipient + `",` +
+		`"subject":"Private subject","terminal":true,"delivery":{"status":"` + eventType + `","smtpStatusCode":550,"smtpEnhancedStatusCode":"5.1.1",` +
+		`"smtpResponse":"550 5.1.1 The email account that you tried to reach does not exist <secret free text>"},` +
+		`"bounce":{"type":"hard","classification":"permanent_failure","reason":"Mailbox does not exist!"}},` +
+		`"metadata":{"eventSchemaVersion":1,"eventTimestamp":"2027-01-15T08:00:05Z"}}`)
+}
+
+func (f *serviceFixture) signedEvent(raw []byte) DeliveryEvent {
+	return DeliveryEvent{Raw: raw, Signature: signedHeader(f.now, deliveryEventScope, raw)}
+}
+
+func TestRecordDeliveryEventUpdatesTheMessageOnce(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+	mailbox := fixture.mailbox(t, 1, "hello")
+	fixture.transport.result = mailtransport.Result{MessageID: "prov-2@mail.example", Queued: []string{"bob@example.com"}}
+	sent, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"})
+	if err != nil || sent.LastEvent != domain.MailEventAccepted {
+		t.Fatalf("send = %+v, %v; want an accepted message", sent, err)
+	}
+
+	raw := deliveryEventBody("bounced", "evt-1", "<prov-2@mail.example>", "Bob@Example.com")
+	message, event, recorded, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw))
+	if err != nil || !recorded {
+		t.Fatalf("RecordDeliveryEvent = recorded %v, err %v", recorded, err)
+	}
+	if message.ID != sent.ID || message.LastEvent != domain.MailEventBounced {
+		t.Fatalf("message = %+v; want message %d summarized as bounced", message, sent.ID)
+	}
+	if event.Type != domain.MailEventBounced || event.Recipient != "bob@example.com" {
+		t.Fatalf("event = %+v", event)
+	}
+	// Only short machine-readable tokens are kept; the SMTP response line and the free-form
+	// reason are provider text and must not be stored.
+	if event.Detail != "5.1.1 permanent_failure" {
+		t.Fatalf("detail = %q; want %q", event.Detail, "5.1.1 permanent_failure")
+	}
+	if !event.OccurredAt.Equal(time.Date(2027, 1, 15, 8, 0, 5, 0, time.UTC)) {
+		t.Fatalf("occurred at %v; want the provider's timestamp", event.OccurredAt)
+	}
+
+	_, _, recorded, err = fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw))
+	if err != nil || recorded {
+		t.Fatalf("redelivery = recorded %v, err %v; want an acknowledged duplicate", recorded, err)
+	}
+	if len(fixture.repo.events[sent.ID]) != 2 {
+		t.Fatalf("events = %d; want accepted + bounced", len(fixture.repo.events[sent.ID]))
+	}
+}
+
+func TestRecordDeliveryEventRejectsUntrustedOrUnusableEvents(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+	mailbox := fixture.mailbox(t, 1, "hello")
+	fixture.transport.result = mailtransport.Result{MessageID: "prov-3@mail.example"}
+	if _, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	valid := deliveryEventBody("delivered", "evt-2", "prov-3@mail.example", "bob@example.com")
+
+	unsigned := DeliveryEvent{Raw: valid, Signature: "t=1,v1=00"}
+	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, unsigned); !errors.Is(err, ErrMailInboundSignature) {
+		t.Fatalf("unsigned error = %v", err)
+	}
+	// A signature made for inbound mail must not be accepted for an event with the same bytes.
+	crossed := DeliveryEvent{Raw: valid, Signature: signedHeader(fixture.now, "hello@mail.example", valid)}
+	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, crossed); !errors.Is(err, ErrMailInboundSignature) {
+		t.Fatalf("inbound signature reused for an event: error = %v", err)
+	}
+
+	invalid := map[string][]byte{
+		"not json":          []byte("nope"),
+		"unknown type":      deliveryEventBody("opened", "evt-3", "prov-3@mail.example", "bob@example.com"),
+		"routing event":     []byte(strings.Replace(string(valid), "cf.email.sending.message.", "cf.email.routing.message.", 1)),
+		"missing event id":  deliveryEventBody("delivered", "", "prov-3@mail.example", "bob@example.com"),
+		"missing message":   deliveryEventBody("delivered", "evt-4", "", "bob@example.com"),
+		"invalid recipient": deliveryEventBody("delivered", "evt-5", "prov-3@mail.example", "not-an-address"),
+	}
+	for name, raw := range invalid {
+		if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw)); !errors.Is(err, ErrMailDeliveryEventInvalid) {
+			t.Fatalf("%s: error = %v; want ErrMailDeliveryEventInvalid", name, err)
+		}
+	}
+	oversized := make([]byte, MaxDeliveryEventBytes+1)
+	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(oversized)); !errors.Is(err, ErrMailDeliveryEventInvalid) {
+		t.Fatalf("oversized error = %v", err)
+	}
+
+	unknown := deliveryEventBody("delivered", "evt-6", "someone-elses@other.example", "bob@example.com")
+	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(unknown)); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("unknown message error = %v; want ErrMailMessageNotFound", err)
+	}
+
+	fixture.service.settings.InboundSecret = ""
+	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(valid)); !errors.Is(err, ErrMailInboundDisabled) {
+		t.Fatalf("disabled error = %v", err)
+	}
+}
+
+func TestSummarizeMailEventsUsesEachRecipientsLatestState(t *testing.T) {
+	at := func(minute int) time.Time { return time.Date(2027, 1, 1, 0, minute, 0, 0, time.UTC) }
+	cases := []struct {
+		name   string
+		events []domain.MailEvent
+		want   domain.MailEventType
+	}{
+		{"nothing recorded", nil, ""},
+		{"accepted only", []domain.MailEvent{{Type: domain.MailEventAccepted, OccurredAt: at(0)}}, domain.MailEventAccepted},
+		{"deferred then delivered is delivered", []domain.MailEvent{
+			{Type: domain.MailEventAccepted, OccurredAt: at(0)},
+			{Type: domain.MailEventDeferred, Recipient: "a@x.io", OccurredAt: at(1)},
+			{Type: domain.MailEventDelivered, Recipient: "a@x.io", OccurredAt: at(2)},
+		}, domain.MailEventDelivered},
+		{"events arriving out of order", []domain.MailEvent{
+			{Type: domain.MailEventDelivered, Recipient: "a@x.io", OccurredAt: at(2)},
+			{Type: domain.MailEventDeferred, Recipient: "a@x.io", OccurredAt: at(1)},
+		}, domain.MailEventDelivered},
+		{"one bounce outweighs a delivery", []domain.MailEvent{
+			{Type: domain.MailEventDelivered, Recipient: "a@x.io", OccurredAt: at(1)},
+			{Type: domain.MailEventBounced, Recipient: "b@x.io", OccurredAt: at(1)},
+		}, domain.MailEventBounced},
+		{"a complaint after delivery", []domain.MailEvent{
+			{Type: domain.MailEventDelivered, Recipient: "a@x.io", OccurredAt: at(1)},
+			{Type: domain.MailEventComplained, Recipient: "a@x.io", OccurredAt: at(9)},
+		}, domain.MailEventComplained},
+	}
+	for _, test := range cases {
+		if got := domain.SummarizeMailEvents(test.events); got != test.want {
+			t.Fatalf("%s: summary = %q; want %q", test.name, got, test.want)
 		}
 	}
 }

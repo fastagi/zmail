@@ -422,7 +422,8 @@ func (r *repository) ListMessagesForOrganization(
 		Select(`mail_messages.id, mail_messages.mailbox_id, mail_messages.direction, mail_messages.status,
 			mail_messages.from_address, mail_messages.from_name, mail_messages.to_addresses,
 			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
-			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.read_at,
+			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
+			mail_messages.read_at,
 			mail_messages.created_at, mail_messages.updated_at, mailboxes.address AS mailbox_address`).
 		Order("mail_messages.id DESC").
 		Offset((page - 1) * perPage).
@@ -469,6 +470,108 @@ func (r *repository) StatsForOrganization(ctx context.Context, organizationID ui
 		stats = append(stats, domain.MailDayStats{Day: day, Sent: row.Sent, Failed: row.Failed, Received: row.Received})
 	}
 	return stats, nil
+}
+
+// AddMessageEvents locks the message row so concurrent provider events for one message are
+// applied one after another, stores the new events, and recomputes the summary from the full
+// history.
+func (r *repository) AddMessageEvents(
+	ctx context.Context,
+	messageID uint,
+	events []domain.MailEvent,
+) (int, domain.MailEventType, error) {
+	if r.db == nil {
+		return 0, "", domain.ErrServiceUnavailable
+	}
+	added := 0
+	var summary domain.MailEventType
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked MailMessagePO
+		lock := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", messageID).First(&locked)
+		if lock.Error != nil {
+			if errors.Is(lock.Error, gorm.ErrRecordNotFound) {
+				return ErrMailMessageNotFound
+			}
+			return lock.Error
+		}
+		for _, event := range events {
+			po := &MailMessageEventPO{
+				MessageID:  messageID,
+				Type:       string(event.Type),
+				Recipient:  event.Recipient,
+				Detail:     event.Detail,
+				OccurredAt: event.OccurredAt,
+			}
+			query := tx
+			if event.ProviderEventID != "" {
+				providerEventID := event.ProviderEventID
+				po.ProviderEventID = &providerEventID
+				query = tx.Clauses(clause.OnConflict{
+					Columns:     []clause.Column{{Name: "provider_event_id"}},
+					TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "provider_event_id IS NOT NULL"}}},
+					DoNothing:   true,
+				})
+			}
+			result := query.Create(po)
+			if result.Error != nil {
+				return result.Error
+			}
+			added += int(result.RowsAffected)
+		}
+
+		var rows []MailMessageEventPO
+		if err := tx.Where("message_id = ?", messageID).Order("occurred_at ASC, id ASC").Find(&rows).Error; err != nil {
+			return err
+		}
+		history := make([]domain.MailEvent, 0, len(rows))
+		for i := range rows {
+			history = append(history, rows[i].toDomain())
+		}
+		summary = domain.SummarizeMailEvents(history)
+		return tx.Model(&MailMessagePO{}).Where("id = ?", messageID).UpdateColumn("last_event", string(summary)).Error
+	})
+	if err != nil {
+		return 0, "", err
+	}
+	return added, summary, nil
+}
+
+func (r *repository) ListMessageEvents(ctx context.Context, messageID uint) ([]domain.MailEvent, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var rows []MailMessageEventPO
+	err := r.db.WithContext(ctx).Where("message_id = ?", messageID).Order("occurred_at ASC, id ASC").Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	events := make([]domain.MailEvent, 0, len(rows))
+	for i := range rows {
+		events = append(events, rows[i].toDomain())
+	}
+	return events, nil
+}
+
+func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*domain.MailMessage, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	if providerMessageID == "" {
+		return nil, ErrMailMessageNotFound
+	}
+	var po MailMessagePO
+	err := r.db.WithContext(ctx).
+		Omit("text_body", "html_body").
+		Where("message_id = ? AND direction = ?", providerMessageID, string(domain.MailDirectionOutbound)).
+		Order("id DESC").
+		First(&po).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrMailMessageNotFound
+		}
+		return nil, err
+	}
+	return po.toDomain(), nil
 }
 
 // escapeLike makes user text match literally inside a LIKE pattern.

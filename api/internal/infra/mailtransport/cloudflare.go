@@ -24,6 +24,7 @@ const (
 	failureInvalidResponse  = "transport.invalid_response"
 	failureResponseTooLarge = "transport.response_too_large"
 	failurePermanentBounce  = "transport.permanent_bounce"
+	failureSuppressed       = "transport.suppressed"
 )
 
 type httpDoer interface {
@@ -62,9 +63,11 @@ type cloudflareSendResponse struct {
 		Message string `json:"message"`
 	} `json:"errors"`
 	Result *struct {
-		Delivered        []string `json:"delivered"`
-		PermanentBounces []string `json:"permanent_bounces"`
-		Queued           []string `json:"queued"`
+		MessageID            string   `json:"message_id"`
+		Delivered            []string `json:"delivered"`
+		PermanentBounces     []string `json:"permanent_bounces"`
+		Queued               []string `json:"queued"`
+		SuppressedRecipients []string `json:"suppressed_recipients"`
 	} `json:"result"`
 }
 
@@ -91,10 +94,11 @@ func newCloudflare(cfg config.MailboxConfig, client httpDoer, baseURL string) *C
 	}
 }
 
-// Send delivers one message. The REST API does not report a message identifier.
-func (c *Cloudflare) Send(ctx context.Context, mail Message) error {
+// Send delivers one message and reports the provider's message identifier and what it said
+// about each recipient.
+func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 	if c == nil || c.token == "" || c.client == nil {
-		return ErrNotConfigured
+		return Result{}, ErrNotConfigured
 	}
 	body := cloudflareSendRequest{
 		From:    cloudflareAddress{Address: mail.FromAddress, Name: mail.FromName},
@@ -110,14 +114,14 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) error {
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("encode mail request: %w", err)
+		return Result{}, fmt.Errorf("encode mail request: %w", err)
 	}
 
 	requestContext, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestContext, http.MethodPost, c.endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return fmt.Errorf("build mail request: %w", err)
+		return Result{}, fmt.Errorf("build mail request: %w", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+c.token)
@@ -125,16 +129,16 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) error {
 	response, err := c.client.Do(request)
 	if err != nil {
 		// The provider may or may not have accepted the message; report it as retryable.
-		return &Error{Code: failureTransport}
+		return Result{}, &Error{Code: failureTransport}
 	}
 	defer response.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxProviderResponseBytes+1))
 	if err != nil {
-		return &Error{Code: failureTransport}
+		return Result{}, &Error{Code: failureTransport}
 	}
 	if len(raw) > maxProviderResponseBytes {
-		return &Error{Code: failureResponseTooLarge}
+		return Result{}, &Error{Code: failureResponseTooLarge}
 	}
 
 	var parsed cloudflareSendResponse
@@ -148,15 +152,38 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) error {
 		}
 		permanent := response.StatusCode >= 400 && response.StatusCode < 500 &&
 			response.StatusCode != http.StatusTooManyRequests && response.StatusCode != http.StatusRequestTimeout
-		return &Error{Code: code, Permanent: permanent}
+		return Result{}, &Error{Code: code, Permanent: permanent}
 	}
 	if decodeErr != nil || parsed.Result == nil {
-		return &Error{Code: failureInvalidResponse}
+		return Result{}, &Error{Code: failureInvalidResponse}
 	}
-	if len(parsed.Result.Delivered) == 0 && len(parsed.Result.Queued) == 0 && len(parsed.Result.PermanentBounces) > 0 {
-		return &Error{Code: failurePermanentBounce, Permanent: true}
+	result := Result{
+		MessageID:  normalizeProviderMessageID(parsed.Result.MessageID),
+		Delivered:  parsed.Result.Delivered,
+		Queued:     parsed.Result.Queued,
+		Bounced:    parsed.Result.PermanentBounces,
+		Suppressed: parsed.Result.SuppressedRecipients,
 	}
-	return nil
+	if len(result.Delivered) == 0 && len(result.Queued) == 0 {
+		// Nobody was accepted. The result still tells the caller who was refused and why.
+		switch {
+		case len(result.Bounced) > 0:
+			return result, &Error{Code: failurePermanentBounce, Permanent: true}
+		case len(result.Suppressed) > 0:
+			return result, &Error{Code: failureSuppressed, Permanent: true}
+		}
+	}
+	return result, nil
+}
+
+// normalizeProviderMessageID strips angle brackets and rejects anything that is not a short
+// single token, so a provider value is safe to store and to match later events against.
+func normalizeProviderMessageID(raw string) string {
+	id := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(raw), "<"), ">")
+	if id == "" || len(id) > 900 || strings.ContainsAny(id, " \t\r\n<>") {
+		return ""
+	}
+	return id
 }
 
 // sanitizeFailureCode keeps a provider reason only when it is a short dotted identifier, so

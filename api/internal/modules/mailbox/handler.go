@@ -330,6 +330,30 @@ func (h *Handler) ReceiveInbound(c *gin.Context) {
 	response.Success(c, body)
 }
 
+// ReceiveDeliveryEvent accepts one provider delivery event from the mail edge. Like inbound
+// mail it is authenticated by the edge's HMAC signature, not by a user session.
+func (h *Handler) ReceiveDeliveryEvent(c *gin.Context) {
+	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, MaxDeliveryEventBytes+1))
+	if err != nil || len(raw) > MaxDeliveryEventBytes {
+		response.HandleError(c, "Delivery event is invalid", ErrMailDeliveryEventInvalid)
+		return
+	}
+	message, event, recorded, err := h.service.RecordDeliveryEvent(c.Request.Context(), DeliveryEvent{
+		Signature: c.GetHeader(InboundSignatureHeader),
+		Raw:       raw,
+	})
+	if err != nil {
+		response.HandleError(c, "Failed to record delivery event", err)
+		return
+	}
+	body := DeliveryEventResponse{MessageID: message.ID, Type: string(event.Type), Duplicate: !recorded}
+	if recorded {
+		response.Created(c, body)
+		return
+	}
+	response.Success(c, body)
+}
+
 func mailboxScope(c *gin.Context) (organizationID, mailboxID uint, ok bool) {
 	organizationID, ok = currentOrganizationID(c)
 	if !ok {

@@ -9,6 +9,7 @@ import {
 import type {
   MailDayStats,
   MailDirection,
+  MailEvent,
   MailLogEntry,
   MailLogFilters,
   MailLogPage,
@@ -243,6 +244,18 @@ export class MockMailboxStore {
     if (!normalized) return { ok: false, error: 'invalid' };
 
     const id = this.nextMessageId++;
+    const sentAt = this.timestamp();
+    // As the API's send call does: one message-level `accepted`, then what the provider
+    // reported for each recipient. The mock's provider delivers to everyone at once.
+    const events: MailEvent[] = [
+      { type: 'accepted', recipient: '', detail: '', occurred_at: sentAt },
+      ...[...normalized.to, ...normalized.cc].map((recipient): MailEvent => ({
+        type: 'delivered',
+        recipient,
+        detail: '',
+        occurred_at: sentAt,
+      })),
+    ];
     const message: MailMessage = {
       id,
       mailbox_id: mailboxId,
@@ -255,11 +268,13 @@ export class MockMailboxStore {
       // A member wrote it, so it starts out read.
       read: true,
       failure_code: '',
-      created_at: this.timestamp(),
+      last_event: 'delivered',
+      created_at: sentAt,
       text_body: normalized.text,
       html_body: normalized.html,
       message_id: `mock-${id}@${MOCK_MAILBOX_DOMAIN}`,
       in_reply_to: normalized.in_reply_to,
+      events,
     };
     this.store(state, message);
     return { ok: true, message };
@@ -295,6 +310,7 @@ export class MockMailboxStore {
       subject: 'Welcome to your mock mailbox',
       read: false,
       failure_code: '',
+      last_event: '',
       created_at: this.timestamp(),
       text_body:
         'This message was created by the development mock. No mail is sent or received until the app uses the real API.',
@@ -302,6 +318,7 @@ export class MockMailboxStore {
         '<p>This message was created by the <strong>development mock</strong>. No mail is sent or received until the app uses the real API.</p>',
       message_id: `mock-${id}@${MOCK_MAILBOX_DOMAIN}`,
       in_reply_to: '',
+      events: [],
     };
   }
 
@@ -336,6 +353,7 @@ function summaryOf(message: MailMessage): MailMessageSummary {
     subject: message.subject,
     read: message.read,
     failure_code: message.failure_code,
+    last_event: message.last_event,
     created_at: message.created_at,
   };
 }

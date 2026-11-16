@@ -123,7 +123,9 @@ type MailMessageSummaryResponse struct {
 	Subject     string              `json:"subject"`
 	Read        bool                `json:"read"`
 	FailureCode string              `json:"failure_code"`
-	CreatedAt   time.Time           `json:"created_at"`
+	// LastEvent summarizes the delivery events of an outbound message; empty when there are none.
+	LastEvent string    `json:"last_event"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // MailMessageResponse is the full shape of a message.
@@ -133,6 +135,36 @@ type MailMessageResponse struct {
 	HTMLBody  string `json:"html_body"`
 	MessageID string `json:"message_id"`
 	InReplyTo string `json:"in_reply_to"`
+	// Events is the delivery history of an outbound message, oldest first.
+	Events []MailEventResponse `json:"events"`
+}
+
+// MailEventResponse is one delivery step of a message.
+type MailEventResponse struct {
+	Type       string    `json:"type"`
+	Recipient  string    `json:"recipient"`
+	Detail     string    `json:"detail"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+// DeliveryEventResponse acknowledges one provider event from the mail edge.
+type DeliveryEventResponse struct {
+	MessageID uint   `json:"message_id"`
+	Type      string `json:"type"`
+	Duplicate bool   `json:"duplicate"`
+}
+
+func toMailEventResponses(events []domain.MailEvent) []MailEventResponse {
+	responses := make([]MailEventResponse, 0, len(events))
+	for _, event := range events {
+		responses = append(responses, MailEventResponse{
+			Type:       string(event.Type),
+			Recipient:  event.Recipient,
+			Detail:     event.Detail,
+			OccurredAt: event.OccurredAt,
+		})
+	}
+	return responses
 }
 
 // InboundMailResponse acknowledges one delivery from the mail edge.
@@ -181,6 +213,7 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		Subject:     message.Subject,
 		Read:        message.ReadAt != nil,
 		FailureCode: message.FailureCode,
+		LastEvent:   string(message.LastEvent),
 		CreatedAt:   message.CreatedAt,
 	}
 }
@@ -203,5 +236,6 @@ func toMailMessageResponse(message *domain.MailMessage) *MailMessageResponse {
 		HTMLBody:                   message.HTMLBody,
 		MessageID:                  message.MessageID,
 		InReplyTo:                  message.InReplyTo,
+		Events:                     toMailEventResponses(message.Events),
 	}
 }

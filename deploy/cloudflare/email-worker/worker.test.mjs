@@ -2,7 +2,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { MAX_RAW_BYTES, deliver, signDelivery } from './worker.js';
+import {
+  DELIVERY_EVENT_SCOPE,
+  MAX_RAW_BYTES,
+  deliver,
+  deliveryEventsUrl,
+  forwardEvent,
+  signDelivery,
+} from './worker.js';
 
 const secret = '0123456789abcdef0123456789abcdef';
 const raw = new TextEncoder().encode('From: a@b.c\r\n\r\nbody');
@@ -97,4 +104,55 @@ test('a network failure propagates so the sender retries', async () => {
 
 test('missing configuration fails loudly instead of dropping mail', async () => {
   await assert.rejects(deliver(message(), {}, async () => new Response('{}')), /must be configured/);
+});
+
+const deliveryEvent = {
+  type: 'cf.email.sending.message.delivered',
+  payload: { eventId: 'evt-1', messageId: 'abc@mail.example', recipient: 'bob@example.com' },
+  metadata: { eventTimestamp: '2027-01-15T08:00:05Z' },
+};
+
+test('delivery events go to the route next to the inbound route', () => {
+  assert.equal(deliveryEventsUrl(env), 'https://api.example/v1/mail-delivery-events');
+  assert.equal(
+    deliveryEventsUrl({ ...env, MAILBOX_EVENTS_URL: 'https://other.example/events' }),
+    'https://other.example/events',
+  );
+});
+
+test('a delivery event is posted unchanged with a signature over its exact bytes', async () => {
+  const calls = [];
+  const fetcher = async (url, init) => {
+    calls.push({ url, init });
+    return new Response('{}', { status: 201 });
+  };
+
+  assert.equal(await forwardEvent(deliveryEvent, env, fetcher, () => 1800000000_000), 'ack');
+  assert.equal(calls[0].url, 'https://api.example/v1/mail-delivery-events');
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(calls[0].init.body)), deliveryEvent);
+  assert.equal(
+    calls[0].init.headers['X-Mailbox-Signature'],
+    `t=1800000000,v1=${await signDelivery(secret, 1800000000, DELIVERY_EVENT_SCOPE, calls[0].init.body)}`,
+  );
+  // The scope keeps an event signature from ever matching an inbound message signature.
+  assert.notEqual(
+    await signDelivery(secret, 1800000000, DELIVERY_EVENT_SCOPE, calls[0].init.body),
+    await signDelivery(secret, 1800000000, 'bob@example.com', calls[0].init.body),
+  );
+});
+
+for (const status of [200, 201, 404, 413, 422]) {
+  test(`HTTP ${status} from the API finishes a delivery event`, async () => {
+    assert.equal(await forwardEvent(deliveryEvent, env, async () => new Response('{}', { status })), 'ack');
+  });
+}
+
+for (const status of [401, 429, 500, 503]) {
+  test(`HTTP ${status} from the API retries a delivery event`, async () => {
+    assert.equal(await forwardEvent(deliveryEvent, env, async () => new Response('{}', { status })), 'retry');
+  });
+}
+
+test('a network failure retries a delivery event', async () => {
+  assert.equal(await forwardEvent(deliveryEvent, env, async () => { throw new Error('offline'); }), 'retry');
 });

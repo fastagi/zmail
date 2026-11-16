@@ -59,6 +59,7 @@ type MailMessagePO struct {
 	FailureCode            string  `gorm:"size:120;not null;default:''"`
 	IdempotencyKey         *string `gorm:"size:255;uniqueIndex:idx_mail_messages_idempotency,priority:2,where:idempotency_key IS NOT NULL"`
 	IdempotencyFingerprint string  `gorm:"size:64;not null;default:''"`
+	LastEvent              string  `gorm:"size:16;not null;default:''"`
 	ReadAt                 *time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
@@ -98,6 +99,7 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 		message.IdempotencyKey = *po.IdempotencyKey
 	}
 	message.IdempotencyFingerprint = po.IdempotencyFingerprint
+	message.LastEvent = domain.MailEventType(po.LastEvent)
 	return message
 }
 
@@ -158,4 +160,35 @@ func organizationIDOf(po *MailboxPO) uint {
 		return 0
 	}
 	return *po.OrganizationID
+}
+
+// MailMessageEventPO is the persistent object for one delivery event.
+type MailMessageEventPO struct {
+	ID              uint      `gorm:"primaryKey"`
+	MessageID       uint      `gorm:"not null;index:idx_mail_message_events_message,priority:1"`
+	Type            string    `gorm:"size:16;not null"`
+	Recipient       string    `gorm:"size:320;not null;default:''"`
+	Detail          string    `gorm:"size:255;not null;default:''"`
+	ProviderEventID *string   `gorm:"size:128;uniqueIndex:idx_mail_message_events_provider,where:provider_event_id IS NOT NULL"`
+	OccurredAt      time.Time `gorm:"not null;index:idx_mail_message_events_message,priority:2"`
+	CreatedAt       time.Time
+}
+
+func (MailMessageEventPO) TableName() string {
+	return "mail_message_events"
+}
+
+func (po *MailMessageEventPO) toDomain() domain.MailEvent {
+	event := domain.MailEvent{
+		ID:         po.ID,
+		MessageID:  po.MessageID,
+		Type:       domain.MailEventType(po.Type),
+		Recipient:  po.Recipient,
+		Detail:     po.Detail,
+		OccurredAt: po.OccurredAt,
+	}
+	if po.ProviderEventID != nil {
+		event.ProviderEventID = *po.ProviderEventID
+	}
+	return event
 }

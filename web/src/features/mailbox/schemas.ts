@@ -59,6 +59,19 @@ export const mailStatusSchema = union([
   literal('failed'),
 ]);
 
+/** What happened to an outbound message after the provider took it; one event per recipient. */
+export const mailEventTypeSchema = union([
+  literal('accepted'),
+  literal('delivered'),
+  literal('deferred'),
+  literal('bounced'),
+  literal('failed'),
+  literal('rejected'),
+  literal('complained'),
+]);
+/** The most severe current state among the recipients; '' when no event is recorded. */
+export const mailEventSummarySchema = union([literal(''), mailEventTypeSchema]);
+
 export const mailboxDomainSchema = strictObject({
   domain: string(),
   max_mailboxes: number().check(int()),
@@ -91,8 +104,17 @@ const summaryShape = {
   subject: string(),
   read: boolean(),
   failure_code: string(),
+  last_event: mailEventSummarySchema,
   created_at: timestampSchema,
 };
+
+/** `recipient` is '' for a message-level event; `detail` holds short machine-readable tokens. */
+export const mailEventSchema = strictObject({
+  type: mailEventTypeSchema,
+  recipient: string(),
+  detail: string(),
+  occurred_at: timestampSchema,
+});
 
 export const mailMessageSummarySchema = strictObject(summaryShape);
 
@@ -102,6 +124,8 @@ export const mailMessageSchema = strictObject({
   html_body: string(),
   message_id: string(),
   in_reply_to: string(),
+  // Oldest first; always empty for inbound messages.
+  events: array(mailEventSchema),
 });
 
 const pageMetaSchema = strictObject({

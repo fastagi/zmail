@@ -583,12 +583,16 @@ describe('mailbox browser route boundary', () => {
     expect(inbox.data[0]).toMatchObject({ direction: 'inbound', status: 'received', read: false });
     expect(inbox.data[0]).not.toHaveProperty('text_body');
     expect(inbox.data[0]).not.toHaveProperty('html_body');
+    // Inbound mail has no delivery events; listings carry the summary and never the events.
+    expect(inbox.data[0].last_event).toBe('');
+    expect(inbox.data[0]).not.toHaveProperty('events');
     const welcomeId = String(inbox.data[0].id);
 
     const read = await route.getMailMessageRoute(request(`${path}/${welcomeId}`), id, welcomeId);
     expect(read.status).toBe(200);
     const welcome = (await read.json()).data;
     expect(welcome.text_body).not.toBe('');
+    expect(welcome).toMatchObject({ last_event: '', events: [] });
     expect(welcome.read).toBe(false);
 
     const marked = await route.updateMailMessageRoute(
@@ -627,7 +631,25 @@ describe('mailbox browser route boundary', () => {
       read: true,
       failure_code: '',
       in_reply_to: welcome.message_id,
+      last_event: 'delivered',
     });
+    // The mock provider accepts the message and delivers to every recipient at once.
+    expect(sent.events).toEqual([
+      { type: 'accepted', recipient: '', detail: '', occurred_at: sent.created_at },
+      { type: 'delivered', recipient: 'bob@example.com', detail: '', occurred_at: sent.created_at },
+      {
+        type: 'delivered',
+        recipient: 'carol@example.com',
+        detail: '',
+        occurred_at: sent.created_at,
+      },
+    ]);
+    const stored = (
+      await (
+        await route.getMailMessageRoute(request(`${path}/${sent.id}`), id, String(sent.id))
+      ).json()
+    ).data;
+    expect(stored.events).toEqual(sent.events);
     const second = (
       await (
         await send(route, mailbox.id, {
@@ -642,6 +664,8 @@ describe('mailbox browser route boundary', () => {
       await route.listMailMessagesRoute(request(`${path}?direction=outbound&per_page=1`), id)
     ).json();
     expect(page.data.map((item: { id: number }) => item.id)).toEqual([second.id]);
+    expect(page.data[0].last_event).toBe('delivered');
+    expect(page.data[0]).not.toHaveProperty('events');
     expect(page.meta).toMatchObject({ current_page: 1, per_page: 1, total: 2, last_page: 2 });
     expect(page.links.next).toContain('direction=outbound&page=2');
     const next = await (
@@ -957,6 +981,14 @@ describe('mailbox browser route boundary', () => {
       offer.id - 2,
     ]);
     expect(everything.meta).toMatchObject({ current_page: 1, per_page: 15, total: 4 });
+    // Log entries carry the delivery summary and never the events.
+    expect(everything.data.map((item: { last_event: string }) => item.last_event)).toEqual([
+      'delivered',
+      'delivered',
+      '',
+      '',
+    ]);
+    for (const item of everything.data) expect(item).not.toHaveProperty('events');
     expect(everything.data[0]).toMatchObject({
       mailbox_id: sales.id,
       mailbox_address: 'sales@mail.example.com',

@@ -195,6 +195,14 @@ through `status` and `failure_code`. Operations are documented in
    may have accepted a message whose answer was lost; migration
    `2026_11_16_110000_add_mail_message_idempotency` adds the key, a request fingerprint, and a
    unique partial index per mailbox that also settles two concurrent requests with one key.
-4. Later slices, each with its own plan: attachments on R2 through the `asset` starter; background
+4. Delivery events (third slice): the send call stores the provider's message id and what it
+   reported for each recipient; a `mail_message_events` table keeps the history, and
+   `mail_messages.last_event` summarizes it for listings as the most severe current state among
+   the recipients. Later events arrive from a Cloudflare Queues event subscription through the
+   Email Worker's queue consumer and `POST /v1/mail-delivery-events`, signed with the inbound
+   secret under a separate scope and idempotent by the provider's event id. Only identifiers,
+   status codes, and classifications are stored; provider free text is dropped. Opens and clicks
+   are out of scope.
+5. Later slices, each with its own plan: attachments on R2 through the `asset` starter; background
    retry on the PostgreSQL job queue; bounce and complaint ingestion; organization-shared
    mailboxes; search.
