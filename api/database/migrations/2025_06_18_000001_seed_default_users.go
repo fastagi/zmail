@@ -3,13 +3,14 @@ package migrations
 import (
 	"gorm.io/gorm"
 
+	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/migration"
-	"github.com/fastagi/zmail/api/pkg/env"
 )
 
-// seedDefaultUsersInProduction reports whether the process runs in production mode; a variable so
-// tests can exercise both branches.
-var seedDefaultUsersInProduction = env.IsProduction
+// seedDefaultUsersInProduction reports whether the loaded configuration is a production one. Every
+// command that migrates loads the configuration first. A variable so tests can exercise both
+// branches.
+var seedDefaultUsersInProduction = config.IsProduction
 
 func init() {
 	register("2025_06_18_000001_seed_default_users", &seedDefaultUsers{})
