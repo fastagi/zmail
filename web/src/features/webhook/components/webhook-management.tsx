@@ -400,9 +400,18 @@ function EndpointDialog({
   const t = useT('webhook');
   const [name, setName] = useState(endpoint?.name ?? '');
   const [url, setUrl] = useState(endpoint?.url ?? '');
-  const [testSelected, setTestSelected] = useState(
-    endpoint?.event_types.includes(webhookTestEvent) ?? true
-  );
+  // null means the user has not chosen yet: a new endpoint then subscribes to every event type,
+  // and an existing endpoint keeps exactly the subscriptions it has.
+  const [chosen, setChosen] = useState<readonly string[] | null>(endpoint?.event_types ?? null);
+  const selected = chosen ?? eventTypes;
+  // A subscription the catalog no longer lists stays visible so saving cannot drop it silently.
+  const listed = [...eventTypes, ...selected.filter(eventType => !eventTypes.includes(eventType))];
+  const toggle = (eventType: string, checked: boolean) =>
+    setChosen(
+      checked
+        ? listed.filter(candidate => candidate === eventType || selected.includes(candidate))
+        : selected.filter(candidate => candidate !== eventType)
+    );
   const [formError, setFormError] = useState<string>();
   const create = useCreateWebhookEndpoint(organizationId);
   const update = useUpdateWebhookEndpoint(organizationId);
@@ -415,7 +424,7 @@ function EndpointDialog({
     const input = webhookEndpointInputSchema.safeParse({
       name: name.trim(),
       url: url.trim(),
-      event_types: testSelected ? [webhookTestEvent] : [],
+      event_types: [...selected],
     });
     if (!input.success) {
       setFormError(t('form.invalid'));
@@ -483,16 +492,16 @@ function EndpointDialog({
             </div>
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium">{t('form.eventTypes')}</legend>
-              {eventTypes.map(eventType => (
+              {listed.map(eventType => (
                 <div
                   key={eventType}
                   className="flex items-center gap-2 rounded-sm border px-3 py-2.5"
                 >
                   <Checkbox
                     id={`webhook-event-${eventType}`}
-                    checked={eventType === webhookTestEvent && testSelected}
-                    disabled={eventType !== webhookTestEvent || pending}
-                    onCheckedChange={checked => setTestSelected(checked === true)}
+                    checked={selected.includes(eventType)}
+                    disabled={pending}
+                    onCheckedChange={checked => toggle(eventType, checked === true)}
                   />
                   <Label htmlFor={`webhook-event-${eventType}`} className="font-mono text-xs">
                     {eventType}

@@ -46,6 +46,12 @@ func NewDefaultCatalog() (*Catalog, error) {
 	})
 }
 
+// DefaultDefinitions returns the starter-owned definitions, so a product catalog can extend
+// them with its own event types instead of replacing them.
+func DefaultDefinitions() []Definition {
+	return []Definition{{Type: "webhook.test", ValidatePayload: validateTestPayload}}
+}
+
 // NewCatalog validates and freezes event definitions.
 func NewCatalog(definitions ...Definition) (*Catalog, error) {
 	if len(definitions) == 0 {

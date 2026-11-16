@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -91,6 +92,7 @@ type Service interface {
 type service struct {
 	repo      domain.MailboxRepository
 	transport mailtransport.Transport
+	notifier  mailNotifier
 	settings  Settings
 	now       func() time.Time
 }
@@ -98,8 +100,42 @@ type service struct {
 var _ Service = (*service)(nil)
 
 // NewService creates the mailbox service.
-func NewService(repo domain.MailboxRepository, transport mailtransport.Transport, settings Settings) *service {
-	return &service{repo: repo, transport: transport, settings: settings, now: time.Now}
+func NewService(
+	repo domain.MailboxRepository,
+	transport mailtransport.Transport,
+	notifier mailNotifier,
+	settings Settings,
+) *service {
+	return &service{repo: repo, transport: transport, notifier: notifier, settings: settings, now: time.Now}
+}
+
+// apply runs a state change and publishes the notifications it returns in one transaction, so
+// a webhook is queued exactly when its state change commits. If publishing fails, the state
+// change is applied on its own: a webhook that cannot be queued must never undo the record of
+// mail that was really sent or received.
+func (s *service) apply(ctx context.Context, state func(ctx context.Context) ([]MailNotification, error)) error {
+	var publishErr error
+	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
+		notifications, err := state(tx)
+		if err != nil {
+			return err
+		}
+		for _, notification := range notifications {
+			if publishErr = s.notifier.Notify(tx, notification); publishErr != nil {
+				return publishErr
+			}
+		}
+		return nil
+	})
+	if err == nil || publishErr == nil {
+		return err
+	}
+	slog.ErrorContext(ctx, "mailbox webhook publication failed; recording the mail event without it",
+		slog.String("error", publishErr.Error()))
+	return s.repo.InTransaction(ctx, func(tx context.Context) error {
+		_, stateErr := state(tx)
+		return stateErr
+	})
 }
 
 // SettingsFromConfig resolves the service policy from typed configuration.
@@ -362,18 +398,57 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	// leave a delivered message looking queued.
 	recordContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryRecordTimeout)
 	defer cancel()
-	if err := s.repo.UpdateMessageDelivery(recordContext, message.ID, message.Status, message.MessageID, message.FailureCode); err != nil {
+	occurredAt := s.now().UTC()
+	events := sendEvents(outcome, sendErr == nil, occurredAt)
+	err = s.apply(recordContext, func(tx context.Context) ([]MailNotification, error) {
+		if updateErr := s.repo.UpdateMessageDelivery(tx, message.ID, message.Status, message.MessageID, message.FailureCode); updateErr != nil {
+			return nil, updateErr
+		}
+		if len(events) > 0 {
+			_, summary, addErr := s.repo.AddMessageEvents(tx, message.ID, events)
+			if addErr != nil {
+				return nil, addErr
+			}
+			message.LastEvent = summary
+			message.Events = events
+		}
+		return sendNotifications(mailbox, message, events, occurredAt), nil
+	})
+	if err != nil {
 		return nil, false, err
 	}
-	if events := sendEvents(outcome, sendErr == nil, s.now().UTC()); len(events) > 0 {
-		_, summary, err := s.repo.AddMessageEvents(recordContext, message.ID, events)
-		if err != nil {
-			return nil, false, err
-		}
-		message.LastEvent = summary
-		message.Events = events
-	}
 	return message, true, result
+}
+
+// sendNotifications lists what a finished send tells webhook endpoints: whether the provider
+// took the message, and anything it already said about a recipient.
+func sendNotifications(mailbox *domain.Mailbox, message *domain.MailMessage, events []domain.MailEvent, at time.Time) []MailNotification {
+	base := MailNotification{
+		OrganizationID: mailbox.OrganizationID,
+		MailboxAddress: mailbox.Address,
+		Message:        message,
+		OccurredAt:     at,
+	}
+	outcome := base
+	outcome.Type = WebhookMailSent
+	if message.Status == domain.MailStatusFailed {
+		outcome.Type = WebhookMailFailed
+		outcome.Reason = message.FailureCode
+	}
+	notifications := []MailNotification{outcome}
+	for _, event := range events {
+		eventType, publish := webhookTypeForEvent(event.Type)
+		if !publish {
+			continue
+		}
+		notification := base
+		notification.Type = eventType
+		notification.Recipient = event.Recipient
+		notification.Reason = event.Detail
+		notification.Key = "send:" + event.Recipient
+		notifications = append(notifications, notification)
+	}
+	return notifications
 }
 
 // sendEvents turns what the provider said during the send call into delivery events.
@@ -536,7 +611,20 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		InReplyTo:   parsed.InReplyTo,
 		DedupeKey:   inboundDedupeKey(parsed.MessageID, delivery.Raw),
 	}
-	created, err := s.repo.CreateInboundMessage(ctx, message)
+	created := false
+	err = s.apply(ctx, func(tx context.Context) ([]MailNotification, error) {
+		var createErr error
+		if created, createErr = s.repo.CreateInboundMessage(tx, message); createErr != nil || !created {
+			return nil, createErr
+		}
+		return []MailNotification{{
+			Type:           WebhookMailReceived,
+			OrganizationID: mailbox.OrganizationID,
+			MailboxAddress: mailbox.Address,
+			Message:        message,
+			OccurredAt:     s.now().UTC(),
+		}}, nil
+	})
 	if err != nil {
 		return nil, false, err
 	}

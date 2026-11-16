@@ -44,6 +44,10 @@ schema is owned by the starter. Downstream apps add reviewed product event defin
 publisher adapters before subscriptions can select them. Browser clients therefore accept any
 catalog-valid event type in responses instead of a hard-coded list.
 
+Zmail is such a downstream app. Its product catalog adds the `mail.message.*` events defined in
+[MAILBOXES.md](MAILBOXES.md#webhooks) to the starter's `webhook.test`; `GET /v1/webhook-event-types`
+lists all of them.
+
 An internal publication contains:
 
 | Field | Rule |

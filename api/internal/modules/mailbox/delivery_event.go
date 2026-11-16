@@ -3,7 +3,6 @@ package mailbox
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"time"
 
@@ -154,14 +153,32 @@ func (s *service) RecordDeliveryEvent(
 	if err != nil {
 		return nil, domain.MailEvent{}, false, err
 	}
-	added, summary, err := s.repo.AddMessageEvents(ctx, message.ID, []domain.MailEvent{event})
-	if err != nil {
-		if errors.Is(err, ErrMailMessageNotFound) {
-			return nil, domain.MailEvent{}, false, ErrMailMessageNotFound
+	event.MessageID = message.ID
+	added := 0
+	err = s.apply(ctx, func(tx context.Context) ([]MailNotification, error) {
+		var summary domain.MailEventType
+		var addErr error
+		if added, summary, addErr = s.repo.AddMessageEvents(tx, message.ID, []domain.MailEvent{event}); addErr != nil {
+			return nil, addErr
 		}
+		message.LastEvent = summary
+		eventType, publish := webhookTypeForEvent(event.Type)
+		if added == 0 || !publish {
+			return nil, nil
+		}
+		return []MailNotification{{
+			Type:           eventType,
+			OrganizationID: message.OrganizationID,
+			MailboxAddress: message.MailboxAddress,
+			Message:        message,
+			Recipient:      event.Recipient,
+			Reason:         event.Detail,
+			OccurredAt:     event.OccurredAt,
+			Key:            "event:" + event.ProviderEventID,
+		}}, nil
+	})
+	if err != nil {
 		return nil, domain.MailEvent{}, false, err
 	}
-	message.LastEvent = summary
-	event.MessageID = message.ID
 	return message, event, added > 0, nil
 }

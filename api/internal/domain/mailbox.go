@@ -185,8 +185,12 @@ type MailMessage struct {
 	// request is refused instead of answered with an unrelated message.
 	IdempotencyFingerprint string
 	ReadAt                 *time.Time
-	// MailboxAddress is the address of the owning mailbox. Only the cross-mailbox log fills it.
+	// MailboxAddress is the address of the owning mailbox. Only the cross-mailbox log and the
+	// provider-id lookup fill it.
 	MailboxAddress string
+	// OrganizationID is the owner of the mailbox; zero for an unowned mailbox. Only the
+	// provider-id lookup fills it.
+	OrganizationID uint
 	// LastEvent summarizes the delivery events of an outbound message; see SummarizeMailEvents.
 	LastEvent MailEventType
 	// Events is the delivery history, oldest first. Only the detail lookup fills it.
@@ -244,6 +248,9 @@ type MailboxRepository interface {
 	SetMessageRead(ctx context.Context, mailboxID, id uint, readAt *time.Time) error
 	DeleteMessage(ctx context.Context, mailboxID, id uint) error
 	CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error)
+	// InTransaction runs fn in one database transaction. Repository calls made with the context
+	// fn receives, and cooperating repositories of other modules, join it.
+	InTransaction(ctx context.Context, fn func(ctx context.Context) error) error
 	// AddMessageEvents records delivery events and refreshes the message's summary in one
 	// transaction. An event whose ProviderEventID is already stored is skipped; the count of
 	// newly stored events is returned.

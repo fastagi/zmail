@@ -550,7 +550,7 @@ func TestRepositoryStoresDeliveryEventsOnceAndSummarizesThem(t *testing.T) {
 	}
 
 	found, err := repo.FindOutboundMessageByProviderID(ctx, "prov-9@mail.example")
-	if err != nil || found.ID != message.ID {
+	if err != nil || found.ID != message.ID || found.MailboxAddress != mailbox.Address || found.OrganizationID != 1 {
 		t.Fatalf("FindOutboundMessageByProviderID = %+v, %v", found, err)
 	}
 	for _, missing := range []string{"", "unknown@mail.example"} {
@@ -582,5 +582,56 @@ func TestRepositoryReportsADisabledDatabase(t *testing.T) {
 	repo := NewRepository(nil)
 	if _, err := repo.ListMailboxes(context.Background(), 1); !errors.Is(err, domain.ErrServiceUnavailable) {
 		t.Fatalf("error = %v; want ErrServiceUnavailable", err)
+	}
+}
+
+func TestRepositoryTransactionCommitsOrRollsBackTogether(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	mailbox := createMailbox(t, repo, "tx@mail.example")
+	message := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusQueued,
+		FromAddress: mailbox.Address, To: []string{"bob@example.com"}, Subject: "Tx",
+	}
+	if _, err := repo.CreateMessage(ctx, message); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	change := func(tx context.Context) error {
+		if err := repo.UpdateMessageDelivery(tx, message.ID, domain.MailStatusSent, "prov-tx@mail.example", ""); err != nil {
+			return err
+		}
+		_, _, err := repo.AddMessageEvents(tx, message.ID, []domain.MailEvent{{Type: domain.MailEventAccepted, OccurredAt: time.Now().UTC()}})
+		return err
+	}
+
+	failure := errors.New("publication failed")
+	err := repo.InTransaction(ctx, func(tx context.Context) error {
+		if err := change(tx); err != nil {
+			return err
+		}
+		return failure
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("InTransaction error = %v; want the callback's error", err)
+	}
+	stored, err := repo.FindMessage(ctx, mailbox.ID, message.ID)
+	if err != nil || stored.Status != domain.MailStatusQueued || stored.LastEvent != "" {
+		t.Fatalf("after rollback message = %+v, %v; want it unchanged", stored, err)
+	}
+	if events, _ := repo.ListMessageEvents(ctx, message.ID); len(events) != 0 {
+		t.Fatalf("after rollback events = %+v; want none", events)
+	}
+
+	// A nested call joins the outer transaction instead of opening its own.
+	err = repo.InTransaction(ctx, func(tx context.Context) error {
+		return repo.InTransaction(tx, change)
+	})
+	if err != nil {
+		t.Fatalf("InTransaction: %v", err)
+	}
+	stored, err = repo.FindMessage(ctx, mailbox.ID, message.ID)
+	if err != nil || stored.Status != domain.MailStatusSent || stored.LastEvent != domain.MailEventAccepted {
+		t.Fatalf("after commit message = %+v, %v", stored, err)
 	}
 }

@@ -110,7 +110,7 @@ func InitApplication() (*app.Application, error) {
 	usageRepository := usage.NewRepository(db)
 	usageService := usage.NewService(usageCatalog, usageRepository, configConfig)
 	usageHandler := usage.NewHandler(usageService, accountDeletionPolicy)
-	webhookCatalog, err := webhook.NewDefaultCatalog()
+	webhookCatalog, err := mailbox.NewWebhookCatalog()
 	if err != nil {
 		return nil, err
 	}
@@ -137,8 +137,9 @@ func InitApplication() (*app.Application, error) {
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, configConfig, surfaces)
 	mailboxRepository := mailbox.NewRepository(db)
 	transport := mailtransport.New(configConfig)
+	webhookNotifier := mailbox.NewWebhookNotifier(configConfig, webhookService)
 	settings := mailbox.SettingsFromConfig(configConfig)
-	mailboxService := mailbox.NewService(mailboxRepository, transport, settings)
+	mailboxService := mailbox.NewService(mailboxRepository, transport, webhookNotifier, settings)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -263,7 +264,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	usageRepository := usage.NewRepository(db)
 	usageService := usage.NewService(usageCatalog, usageRepository, cfg)
 	usageHandler := usage.NewHandler(usageService, accountDeletionPolicy)
-	webhookCatalog, err := webhook.NewDefaultCatalog()
+	webhookCatalog, err := mailbox.NewWebhookCatalog()
 	if err != nil {
 		return nil, err
 	}
@@ -290,8 +291,9 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, cfg, surfaces)
 	mailboxRepository := mailbox.NewRepository(db)
 	transport := mailtransport.New(cfg)
+	webhookNotifier := mailbox.NewWebhookNotifier(cfg, webhookService)
 	settings := mailbox.SettingsFromConfig(cfg)
-	mailboxService := mailbox.NewService(mailboxRepository, transport, settings)
+	mailboxService := mailbox.NewService(mailboxRepository, transport, webhookNotifier, settings)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
