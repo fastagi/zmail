@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import {
   ErrorAlert,
   MailHtmlFrame,
@@ -40,7 +41,7 @@ export function EmailDetail({
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
-  const query = useMailMessage(mailboxId, messageId);
+  const query = useMailMessage(useMailOrganizationId(), mailboxId, messageId);
   const [chosenTab, setChosenTab] = useState<ContentTab | null>(null);
 
   const back = (

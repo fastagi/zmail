@@ -13,6 +13,8 @@ export type MailboxErrorKey =
   | 'errors.mailboxNotFound'
   | 'errors.messageInvalid'
   | 'errors.messageNotFound'
+  | 'errors.organizationNotFound'
+  | 'errors.permissionDenied'
   | 'errors.sendLimitReached'
   | 'errors.senderNotConfigured'
   | 'errors.tooLarge'
@@ -27,6 +29,8 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.COMMON_VALIDATION_FAILED]: 'errors.invalidInput',
   [ApiErrorCode.COMMON_INVALID_INPUT]: 'errors.invalidInput',
   [ApiErrorCode.COMMON_REQUEST_TOO_LARGE]: 'errors.tooLarge',
+  [ApiErrorCode.PERMISSION_DENIED]: 'errors.permissionDenied',
+  [ApiErrorCode.ORGANIZATION_NOT_FOUND]: 'errors.organizationNotFound',
   [ApiErrorCode.MAILBOX_NOT_FOUND]: 'errors.mailboxNotFound',
   [ApiErrorCode.MAILBOX_MESSAGE_NOT_FOUND]: 'errors.messageNotFound',
   [ApiErrorCode.MAILBOX_ADDRESS_TAKEN]: 'errors.addressTaken',
@@ -43,6 +47,11 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
 export function resolveMailboxErrorKey(error: unknown): MailboxErrorKey {
   if (!(error instanceof ApiError)) return 'errors.generic';
   return errorKeys[error.errorCode] ?? 'errors.generic';
+}
+
+/** True when the API no longer finds the organization for this member: access was lost. */
+export function isOrganizationLost(error: unknown): boolean {
+  return error instanceof ApiError && error.errorCode === ApiErrorCode.ORGANIZATION_NOT_FOUND;
 }
 
 /**

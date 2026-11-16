@@ -3,9 +3,9 @@ import type { MailboxMessages } from './en-US';
 
 const messages = {
   title: '邮箱',
-  description: '在你的邮件域名上创建地址，查看收到的邮件，并用这些地址发信。',
+  description: '组织在邮件域名上的地址：查看收到的邮件，并用这些地址发信。',
   mailboxes: {
-    title: '我的邮箱',
+    title: '邮箱',
     count: '已用 {count} / {max}',
     noDisplayName: '未设置显示名称',
     unreadCount: '{count} 封未读',
@@ -19,7 +19,7 @@ const messages = {
     localPartHint: '使用小写字母和数字，中间可以有单个点、下划线或连字符。',
     displayName: '显示名称（可选）',
     displayNamePlaceholder: '你好团队',
-    limitReached: '你已达到 {max} 个邮箱的上限。删除一个后才能再创建。',
+    limitReached: '该组织已达到 {max} 个邮箱的上限。删除一个后才能再创建。',
     displayNameInvalid: '显示名称最多 120 个字符，且不能包含 <、> 或引号。',
   },
   deleteMailbox: {
@@ -78,7 +78,7 @@ const messages = {
   },
   emails: {
     title: '邮件',
-    description: '你所有邮箱收发的每一封邮件。',
+    description: '组织所有邮箱收发的每一封邮件。',
     send: '发送邮件',
     sendUnavailable: '请先创建一个邮箱，再发送邮件。',
     statsTitle: '最近 7 天',
@@ -132,9 +132,9 @@ const messages = {
     inboundHintEnabled: 'API 接受来自邮件边缘的已签名投递。',
     inboundHintDisabled: '在设置收信密钥之前，API 会拒绝收信投递。',
     maxMailboxes: '邮箱数量上限',
-    maxMailboxesValue: '每位用户 {count} 个',
+    maxMailboxesValue: '每个组织 {count} 个',
     dailySendLimit: '每日发信上限',
-    dailySendLimitValue: '每位用户任意 24 小时内 {count} 封',
+    dailySendLimitValue: '每个组织任意 24 小时内 {count} 封',
     checklistTitle: 'Cloudflare 配置',
     checklistDescription:
       '标记为“已完成”的步骤由 API 确认。其余步骤在 Cloudflare 中完成，无法在这里检查。',
@@ -154,10 +154,19 @@ const messages = {
     configBody: '在 API 上设置以下配置项并重启。',
     apiTitle: '从你的后端发信',
     apiDescription:
-      '创建带有 mail:send 权限的 API 密钥并调用 API。发件地址必须是你的邮箱之一，重复的 Idempotency-Key 不会重复发送。',
+      '创建带有 mail:send 权限的 API 密钥，并在调用 API 时带上 Organization-Id 请求头。发件地址必须是该组织的邮箱之一，重复的 Idempotency-Key 不会重复发送。',
     apiHostNote: '请把 YOUR_API_HOST 替换为你的 API 地址。',
     apiExample: '请求示例',
     apiKeys: '管理 API 密钥',
+  },
+  organization: {
+    label: '组织',
+    loadFailed: '无法加载你的组织。',
+    emptyTitle: '还没有组织',
+    empty: '邮箱属于组织。创建或加入一个组织后，即可收发邮件。',
+    open: '前往组织',
+    lostTitle: '无权访问该组织',
+    readOnly: '邮箱由该组织的所有者和管理员创建和删除。',
   },
   actions: {
     create: '创建邮箱',
@@ -186,11 +195,13 @@ const messages = {
     generic: '邮箱请求未能完成。',
     invalidInput: '请检查各项内容后重试。',
     invalidResponse: '邮箱服务返回了无效数据。',
-    limitReached: '你已达到邮箱数量上限。删除一个邮箱后才能再创建。',
+    limitReached: '该组织已达到邮箱数量上限。删除一个邮箱后才能再创建。',
     mailboxNotFound: '这个邮箱不存在或已被删除。',
     messageInvalid: '请填写 1 到 50 个纯邮箱地址、单行主题，以及不超过 256 KB 的正文。',
     messageNotFound: '这封邮件不存在或已被删除。',
-    sendLimitReached: '你已达到 24 小时发信上限，邮件没有发出。请稍后再试。',
+    organizationNotFound: '该组织不存在，或你已不再是其成员。请选择其他组织。',
+    permissionDenied: '只有组织的所有者和管理员可以创建或删除邮箱。',
+    sendLimitReached: '该组织已达到 24 小时发信上限，邮件没有发出。请稍后再试。',
     senderNotConfigured:
       '邮件没有送达：此服务器尚未配置发信功能。它已保存在“已发送”中并标记为发送失败。',
     tooLarge: '邮件太大，无法发送。',

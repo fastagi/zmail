@@ -31,6 +31,9 @@ import {
   MAIL_SUBJECT_MAX_LENGTH,
 } from '@/features/mailbox/schemas';
 import { mockMailboxStore } from '@/features/mailbox/server/mock-mailbox-store';
+import { mockOrganizationStore } from '@/features/organization/server/mock-organization-store';
+import { parseOrganizationId } from '@/features/organization/server/organization-route';
+import type { OrganizationContext } from '@/features/organization/types';
 import type {
   CreateMailboxInput,
   MailDirection,
@@ -43,20 +46,22 @@ import { forwardAuthenticatedGoApi } from '@/server/api-adapter/authenticated-ro
 import { privateNoStoreHeaders, privateNoStoreResponse } from '@/server/http/private-response';
 
 /**
- * Browser route boundary of the mailbox feature. Every handler requires the explicit `mailbox`
- * feature selection, selects the Go API adapter or the development mock, and authenticates the
- * caller. Writes check availability, then the browser origin, then authentication, before reading
- * a body. Mailboxes are user-owned: no handler reads an organization. Ownership, address rules,
- * and delivery stay authoritative in the API; the mock reproduces them for development.
+ * Browser route boundary of the mailbox feature. Every handler requires the `organization` and
+ * `mailbox` feature selections, selects the Go API adapter or the development mock, authenticates
+ * the caller, and reads the organization from the `Organization-Id` header. Writes check
+ * availability, then the browser origin, then authentication, before reading a body. Mailboxes
+ * belong to an organization: membership, roles, address rules, and delivery stay authoritative in
+ * the API; the mock reproduces them for development.
  */
 
 type MailboxBackend = 'go-api' | 'mock';
 
 interface MailboxRouteEnvironment {
   adapterEnabled: boolean;
-  featureEnabled: boolean;
+  mailboxFeatureEnabled: boolean;
   mockBffEnabled: boolean;
   nodeEnv: 'development' | 'production' | 'test';
+  organizationFeatureEnabled: boolean;
 }
 
 type MailboxRouteResolution =
@@ -67,9 +72,10 @@ type AuthenticatedMailboxBackend =
   | { authenticated: true; backend: 'mock'; user: AuthUser }
   | { authenticated: false; response: NextResponse };
 
+/** In mock mode `context` is the caller's verified membership; the API verifies its own. */
 type MailboxTarget =
-  | { available: true; backend: 'go-api'; accessToken: string }
-  | { available: true; backend: 'mock'; user: AuthUser }
+  | { available: true; backend: 'go-api'; accessToken: string; organizationId: number }
+  | { available: true; backend: 'mock'; organizationId: number; context: OrganizationContext }
   | { available: false; response: NextResponse };
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; response: NextResponse };
@@ -84,7 +90,9 @@ const maxSendBodyBytes = 1_024 * 1_024;
 export function resolveMailboxRoute(
   environment: MailboxRouteEnvironment = currentEnvironment()
 ): MailboxRouteResolution {
-  if (!environment.featureEnabled) return unavailable('Mailbox Web feature is disabled');
+  if (!environment.organizationFeatureEnabled || !environment.mailboxFeatureEnabled) {
+    return unavailable('Mailbox Web feature is disabled');
+  }
   if (environment.adapterEnabled) return { available: true, backend: 'go-api' };
   if (isMockBffEnabled({ enabled: environment.mockBffEnabled, nodeEnv: environment.nodeEnv })) {
     return { available: true, backend: 'mock' };
@@ -93,11 +101,11 @@ export function resolveMailboxRoute(
 }
 
 export function privateMailboxResponse<T extends Response>(response: T): T {
-  return privateNoStoreResponse(response, ['Cookie']);
+  return privateNoStoreResponse(response, ['Cookie', 'Organization-Id']);
 }
 
 export async function listMailboxDomainsRoute(request: Request): Promise<NextResponse> {
-  const target = await resolveMailboxReadRoute();
+  const target = await resolveMailboxReadRoute(request);
   if (!target.available) return target.response;
 
   if (target.backend === 'go-api') {
@@ -105,13 +113,14 @@ export async function listMailboxDomainsRoute(request: Request): Promise<NextRes
       method: 'GET',
       path: 'mailbox-domains',
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
     });
   }
   return success(mockMailboxStore.domains());
 }
 
 export async function listMailboxesRoute(request: Request): Promise<NextResponse> {
-  const target = await resolveMailboxReadRoute();
+  const target = await resolveMailboxReadRoute(request);
   if (!target.available) return target.response;
 
   if (target.backend === 'go-api') {
@@ -119,14 +128,16 @@ export async function listMailboxesRoute(request: Request): Promise<NextResponse
       method: 'GET',
       path: 'mailboxes',
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
     });
   }
-  return success(mockMailboxStore.list(target.user.id));
+  return success(mockMailboxStore.list(target.organizationId));
 }
 
 export async function createMailboxRoute(request: Request): Promise<NextResponse> {
   const target = await resolveMailboxMutationRoute(request);
   if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
   const input = await mailboxBody(request);
   if (!input.ok) return input.response;
 
@@ -135,12 +146,13 @@ export async function createMailboxRoute(request: Request): Promise<NextResponse
       method: 'POST',
       path: 'mailboxes',
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
       body: input.value,
       fieldMap: { local_part: 'local_part', display_name: 'display_name' },
     });
   }
   const result = mockMailboxStore.create(
-    target.user.id,
+    target.organizationId,
     input.value.local_part,
     input.value.display_name ?? ''
   );
@@ -163,6 +175,7 @@ export async function deleteMailboxRoute(
 ): Promise<NextResponse> {
   const target = await resolveMailboxMutationRoute(request);
   if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
   const mailboxId = parseRouteId(rawMailboxId);
   if (!mailboxId.ok) return mailboxId.response;
 
@@ -171,9 +184,10 @@ export async function deleteMailboxRoute(
       method: 'DELETE',
       path: `mailboxes/${mailboxId.value}`,
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
     });
   }
-  return mockMailboxStore.delete(target.user.id, mailboxId.value)
+  return mockMailboxStore.delete(target.organizationId, mailboxId.value)
     ? apiNoContentResponse(privateMailboxHeaders())
     : mailboxNotFound();
 }
@@ -182,7 +196,7 @@ export async function listMailMessagesRoute(
   request: Request,
   rawMailboxId: string
 ): Promise<NextResponse> {
-  const target = await resolveMailboxReadRoute();
+  const target = await resolveMailboxReadRoute(request);
   if (!target.available) return target.response;
   const mailboxId = parseRouteId(rawMailboxId);
   if (!mailboxId.ok) return mailboxId.response;
@@ -203,11 +217,12 @@ export async function listMailMessagesRoute(
       method: 'GET',
       path: `mailboxes/${mailboxId.value}/messages`,
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
       searchParams,
     });
   }
   const result = mockMailboxStore.listMessages(
-    target.user.id,
+    target.organizationId,
     mailboxId.value,
     direction.value,
     page,
@@ -217,9 +232,9 @@ export async function listMailMessagesRoute(
   return apiPaginatedResponse(result.items, result.meta, result.links, privateMailboxHeaders());
 }
 
-/** The log: every mailbox of the caller, filtered by the whitelisted parameters only. */
+/** The log: every mailbox of the organization, filtered by the whitelisted parameters only. */
 export async function listMailLogRoute(request: Request): Promise<NextResponse> {
-  const target = await resolveMailboxReadRoute();
+  const target = await resolveMailboxReadRoute(request);
   if (!target.available) return target.response;
   const query = new URL(request.url).searchParams;
   const filters = parseLogFilters(query);
@@ -242,16 +257,17 @@ export async function listMailLogRoute(request: Request): Promise<NextResponse> 
       method: 'GET',
       path: 'mail-messages',
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
       searchParams,
     });
   }
-  const result = mockMailboxStore.listLog(target.user.id, filters.value, page, perPage);
+  const result = mockMailboxStore.listLog(target.organizationId, filters.value, page, perPage);
   return apiPaginatedResponse(result.items, result.meta, result.links, privateMailboxHeaders());
 }
 
 /** Per-day counts for the last `days` UTC days; the window defaults to a week. */
 export async function listMailMessageStatsRoute(request: Request): Promise<NextResponse> {
-  const target = await resolveMailboxReadRoute();
+  const target = await resolveMailboxReadRoute(request);
   if (!target.available) return target.response;
   const days = parseStatsDays(new URL(request.url).searchParams.getAll('days'));
   if (!days.ok) return days.response;
@@ -261,10 +277,11 @@ export async function listMailMessageStatsRoute(request: Request): Promise<NextR
       method: 'GET',
       path: 'mail-message-stats',
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
       searchParams: new URLSearchParams({ days: String(days.value) }),
     });
   }
-  return success(mockMailboxStore.stats(target.user.id, days.value));
+  return success(mockMailboxStore.stats(target.organizationId, days.value));
 }
 
 export async function sendMailMessageRoute(
@@ -283,6 +300,7 @@ export async function sendMailMessageRoute(
       method: 'POST',
       path: `mailboxes/${mailboxId.value}/messages`,
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
       body: input.value,
       fieldMap: {
         to: 'to',
@@ -294,7 +312,7 @@ export async function sendMailMessageRoute(
       },
     });
   }
-  const result = mockMailboxStore.send(target.user.id, mailboxId.value, input.value);
+  const result = mockMailboxStore.send(target.organizationId, mailboxId.value, input.value);
   if (result.ok) return success(result.message, 201);
   return result.error === 'mailbox_not_found'
     ? mailboxNotFound()
@@ -306,7 +324,7 @@ export async function getMailMessageRoute(
   rawMailboxId: string,
   rawMessageId: string
 ): Promise<NextResponse> {
-  const target = await resolveMailboxReadRoute();
+  const target = await resolveMailboxReadRoute(request);
   if (!target.available) return target.response;
   const ids = parseMessageIds(rawMailboxId, rawMessageId);
   if (!ids.ok) return ids.response;
@@ -316,10 +334,11 @@ export async function getMailMessageRoute(
       method: 'GET',
       path: `mailboxes/${ids.value.mailboxId}/messages/${ids.value.messageId}`,
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
     });
   }
   const result = mockMailboxStore.getMessage(
-    target.user.id,
+    target.organizationId,
     ids.value.mailboxId,
     ids.value.messageId
   );
@@ -343,12 +362,13 @@ export async function updateMailMessageRoute(
       method: 'PUT',
       path: `mailboxes/${ids.value.mailboxId}/messages/${ids.value.messageId}`,
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
       body: input.value,
       fieldMap: { read: 'read' },
     });
   }
   const result = mockMailboxStore.setRead(
-    target.user.id,
+    target.organizationId,
     ids.value.mailboxId,
     ids.value.messageId,
     input.value.read
@@ -371,33 +391,34 @@ export async function deleteMailMessageRoute(
       method: 'DELETE',
       path: `mailboxes/${ids.value.mailboxId}/messages/${ids.value.messageId}`,
       accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
     });
   }
   const result = mockMailboxStore.deleteMessage(
-    target.user.id,
+    target.organizationId,
     ids.value.mailboxId,
     ids.value.messageId
   );
   return result.ok ? apiNoContentResponse(privateMailboxHeaders()) : missing(result.error);
 }
 
-/** Reads: feature availability, then authentication. */
-async function resolveMailboxReadRoute(): Promise<MailboxTarget> {
+/** Reads: feature availability, then authentication, then the organization. */
+async function resolveMailboxReadRoute(request: Request): Promise<MailboxTarget> {
   const resolution = resolveMailboxRoute();
   if (!resolution.available) return resolution;
-  return targetOf(await authenticateMailboxBackend(resolution.backend));
+  return targetOf(request, await authenticateMailboxBackend(resolution.backend));
 }
 
 /**
- * Writes: feature availability, then the same-origin check, then authentication. Handlers read
- * the body only after this resolves.
+ * Writes: feature availability, then the same-origin check, then authentication, then the
+ * organization. Handlers read the body only after this resolves.
  */
 async function resolveMailboxMutationRoute(request: Request): Promise<MailboxTarget> {
   const resolution = resolveMailboxRoute();
   if (!resolution.available) return resolution;
   const guard = guardSameOriginMutation(request);
   if (guard) return { available: false, response: privateMailboxResponse(guard) };
-  return targetOf(await authenticateMailboxBackend(resolution.backend));
+  return targetOf(request, await authenticateMailboxBackend(resolution.backend));
 }
 
 async function authenticateMailboxBackend(
@@ -415,11 +436,55 @@ async function authenticateMailboxBackend(
     : { authenticated: false, response: unauthenticated() };
 }
 
-function targetOf(authentication: AuthenticatedMailboxBackend): MailboxTarget {
+/**
+ * The organization the request acts in. A missing header and a malformed or repeated one are
+ * rejected here; the API decides membership, and the mock resolves it from the organization mock.
+ */
+function targetOf(request: Request, authentication: AuthenticatedMailboxBackend): MailboxTarget {
   if (!authentication.authenticated) return { available: false, response: authentication.response };
-  return authentication.backend === 'go-api'
-    ? { available: true, backend: 'go-api', accessToken: authentication.accessToken }
-    : { available: true, backend: 'mock', user: authentication.user };
+  const rawOrganizationId = request.headers.get('organization-id');
+  if (rawOrganizationId === null) {
+    return {
+      available: false,
+      response: failure(
+        400,
+        ApiErrorCode.ORGANIZATION_CONTEXT_REQUIRED,
+        'Organization context is required'
+      ),
+    };
+  }
+  const organizationId = parseOrganizationId(rawOrganizationId);
+  if (!organizationId) {
+    return {
+      available: false,
+      response: failure(
+        400,
+        ApiErrorCode.ORGANIZATION_CONTEXT_INVALID,
+        'Organization context is invalid'
+      ),
+    };
+  }
+  if (authentication.backend === 'go-api') {
+    return {
+      available: true,
+      backend: 'go-api',
+      accessToken: authentication.accessToken,
+      organizationId,
+    };
+  }
+  const context = mockOrganizationStore.resolveContext(authentication.user, organizationId);
+  if (!context) {
+    return {
+      available: false,
+      response: failure(404, ApiErrorCode.ORGANIZATION_NOT_FOUND, 'Organization not found'),
+    };
+  }
+  return { available: true, backend: 'mock', organizationId, context };
+}
+
+/** Only owners and admins create and delete mailboxes. With the API backend, the API decides. */
+function mayManageMailboxes(target: MailboxTarget & { available: true }): boolean {
+  return target.backend === 'go-api' || target.context.role !== 'member';
 }
 
 async function jsonObject(
@@ -613,14 +678,15 @@ function positiveInteger(value: string | null, fallback: number): number {
 function currentEnvironment(): MailboxRouteEnvironment {
   return {
     adapterEnabled: serverEnv.API_ADAPTER_ENABLED,
-    featureEnabled: isWebFeatureEnabled('mailbox'),
+    mailboxFeatureEnabled: isWebFeatureEnabled('mailbox'),
     mockBffEnabled: serverEnv.MOCK_BFF_ENABLED,
     nodeEnv: env.NODE_ENV,
+    organizationFeatureEnabled: isWebFeatureEnabled('organization'),
   };
 }
 
 function privateMailboxHeaders(): Headers {
-  return privateNoStoreHeaders(undefined, ['Cookie']);
+  return privateNoStoreHeaders(undefined, ['Cookie', 'Organization-Id']);
 }
 
 function success<T>(data: T, status: 200 | 201 = 200): NextResponse {
@@ -653,6 +719,10 @@ function validationFailed(errors: Record<string, string[]>): NextResponse {
     errors,
     headers: privateMailboxHeaders(),
   });
+}
+
+function forbidden(): NextResponse {
+  return failure(403, ApiErrorCode.PERMISSION_DENIED, 'Mailbox management forbidden');
 }
 
 function unauthenticated(): NextResponse {

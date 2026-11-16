@@ -57,22 +57,22 @@ type SendInput struct {
 // Service defines the business interface of the mailbox starter.
 type Service interface {
 	Domain() string
-	CreateMailbox(ctx context.Context, userID uint, localPart, displayName string) (*domain.Mailbox, error)
-	ListMailboxes(ctx context.Context, userID uint) ([]*domain.Mailbox, error)
-	DeleteMailbox(ctx context.Context, userID, mailboxID uint) error
-	ListMessages(ctx context.Context, userID, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
-	GetMessage(ctx context.Context, userID, mailboxID, messageID uint) (*domain.MailMessage, error)
+	CreateMailbox(ctx context.Context, organizationID, createdBy uint, localPart, displayName string) (*domain.Mailbox, error)
+	ListMailboxes(ctx context.Context, organizationID uint) ([]*domain.Mailbox, error)
+	DeleteMailbox(ctx context.Context, organizationID, mailboxID uint) error
+	ListMessages(ctx context.Context, organizationID, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
+	GetMessage(ctx context.Context, organizationID, mailboxID, messageID uint) (*domain.MailMessage, error)
 	// SendMessage reports created=false when an idempotency key replayed an earlier attempt.
-	SendMessage(ctx context.Context, userID, mailboxID uint, input SendInput) (message *domain.MailMessage, created bool, err error)
-	// SendFromAddress sends from the mailbox with this address, which the user must own.
-	SendFromAddress(ctx context.Context, userID uint, from string, input SendInput) (message *domain.MailMessage, created bool, err error)
-	GetOutboundMessage(ctx context.Context, userID, messageID uint) (*domain.MailMessage, error)
-	SetMessageRead(ctx context.Context, userID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error)
-	DeleteMessage(ctx context.Context, userID, mailboxID, messageID uint) error
-	// ListLog lists messages across every mailbox the user owns.
-	ListLog(ctx context.Context, userID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
+	SendMessage(ctx context.Context, organizationID, mailboxID uint, input SendInput) (message *domain.MailMessage, created bool, err error)
+	// SendFromAddress sends from the mailbox with this address, which the organization must own.
+	SendFromAddress(ctx context.Context, organizationID uint, from string, input SendInput) (message *domain.MailMessage, created bool, err error)
+	GetOutboundMessage(ctx context.Context, organizationID, messageID uint) (*domain.MailMessage, error)
+	SetMessageRead(ctx context.Context, organizationID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error)
+	DeleteMessage(ctx context.Context, organizationID, mailboxID, messageID uint) error
+	// ListLog lists messages across every mailbox of the organization.
+	ListLog(ctx context.Context, organizationID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty days.
-	Stats(ctx context.Context, userID uint, days int) ([]domain.MailDayStats, error)
+	Stats(ctx context.Context, organizationID uint, days int) ([]domain.MailDayStats, error)
 	Provider() string
 	InboundEnabled() bool
 	DailySendLimit() int
@@ -136,7 +136,7 @@ const (
 	MaxStatsDays = 90
 )
 
-func (s *service) ListLog(ctx context.Context, userID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error) {
+func (s *service) ListLog(ctx context.Context, organizationID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error) {
 	if filter.Direction != "" && !filter.Direction.Valid() {
 		return nil, 0, domain.ErrInvalidInput
 	}
@@ -147,17 +147,17 @@ func (s *service) ListLog(ctx context.Context, userID uint, filter domain.MailLo
 	if len(filter.Query) > maxLogQueryLength {
 		return nil, 0, domain.ErrInvalidInput
 	}
-	return s.repo.ListMessagesForUser(ctx, userID, filter)
+	return s.repo.ListMessagesForOrganization(ctx, organizationID, filter)
 }
 
-func (s *service) Stats(ctx context.Context, userID uint, days int) ([]domain.MailDayStats, error) {
+func (s *service) Stats(ctx context.Context, organizationID uint, days int) ([]domain.MailDayStats, error) {
 	if days < 1 || days > MaxStatsDays {
 		return nil, domain.ErrInvalidInput
 	}
 	now := s.now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	first := today.AddDate(0, 0, -(days - 1))
-	counted, err := s.repo.StatsForUser(ctx, userID, first)
+	counted, err := s.repo.StatsForOrganization(ctx, organizationID, first)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (s *service) Stats(ctx context.Context, userID uint, days int) ([]domain.Ma
 	return stats, nil
 }
 
-func (s *service) CreateMailbox(ctx context.Context, userID uint, localPart, displayName string) (*domain.Mailbox, error) {
+func (s *service) CreateMailbox(ctx context.Context, organizationID, createdBy uint, localPart, displayName string) (*domain.Mailbox, error) {
 	normalized, err := normalizeLocalPart(localPart)
 	if err != nil {
 		return nil, err
@@ -185,58 +185,48 @@ func (s *service) CreateMailbox(ctx context.Context, userID uint, localPart, dis
 		return nil, fmt.Errorf("%w: display name", ErrMailboxAddressInvalid)
 	}
 	mailbox := &domain.Mailbox{
-		UserID:      userID,
-		Address:     normalized + "@" + s.settings.Domain,
-		DisplayName: displayName,
+		OrganizationID: organizationID,
+		CreatedBy:      createdBy,
+		Address:        normalized + "@" + s.settings.Domain,
+		DisplayName:    displayName,
 	}
-	if err := s.repo.CreateMailbox(ctx, mailbox, domain.MaxMailboxesPerUser); err != nil {
+	if err := s.repo.CreateMailbox(ctx, mailbox, domain.MaxMailboxesPerOrganization); err != nil {
 		return nil, err
 	}
 	return mailbox, nil
 }
 
-func (s *service) ListMailboxes(ctx context.Context, userID uint) ([]*domain.Mailbox, error) {
-	return s.repo.ListMailboxes(ctx, userID)
+func (s *service) ListMailboxes(ctx context.Context, organizationID uint) ([]*domain.Mailbox, error) {
+	return s.repo.ListMailboxes(ctx, organizationID)
 }
 
-func (s *service) DeleteMailbox(ctx context.Context, userID, mailboxID uint) error {
-	return s.repo.DeleteMailbox(ctx, userID, mailboxID)
-}
-
-// AccountDeletionCleanerName identifies this starter in the account deletion policy.
-func (s *service) AccountDeletionCleanerName() string {
-	return config.StarterMailbox
-}
-
-// CleanAccountDeletion removes a deleted account's mailboxes and messages inside the account
-// transaction. The addresses stay reserved, and later mail for them is bounced as unknown.
-func (s *service) CleanAccountDeletion(ctx context.Context, userID uint) error {
-	return s.repo.DeleteMailboxesForUser(ctx, userID)
+func (s *service) DeleteMailbox(ctx context.Context, organizationID, mailboxID uint) error {
+	return s.repo.DeleteMailbox(ctx, organizationID, mailboxID)
 }
 
 func (s *service) ListMessages(
 	ctx context.Context,
-	userID, mailboxID uint,
+	organizationID, mailboxID uint,
 	filter domain.MailMessageFilter,
 ) ([]*domain.MailMessage, int64, error) {
 	if filter.Direction != "" && !filter.Direction.Valid() {
 		return nil, 0, domain.ErrInvalidInput
 	}
-	if _, err := s.repo.FindMailbox(ctx, userID, mailboxID); err != nil {
+	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
 		return nil, 0, err
 	}
 	return s.repo.ListMessages(ctx, mailboxID, filter)
 }
 
-func (s *service) GetMessage(ctx context.Context, userID, mailboxID, messageID uint) (*domain.MailMessage, error) {
-	if _, err := s.repo.FindMailbox(ctx, userID, mailboxID); err != nil {
+func (s *service) GetMessage(ctx context.Context, organizationID, mailboxID, messageID uint) (*domain.MailMessage, error) {
+	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
 		return nil, err
 	}
 	return s.repo.FindMessage(ctx, mailboxID, messageID)
 }
 
-func (s *service) SetMessageRead(ctx context.Context, userID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error) {
-	if _, err := s.repo.FindMailbox(ctx, userID, mailboxID); err != nil {
+func (s *service) SetMessageRead(ctx context.Context, organizationID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error) {
+	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
 		return nil, err
 	}
 	var readAt *time.Time
@@ -250,8 +240,8 @@ func (s *service) SetMessageRead(ctx context.Context, userID, mailboxID, message
 	return s.repo.FindMessage(ctx, mailboxID, messageID)
 }
 
-func (s *service) DeleteMessage(ctx context.Context, userID, mailboxID, messageID uint) error {
-	if _, err := s.repo.FindMailbox(ctx, userID, mailboxID); err != nil {
+func (s *service) DeleteMessage(ctx context.Context, organizationID, mailboxID, messageID uint) error {
+	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
 		return err
 	}
 	return s.repo.DeleteMessage(ctx, mailboxID, messageID)
@@ -260,15 +250,15 @@ func (s *service) DeleteMessage(ctx context.Context, userID, mailboxID, messageI
 // SendMessage stores the message as queued, calls the provider, and records the real outcome.
 // A provider failure keeps the message with status "failed" and returns ErrMailDeliveryFailed
 // together with the stored message, so a caller never sees a failed send reported as sent.
-func (s *service) SendMessage(ctx context.Context, userID, mailboxID uint, input SendInput) (*domain.MailMessage, bool, error) {
-	mailbox, err := s.repo.FindMailbox(ctx, userID, mailboxID)
+func (s *service) SendMessage(ctx context.Context, organizationID, mailboxID uint, input SendInput) (*domain.MailMessage, bool, error) {
+	mailbox, err := s.repo.FindMailbox(ctx, organizationID, mailboxID)
 	if err != nil {
 		return nil, false, err
 	}
 	return s.send(ctx, mailbox, input)
 }
 
-func (s *service) SendFromAddress(ctx context.Context, userID uint, from string, input SendInput) (*domain.MailMessage, bool, error) {
+func (s *service) SendFromAddress(ctx context.Context, organizationID uint, from string, input SendInput) (*domain.MailMessage, bool, error) {
 	address, ok := normalizeRecipient(from)
 	if !ok {
 		return nil, false, fmt.Errorf("%w: from", ErrMailMessageInvalid)
@@ -277,15 +267,15 @@ func (s *service) SendFromAddress(ctx context.Context, userID uint, from string,
 	if err != nil {
 		return nil, false, err
 	}
-	// Another user's address answers exactly like an address that is not a mailbox.
-	if mailbox.UserID != userID {
+	// Another organization's address answers exactly like an address that is not a mailbox.
+	if mailbox.OrganizationID != organizationID {
 		return nil, false, ErrMailboxNotFound
 	}
 	return s.send(ctx, mailbox, input)
 }
 
-func (s *service) GetOutboundMessage(ctx context.Context, userID, messageID uint) (*domain.MailMessage, error) {
-	return s.repo.FindOutboundMessageForUser(ctx, userID, messageID)
+func (s *service) GetOutboundMessage(ctx context.Context, organizationID, messageID uint) (*domain.MailMessage, error) {
+	return s.repo.FindOutboundMessageForOrganization(ctx, organizationID, messageID)
 }
 
 func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput) (*domain.MailMessage, bool, error) {
@@ -304,7 +294,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		}
 	}
 
-	sent, err := s.repo.CountOutboundSince(ctx, mailbox.UserID, s.now().Add(-sendLimitWindow))
+	sent, err := s.repo.CountOutboundSince(ctx, mailbox.OrganizationID, s.now().Add(-sendLimitWindow))
 	if err != nil {
 		return nil, false, err
 	}

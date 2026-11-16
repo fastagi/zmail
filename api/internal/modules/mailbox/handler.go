@@ -10,7 +10,6 @@ import (
 
 	"github.com/fastagi/fastmail/api/internal/domain"
 	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
 	"github.com/fastagi/fastmail/api/internal/starter/assembly"
 	httphandler "github.com/fastagi/fastmail/api/pkg/handler"
 	"github.com/fastagi/fastmail/api/pkg/pagination"
@@ -28,26 +27,18 @@ const (
 
 // Handler handles HTTP requests for the mailbox starter.
 type Handler struct {
-	service        Service
-	cleaner        user.AccountDeletionCleaner
-	deletionPolicy *user.AccountDeletionPolicy
+	service Service
 }
 
 var (
-	_ assembly.Module           = (*Handler)(nil)
-	_ assembly.RouteModule      = (*Handler)(nil)
-	_ assembly.ErrorModule      = (*Handler)(nil)
-	_ assembly.ActivationModule = (*Handler)(nil)
+	_ assembly.Module      = (*Handler)(nil)
+	_ assembly.RouteModule = (*Handler)(nil)
+	_ assembly.ErrorModule = (*Handler)(nil)
 )
 
 // NewHandler creates a new handler.
-func NewHandler(service *service, deletionPolicy *user.AccountDeletionPolicy) *Handler {
-	return &Handler{service: service, cleaner: service, deletionPolicy: deletionPolicy}
-}
-
-// Activate installs account-deletion cleanup only when the mailbox starter is selected.
-func (h *Handler) Activate() error {
-	return h.deletionPolicy.RegisterCleaner(h.cleaner)
+func NewHandler(service Service) *Handler {
+	return &Handler{service: service}
 }
 
 // Name returns the starter name.
@@ -58,27 +49,27 @@ func (h *Handler) Name() string {
 // ListDomains returns the domains a user may create addresses on.
 // fastbuild:bounded-list max=1 reason=one configured mailbox domain per deployment
 func (h *Handler) ListDomains(c *gin.Context) {
-	if _, ok := httphandler.GetUserID(c); !ok {
+	if _, ok := organizationScope(c); !ok {
 		return
 	}
 	privateResponse(c)
 	response.Success(c, []MailboxDomainResponse{{
 		Domain:         h.service.Domain(),
-		MaxMailboxes:   domain.MaxMailboxesPerUser,
+		MaxMailboxes:   domain.MaxMailboxesPerOrganization,
 		Provider:       h.service.Provider(),
 		InboundEnabled: h.service.InboundEnabled(),
 		DailySendLimit: h.service.DailySendLimit(),
 	}})
 }
 
-// ListMailboxes returns the caller's mailboxes.
-// fastbuild:bounded-list max=10 reason=a user owns at most domain.MaxMailboxesPerUser mailboxes
+// ListMailboxes returns the organization's mailboxes.
+// fastbuild:bounded-list max=50 reason=an organization owns at most domain.MaxMailboxesPerOrganization mailboxes
 func (h *Handler) ListMailboxes(c *gin.Context) {
-	userID, ok := httphandler.GetUserID(c)
+	organizationID, ok := currentOrganizationID(c)
 	if !ok {
 		return
 	}
-	mailboxes, err := h.service.ListMailboxes(c.Request.Context(), userID)
+	mailboxes, err := h.service.ListMailboxes(c.Request.Context(), organizationID)
 	if err != nil {
 		response.HandleError(c, "Failed to list mailboxes", err)
 		return
@@ -87,8 +78,9 @@ func (h *Handler) ListMailboxes(c *gin.Context) {
 	response.Success(c, toMailboxResponses(mailboxes))
 }
 
+// CreateMailbox claims an address for the organization. Only owners and admins may.
 func (h *Handler) CreateMailbox(c *gin.Context) {
-	userID, ok := httphandler.GetUserID(c)
+	organization, ok := managerScope(c)
 	if !ok {
 		return
 	}
@@ -96,7 +88,8 @@ func (h *Handler) CreateMailbox(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	mailbox, err := h.service.CreateMailbox(c.Request.Context(), userID, req.LocalPart, req.DisplayName)
+	mailbox, err := h.service.CreateMailbox(
+		c.Request.Context(), organization.OrganizationID, organization.UserID, req.LocalPart, req.DisplayName)
 	if err != nil {
 		response.HandleError(c, "Failed to create mailbox", err)
 		return
@@ -105,21 +98,25 @@ func (h *Handler) CreateMailbox(c *gin.Context) {
 	response.Created(c, toMailboxResponse(mailbox))
 }
 
+// DeleteMailbox removes a mailbox and its messages. Only owners and admins may.
 func (h *Handler) DeleteMailbox(c *gin.Context) {
-	userID, mailboxID, ok := mailboxScope(c)
+	organization, ok := managerScope(c)
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteMailbox(c.Request.Context(), userID, mailboxID); err != nil {
+	mailboxID, ok := httphandler.ParseID(c, "mailbox_id")
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteMailbox(c.Request.Context(), organization.OrganizationID, mailboxID); err != nil {
 		response.HandleError(c, "Failed to delete mailbox", err)
 		return
 	}
 	response.NoContent(c)
 }
 
-// ListLog lists messages across every mailbox the caller owns, newest first.
 func (h *Handler) ListLog(c *gin.Context) {
-	userID, ok := httphandler.GetUserID(c)
+	organizationID, ok := currentOrganizationID(c)
 	if !ok {
 		return
 	}
@@ -133,7 +130,7 @@ func (h *Handler) ListLog(c *gin.Context) {
 		mailboxID = uint(parsed)
 	}
 	page := pagination.FromContext(c)
-	messages, total, err := h.service.ListLog(c.Request.Context(), userID, domain.MailLogFilter{
+	messages, total, err := h.service.ListLog(c.Request.Context(), organizationID, domain.MailLogFilter{
 		Direction: domain.MailDirection(c.Query("direction")),
 		Status:    domain.MailStatus(c.Query("status")),
 		MailboxID: mailboxID,
@@ -154,7 +151,7 @@ func (h *Handler) ListLog(c *gin.Context) {
 // ListStats returns per-day counts for the caller's mail.
 // fastbuild:bounded-list max=90 reason=one entry per day of a window capped at MaxStatsDays
 func (h *Handler) ListStats(c *gin.Context) {
-	userID, ok := httphandler.GetUserID(c)
+	organizationID, ok := currentOrganizationID(c)
 	if !ok {
 		return
 	}
@@ -167,7 +164,7 @@ func (h *Handler) ListStats(c *gin.Context) {
 		}
 		days = parsed
 	}
-	stats, err := h.service.Stats(c.Request.Context(), userID, days)
+	stats, err := h.service.Stats(c.Request.Context(), organizationID, days)
 	if err != nil {
 		response.HandleError(c, "Failed to load mail statistics", err)
 		return
@@ -177,12 +174,12 @@ func (h *Handler) ListStats(c *gin.Context) {
 }
 
 func (h *Handler) ListMessages(c *gin.Context) {
-	userID, mailboxID, ok := mailboxScope(c)
+	organizationID, mailboxID, ok := mailboxScope(c)
 	if !ok {
 		return
 	}
 	page := pagination.FromContext(c)
-	messages, total, err := h.service.ListMessages(c.Request.Context(), userID, mailboxID, domain.MailMessageFilter{
+	messages, total, err := h.service.ListMessages(c.Request.Context(), organizationID, mailboxID, domain.MailMessageFilter{
 		Direction: domain.MailDirection(c.Query("direction")),
 		Page:      page.GetPage(),
 		PerPage:   page.GetPerPage(),
@@ -198,11 +195,11 @@ func (h *Handler) ListMessages(c *gin.Context) {
 }
 
 func (h *Handler) GetMessage(c *gin.Context) {
-	userID, mailboxID, messageID, ok := messageScope(c)
+	organizationID, mailboxID, messageID, ok := messageScope(c)
 	if !ok {
 		return
 	}
-	message, err := h.service.GetMessage(c.Request.Context(), userID, mailboxID, messageID)
+	message, err := h.service.GetMessage(c.Request.Context(), organizationID, mailboxID, messageID)
 	if err != nil {
 		response.HandleError(c, "Failed to get mail message", err)
 		return
@@ -212,7 +209,7 @@ func (h *Handler) GetMessage(c *gin.Context) {
 }
 
 func (h *Handler) SendMessage(c *gin.Context) {
-	userID, mailboxID, ok := mailboxScope(c)
+	organizationID, mailboxID, ok := mailboxScope(c)
 	if !ok {
 		return
 	}
@@ -221,13 +218,13 @@ func (h *Handler) SendMessage(c *gin.Context) {
 		return
 	}
 	message, created, err := h.service.SendMessage(
-		c.Request.Context(), userID, mailboxID, req.input(c.GetHeader(IdempotencyKeyHeader)))
+		c.Request.Context(), organizationID, mailboxID, req.input(c.GetHeader(IdempotencyKeyHeader)))
 	respondSent(c, message, created, err)
 }
 
 // SendOutbound sends one message with an API key that holds the mail:send scope.
 func (h *Handler) SendOutbound(c *gin.Context) {
-	userID, ok := httphandler.GetUserID(c)
+	organizationID, ok := currentOrganizationID(c)
 	if !ok {
 		return
 	}
@@ -236,13 +233,13 @@ func (h *Handler) SendOutbound(c *gin.Context) {
 		return
 	}
 	message, created, err := h.service.SendFromAddress(
-		c.Request.Context(), userID, req.From, req.input(c.GetHeader(IdempotencyKeyHeader)))
+		c.Request.Context(), organizationID, req.From, req.input(c.GetHeader(IdempotencyKeyHeader)))
 	respondSent(c, message, created, err)
 }
 
 // GetOutbound returns one message the API key owner sent, so a sender can check its outcome.
 func (h *Handler) GetOutbound(c *gin.Context) {
-	userID, ok := httphandler.GetUserID(c)
+	organizationID, ok := currentOrganizationID(c)
 	if !ok {
 		return
 	}
@@ -250,7 +247,7 @@ func (h *Handler) GetOutbound(c *gin.Context) {
 	if !ok {
 		return
 	}
-	message, err := h.service.GetOutboundMessage(c.Request.Context(), userID, messageID)
+	message, err := h.service.GetOutboundMessage(c.Request.Context(), organizationID, messageID)
 	if err != nil {
 		response.HandleError(c, "Failed to get mail message", err)
 		return
@@ -274,7 +271,7 @@ func respondSent(c *gin.Context, message *domain.MailMessage, created bool, err 
 }
 
 func (h *Handler) UpdateMessage(c *gin.Context) {
-	userID, mailboxID, messageID, ok := messageScope(c)
+	organizationID, mailboxID, messageID, ok := messageScope(c)
 	if !ok {
 		return
 	}
@@ -282,7 +279,7 @@ func (h *Handler) UpdateMessage(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	message, err := h.service.SetMessageRead(c.Request.Context(), userID, mailboxID, messageID, *req.Read)
+	message, err := h.service.SetMessageRead(c.Request.Context(), organizationID, mailboxID, messageID, *req.Read)
 	if err != nil {
 		response.HandleError(c, "Failed to update mail message", err)
 		return
@@ -292,11 +289,11 @@ func (h *Handler) UpdateMessage(c *gin.Context) {
 }
 
 func (h *Handler) DeleteMessage(c *gin.Context) {
-	userID, mailboxID, messageID, ok := messageScope(c)
+	organizationID, mailboxID, messageID, ok := messageScope(c)
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteMessage(c.Request.Context(), userID, mailboxID, messageID); err != nil {
+	if err := h.service.DeleteMessage(c.Request.Context(), organizationID, mailboxID, messageID); err != nil {
 		response.HandleError(c, "Failed to delete mail message", err)
 		return
 	}
@@ -333,25 +330,56 @@ func (h *Handler) ReceiveInbound(c *gin.Context) {
 	response.Success(c, body)
 }
 
-func mailboxScope(c *gin.Context) (userID, mailboxID uint, ok bool) {
-	userID, ok = httphandler.GetUserID(c)
+func mailboxScope(c *gin.Context) (organizationID, mailboxID uint, ok bool) {
+	organizationID, ok = currentOrganizationID(c)
 	if !ok {
 		return 0, 0, false
 	}
 	mailboxID, ok = httphandler.ParseID(c, "mailbox_id")
-	return userID, mailboxID, ok
+	return organizationID, mailboxID, ok
 }
 
-func messageScope(c *gin.Context) (userID, mailboxID, messageID uint, ok bool) {
-	userID, mailboxID, ok = mailboxScope(c)
+func messageScope(c *gin.Context) (organizationID, mailboxID, messageID uint, ok bool) {
+	organizationID, mailboxID, ok = mailboxScope(c)
 	if !ok {
 		return 0, 0, 0, false
 	}
 	messageID, ok = httphandler.ParseID(c, "message_id")
-	return userID, mailboxID, messageID, ok
+	return organizationID, mailboxID, messageID, ok
 }
 
-// privateResponse keeps mail out of shared and browser caches.
+// organizationScope returns the organization the request acts in, resolved and verified by the
+// organization_context middleware. The raw Organization-Id header is never trusted here.
+func organizationScope(c *gin.Context) (domain.OrganizationContext, bool) {
+	organization, ok := domain.OrganizationContextFromContext(c.Request.Context())
+	if !ok {
+		response.HandleError(c, "Organization context required", domain.ErrOrganizationContextRequired)
+		return domain.OrganizationContext{}, false
+	}
+	return organization, true
+}
+
+func currentOrganizationID(c *gin.Context) (uint, bool) {
+	organization, ok := organizationScope(c)
+	return organization.OrganizationID, ok
+}
+
+// managerScope additionally requires the owner or admin role.
+func managerScope(c *gin.Context) (domain.OrganizationContext, bool) {
+	organization, ok := organizationScope(c)
+	if !ok {
+		return domain.OrganizationContext{}, false
+	}
+	if !organization.Role.CanManageOrganization() {
+		response.HandleError(c, "Mailbox management forbidden", domain.ErrPermissionDenied)
+		return domain.OrganizationContext{}, false
+	}
+	return organization, true
+}
+
+// privateResponse keeps mail out of shared and browser caches and tells caches the answer
+// depends on the caller and the selected organization.
 func privateResponse(c *gin.Context) {
 	c.Header("Cache-Control", "private, no-store")
+	c.Header("Vary", "Authorization, Organization-Id")
 }

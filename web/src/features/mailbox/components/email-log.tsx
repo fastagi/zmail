@@ -26,6 +26,12 @@ import {
 } from '@/features/mailbox/components/compose-dialog';
 import { EmailDetail } from '@/features/mailbox/components/email-detail';
 import {
+  MailOrganizationBoundary,
+  MailPageHeader,
+  OrganizationLostState,
+  useMailOrganizationId,
+} from '@/features/mailbox/components/mail-organization';
+import {
   EmptyState,
   ErrorAlert,
   MailStatusBadge,
@@ -40,6 +46,11 @@ import {
   useMailboxes,
   useMarkMailMessageRead,
 } from '@/features/mailbox/hooks/use-mailbox';
+import {
+  mailOrganizationHref,
+  useMailOrganization,
+  type MailOrganizationScope,
+} from '@/features/mailbox/hooks/use-mail-organization';
 import { MAIL_LOG_QUERY_MAX_LENGTH } from '@/features/mailbox/schemas';
 import type {
   MailDayStats,
@@ -54,7 +65,7 @@ import {
   hasEmailLogFilters,
   type EmailLogView,
 } from '@/features/mailbox/utils/email-log-view';
-import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
+import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -69,28 +80,70 @@ interface Composition {
 }
 
 /**
- * Emails console: every message across the signed-in user's mailboxes, with a week of counts,
- * filters kept in the URL, and the message detail. The API stays the authority for ownership
- * and filtering; this component only chooses what to ask for.
+ * Emails console: every message across the chosen organization's mailboxes, with a week of
+ * counts, filters kept in the URL, and the message detail. The API stays the authority for
+ * membership and filtering; this component only chooses what to ask for.
  */
 export function EmailLog({ initialView }: { initialView: EmailLogView }) {
   const t = useT('mailbox');
-  const mailboxes = useMailboxes();
-  const markRead = useMarkMailMessageRead();
+  const scope = useMailOrganization();
+  // The filters in the URL belong to the organization the page opened with.
+  const [switched, setSwitched] = useState(false);
+  const header: MailOrganizationScope =
+    scope.status === 'ready'
+      ? {
+          ...scope,
+          select: organizationId => {
+            setSwitched(true);
+            scope.select(organizationId);
+          },
+        }
+      : scope;
+
+  return (
+    <div className="space-y-6">
+      {scope.status === 'ready' ? null : (
+        <MailPageHeader
+          title={t('emails.title')}
+          description={t('emails.description')}
+          scope={scope}
+        />
+      )}
+      <MailOrganizationBoundary scope={scope}>
+        {() => (
+          <EmailLogContent scope={header} initialView={switched ? { page: 1 } : initialView} />
+        )}
+      </MailOrganizationBoundary>
+    </div>
+  );
+}
+
+function EmailLogContent({
+  scope,
+  initialView,
+}: {
+  scope: MailOrganizationScope;
+  initialView: EmailLogView;
+}) {
+  const t = useT('mailbox');
+  const organizationId = useMailOrganizationId();
+  const mailboxes = useMailboxes(organizationId);
+  const markRead = useMarkMailMessageRead(organizationId);
   const [view, setView] = useState(initialView);
   const [search, setSearch] = useState(initialView.q ?? '');
   const [opened, setOpened] = useState<MailLogEntry | null>(null);
   const [composition, setComposition] = useState<Composition | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // The URL mirrors the view, so a reload or a shared link shows the same list.
+  // The URL mirrors the organization and the view, so a reload or a shared link shows the same
+  // list.
   useEffect(() => {
     window.history.replaceState(
       window.history.state,
       '',
-      `${window.location.pathname}${emailLogSearch(view)}`
+      `${window.location.pathname}${emailLogSearch(view, organizationId)}`
     );
-  }, [view]);
+  }, [organizationId, view]);
   useEffect(
     () => () => {
       if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -139,13 +192,11 @@ export function EmailLog({ initialView }: { initialView: EmailLogView }) {
     });
   };
 
+  const lost = isOrganizationLost(mailboxes.error);
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-5">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold">{t('emails.title')}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t('emails.description')}</p>
-        </div>
+    <>
+      <MailPageHeader title={t('emails.title')} description={t('emails.description')} scope={scope}>
         <Button
           type="button"
           icon={<Send className="size-4" />}
@@ -157,9 +208,11 @@ export function EmailLog({ initialView }: { initialView: EmailLogView }) {
         >
           {t('emails.send')}
         </Button>
-      </div>
+      </MailPageHeader>
 
-      {opened ? (
+      {lost ? (
+        <OrganizationLostState />
+      ) : opened ? (
         <EmailDetail
           key={opened.id}
           mailboxId={opened.mailbox_id}
@@ -257,14 +310,14 @@ export function EmailLog({ initialView }: { initialView: EmailLogView }) {
           onStored={() => setView(current => ({ ...current, page: 1 }))}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 
 function EmailStats() {
   const t = useT('mailbox');
   const locale = useLocale();
-  const stats = useMailStats(MAIL_STATS_DAYS);
+  const stats = useMailStats(useMailOrganizationId(), MAIL_STATS_DAYS);
   const dayFormat = useMemo(
     () => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }),
     [locale]
@@ -383,8 +436,9 @@ function EmailTable({
     [locale]
   );
   const [now] = useState(() => Date.now());
+  const organizationId = useMailOrganizationId();
   const { page, ...filters } = view;
-  const log = useMailLog(filters, page);
+  const log = useMailLog(organizationId, filters, page);
 
   if (log.isPending) {
     return (
@@ -430,7 +484,9 @@ function EmailTable({
         action={
           hasMailboxes ? undefined : (
             <Button asChild size="sm" variant="outline">
-              <Link href={ROUTES.CONSOLE.MAILBOXES}>{t('emails.openMailboxes')}</Link>
+              <Link href={mailOrganizationHref(ROUTES.CONSOLE.MAILBOXES, organizationId)}>
+                {t('emails.openMailboxes')}
+              </Link>
             </Button>
           )
         }

@@ -2,25 +2,41 @@
 
 This contract owns the optional `mailbox` starter across the Go API, the Web mailbox feature, the
 fixed production API adapter, the development mock BFF, and the Cloudflare Email Worker that
-delivers inbound mail. It defines user-owned mailboxes on one configured domain, sending through a
-mail provider from a session or an API key, and signed inbound delivery. It does not define attachments, organization-shared
-mailboxes, custom domains per user, mailing lists, or delivery webhooks.
+delivers inbound mail. It defines mailboxes owned by an organization on one configured domain,
+sending through a mail provider from a session or an API key, and signed inbound delivery. It does
+not define attachments, per-mailbox access rules, custom domains per organization, mailing lists,
+or delivery webhooks.
 
 ## Activation
 
-The API registers these routes only when `OPTIONAL_STARTERS` contains `mailbox`. The Web feature
-is active only when `NEXT_PUBLIC_OPTIONAL_FEATURES` contains `mailbox`. Configuration keys are
+The API registers these routes only when `OPTIONAL_STARTERS` contains `organization` and
+`mailbox`; `mailbox` alone is refused at startup. The Web feature is active only when
+`NEXT_PUBLIC_OPTIONAL_FEATURES` contains `organization` and `mailbox`. Configuration keys are
 listed in [`api/docs/CONFIGURATION.md`](../api/docs/CONFIGURATION.md).
 
 ## Ownership And Paths
 
-An authenticated user may manage only their own mailboxes and the messages in them. A mailbox or
-message that belongs to another user is reported exactly like one that does not exist.
+Mailboxes and their messages belong to an organization. Every request names the organization
+with the `Organization-Id` header defined in [`ORGANIZATIONS.md`](ORGANIZATIONS.md), and the API
+resolves the caller's membership of it on each request: a missing header is
+`400 ORGANIZATION.CONTEXT_REQUIRED`, a malformed one `400 ORGANIZATION.CONTEXT_INVALID`, and an
+organization the caller does not belong to is `404 ORGANIZATION.NOT_FOUND`, exactly like one that
+does not exist. A mailbox or message of another organization is likewise reported as missing.
+
+| Role | May |
+|---|---|
+| `member` | List domains and mailboxes; list, read, send, mark read or unread, and delete messages; read the log and statistics |
+| `owner`, `admin` | Everything a member may, and create and delete mailboxes |
+
+A member who creates or deletes a mailbox gets `403 PERMISSION.DENIED`. The user who created a
+mailbox is recorded but has no special rights to it; removing that user from the organization
+changes nothing about the mailbox. A removed member loses access on their next request. Read state
+is shared: a message one member reads is read for the whole organization.
 
 | Operation | Browser route | Go API route | Success |
 |---|---|---|---|
 | List domains | `GET /api/mailbox-domains` | `GET /v1/mailbox-domains` | `200` envelope, at most 1 item |
-| List mailboxes | `GET /api/mailboxes` | `GET /v1/mailboxes` | `200` envelope, at most 10 items |
+| List mailboxes | `GET /api/mailboxes` | `GET /v1/mailboxes` | `200` envelope, at most 50 items |
 | Create mailbox | `POST /api/mailboxes` | `POST /v1/mailboxes` | `201` envelope |
 | Delete mailbox | `DELETE /api/mailboxes/:id` | `DELETE /v1/mailboxes/:mailbox_id` | `204` |
 | List messages | `GET /api/mailboxes/:id/messages` | `GET /v1/mailboxes/:mailbox_id/messages` | Paginated envelope |
@@ -35,7 +51,8 @@ message that belongs to another user is reported exactly like one that does not 
 | Inbound delivery | none | `POST /v1/inbound-mail-messages` | `201`, or `200` for a repeat |
 
 The Web production API adapter owns the HttpOnly API session credential and forwards only these
-fixed relative paths. Every user response is `Cache-Control: private, no-store`. The inbound route
+fixed relative paths together with the `Organization-Id` header. Every member response is
+`Cache-Control: private, no-store` and varies on `Authorization` and `Organization-Id`. The inbound route
 has no browser route: only the mail edge calls it.
 
 ## Mailboxes
@@ -54,12 +71,12 @@ has no browser route: only the mail edge calls it.
 - `display_name` is optional, at most 120 characters, and may not contain `<`, `>`, or `"`; a
   violation is also `422 MAILBOX.ADDRESS_INVALID`.
 - The address is `<local_part>@<configured domain>`. `GET /v1/mailbox-domains` returns that domain
-  with `max_mailboxes`, the outbound `provider` (`cloudflare` delivers; `log` only records and is
-  for development), `inbound_enabled`, and `daily_send_limit`.
+  with `max_mailboxes` (per organization), the outbound `provider` (`cloudflare` delivers; `log` only records and is
+  for development), `inbound_enabled`, and `daily_send_limit` (per organization).
 - An address that is or ever was a mailbox is
   `409 MAILBOX.ADDRESS_TAKEN`: deleting a mailbox keeps its address reserved, so a later owner
   never receives mail meant for the previous one.
-- A user owns at most 10 mailboxes; one more is `409 MAILBOX.LIMIT_REACHED`.
+- An organization owns at most 50 mailboxes; one more is `409 MAILBOX.LIMIT_REACHED`.
 
 ```json
 {
@@ -78,10 +95,10 @@ has no browser route: only the mail edge calls it.
 `unread_count` is the number of unread inbound messages in the mailbox; sent messages never
 count.
 
-Deleting a mailbox deletes its messages in the same transaction. Deleting the account
-(`DELETE /v1/users/account`) does the same for every mailbox the user owns, inside the account
-transaction; the addresses stay reserved and later mail for them is answered
-`404 MAILBOX.RECIPIENT_NOT_FOUND`.
+Deleting a mailbox deletes its messages in the same transaction; the address stays reserved and
+later mail for it is answered `404 MAILBOX.RECIPIENT_NOT_FOUND`. Deleting a user account does not
+touch mailboxes: the organization starter already refuses to delete an account that still belongs
+to an organization.
 
 ## Messages
 
@@ -130,17 +147,17 @@ answers:
 | Provider accepted | `201` with the message | `sent` |
 | Provider rejected or was unreachable | `502 MAILBOX.DELIVERY_FAILED` | `failed`, with `failure_code` |
 | No provider configured | `503 MAILBOX.SENDER_NOT_CONFIGURED` | `failed` |
-| Rolling 24-hour limit reached | `429 MAILBOX.SEND_LIMIT_REACHED` | nothing stored |
+| Organization's rolling 24-hour limit reached | `429 MAILBOX.SEND_LIMIT_REACHED` | nothing stored |
 
-A send is never reported as successful before the provider accepts it. Failed attempts count toward
-the send limit. The limit is a soft bound: concurrent requests may exceed it by the number of
+A send is never reported as successful before the provider accepts it. The send limit is counted
+per organization, and failed attempts count toward it. The limit is a soft bound: concurrent requests may exceed it by the number of
 requests in flight. There is no automatic retry. A client that retries a `502` without an
 `Idempotency-Key` may send a duplicate when the first attempt reached the provider but the answer
 was lost (`failure_code` `transport.unreachable`); see [Idempotency](#idempotency).
 
 ### Log And Statistics
 
-`GET /v1/mail-messages` lists messages across every mailbox the caller owns, newest first, as
+`GET /v1/mail-messages` lists messages across every mailbox of the organization, newest first, as
 summaries with the owning `mailbox_address` and without bodies. Read a message through
 `GET /v1/mailboxes/:mailbox_id/messages/:message_id`.
 
@@ -148,7 +165,7 @@ summaries with the owning `mailbox_address` and without bodies. Read a message t
 |---|---|
 | `direction` | `inbound` or `outbound` |
 | `status` | `received`, `queued`, `sent`, or `failed` |
-| `mailbox_id` | One mailbox. Another user's mailbox matches nothing. |
+| `mailbox_id` | One mailbox. Another organization's mailbox matches nothing. |
 | `q` | Case-insensitive match on the subject, the sender address, or a recipient address; at most 200 characters. `%` and `_` match literally. |
 | `page`, `per_page` | Pagination |
 
@@ -185,7 +202,11 @@ key. Without a key, every request is a new message.
 ## Programmatic Sending
 
 Backend services send with an API key instead of a browser session. Create the key with
-`POST /v1/api-keys` (see [`API_KEYS.md`](API_KEYS.md)) and pass it as `X-API-Key`.
+`POST /v1/api-keys` (see [`API_KEYS.md`](API_KEYS.md)) and pass it as `X-API-Key`, together with
+the `Organization-Id` header. A key belongs to a user, and it acts with that user's current
+membership of the named organization: the same header errors apply, and removing the user from the
+organization stops the key from working there on the next request. Keys owned by an organization
+are not defined.
 
 | Route | Required scope |
 |---|---|
@@ -201,11 +222,11 @@ Backend services send with an API key instead of a browser session. Create the k
 }
 ```
 
-`from` must be the bare address of a mailbox the key's owner owns; any other address, including
-another user's mailbox, is `404 MAILBOX.NOT_FOUND`. The remaining fields, limits, outcomes, and
+`from` must be the bare address of a mailbox of that organization; any other address, including
+another organization's mailbox, is `404 MAILBOX.NOT_FOUND`. The remaining fields, limits, outcomes, and
 `Idempotency-Key` behavior are those of [Send](#send). A key without the scope gets
 `403 PERMISSION.DENIED`. The read route returns only outbound messages, so a `mail:read` key cannot
-read mail that was received.
+read mail that was received. Both routes are limited to the organization in the header.
 
 ## Inbound Delivery
 
@@ -232,8 +253,9 @@ so an unsigned caller cannot learn which addresses exist.
 | Not a parseable message with a sender | `422 MAILBOX.INBOUND_UNPARSEABLE` | Reject (bounce) |
 | No inbound secret configured | `503 MAILBOX.INBOUND_DISABLED` | Temporary failure |
 
-A message is identified by its `Message-ID`, or by a hash of its content when it has none, once per
-mailbox. The API stores the first `text/plain` and first `text/html` part, converted to UTF-8 and
+The inbound route carries no organization header: the recipient address identifies the mailbox,
+and the mailbox its organization. A message is identified by its `Message-ID`, or by a hash of its
+content when it has none, once per mailbox. The API stores the first `text/plain` and first `text/html` part, converted to UTF-8 and
 truncated to 256 KiB each. Attachments are not stored.
 
 ## Errors

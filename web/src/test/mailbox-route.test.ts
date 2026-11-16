@@ -28,6 +28,9 @@ const managedKeys = [
 
 type MailboxRoute = typeof import('@/features/mailbox/server/mailbox-route');
 
+/** The `Organization-Id` every request of a test carries unless it names another. */
+let activeOrganization = '1';
+
 describe('mailbox browser route boundary', () => {
   let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 
@@ -40,8 +43,9 @@ describe('mailbox browser route boundary', () => {
     getSessionUser.mockReset();
     process.env.NEXT_PUBLIC_API_URL = '/api';
     process.env.NEXT_PUBLIC_APP_URL = 'https://app.example.com';
-    process.env.NEXT_PUBLIC_OPTIONAL_FEATURES = 'mailbox';
+    process.env.NEXT_PUBLIC_OPTIONAL_FEATURES = 'organization,mailbox';
     process.env.API_UPSTREAM_TIMEOUT_MS = '5000';
+    activeOrganization = '1';
     process.env.API_UPSTREAM_MAX_RESPONSE_BYTES = '1048576';
   });
 
@@ -54,31 +58,44 @@ describe('mailbox browser route boundary', () => {
     }
   });
 
-  it('is selected on its own, without an organization', () => {
-    expect(parseOptionalWebFeatures('mailbox')).toEqual(['mailbox']);
+  it('is selected only together with the organization feature', () => {
+    expect(() => parseOptionalWebFeatures('mailbox')).toThrow(
+      'Optional Web feature "mailbox" requires "organization"'
+    );
+    expect(parseOptionalWebFeatures('organization,mailbox')).toEqual(['organization', 'mailbox']);
   });
 
   it('stays unavailable when the feature is not selected', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
-    process.env.NEXT_PUBLIC_OPTIONAL_FEATURES = '';
     getSessionUser.mockResolvedValue(mockUser('demo-admin'));
-    const route = await loadRoute();
 
-    const read = await route.listMailboxesRoute(request('/api/mailboxes'));
-    const write = await create(route, { local_part: 'hello' });
+    // Neither feature, and the organization feature without the mailbox feature.
+    for (const features of ['', 'organization']) {
+      vi.resetModules();
+      process.env.NEXT_PUBLIC_OPTIONAL_FEATURES = features;
+      const route = await loadRoute();
 
-    for (const response of [read, write]) {
-      expect(response.status).toBe(503);
-      await expect(response.json()).resolves.toMatchObject({
-        error_code: 'COMMON.SERVICE_UNAVAILABLE',
-      });
+      const read = await route.listMailboxesRoute(request('/api/mailboxes'));
+      const write = await create(route, { local_part: 'hello' });
+
+      for (const response of [read, write]) {
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toMatchObject({
+          error_code: 'COMMON.SERVICE_UNAVAILABLE',
+        });
+      }
     }
     expect(getSessionUser).not.toHaveBeenCalled();
   });
 
   it('stays unavailable in production without the adapter or an explicit mock', async () => {
     const route = await loadRoute();
-    const base = { featureEnabled: true, adapterEnabled: false, nodeEnv: 'production' as const };
+    const base = {
+      mailboxFeatureEnabled: true,
+      organizationFeatureEnabled: true,
+      adapterEnabled: false,
+      nodeEnv: 'production' as const,
+    };
 
     expect(route.resolveMailboxRoute({ ...base, mockBffEnabled: false }).available).toBe(false);
     expect(
@@ -87,7 +104,16 @@ describe('mailbox browser route boundary', () => {
     expect(
       route.resolveMailboxRoute({
         ...base,
-        featureEnabled: false,
+        mailboxFeatureEnabled: false,
+        adapterEnabled: true,
+        mockBffEnabled: true,
+      }).available
+    ).toBe(false);
+    // The mailbox feature needs the organization feature, whatever the backend.
+    expect(
+      route.resolveMailboxRoute({
+        ...base,
+        organizationFeatureEnabled: false,
         adapterEnabled: true,
         mockBffEnabled: true,
       }).available
@@ -157,7 +183,7 @@ describe('mailbox browser route boundary', () => {
       data: [
         {
           domain: 'mail.example.com',
-          max_mailboxes: 10,
+          max_mailboxes: 50,
           provider: 'log',
           inbound_enabled: false,
           daily_send_limit: 200,
@@ -172,6 +198,7 @@ describe('mailbox browser route boundary', () => {
     expect(created.status).toBe(201);
     expect(created.headers.get('cache-control')).toBe('private, no-store');
     expect(created.headers.get('vary')).toContain('Cookie');
+    expect(created.headers.get('vary')).toContain('Organization-Id');
     const mailbox = (await created.json()).data;
     expect(mailbox).toMatchObject({
       address: 'hello.team@mail.example.com',
@@ -229,25 +256,30 @@ describe('mailbox browser route boundary', () => {
       404,
       'MAILBOX.NOT_FOUND'
     );
-    // Another user cannot take the address either.
-    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    // Another organization cannot take the address either.
+    activeOrganization = await secondOrganization();
     await expectError(await create(route, { local_part: 'box0' }), 409, 'MAILBOX.ADDRESS_TAKEN');
 
-    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
-    for (let index = 1; index <= 10; index += 1) {
+    activeOrganization = '1';
+    for (let index = 1; index <= 50; index += 1) {
       expect((await create(route, { local_part: `box${index}` })).status).toBe(201);
     }
-    await expectError(await create(route, { local_part: 'box11' }), 409, 'MAILBOX.LIMIT_REACHED');
+    await expectError(await create(route, { local_part: 'box51' }), 409, 'MAILBOX.LIMIT_REACHED');
+
+    // The limit is per organization: a full one leaves the other free to create.
+    activeOrganization = await secondOrganization();
+    expect((await create(route, { local_part: 'elsewhere' })).status).toBe(201);
   });
 
-  it("reports another user's mailbox and messages as missing", async () => {
+  it("reports another organization's mailbox and messages as missing", async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockUser('demo-admin'));
     const route = await loadRoute();
     const mailbox = (await (await create(route, { local_part: 'private' })).json()).data;
     const path = `/api/mailboxes/${mailbox.id}/messages`;
 
-    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    // The same user, acting in an organization that does not own the mailbox.
+    activeOrganization = await secondOrganization();
     await expect(
       (await route.listMailboxesRoute(request('/api/mailboxes'))).json()
     ).resolves.toMatchObject({
@@ -275,6 +307,212 @@ describe('mailbox browser route boundary', () => {
       ),
       404,
       'MAILBOX.NOT_FOUND'
+    );
+
+    // Nothing was changed from the other organization.
+    activeOrganization = '1';
+    const list = await (await route.listMailboxesRoute(request('/api/mailboxes'))).json();
+    expect(list.data.map((item: { id: number }) => item.id)).toEqual([mailbox.id]);
+    const messages = await (
+      await route.listMailMessagesRoute(request(path), String(mailbox.id))
+    ).json();
+    expect(messages.meta.total).toBe(1);
+  });
+
+  it('requires a well-formed organization header after authentication', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const calls = (organization: string | string[] | null) => [
+      () => route.listMailboxDomainsRoute(request('/api/mailbox-domains', { organization })),
+      () => route.listMailboxesRoute(request('/api/mailboxes', { organization })),
+      () => route.listMailLogRoute(request('/api/mail-messages', { organization })),
+      () => route.listMailMessageStatsRoute(request('/api/mail-message-stats', { organization })),
+      () =>
+        route.listMailMessagesRoute(request('/api/mailboxes/1/messages', { organization }), '1'),
+      () =>
+        route.getMailMessageRoute(
+          request('/api/mailboxes/1/messages/1', { organization }),
+          '1',
+          '1'
+        ),
+      () =>
+        route.createMailboxRoute(
+          request('/api/mailboxes', { method: 'POST', body: '{"local_part":"x"}', organization })
+        ),
+      () =>
+        route.deleteMailboxRoute(
+          request('/api/mailboxes/1', { method: 'DELETE', organization }),
+          '1'
+        ),
+      () =>
+        route.sendMailMessageRoute(
+          request('/api/mailboxes/1/messages', { method: 'POST', body: '{}', organization }),
+          '1'
+        ),
+      () =>
+        route.updateMailMessageRoute(
+          request('/api/mailboxes/1/messages/1', { method: 'PUT', body: '{}', organization }),
+          '1',
+          '1'
+        ),
+      () =>
+        route.deleteMailMessageRoute(
+          request('/api/mailboxes/1/messages/1', { method: 'DELETE', organization }),
+          '1',
+          '1'
+        ),
+    ];
+
+    for (const call of calls(null)) {
+      const response = await call();
+      await expectError(response, 400, 'ORGANIZATION.CONTEXT_REQUIRED');
+      expect(response.headers.get('vary')).toContain('Organization-Id');
+    }
+    for (const organization of ['', '0', '-1', '1.5', 'abc', '01', ['1', '1'], ['1', '2']]) {
+      for (const call of calls(organization)) {
+        await expectError(await call(), 400, 'ORGANIZATION.CONTEXT_INVALID');
+      }
+    }
+    // An organization that does not exist and one the caller does not belong to look the same.
+    const foreign = await secondOrganization('demo-operator');
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    for (const organization of ['999', foreign]) {
+      for (const call of calls(organization)) {
+        await expectError(await call(), 404, 'ORGANIZATION.NOT_FOUND');
+      }
+    }
+
+    // A signed-out caller learns nothing about the header.
+    getSessionUser.mockResolvedValue(null);
+    for (const call of [...calls(null), ...calls('abc'), ...calls('999')]) {
+      await expectError(await call(), 401, 'AUTH.UNAUTHORIZED');
+    }
+  });
+
+  it('lets only owners and admins create and delete mailboxes', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    const route = await loadRoute();
+    const remove = (id: number) =>
+      route.deleteMailboxRoute(request(`/api/mailboxes/${id}`, { method: 'DELETE' }), String(id));
+    const listed = async () =>
+      (await (await route.listMailboxesRoute(request('/api/mailboxes'))).json()).data.map(
+        (item: { address: string }) => item.address
+      );
+
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const owned = (await (await create(route, { local_part: 'owner-box' })).json()).data;
+    getSessionUser.mockResolvedValue(mockUser('demo-operator'));
+    const managed = await create(route, { local_part: 'admin-box' });
+    expect(managed.status).toBe(201);
+    const adminBox = (await managed.json()).data;
+
+    // A member is refused before the body or the mailbox is looked at, and changes nothing.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    await expectError(await create(route, { local_part: 'member-box' }), 403, 'PERMISSION.DENIED');
+    await expectError(await create(route, {}), 403, 'PERMISSION.DENIED');
+    await expectError(await remove(owned.id), 403, 'PERMISSION.DENIED');
+    await expectError(await remove(999), 403, 'PERMISSION.DENIED');
+    expect(await listed()).toEqual(['owner-box@mail.example.com', 'admin-box@mail.example.com']);
+
+    // The member still reads, sends, marks, and deletes messages in every mailbox.
+    const path = `/api/mailboxes/${owned.id}/messages`;
+    const inbox = await (
+      await route.listMailMessagesRoute(request(`${path}?direction=inbound`), String(owned.id))
+    ).json();
+    const welcomeId = String(inbox.data[0].id);
+    const sent = await send(route, owned.id, {
+      to: ['bob@example.com'],
+      subject: 'From a member',
+      text: 'Body',
+    });
+    expect(sent.status).toBe(201);
+    const marked = await route.updateMailMessageRoute(
+      request(`${path}/${welcomeId}`, { method: 'PUT', body: JSON.stringify({ read: true }) }),
+      String(owned.id),
+      welcomeId
+    );
+    expect(marked.status).toBe(200);
+    expect((await route.listMailLogRoute(request('/api/mail-messages'))).status).toBe(200);
+    expect((await route.listMailMessageStatsRoute(request('/api/mail-message-stats'))).status).toBe(
+      200
+    );
+    expect((await route.listMailboxDomainsRoute(request('/api/mailbox-domains'))).status).toBe(200);
+
+    // Read state is shared: what the member read is read for the owner too.
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const seen = await route.getMailMessageRoute(
+      request(`${path}/${welcomeId}`),
+      String(owned.id),
+      welcomeId
+    );
+    await expect(seen.json()).resolves.toMatchObject({ data: { read: true } });
+
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    const removedMessage = await route.deleteMailMessageRoute(
+      request(`${path}/${welcomeId}`, { method: 'DELETE' }),
+      String(owned.id),
+      welcomeId
+    );
+    expect(removedMessage.status).toBe(204);
+
+    // An admin deletes a mailbox the owner created, and the owner one the admin created.
+    getSessionUser.mockResolvedValue(mockUser('demo-operator'));
+    expect((await remove(owned.id)).status).toBe(204);
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    expect((await remove(adminBox.id)).status).toBe(204);
+    expect(await listed()).toEqual([]);
+  });
+
+  it('keeps the mailboxes, log, and statistics of two organizations apart', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const second = await secondOrganization();
+    const addresses = async () =>
+      (await (await route.listMailboxesRoute(request('/api/mailboxes'))).json()).data.map(
+        (item: { address: string }) => item.address
+      );
+    const logTotal = async () =>
+      (await (await route.listMailLogRoute(request('/api/mail-messages'))).json()).meta.total;
+    const received = async () =>
+      (
+        await (await route.listMailMessageStatsRoute(request('/api/mail-message-stats'))).json()
+      ).data.reduce((sum: number, day: { received: number }) => sum + day.received, 0);
+
+    const first = (await (await create(route, { local_part: 'first' })).json()).data;
+    await send(route, first.id, { to: ['bob@example.com'], subject: 'One', text: 'Body' });
+    activeOrganization = second;
+    const other = (await (await create(route, { local_part: 'second' })).json()).data;
+
+    expect(await addresses()).toEqual(['second@mail.example.com']);
+    expect(await logTotal()).toBe(1);
+    expect(await received()).toBe(1);
+    await expectError(
+      await send(route, first.id, { to: ['bob@example.com'], subject: 'Two', text: 'Body' }),
+      404,
+      'MAILBOX.NOT_FOUND'
+    );
+
+    activeOrganization = '1';
+    expect(await addresses()).toEqual(['first@mail.example.com']);
+    expect(await logTotal()).toBe(2);
+    await expectError(
+      await route.listMailMessagesRoute(
+        request(`/api/mailboxes/${other.id}/messages`),
+        String(other.id)
+      ),
+      404,
+      'MAILBOX.NOT_FOUND'
+    );
+
+    // A member of the first organization only does not reach the second one at all.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect(await addresses()).toEqual(['first@mail.example.com']);
+    await expectError(
+      await route.listMailboxesRoute(request('/api/mailboxes', { organization: second })),
+      404,
+      'ORGANIZATION.NOT_FOUND'
     );
   });
 
@@ -322,7 +560,7 @@ describe('mailbox browser route boundary', () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockUser('demo-admin'));
     const route = await loadRoute();
-    for (let index = 0; index < 10; index += 1) {
+    for (let index = 0; index < 50; index += 1) {
       expect((await create(route, { local_part: `full${index}` })).status).toBe(201);
     }
     await expectError(await create(route, { local_part: 'full0' }), 409, 'MAILBOX.LIMIT_REACHED');
@@ -501,6 +739,7 @@ describe('mailbox browser route boundary', () => {
       Response.json({ code: 0, message: 'success', data: [] })
     );
     const route = await loadRoute();
+    activeOrganization = '7';
 
     await route.listMailboxDomainsRoute(request('/api/mailbox-domains?x=1'));
     await route.listMailboxesRoute(request('/api/mailboxes?x=1'));
@@ -553,10 +792,72 @@ describe('mailbox browser route boundary', () => {
       text: 'Body',
     });
     expect(JSON.parse(String(fetchMock.mock.calls[8][1]?.body))).toEqual({ read: false });
+    // The API verifies membership; the adapter only carries the organization on every call.
+    expect(fetchMock.mock.calls).toHaveLength(10);
     for (const [, init] of fetchMock.mock.calls) {
-      expect(new Headers(init?.headers).has('organization-id')).toBe(false);
+      expect(new Headers(init?.headers).get('organization-id')).toBe('7');
     }
     expect(getSessionUser).not.toHaveBeenCalled();
+  });
+
+  it('forwards a member write and returns the decision of the API', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () =>
+      Response.json(
+        { code: 403, error_code: 'PERMISSION.DENIED', message: 'members cannot' },
+        { status: 403 }
+      )
+    );
+    const route = await loadRoute();
+
+    const created = await create(route, { local_part: 'hello' });
+    const removed = await route.deleteMailboxRoute(
+      request('/api/mailboxes/12', { method: 'DELETE' }),
+      '12'
+    );
+
+    for (const response of [created, removed]) {
+      await expectError(response, 403, 'PERMISSION.DENIED');
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a missing or malformed organization header before it reaches the API', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    const route = await loadRoute();
+
+    await expectError(
+      await route.listMailboxesRoute(request('/api/mailboxes', { organization: null })),
+      400,
+      'ORGANIZATION.CONTEXT_REQUIRED'
+    );
+    await expectError(
+      await route.createMailboxRoute(
+        request('/api/mailboxes', { method: 'POST', body: '{}', organization: null })
+      ),
+      400,
+      'ORGANIZATION.CONTEXT_REQUIRED'
+    );
+    for (const organization of ['abc', '0', ['7', '7'], ['7', '8']]) {
+      await expectError(
+        await route.listMailLogRoute(request('/api/mail-messages', { organization })),
+        400,
+        'ORGANIZATION.CONTEXT_INVALID'
+      );
+      await expectError(
+        await route.deleteMailboxRoute(
+          request('/api/mailboxes/12', { method: 'DELETE', organization }),
+          '12'
+        ),
+        400,
+        'ORGANIZATION.CONTEXT_INVALID'
+      );
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects malformed input before it reaches the API', async () => {
@@ -601,7 +902,7 @@ describe('mailbox browser route boundary', () => {
     expect(getSessionUser).not.toHaveBeenCalled();
 
     vi.resetModules();
-    process.env.NEXT_PUBLIC_OPTIONAL_FEATURES = 'mailbox';
+    process.env.NEXT_PUBLIC_OPTIONAL_FEATURES = 'organization,mailbox';
     getSessionUser.mockResolvedValue(null);
     route = await loadRoute();
     // Authentication comes before validation: a signed-out caller learns nothing about the query.
@@ -646,6 +947,7 @@ describe('mailbox browser route boundary', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(response.headers.get('vary')).toContain('Cookie');
+    expect(response.headers.get('vary')).toContain('Organization-Id');
     const everything = await response.json();
     // Two welcome messages and two sends, newest first.
     expect(everything.data.map((item: { id: number }) => item.id)).toEqual([
@@ -706,8 +1008,13 @@ describe('mailbox browser route boundary', () => {
     );
     expect(await ids('')).toEqual([offer.id, offer.id - 2]);
 
-    // Another user sees none of it, even when naming the mailbox.
+    // Another member of the organization sees the same log.
     getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect(await ids('')).toEqual([offer.id, offer.id - 2]);
+
+    // Another organization sees none of it, even when naming the mailbox.
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    activeOrganization = await secondOrganization();
     expect(await ids('')).toEqual([]);
     expect(await ids(`?mailbox_id=${hello.id}`)).toEqual([]);
   });
@@ -809,8 +1116,15 @@ describe('mailbox browser route boundary', () => {
       );
       expect(await stats('?days=90')).toHaveLength(90);
 
-      // Another user has the same window with nothing in it.
+      // Another member of the organization sees the same counts.
       getSessionUser.mockResolvedValue(mockUser('demo-member'));
+      expect(await stats('?days=1')).toEqual([
+        { day: '2026-11-16', sent: 2, failed: 0, received: 0 },
+      ]);
+
+      // Another organization has the same window with nothing in it.
+      getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+      activeOrganization = await secondOrganization();
       const theirs = await stats();
       expect(theirs).toHaveLength(7);
       expect(theirs.every((entry: typeof empty) => entry.sent + entry.received === 0)).toBe(true);
@@ -827,6 +1141,7 @@ describe('mailbox browser route boundary', () => {
       Response.json({ code: 0, message: 'success', data: [] })
     );
     const route = await loadRoute();
+    activeOrganization = '7';
 
     await route.listMailLogRoute(request('/api/mail-messages'));
     await route.listMailLogRoute(
@@ -850,7 +1165,7 @@ describe('mailbox browser route boundary', () => {
       'GET /v1/mail-message-stats?days=30',
     ]);
     for (const [, init] of fetchMock.mock.calls) {
-      expect(new Headers(init?.headers).has('organization-id')).toBe(false);
+      expect(new Headers(init?.headers).get('organization-id')).toBe('7');
     }
     expect(getSessionUser).not.toHaveBeenCalled();
   });
@@ -938,14 +1253,45 @@ async function expectError(response: Response, status: number, errorCode: string
   expect(response.headers.get('cache-control')).toBe('private, no-store');
 }
 
+/**
+ * A second organization owned by `owner`, next to the seeded one (id 1: demo-admin is its owner,
+ * demo-operator an admin, demo-member a member). Created once per test; returns its id.
+ */
+async function secondOrganization(owner = 'demo-admin'): Promise<string> {
+  const { mockOrganizationStore } =
+    await import('@/features/organization/server/mock-organization-store');
+  const actor = mockUser(owner);
+  const existing = mockOrganizationStore
+    .list(actor, 1, 100)
+    .items.find(item => item.slug === 'second');
+  if (existing) return String(existing.id);
+  const created = mockOrganizationStore.create(actor, { name: 'Second', slug: 'second' });
+  if (typeof created === 'string') throw new Error(created);
+  return String(created.id);
+}
+
+/**
+ * `organization` is the `Organization-Id` header: the active organization by default, `null` for
+ * no header, and an array for a repeated header.
+ */
 function request(
   path: string,
-  options: { method?: string; body?: string; origin?: string } = {}
+  options: {
+    method?: string;
+    body?: string;
+    origin?: string;
+    organization?: string | string[] | null;
+  } = {}
 ): Request {
   const result = new Request(`https://app.example.com${path}`, {
     method: options.method ?? 'GET',
     body: options.body,
   });
+  const organization =
+    options.organization === undefined ? activeOrganization : options.organization;
+  for (const value of organization === null ? [] : [organization].flat()) {
+    result.headers.append('organization-id', value);
+  }
   if (options.body) result.headers.set('content-type', 'application/json');
   if (options.method && options.method !== 'GET') {
     result.headers.set('origin', options.origin ?? 'https://app.example.com');

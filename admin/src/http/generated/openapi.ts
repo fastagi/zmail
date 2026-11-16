@@ -350,7 +350,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Count the caller's mail per UTC day
+         * Count the organization's mail per UTC day
          * @description Returns one entry for every day of the window, oldest first, including days without mail.
          */
         get: operations["listMailMessageStats"];
@@ -370,7 +370,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List messages across every mailbox the caller owns, newest first
+         * List messages across every mailbox of the organization, newest first
          * @description The log carries summaries without bodies; read a message through its mailbox.
          */
         get: operations["listMailLog"];
@@ -389,7 +389,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the domains the caller may create mailboxes on */
+        /** List the domains the organization may create mailboxes on */
         get: operations["listMailboxDomains"];
         put?: never;
         post?: never;
@@ -406,7 +406,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the caller's mailboxes */
+        /** List the organization's mailboxes */
         get: operations["listMailboxes"];
         put?: never;
         /** Create a mailbox on the configured domain */
@@ -1173,7 +1173,7 @@ export interface paths {
         put?: never;
         /**
          * Send a message with an API key
-         * @description For backend services. The key must hold the `mail:send` scope, and `from` must be the address of a mailbox the key's owner owns. Outcomes are the same as sending from a mailbox: a message the provider does not accept answers `502 MAILBOX.DELIVERY_FAILED` and is kept with status `failed`.
+         * @description For backend services. The key must hold the `mail:send` scope, and `from` must be the address of a mailbox of the organization named by `Organization-Id`, of which the key's owner must be a member. Outcomes are the same as sending from a mailbox: a message the provider does not accept answers `502 MAILBOX.DELIVERY_FAILED` and is kept with status `failed`.
          */
         post: operations["sendOutboundMailMessage"];
         delete?: never;
@@ -1190,7 +1190,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a message the API key's owner sent
+         * Get a message the organization sent
          * @description The key must hold the `mail:read` scope. Only outbound messages are visible here.
          */
         get: operations["getOutboundMailMessage"];
@@ -1943,7 +1943,7 @@ export interface components {
             unread_count: number;
         };
         MailboxDomain: {
-            /** @description Outbound messages one user may attempt per rolling 24 hours. */
+            /** @description Outbound messages one organization may attempt per rolling 24 hours. */
             daily_send_limit: number;
             domain: string;
             /** @description Whether the API accepts signed deliveries from the mail edge. */
@@ -2539,7 +2539,7 @@ export interface components {
         };
         SendOutboundMailMessageRequest: {
             cc?: string[];
-            /** @description The address of a mailbox the API key's owner owns. */
+            /** @description The address of a mailbox of the organization. */
             from: string;
             html?: string;
             in_reply_to?: string;
@@ -4030,7 +4030,10 @@ export interface operations {
                 /** @description Window length ending today (UTC). Defaults to 7. */
                 days?: number;
             };
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -4045,8 +4048,9 @@ export interface operations {
                     "application/json": components["schemas"]["MailDayStatsListResponse"];
                 };
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -4054,7 +4058,7 @@ export interface operations {
         parameters: {
             query?: {
                 direction?: components["schemas"]["MailDirection"];
-                /** @description Keep only one mailbox. Another user's mailbox matches nothing. */
+                /** @description Keep only one mailbox. Another organization's mailbox matches nothing. */
                 mailbox_id?: components["schemas"]["PositiveID"];
                 /** @description One-based page number. */
                 page?: components["parameters"]["Page"];
@@ -4064,7 +4068,10 @@ export interface operations {
                 q?: string;
                 status?: components["schemas"]["MailStatus"];
             };
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -4079,15 +4086,19 @@ export interface operations {
                     "application/json": components["schemas"]["MailLogPageResponse"];
                 };
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
     listMailboxDomains: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -4102,20 +4113,25 @@ export interface operations {
                     "application/json": components["schemas"]["MailboxDomainListResponse"];
                 };
             };
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
     listMailboxes: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Every mailbox the caller owns, oldest first. */
+            /** @description Every mailbox of the organization, oldest first. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -4124,14 +4140,19 @@ export interface operations {
                     "application/json": components["schemas"]["MailboxListResponse"];
                 };
             };
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
     createMailbox: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -4150,8 +4171,10 @@ export interface operations {
                     "application/json": components["schemas"]["MailboxResponse"];
                 };
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             /** @description The address is taken (`MAILBOX.ADDRESS_TAKEN`) or the caller owns the maximum number of mailboxes (`MAILBOX.LIMIT_REACHED`). */
             409: {
                 headers: {
@@ -4177,7 +4200,10 @@ export interface operations {
     deleteMailbox: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path: {
                 /** @description Positive mailbox identifier. */
                 mailbox_id: components["parameters"]["MailboxID"];
@@ -4193,8 +4219,9 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -4209,7 +4236,10 @@ export interface operations {
                 /** @description Requested page size, capped by the API. */
                 per_page?: components["parameters"]["PerPage"];
             };
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path: {
                 /** @description Positive mailbox identifier. */
                 mailbox_id: components["parameters"]["MailboxID"];
@@ -4227,7 +4257,7 @@ export interface operations {
                     "application/json": components["schemas"]["MailMessagePageResponse"];
                 };
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
@@ -4236,9 +4266,11 @@ export interface operations {
     sendMailMessage: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
                 /** @description Names this send within its mailbox. A repeat with the same key and the same content returns the first attempt's outcome and does not call the provider again. */
                 "Idempotency-Key"?: components["parameters"]["MailIdempotencyKey"];
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
             };
             path: {
                 /** @description Positive mailbox identifier. */
@@ -4270,7 +4302,7 @@ export interface operations {
                     "application/json": components["schemas"]["MailMessageResponse"];
                 };
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             /** @description The `Idempotency-Key` was used with different content (`MAILBOX.IDEMPOTENCY_CONFLICT`), or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`). */
@@ -4292,7 +4324,7 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The caller reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`). */
+            /** @description The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -4316,7 +4348,10 @@ export interface operations {
     getMailMessage: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path: {
                 /** @description Positive mailbox identifier. */
                 mailbox_id: components["parameters"]["MailboxID"];
@@ -4336,7 +4371,7 @@ export interface operations {
                     "application/json": components["schemas"]["MailMessageResponse"];
                 };
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
@@ -4345,7 +4380,10 @@ export interface operations {
     updateMailMessage: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path: {
                 /** @description Positive mailbox identifier. */
                 mailbox_id: components["parameters"]["MailboxID"];
@@ -4369,7 +4407,7 @@ export interface operations {
                     "application/json": components["schemas"]["MailMessageResponse"];
                 };
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             413: components["responses"]["RequestTooLarge"];
@@ -4380,7 +4418,10 @@ export interface operations {
     deleteMailMessage: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path: {
                 /** @description Positive mailbox identifier. */
                 mailbox_id: components["parameters"]["MailboxID"];
@@ -4398,7 +4439,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
@@ -5946,9 +5987,11 @@ export interface operations {
     sendOutboundMailMessage: {
         parameters: {
             query?: never;
-            header?: {
+            header: {
                 /** @description Names this send within its mailbox. A repeat with the same key and the same content returns the first attempt's outcome and does not call the provider again. */
                 "Idempotency-Key"?: components["parameters"]["MailIdempotencyKey"];
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
             };
             path?: never;
             cookie?: never;
@@ -5977,10 +6020,10 @@ export interface operations {
                     "application/json": components["schemas"]["MailMessageResponse"];
                 };
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description No mailbox owned by the key's owner has the `from` address (`MAILBOX.NOT_FOUND`). */
+            /** @description The organization has no mailbox with the `from` address (`MAILBOX.NOT_FOUND`), or the key's owner is not a member of it (`ORGANIZATION.NOT_FOUND`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -6008,7 +6051,7 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The key's owner reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`). */
+            /** @description The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`). */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -6032,7 +6075,10 @@ export interface operations {
     getOutboundMailMessage: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
             path: {
                 /** @description Positive mail message identifier. */
                 message_id: components["parameters"]["MailMessageID"];
@@ -6050,7 +6096,7 @@ export interface operations {
                     "application/json": components["schemas"]["MailMessageResponse"];
                 };
             };
-            400: components["responses"]["InvalidInput"];
+            400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

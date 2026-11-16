@@ -4,6 +4,7 @@
   "module": "github.com/fastagi/fastmail/api",
   "repository": "https://github.com/fastagi/fastmail",
   "starters": [
+    "organization",
     "mailbox"
   ],
   "scaffold_version": "unknown",

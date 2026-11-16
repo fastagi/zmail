@@ -9,17 +9,16 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/fastagi/fastmail/api/internal/domain"
-	infradatabase "github.com/fastagi/fastmail/api/internal/infra/database"
 	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
 )
 
-// mailboxOwnerPO stands in for the users table so the foreign key target exists without
+// mailboxOwnerPO stands in for the organizations table so the owner rows exist without
 // importing another module.
 type mailboxOwnerPO struct {
 	ID uint `gorm:"primaryKey"`
 }
 
-func (mailboxOwnerPO) TableName() string { return "users" }
+func (mailboxOwnerPO) TableName() string { return "organizations" }
 
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
@@ -36,8 +35,8 @@ func createOwner(t *testing.T, db *gorm.DB, id uint) {
 
 func createMailbox(t *testing.T, repo *repository, address string) *domain.Mailbox {
 	t.Helper()
-	mailbox := &domain.Mailbox{UserID: 1, Address: address, DisplayName: "Owner"}
-	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MaxMailboxesPerUser); err != nil {
+	mailbox := &domain.Mailbox{OrganizationID: 1, Address: address, DisplayName: "Owner"}
+	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MaxMailboxesPerOrganization); err != nil {
 		t.Fatalf("CreateMailbox(%q): %v", address, err)
 	}
 	return mailbox
@@ -50,8 +49,8 @@ func TestRepositoryKeepsAReleasedAddressReserved(t *testing.T) {
 	createOwner(t, db, 2)
 
 	mailbox := createMailbox(t, repo, "hello@mail.example")
-	duplicate := &domain.Mailbox{UserID: 2, Address: "hello@mail.example"}
-	if err := repo.CreateMailbox(ctx, duplicate, domain.MaxMailboxesPerUser); !errors.Is(err, ErrMailboxAddressTaken) {
+	duplicate := &domain.Mailbox{OrganizationID: 2, Address: "hello@mail.example"}
+	if err := repo.CreateMailbox(ctx, duplicate, domain.MaxMailboxesPerOrganization); !errors.Is(err, ErrMailboxAddressTaken) {
 		t.Fatalf("duplicate address error = %v", err)
 	}
 
@@ -62,27 +61,27 @@ func TestRepositoryKeepsAReleasedAddressReserved(t *testing.T) {
 		t.Fatalf("deleted mailbox lookup error = %v", err)
 	}
 	// The next owner must not inherit mail addressed to the previous one.
-	if err := repo.CreateMailbox(ctx, duplicate, domain.MaxMailboxesPerUser); !errors.Is(err, ErrMailboxAddressTaken) {
+	if err := repo.CreateMailbox(ctx, duplicate, domain.MaxMailboxesPerOrganization); !errors.Is(err, ErrMailboxAddressTaken) {
 		t.Fatalf("released address error = %v; want ErrMailboxAddressTaken", err)
 	}
 }
 
-func TestRepositoryEnforcesTheMailboxLimitPerUser(t *testing.T) {
+func TestRepositoryEnforcesTheMailboxLimitPerOrganization(t *testing.T) {
 	repo, db := openRepository(t)
 	ctx := context.Background()
 	createOwner(t, db, 1)
 	createOwner(t, db, 2)
 
 	for _, address := range []string{"a@mail.example", "b@mail.example"} {
-		if err := repo.CreateMailbox(ctx, &domain.Mailbox{UserID: 1, Address: address}, 2); err != nil {
+		if err := repo.CreateMailbox(ctx, &domain.Mailbox{OrganizationID: 1, Address: address}, 2); err != nil {
 			t.Fatalf("CreateMailbox(%q): %v", address, err)
 		}
 	}
-	if err := repo.CreateMailbox(ctx, &domain.Mailbox{UserID: 1, Address: "c@mail.example"}, 2); !errors.Is(err, ErrMailboxLimitReached) {
+	if err := repo.CreateMailbox(ctx, &domain.Mailbox{OrganizationID: 1, Address: "c@mail.example"}, 2); !errors.Is(err, ErrMailboxLimitReached) {
 		t.Fatalf("limit error = %v", err)
 	}
-	if err := repo.CreateMailbox(ctx, &domain.Mailbox{UserID: 2, Address: "c@mail.example"}, 2); err != nil {
-		t.Fatalf("another user is limited by the first user's mailboxes: %v", err)
+	if err := repo.CreateMailbox(ctx, &domain.Mailbox{OrganizationID: 2, Address: "c@mail.example"}, 2); err != nil {
+		t.Fatalf("another organization is limited by the first one's mailboxes: %v", err)
 	}
 
 	owned, err := repo.ListMailboxes(ctx, 1)
@@ -91,7 +90,7 @@ func TestRepositoryEnforcesTheMailboxLimitPerUser(t *testing.T) {
 	}
 }
 
-func TestRepositoryScopesMailboxesToTheirOwner(t *testing.T) {
+func TestRepositoryScopesMailboxesToTheirOrganization(t *testing.T) {
 	repo, db := openRepository(t)
 	ctx := context.Background()
 	createOwner(t, db, 1)
@@ -275,70 +274,14 @@ func TestRepositoryDeletesMessagesWithTheirMailbox(t *testing.T) {
 	}
 }
 
-func TestRepositoryCleansUpADeletedAccountInsideItsTransaction(t *testing.T) {
-	repo, db := openRepository(t)
-	ctx := context.Background()
-	createOwner(t, db, 1)
-	createOwner(t, db, 2)
-	leaving := createMailbox(t, repo, "leaving@mail.example")
-	staying := &domain.Mailbox{UserID: 2, Address: "staying@mail.example"}
-	if err := repo.CreateMailbox(ctx, staying, domain.MaxMailboxesPerUser); err != nil {
-		t.Fatalf("CreateMailbox: %v", err)
-	}
-	for _, mailboxID := range []uint{leaving.ID, staying.ID} {
-		if _, err := repo.CreateMessage(ctx, &domain.MailMessage{
-			MailboxID: mailboxID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
-			FromAddress: "alice@sender.test", Subject: "Hi",
-		}); err != nil {
-			t.Fatalf("CreateMessage: %v", err)
-		}
-	}
-	countMessages := func(mailboxID uint) int64 {
-		var count int64
-		if err := db.Model(&MailMessagePO{}).Where("mailbox_id = ?", mailboxID).Count(&count).Error; err != nil {
-			t.Fatalf("count messages: %v", err)
-		}
-		return count
-	}
-
-	// A rolled-back account deletion must leave the mail untouched.
-	rollback := errors.New("account deletion failed later")
-	err := db.Transaction(func(tx *gorm.DB) error {
-		if cleanErr := repo.DeleteMailboxesForUser(infradatabase.ContextWithTransaction(ctx, tx), 1); cleanErr != nil {
-			return cleanErr
-		}
-		return rollback
-	})
-	if !errors.Is(err, rollback) {
-		t.Fatalf("transaction error = %v", err)
-	}
-	if _, findErr := repo.FindMailbox(ctx, 1, leaving.ID); findErr != nil || countMessages(leaving.ID) != 1 {
-		t.Fatalf("cleanup escaped the rolled-back transaction: %v, %d messages", findErr, countMessages(leaving.ID))
-	}
-
-	if err := repo.DeleteMailboxesForUser(ctx, 1); err != nil {
-		t.Fatalf("DeleteMailboxesForUser: %v", err)
-	}
-	if _, err := repo.FindMailbox(ctx, 1, leaving.ID); !errors.Is(err, ErrMailboxNotFound) {
-		t.Fatalf("mailbox of the deleted account error = %v", err)
-	}
-	if countMessages(leaving.ID) != 0 || countMessages(staying.ID) != 1 {
-		t.Fatalf("messages = %d and %d; want 0 and 1", countMessages(leaving.ID), countMessages(staying.ID))
-	}
-	reclaim := &domain.Mailbox{UserID: 2, Address: "leaving@mail.example"}
-	if err := repo.CreateMailbox(ctx, reclaim, domain.MaxMailboxesPerUser); !errors.Is(err, ErrMailboxAddressTaken) {
-		t.Fatalf("address of a deleted account error = %v; want ErrMailboxAddressTaken", err)
-	}
-}
-
 func TestRepositoryStoresOneOutboundMessagePerIdempotencyKey(t *testing.T) {
 	repo, db := openRepository(t)
 	ctx := context.Background()
 	createOwner(t, db, 1)
 	createOwner(t, db, 2)
 	mailbox := createMailbox(t, repo, "hello@mail.example")
-	foreign := &domain.Mailbox{UserID: 2, Address: "other@mail.example"}
-	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerUser); err != nil {
+	foreign := &domain.Mailbox{OrganizationID: 2, Address: "other@mail.example"}
+	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	outbound := func(mailboxID uint, key string) *domain.MailMessage {
@@ -377,10 +320,10 @@ func TestRepositoryStoresOneOutboundMessagePerIdempotencyKey(t *testing.T) {
 		t.Fatalf("missing key error = %v", err)
 	}
 
-	if owned, findErr := repo.FindOutboundMessageForUser(ctx, 1, first.ID); findErr != nil || owned.ID != first.ID {
-		t.Fatalf("FindOutboundMessageForUser = %+v, %v", owned, findErr)
+	if owned, findErr := repo.FindOutboundMessageForOrganization(ctx, 1, first.ID); findErr != nil || owned.ID != first.ID {
+		t.Fatalf("FindOutboundMessageForOrganization = %+v, %v", owned, findErr)
 	}
-	if _, err = repo.FindOutboundMessageForUser(ctx, 2, first.ID); !errors.Is(err, ErrMailMessageNotFound) {
+	if _, err = repo.FindOutboundMessageForOrganization(ctx, 2, first.ID); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("another user's lookup error = %v", err)
 	}
 	inbound := &domain.MailMessage{
@@ -390,7 +333,7 @@ func TestRepositoryStoresOneOutboundMessagePerIdempotencyKey(t *testing.T) {
 	if _, err = repo.CreateMessage(ctx, inbound); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if _, err = repo.FindOutboundMessageForUser(ctx, 1, inbound.ID); !errors.Is(err, ErrMailMessageNotFound) {
+	if _, err = repo.FindOutboundMessageForOrganization(ctx, 1, inbound.ID); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("inbound message through the outbound lookup error = %v", err)
 	}
 }
@@ -435,15 +378,15 @@ func TestRepositoryCountsUnreadInboundMessagesPerMailbox(t *testing.T) {
 	}
 }
 
-func TestRepositoryListsTheLogAcrossAUsersMailboxes(t *testing.T) {
+func TestRepositoryListsTheLogAcrossAnOrganizationsMailboxes(t *testing.T) {
 	repo, db := openRepository(t)
 	ctx := context.Background()
 	createOwner(t, db, 1)
 	createOwner(t, db, 2)
 	first := createMailbox(t, repo, "first@mail.example")
 	second := createMailbox(t, repo, "second@mail.example")
-	foreign := &domain.Mailbox{UserID: 2, Address: "foreign@mail.example"}
-	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerUser); err != nil {
+	foreign := &domain.Mailbox{OrganizationID: 2, Address: "foreign@mail.example"}
+	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	add := func(mailboxID uint, direction domain.MailDirection, status domain.MailStatus, from, to, subject string) {
@@ -462,9 +405,9 @@ func TestRepositoryListsTheLogAcrossAUsersMailboxes(t *testing.T) {
 
 	list := func(filter domain.MailLogFilter) []*domain.MailMessage {
 		t.Helper()
-		messages, total, err := repo.ListMessagesForUser(ctx, 1, filter)
+		messages, total, err := repo.ListMessagesForOrganization(ctx, 1, filter)
 		if err != nil || int(total) != len(messages) {
-			t.Fatalf("ListMessagesForUser(%+v) = %d rows, total %d, err %v", filter, len(messages), total, err)
+			t.Fatalf("ListMessagesForOrganization(%+v) = %d rows, total %d, err %v", filter, len(messages), total, err)
 		}
 		return messages
 	}
@@ -505,7 +448,7 @@ func TestRepositoryListsTheLogAcrossAUsersMailboxes(t *testing.T) {
 		t.Fatalf("a lone _ matched %d rows; want 0", len(got))
 	}
 
-	page, total, err := repo.ListMessagesForUser(ctx, 1, domain.MailLogFilter{Page: 2, PerPage: 2})
+	page, total, err := repo.ListMessagesForOrganization(ctx, 1, domain.MailLogFilter{Page: 2, PerPage: 2})
 	if err != nil || total != 3 || len(page) != 1 || page[0].Subject != "Invoice 100% due" {
 		t.Fatalf("page 2 = %+v, total %d, err %v", page, total, err)
 	}
@@ -517,8 +460,8 @@ func TestRepositoryCountsMailPerDay(t *testing.T) {
 	createOwner(t, db, 1)
 	createOwner(t, db, 2)
 	mailbox := createMailbox(t, repo, "hello@mail.example")
-	foreign := &domain.Mailbox{UserID: 2, Address: "foreign@mail.example"}
-	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerUser); err != nil {
+	foreign := &domain.Mailbox{OrganizationID: 2, Address: "foreign@mail.example"}
+	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	add := func(mailboxID uint, direction domain.MailDirection, status domain.MailStatus, at time.Time) {
@@ -540,9 +483,9 @@ func TestRepositoryCountsMailPerDay(t *testing.T) {
 	add(mailbox.ID, domain.MailDirectionInbound, domain.MailStatusReceived, time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))
 	add(foreign.ID, domain.MailDirectionInbound, domain.MailStatusReceived, day2)
 
-	stats, err := repo.StatsForUser(ctx, 1, time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC))
+	stats, err := repo.StatsForOrganization(ctx, 1, time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC))
 	if err != nil || len(stats) != 2 {
-		t.Fatalf("StatsForUser = %+v, %v; want 2 days", stats, err)
+		t.Fatalf("StatsForOrganization = %+v, %v; want 2 days", stats, err)
 	}
 	if !stats[0].Day.Equal(time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)) || stats[0].Sent != 1 || stats[0].Failed != 0 || stats[0].Received != 0 {
 		t.Fatalf("first day = %+v", stats[0])

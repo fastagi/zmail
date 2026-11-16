@@ -18,7 +18,7 @@ import {
 /** Limits from `contracts/MAILBOXES.md`. */
 export const MAILBOX_LOCAL_PART_MAX_LENGTH = 64;
 export const MAILBOX_DISPLAY_NAME_MAX_LENGTH = 120;
-export const MAILBOX_MAX_PER_USER = 10;
+export const MAILBOX_MAX_PER_ORGANIZATION = 50;
 export const MAIL_MAX_RECIPIENTS = 50;
 export const MAIL_ADDRESS_MAX_LENGTH = 320;
 export const MAIL_SUBJECT_MAX_LENGTH = 998;

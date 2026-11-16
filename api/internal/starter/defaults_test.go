@@ -204,3 +204,22 @@ func TestConfiguredManifestsRequireOrganizationForWebhook(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `optional starter "webhook" requires "organization"`)
 }
+
+func TestConfiguredManifestsRequireOrganizationForMailbox(t *testing.T) {
+	cfg := &config.Config{Starters: config.StarterConfig{Optional: []string{"mailbox"}}}
+
+	_, err := ConfiguredManifests(cfg, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `optional starter "mailbox" requires "organization"`)
+
+	cfg = &config.Config{Starters: config.StarterConfig{Optional: []string{"mailbox", "organization"}}}
+	migrations, err := ConfiguredMigrations(cfg)
+	require.NoError(t, err)
+	for _, name := range []string{
+		"2026_11_16_100000_create_mailbox_tables",
+		"2026_11_16_110000_add_mail_message_idempotency",
+		"2026_11_17_090000_move_mailboxes_to_organizations",
+	} {
+		assert.Contains(t, migrations, name)
+	}
+}

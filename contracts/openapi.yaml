@@ -43,7 +43,7 @@ tags:
     description: 'Platform-operator browser session and operator-only reads and commands for the Admin
       Console (optional `operator` starter). Every response sends `Cache-Control: private, no-store`.'
   - name: Mailboxes
-    description: User-owned mailboxes, their messages, and signed inbound delivery from the mail edge.
+    description: Organization mailboxes, their messages, and signed inbound delivery from the mail edge.
 paths:
   /health:
     get:
@@ -3394,11 +3394,13 @@ paths:
   /v1/mailbox-domains:
     get:
       operationId: listMailboxDomains
-      summary: List the domains the caller may create mailboxes on
+      summary: List the domains the organization may create mailboxes on
       tags:
         - Mailboxes
       security:
         - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
       responses:
         '200':
           description: The configured mailbox domains.
@@ -3406,27 +3408,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MailboxDomainListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes:
     get:
       operationId: listMailboxes
-      summary: List the caller's mailboxes
+      summary: List the organization's mailboxes
       tags:
         - Mailboxes
       security:
         - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
       responses:
         '200':
-          description: Every mailbox the caller owns, oldest first.
+          description: Every mailbox of the organization, oldest first.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MailboxListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     post:
@@ -3436,6 +3448,8 @@ paths:
         - Mailboxes
       security:
         - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
       requestBody:
         required: true
         content:
@@ -3450,9 +3464,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailboxResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           description: The address is taken (`MAILBOX.ADDRESS_TAKEN`) or the caller owns the maximum number of
             mailboxes (`MAILBOX.LIMIT_REACHED`).
@@ -3483,14 +3501,17 @@ paths:
       security:
         - bearerSession: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - $ref: '#/components/parameters/MailboxID'
       responses:
         '204':
           description: The mailbox and its messages are deleted.
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '503':
@@ -3504,6 +3525,7 @@ paths:
       security:
         - bearerSession: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - $ref: '#/components/parameters/MailboxID'
         - name: direction
           in: query
@@ -3521,7 +3543,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailMessagePageResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -3539,6 +3561,7 @@ paths:
       security:
         - bearerSession: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - $ref: '#/components/parameters/MailboxID'
         - $ref: '#/components/parameters/MailIdempotencyKey'
       requestBody:
@@ -3561,7 +3584,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailMessageResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -3586,7 +3609,7 @@ paths:
                   - $ref: '#/components/schemas/ValidationErrorResponse'
                   - $ref: '#/components/schemas/ErrorResponse'
         '429':
-          description: The caller reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
+          description: The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
           content:
             application/json:
               schema:
@@ -3608,6 +3631,7 @@ paths:
       security:
         - bearerSession: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - $ref: '#/components/parameters/MailboxID'
         - $ref: '#/components/parameters/MailMessageID'
       responses:
@@ -3618,7 +3642,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailMessageResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -3633,6 +3657,7 @@ paths:
       security:
         - bearerSession: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - $ref: '#/components/parameters/MailboxID'
         - $ref: '#/components/parameters/MailMessageID'
       requestBody:
@@ -3649,7 +3674,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailMessageResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -3668,13 +3693,14 @@ paths:
       security:
         - bearerSession: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - $ref: '#/components/parameters/MailboxID'
         - $ref: '#/components/parameters/MailMessageID'
       responses:
         '204':
           description: The message is deleted.
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -3765,7 +3791,7 @@ paths:
       operationId: sendOutboundMailMessage
       summary: Send a message with an API key
       description: "For backend services. The key must hold the `mail:send` scope, and `from` must be the
-        address of a mailbox the key's owner owns. Outcomes are the same as sending from a mailbox: a
+        address of a mailbox of the organization named by `Organization-Id`, of which the key's owner must be a member. Outcomes are the same as sending from a mailbox: a
         message the provider does not accept answers `502 MAILBOX.DELIVERY_FAILED` and is kept with
         status `failed`."
       tags:
@@ -3773,6 +3799,7 @@ paths:
       security:
         - apiKey: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - $ref: '#/components/parameters/MailIdempotencyKey'
       requestBody:
         required: true
@@ -3795,13 +3822,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailMessageResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: No mailbox owned by the key's owner has the `from` address (`MAILBOX.NOT_FOUND`).
+          description: The organization has no mailbox with the `from` address (`MAILBOX.NOT_FOUND`), or the key's owner is not a member of it (`ORGANIZATION.NOT_FOUND`).
           content:
             application/json:
               schema:
@@ -3825,7 +3852,7 @@ paths:
                   - $ref: '#/components/schemas/ValidationErrorResponse'
                   - $ref: '#/components/schemas/ErrorResponse'
         '429':
-          description: The key's owner reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
+          description: The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
           content:
             application/json:
               schema:
@@ -3841,13 +3868,14 @@ paths:
   /v1/outbound-mail-messages/{message_id}:
     get:
       operationId: getOutboundMailMessage
-      summary: Get a message the API key's owner sent
+      summary: Get a message the organization sent
       description: The key must hold the `mail:read` scope. Only outbound messages are visible here.
       tags:
         - Mailboxes
       security:
         - apiKey: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - $ref: '#/components/parameters/MailMessageID'
       responses:
         '200':
@@ -3857,7 +3885,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailMessageResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3869,13 +3897,14 @@ paths:
   /v1/mail-messages:
     get:
       operationId: listMailLog
-      summary: List messages across every mailbox the caller owns, newest first
+      summary: List messages across every mailbox of the organization, newest first
       description: The log carries summaries without bodies; read a message through its mailbox.
       tags:
         - Mailboxes
       security:
         - bearerSession: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - name: direction
           in: query
           required: false
@@ -3889,7 +3918,7 @@ paths:
         - name: mailbox_id
           in: query
           required: false
-          description: Keep only one mailbox. Another user's mailbox matches nothing.
+          description: Keep only one mailbox. Another organization's mailbox matches nothing.
           schema:
             $ref: '#/components/schemas/PositiveID'
         - name: q
@@ -3909,21 +3938,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailLogPageResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-message-stats:
     get:
       operationId: listMailMessageStats
-      summary: Count the caller's mail per UTC day
+      summary: Count the organization's mail per UTC day
       description: Returns one entry for every day of the window, oldest first, including days without mail.
       tags:
         - Mailboxes
       security:
         - bearerSession: []
       parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
         - name: days
           in: query
           required: false
@@ -3940,9 +3972,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/MailDayStatsListResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 components:
@@ -7238,7 +7272,7 @@ components:
           description: Whether the API accepts signed deliveries from the mail edge.
         daily_send_limit:
           type: integer
-          description: Outbound messages one user may attempt per rolling 24 hours.
+          description: Outbound messages one organization may attempt per rolling 24 hours.
           minimum: 1
     MailboxDomainListResponse:
       type: object
@@ -7326,7 +7360,7 @@ components:
           type: string
         data:
           type: array
-          maxItems: 10
+          maxItems: 50
           items:
             $ref: '#/components/schemas/Mailbox'
     MailAddress:
@@ -7575,7 +7609,7 @@ components:
       properties:
         from:
           type: string
-          description: The address of a mailbox the API key's owner owns.
+          description: The address of a mailbox of the organization.
           minLength: 3
           maxLength: 320
         to:

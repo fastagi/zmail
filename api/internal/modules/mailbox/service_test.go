@@ -11,6 +11,9 @@ import (
 	"github.com/fastagi/fastmail/api/internal/infra/mailtransport"
 )
 
+// testCreator is the user recorded as the creator of test mailboxes; it grants nothing.
+const testCreator = 99
+
 // fakeRepository is an in-memory domain.MailboxRepository for service tests.
 type fakeRepository struct {
 	mailboxes map[uint]*domain.Mailbox
@@ -41,7 +44,7 @@ func (r *fakeRepository) CreateMailbox(_ context.Context, mailbox *domain.Mailbo
 		if existing.Address == mailbox.Address {
 			return ErrMailboxAddressTaken
 		}
-		if existing.UserID == mailbox.UserID {
+		if existing.OrganizationID == mailbox.OrganizationID {
 			owned++
 		}
 	}
@@ -54,19 +57,19 @@ func (r *fakeRepository) CreateMailbox(_ context.Context, mailbox *domain.Mailbo
 	return nil
 }
 
-func (r *fakeRepository) ListMailboxes(_ context.Context, userID uint) ([]*domain.Mailbox, error) {
+func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID uint) ([]*domain.Mailbox, error) {
 	var owned []*domain.Mailbox
 	for _, mailbox := range r.mailboxes {
-		if mailbox.UserID == userID {
+		if mailbox.OrganizationID == organizationID {
 			owned = append(owned, mailbox)
 		}
 	}
 	return owned, nil
 }
 
-func (r *fakeRepository) FindMailbox(_ context.Context, userID, id uint) (*domain.Mailbox, error) {
+func (r *fakeRepository) FindMailbox(_ context.Context, organizationID, id uint) (*domain.Mailbox, error) {
 	mailbox, ok := r.mailboxes[id]
-	if !ok || mailbox.UserID != userID {
+	if !ok || mailbox.OrganizationID != organizationID {
 		return nil, ErrMailboxNotFound
 	}
 	return mailbox, nil
@@ -81,26 +84,11 @@ func (r *fakeRepository) FindMailboxByAddress(_ context.Context, address string)
 	return nil, ErrMailboxNotFound
 }
 
-func (r *fakeRepository) DeleteMailbox(ctx context.Context, userID, id uint) error {
-	if _, err := r.FindMailbox(ctx, userID, id); err != nil {
+func (r *fakeRepository) DeleteMailbox(ctx context.Context, organizationID, id uint) error {
+	if _, err := r.FindMailbox(ctx, organizationID, id); err != nil {
 		return err
 	}
 	delete(r.mailboxes, id)
-	return nil
-}
-
-func (r *fakeRepository) DeleteMailboxesForUser(_ context.Context, userID uint) error {
-	for id, mailbox := range r.mailboxes {
-		if mailbox.UserID != userID {
-			continue
-		}
-		for messageID, message := range r.messages {
-			if message.MailboxID == id {
-				delete(r.messages, messageID)
-			}
-		}
-		delete(r.mailboxes, id)
-	}
 	return nil
 }
 
@@ -132,13 +120,13 @@ func (r *fakeRepository) FindMessageByIdempotencyKey(_ context.Context, mailboxI
 	return nil, ErrMailMessageNotFound
 }
 
-func (r *fakeRepository) FindOutboundMessageForUser(_ context.Context, userID, id uint) (*domain.MailMessage, error) {
+func (r *fakeRepository) FindOutboundMessageForOrganization(_ context.Context, organizationID, id uint) (*domain.MailMessage, error) {
 	message, ok := r.messages[id]
 	if !ok || message.Direction != domain.MailDirectionOutbound {
 		return nil, ErrMailMessageNotFound
 	}
 	mailbox, ok := r.mailboxes[message.MailboxID]
-	if !ok || mailbox.UserID != userID {
+	if !ok || mailbox.OrganizationID != organizationID {
 		return nil, ErrMailMessageNotFound
 	}
 	copied := *message
@@ -202,29 +190,29 @@ func (r *fakeRepository) DeleteMessage(_ context.Context, mailboxID, id uint) er
 	return nil
 }
 
-func (r *fakeRepository) CountOutboundSince(_ context.Context, userID uint, _ time.Time) (int64, error) {
+func (r *fakeRepository) CountOutboundSince(_ context.Context, organizationID uint, _ time.Time) (int64, error) {
 	var count int64
 	for _, message := range r.messages {
 		mailbox, ok := r.mailboxes[message.MailboxID]
-		if ok && mailbox.UserID == userID && message.Direction == domain.MailDirectionOutbound {
+		if ok && mailbox.OrganizationID == organizationID && message.Direction == domain.MailDirectionOutbound {
 			count++
 		}
 	}
 	return count, nil
 }
 
-func (r *fakeRepository) ListMessagesForUser(_ context.Context, userID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error) {
+func (r *fakeRepository) ListMessagesForOrganization(_ context.Context, organizationID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error) {
 	r.lastLogFilter = filter
 	var listed []*domain.MailMessage
 	for _, message := range r.messages {
-		if mailbox, ok := r.mailboxes[message.MailboxID]; ok && mailbox.UserID == userID {
+		if mailbox, ok := r.mailboxes[message.MailboxID]; ok && mailbox.OrganizationID == organizationID {
 			listed = append(listed, message)
 		}
 	}
 	return listed, int64(len(listed)), nil
 }
 
-func (r *fakeRepository) StatsForUser(_ context.Context, _ uint, since time.Time) ([]domain.MailDayStats, error) {
+func (r *fakeRepository) StatsForOrganization(_ context.Context, _ uint, since time.Time) ([]domain.MailDayStats, error) {
 	r.lastStatsSince = since
 	return r.stats, nil
 }
@@ -264,9 +252,9 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 	return fixture
 }
 
-func (f *serviceFixture) mailbox(t *testing.T, userID uint, localPart string) *domain.Mailbox {
+func (f *serviceFixture) mailbox(t *testing.T, organizationID uint, localPart string) *domain.Mailbox {
 	t.Helper()
-	mailbox, err := f.service.CreateMailbox(context.Background(), userID, localPart, "Test Sender")
+	mailbox, err := f.service.CreateMailbox(context.Background(), organizationID, testCreator, localPart, "Test Sender")
 	if err != nil {
 		t.Fatalf("CreateMailbox(%q): %v", localPart, err)
 	}
@@ -276,22 +264,22 @@ func (f *serviceFixture) mailbox(t *testing.T, userID uint, localPart string) *d
 func TestCreateMailboxBuildsAddressOnTheConfiguredDomain(t *testing.T) {
 	fixture := newServiceFixture(t)
 	mailbox := fixture.mailbox(t, 7, "  Hello ")
-	if mailbox.Address != "hello@mail.example" || mailbox.UserID != 7 || mailbox.DisplayName != "Test Sender" {
+	if mailbox.Address != "hello@mail.example" || mailbox.OrganizationID != 7 || mailbox.DisplayName != "Test Sender" {
 		t.Fatalf("mailbox = %+v", mailbox)
 	}
 
-	if _, err := fixture.service.CreateMailbox(context.Background(), 8, "HELLO", ""); !errors.Is(err, ErrMailboxAddressTaken) {
+	if _, err := fixture.service.CreateMailbox(context.Background(), 8, testCreator, "HELLO", ""); !errors.Is(err, ErrMailboxAddressTaken) {
 		t.Fatalf("duplicate address error = %v", err)
 	}
-	if _, err := fixture.service.CreateMailbox(context.Background(), 7, "postmaster", ""); !errors.Is(err, ErrMailboxAddressReserved) {
+	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "postmaster", ""); !errors.Is(err, ErrMailboxAddressReserved) {
 		t.Fatalf("reserved address error = %v", err)
 	}
-	if _, err := fixture.service.CreateMailbox(context.Background(), 7, "ok", `Eve <eve@evil.test>`); !errors.Is(err, ErrMailboxAddressInvalid) {
+	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "ok", `Eve <eve@evil.test>`); !errors.Is(err, ErrMailboxAddressInvalid) {
 		t.Fatalf("display name error = %v", err)
 	}
 }
 
-func TestMailboxesAreInvisibleToOtherUsers(t *testing.T) {
+func TestMailboxesAreInvisibleToOtherOrganizations(t *testing.T) {
 	fixture := newServiceFixture(t)
 	ctx := context.Background()
 	mailbox := fixture.mailbox(t, 1, "owner")
@@ -320,7 +308,7 @@ func TestMailboxesAreInvisibleToOtherUsers(t *testing.T) {
 		t.Fatalf("DeleteMailbox error = %v", err)
 	}
 	if len(fixture.transport.sent) != 1 {
-		t.Fatalf("transport calls = %d; a stranger's send must not reach the provider", len(fixture.transport.sent))
+		t.Fatalf("transport calls = %d; another organization's send must not reach the provider", len(fixture.transport.sent))
 	}
 }
 
@@ -567,34 +555,6 @@ func TestSetMessageReadTogglesState(t *testing.T) {
 	}
 }
 
-func TestAccountDeletionRemovesOnlyThatUsersMail(t *testing.T) {
-	fixture := newServiceFixture(t)
-	ctx := context.Background()
-	leaving := fixture.mailbox(t, 1, "leaving")
-	staying := fixture.mailbox(t, 2, "staying")
-	for _, mailbox := range []*domain.Mailbox{leaving, staying} {
-		if _, _, err := fixture.service.SendMessage(ctx, mailbox.UserID, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}); err != nil {
-			t.Fatalf("SendMessage: %v", err)
-		}
-	}
-
-	if fixture.service.AccountDeletionCleanerName() != "mailbox" {
-		t.Fatalf("cleaner name = %q", fixture.service.AccountDeletionCleanerName())
-	}
-	if err := fixture.service.CleanAccountDeletion(ctx, 1); err != nil {
-		t.Fatalf("CleanAccountDeletion: %v", err)
-	}
-	if owned, _ := fixture.service.ListMailboxes(ctx, 1); len(owned) != 0 {
-		t.Fatalf("deleted account still owns %d mailboxes", len(owned))
-	}
-	if owned, _ := fixture.service.ListMailboxes(ctx, 2); len(owned) != 1 {
-		t.Fatalf("another account lost its mailbox")
-	}
-	if len(fixture.repo.messages) != 1 {
-		t.Fatalf("messages left = %d; want only the other account's", len(fixture.repo.messages))
-	}
-}
-
 func TestSendMessageWithAnIdempotencyKeySendsOnce(t *testing.T) {
 	fixture := newServiceFixture(t)
 	ctx := context.Background()
@@ -697,7 +657,7 @@ func TestSendMessageRejectsAnUnusableIdempotencyKey(t *testing.T) {
 	}
 }
 
-func TestSendFromAddressUsesOnlyTheCallersMailbox(t *testing.T) {
+func TestSendFromAddressUsesOnlyTheOrganizationsMailbox(t *testing.T) {
 	fixture := newServiceFixture(t)
 	ctx := context.Background()
 	fixture.mailbox(t, 1, "mine")

@@ -17,6 +17,9 @@ const state = vi.hoisted(() => {
   });
   const mutation = () => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() });
   return {
+    organizations: query(),
+    /** The organization id each mailbox hook was called with, in call order. */
+    organizationIds: [] as number[],
     domains: query(),
     mailboxes: query(),
     inbox: query(),
@@ -32,29 +35,73 @@ const state = vi.hoisted(() => {
   };
 });
 
+/** A router whose `replace` changes the URL the page reads, as the real one does. */
+const navigation = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    listeners,
+    replace: vi.fn((url: string) => {
+      window.history.replaceState(null, '', url);
+      for (const listener of listeners) listener();
+    }),
+  };
+});
+
 vi.mock('sonner', () => ({ toast }));
-vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
-  useMailboxDomains: () => state.domains,
-  useMailboxes: () => state.mailboxes,
-  useMailMessages: (mailboxId: number, direction: string, page: number) => {
-    state.listCalls.push({ mailboxId, direction, page });
-    return direction === 'inbound' ? state.inbox : state.sent;
-  },
-  useMailMessage: (_mailboxId: number, messageId: number | null) => {
-    state.detailCalls.push(messageId);
-    return state.detail;
-  },
-  useCreateMailbox: () => state.createMailbox,
-  useDeleteMailbox: () => state.deleteMailbox,
-  useSendMailMessage: () => state.send,
-  useUpdateMailMessage: () => state.update,
-  useDeleteMailMessage: () => state.removeMessage,
+vi.mock('next/navigation', async () => {
+  const { useSyncExternalStore } = await import('react');
+  const router = { replace: navigation.replace };
+  const subscribe = (listener: () => void) => {
+    navigation.listeners.add(listener);
+    return () => navigation.listeners.delete(listener);
+  };
+  return {
+    useRouter: () => router,
+    usePathname: () => window.location.pathname,
+    useSearchParams: () =>
+      new URLSearchParams(useSyncExternalStore(subscribe, () => window.location.search)),
+  };
+});
+vi.mock('@/features/organization/hooks/use-organizations', () => ({
+  useOrganizations: () => state.organizations,
 }));
+vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
+  const scoped = <T,>(organizationId: number, result: T): T => {
+    state.organizationIds.push(organizationId);
+    return result;
+  };
+  return {
+    useMailboxDomains: (organizationId: number) => scoped(organizationId, state.domains),
+    useMailboxes: (organizationId: number) => scoped(organizationId, state.mailboxes),
+    useMailMessages: (
+      organizationId: number,
+      mailboxId: number,
+      direction: string,
+      page: number
+    ) => {
+      state.listCalls.push({ mailboxId, direction, page });
+      return scoped(organizationId, direction === 'inbound' ? state.inbox : state.sent);
+    },
+    useMailMessage: (organizationId: number, _mailboxId: number, messageId: number | null) => {
+      state.detailCalls.push(messageId);
+      return scoped(organizationId, state.detail);
+    },
+    useCreateMailbox: (organizationId: number) => scoped(organizationId, state.createMailbox),
+    useDeleteMailbox: (organizationId: number) => scoped(organizationId, state.deleteMailbox),
+    useSendMailMessage: (organizationId: number) => scoped(organizationId, state.send),
+    useUpdateMailMessage: (organizationId: number) => scoped(organizationId, state.update),
+    useDeleteMailMessage: (organizationId: number) => scoped(organizationId, state.removeMessage),
+  };
+});
 
 describe('mailbox workspace', () => {
   beforeEach(() => {
     toast.success.mockReset();
     toast.error.mockReset();
+    navigation.replace.mockClear();
+    window.history.replaceState(null, '', '/console/mailboxes');
+    state.organizations.data = organizations(organization(1, 'Acme', 'owner'));
+    state.organizationIds = [];
     state.domains.data = [domain(10)];
     state.mailboxes.data = [mailbox(1, 'hello', 'Hello Team'), mailbox(2, 'sales', '')];
     state.inbox.data = page([
@@ -73,9 +120,17 @@ describe('mailbox workspace', () => {
       }),
     ]);
     state.detail.data = message();
-    for (const query of [state.domains, state.mailboxes, state.inbox, state.sent, state.detail]) {
+    for (const query of [
+      state.organizations,
+      state.domains,
+      state.mailboxes,
+      state.inbox,
+      state.sent,
+      state.detail,
+    ]) {
       query.isPending = false;
       query.error = null;
+      query.refetch.mockReset();
     }
     state.listCalls = [];
     state.detailCalls = [];
@@ -110,6 +165,155 @@ describe('mailbox workspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^sales@mail\.example\.com/u }));
     expect(state.listCalls.at(-1)).toEqual({ mailboxId: 2, direction: 'inbound', page: 1 });
+  });
+
+  it('names the only organization as text and asks every hook for it', () => {
+    renderWorkspace();
+
+    expect(screen.getByTestId('mail-organization-name')).toHaveTextContent('Acme');
+    expect(screen.queryByLabelText('Organization')).toBeNull();
+    // The fallback choice is written into the URL, so a reload or a link keeps it.
+    expect(navigation.replace).toHaveBeenCalledWith('/console/mailboxes?org=1', { scroll: false });
+    expect(window.location.search).toBe('?org=1');
+    expect(state.organizationIds.length).toBeGreaterThan(0);
+    expect(new Set(state.organizationIds)).toEqual(new Set([1]));
+  });
+
+  it('offers a picker with two organizations and shows the chosen one', () => {
+    state.organizations.data = organizations(
+      organization(1, 'Acme', 'owner'),
+      organization(2, 'Globex', 'member')
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?org=2');
+    renderWorkspace();
+
+    const picker = screen.getByLabelText('Organization') as HTMLSelectElement;
+    expect([...picker.options].map(option => [option.value, option.text])).toEqual([
+      ['1', 'Acme'],
+      ['2', 'Globex'],
+    ]);
+    expect(picker).toHaveValue('2');
+    expect(screen.queryByTestId('mail-organization-name')).toBeNull();
+    // A valid choice in the URL is used as it is.
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(new Set(state.organizationIds)).toEqual(new Set([2]));
+
+    state.organizationIds = [];
+    fireEvent.change(picker, { target: { value: '1' } });
+    expect(navigation.replace).toHaveBeenCalledWith('/console/mailboxes?org=1', { scroll: false });
+    expect(screen.getByLabelText('Organization')).toHaveValue('1');
+    expect(new Set(state.organizationIds)).toEqual(new Set([1]));
+  });
+
+  it('falls back to the first organization when the URL names one the user is not in', () => {
+    state.organizations.data = organizations(
+      organization(4, 'Acme', 'owner'),
+      organization(5, 'Globex', 'member')
+    );
+    for (const search of ['?org=9', '?org=abc', '?org=0', '?org=', '?other=1']) {
+      window.history.replaceState(null, '', `/console/mailboxes${search}`);
+      state.organizationIds = [];
+      const view = renderWorkspace();
+
+      expect(screen.getByLabelText('Organization'), search).toHaveValue('4');
+      expect(new URLSearchParams(window.location.search).get('org'), search).toBe('4');
+      expect(new Set(state.organizationIds), search).toEqual(new Set([4]));
+      view.unmount();
+    }
+    // Other parameters of the page are kept when the organization is written.
+    expect(window.location.search).toBe('?other=1&org=4');
+  });
+
+  it('lets an owner and an admin manage mailboxes and shows a member a read-only list', () => {
+    for (const role of ['owner', 'admin'] as const) {
+      state.organizations.data = organizations(organization(1, 'Acme', role));
+      const view = renderWorkspace();
+      expect(screen.getByRole('button', { name: 'Create mailbox' }), role).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: /^Delete /u }), role).toHaveLength(2);
+      expect(screen.queryByText(/Owners and admins of this organization/u), role).toBeNull();
+      view.unmount();
+    }
+
+    state.organizations.data = organizations(organization(1, 'Acme', 'member'));
+    renderWorkspace();
+    expect(screen.queryByRole('button', { name: 'Create mailbox' })).toBeNull();
+    expect(screen.queryByLabelText('Address')).toBeNull();
+    expect(screen.queryByText('New mailbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Delete /u })).toBeNull();
+    expect(
+      screen.getByText('Owners and admins of this organization create and delete mailboxes.')
+    ).toBeInTheDocument();
+    // Reading and sending stay available to a member.
+    expect(screen.getByText('2 of 10 used')).toBeInTheDocument();
+    expect(screen.getByText('Unread question')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Compose' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    expect(screen.getByRole('button', { name: 'Reply' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mark unread' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('tells a member without mailboxes who can create one', () => {
+    state.organizations.data = organizations(organization(1, 'Acme', 'member'));
+    state.mailboxes.data = [];
+    renderWorkspace();
+
+    expect(screen.getByText('No mailboxes yet')).toBeInTheDocument();
+    expect(
+      screen.getByText('Owners and admins of this organization create and delete mailboxes.')
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Create an address to start receiving and sending mail.')).toBeNull();
+  });
+
+  it('explains that mailboxes need an organization when the user has none', () => {
+    state.organizations.data = organizations();
+    renderWorkspace();
+
+    expect(screen.getByRole('heading', { name: 'Mailboxes' })).toBeInTheDocument();
+    expect(screen.getByText('No organization yet')).toBeInTheDocument();
+    expect(screen.getByText(/Mailboxes belong to an organization/u)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Go to organizations' })).toHaveAttribute(
+      'href',
+      '/console/organizations'
+    );
+    expect(screen.queryByLabelText('Organization')).toBeNull();
+    // Nothing is asked of the mailbox API without an organization.
+    expect(state.organizationIds).toEqual([]);
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
+
+  it('shows loading and a retryable error for the organization list', () => {
+    state.organizations.data = undefined;
+    state.organizations.isPending = true;
+    const view = renderWorkspace();
+    expect(screen.getByRole('heading', { name: 'Mailboxes' })).toBeInTheDocument();
+    expect(screen.queryByText('No organization yet')).toBeNull();
+    expect(state.organizationIds).toEqual([]);
+    view.unmount();
+
+    state.organizations.isPending = false;
+    state.organizations.error = new ApiError('boom', ApiErrorCode.COMMON_SERVICE_UNAVAILABLE);
+    renderWorkspace();
+    expect(screen.getByText('Your organizations could not be loaded.')).toBeInTheDocument();
+    expect(screen.queryByText('boom')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(state.organizations.refetch).toHaveBeenCalled();
+    expect(state.organizationIds).toEqual([]);
+  });
+
+  it('leads back to the organizations when access to the organization was lost', () => {
+    state.mailboxes.data = undefined;
+    state.mailboxes.error = new ApiError('gone', ApiErrorCode.ORGANIZATION_NOT_FOUND, 404);
+    renderWorkspace();
+
+    expect(screen.getByText('No access to this organization')).toBeInTheDocument();
+    expect(screen.getByText(/you are no longer a member of it/u)).toBeInTheDocument();
+    expect(screen.queryByText('gone')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Go to organizations' })).toHaveAttribute(
+      'href',
+      '/console/organizations'
+    );
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
   it('shows an unread badge only on mailboxes with unread mail, capped at 99+', () => {
@@ -165,6 +369,7 @@ describe('mailbox workspace', () => {
       [ApiErrorCode.MAILBOX_ADDRESS_INVALID, /1 to 64 lowercase letters/u],
       [ApiErrorCode.MAILBOX_ADDRESS_RESERVED, /reserved for the mail administrator/u],
       [ApiErrorCode.MAILBOX_LIMIT_REACHED, /reached the mailbox limit/u],
+      [ApiErrorCode.PERMISSION_DENIED, /Only owners and admins of the organization/u],
     ] as const;
     fireEvent.change(address, { target: { value: 'hello' } });
     for (const [code, copy] of cases) {
@@ -196,6 +401,23 @@ describe('mailbox workspace', () => {
 
     await waitFor(() => expect(state.deleteMailbox.mutateAsync).toHaveBeenCalledWith(2));
     expect(toast.success).toHaveBeenCalledWith('Mailbox deleted');
+  });
+
+  it('says only owners and admins delete when the API refuses a delete', async () => {
+    state.deleteMailbox.mutateAsync.mockRejectedValue(
+      new ApiError('backend text', ApiErrorCode.PERMISSION_DENIED, 403)
+    );
+    renderWorkspace();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete sales@mail.example.com' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'Only owners and admins of the organization can create or delete mailboxes.'
+      )
+    );
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it('marks an unread inbound message read when it is opened, and only then', () => {
@@ -452,6 +674,14 @@ function domain(maxMailboxes: number) {
     inbound_enabled: false,
     daily_send_limit: 200,
   };
+}
+
+function organization(id: number, name: string, role: 'owner' | 'admin' | 'member') {
+  return { id, name, slug: `org-${id}`, role, created_at: now(), updated_at: now() };
+}
+
+function organizations(...items: ReturnType<typeof organization>[]) {
+  return page(items);
 }
 
 function mailbox(id: number, localPart: string, displayName: string, unreadCount = 0) {

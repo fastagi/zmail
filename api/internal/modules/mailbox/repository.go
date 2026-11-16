@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/fastagi/fastmail/api/internal/domain"
-	infradatabase "github.com/fastagi/fastmail/api/internal/infra/database"
 )
 
 type repository struct {
@@ -24,24 +23,30 @@ func NewRepository(db *gorm.DB) *repository {
 	return &repository{db: db}
 }
 
-// CreateMailbox inserts a mailbox while holding a per-user advisory lock, so two concurrent
+// CreateMailbox inserts a mailbox while holding a per-organization advisory lock, so two concurrent
 // requests cannot both pass the ownership limit.
 func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox, limit int) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('mailbox_owner'), ?)`, int32(mailbox.UserID)).Error; err != nil { //nolint:gosec // lock key only needs to be stable per user
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('mailbox_owner'), ?)`, int32(mailbox.OrganizationID)).Error; err != nil { //nolint:gosec // lock key only needs to be stable per user
 			return err
 		}
 		var owned int64
-		if err := tx.Model(&MailboxPO{}).Where("user_id = ?", mailbox.UserID).Count(&owned).Error; err != nil {
+		if err := tx.Model(&MailboxPO{}).Where("organization_id = ?", mailbox.OrganizationID).Count(&owned).Error; err != nil {
 			return err
 		}
 		if owned >= int64(limit) {
 			return ErrMailboxLimitReached
 		}
-		po := &MailboxPO{UserID: mailbox.UserID, Address: mailbox.Address, DisplayName: mailbox.DisplayName}
+		organizationID := mailbox.OrganizationID
+		po := &MailboxPO{
+			OrganizationID: &organizationID,
+			CreatedBy:      mailbox.CreatedBy,
+			Address:        mailbox.Address,
+			DisplayName:    mailbox.DisplayName,
+		}
 		if err := tx.Create(po).Error; err != nil {
 			if isUniqueViolation(err) {
 				return ErrMailboxAddressTaken
@@ -55,15 +60,15 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 	})
 }
 
-func (r *repository) ListMailboxes(ctx context.Context, userID uint) ([]*domain.Mailbox, error) {
+func (r *repository) ListMailboxes(ctx context.Context, organizationID uint) ([]*domain.Mailbox, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
 	var rows []MailboxPO
 	err := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
+		Where("organization_id = ?", organizationID).
 		Order("id asc").
-		Limit(domain.MaxMailboxesPerUser).
+		Limit(domain.MaxMailboxesPerOrganization).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
@@ -101,12 +106,12 @@ func (r *repository) ListMailboxes(ctx context.Context, userID uint) ([]*domain.
 	return mailboxes, nil
 }
 
-func (r *repository) FindMailbox(ctx context.Context, userID, id uint) (*domain.Mailbox, error) {
+func (r *repository) FindMailbox(ctx context.Context, organizationID, id uint) (*domain.Mailbox, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailboxPO
-	if err := r.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&po).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("id = ? AND organization_id = ?", id, organizationID).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailboxNotFound
 		}
@@ -131,12 +136,12 @@ func (r *repository) FindMailboxByAddress(ctx context.Context, address string) (
 
 // DeleteMailbox soft-deletes the mailbox, which keeps its address reserved, and removes its
 // messages in the same transaction.
-func (r *repository) DeleteMailbox(ctx context.Context, userID, id uint) error {
+func (r *repository) DeleteMailbox(ctx context.Context, organizationID, id uint) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ? AND user_id = ?", id, userID).Delete(&MailboxPO{})
+		result := tx.Where("id = ? AND organization_id = ?", id, organizationID).Delete(&MailboxPO{})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -145,19 +150,6 @@ func (r *repository) DeleteMailbox(ctx context.Context, userID, id uint) error {
 		}
 		return tx.Where("mailbox_id = ?", id).Delete(&MailMessagePO{}).Error
 	})
-}
-
-func (r *repository) DeleteMailboxesForUser(ctx context.Context, userID uint) error {
-	if r.db == nil {
-		return domain.ErrServiceUnavailable
-	}
-	db := infradatabase.ResolveContextDB(ctx, r.db)
-	owned := db.Model(&MailboxPO{}).Select("id").Where("user_id = ?", userID)
-	if err := db.Where("mailbox_id IN (?)", owned).Delete(&MailMessagePO{}).Error; err != nil {
-		return err
-	}
-	// A soft delete keeps every released address reserved.
-	return db.Where("user_id = ?", userID).Delete(&MailboxPO{}).Error
 }
 
 func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMessage) (bool, error) {
@@ -206,15 +198,15 @@ func (r *repository) FindMessageByIdempotencyKey(ctx context.Context, mailboxID 
 	return po.toDomain(), nil
 }
 
-func (r *repository) FindOutboundMessageForUser(ctx context.Context, userID, id uint) (*domain.MailMessage, error) {
+func (r *repository) FindOutboundMessageForOrganization(ctx context.Context, organizationID, id uint) (*domain.MailMessage, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailMessagePO
 	err := r.db.WithContext(ctx).
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
-		Where("mail_messages.id = ? AND mailboxes.user_id = ? AND mail_messages.direction = ?",
-			id, userID, string(domain.MailDirectionOutbound)).
+		Where("mail_messages.id = ? AND mailboxes.organization_id = ? AND mail_messages.direction = ?",
+			id, organizationID, string(domain.MailDirectionOutbound)).
 		First(&po).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -364,17 +356,17 @@ func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) erro
 	return nil
 }
 
-// CountOutboundSince counts messages the user tried to send since the given time, including
-// failed attempts, across every mailbox the user owns or has deleted.
-func (r *repository) CountOutboundSince(ctx context.Context, userID uint, since time.Time) (int64, error) {
+// CountOutboundSince counts messages the organization tried to send since the given time,
+// including failed attempts, across every mailbox it owns or has deleted.
+func (r *repository) CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error) {
 	if r.db == nil {
 		return 0, domain.ErrServiceUnavailable
 	}
 	var count int64
 	err := r.db.WithContext(ctx).Model(&MailMessagePO{}).
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
-		Where("mailboxes.user_id = ? AND mail_messages.direction = ? AND mail_messages.created_at >= ?",
-			userID, string(domain.MailDirectionOutbound), since).
+		Where("mailboxes.organization_id = ? AND mail_messages.direction = ? AND mail_messages.created_at >= ?",
+			organizationID, string(domain.MailDirectionOutbound), since).
 		Count(&count).Error
 	return count, err
 }
@@ -384,9 +376,9 @@ type mailLogRow struct {
 	MailboxAddress string
 }
 
-func (r *repository) ListMessagesForUser(
+func (r *repository) ListMessagesForOrganization(
 	ctx context.Context,
-	userID uint,
+	organizationID uint,
 	filter domain.MailLogFilter,
 ) ([]*domain.MailMessage, int64, error) {
 	if r.db == nil {
@@ -402,7 +394,7 @@ func (r *repository) ListMessagesForUser(
 
 	query := r.db.WithContext(ctx).Table("mail_messages").
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
-		Where("mailboxes.user_id = ?", userID)
+		Where("mailboxes.organization_id = ?", organizationID)
 	if filter.Direction != "" {
 		query = query.Where("mail_messages.direction = ?", string(filter.Direction))
 	}
@@ -448,7 +440,7 @@ func (r *repository) ListMessagesForUser(
 	return messages, total, nil
 }
 
-func (r *repository) StatsForUser(ctx context.Context, userID uint, since time.Time) ([]domain.MailDayStats, error) {
+func (r *repository) StatsForOrganization(ctx context.Context, organizationID uint, since time.Time) ([]domain.MailDayStats, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
@@ -464,7 +456,7 @@ func (r *repository) StatsForUser(ctx context.Context, userID uint, since time.T
 			COUNT(*) FILTER (WHERE mail_messages.status = 'sent') AS sent,
 			COUNT(*) FILTER (WHERE mail_messages.status = 'failed') AS failed,
 			COUNT(*) FILTER (WHERE mail_messages.direction = 'inbound') AS received`).
-		Where("mailboxes.user_id = ? AND mail_messages.created_at >= ?", userID, since).
+		Where("mailboxes.organization_id = ? AND mail_messages.created_at >= ?", organizationID, since).
 		Group("day").
 		Order("day ASC").
 		Scan(&rows).Error
