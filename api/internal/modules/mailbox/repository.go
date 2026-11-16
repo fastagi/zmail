@@ -134,18 +134,69 @@ func (r *repository) DeleteMailboxesForUser(ctx context.Context, userID uint) er
 	return db.Where("user_id = ?", userID).Delete(&MailboxPO{}).Error
 }
 
-func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMessage) error {
+func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMessage) (bool, error) {
 	if r.db == nil {
-		return domain.ErrServiceUnavailable
+		return false, domain.ErrServiceUnavailable
 	}
 	po := newMailMessagePO(message)
-	if err := r.db.WithContext(ctx).Create(po).Error; err != nil {
-		return err
+	query := r.db.WithContext(ctx)
+	if message.IdempotencyKey != "" {
+		query = query.Clauses(clause.OnConflict{
+			Columns:     []clause.Column{{Name: "mailbox_id"}, {Name: "idempotency_key"}},
+			TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "idempotency_key IS NOT NULL"}}},
+			DoNothing:   true,
+		})
+	}
+	result := query.Create(po)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		existing, err := r.FindMessageByIdempotencyKey(ctx, message.MailboxID, message.IdempotencyKey)
+		if err != nil {
+			return false, err
+		}
+		*message = *existing
+		return false, nil
 	}
 	message.ID = po.ID
 	message.CreatedAt = po.CreatedAt
 	message.UpdatedAt = po.UpdatedAt
-	return nil
+	return true, nil
+}
+
+func (r *repository) FindMessageByIdempotencyKey(ctx context.Context, mailboxID uint, key string) (*domain.MailMessage, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var po MailMessagePO
+	err := r.db.WithContext(ctx).Where("mailbox_id = ? AND idempotency_key = ?", mailboxID, key).First(&po).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrMailMessageNotFound
+		}
+		return nil, err
+	}
+	return po.toDomain(), nil
+}
+
+func (r *repository) FindOutboundMessageForUser(ctx context.Context, userID, id uint) (*domain.MailMessage, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var po MailMessagePO
+	err := r.db.WithContext(ctx).
+		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
+		Where("mail_messages.id = ? AND mailboxes.user_id = ? AND mail_messages.direction = ?",
+			id, userID, string(domain.MailDirectionOutbound)).
+		First(&po).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrMailMessageNotFound
+		}
+		return nil, err
+	}
+	return po.toDomain(), nil
 }
 
 func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.MailMessage) (bool, error) {

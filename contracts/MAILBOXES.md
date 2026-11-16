@@ -3,7 +3,7 @@
 This contract owns the optional `mailbox` starter across the Go API, the Web mailbox feature, the
 fixed production API adapter, the development mock BFF, and the Cloudflare Email Worker that
 delivers inbound mail. It defines user-owned mailboxes on one configured domain, sending through a
-mail provider, and signed inbound delivery. It does not define attachments, organization-shared
+mail provider from a session or an API key, and signed inbound delivery. It does not define attachments, organization-shared
 mailboxes, custom domains per user, mailing lists, or delivery webhooks.
 
 ## Activation
@@ -28,6 +28,8 @@ message that belongs to another user is reported exactly like one that does not 
 | Get message | `GET /api/mailboxes/:id/messages/:messageId` | `GET /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
 | Mark read or unread | `PUT /api/mailboxes/:id/messages/:messageId` | `PUT /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
 | Delete message | `DELETE /api/mailboxes/:id/messages/:messageId` | `DELETE /v1/mailboxes/:mailbox_id/messages/:message_id` | `204` |
+| Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
+| Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
 | Inbound delivery | none | `POST /v1/inbound-mail-messages` | `201`, or `200` for a repeat |
 
 The Web production API adapter owns the HttpOnly API session credential and forwards only these
@@ -123,9 +125,51 @@ answers:
 
 A send is never reported as successful before the provider accepts it. Failed attempts count toward
 the send limit. The limit is a soft bound: concurrent requests may exceed it by the number of
-requests in flight. There is no automatic retry and no idempotency key; a client that retries a
-`502` may send a duplicate when the first attempt reached the provider but the answer was lost
-(`failure_code` `transport.unreachable`).
+requests in flight. There is no automatic retry. A client that retries a `502` without an
+`Idempotency-Key` may send a duplicate when the first attempt reached the provider but the answer
+was lost (`failure_code` `transport.unreachable`); see [Idempotency](#idempotency).
+
+### Idempotency
+
+Both send routes accept an optional `Idempotency-Key` header of 1 to 255 printable ASCII
+characters; anything else is `422 MAILBOX.IDEMPOTENCY_KEY_INVALID`. The key names one send within
+one mailbox. A later send in the same mailbox with the same key never calls the provider again:
+
+| First attempt | Repeat with the same content | Repeat with different content |
+|---|---|---|
+| `sent` | `200` with the stored message | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
+| `failed` | The same error as the first attempt, with the stored message kept | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
+| Still `queued` | `409 MAILBOX.SEND_IN_PROGRESS` | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
+
+Content is compared after normalization, so address case, duplicate recipients, and surrounding
+whitespace in the subject do not matter. A failed attempt is replayed rather than retried because
+the provider may have accepted it before the answer was lost; to send again on purpose, use a new
+key. Without a key, every request is a new message.
+
+## Programmatic Sending
+
+Backend services send with an API key instead of a browser session. Create the key with
+`POST /v1/api-keys` (see [`API_KEYS.md`](API_KEYS.md)) and pass it as `X-API-Key`.
+
+| Route | Required scope |
+|---|---|
+| `POST /v1/outbound-mail-messages` | `mail:send` |
+| `GET /v1/outbound-mail-messages/:message_id` | `mail:read` |
+
+```json
+{
+  "from": "hello@mail.example.com",
+  "to": ["bob@example.com"],
+  "subject": "Your receipt",
+  "text": "Thanks for your order."
+}
+```
+
+`from` must be the bare address of a mailbox the key's owner owns; any other address, including
+another user's mailbox, is `404 MAILBOX.NOT_FOUND`. The remaining fields, limits, outcomes, and
+`Idempotency-Key` behavior are those of [Send](#send). A key without the scope gets
+`403 PERMISSION.DENIED`. The read route returns only outbound messages, so a `mail:read` key cannot
+read mail that was received.
 
 ## Inbound Delivery
 
@@ -167,6 +211,9 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.ADDRESS_INVALID` | 422 |
 | `MAILBOX.ADDRESS_RESERVED` | 422 |
 | `MAILBOX.MESSAGE_INVALID` | 422 |
+| `MAILBOX.IDEMPOTENCY_CONFLICT` | 409 |
+| `MAILBOX.SEND_IN_PROGRESS` | 409 |
+| `MAILBOX.IDEMPOTENCY_KEY_INVALID` | 422 |
 | `MAILBOX.SEND_LIMIT_REACHED` | 429 |
 | `MAILBOX.DELIVERY_FAILED` | 502 |
 | `MAILBOX.SENDER_NOT_CONFIGURED` | 503 |

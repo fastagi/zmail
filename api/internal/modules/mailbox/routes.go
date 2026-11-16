@@ -1,6 +1,9 @@
 package mailbox
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import (
+	"github.com/fastagi/fastmail/api/internal/infra/router"
+	"github.com/fastagi/fastmail/api/internal/modules/apikey"
+)
 
 // RegisterRoutes registers HTTP routes for the mailbox starter. User routes require a signed-in
 // user and only ever touch that user's mailboxes. The inbound route is authenticated by the
@@ -25,6 +28,18 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.messages.update").WhereNumber("mailbox_id").WhereNumber("message_id")
 		auth.DELETE("/mailboxes/:mailbox_id/messages/:message_id", h.DeleteMessage).
 			Name("mailboxes.messages.destroy").WhereNumber("mailbox_id").WhereNumber("message_id")
+	})
+
+	// Programmatic sending for backend services: an API key instead of a browser session, with
+	// scopes that limit the key to sending or to reading what it sent.
+	r.Group("", func(key *router.Router) {
+		key.WithMiddleware("api_key")
+
+		key.POST("/outbound-mail-messages", h.SendOutbound).
+			Name("outbound_mail_messages.store").Middleware(apikey.RequireScopes(ScopeMailSend))
+		key.GET("/outbound-mail-messages/:message_id", h.GetOutbound).
+			Name("outbound_mail_messages.show").WhereNumber("message_id").
+			Middleware(apikey.RequireScopes(ScopeMailRead))
 	})
 
 	r.POST("/inbound-mail-messages", h.ReceiveInbound).Name("inbound_mail_messages.store")
