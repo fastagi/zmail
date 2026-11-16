@@ -35,6 +35,7 @@ const messages = {
     outbound: 'Sent',
   },
   list: {
+    attachments: 'Attachments: {count}',
     to: 'To: {recipients}',
     noSubject: '(no subject)',
     unread: 'Unread',
@@ -48,6 +49,9 @@ const messages = {
     next: 'Next',
   },
   message: {
+    attachments: 'Attachments',
+    download: 'Download {name}',
+    downloadFailed: 'The file could not be downloaded. Try again.',
     from: 'From',
     to: 'To',
     cc: 'Cc',
@@ -76,6 +80,9 @@ const messages = {
     cc: 'Cc (optional)',
     subject: 'Subject',
     body: 'Message',
+    attach: 'Attach files',
+    attachHint: 'Up to 10 files, 4 MB in total.',
+    removeAttachment: 'Remove {name}',
     replySubject: 'Re: {subject}',
   },
   emails: {
@@ -199,6 +206,7 @@ const messages = {
     messageDeleted: 'Message deleted',
   },
   errors: {
+    attachmentsInvalid: 'Attach at most 10 non-empty files, 4 MB in total.',
     addressInvalid:
       'Use 1 to 64 lowercase letters and digits. Dots, underscores, and hyphens are allowed inside, one at a time.',
     addressReserved: 'This address is reserved for the mail administrator. Choose another one.',

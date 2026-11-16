@@ -72,6 +72,15 @@ TABLE authentication_sessions
   COLUMN revocation_reason character varying(32) NOT NULL DEFAULT ''::character varying
   COLUMN audience character varying(16) NOT NULL DEFAULT 'user'::character varying
 
+TABLE mail_attachments
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_attachments_id_seq'::regclass)
+  COLUMN message_id bigint NOT NULL
+  COLUMN filename character varying(255) NOT NULL
+  COLUMN content_type character varying(127) NOT NULL
+  COLUMN size bigint NOT NULL
+  COLUMN content bytea NOT NULL
+  COLUMN created_at timestamp with time zone
+
 TABLE mail_message_events
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_message_events_id_seq'::regclass)
   COLUMN message_id bigint NOT NULL
@@ -104,6 +113,7 @@ TABLE mail_messages
   COLUMN idempotency_key character varying(255)
   COLUMN idempotency_fingerprint character varying(64) NOT NULL DEFAULT ''::character varying
   COLUMN last_event character varying(16) NOT NULL DEFAULT ''::character varying
+  COLUMN attachment_count bigint NOT NULL DEFAULT 0
 
 TABLE mailboxes
   COLUMN id bigint NOT NULL DEFAULT nextval('mailboxes_id_seq'::regclass)
@@ -403,6 +413,9 @@ CONSTRAINT assets.fk_assets_user FOREIGN KEY (user_id) REFERENCES users(id) ON U
 CONSTRAINT audit_logs.audit_logs_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.authentication_sessions_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.chk_authentication_sessions_audience CHECK (((audience)::text = ANY ((ARRAY['user'::character varying, 'operator'::character varying])::text[])))
+CONSTRAINT mail_attachments.chk_mail_attachments_size CHECK (((size >= 0) AND (size = octet_length(content))))
+CONSTRAINT mail_attachments.fk_mail_attachments_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_attachments.mail_attachments_pkey PRIMARY KEY (id)
 CONSTRAINT mail_message_events.chk_mail_message_events_type CHECK (((type)::text = ANY ((ARRAY['accepted'::character varying, 'delivered'::character varying, 'deferred'::character varying, 'bounced'::character varying, 'failed'::character varying, 'rejected'::character varying, 'complained'::character varying])::text[])))
 CONSTRAINT mail_message_events.fk_mail_message_events_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_message_events.mail_message_events_pkey PRIMARY KEY (id)
@@ -543,6 +556,8 @@ INDEX CREATE INDEX idx_authentication_sessions_idle_expires_at ON authentication
 INDEX CREATE INDEX idx_authentication_sessions_revoked_at ON authentication_sessions USING btree (revoked_at)
 INDEX CREATE UNIQUE INDEX idx_authentication_sessions_token_hash ON authentication_sessions USING btree (token_hash)
 INDEX CREATE INDEX idx_authentication_sessions_user_id ON authentication_sessions USING btree (user_id)
+INDEX CREATE INDEX idx_mail_attachments_message ON mail_attachments USING btree (message_id)
+INDEX CREATE UNIQUE INDEX mail_attachments_pkey ON mail_attachments USING btree (id)
 INDEX CREATE INDEX idx_mail_message_events_message ON mail_message_events USING btree (message_id, occurred_at, id)
 INDEX CREATE UNIQUE INDEX idx_mail_message_events_provider ON mail_message_events USING btree (provider_event_id) WHERE (provider_event_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_message_events_pkey ON mail_message_events USING btree (id)

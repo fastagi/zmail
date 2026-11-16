@@ -1157,6 +1157,7 @@ function entry(overrides: Record<string, unknown> = {}) {
     read: false,
     failure_code: '',
     last_event: '',
+    attachment_count: 0,
     created_at: now(),
     ...overrides,
   };
@@ -1172,6 +1173,7 @@ function message(overrides: Record<string, unknown> = {}) {
     message_id: 'question-1@example.com',
     in_reply_to: '',
     events: [],
+    attachments: [],
     ...overrides,
   };
 }

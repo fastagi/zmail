@@ -187,6 +187,75 @@ describe('GoApiClient', () => {
     });
   });
 
+  it('reads a binary success as bounded bytes and keeps only a safe disposition', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(new Uint8Array([0, 255, 10]), {
+        headers: { 'content-disposition': "attachment; filename*=utf-8''r%C3%A9sum%C3%A9.pdf" },
+      })
+    );
+    const result = await client.request({
+      method: 'GET',
+      path: 'files/1',
+      incomingHeaders: new Headers(),
+      responseType: 'binary',
+      maxResponseBytes: 4_096,
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        status: 200,
+        envelope: null,
+        binary: { disposition: "attachment; filename*=utf-8''r%C3%A9sum%C3%A9.pdf" },
+      },
+    });
+    expect(result.ok && result.data.binary?.bytes).toEqual(new Uint8Array([0, 255, 10]));
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('accept')).toContain(
+      'application/octet-stream'
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      new Response('x', { headers: { 'content-disposition': 'inline; filename="a.html"' } })
+    );
+    const inline = await client.request({
+      method: 'GET',
+      path: 'files/2',
+      incomingHeaders: new Headers(),
+      responseType: 'binary',
+    });
+    expect(inline.ok && inline.data.binary?.disposition).toBeNull();
+
+    // The per-request limit replaces the client limit, and a larger body is refused.
+    fetchMock.mockResolvedValueOnce(new Response(new Uint8Array(5_000)));
+    await expect(
+      client.request({
+        method: 'GET',
+        path: 'files/3',
+        incomingHeaders: new Headers(),
+        responseType: 'binary',
+        maxResponseBytes: 4_096,
+      })
+    ).resolves.toMatchObject({ ok: false, error: { cause: 'unavailable' } });
+
+    // An error is still read as a JSON envelope.
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { code: 404, error_code: 'MAILBOX.MESSAGE_NOT_FOUND', message: 'missing' },
+        { status: 404 }
+      )
+    );
+    await expect(
+      client.request({
+        method: 'GET',
+        path: 'files/4',
+        incomingHeaders: new Headers(),
+        responseType: 'binary',
+      })
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { status: 404, errorCode: 'MAILBOX.MESSAGE_NOT_FOUND' },
+    });
+  });
+
   it('rejects absolute, traversal, query-bearing, and fragment-bearing paths', async () => {
     for (const path of [
       'https://evil.example/path',

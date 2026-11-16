@@ -3707,6 +3707,47 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/attachments/{attachment_id}:
+    get:
+      operationId: downloadMailAttachment
+      summary: Download one attached file
+      description: The file is always served as an opaque download; its declared media type is in the
+        message detail and is never used as the response type.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailMessageID'
+        - $ref: '#/components/parameters/MailAttachmentID'
+      responses:
+        '200':
+          description: The file bytes.
+          headers:
+            Cache-Control:
+              description: Always `private, no-store`.
+              schema:
+                type: string
+                const: private, no-store
+            Content-Disposition:
+              description: '`attachment` with the stored file name.'
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/inbound-mail-messages:
     post:
       operationId: receiveInboundMailMessage
@@ -4298,6 +4339,13 @@ components:
       in: path
       required: true
       description: Positive mail message identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    MailAttachmentID:
+      name: attachment_id
+      in: path
+      required: true
+      description: Positive mail attachment identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
     MailIdempotencyKey:
@@ -7459,6 +7507,7 @@ components:
         - read
         - failure_code
         - last_event
+        - attachment_count
         - created_at
       properties:
         id:
@@ -7494,6 +7543,11 @@ components:
           maxLength: 120
         last_event:
           $ref: '#/components/schemas/MailEventSummary'
+        attachment_count:
+          type: integer
+          description: How many files the message has; the detail lists them.
+          minimum: 0
+          maximum: 10
         created_at:
           type: string
           format: date-time
@@ -7512,12 +7566,14 @@ components:
         - read
         - failure_code
         - last_event
+        - attachment_count
         - created_at
         - text_body
         - html_body
         - message_id
         - in_reply_to
         - events
+        - attachments
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -7551,6 +7607,11 @@ components:
           maxLength: 120
         last_event:
           $ref: '#/components/schemas/MailEventSummary'
+        attachment_count:
+          type: integer
+          description: How many files the message has; the detail lists them.
+          minimum: 0
+          maximum: 10
         created_at:
           type: string
           format: date-time
@@ -7574,6 +7635,57 @@ components:
           maxItems: 1000
           items:
             $ref: '#/components/schemas/MailEvent'
+        attachments:
+          type: array
+          description: The files of the message, without their content.
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/MailAttachment'
+    MailAttachment:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - filename
+        - content_type
+        - size
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        filename:
+          type: string
+          description: Bare file name without a path.
+          minLength: 1
+          maxLength: 255
+        content_type:
+          type: string
+          description: Media type the sender declared. It is untrusted and never used to serve the file.
+          minLength: 1
+          maxLength: 127
+        size:
+          type: integer
+          description: Size in bytes.
+          minimum: 0
+          maximum: 4194304
+    MailAttachmentInput:
+      type: object
+      additionalProperties: false
+      required:
+        - filename
+        - content
+      properties:
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 255
+        content_type:
+          type: string
+          description: Media type; `application/octet-stream` when absent or unusable.
+          maxLength: 127
+        content:
+          type: string
+          description: The file as standard base64. All files of a message decode to at most 4 MiB.
+          minLength: 1
 
     SendMailMessageRequest:
       type: object
@@ -7612,6 +7724,12 @@ components:
           type: string
           description: Message-ID of the message this one answers, with or without angle brackets.
           maxLength: 900
+        attachments:
+          type: array
+          description: Optional files to send with the message.
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/MailAttachmentInput'
     UpdateMailMessageRequest:
       type: object
       additionalProperties: false
@@ -7722,6 +7840,12 @@ components:
         in_reply_to:
           type: string
           maxLength: 900
+        attachments:
+          type: array
+          description: Optional files to send with the message.
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/MailAttachmentInput'
     MailLogEntry:
       type: object
       additionalProperties: false
@@ -7738,6 +7862,7 @@ components:
         - read
         - failure_code
         - last_event
+        - attachment_count
         - created_at
       properties:
         id:
@@ -7776,6 +7901,11 @@ components:
           maxLength: 120
         last_event:
           $ref: '#/components/schemas/MailEventSummary'
+        attachment_count:
+          type: integer
+          description: How many files the message has; the detail lists them.
+          minimum: 0
+          maximum: 10
         created_at:
           type: string
           format: date-time

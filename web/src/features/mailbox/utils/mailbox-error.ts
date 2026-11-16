@@ -3,6 +3,7 @@ import { ApiError } from '@/http/request';
 
 export type MailboxErrorKey =
   | 'errors.addressInvalid'
+  | 'errors.attachmentsInvalid'
   | 'errors.addressReserved'
   | 'errors.addressTaken'
   | 'errors.deliveryFailed'

@@ -60,6 +60,7 @@ type MailMessagePO struct {
 	IdempotencyKey         *string `gorm:"size:255;uniqueIndex:idx_mail_messages_idempotency,priority:2,where:idempotency_key IS NOT NULL"`
 	IdempotencyFingerprint string  `gorm:"size:64;not null;default:''"`
 	LastEvent              string  `gorm:"size:16;not null;default:''"`
+	AttachmentCount        int     `gorm:"not null;default:0"`
 	ReadAt                 *time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
@@ -100,6 +101,7 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 	}
 	message.IdempotencyFingerprint = po.IdempotencyFingerprint
 	message.LastEvent = domain.MailEventType(po.LastEvent)
+	message.AttachmentCount = po.AttachmentCount
 	return message
 }
 
@@ -130,6 +132,7 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		po.IdempotencyKey = &key
 	}
 	po.IdempotencyFingerprint = message.IdempotencyFingerprint
+	po.AttachmentCount = len(message.Attachments)
 	return po
 }
 
@@ -191,4 +194,31 @@ func (po *MailMessageEventPO) toDomain() domain.MailEvent {
 		event.ProviderEventID = *po.ProviderEventID
 	}
 	return event
+}
+
+// MailAttachmentPO is the persistent object for one attached file. The content lives in the
+// row: attachments are small and bounded, and deleting a message removes them with it.
+type MailAttachmentPO struct {
+	ID          uint   `gorm:"primaryKey"`
+	MessageID   uint   `gorm:"not null;index:idx_mail_attachments_message"`
+	Filename    string `gorm:"size:255;not null"`
+	ContentType string `gorm:"size:127;not null"`
+	Size        int    `gorm:"not null"`
+	Content     []byte `gorm:"type:bytea;not null"`
+	CreatedAt   time.Time
+}
+
+func (MailAttachmentPO) TableName() string {
+	return "mail_attachments"
+}
+
+func (po *MailAttachmentPO) toDomain() domain.MailAttachment {
+	return domain.MailAttachment{
+		ID:          po.ID,
+		MessageID:   po.MessageID,
+		Filename:    po.Filename,
+		ContentType: po.ContentType,
+		Size:        po.Size,
+		Content:     po.Content,
+	}
 }

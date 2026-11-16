@@ -21,6 +21,15 @@ type Message struct {
 	HTMLBody    string
 	// InReplyTo is an RFC 5322 message identifier without angle brackets.
 	InReplyTo string
+	// Attachments are files sent with the message.
+	Attachments []Attachment
+}
+
+// Attachment is one file of an outbound message.
+type Attachment struct {
+	Filename    string
+	ContentType string
+	Content     []byte
 }
 
 // Error reports a provider rejection with a stable, non-sensitive code.

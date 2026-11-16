@@ -19,7 +19,9 @@ type fakeRepository struct {
 	mailboxes map[uint]*domain.Mailbox
 	messages  map[uint]*domain.MailMessage
 	events    map[uint][]domain.MailEvent
-	nextID    uint
+	// attachments holds the stored files of each message, with content.
+	attachments map[uint][]domain.MailAttachment
+	nextID      uint
 	// hideIdempotencyLookup simulates a concurrent request that stores its message between
 	// this request's lookup and its insert.
 	hideIdempotencyLookup bool
@@ -33,9 +35,10 @@ var _ domain.MailboxRepository = (*fakeRepository)(nil)
 
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
-		mailboxes: map[uint]*domain.Mailbox{},
-		messages:  map[uint]*domain.MailMessage{},
-		events:    map[uint][]domain.MailEvent{},
+		mailboxes:   map[uint]*domain.Mailbox{},
+		messages:    map[uint]*domain.MailMessage{},
+		events:      map[uint][]domain.MailEvent{},
+		attachments: map[uint][]domain.MailAttachment{},
 	}
 }
 
@@ -132,9 +135,34 @@ func (r *fakeRepository) CreateMessage(_ context.Context, message *domain.MailMe
 		}
 	}
 	message.ID = r.id()
+	message.AttachmentCount = len(message.Attachments)
+	for i := range message.Attachments {
+		message.Attachments[i].ID, message.Attachments[i].MessageID = r.id(), message.ID
+		message.Attachments[i].Size = len(message.Attachments[i].Content)
+	}
+	r.attachments[message.ID] = append([]domain.MailAttachment(nil), message.Attachments...)
 	stored := *message
+	stored.Attachments = nil
 	r.messages[message.ID] = &stored
 	return true, nil
+}
+
+func (r *fakeRepository) ListMessageAttachments(_ context.Context, messageID uint) ([]domain.MailAttachment, error) {
+	listed := make([]domain.MailAttachment, 0, len(r.attachments[messageID]))
+	for _, attachment := range r.attachments[messageID] {
+		attachment.Content = nil
+		listed = append(listed, attachment)
+	}
+	return listed, nil
+}
+
+func (r *fakeRepository) FindMessageAttachment(_ context.Context, messageID, id uint) (*domain.MailAttachment, error) {
+	for _, attachment := range r.attachments[messageID] {
+		if attachment.ID == id {
+			return &attachment, nil
+		}
+	}
+	return nil, ErrMailMessageNotFound
 }
 
 func (r *fakeRepository) FindMessageByIdempotencyKey(_ context.Context, mailboxID uint, key string) (*domain.MailMessage, error) {
@@ -788,8 +816,8 @@ func TestSendFromAddressUsesOnlyTheOrganizationsMailbox(t *testing.T) {
 }
 
 func TestSendFingerprintSeparatesFieldBoundaries(t *testing.T) {
-	a := sendFingerprint([]string{"a@x.io"}, nil, "ab", "c", "", "")
-	b := sendFingerprint([]string{"a@x.io"}, nil, "a", "bc", "", "")
+	a := sendFingerprint([]string{"a@x.io"}, nil, "ab", "c", "", "", "")
+	b := sendFingerprint([]string{"a@x.io"}, nil, "a", "bc", "", "", "")
 	if a == b {
 		t.Fatal("moving text between subject and body kept the same fingerprint")
 	}

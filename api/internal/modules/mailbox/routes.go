@@ -28,6 +28,9 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.messages.store").WhereNumber("mailbox_id")
 		auth.GET("/mailboxes/:mailbox_id/messages/:message_id", h.GetMessage).
 			Name("mailboxes.messages.show").WhereNumber("mailbox_id").WhereNumber("message_id")
+		auth.GET("/mailboxes/:mailbox_id/messages/:message_id/attachments/:attachment_id", h.DownloadAttachment).
+			Name("mailboxes.messages.attachments.show").
+			WhereNumber("mailbox_id").WhereNumber("message_id").WhereNumber("attachment_id")
 		auth.PUT("/mailboxes/:mailbox_id/messages/:message_id", h.UpdateMessage).
 			Name("mailboxes.messages.update").WhereNumber("mailbox_id").WhereNumber("message_id")
 		auth.DELETE("/mailboxes/:mailbox_id/messages/:message_id", h.DeleteMessage).

@@ -20,6 +20,16 @@ type SendMailMessageRequest struct {
 	Text      string   `json:"text" binding:"max=262144"`
 	HTML      string   `json:"html" binding:"max=262144"`
 	InReplyTo string   `json:"in_reply_to" binding:"max=900"`
+	// Attachments are optional files; content is standard base64. The decoded total is bounded
+	// by the service.
+	Attachments []MailAttachmentRequest `json:"attachments" binding:"omitempty,max=10,dive"`
+}
+
+// MailAttachmentRequest is one file to attach to an outbound message.
+type MailAttachmentRequest struct {
+	Filename    string `json:"filename" binding:"required,max=255"`
+	ContentType string `json:"content_type" binding:"max=127"`
+	Content     string `json:"content" binding:"required"`
 }
 
 // SendOutboundMailRequest asks to send one message with an API key. From names one of the key
@@ -30,7 +40,12 @@ type SendOutboundMailRequest struct {
 }
 
 func (r SendMailMessageRequest) input(idempotencyKey string) SendInput {
+	attachments := make([]AttachmentInput, 0, len(r.Attachments))
+	for _, attachment := range r.Attachments {
+		attachments = append(attachments, AttachmentInput(attachment))
+	}
 	return SendInput{
+		Attachments:    attachments,
 		To:             r.To,
 		Cc:             r.Cc,
 		Subject:        r.Subject,
@@ -124,8 +139,10 @@ type MailMessageSummaryResponse struct {
 	Read        bool                `json:"read"`
 	FailureCode string              `json:"failure_code"`
 	// LastEvent summarizes the delivery events of an outbound message; empty when there are none.
-	LastEvent string    `json:"last_event"`
-	CreatedAt time.Time `json:"created_at"`
+	LastEvent string `json:"last_event"`
+	// AttachmentCount is how many files the message has; the detail lists them.
+	AttachmentCount int       `json:"attachment_count"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // MailMessageResponse is the full shape of a message.
@@ -137,6 +154,29 @@ type MailMessageResponse struct {
 	InReplyTo string `json:"in_reply_to"`
 	// Events is the delivery history of an outbound message, oldest first.
 	Events []MailEventResponse `json:"events"`
+	// Attachments lists the files of the message without their content.
+	Attachments []MailAttachmentResponse `json:"attachments"`
+}
+
+// MailAttachmentResponse describes one attached file. The content is downloaded separately.
+type MailAttachmentResponse struct {
+	ID          uint   `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Size        int    `json:"size"`
+}
+
+func toMailAttachmentResponses(attachments []domain.MailAttachment) []MailAttachmentResponse {
+	responses := make([]MailAttachmentResponse, 0, len(attachments))
+	for _, attachment := range attachments {
+		responses = append(responses, MailAttachmentResponse{
+			ID:          attachment.ID,
+			Filename:    attachment.Filename,
+			ContentType: attachment.ContentType,
+			Size:        attachment.Size,
+		})
+	}
+	return responses
 }
 
 // MailEventResponse is one delivery step of a message.
@@ -203,18 +243,19 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		cc = []string{}
 	}
 	return MailMessageSummaryResponse{
-		ID:          message.ID,
-		MailboxID:   message.MailboxID,
-		Direction:   string(message.Direction),
-		Status:      string(message.Status),
-		From:        MailAddressResponse{Address: message.FromAddress, Name: message.FromName},
-		To:          to,
-		Cc:          cc,
-		Subject:     message.Subject,
-		Read:        message.ReadAt != nil,
-		FailureCode: message.FailureCode,
-		LastEvent:   string(message.LastEvent),
-		CreatedAt:   message.CreatedAt,
+		ID:              message.ID,
+		MailboxID:       message.MailboxID,
+		Direction:       string(message.Direction),
+		Status:          string(message.Status),
+		From:            MailAddressResponse{Address: message.FromAddress, Name: message.FromName},
+		To:              to,
+		Cc:              cc,
+		Subject:         message.Subject,
+		Read:            message.ReadAt != nil,
+		FailureCode:     message.FailureCode,
+		LastEvent:       string(message.LastEvent),
+		AttachmentCount: message.AttachmentCount,
+		CreatedAt:       message.CreatedAt,
 	}
 }
 
@@ -237,5 +278,6 @@ func toMailMessageResponse(message *domain.MailMessage) *MailMessageResponse {
 		MessageID:                  message.MessageID,
 		InReplyTo:                  message.InReplyTo,
 		Events:                     toMailEventResponses(message.Events),
+		Attachments:                toMailAttachmentResponses(message.Attachments),
 	}
 }

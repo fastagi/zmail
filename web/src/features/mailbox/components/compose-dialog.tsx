@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { AlertCircle, Send } from 'lucide-react';
+import { useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { AlertCircle, Paperclip, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -18,10 +18,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { fileToBase64, formatBytes } from '@/features/mailbox/components/mail-attachments';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import {
+  MAIL_ATTACHMENTS_MAX_BYTES,
+  MAIL_MAX_ATTACHMENTS,
   MAIL_SUBJECT_MAX_LENGTH,
   normalizeMailMessage,
   splitRecipients,
@@ -83,7 +86,21 @@ export function ComposeDialog({
   const [cc, setCc] = useState('');
   const [subject, setSubject] = useState(draft.subject);
   const [body, setBody] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attachHintId = useId();
+  const filesTooMany = files.length > MAIL_MAX_ATTACHMENTS;
+  const filesTooLarge =
+    files.reduce((total, file) => total + file.size, 0) > MAIL_ATTACHMENTS_MAX_BYTES;
+
+  const addFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const chosen = Array.from(event.target.files ?? []);
+    // Clear the input so the same file can be chosen again after it is removed.
+    event.target.value = '';
+    setErrorKey(null);
+    setFiles(current => [...current, ...chosen]);
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -99,13 +116,25 @@ export function ComposeDialog({
       setErrorKey('errors.messageInvalid');
       return;
     }
+    if (filesTooMany || filesTooLarge || files.some(file => file.size === 0)) {
+      setErrorKey('errors.attachmentsInvalid');
+      return;
+    }
     try {
+      const attachments = await Promise.all(
+        files.map(async file => ({
+          filename: file.name,
+          ...(file.type ? { content_type: file.type } : {}),
+          content: await fileToBase64(file),
+        }))
+      );
       await send.mutateAsync({
         to: normalized.to,
         ...(normalized.cc.length > 0 ? { cc: normalized.cc } : {}),
         subject: normalized.subject,
         text: normalized.text,
         ...(normalized.in_reply_to === '' ? {} : { in_reply_to: normalized.in_reply_to }),
+        ...(attachments.length > 0 ? { attachments } : {}),
       });
       toast.success(t('messages.sent'));
       onStored();
@@ -194,6 +223,71 @@ export function ComposeDialog({
                 disabled={send.isPending}
                 onChange={event => setBody(event.target.value)}
               />
+            </div>
+            <div className="space-y-2">
+              <input
+                ref={fileInput}
+                id="mail-compose-files"
+                type="file"
+                multiple
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={addFiles}
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={send.isPending}
+                  icon={<Paperclip className="size-4" />}
+                  aria-describedby={attachHintId}
+                  onClick={() => fileInput.current?.click()}
+                >
+                  {t('compose.attach')}
+                </Button>
+                <p
+                  id={attachHintId}
+                  className={cn(
+                    'text-xs',
+                    filesTooMany || filesTooLarge ? 'text-error' : 'text-muted-foreground'
+                  )}
+                >
+                  {t('compose.attachHint')}
+                </p>
+              </div>
+              {files.length > 0 ? (
+                <ul className="divide-y rounded-md border text-sm">
+                  {files.map((file, index) => (
+                    // A list the user edits by position; two files may share a name.
+                    <li key={index} className="flex items-center gap-3 px-3 py-1.5">
+                      <Paperclip
+                        className="size-4 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 flex-1 truncate" title={file.name}>
+                        {file.name}
+                      </span>
+                      <span className="text-xs whitespace-nowrap text-muted-foreground">
+                        {formatBytes(file.size)}
+                      </span>
+                      <Button
+                        type="button"
+                        size="xs"
+                        isIcon
+                        variant="ghost"
+                        disabled={send.isPending}
+                        icon={<X className="size-3.5" />}
+                        aria-label={t('compose.removeAttachment', { name: file.name })}
+                        onClick={() =>
+                          setFiles(current => current.filter((_, position) => position !== index))
+                        }
+                      />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
             {errorKey ? (
               <Alert variant="destructive">

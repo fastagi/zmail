@@ -23,7 +23,7 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{}, &MailMessageEventPO{})
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{}, &MailMessageEventPO{}, &MailAttachmentPO{})
 	return NewRepository(db), db
 }
 
@@ -633,5 +633,74 @@ func TestRepositoryTransactionCommitsOrRollsBackTogether(t *testing.T) {
 	stored, err = repo.FindMessage(ctx, mailbox.ID, message.ID)
 	if err != nil || stored.Status != domain.MailStatusSent || stored.LastEvent != domain.MailEventAccepted {
 		t.Fatalf("after commit message = %+v, %v", stored, err)
+	}
+}
+
+func TestRepositoryStoresAttachmentsWithTheirMessage(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	mailbox := createMailbox(t, repo, "files@mail.example")
+	message := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusQueued,
+		FromAddress: mailbox.Address, To: []string{"bob@example.com"}, Subject: "Files",
+		Attachments: []domain.MailAttachment{
+			{Filename: "a.pdf", ContentType: "application/pdf", Content: []byte("%PDF-1.4")},
+			{Filename: "b.bin", ContentType: "application/octet-stream", Content: []byte{0, 1, 2, 0xff}},
+		},
+	}
+	if created, err := repo.CreateMessage(ctx, message); err != nil || !created {
+		t.Fatalf("CreateMessage = %v, %v", created, err)
+	}
+	if message.AttachmentCount != 2 || message.Attachments[0].ID == 0 {
+		t.Fatalf("message = %+v", message)
+	}
+
+	stored, err := repo.FindMessage(ctx, mailbox.ID, message.ID)
+	if err != nil || stored.AttachmentCount != 2 {
+		t.Fatalf("FindMessage = %+v, %v", stored, err)
+	}
+	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, domain.MailLogFilter{})
+	if err != nil || len(listed) != 1 || listed[0].AttachmentCount != 2 {
+		t.Fatalf("log = %+v, %v", listed, err)
+	}
+	attachments, err := repo.ListMessageAttachments(ctx, message.ID)
+	if err != nil || len(attachments) != 2 || attachments[0].Filename != "a.pdf" || attachments[0].Size != 8 ||
+		attachments[0].Content != nil {
+		t.Fatalf("ListMessageAttachments = %+v, %v; want metadata without content", attachments, err)
+	}
+	file, err := repo.FindMessageAttachment(ctx, message.ID, attachments[1].ID)
+	if err != nil || string(file.Content) != string([]byte{0, 1, 2, 0xff}) {
+		t.Fatalf("FindMessageAttachment = %+v, %v", file, err)
+	}
+	if _, err := repo.FindMessageAttachment(ctx, message.ID+1, attachments[1].ID); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("attachment under another message error = %v", err)
+	}
+
+	// A repeated inbound delivery stores neither the message nor its files again.
+	inbound := func() *domain.MailMessage {
+		return &domain.MailMessage{
+			MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
+			FromAddress: "a@sender.test", Subject: "In", DedupeKey: "dedupe-files",
+			Attachments: []domain.MailAttachment{{Filename: "in.txt", ContentType: "text/plain", Content: []byte("in")}},
+		}
+	}
+	first := inbound()
+	if created, err := repo.CreateInboundMessage(ctx, first); err != nil || !created {
+		t.Fatalf("CreateInboundMessage = %v, %v", created, err)
+	}
+	if created, err := repo.CreateInboundMessage(ctx, inbound()); err != nil || created {
+		t.Fatalf("repeated CreateInboundMessage = %v, %v", created, err)
+	}
+	var count int64
+	if err := db.Model(&MailAttachmentPO{}).Where("message_id = ?", first.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("inbound attachments = %d, %v; want 1", count, err)
+	}
+
+	if err := repo.DeleteMessage(ctx, mailbox.ID, message.ID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	if err := db.Model(&MailAttachmentPO{}).Where("message_id = ?", message.ID).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("attachments after deleting the message = %d, %v; want 0", count, err)
 	}
 }

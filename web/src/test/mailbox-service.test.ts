@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  attachmentsWithinLimits,
+  base64DecodedLength,
   mailDayStatsListSchema,
   mailLogEntrySchema,
   mailLogPageEnvelopeSchema,
@@ -408,6 +410,38 @@ describe('mailbox service boundary', () => {
   });
 });
 
+describe('attachment limits', () => {
+  it('measures base64 and applies the contract limits', () => {
+    expect(base64DecodedLength('')).toBeNull();
+    expect(base64DecodedLength('YQ==')).toBe(1);
+    expect(base64DecodedLength('YWI=')).toBe(2);
+    expect(base64DecodedLength('YWJj')).toBe(3);
+    expect(base64DecodedLength('YWJ')).toBeNull();
+    expect(base64DecodedLength('YW J')).toBeNull();
+
+    const file = { filename: 'a.txt', content: 'YQ==' };
+    expect(attachmentsWithinLimits([])).toBe(true);
+    expect(attachmentsWithinLimits([file])).toBe(true);
+    expect(attachmentsWithinLimits(Array.from({ length: 10 }, () => file))).toBe(true);
+    expect(attachmentsWithinLimits(Array.from({ length: 11 }, () => file))).toBe(false);
+    expect(attachmentsWithinLimits([{ ...file, filename: 'dir/' }])).toBe(false);
+    expect(attachmentsWithinLimits([{ ...file, content: '' }])).toBe(false);
+    const big = 'A'.repeat(((4 * 1_024 * 1_024) / 3) * 4 + 4);
+    expect(attachmentsWithinLimits([{ ...file, content: big }])).toBe(false);
+  });
+
+  it('accepts attachment metadata and rejects attachment content in a message', () => {
+    const attachment = { id: 3, filename: 'a.pdf', content_type: 'application/pdf', size: 8 };
+    expect(
+      parseMailMessage({ ...message(), attachment_count: 1, attachments: [attachment] }, 7)
+    ).toMatchObject({ attachments: [attachment] });
+    expect(() =>
+      parseMailMessage({ ...message(), attachments: [{ ...attachment, content: 'YQ==' }] }, 7)
+    ).toThrow(ApiError);
+    expect(() => parseMailMessage({ ...message(), attachments: undefined }, 7)).toThrow(ApiError);
+  });
+});
+
 function domain(overrides: Record<string, unknown> = {}) {
   return {
     domain: 'mail.example.com',
@@ -432,6 +466,7 @@ function summary() {
     read: false,
     failure_code: '',
     last_event: '',
+    attachment_count: 0,
     created_at: '2026-11-16T10:00:00.123456+08:00',
   };
 }
@@ -444,6 +479,7 @@ function message() {
     message_id: 'previous-id@example.com',
     in_reply_to: '',
     events: [],
+    attachments: [],
   };
 }
 

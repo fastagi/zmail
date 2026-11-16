@@ -28,6 +28,11 @@ export const MAIL_PAGE_MAX_SIZE = 100;
 export const MAIL_LOG_QUERY_MAX_LENGTH = 200;
 export const MAIL_STATS_DEFAULT_DAYS = 7;
 export const MAIL_STATS_MAX_DAYS = 90;
+export const MAIL_MAX_ATTACHMENTS = 10;
+/** Decoded size of all attachments of one message. */
+export const MAIL_ATTACHMENTS_MAX_BYTES = 4 * 1_024 * 1_024;
+export const MAIL_ATTACHMENT_NAME_MAX_LENGTH = 255;
+export const MAIL_ATTACHMENT_TYPE_MAX_LENGTH = 127;
 
 const localPartPattern = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/u;
 const recipientPattern = /^[^\s@<>"(),:;\\[\]]+@[^\s@<>"(),:;\\[\]]+\.[^\s@<>"(),:;\\[\]]+$/u;
@@ -105,8 +110,17 @@ const summaryShape = {
   read: boolean(),
   failure_code: string(),
   last_event: mailEventSummarySchema,
+  attachment_count: nonnegativeIntegerSchema,
   created_at: timestampSchema,
 };
+
+/** An attached file as listed in a message; the bytes are downloaded separately. */
+export const mailAttachmentSchema = strictObject({
+  id: safeIdSchema,
+  filename: string(),
+  content_type: string(),
+  size: nonnegativeIntegerSchema,
+});
 
 /** `recipient` is '' for a message-level event; `detail` holds short machine-readable tokens. */
 export const mailEventSchema = strictObject({
@@ -126,6 +140,7 @@ export const mailMessageSchema = strictObject({
   in_reply_to: string(),
   // Oldest first; always empty for inbound messages.
   events: array(mailEventSchema),
+  attachments: array(mailAttachmentSchema),
 });
 
 const pageMetaSchema = strictObject({
@@ -184,7 +199,51 @@ export const sendMailMessageSchema = strictObject({
   text: optional(string()),
   html: optional(string()),
   in_reply_to: optional(string()),
+  attachments: optional(array(mailAttachmentInputSchema())),
 });
+
+/** A file to send; `content` is standard base64. */
+function mailAttachmentInputSchema() {
+  return strictObject({
+    filename: string(),
+    content_type: optional(string()),
+    content: string(),
+  });
+}
+
+/** The decoded byte length of standard base64, or null when the text is not base64. */
+export function base64DecodedLength(content: string): number | null {
+  if (
+    content.length === 0 ||
+    content.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/u.test(content)
+  ) {
+    return null;
+  }
+  const padding = content.endsWith('==') ? 2 : content.endsWith('=') ? 1 : 0;
+  return (content.length / 4) * 3 - padding;
+}
+
+/**
+ * The contract's limits for files to send: at most 10, each with a usable name and base64 content,
+ * all together at most 4 MiB decoded. Returns false for files the API would answer with
+ * `MAILBOX.MESSAGE_INVALID`.
+ */
+export function attachmentsWithinLimits(
+  attachments: readonly { filename: string; content: string }[]
+): boolean {
+  if (attachments.length > MAIL_MAX_ATTACHMENTS) return false;
+  let total = 0;
+  for (const attachment of attachments) {
+    const name = attachment.filename.replaceAll('\\', '/').split('/').pop()?.trim() ?? '';
+    if (name === '' || name === '.' || name === '..') return false;
+    const size = base64DecodedLength(attachment.content);
+    if (size === null || size === 0) return false;
+    total += size;
+    if (total > MAIL_ATTACHMENTS_MAX_BYTES) return false;
+  }
+  return true;
+}
 
 export const updateMailMessageSchema = strictObject({ read: boolean() });
 

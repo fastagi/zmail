@@ -47,7 +47,14 @@ const navigation = vi.hoisted(() => {
   };
 });
 
+const downloadAttachment = vi.hoisted(() => vi.fn());
+
 vi.mock('sonner', () => ({ toast }));
+vi.mock('@/features/mailbox/services/mailbox-service', async importOriginal => {
+  const original =
+    await importOriginal<typeof import('@/features/mailbox/services/mailbox-service')>();
+  return { ...original, mailboxService: { ...original.mailboxService, downloadAttachment } };
+});
 vi.mock('next/navigation', async () => {
   const { useSyncExternalStore } = await import('react');
   const router = { replace: navigation.replace };
@@ -625,6 +632,88 @@ describe('mailbox workspace', () => {
     expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'outbound', page: 1 });
   });
 
+  it('attaches files as base64, lets one be removed, and refuses too many', async () => {
+    state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
+    fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Files' } });
+    fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Attached.' } });
+
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error('missing file input');
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(['hello'], 'notes.txt', { type: 'text/plain' }),
+          new File(['drop me'], 'drop.bin'),
+        ],
+      },
+    });
+    expect(within(dialog).getByText('notes.txt')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove drop.bin' }));
+    expect(within(dialog).queryByText('drop.bin')).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+    await waitFor(() =>
+      expect(state.send.mutateAsync).toHaveBeenCalledWith({
+        to: ['bob@example.com'],
+        subject: 'Files',
+        text: 'Attached.',
+        attachments: [{ filename: 'notes.txt', content_type: 'text/plain', content: 'aGVsbG8=' }],
+      })
+    );
+  });
+
+  it('does not send more than ten files', async () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
+    fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Files' } });
+    fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Attached.' } });
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error('missing file input');
+    fireEvent.change(input, {
+      target: { files: Array.from({ length: 11 }, (_, index) => new File(['x'], `f${index}.txt`)) },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    expect(
+      await within(dialog).findByText('Attach at most 10 non-empty files, 4 MB in total.')
+    ).toBeInTheDocument();
+    expect(state.send.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('lists the files of a message and downloads one on request', async () => {
+    const attachment = {
+      id: 5,
+      filename: 'report.pdf',
+      content_type: 'application/pdf',
+      size: 2_048,
+    };
+    state.inbox.data = page([summary({ id: 11, subject: 'Unread question', attachment_count: 1 })]);
+    state.detail.data = message({ attachment_count: 1, attachments: [attachment] });
+    downloadAttachment.mockResolvedValue(undefined);
+    renderWorkspace();
+
+    expect(screen.getByRole('img', { name: 'Attachments: 1' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    expect(screen.getByRole('heading', { name: 'Attachments' })).toBeInTheDocument();
+    expect(screen.getByText('report.pdf')).toBeInTheDocument();
+    expect(screen.getByText('2.0 KB')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download report.pdf' }));
+    await waitFor(() => expect(downloadAttachment).toHaveBeenCalledWith(1, 1, 11, attachment));
+
+    downloadAttachment.mockRejectedValueOnce(new Error('network'));
+    fireEvent.click(screen.getByRole('button', { name: 'Download report.pdf' }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('The file could not be downloaded. Try again.')
+    );
+  });
+
   it('says a rejected send was not delivered and is kept in Sent as failed', async () => {
     state.send.mutateAsync.mockRejectedValue(
       new ApiError('provider said no', ApiErrorCode.MAILBOX_DELIVERY_FAILED, 502)
@@ -754,6 +843,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     read: false,
     failure_code: '',
     last_event: '',
+    attachment_count: 0,
     created_at: now(),
     ...overrides,
   };
@@ -767,6 +857,7 @@ function message(overrides: Record<string, unknown> = {}) {
     message_id: 'question-1@example.com',
     in_reply_to: '',
     events: [],
+    attachments: [],
     ...overrides,
   };
 }

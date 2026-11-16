@@ -69,6 +69,7 @@ import {
   type EmailLogView,
 } from '@/features/mailbox/utils/email-log-view';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
+import { AttachmentIndicator } from '@/features/mailbox/components/mail-attachments';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -560,6 +561,7 @@ function EmailTable({
                     </span>
                   </TableCell>
                   <TableCell className={cn('max-w-72 truncate', unread && 'font-medium')}>
+                    <AttachmentIndicator count={entry.attachment_count} />{' '}
                     {entry.subject || t('list.noSubject')}
                   </TableCell>
                   <TableCell className="max-w-56 truncate text-muted-foreground">
