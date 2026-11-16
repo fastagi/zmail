@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/starter/assembly"
+	"github.com/fastagi/zmail/api/internal/starter/assembly"
 )
 
 // MarkdownCatalog renders every default and optional starter as a Markdown table from the same

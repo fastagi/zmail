@@ -3,10 +3,10 @@ package mailbox
 import (
 	"github.com/google/wire"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/mailtransport"
-	"github.com/fastagi/fastmail/api/internal/starter/assembly"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
+	"github.com/fastagi/zmail/api/internal/starter/assembly"
 )
 
 // ProviderSet is the provider set for this starter.

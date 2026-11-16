@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/infra/projectfiles"
+	"github.com/fastagi/zmail/api/internal/infra/projectfiles"
 )
 
 // ConflictMarker starts the local side of an unresolved merge written by update.

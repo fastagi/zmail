@@ -3,12 +3,12 @@ package permission
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/starter/assembly"
-	"github.com/fastagi/fastmail/api/pkg/handler"
-	"github.com/fastagi/fastmail/api/pkg/pagination"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/starter/assembly"
+	"github.com/fastagi/zmail/api/pkg/handler"
+	"github.com/fastagi/zmail/api/pkg/pagination"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // Handler owns permission starter HTTP routes.

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/fastagi/fastmail/api/internal/infra/email"
+	"github.com/fastagi/zmail/api/internal/infra/email"
 )
 
 // mailService is every email.Service method that starter mail seams use. Both the real service and

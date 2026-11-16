@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/fastagi/fastmail/api/database/migrations"
-	"github.com/fastagi/fastmail/api/database/seeders"
-	"github.com/fastagi/fastmail/api/internal/infra/events"
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
-	"github.com/fastagi/fastmail/api/internal/infra/router"
-	"github.com/fastagi/fastmail/api/internal/starter/assembly"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/database/migrations"
+	"github.com/fastagi/zmail/api/database/seeders"
+	"github.com/fastagi/zmail/api/internal/infra/events"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
+	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/starter/assembly"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // Registry is the single assembly point for active default and optional starters.

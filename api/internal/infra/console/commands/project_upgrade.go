@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/infra/pluginregistry"
-	"github.com/fastagi/fastmail/api/internal/infra/projectfiles"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/pluginregistry"
+	"github.com/fastagi/zmail/api/internal/infra/projectfiles"
 )
 
 // ProjectUpgradeCommand moves an initialized project to a newer FastBuild release, keeping the

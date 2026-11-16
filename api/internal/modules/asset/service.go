@@ -15,11 +15,11 @@ import (
 
 	"github.com/google/uuid"
 
-	storagecap "github.com/fastagi/fastmail/api/internal/capabilities/storage"
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	auditstarter "github.com/fastagi/fastmail/api/internal/modules/audit"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	storagecap "github.com/fastagi/zmail/api/internal/capabilities/storage"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 )
 
 const (

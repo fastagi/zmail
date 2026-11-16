@@ -12,11 +12,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/capabilities/crypto"
-	"github.com/fastagi/fastmail/api/internal/capabilities/idgen"
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/events"
-	auditstarter "github.com/fastagi/fastmail/api/internal/modules/audit"
+	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
+	"github.com/fastagi/zmail/api/internal/capabilities/idgen"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/events"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 // AuthService defines the authentication and public account flows.

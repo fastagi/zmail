@@ -3,7 +3,7 @@ package usage
 import (
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // UsageSummaryResponse is one bounded current-period browser summary.

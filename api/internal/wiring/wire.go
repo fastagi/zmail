@@ -4,10 +4,10 @@
 package wiring
 
 import (
-	"github.com/fastagi/fastmail/api/internal/app"
-	"github.com/fastagi/fastmail/api/internal/infra"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/internal/app"
+	"github.com/fastagi/zmail/api/internal/infra"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/starter"
 	"github.com/google/wire"
 )
 

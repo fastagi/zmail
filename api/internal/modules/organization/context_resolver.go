@@ -9,10 +9,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	auditstarter "github.com/fastagi/fastmail/api/internal/modules/audit"
-	httphandler "github.com/fastagi/fastmail/api/pkg/handler"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/internal/domain"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
+	httphandler "github.com/fastagi/zmail/api/pkg/handler"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // OrganizationIDHeader selects the organization for one context-protected request.

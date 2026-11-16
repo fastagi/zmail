@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	pkgenv "github.com/fastagi/fastmail/api/pkg/env"
+	pkgenv "github.com/fastagi/zmail/api/pkg/env"
 )
 
 var envExampleKey = regexp.MustCompile(`^#?\s*([A-Z][A-Z0-9_]*)=`)

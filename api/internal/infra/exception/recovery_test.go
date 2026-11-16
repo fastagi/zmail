@@ -12,13 +12,13 @@ import (
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	infraDatabase "github.com/fastagi/fastmail/api/internal/infra/database"
-	"github.com/fastagi/fastmail/api/internal/infra/exception"
-	infraMiddleware "github.com/fastagi/fastmail/api/internal/infra/middleware"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
-	"github.com/fastagi/fastmail/api/internal/infra/tracing"
-	"github.com/fastagi/fastmail/api/pkg/logger"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	infraDatabase "github.com/fastagi/zmail/api/internal/infra/database"
+	"github.com/fastagi/zmail/api/internal/infra/exception"
+	infraMiddleware "github.com/fastagi/zmail/api/internal/infra/middleware"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/infra/tracing"
+	"github.com/fastagi/zmail/api/pkg/logger"
 )
 
 func TestRecoveryRendersDebugPageWithRouteTraceSQLAndLogs(t *testing.T) {

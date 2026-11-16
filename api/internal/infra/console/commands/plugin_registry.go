@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/infra/pluginregistry"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/pluginregistry"
 )
 
 // registryDir is the official registry inside the scaffold repository.

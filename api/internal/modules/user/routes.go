@@ -1,7 +1,7 @@
 package user
 
 import (
-	"github.com/fastagi/fastmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/infra/router"
 )
 
 // RegisterMiddleware registers the persistent authentication-session middleware.

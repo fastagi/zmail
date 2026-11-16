@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 )
 
 func TestSeedDefaultUsersCreatesLoginableAdmin(t *testing.T) {

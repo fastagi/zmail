@@ -6,7 +6,7 @@ Instructions for coding agents working in this monorepo.
 
 FastBuild is an AI-era scaffold, not a product application:
 
-- `api/`: Go backend (`github.com/fastagi/fastmail/api`) using Gin, Wire, GORM, and
+- `api/`: Go backend (`github.com/fastagi/zmail/api`) using Gin, Wire, GORM, and
   DDD-flavored starter modules.
 - `web/`: customer-facing Next.js 16 application with React 19, TypeScript,
   Tailwind 4, shadcn, SSR, and server-owned browser adapters.
@@ -85,8 +85,9 @@ public HTTP behavior. The nearest `AGENTS.md` wins for local implementation.
 
 1. API and browser shells never import each other's source. Browser clients
    talk to API behavior over HTTP.
-2. Keep API imports under `github.com/fastagi/fastmail/api/...`; Web uses `@/...`.
-3. Use `FastBuild` for the user-facing brand and `fastbuild` for identifiers.
+2. Keep API imports under `github.com/fastagi/zmail/api/...`; Web uses `@/...`.
+3. The product is `Zmail`: use it for the user-facing brand and `zmail` for product identifiers.
+   `FastBuild` and `fastbuild` name the scaffold underneath and its tooling.
 4. Never reintroduce the retired `LlamaFront`, `Hypership`, or `ZGO` brands.
 5. Keep starter behavior product-neutral. Downstream product behavior belongs
    outside this scaffold.

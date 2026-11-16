@@ -15,7 +15,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
 // TracerProvider wraps the OpenTelemetry tracer provider

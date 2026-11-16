@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
 func TestReadEnvKeysRejectsDuplicateKeys(t *testing.T) {

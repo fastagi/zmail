@@ -16,11 +16,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/fastagi/fastmail/api/internal/bootstrap"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/infra/tracing"
-	"github.com/fastagi/fastmail/api/internal/wiring"
+	"github.com/fastagi/zmail/api/internal/bootstrap"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/tracing"
+	"github.com/fastagi/zmail/api/internal/wiring"
 )
 
 const (

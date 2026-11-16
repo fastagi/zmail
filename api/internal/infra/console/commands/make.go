@@ -11,9 +11,9 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
-	"github.com/fastagi/fastmail/api/internal/infra/pluginregistry"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
+	"github.com/fastagi/zmail/api/internal/infra/pluginregistry"
 )
 
 // MakeModelCommand creates a new model
@@ -575,7 +575,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // {{.ModelName}}PO is the persistent object for {{.ModelName}}.
@@ -624,7 +624,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // Service defines the business interface for {{.ModelName}}.
@@ -706,11 +706,11 @@ const handlerTemplate = `package {{.PackageName}}
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/starter/assembly"
-	httphandler "github.com/fastagi/fastmail/api/pkg/handler"
-	"github.com/fastagi/fastmail/api/pkg/pagination"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/starter/assembly"
+	httphandler "github.com/fastagi/zmail/api/pkg/handler"
+	"github.com/fastagi/zmail/api/pkg/pagination"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // Handler handles HTTP requests for {{.ModelName}}.
@@ -821,7 +821,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 type repository struct {
@@ -906,7 +906,7 @@ const dtoTemplate = `package {{.PackageName}}
 import (
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // Create{{.ModelName}}Request represents the request to create a {{.ModelName}}.
@@ -981,7 +981,7 @@ func init() {
 
 const routesTemplate = `package {{.PackageName}}
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import "github.com/fastagi/zmail/api/internal/infra/router"
 
 // RegisterRoutes registers HTTP routes for the {{.Package}} starter. Every route requires a signed-in
 // user; record ownership is not enforced yet and must be added before production use.
@@ -1006,7 +1006,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 type mockRepository struct {
@@ -1067,9 +1067,9 @@ const providerTemplate = `package {{.PackageName}}
 import (
 	"github.com/google/wire"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/starter/assembly"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/starter/assembly"
 )
 
 // ProviderSet is the provider set for this starter.
@@ -1322,7 +1322,7 @@ components:
 
 const errorMappingsTemplate = `package {{.PackageName}}
 
-import "github.com/fastagi/fastmail/api/pkg/response"
+import "github.com/fastagi/zmail/api/pkg/response"
 
 // RegisterErrorMappings maps this starter's own domain errors to public status and error codes.
 // Shared errors such as domain.ErrNotFound and domain.ErrInvalidInput are already mapped by core.
@@ -1336,7 +1336,7 @@ const migrationTemplate = `package migrations
 import (
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
 )
 
 func init() {

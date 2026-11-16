@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/capabilities/crypto"
-	"github.com/fastagi/fastmail/api/internal/domain"
-	auditstarter "github.com/fastagi/fastmail/api/internal/modules/audit"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
+	"github.com/fastagi/zmail/api/internal/domain"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 )
 
 // Service defines the organization ownership kernel.

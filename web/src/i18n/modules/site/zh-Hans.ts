@@ -8,7 +8,7 @@ const messages = {
   },
   footer: {
     tagline: 'AI 时代全栈脚手架',
-    copyright: '© {year} FastBuild。保留所有权利。',
+    copyright: '© {year} Zmail。保留所有权利。',
   },
   hero: {
     eyebrow: '面向 AI 协作的企业脚手架',

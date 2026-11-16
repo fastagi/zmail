@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // DefaultMaxBuckets bounds attacker-controlled identity cardinality per store.

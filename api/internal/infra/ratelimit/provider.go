@@ -5,7 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
 // ProvideStores resolves the configured rate-limit backend for every HTTP limiter rule.

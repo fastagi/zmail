@@ -18,11 +18,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/email"
-	infraevents "github.com/fastagi/fastmail/api/internal/infra/events"
-	auditstarter "github.com/fastagi/fastmail/api/internal/modules/audit"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/email"
+	infraevents "github.com/fastagi/zmail/api/internal/infra/events"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 const (

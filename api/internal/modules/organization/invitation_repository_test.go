@@ -10,9 +10,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/fastagi/fastmail/api/internal/capabilities/crypto"
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 )
 
 func createInvitationTestOrganization(t *testing.T, db *gorm.DB, ownerID uint) *domain.Organization {

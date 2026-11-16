@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/capabilities/ai"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/capabilities/ai"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/console"
 )
 
 // AIChatCommand sends a prompt to the configured AI provider.

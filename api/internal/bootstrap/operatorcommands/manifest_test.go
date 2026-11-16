@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	infracommands "github.com/fastagi/fastmail/api/internal/infra/console/commands"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	infracommands "github.com/fastagi/zmail/api/internal/infra/console/commands"
 )
 
 func TestManifestRegistersBusinessOperatorCommands(t *testing.T) {

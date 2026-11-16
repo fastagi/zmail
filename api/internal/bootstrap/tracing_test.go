@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/tracing"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/tracing"
 )
 
 func stubTracerProvider(t *testing.T, factory func(*tracing.Config) (*tracing.TracerProvider, error)) {

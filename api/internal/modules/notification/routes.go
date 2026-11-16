@@ -1,6 +1,6 @@
 package notification
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import "github.com/fastagi/zmail/api/internal/infra/router"
 
 // RegisterRoutes attaches notification-center resources behind authentication.
 func (h *Handler) RegisterRoutes(r *router.Router) {

@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/wire"
 
-	storagecap "github.com/fastagi/fastmail/api/internal/capabilities/storage"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
+	storagecap "github.com/fastagi/zmail/api/internal/capabilities/storage"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
 // ProviderSet exposes one provider-neutral store selected from the typed startup snapshot.

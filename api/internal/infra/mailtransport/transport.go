@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
 // ErrNotConfigured means no outbound provider is configured for this process.

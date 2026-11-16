@@ -1,6 +1,6 @@
 package operatorcommands
 
-import infracommands "github.com/fastagi/fastmail/api/internal/infra/console/commands"
+import infracommands "github.com/fastagi/zmail/api/internal/infra/console/commands"
 
 // Manifest returns business-aware operator commands assembled outside infrastructure packages.
 func Manifest() infracommands.Manifest {

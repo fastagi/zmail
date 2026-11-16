@@ -8,9 +8,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/infra/events"
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
-	"github.com/fastagi/fastmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/internal/infra/events"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
+	"github.com/fastagi/zmail/api/internal/starter"
 )
 
 // MigrationStatus represents the status of a migration.

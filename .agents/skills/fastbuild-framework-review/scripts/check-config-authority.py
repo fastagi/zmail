@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[4]
-ENV_IMPORT = "github.com/fastagi/fastmail/api/pkg/env"
+ENV_IMPORT = "github.com/fastagi/zmail/api/pkg/env"
 
 
 def read(relative_path: str) -> str:

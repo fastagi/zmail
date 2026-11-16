@@ -1,5 +1,5 @@
 {
-  "name": "fastmail-admin",
+  "name": "zmail-admin",
   "version": "0.1.0",
   "description": "FastBuild project management system, delivered as a static Vite application.",
   "private": true,

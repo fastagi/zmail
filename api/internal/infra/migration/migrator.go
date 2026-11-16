@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 	gormLogger "gorm.io/gorm/logger"
 
-	"github.com/fastagi/fastmail/api/internal/infra/events"
+	"github.com/fastagi/zmail/api/internal/infra/events"
 )
 
 // Migrator coordinates all migration operations including run, rollback, and reset.

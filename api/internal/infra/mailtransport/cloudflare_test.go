@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
 func cloudflareAgainst(t *testing.T, handler http.HandlerFunc) *Cloudflare {

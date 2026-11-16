@@ -1,5 +1,5 @@
 # syntax=docker.io/docker/dockerfile:1.24.0@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
-ARG OCI_SOURCE=https://github.com/fastagi/fastmail
+ARG OCI_SOURCE=https://github.com/fastagi/zmail
 ARG OCI_REVISION=unknown
 ARG OCI_VERSION=dev
 

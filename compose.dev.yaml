@@ -1,6 +1,6 @@
 # Local development database for `make dev`. The API, Web, and Admin processes run on the host so
 # they reload quickly; only PostgreSQL runs in a container. Never use these values in production.
-name: fastmail-dev
+name: zmail-dev
 
 services:
   postgres:

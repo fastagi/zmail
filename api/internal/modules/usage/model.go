@@ -3,8 +3,8 @@ package usage
 import (
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/modules/organization"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	"github.com/fastagi/zmail/api/internal/modules/organization"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 )
 
 const (

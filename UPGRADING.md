@@ -81,7 +81,7 @@ redirects the old repository URL, but code and configuration must use the new na
 
 | Area | Before | After |
 |---|---|---|
-| Go module | `github.com/zgiai/luas/api` | `github.com/fastagi/fastmail/api` |
+| Go module | `github.com/zgiai/luas/api` | `github.com/fastagi/zmail/api` |
 | CLI and image binary | `luas`, `/app/luas` | `fastbuild`, `/app/fastbuild` |
 | Environment variable prefix | `LUAS_` (for example `LUAS_ENV_FILE`) | `FASTBUILD_` |
 | Operator session cookie | `__Host-luas_operator` / `luas_operator` | `__Host-fastbuild_operator` / `fastbuild_operator` |

@@ -3,7 +3,7 @@ package organization
 import (
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
 // InvitationPolicy owns replaceable organization invitation timing policy.

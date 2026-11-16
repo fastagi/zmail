@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/infra/events"
+	"github.com/fastagi/zmail/api/internal/infra/events"
 )
 
 // testEvent for testing

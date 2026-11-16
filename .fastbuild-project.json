@@ -1,8 +1,8 @@
 {
-  "name": "FastMail",
-  "slug": "fastmail",
-  "module": "github.com/fastagi/fastmail/api",
-  "repository": "https://github.com/fastagi/fastmail",
+  "name": "Zmail",
+  "slug": "zmail",
+  "module": "github.com/fastagi/zmail/api",
+  "repository": "https://github.com/fastagi/zmail",
   "starters": [
     "organization",
     "mailbox"

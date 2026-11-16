@@ -10,8 +10,8 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/starter"
 )
 
 const (

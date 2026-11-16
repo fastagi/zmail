@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fastagi/fastmail/api/pkg/tracedhttp"
+	"github.com/fastagi/zmail/api/pkg/tracedhttp"
 )
 
 const (

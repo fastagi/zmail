@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/fastagi/fastmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/console"
 )
 
 func TestDefaultManifestsRegisterExpectedCommands(t *testing.T) {

@@ -1,6 +1,6 @@
 package usage
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import "github.com/fastagi/zmail/api/internal/infra/router"
 
 // RegisterRoutes attaches private user and active-organization usage reads.
 func (h *Handler) RegisterRoutes(r *router.Router) {

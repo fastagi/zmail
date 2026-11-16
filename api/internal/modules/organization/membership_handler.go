@@ -3,9 +3,9 @@ package organization
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/pkg/handler"
-	"github.com/fastagi/fastmail/api/pkg/pagination"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/pkg/handler"
+	"github.com/fastagi/zmail/api/pkg/pagination"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // ListMembers returns the PII-minimized directory visible to organization members.

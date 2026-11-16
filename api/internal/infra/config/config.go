@@ -13,7 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/fastagi/fastmail/api/pkg/env"
+	"github.com/fastagi/zmail/api/pkg/env"
 )
 
 // GlobalConfig stores the global configuration

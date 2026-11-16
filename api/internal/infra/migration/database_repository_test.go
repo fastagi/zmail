@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
 // setupTestDB creates an isolated PostgreSQL schema for testing.

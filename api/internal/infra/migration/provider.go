@@ -5,7 +5,7 @@ import (
 	"github.com/google/wire"
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/infra/events"
+	"github.com/fastagi/zmail/api/internal/infra/events"
 )
 
 // ProviderSet provides migration components for Wire DI.

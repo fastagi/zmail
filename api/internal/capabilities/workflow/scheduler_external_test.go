@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/capabilities/workflow"
+	"github.com/fastagi/zmail/api/internal/capabilities/workflow"
 )
 
 func TestEvent_EveryMinute(t *testing.T) {

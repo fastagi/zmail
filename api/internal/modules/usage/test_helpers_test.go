@@ -7,10 +7,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
-	"github.com/fastagi/fastmail/api/internal/modules/organization"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/modules/organization"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 )
 
 type usageTestFixture struct {

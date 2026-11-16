@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/infra/projectfiles"
+	"github.com/fastagi/zmail/api/internal/infra/projectfiles"
 )
 
 // ManifestFile is the manifest name inside each plugin directory.

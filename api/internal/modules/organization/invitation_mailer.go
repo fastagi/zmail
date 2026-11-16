@@ -6,8 +6,8 @@ import (
 	"html"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/email"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/email"
 )
 
 // InvitationMailer is the organization-owned seam for invitation delivery.

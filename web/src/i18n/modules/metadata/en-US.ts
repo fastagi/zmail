@@ -1,6 +1,6 @@
 // Metadata translations - English (US)
 const messages = {
-  title: 'FastBuild Web',
+  title: 'Zmail',
   description: 'Customer-facing web application built with Next.js, TypeScript, and Tailwind CSS',
 } as const;
 

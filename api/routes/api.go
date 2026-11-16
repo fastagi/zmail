@@ -1,8 +1,8 @@
 package routes
 
 import (
-	"github.com/fastagi/fastmail/api/internal/infra/router"
-	"github.com/fastagi/fastmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/starter"
 )
 
 // RegisterAPI registers all API routes using fluent router

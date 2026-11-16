@@ -3,7 +3,7 @@ package migrations
 import (
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
 )
 
 const workflowTasksMigration = "2026_07_31_000000_create_workflow_tasks_table"

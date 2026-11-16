@@ -1,5 +1,5 @@
-// FastMail mail edge: a Cloudflare Email Worker that hands every message Email Routing accepts
-// to the FastMail API as a signed delivery. It keeps no state and makes no routing decision; the
+// Zmail mail edge: a Cloudflare Email Worker that hands every message Email Routing accepts
+// to the Zmail API as a signed delivery. It keeps no state and makes no routing decision; the
 // API owns mailboxes and answers whether a recipient exists.
 //
 // Bindings (see wrangler.jsonc and README.md):
@@ -73,7 +73,7 @@ export async function deliver(message, env, fetcher = fetch, now = Date.now) {
       message.setReject('Message could not be processed');
       return 'rejected';
     default:
-      throw new Error(`FastMail API answered HTTP ${response.status}`);
+      throw new Error(`Zmail API answered HTTP ${response.status}`);
   }
 }
 

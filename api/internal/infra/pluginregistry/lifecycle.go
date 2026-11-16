@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/infra/projectfiles"
+	"github.com/fastagi/zmail/api/internal/infra/projectfiles"
 )
 
 // IncomingSuffix names the incoming version of a locally edited file when update cannot merge it

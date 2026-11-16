@@ -9,10 +9,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	infradatabase "github.com/fastagi/fastmail/api/internal/infra/database"
-	"github.com/fastagi/fastmail/api/internal/modules/organization"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	"github.com/fastagi/zmail/api/internal/domain"
+	infradatabase "github.com/fastagi/zmail/api/internal/infra/database"
+	"github.com/fastagi/zmail/api/internal/modules/organization"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 )
 
 type settingStore interface {

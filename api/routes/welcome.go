@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
 const welcomeHTML = `<!DOCTYPE html>
@@ -573,7 +573,7 @@ const welcomeHTML = `<!DOCTYPE html>
 				</p>
 				<div class="cta-row">
 					<a href="/v1/health" class="button button-primary">Check Health</a>
-					<a href="https://github.com/fastagi/fastmail/api" target="_blank" rel="noreferrer" class="button button-secondary">Read GitHub Docs</a>
+					<a href="https://github.com/fastagi/zmail/api" target="_blank" rel="noreferrer" class="button button-secondary">Read GitHub Docs</a>
 				</div>
 				<div class="signal-row">
 					<div class="signal">
@@ -738,7 +738,7 @@ go run ./cmd/fastbuild ai:chat "Summarize this scaffold"</pre>
 					<ul class="bullet-list">
 						<li><a href="/v1/health">Health endpoint</a><code>/v1/health</code></li>
 						<li><a href="/health/ready">Readiness probe</a><code>/health/ready</code></li>
-						<li><a href="https://github.com/fastagi/fastmail/api" target="_blank" rel="noreferrer">GitHub repository</a><code>README + source</code></li>
+						<li><a href="https://github.com/fastagi/zmail/api" target="_blank" rel="noreferrer">GitHub repository</a><code>README + source</code></li>
 						<li><span>CLI route listing</span><code>go run ./cmd/fastbuild route:list</code></li>
 					</ul>
 				</article>
@@ -748,7 +748,7 @@ go run ./cmd/fastbuild ai:chat "Summarize this scaffold"</pre>
 		<footer class="footer reveal reveal-delay-3">
 			<div>{{APP_NAME}} is a modular Go API scaffold focused on fast product starts and clean architecture seams.</div>
 			<div class="footer-links">
-				<a href="https://github.com/fastagi/fastmail/api" target="_blank" rel="noreferrer">GitHub</a>
+				<a href="https://github.com/fastagi/zmail/api" target="_blank" rel="noreferrer">GitHub</a>
 				<a href="/v1/health">Health</a>
 			</div>
 		</footer>

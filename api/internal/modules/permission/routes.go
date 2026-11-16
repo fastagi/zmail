@@ -1,6 +1,6 @@
 package permission
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import "github.com/fastagi/zmail/api/internal/infra/router"
 
 // RegisterRoutes attaches permission routes behind authentication and organization context.
 func (h *Handler) RegisterRoutes(r *router.Router) {

@@ -1,11 +1,11 @@
 package commands
 
 import (
-	"github.com/fastagi/fastmail/api/internal/bootstrap"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/infra/database"
-	"github.com/fastagi/fastmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/internal/bootstrap"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/database"
+	"github.com/fastagi/zmail/api/internal/starter"
 )
 
 // DBSeedCommand runs database seeders

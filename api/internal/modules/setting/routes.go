@@ -1,6 +1,6 @@
 package setting
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import "github.com/fastagi/zmail/api/internal/infra/router"
 
 // RegisterRoutes attaches public app, private user, and active-organization setting routes.
 func (h *Handler) RegisterRoutes(r *router.Router) {

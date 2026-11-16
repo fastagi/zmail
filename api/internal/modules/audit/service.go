@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/pkg/redact"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/pkg/redact"
 )
 
 // Service defines audit logging operations.

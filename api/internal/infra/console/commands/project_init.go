@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/infra/pluginregistry"
-	"github.com/fastagi/fastmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/pluginregistry"
+	"github.com/fastagi/zmail/api/internal/starter"
 )
 
 // The scaffold identity is assembled from parts so project:init never rewrites its own search

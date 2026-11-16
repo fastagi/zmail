@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/infra/router"
 )
 
 func init() {

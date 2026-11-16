@@ -13,12 +13,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	storagecap "github.com/fastagi/fastmail/api/internal/capabilities/storage"
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	infrastorage "github.com/fastagi/fastmail/api/internal/infra/storage"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	storagecap "github.com/fastagi/zmail/api/internal/capabilities/storage"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	infrastorage "github.com/fastagi/zmail/api/internal/infra/storage"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 )
 
 func newAssetServiceTest(t *testing.T) (*service, uint) {

@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm/logger"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/exception"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/exception"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
 func TestResolveGormLogLevel_DefaultsToInfoForDebugAndTest(t *testing.T) {

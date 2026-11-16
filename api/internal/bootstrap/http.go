@@ -19,17 +19,17 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/app"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/exception"
-	"github.com/fastagi/fastmail/api/internal/infra/health"
-	"github.com/fastagi/fastmail/api/internal/infra/metrics"
-	infraMiddleware "github.com/fastagi/fastmail/api/internal/infra/middleware"
-	"github.com/fastagi/fastmail/api/internal/infra/ratelimit"
-	"github.com/fastagi/fastmail/api/internal/infra/tracing"
-	"github.com/fastagi/fastmail/api/pkg/logger"
-	"github.com/fastagi/fastmail/api/pkg/response"
-	"github.com/fastagi/fastmail/api/routes"
+	"github.com/fastagi/zmail/api/internal/app"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/exception"
+	"github.com/fastagi/zmail/api/internal/infra/health"
+	"github.com/fastagi/zmail/api/internal/infra/metrics"
+	infraMiddleware "github.com/fastagi/zmail/api/internal/infra/middleware"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
+	"github.com/fastagi/zmail/api/internal/infra/tracing"
+	"github.com/fastagi/zmail/api/pkg/logger"
+	"github.com/fastagi/zmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/routes"
 )
 
 // HttpKernel handles HTTP server lifecycle
