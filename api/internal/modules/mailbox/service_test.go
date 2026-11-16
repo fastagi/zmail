@@ -21,6 +21,7 @@ type fakeRepository struct {
 	events    map[uint][]domain.MailEvent
 	// attachments holds the stored files of each message, with content.
 	attachments map[uint][]domain.MailAttachment
+	templates   map[uint]*domain.MailTemplate
 	nextID      uint
 	// hideIdempotencyLookup simulates a concurrent request that stores its message between
 	// this request's lookup and its insert.
@@ -31,7 +32,75 @@ type fakeRepository struct {
 	transactions          int
 }
 
-var _ domain.MailboxRepository = (*fakeRepository)(nil)
+var (
+	_ domain.MailboxRepository      = (*fakeRepository)(nil)
+	_ domain.MailTemplateRepository = (*fakeRepository)(nil)
+)
+
+func (r *fakeRepository) CreateTemplate(_ context.Context, template *domain.MailTemplate, limit int) error {
+	owned := 0
+	for _, existing := range r.templates {
+		if existing.OrganizationID != template.OrganizationID {
+			continue
+		}
+		owned++
+		if existing.Name == template.Name {
+			return ErrMailTemplateNameTaken
+		}
+	}
+	if owned >= limit {
+		return ErrMailTemplateLimitReached
+	}
+	template.ID = r.id()
+	stored := *template
+	r.templates[template.ID] = &stored
+	return nil
+}
+
+func (r *fakeRepository) ListTemplates(_ context.Context, organizationID uint) ([]*domain.MailTemplate, error) {
+	var listed []*domain.MailTemplate
+	for _, template := range r.templates {
+		if template.OrganizationID == organizationID {
+			copied := *template
+			listed = append(listed, &copied)
+		}
+	}
+	return listed, nil
+}
+
+func (r *fakeRepository) FindTemplate(_ context.Context, organizationID, id uint) (*domain.MailTemplate, error) {
+	template, ok := r.templates[id]
+	if !ok || template.OrganizationID != organizationID {
+		return nil, ErrMailTemplateNotFound
+	}
+	copied := *template
+	return &copied, nil
+}
+
+func (r *fakeRepository) UpdateTemplate(_ context.Context, template *domain.MailTemplate) error {
+	existing, ok := r.templates[template.ID]
+	if !ok || existing.OrganizationID != template.OrganizationID {
+		return ErrMailTemplateNotFound
+	}
+	for _, other := range r.templates {
+		if other.ID != template.ID && other.OrganizationID == template.OrganizationID && other.Name == template.Name {
+			return ErrMailTemplateNameTaken
+		}
+	}
+	template.CreatedBy, template.CreatedAt = existing.CreatedBy, existing.CreatedAt
+	stored := *template
+	r.templates[template.ID] = &stored
+	return nil
+}
+
+func (r *fakeRepository) DeleteTemplate(_ context.Context, organizationID, id uint) error {
+	template, ok := r.templates[id]
+	if !ok || template.OrganizationID != organizationID {
+		return ErrMailTemplateNotFound
+	}
+	delete(r.templates, id)
+	return nil
+}
 
 func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
@@ -39,6 +108,7 @@ func newFakeRepository() *fakeRepository {
 		messages:    map[uint]*domain.MailMessage{},
 		events:      map[uint][]domain.MailEvent{},
 		attachments: map[uint][]domain.MailAttachment{},
+		templates:   map[uint]*domain.MailTemplate{},
 	}
 }
 
@@ -369,7 +439,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		notifier:  &fakeNotifier{},
 		now:       time.Unix(1_800_000_000, 0).UTC(),
 	}
-	fixture.service = NewService(fixture.repo, fixture.transport, fixture.notifier, Settings{
+	fixture.service = NewService(fixture.repo, fixture.repo, fixture.transport, fixture.notifier, Settings{
 		Domain:           "mail.example",
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,

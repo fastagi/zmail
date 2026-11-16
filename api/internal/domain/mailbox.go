@@ -23,6 +23,8 @@ const (
 	MaxMailAttachmentBytes = 4 * 1024 * 1024
 	// MaxMailAttachmentNameLength bounds a stored file name.
 	MaxMailAttachmentNameLength = 255
+	// MaxMailTemplatesPerOrganization bounds how many templates one organization keeps.
+	MaxMailTemplatesPerOrganization = 200
 )
 
 // MailDirection tells whether a message arrived at or left a mailbox.
@@ -203,6 +205,8 @@ type MailMessage struct {
 	LastEvent MailEventType
 	// Events is the delivery history, oldest first. Only the detail lookup fills it.
 	Events []MailEvent
+	// TemplateID names the template the message was rendered from; zero when none was used.
+	TemplateID uint
 	// AttachmentCount is how many attachments the message has.
 	AttachmentCount int
 	// Attachments carries content when a message is being stored and metadata only when the
@@ -223,6 +227,31 @@ type MailAttachment struct {
 	Size        int
 	// Content is empty when only metadata was loaded.
 	Content []byte
+}
+
+// MailTemplate is reusable message content with variables, owned by an organization.
+type MailTemplate struct {
+	ID             uint
+	OrganizationID uint
+	Name           string
+	Subject        string
+	HTMLBody       string
+	TextBody       string
+	// SampleVariables are example values used by previews and test sends.
+	SampleVariables map[string]string
+	CreatedBy       uint
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// MailTemplateRepository stores templates. Every lookup is scoped to an organization.
+type MailTemplateRepository interface {
+	// CreateTemplate stores a template unless the organization already has limit templates.
+	CreateTemplate(ctx context.Context, template *MailTemplate, limit int) error
+	ListTemplates(ctx context.Context, organizationID uint) ([]*MailTemplate, error)
+	FindTemplate(ctx context.Context, organizationID, id uint) (*MailTemplate, error)
+	UpdateTemplate(ctx context.Context, template *MailTemplate) error
+	DeleteTemplate(ctx context.Context, organizationID, id uint) error
 }
 
 // MailMessageFilter narrows a mailbox message listing.

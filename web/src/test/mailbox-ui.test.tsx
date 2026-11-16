@@ -72,6 +72,10 @@ vi.mock('next/navigation', async () => {
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => state.organizations,
 }));
+const templateState = vi.hoisted(() => ({ data: [] as unknown[] }));
+vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
+  useMailTemplates: () => templateState,
+}));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
   const scoped = <T,>(organizationId: number, result: T): T => {
     state.organizationIds.push(organizationId);
@@ -105,6 +109,7 @@ describe('mailbox workspace', () => {
   beforeEach(() => {
     toast.success.mockReset();
     toast.error.mockReset();
+    templateState.data = [];
     navigation.replace.mockClear();
     window.history.replaceState(null, '', '/console/mailboxes');
     state.organizations.data = organizations(organization(1, 'Acme', 'owner'));
@@ -714,6 +719,66 @@ describe('mailbox workspace', () => {
     );
   });
 
+  it('sends a template with the variable values that were filled in', async () => {
+    templateState.data = [
+      {
+        id: 4,
+        name: 'Welcome',
+        subject: 'Welcome {{first_name|there}}',
+        variables: ['code', 'first_name'],
+        created_at: now(),
+        updated_at: now(),
+      },
+    ];
+    state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
+    const dialog = screen.getByRole('dialog');
+
+    fireEvent.change(within(dialog).getByLabelText('Template'), { target: { value: '4' } });
+    expect(within(dialog).queryByLabelText('Subject')).toBeNull();
+    expect(within(dialog).queryByLabelText('Message')).toBeNull();
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
+    fireEvent.change(within(dialog).getByLabelText('code'), { target: { value: ' 1234 ' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    // first_name is left empty, so the template's fallback applies.
+    await waitFor(() =>
+      expect(state.send.mutateAsync).toHaveBeenCalledWith({
+        to: ['bob@example.com'],
+        template: { id: 4, variables: { code: '1234' } },
+      })
+    );
+  });
+
+  it('explains a template send that lacks variable values', async () => {
+    templateState.data = [
+      {
+        id: 4,
+        name: 'Welcome',
+        subject: 'Hi',
+        variables: ['code'],
+        created_at: now(),
+        updated_at: now(),
+      },
+    ];
+    state.send.mutateAsync.mockRejectedValue(
+      new ApiError('missing', ApiErrorCode.MAILBOX_TEMPLATE_VARIABLES_MISSING, 422)
+    );
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Template'), { target: { value: '4' } });
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    expect(
+      await within(dialog).findByText(
+        'Some variables of the template have no value and no fallback. Fill them in and send again.'
+      )
+    ).toBeInTheDocument();
+  });
+
   it('says a rejected send was not delivered and is kept in Sent as failed', async () => {
     state.send.mutateAsync.mockRejectedValue(
       new ApiError('provider said no', ApiErrorCode.MAILBOX_DELIVERY_FAILED, 502)
@@ -844,6 +909,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     failure_code: '',
     last_event: '',
     attachment_count: 0,
+    template_id: null,
     created_at: now(),
     ...overrides,
   };

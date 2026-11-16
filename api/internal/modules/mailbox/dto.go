@@ -14,15 +14,18 @@ type CreateMailboxRequest struct {
 
 // SendMailMessageRequest asks to send one message from a mailbox.
 type SendMailMessageRequest struct {
-	To        []string `json:"to" binding:"required,min=1,max=50,dive,required,max=320"`
-	Cc        []string `json:"cc" binding:"omitempty,max=50,dive,required,max=320"`
-	Subject   string   `json:"subject" binding:"required,max=998"`
-	Text      string   `json:"text" binding:"max=262144"`
-	HTML      string   `json:"html" binding:"max=262144"`
-	InReplyTo string   `json:"in_reply_to" binding:"max=900"`
+	To []string `json:"to" binding:"required,min=1,max=50,dive,required,max=320"`
+	Cc []string `json:"cc" binding:"omitempty,max=50,dive,required,max=320"`
+	// Subject, Text, and HTML are required unless Template is given; the service decides.
+	Subject   string `json:"subject" binding:"max=998"`
+	Text      string `json:"text" binding:"max=262144"`
+	HTML      string `json:"html" binding:"max=262144"`
+	InReplyTo string `json:"in_reply_to" binding:"max=900"`
 	// Attachments are optional files; content is standard base64. The decoded total is bounded
 	// by the service.
 	Attachments []MailAttachmentRequest `json:"attachments" binding:"omitempty,max=10,dive"`
+	// Template sends a stored template in place of Subject, Text, and HTML.
+	Template *MailTemplateSendRequest `json:"template"`
 }
 
 // MailAttachmentRequest is one file to attach to an outbound message.
@@ -44,7 +47,12 @@ func (r SendMailMessageRequest) input(idempotencyKey string) SendInput {
 	for _, attachment := range r.Attachments {
 		attachments = append(attachments, AttachmentInput(attachment))
 	}
+	var template *TemplateSendInput
+	if r.Template != nil {
+		template = &TemplateSendInput{ID: r.Template.ID, Variables: r.Template.Variables}
+	}
 	return SendInput{
+		Template:       template,
 		Attachments:    attachments,
 		To:             r.To,
 		Cc:             r.Cc,
@@ -140,6 +148,8 @@ type MailMessageSummaryResponse struct {
 	FailureCode string              `json:"failure_code"`
 	// LastEvent summarizes the delivery events of an outbound message; empty when there are none.
 	LastEvent string `json:"last_event"`
+	// TemplateID names the template the message was rendered from; null when none was used.
+	TemplateID *uint `json:"template_id"`
 	// AttachmentCount is how many files the message has; the detail lists them.
 	AttachmentCount int       `json:"attachment_count"`
 	CreatedAt       time.Time `json:"created_at"`
@@ -255,6 +265,7 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		FailureCode:     message.FailureCode,
 		LastEvent:       string(message.LastEvent),
 		AttachmentCount: message.AttachmentCount,
+		TemplateID:      templateIDOf(message),
 		CreatedAt:       message.CreatedAt,
 	}
 }
@@ -280,4 +291,12 @@ func toMailMessageResponse(message *domain.MailMessage) *MailMessageResponse {
 		Events:                     toMailEventResponses(message.Events),
 		Attachments:                toMailAttachmentResponses(message.Attachments),
 	}
+}
+
+func templateIDOf(message *domain.MailMessage) *uint {
+	if message.TemplateID == 0 {
+		return nil
+	}
+	id := message.TemplateID
+	return &id
 }

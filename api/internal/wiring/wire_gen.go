@@ -139,7 +139,7 @@ func InitApplication() (*app.Application, error) {
 	transport := mailtransport.New(configConfig)
 	webhookNotifier := mailbox.NewWebhookNotifier(configConfig, webhookService)
 	settings := mailbox.SettingsFromConfig(configConfig)
-	mailboxService := mailbox.NewService(mailboxRepository, transport, webhookNotifier, settings)
+	mailboxService := mailbox.NewService(mailboxRepository, mailboxRepository, transport, webhookNotifier, settings)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -293,7 +293,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	transport := mailtransport.New(cfg)
 	webhookNotifier := mailbox.NewWebhookNotifier(cfg, webhookService)
 	settings := mailbox.SettingsFromConfig(cfg)
-	mailboxService := mailbox.NewService(mailboxRepository, transport, webhookNotifier, settings)
+	mailboxService := mailbox.NewService(mailboxRepository, mailboxRepository, transport, webhookNotifier, settings)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,

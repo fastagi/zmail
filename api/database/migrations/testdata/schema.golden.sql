@@ -114,6 +114,19 @@ TABLE mail_messages
   COLUMN idempotency_fingerprint character varying(64) NOT NULL DEFAULT ''::character varying
   COLUMN last_event character varying(16) NOT NULL DEFAULT ''::character varying
   COLUMN attachment_count bigint NOT NULL DEFAULT 0
+  COLUMN template_id bigint
+
+TABLE mail_templates
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_templates_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN name character varying(100) NOT NULL
+  COLUMN subject character varying(998) NOT NULL
+  COLUMN html_body text NOT NULL DEFAULT ''::text
+  COLUMN text_body text NOT NULL DEFAULT ''::text
+  COLUMN sample_variables jsonb NOT NULL DEFAULT '{}'::jsonb
+  COLUMN created_by bigint NOT NULL
+  COLUMN created_at timestamp with time zone
+  COLUMN updated_at timestamp with time zone
 
 TABLE mailboxes
   COLUMN id bigint NOT NULL DEFAULT nextval('mailboxes_id_seq'::regclass)
@@ -423,6 +436,8 @@ CONSTRAINT mail_messages.chk_mail_messages_direction CHECK (((direction)::text =
 CONSTRAINT mail_messages.chk_mail_messages_status CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'queued'::character varying, 'sent'::character varying, 'failed'::character varying])::text[])))
 CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_messages.mail_messages_pkey PRIMARY KEY (id)
+CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_templates.mail_templates_pkey PRIMARY KEY (id)
 CONSTRAINT mailboxes.fk_mailboxes_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT migrations.migrations_pkey PRIMARY KEY (id)
@@ -566,6 +581,8 @@ INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING b
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
 INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (message_id) WHERE (((direction)::text = 'outbound'::text) AND ((message_id)::text <> ''::text))
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
+INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address)
 INDEX CREATE INDEX idx_mailboxes_organization ON mailboxes USING btree (organization_id, id) WHERE (deleted_at IS NULL)
 INDEX CREATE UNIQUE INDEX mailboxes_pkey ON mailboxes USING btree (id)

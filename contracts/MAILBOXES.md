@@ -116,6 +116,7 @@ Listing returns summaries, newest first, without bodies. `direction=inbound` is 
 | `failure_code` | Stable provider or transport reason when `status` is `failed`, otherwise empty |
 | `last_event` | Summary of the delivery events of an outbound message; see [Delivery Events](#delivery-events). Empty when none are recorded. |
 | `attachment_count` | How many files the message has |
+| `template_id` | The template the message was rendered from; `null` when none was used |
 
 The detail response adds `text_body`, `html_body`, `message_id`, `in_reply_to`, `events` (the
 delivery history of an outbound message), and `attachments` (see [Attachments](#attachments)). `html_body` is
@@ -144,6 +145,8 @@ loads nothing with the user's credentials.
 - At least one of `text` and `html` is required; each is at most 256 KiB.
 - `in_reply_to` is an optional Message-ID. It is sent as the `In-Reply-To` and `References` headers.
 - `attachments` is optional; see [Attachments](#attachments) for its limits.
+- `template` is optional: `{ "id", "variables" }` sends a stored template in place of `subject`,
+  `text`, and `html`, which must then be absent. See [Templates](#templates).
 - Any of these violations is `422 MAILBOX.MESSAGE_INVALID`.
 - The sender is always the mailbox address and display name; a request cannot set `from`.
 
@@ -204,6 +207,47 @@ one in exactly that way.
 
 Deleting a message or its mailbox deletes its files. API-key routes can send attachments and see
 their metadata; they cannot download files.
+
+### Templates
+
+A template is reusable content of an organization: a `name`, a `subject`, and an `html` and `text`
+body, at least one of which is not empty. Every member reads and edits the organization's
+templates; an organization keeps at most 200, and names are unique within it.
+
+Placeholders may appear in the subject and both bodies:
+
+| Form | Meaning |
+|---|---|
+| `{{name}}` | The value of `name`. A send without it is refused. |
+| `{{name\|fallback}}` | The value of `name`, or `fallback` when it is absent or empty. |
+
+A name is a letter followed by letters, digits, or underscores, at most 64 characters. Spaces
+inside the braces are ignored. Any `{{` that does not open such a placeholder makes the template
+`422 MAILBOX.TEMPLATE_INVALID`, so a typo is caught when the template is saved. There are no
+conditionals, loops, or helpers.
+
+Values are always escaped in the HTML body, so a value cannot add markup; there is no unescaped
+form. In the subject, line breaks inside a value become spaces. The text body uses values as they
+are.
+
+`sample_variables` holds example values for the editor. They are used by previews and test sends
+and never by a real send.
+
+| Route | Result |
+|---|---|
+| `GET /v1/mail-templates` | Every template by name, with `variables` and without bodies |
+| `POST /v1/mail-templates` | `201` with the template |
+| `GET`, `PUT`, `DELETE /v1/mail-templates/{id}` | Read, replace, or delete one template |
+| `POST /v1/mail-template-previews` | Renders `template_id` or an unsaved `source`, with `variables` over the sample values; returns `subject`, `html_body`, `text_body`, `variables`, and `missing`. Sends nothing. |
+| `POST /v1/mail-templates/{id}/tests` | Renders with `variables` over the sample values and sends it from `mailbox_id` to 1 to 5 addresses in `to`, like any send |
+
+Sending with `template` renders the stored template with the given `variables` only. If a variable
+without a fallback has no value, the send is `422 MAILBOX.TEMPLATE_VARIABLES_MISSING` with one field
+error per variable, named `template.variables.<name>`, and nothing is stored or sent. The message
+stores the rendered content and `template_id`; editing or deleting the template later does not change
+it. The idempotency fingerprint covers the rendered content.
+
+A template of another organization is `404 MAILBOX.TEMPLATE_NOT_FOUND`.
 
 ### Log And Statistics
 
@@ -424,3 +468,8 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.INBOUND_UNPARSEABLE` | 422 |
 | `MAILBOX.INBOUND_DISABLED` | 503 |
 | `MAILBOX.DELIVERY_EVENT_INVALID` | 422 |
+| `MAILBOX.TEMPLATE_NOT_FOUND` | 404 |
+| `MAILBOX.TEMPLATE_NAME_TAKEN` | 409 |
+| `MAILBOX.TEMPLATE_LIMIT_REACHED` | 409 |
+| `MAILBOX.TEMPLATE_INVALID` | 422 |
+| `MAILBOX.TEMPLATE_VARIABLES_MISSING` | 422 |

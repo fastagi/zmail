@@ -10,6 +10,7 @@ import {
   number,
   optional,
   positive,
+  record,
   strictObject,
   string,
   union,
@@ -33,6 +34,13 @@ export const MAIL_MAX_ATTACHMENTS = 10;
 export const MAIL_ATTACHMENTS_MAX_BYTES = 4 * 1_024 * 1_024;
 export const MAIL_ATTACHMENT_NAME_MAX_LENGTH = 255;
 export const MAIL_ATTACHMENT_TYPE_MAX_LENGTH = 127;
+export const MAIL_TEMPLATE_NAME_MAX_LENGTH = 100;
+export const MAIL_TEMPLATE_MAX_PER_ORGANIZATION = 200;
+export const MAIL_TEMPLATE_MAX_VARIABLES = 100;
+export const MAIL_TEMPLATE_VALUE_MAX_LENGTH = 2_000;
+export const MAIL_TEMPLATE_TEST_MAX_RECIPIENTS = 5;
+/** A variable name: a letter, then letters, digits, or underscores. */
+export const MAIL_TEMPLATE_VARIABLE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
 const localPartPattern = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/u;
 const recipientPattern = /^[^\s@<>"(),:;\\[\]]+@[^\s@<>"(),:;\\[\]]+\.[^\s@<>"(),:;\\[\]]+$/u;
@@ -111,6 +119,7 @@ const summaryShape = {
   failure_code: string(),
   last_event: mailEventSummarySchema,
   attachment_count: nonnegativeIntegerSchema,
+  template_id: nullable(safeIdSchema),
   created_at: timestampSchema,
 };
 
@@ -186,6 +195,8 @@ export const mailDayStatsSchema = strictObject({
 });
 export const mailDayStatsListSchema = array(mailDayStatsSchema);
 
+const templateVariablesSchema = record(string(), string());
+
 /** Request bodies. Field rules beyond the types are checked by the normalizers below. */
 export const createMailboxSchema = strictObject({
   local_part: string(),
@@ -195,11 +206,15 @@ export const createMailboxSchema = strictObject({
 export const sendMailMessageSchema = strictObject({
   to: array(string()),
   cc: optional(array(string())),
-  subject: string(),
+  // Absent when `template` supplies the subject and bodies.
+  subject: optional(string()),
   text: optional(string()),
   html: optional(string()),
   in_reply_to: optional(string()),
   attachments: optional(array(mailAttachmentInputSchema())),
+  template: optional(
+    strictObject({ id: safeIdSchema, variables: optional(templateVariablesSchema) })
+  ),
 });
 
 /** A file to send; `content` is standard base64. */
@@ -244,6 +259,42 @@ export function attachmentsWithinLimits(
   }
   return true;
 }
+
+export const mailTemplateSummarySchema = strictObject({
+  id: safeIdSchema,
+  name: string(),
+  subject: string(),
+  variables: array(string()),
+  created_at: timestampSchema,
+  updated_at: timestampSchema,
+});
+export const mailTemplateListSchema = array(mailTemplateSummarySchema);
+
+export const mailTemplateSchema = strictObject({
+  id: safeIdSchema,
+  name: string(),
+  subject: string(),
+  variables: array(string()),
+  created_at: timestampSchema,
+  updated_at: timestampSchema,
+  html_body: string(),
+  text_body: string(),
+  sample_variables: templateVariablesSchema,
+});
+
+export const mailTemplateInputSchema = strictObject({
+  name: string(),
+  subject: string(),
+  html: optional(string()),
+  text: optional(string()),
+  sample_variables: optional(templateVariablesSchema),
+});
+
+export const mailTemplateTestInputSchema = strictObject({
+  mailbox_id: safeIdSchema,
+  to: array(string()),
+  variables: optional(templateVariablesSchema),
+});
 
 export const updateMailMessageSchema = strictObject({ read: boolean() });
 
@@ -301,12 +352,26 @@ interface MailMessageDraft {
  * duplicates are removed, a single-line subject, at least one body, and an optional Message-ID.
  * Returns null for a message the API would answer with `MAILBOX.MESSAGE_INVALID`.
  */
-export function normalizeMailMessage(draft: MailMessageDraft): NormalizedMailMessage | null {
+/**
+ * The contract's recipient rules alone: 1 to 50 bare addresses across `to` and `cc` after
+ * duplicates are removed. Used when a template supplies the subject and body.
+ */
+export function normalizeRecipientLists(
+  rawTo: readonly string[],
+  rawCc: readonly string[] = []
+): { to: string[]; cc: string[] } | null {
   const seen = new Set<string>();
-  const to = uniqueRecipients(draft.to, seen);
+  const to = uniqueRecipients(rawTo, seen);
   if (to === null || to.length === 0) return null;
-  const cc = uniqueRecipients(draft.cc ?? [], seen);
+  const cc = uniqueRecipients(rawCc, seen);
   if (cc === null || to.length + cc.length > MAIL_MAX_RECIPIENTS) return null;
+  return { to, cc };
+}
+
+export function normalizeMailMessage(draft: MailMessageDraft): NormalizedMailMessage | null {
+  const recipients = normalizeRecipientLists(draft.to, draft.cc ?? []);
+  if (recipients === null) return null;
+  const { to, cc } = recipients;
 
   const subject = draft.subject.trim();
   if (

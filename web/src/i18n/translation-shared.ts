@@ -40,53 +40,57 @@ export type ScopedTranslationKeys<P extends AllScopePaths> = TranslationLeafPath
   ValueAtPath<MessageSchema, P>
 >;
 
-export type TranslationVariables<K extends AllTranslationKeys> =
-  ValueAtPath<MessageSchema, K> extends infer Message extends string
-    ? [ICUVariableNames<Message>] extends [never]
-      ? never
-      : { [Name in ICUVariableNames<Message>]: TranslationValue }
-    : never;
+/** The ICU values a message needs, or never when it needs none. */
+type MessageVariables<Message> = Message extends string
+  ? [ICUVariableNames<Message>] extends [never]
+    ? never
+    : { [Name in ICUVariableNames<Message>]: TranslationValue }
+  : never;
 
-type ExactTranslationVariables<
-  K extends AllTranslationKeys,
-  Actual extends TranslationVariables<K>,
-> = Actual & Record<Exclude<keyof Actual, keyof TranslationVariables<K>>, never>;
-
-type TranslationArguments<
-  K extends AllTranslationKeys,
-  Actual extends TranslationVariables<K> = TranslationVariables<K>,
-> = [TranslationVariables<K>] extends [never] ? [] : [values: ExactTranslationVariables<K, Actual>];
-
-type ScopedTranslationKey<P extends AllScopePaths, K extends ScopedTranslationKeys<P>> = Extract<
-  `${P}.${K}`,
-  AllTranslationKeys
+export type TranslationVariables<K extends AllTranslationKeys> = MessageVariables<
+  ValueAtPath<MessageSchema, K>
 >;
+
+/**
+ * Scoped keys resolve by walking the scope and then the key, never by joining them into one
+ * template literal: the constraint of `${P}.${K}` crosses every scope with every key and grows
+ * past what TypeScript can represent as the catalog grows.
+ */
+type ScopedVariables<P extends AllScopePaths, K extends string> = MessageVariables<
+  ValueAtPath<ValueAtPath<MessageSchema, P>, K>
+>;
+
+type ExactVariables<Variables, Actual extends Variables> = Actual &
+  Record<Exclude<keyof Actual, keyof Variables>, never>;
+
+type ArgumentsFor<Variables, Actual extends Variables = Variables> = [Variables] extends [never]
+  ? []
+  : [values: ExactVariables<Variables, Actual>];
 
 export type ScopedTranslations<P extends AllScopePaths> = <
   K extends ScopedTranslationKeys<P>,
-  Actual extends TranslationVariables<ScopedTranslationKey<P, K>> = TranslationVariables<
-    ScopedTranslationKey<P, K>
-  >,
+  Actual extends ScopedVariables<P, K> = ScopedVariables<P, K>,
 >(
   key: K,
-  ...args: TranslationArguments<ScopedTranslationKey<P, K>, Actual>
+  ...args: ArgumentsFor<ScopedVariables<P, K>, Actual>
 ) => string;
 
 export type Translators = {
   [Namespace in ModuleName]: <
     K extends TranslationLeafPaths<MessageSchema[Namespace]>,
-    FullKey extends AllTranslationKeys = Extract<`${Namespace}.${K}`, AllTranslationKeys>,
-    Actual extends TranslationVariables<FullKey> = TranslationVariables<FullKey>,
+    Actual extends MessageVariables<ValueAtPath<MessageSchema[Namespace], K>> = MessageVariables<
+      ValueAtPath<MessageSchema[Namespace], K>
+    >,
   >(
     key: K,
-    ...args: TranslationArguments<FullKey, Actual>
+    ...args: ArgumentsFor<MessageVariables<ValueAtPath<MessageSchema[Namespace], K>>, Actual>
   ) => string;
 };
 
 export type UnifiedTranslations = {
   <K extends AllTranslationKeys, Actual extends TranslationVariables<K> = TranslationVariables<K>>(
     key: K,
-    ...args: TranslationArguments<K, Actual>
+    ...args: ArgumentsFor<TranslationVariables<K>, Actual>
   ): string;
 } & Translators;
 
@@ -105,21 +109,34 @@ function createScopedTranslatorMap(rootT: BaseTranslator): ScopedTranslatorMap {
   ) as ScopedTranslatorMap;
 }
 
-export function createTranslator(rootT: BaseTranslator): UnifiedTranslations;
-export function createTranslator<P extends AllScopePaths>(
+/**
+ * The runtime shape of every scoped translator. Implementation signatures use it instead of
+ * `ScopedTranslations<AllScopePaths>`, which crosses every scope with every key and grows past what
+ * TypeScript can represent; callers still see the precise per-scope overloads.
+ */
+export type AnyScopedTranslator = (key: string, values?: TranslationValues) => string;
+
+export function scopedTranslator(rootT: BaseTranslator, scope: string): AnyScopedTranslator {
+  return (key: string, values?: TranslationValues) => rootT(withScope(scope, key), values);
+}
+
+interface CreateTranslator {
+  (rootT: BaseTranslator): UnifiedTranslations;
+  <P extends AllScopePaths>(rootT: BaseTranslator, scope: P): ScopedTranslations<P>;
+}
+
+// Cast through unknown: checking the implementation against the generic overload would cross
+// every scope with every key, which grows past what TypeScript can represent.
+export const createTranslator = ((
   rootT: BaseTranslator,
-  scope: P
-): ScopedTranslations<P>;
-export function createTranslator(
-  rootT: BaseTranslator,
-  scope?: AllScopePaths
-): UnifiedTranslations | ScopedTranslations<AllScopePaths> {
+  scope?: string
+): UnifiedTranslations | AnyScopedTranslator => {
   if (scope) {
-    return (key: string, values?: TranslationValues) => rootT(withScope(scope, key), values);
+    return scopedTranslator(rootT, scope);
   }
 
   return Object.assign(
     (key: AllTranslationKeys, values?: TranslationValues) => rootT(key, values),
     createScopedTranslatorMap(rootT)
   ) as UnifiedTranslations;
-}
+}) as unknown as CreateTranslator;

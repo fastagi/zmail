@@ -2,6 +2,13 @@ import 'server-only';
 
 import {
   MAILBOX_MAX_PER_ORGANIZATION,
+  MAIL_SUBJECT_MAX_LENGTH,
+  MAIL_TEMPLATE_MAX_PER_ORGANIZATION,
+  MAIL_TEMPLATE_MAX_VARIABLES,
+  MAIL_TEMPLATE_NAME_MAX_LENGTH,
+  MAIL_TEMPLATE_VALUE_MAX_LENGTH,
+  MAIL_TEMPLATE_VARIABLE_PATTERN,
+  MAIL_BODY_MAX_BYTES,
   attachmentsWithinLimits,
   normalizeDisplayName,
   normalizeLocalPart,
@@ -20,8 +27,12 @@ import type {
   MailMessageSummary,
   Mailbox,
   MailboxDomain,
+  MailTemplate,
+  MailTemplateInput,
+  MailTemplateSummary,
   SendMailMessageInput,
 } from '@/features/mailbox/types';
+import { renderTemplate, templateVariables } from '@/features/mailbox/utils/template-render';
 
 /**
  * Development-only mailboxes, isolated per organization. It mirrors the browser-facing rules of
@@ -54,7 +65,13 @@ export type MockMailMessageResult =
   { ok: true; message: MailMessage } | { ok: false; error: 'mailbox_not_found' | 'not_found' };
 
 export type MockMailSendResult =
-  { ok: true; message: MailMessage } | { ok: false; error: 'mailbox_not_found' | 'invalid' };
+  | { ok: true; message: MailMessage }
+  | { ok: false; error: 'mailbox_not_found' | 'invalid' | 'template_not_found' }
+  | { ok: false; error: 'variables_missing'; missing: string[] };
+
+export type MockMailTemplateResult =
+  | { ok: true; template: MailTemplate }
+  | { ok: false; error: 'not_found' | 'invalid' | 'taken' | 'limit' };
 
 export type MockMailAttachmentResult =
   | { ok: true; filename: string; content: Uint8Array }
@@ -71,6 +88,8 @@ export class MockMailboxStore {
   private nextMailboxId = 1;
   private nextMessageId = 1;
   private nextAttachmentId = 1;
+  private nextTemplateId = 1;
+  private templates = new Map<number, Map<number, MailTemplate>>();
   private organizations = new Map<number, Map<number, MailboxState>>();
   /** Every address that is or ever was a mailbox, across all organizations. */
   private claimedAddresses = new Set<string>();
@@ -255,17 +274,116 @@ export class MockMailboxStore {
     return file ? { ok: true, ...file } : { ok: false, error: 'not_found' };
   }
 
-  /** Validates like the API and stores the message as `sent`; the mock has no provider. */
-  send(
+  listTemplates(organizationId: number): MailTemplateSummary[] {
+    return [...this.templatesOf(organizationId).values()]
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id - b.id))
+      .map(template => ({
+        id: template.id,
+        name: template.name,
+        subject: template.subject,
+        variables: template.variables,
+        created_at: template.created_at,
+        updated_at: template.updated_at,
+      }));
+  }
+
+  getTemplate(organizationId: number, templateId: number): MockMailTemplateResult {
+    const template = this.templatesOf(organizationId).get(templateId);
+    return template ? { ok: true, template } : { ok: false, error: 'not_found' };
+  }
+
+  createTemplate(organizationId: number, input: MailTemplateInput): MockMailTemplateResult {
+    const templates = this.templatesOf(organizationId);
+    const built = buildTemplate(input);
+    if (!built) return { ok: false, error: 'invalid' };
+    if ([...templates.values()].some(existing => existing.name === built.name)) {
+      return { ok: false, error: 'taken' };
+    }
+    if (templates.size >= MAIL_TEMPLATE_MAX_PER_ORGANIZATION) return { ok: false, error: 'limit' };
+    const now = this.timestamp();
+    const template: MailTemplate = {
+      id: this.nextTemplateId++,
+      ...built,
+      created_at: now,
+      updated_at: now,
+    };
+    templates.set(template.id, template);
+    return { ok: true, template };
+  }
+
+  updateTemplate(
     organizationId: number,
+    templateId: number,
+    input: MailTemplateInput
+  ): MockMailTemplateResult {
+    const templates = this.templatesOf(organizationId);
+    const existing = templates.get(templateId);
+    if (!existing) return { ok: false, error: 'not_found' };
+    const built = buildTemplate(input);
+    if (!built) return { ok: false, error: 'invalid' };
+    if (
+      [...templates.values()].some(other => other.id !== templateId && other.name === built.name)
+    ) {
+      return { ok: false, error: 'taken' };
+    }
+    const template: MailTemplate = { ...existing, ...built, updated_at: this.timestamp() };
+    templates.set(templateId, template);
+    return { ok: true, template };
+  }
+
+  deleteTemplate(organizationId: number, templateId: number): boolean {
+    return this.templatesOf(organizationId).delete(templateId);
+  }
+
+  /** Sends a template with its sample values, overridden by the given ones. */
+  sendTemplateTest(
+    organizationId: number,
+    templateId: number,
     mailboxId: number,
-    draft: Parameters<typeof normalizeMailMessage>[0] & Pick<SendMailMessageInput, 'attachments'>
+    to: readonly string[],
+    variables: Readonly<Record<string, string>>
   ): MockMailSendResult {
+    const template = this.templatesOf(organizationId).get(templateId);
+    if (!template) return { ok: false, error: 'template_not_found' };
+    if (to.length === 0 || to.length > 5) return { ok: false, error: 'invalid' };
+    return this.send(organizationId, mailboxId, {
+      to: [...to],
+      template: { id: templateId, variables: { ...template.sample_variables, ...variables } },
+    });
+  }
+
+  /** Validates like the API and stores the message as `sent`; the mock has no provider. */
+  send(organizationId: number, mailboxId: number, input: SendMailMessageInput): MockMailSendResult {
     const state = this.mailboxesOf(organizationId).get(mailboxId);
     if (!state) return { ok: false, error: 'mailbox_not_found' };
+    let draft: Parameters<typeof normalizeMailMessage>[0] = {
+      ...input,
+      subject: input.subject ?? '',
+    };
+    let templateId: number | null = null;
+    if (input.template) {
+      if (input.subject !== undefined || input.text !== undefined || input.html !== undefined) {
+        return { ok: false, error: 'invalid' };
+      }
+      const template = this.templatesOf(organizationId).get(input.template.id);
+      if (!template) return { ok: false, error: 'template_not_found' };
+      const values = cleanValues(input.template.variables ?? {});
+      if (!values) return { ok: false, error: 'invalid' };
+      // A real send uses only the given values; sample values are for previews and tests.
+      const rendered = renderTemplate(
+        { subject: template.subject, html: template.html_body, text: template.text_body },
+        values
+      );
+      if (!rendered) return { ok: false, error: 'invalid' };
+      if (rendered.missing.length > 0) {
+        return { ok: false, error: 'variables_missing', missing: rendered.missing };
+      }
+      draft = { ...draft, subject: rendered.subject, text: rendered.text, html: rendered.html };
+      templateId = template.id;
+    }
     const normalized = normalizeMailMessage(draft);
     if (!normalized) return { ok: false, error: 'invalid' };
-    const drafts = draft.attachments ?? [];
+    const drafts = input.attachments ?? [];
     if (!attachmentsWithinLimits(drafts)) return { ok: false, error: 'invalid' };
 
     const id = this.nextMessageId++;
@@ -310,6 +428,7 @@ export class MockMailboxStore {
       failure_code: '',
       last_event: 'delivered',
       attachment_count: attachments.length,
+      template_id: templateId,
       created_at: sentAt,
       text_body: normalized.text,
       html_body: normalized.html,
@@ -328,6 +447,8 @@ export class MockMailboxStore {
     this.nextMailboxId = 1;
     this.nextMessageId = 1;
     this.nextAttachmentId = 1;
+    this.nextTemplateId = 1;
+    this.templates.clear();
     this.organizations.clear();
     this.claimedAddresses.clear();
   }
@@ -359,6 +480,7 @@ export class MockMailboxStore {
       failure_code: '',
       last_event: '',
       attachment_count: 0,
+      template_id: null,
       created_at: this.timestamp(),
       text_body:
         'This message was created by the development mock. No mail is sent or received until the app uses the real API.',
@@ -369,6 +491,14 @@ export class MockMailboxStore {
       events: [],
       attachments: [],
     };
+  }
+
+  private templatesOf(organizationId: number): Map<number, MailTemplate> {
+    const existing = this.templates.get(organizationId);
+    if (existing) return existing;
+    const created = new Map<number, MailTemplate>();
+    this.templates.set(organizationId, created);
+    return created;
   }
 
   private mailboxesOf(organizationId: number): Map<number, MailboxState> {
@@ -404,6 +534,7 @@ function summaryOf(message: MailMessage): MailMessageSummary {
     failure_code: message.failure_code,
     last_event: message.last_event,
     attachment_count: message.attachment_count,
+    template_id: message.template_id,
     created_at: message.created_at,
   };
 }
@@ -458,4 +589,46 @@ function unreadCount(state: MailboxState): number {
     if (message.direction === 'inbound' && !message.read) unread += 1;
   }
   return unread;
+}
+
+/** The contract's template rules; null for content the API answers with `MAILBOX.TEMPLATE_INVALID`. */
+function buildTemplate(
+  input: MailTemplateInput
+): Omit<MailTemplate, 'id' | 'created_at' | 'updated_at'> | null {
+  const name = input.name.trim().split(/\s+/u).filter(Boolean).join(' ');
+  const subject = input.subject.trim();
+  const html = input.html ?? '';
+  const text = input.text ?? '';
+  if (name === '' || Array.from(name).length > MAIL_TEMPLATE_NAME_MAX_LENGTH) return null;
+  if (subject === '' || subject.length > MAIL_SUBJECT_MAX_LENGTH || /[\r\n]/u.test(subject)) {
+    return null;
+  }
+  if (html.trim() === '' && text.trim() === '') return null;
+  if (html.length > MAIL_BODY_MAX_BYTES || text.length > MAIL_BODY_MAX_BYTES) return null;
+  const samples = cleanValues(input.sample_variables ?? {});
+  const variables = templateVariables({ subject, html, text });
+  if (!samples || !variables) return null;
+  return {
+    name,
+    subject,
+    html_body: html,
+    text_body: text,
+    sample_variables: samples,
+    variables,
+  };
+}
+
+function cleanValues(values: Readonly<Record<string, string>>): Record<string, string> | null {
+  const entries = Object.entries(values);
+  if (entries.length > MAIL_TEMPLATE_MAX_VARIABLES) return null;
+  for (const [name, value] of entries) {
+    if (
+      !MAIL_TEMPLATE_VARIABLE_PATTERN.test(name) ||
+      typeof value !== 'string' ||
+      Array.from(value).length > MAIL_TEMPLATE_VALUE_MAX_LENGTH
+    ) {
+      return null;
+    }
+  }
+  return { ...values };
 }

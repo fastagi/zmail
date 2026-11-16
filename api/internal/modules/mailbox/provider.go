@@ -13,6 +13,7 @@ import (
 var ProviderSet = wire.NewSet(
 	NewRepository,
 	wire.Bind(new(domain.MailboxRepository), new(*repository)),
+	wire.Bind(new(domain.MailTemplateRepository), new(*repository)),
 	mailtransport.New,
 	SettingsFromConfig,
 	// The product webhook catalog: the webhook starter's definitions plus the mail events.
@@ -37,6 +38,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_17_090000_move_mailboxes_to_organizations",
 			"2026_11_17_100000_create_mail_message_events",
 			"2026_11_17_110000_create_mail_attachments",
+			"2026_11_17_120000_create_mail_templates",
 		),
 	)
 }

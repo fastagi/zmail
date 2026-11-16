@@ -28,4 +28,9 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(ErrMailInboundTooLarge, http.StatusRequestEntityTooLarge, domain.CodeMailInboundTooLarge)
 	mapper.Register(ErrMailDeliveryEventInvalid, http.StatusUnprocessableEntity, domain.CodeMailDeliveryEventInvalid)
 	mapper.Register(ErrMailRecipientNotFound, http.StatusNotFound, domain.CodeMailRecipientNotFound)
+	mapper.Register(ErrMailTemplateNotFound, http.StatusNotFound, domain.CodeMailTemplateNotFound)
+	mapper.Register(ErrMailTemplateInvalid, http.StatusUnprocessableEntity, domain.CodeMailTemplateInvalid)
+	mapper.Register(ErrMailTemplateNameTaken, http.StatusConflict, domain.CodeMailTemplateNameTaken)
+	mapper.Register(ErrMailTemplateLimitReached, http.StatusConflict, domain.CodeMailTemplateLimitReached)
+	mapper.Register(ErrMailTemplateVariablesMissing, http.StatusUnprocessableEntity, domain.CodeMailTemplateVariablesMissing)
 }

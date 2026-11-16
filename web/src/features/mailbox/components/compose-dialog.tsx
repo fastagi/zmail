@@ -22,11 +22,13 @@ import { fileToBase64, formatBytes } from '@/features/mailbox/components/mail-at
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
+import { useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
 import {
   MAIL_ATTACHMENTS_MAX_BYTES,
   MAIL_MAX_ATTACHMENTS,
   MAIL_SUBJECT_MAX_LENGTH,
   normalizeMailMessage,
+  normalizeRecipientLists,
   splitRecipients,
 } from '@/features/mailbox/schemas';
 import type { MailMessage, Mailbox } from '@/features/mailbox/types';
@@ -81,7 +83,14 @@ export function ComposeDialog({
   const t = useT('mailbox');
   const [fromId, setFromId] = useState(mailbox.id);
   const from = fromOptions?.find(option => option.id === fromId) ?? mailbox;
-  const send = useSendMailMessage(useMailOrganizationId(), from.id);
+  const organizationId = useMailOrganizationId();
+  const send = useSendMailMessage(organizationId, from.id);
+  // A reply quotes nothing and answers one message, so it is always written by hand.
+  const templates = useMailTemplates(draft.reply ? 0 : organizationId);
+  const [templateId, setTemplateId] = useState<number | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
+  const templateHintId = useId();
   const [to, setTo] = useState(draft.to);
   const [cc, setCc] = useState('');
   const [subject, setSubject] = useState(draft.subject);
@@ -102,9 +111,53 @@ export function ComposeDialog({
     setFiles(current => [...current, ...chosen]);
   };
 
+  const submitTemplate = async () => {
+    if (!template) return;
+    const recipients = normalizeRecipientLists(splitRecipients(to), splitRecipients(cc));
+    if (!recipients) {
+      setErrorKey('errors.messageInvalid');
+      return;
+    }
+    if (filesTooMany || filesTooLarge || files.some(file => file.size === 0)) {
+      setErrorKey('errors.attachmentsInvalid');
+      return;
+    }
+    // An empty field is left out, so the template's fallback applies.
+    const variables = Object.fromEntries(
+      template.variables
+        .map(name => [name, (values[name] ?? '').trim()] as const)
+        .filter(([, value]) => value !== '')
+    );
+    try {
+      const attachments = await Promise.all(
+        files.map(async file => ({
+          filename: file.name,
+          ...(file.type ? { content_type: file.type } : {}),
+          content: await fileToBase64(file),
+        }))
+      );
+      await send.mutateAsync({
+        to: recipients.to,
+        ...(recipients.cc.length > 0 ? { cc: recipients.cc } : {}),
+        template: { id: template.id, variables },
+        ...(attachments.length > 0 ? { attachments } : {}),
+      });
+      toast.success(t('messages.sent'));
+      onStored();
+      onClose();
+    } catch (failure) {
+      setErrorKey(resolveMailboxErrorKey(failure));
+      if (isStoredSendFailure(failure)) onStored();
+    }
+  };
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorKey(null);
+    if (template) {
+      await submitTemplate();
+      return;
+    }
     const normalized = normalizeMailMessage({
       to: splitRecipients(to),
       cc: splitRecipients(cc),
@@ -204,26 +257,80 @@ export function ComposeDialog({
                 onChange={event => setCc(event.target.value)}
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="mail-compose-subject">{t('compose.subject')}</Label>
-              <Input
-                id="mail-compose-subject"
-                value={subject}
-                maxLength={MAIL_SUBJECT_MAX_LENGTH}
-                disabled={send.isPending}
-                onChange={event => setSubject(event.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="mail-compose-body">{t('compose.body')}</Label>
-              <Textarea
-                id="mail-compose-body"
-                value={body}
-                rows={8}
-                disabled={send.isPending}
-                onChange={event => setBody(event.target.value)}
-              />
-            </div>
+            {templates.data && templates.data.length > 0 ? (
+              <div className="space-y-2">
+                <Label htmlFor="mail-compose-template">{t('compose.template')}</Label>
+                <select
+                  id="mail-compose-template"
+                  className={cn(nativeSelectClassName, 'w-full')}
+                  value={templateId === null ? '' : String(templateId)}
+                  disabled={send.isPending}
+                  onChange={event => {
+                    setErrorKey(null);
+                    setValues({});
+                    setTemplateId(event.target.value === '' ? null : Number(event.target.value));
+                  }}
+                >
+                  <option value="">{t('compose.templateNone')}</option>
+                  {templates.data.map(option => (
+                    <option key={option.id} value={String(option.id)}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+            {template ? (
+              template.variables.length > 0 ? (
+                <fieldset className="space-y-2" aria-describedby={templateHintId}>
+                  <legend className="text-sm font-medium">{t('templates.variables')}</legend>
+                  <p id={templateHintId} className="text-xs text-muted-foreground">
+                    {t('compose.templateHint')}
+                  </p>
+                  {template.variables.map(name => (
+                    <div key={name} className="space-y-1">
+                      <Label
+                        htmlFor={`mail-compose-variable-${name}`}
+                        className="font-mono text-xs"
+                      >
+                        {name}
+                      </Label>
+                      <Input
+                        id={`mail-compose-variable-${name}`}
+                        value={values[name] ?? ''}
+                        disabled={send.isPending}
+                        onChange={event =>
+                          setValues(current => ({ ...current, [name]: event.target.value }))
+                        }
+                      />
+                    </div>
+                  ))}
+                </fieldset>
+              ) : null
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="mail-compose-subject">{t('compose.subject')}</Label>
+                  <Input
+                    id="mail-compose-subject"
+                    value={subject}
+                    maxLength={MAIL_SUBJECT_MAX_LENGTH}
+                    disabled={send.isPending}
+                    onChange={event => setSubject(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="mail-compose-body">{t('compose.body')}</Label>
+                  <Textarea
+                    id="mail-compose-body"
+                    value={body}
+                    rows={8}
+                    disabled={send.isPending}
+                    onChange={event => setBody(event.target.value)}
+                  />
+                </div>
+              </>
+            )}
             <div className="space-y-2">
               <input
                 ref={fileInput}

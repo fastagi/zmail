@@ -282,6 +282,9 @@ func (h *Handler) GetOutbound(c *gin.Context) {
 
 // respondSent answers 201 for a new send and 200 when an idempotency key replayed an earlier one.
 func respondSent(c *gin.Context, message *domain.MailMessage, created bool, err error) {
+	if err != nil && respondMissingVariables(c, err) {
+		return
+	}
 	if err != nil {
 		response.HandleError(c, "Failed to send mail message", err)
 		return

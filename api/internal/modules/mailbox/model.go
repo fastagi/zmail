@@ -61,6 +61,7 @@ type MailMessagePO struct {
 	IdempotencyFingerprint string  `gorm:"size:64;not null;default:''"`
 	LastEvent              string  `gorm:"size:16;not null;default:''"`
 	AttachmentCount        int     `gorm:"not null;default:0"`
+	TemplateID             *uint
 	ReadAt                 *time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
@@ -102,6 +103,9 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 	message.IdempotencyFingerprint = po.IdempotencyFingerprint
 	message.LastEvent = domain.MailEventType(po.LastEvent)
 	message.AttachmentCount = po.AttachmentCount
+	if po.TemplateID != nil {
+		message.TemplateID = *po.TemplateID
+	}
 	return message
 }
 
@@ -133,6 +137,10 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 	}
 	po.IdempotencyFingerprint = message.IdempotencyFingerprint
 	po.AttachmentCount = len(message.Attachments)
+	if message.TemplateID != 0 {
+		templateID := message.TemplateID
+		po.TemplateID = &templateID
+	}
 	return po
 }
 
@@ -220,5 +228,65 @@ func (po *MailAttachmentPO) toDomain() domain.MailAttachment {
 		ContentType: po.ContentType,
 		Size:        po.Size,
 		Content:     po.Content,
+	}
+}
+
+// MailTemplatePO is the persistent object for one template.
+type MailTemplatePO struct {
+	ID              uint   `gorm:"primaryKey"`
+	OrganizationID  uint   `gorm:"not null;uniqueIndex:idx_mail_templates_name,priority:1"`
+	Name            string `gorm:"size:100;not null;uniqueIndex:idx_mail_templates_name,priority:2"`
+	Subject         string `gorm:"size:998;not null"`
+	HTMLBody        string `gorm:"column:html_body;type:text;not null;default:''"`
+	TextBody        string `gorm:"type:text;not null;default:''"`
+	SampleVariables string `gorm:"type:jsonb;not null;default:'{}'"`
+	CreatedBy       uint   `gorm:"not null"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func (MailTemplatePO) TableName() string {
+	return "mail_templates"
+}
+
+func (po *MailTemplatePO) toDomain() *domain.MailTemplate {
+	samples := map[string]string{}
+	if po.SampleVariables != "" {
+		if err := json.Unmarshal([]byte(po.SampleVariables), &samples); err != nil {
+			samples = map[string]string{}
+		}
+	}
+	return &domain.MailTemplate{
+		ID:              po.ID,
+		OrganizationID:  po.OrganizationID,
+		Name:            po.Name,
+		Subject:         po.Subject,
+		HTMLBody:        po.HTMLBody,
+		TextBody:        po.TextBody,
+		SampleVariables: samples,
+		CreatedBy:       po.CreatedBy,
+		CreatedAt:       po.CreatedAt,
+		UpdatedAt:       po.UpdatedAt,
+	}
+}
+
+func newMailTemplatePO(template *domain.MailTemplate) *MailTemplatePO {
+	samples := template.SampleVariables
+	if samples == nil {
+		samples = map[string]string{}
+	}
+	encoded, err := json.Marshal(samples)
+	if err != nil {
+		encoded = []byte("{}")
+	}
+	return &MailTemplatePO{
+		ID:              template.ID,
+		OrganizationID:  template.OrganizationID,
+		Name:            template.Name,
+		Subject:         template.Subject,
+		HTMLBody:        template.HTMLBody,
+		TextBody:        template.TextBody,
+		SampleVariables: string(encoded),
+		CreatedBy:       template.CreatedBy,
 	}
 }

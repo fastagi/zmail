@@ -18,6 +18,11 @@ export type MailboxErrorKey =
   | 'errors.permissionDenied'
   | 'errors.sendLimitReached'
   | 'errors.senderNotConfigured'
+  | 'errors.templateInvalid'
+  | 'errors.templateLimitReached'
+  | 'errors.templateNameTaken'
+  | 'errors.templateNotFound'
+  | 'errors.templateVariablesMissing'
   | 'errors.tooLarge'
   | 'errors.unavailable';
 
@@ -42,6 +47,11 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_SEND_LIMIT_REACHED]: 'errors.sendLimitReached',
   [ApiErrorCode.MAILBOX_DELIVERY_FAILED]: 'errors.deliveryFailed',
   [ApiErrorCode.MAILBOX_SENDER_NOT_CONFIGURED]: 'errors.senderNotConfigured',
+  [ApiErrorCode.MAILBOX_TEMPLATE_NOT_FOUND]: 'errors.templateNotFound',
+  [ApiErrorCode.MAILBOX_TEMPLATE_INVALID]: 'errors.templateInvalid',
+  [ApiErrorCode.MAILBOX_TEMPLATE_NAME_TAKEN]: 'errors.templateNameTaken',
+  [ApiErrorCode.MAILBOX_TEMPLATE_LIMIT_REACHED]: 'errors.templateLimitReached',
+  [ApiErrorCode.MAILBOX_TEMPLATE_VARIABLES_MISSING]: 'errors.templateVariablesMissing',
 };
 
 /** Maps a failure to stable local copy; backend message text is never shown. */

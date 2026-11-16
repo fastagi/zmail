@@ -492,7 +492,7 @@ func (r *repository) ListMessagesForOrganization(
 			mail_messages.from_address, mail_messages.from_name, mail_messages.to_addresses,
 			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
 			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
-			mail_messages.attachment_count, mail_messages.read_at,
+			mail_messages.attachment_count, mail_messages.template_id, mail_messages.read_at,
 			mail_messages.created_at, mail_messages.updated_at, mailboxes.address AS mailbox_address`).
 		Order("mail_messages.id DESC").
 		Offset((page - 1) * perPage).
@@ -671,7 +671,7 @@ func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, provid
 			mail_messages.from_address, mail_messages.from_name, mail_messages.to_addresses,
 			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
 			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
-			mail_messages.attachment_count, mail_messages.read_at, mail_messages.created_at,
+			mail_messages.attachment_count, mail_messages.template_id, mail_messages.read_at, mail_messages.created_at,
 			mail_messages.updated_at,
 			mailboxes.address AS mailbox_address, mailboxes.organization_id AS organization_id`).
 		Where("mail_messages.message_id = ? AND mail_messages.direction = ?", providerMessageID, string(domain.MailDirectionOutbound)).

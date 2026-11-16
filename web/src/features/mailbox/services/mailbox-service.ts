@@ -12,10 +12,16 @@ import {
   mailboxDomainListSchema,
   mailboxListSchema,
   mailboxSchema,
+  mailTemplateListSchema,
+  mailTemplateSchema,
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
   MailAttachment,
+  MailTemplate,
+  MailTemplateInput,
+  MailTemplateSummary,
+  MailTemplateTestInput,
   MailDayStats,
   MailDirection,
   MailLogFilters,
@@ -166,6 +172,70 @@ export const mailboxService = {
     return parseMailMessage(value, messageId);
   },
 
+  async templates(organizationId: number): Promise<MailTemplateSummary[]> {
+    const parsed = mailTemplateListSchema.safeParse(
+      await request.get<unknown>('/mail-templates', {
+        headers: organizationHeaders(organizationId),
+      })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  async template(organizationId: number, templateId: number): Promise<MailTemplate> {
+    validId(templateId);
+    const parsed = mailTemplateSchema.safeParse(
+      await request.get<unknown>(`/mail-templates/${templateId}`, {
+        headers: organizationHeaders(organizationId),
+      })
+    );
+    if (!parsed.success || parsed.data.id !== templateId) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** Creates a template, or replaces one when `templateId` is given. */
+  async saveTemplate(
+    organizationId: number,
+    input: MailTemplateInput,
+    templateId?: number
+  ): Promise<MailTemplate> {
+    if (templateId !== undefined) validId(templateId);
+    const config = { headers: organizationHeaders(organizationId) };
+    const value =
+      templateId === undefined
+        ? await request.post<unknown, MailTemplateInput>('/mail-templates', input, config)
+        : await request.put<unknown, MailTemplateInput>(
+            `/mail-templates/${templateId}`,
+            input,
+            config
+          );
+    const parsed = mailTemplateSchema.safeParse(value);
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  async deleteTemplate(organizationId: number, templateId: number): Promise<void> {
+    validId(templateId);
+    await request.delete<void>(`/mail-templates/${templateId}`, {
+      headers: organizationHeaders(organizationId),
+    });
+  },
+
+  /** Sends a template to test addresses; sample values fill what `variables` does not. */
+  async sendTemplateTest(
+    organizationId: number,
+    templateId: number,
+    input: MailTemplateTestInput
+  ): Promise<MailMessage> {
+    validId(templateId);
+    const value = await request.post<unknown, MailTemplateTestInput>(
+      `/mail-templates/${templateId}/tests`,
+      input,
+      { headers: organizationHeaders(organizationId) }
+    );
+    return parseMailMessage(value);
+  },
+
   /**
    * Downloads one attached file and hands it to the browser as a file to save. The request
    * carries the organization header, so a plain link cannot be used. The bytes are never shown
@@ -293,3 +363,13 @@ assertContract<
 assertContract<
   Accepts<z.input<typeof mailDayStatsListSchema>, ContractData<'listMailMessageStats', 200>>
 >();
+assertContract<
+  Accepts<z.input<typeof mailTemplateListSchema>, ContractData<'listMailTemplates', 200>>
+>();
+assertContract<Accepts<z.input<typeof mailTemplateSchema>, ContractData<'getMailTemplate', 200>>>();
+assertContract<
+  Accepts<z.input<typeof mailTemplateSchema>, ContractData<'createMailTemplate', 201>>
+>();
+assertContract<Sends<MailTemplateInput, ContractRequest<'createMailTemplate'>>>();
+assertContract<Sends<MailTemplateInput, ContractRequest<'updateMailTemplate'>>>();
+assertContract<Sends<MailTemplateTestInput, ContractRequest<'sendMailTemplateTest'>>>();

@@ -26,6 +26,7 @@ export const ROUTES = {
     MAILBOXES: '/console/mailboxes',
     EMAILS: '/console/emails',
     MAIL_DOMAIN: '/console/mail-domain',
+    MAIL_TEMPLATES: '/console/mail-templates',
     // fastbuild:slot web.routes.console
   },
 
