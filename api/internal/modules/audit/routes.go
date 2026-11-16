@@ -1,6 +1,6 @@
 package audit
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import "github.com/fastagi/zmail/api/internal/infra/router"
 
 // RegisterRoutes registers the audit log routes.
 func (h *Handler) RegisterRoutes(r *router.Router) {

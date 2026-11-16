@@ -3,7 +3,7 @@ package mailbox
 import (
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // CreateMailboxRequest asks for a new address on the configured domain.

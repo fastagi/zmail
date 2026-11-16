@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fastagi/fastmail/api/pkg/env"
+	"github.com/fastagi/zmail/api/pkg/env"
 )
 
 func TestEnv_Get(t *testing.T) {

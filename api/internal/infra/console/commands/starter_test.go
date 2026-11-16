@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fastagi/fastmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/internal/starter"
 )
 
 func TestParseStarterCommandOptions(t *testing.T) {

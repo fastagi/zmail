@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/pkg/logger"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/pkg/logger"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // Recovery middleware handles panic recovery

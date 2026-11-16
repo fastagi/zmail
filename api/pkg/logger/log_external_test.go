@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fastagi/fastmail/api/pkg/logger"
+	"github.com/fastagi/zmail/api/pkg/logger"
 )
 
 func TestLog_Levels(t *testing.T) {

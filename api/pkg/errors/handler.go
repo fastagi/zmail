@@ -12,8 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/pkg/logger"
-	"github.com/fastagi/fastmail/api/pkg/redact"
+	"github.com/fastagi/zmail/api/pkg/logger"
+	"github.com/fastagi/zmail/api/pkg/redact"
 )
 
 // Config holds error handler configuration
@@ -694,7 +694,7 @@ func renderDebugHTML(data DebugPageData) string {
 
 	<div class="footer">
 		<div class="logo">FastBuild</div>
-		<div>Framework Debug Mode • <a href="https://github.com/fastagi/fastmail/api" target="_blank">Documentation</a></div>
+		<div>Framework Debug Mode • <a href="https://github.com/fastagi/zmail/api" target="_blank">Documentation</a></div>
 	</div>
 </body>
 </html>`,

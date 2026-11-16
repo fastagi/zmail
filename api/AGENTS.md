@@ -5,7 +5,7 @@ Rules for the Go backend under `api/`.
 ## Scope
 
 The API uses Gin, Wire, GORM, and DDD-flavored starter modules. Preserve the
-module identity `github.com/fastagi/fastmail/api`.
+module identity `github.com/fastagi/zmail/api`.
 
 For a routine change, inspect the owning package and tests first. Read only the
 document or skill that owns the active concern; do not load this entire

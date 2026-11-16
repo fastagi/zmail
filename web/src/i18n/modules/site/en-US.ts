@@ -5,7 +5,7 @@ const messages = {
   },
   footer: {
     tagline: 'Full-stack scaffold for the AI era',
-    copyright: '© {year} FastBuild. All rights reserved.',
+    copyright: '© {year} Zmail. All rights reserved.',
   },
   hero: {
     eyebrow: 'Enterprise scaffold for AI-assisted teams',

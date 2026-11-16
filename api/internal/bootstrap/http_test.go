@@ -11,12 +11,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/app"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	infraMiddleware "github.com/fastagi/fastmail/api/internal/infra/middleware"
-	"github.com/fastagi/fastmail/api/internal/infra/router"
-	"github.com/fastagi/fastmail/api/internal/starter"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/internal/app"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	infraMiddleware "github.com/fastagi/zmail/api/internal/infra/middleware"
+	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 func init() {

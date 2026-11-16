@@ -3,9 +3,9 @@ package assembly
 import (
 	"context"
 
-	"github.com/fastagi/fastmail/api/internal/infra/events"
-	"github.com/fastagi/fastmail/api/internal/infra/router"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/internal/infra/events"
+	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // Module is the minimal assembly seam shared by all FastBuild modules.

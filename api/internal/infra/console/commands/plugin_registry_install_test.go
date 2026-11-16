@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/fastagi/fastmail/api/internal/infra/pluginregistry"
+	"github.com/fastagi/zmail/api/internal/infra/pluginregistry"
 )
 
 // TestOfficialPluginsInstallBuildAndTest installs every registry plugin into a scratch copy of the

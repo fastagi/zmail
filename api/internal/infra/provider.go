@@ -3,13 +3,13 @@ package infra
 import (
 	"github.com/google/wire"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/database"
-	"github.com/fastagi/fastmail/api/internal/infra/email"
-	"github.com/fastagi/fastmail/api/internal/infra/events"
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
-	"github.com/fastagi/fastmail/api/internal/infra/ratelimit"
-	"github.com/fastagi/fastmail/api/internal/infra/storage"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/database"
+	"github.com/fastagi/zmail/api/internal/infra/email"
+	"github.com/fastagi/zmail/api/internal/infra/events"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
+	"github.com/fastagi/zmail/api/internal/infra/storage"
 )
 
 // ProviderSet aggregates all infrastructure providers for Wire DI.

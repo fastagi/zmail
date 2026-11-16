@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/fastagi/fastmail/api/internal/capabilities/workflow"
+	"github.com/fastagi/zmail/api/internal/capabilities/workflow"
 )
 
 func TestWorkerStartsConsumerSpanUnderDispatcherTrace(t *testing.T) {

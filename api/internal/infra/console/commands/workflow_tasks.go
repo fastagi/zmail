@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/bootstrap"
-	"github.com/fastagi/fastmail/api/internal/capabilities/workflow"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/infra/database"
+	"github.com/fastagi/zmail/api/internal/bootstrap"
+	"github.com/fastagi/zmail/api/internal/capabilities/workflow"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/database"
 )
 
 // durableTaskCommand is shared by the operator commands for PostgreSQL-backed workflow tasks.

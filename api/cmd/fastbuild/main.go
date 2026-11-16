@@ -4,10 +4,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/bootstrap/operatorcommands"
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/infra/console/commands"
-	"github.com/fastagi/fastmail/api/internal/infra/plugin"
+	"github.com/fastagi/zmail/api/internal/bootstrap/operatorcommands"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/console/commands"
+	"github.com/fastagi/zmail/api/internal/infra/plugin"
 )
 
 const Version = "1.0.0"

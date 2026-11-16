@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/infra/events"
-	"github.com/fastagi/fastmail/api/internal/infra/migration/schema"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/infra/events"
+	"github.com/fastagi/zmail/api/internal/infra/migration/schema"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
 // Integration test for complete migration workflow:

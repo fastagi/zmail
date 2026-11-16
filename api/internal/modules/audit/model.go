@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // AuditLogPO is the persistent object for audit log records.

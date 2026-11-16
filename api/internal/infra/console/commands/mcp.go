@@ -10,9 +10,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/mcp"
-	"github.com/fastagi/fastmail/api/internal/infra/pluginregistry"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/mcp"
+	"github.com/fastagi/zmail/api/internal/infra/pluginregistry"
 )
 
 // MCPCommand serves the plugin registry to coding agents over the Model Context Protocol. Every

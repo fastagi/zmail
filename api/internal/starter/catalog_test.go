@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/starter/assembly"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/starter/assembly"
 )
 
 func TestCatalogSelectKeepsDefaultsAndAddsRequestedOptionalStarters(t *testing.T) {

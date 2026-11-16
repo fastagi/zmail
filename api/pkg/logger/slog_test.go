@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fastagi/fastmail/api/pkg/logger"
+	"github.com/fastagi/zmail/api/pkg/logger"
 )
 
 func TestSlogHandlerRoutesRecordsIntoTheLogger(t *testing.T) {

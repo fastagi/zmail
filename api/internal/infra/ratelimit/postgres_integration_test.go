@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fastagi/fastmail/api/database/migrations"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/database/migrations"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
 // openBucketTable opens an isolated PostgreSQL schema holding the real migrated bucket table.

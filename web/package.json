@@ -1,5 +1,5 @@
 {
-  "name": "fastmail-web",
+  "name": "zmail-web",
   "version": "0.1.0",
   "description": "FastBuild customer-facing web application built with Next.js and TypeScript.",
   "private": true,

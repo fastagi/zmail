@@ -3,8 +3,8 @@ package routes
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/infra/router"
-	"github.com/fastagi/fastmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/starter"
 )
 
 // Setup configures all application routes using the fluent router API

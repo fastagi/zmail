@@ -3,7 +3,7 @@ package apikey
 import (
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // APIKeyCreateRequest represents an API key creation request.

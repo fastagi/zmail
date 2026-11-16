@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
 // updateGoldenSchemaEnv regenerates testdata/schema.golden.sql instead of comparing against it.

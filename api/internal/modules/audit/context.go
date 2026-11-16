@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/pkg/redact"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/pkg/redact"
 )
 
 type changeCollectorKey struct{}

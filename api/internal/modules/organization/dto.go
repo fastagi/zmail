@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 var organizationSlugPattern = regexp.MustCompile("^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])$")

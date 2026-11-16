@@ -5,9 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	httphandler "github.com/fastagi/fastmail/api/pkg/handler"
-	"github.com/fastagi/fastmail/api/pkg/pagination"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	httphandler "github.com/fastagi/zmail/api/pkg/handler"
+	"github.com/fastagi/zmail/api/pkg/pagination"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // OperatorHandler serves secret-free webhook diagnosis and delivery replay for one organization

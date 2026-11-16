@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/fastagi/fastmail/api/internal/infra/projectfiles"
+	"github.com/fastagi/zmail/api/internal/infra/projectfiles"
 )
 
 type archiveEntry struct {
@@ -115,7 +115,7 @@ func TestExtractRegistryRejectsUnsafeArchives(t *testing.T) {
 }
 
 func TestParseRemoteSourceRequiresAPinnedGitHubReference(t *testing.T) {
-	for _, bad := range []string{"github:fastagi/fastbuild", "https://github.com/fastagi/fastmail", "github:a/b@../x", "gitlab:a/b@v1"} {
+	for _, bad := range []string{"github:fastagi/fastbuild", "https://github.com/fastagi/zmail", "github:a/b@../x", "gitlab:a/b@v1"} {
 		_, err := ParseRemoteSource(bad)
 		assert.Error(t, err, bad)
 	}

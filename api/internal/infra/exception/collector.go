@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fastagi/fastmail/api/pkg/redact"
+	"github.com/fastagi/zmail/api/pkg/redact"
 )
 
 type collectorKey struct{}

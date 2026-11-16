@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	auditstarter "github.com/fastagi/fastmail/api/internal/modules/audit"
+	"github.com/fastagi/zmail/api/internal/domain"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 func (s *service) ListMembers(

@@ -3,7 +3,7 @@ package migrations
 import (
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
 )
 
 func init() {

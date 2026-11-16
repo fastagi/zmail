@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
 func configuredEmailService(client httpDoer, endpoint string, timeout time.Duration) *Service {

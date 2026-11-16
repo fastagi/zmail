@@ -12,10 +12,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/fastagi/fastmail/api/internal/capabilities/crypto"
-	"github.com/fastagi/fastmail/api/internal/capabilities/idgen"
-	"github.com/fastagi/fastmail/api/internal/domain"
-	auditstarter "github.com/fastagi/fastmail/api/internal/modules/audit"
+	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
+	"github.com/fastagi/zmail/api/internal/capabilities/idgen"
+	"github.com/fastagi/zmail/api/internal/domain"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 // lastUsedAtThrottle skips the LastUsedAt write if the previous update is

@@ -11,10 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/trace"
 
-	zerrors "github.com/fastagi/fastmail/api/pkg/errors"
-	"github.com/fastagi/fastmail/api/pkg/logger"
-	"github.com/fastagi/fastmail/api/pkg/redact"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	zerrors "github.com/fastagi/zmail/api/pkg/errors"
+	"github.com/fastagi/zmail/api/pkg/logger"
+	"github.com/fastagi/zmail/api/pkg/redact"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // Recovery creates a development-friendly exception center middleware.

@@ -9,9 +9,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	"github.com/fastagi/zmail/api/internal/domain"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 )
 
 func newOrganizationRepositoryTestDB(t *testing.T) *gorm.DB {

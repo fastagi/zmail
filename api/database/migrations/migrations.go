@@ -5,7 +5,7 @@ package migrations
 import (
 	"slices"
 
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
 )
 
 // registry holds all registered migrations

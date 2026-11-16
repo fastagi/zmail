@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 const postgresProfileDSNEnv = "FASTBUILD_TEST_POSTGRES_DSN"

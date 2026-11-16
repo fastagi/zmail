@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/infra/metrics"
+	"github.com/fastagi/zmail/api/internal/infra/metrics"
 )
 
 const (

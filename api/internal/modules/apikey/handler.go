@@ -3,13 +3,13 @@ package apikey
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/middleware"
-	"github.com/fastagi/fastmail/api/internal/infra/router"
-	"github.com/fastagi/fastmail/api/internal/starter/assembly"
-	"github.com/fastagi/fastmail/api/pkg/handler"
-	"github.com/fastagi/fastmail/api/pkg/pagination"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/middleware"
+	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/starter/assembly"
+	"github.com/fastagi/zmail/api/pkg/handler"
+	"github.com/fastagi/zmail/api/pkg/pagination"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // Handler handles API key HTTP requests.

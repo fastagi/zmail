@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 func createOrganizationMembershipFixture(t *testing.T) (*gorm.DB, *repository, uint, map[string]*OrganizationMembershipPO) {

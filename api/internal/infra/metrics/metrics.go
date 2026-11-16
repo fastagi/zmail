@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/fastagi/fastmail/api/internal/capabilities/workflow"
+	"github.com/fastagi/zmail/api/internal/capabilities/workflow"
 )
 
 const unmatchedRouteLabel = "unmatched"

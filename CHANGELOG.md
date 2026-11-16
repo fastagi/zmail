@@ -173,8 +173,8 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Changed
 
-- **Luas is now FastBuild**, maintained at [`fastagi/fastbuild`](https://github.com/fastagi/fastmail).
-  The Go module is `github.com/fastagi/fastmail/api`, the CLI is `fastbuild`, environment
+- **Luas is now FastBuild**, maintained at [`fastagi/fastbuild`](https://github.com/fastagi/zmail).
+  The Go module is `github.com/fastagi/zmail/api`, the CLI is `fastbuild`, environment
   variables use the `FASTBUILD_` prefix, and API keys start with `fastbuild_`. See `UPGRADING.md`
   for the full mapping.
 

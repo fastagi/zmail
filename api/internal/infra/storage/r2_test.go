@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
 
-	storagecap "github.com/fastagi/fastmail/api/internal/capabilities/storage"
+	storagecap "github.com/fastagi/zmail/api/internal/capabilities/storage"
 )
 
 type fakeS3Client struct{}

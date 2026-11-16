@@ -9,7 +9,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/infra/migration/stubs"
+	"github.com/fastagi/zmail/api/internal/infra/migration/stubs"
 )
 
 // CreatorOptions configures the migration file creator.

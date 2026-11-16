@@ -15,7 +15,7 @@ const (
 	startersFile = "api/internal/infra/config/starters.go"
 	defaultsFile = "api/internal/starter/defaults.go"
 	featuresFile = "web/src/config/optional-features.ts"
-	testModule   = "github.com/fastagi/fastmail/api"
+	testModule   = "github.com/fastagi/zmail/api"
 )
 
 var slotFixtures = map[string]string{
@@ -36,7 +36,7 @@ func StarterNames() []string {
 	defaultsFile: `package starter
 
 import (
-	"github.com/fastagi/fastmail/api/internal/modules/user"
+	"github.com/fastagi/zmail/api/internal/modules/user"
 	// fastbuild:slot api.starter.imports
 )
 
@@ -149,7 +149,7 @@ func TestInstallWritesFilesWiresTheStarterThroughSlotsAndLocks(t *testing.T) {
 	assert.Contains(t, starters, "StarterDemoNotes = \"demonotes\"\n\t// fastbuild:slot api.starter.constants")
 	assert.Contains(t, starters, "\t\tStarterDemoNotes,\n\t\t// fastbuild:slot api.starter.names")
 	defaults := readFile(t, root, defaultsFile)
-	assert.Contains(t, defaults, "\t\"github.com/fastagi/fastmail/api/internal/modules/demonotes\"\n")
+	assert.Contains(t, defaults, "\t\"github.com/fastagi/zmail/api/internal/modules/demonotes\"\n")
 	assert.Contains(t, defaults, "\tdemonotes.ProviderSet,\n")
 	assert.Contains(t, defaults, "\tDemoNotes *demonotes.Handler\n")
 	assert.Contains(t, defaults, "\t\tdemonotes.NewStarterManifest(h.DemoNotes),\n")

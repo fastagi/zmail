@@ -1,6 +1,6 @@
 # Mailbox — Implementation Plan
 
-The first product capability of FastMail: user-owned mailboxes that send through Cloudflare Email
+The first product capability of Zmail: user-owned mailboxes that send through Cloudflare Email
 Service and receive from Cloudflare Email Routing. Written to
 [BUSINESS_IMPLEMENTATION_PLAN_STANDARD.md](../BUSINESS_IMPLEMENTATION_PLAN_STANDARD.md). Public HTTP
 behavior is owned by [contracts/MAILBOXES.md](../../contracts/MAILBOXES.md); this plan records why

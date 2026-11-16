@@ -1,8 +1,8 @@
-# FastMail
+# Zmail
 
 Team mailboxes on your own domain, built on Cloudflare Email Service. An organization claims
 addresses on the deployment's mail domain; its members read mail sent to them and send mail from
-them, through the Web console or the HTTP API. FastMail is built on the FastBuild scaffold: a Go API on PostgreSQL, a
+them, through the Web console or the HTTP API. Zmail is built on the FastBuild scaffold: a Go API on PostgreSQL, a
 Next.js Web application, and an Admin Console.
 
 | Piece | Where | What it does |
@@ -16,7 +16,7 @@ The HTTP behavior is in [`contracts/MAILBOXES.md`](contracts/MAILBOXES.md) and t
 [`docs/plans/mailbox.md`](docs/plans/mailbox.md) and
 [`docs/plans/mailbox-organizations.md`](docs/plans/mailbox-organizations.md).
 
-## Run FastMail Locally
+## Run Zmail Locally
 
 ```bash
 make dev

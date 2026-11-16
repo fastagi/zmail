@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	storagecap "github.com/fastagi/fastmail/api/internal/capabilities/storage"
+	storagecap "github.com/fastagi/zmail/api/internal/capabilities/storage"
 )
 
 type disabledStore struct{}

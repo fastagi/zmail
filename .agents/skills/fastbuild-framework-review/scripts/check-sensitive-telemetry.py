@@ -69,7 +69,7 @@ def main() -> int:
     require_all(
         failures,
         "api/pkg/logger/core.go",
-        ('"github.com/fastagi/fastmail/api/pkg/redact"', "return redact.Map(merged)"),
+        ('"github.com/fastagi/zmail/api/pkg/redact"', "return redact.Map(merged)"),
     )
     require_all(
         failures,

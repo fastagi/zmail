@@ -1,4 +1,4 @@
-module github.com/fastagi/fastmail/api
+module github.com/fastagi/zmail/api
 
 go 1.26.10
 

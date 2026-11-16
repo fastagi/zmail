@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	pkgenv "github.com/fastagi/fastmail/api/pkg/env"
+	pkgenv "github.com/fastagi/zmail/api/pkg/env"
 )
 
 func withoutEnv(t *testing.T, keys ...string) {

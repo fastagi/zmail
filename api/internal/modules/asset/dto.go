@@ -3,8 +3,8 @@ package asset
 import (
 	"time"
 
-	storagecap "github.com/fastagi/fastmail/api/internal/capabilities/storage"
-	"github.com/fastagi/fastmail/api/internal/domain"
+	storagecap "github.com/fastagi/zmail/api/internal/capabilities/storage"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 type createUploadIntentRequest struct {

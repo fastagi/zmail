@@ -3,7 +3,7 @@ package pluginregistry
 import (
 	"fmt"
 
-	"github.com/fastagi/fastmail/api/internal/infra/projectfiles"
+	"github.com/fastagi/zmail/api/internal/infra/projectfiles"
 )
 
 // stageInsert stages lines before the slot marker and reports whether it added them.

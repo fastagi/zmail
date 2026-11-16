@@ -96,7 +96,7 @@ api_environment() {
   export WEBHOOK_ALLOW_INSECURE_HTTP=true
   export WEBHOOK_ALLOW_PRIVATE_TARGETS=true
   # Local-only secret so signed inbound mail can be exercised without Cloudflare.
-  export MAILBOX_INBOUND_SECRET=fastmail-local-only-mailbox-inbound-secret-0123456789
+  export MAILBOX_INBOUND_SECRET=zmail-local-only-mailbox-inbound-secret-0123456789
 }
 
 prepare_api() {

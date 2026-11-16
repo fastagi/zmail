@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/infra/projectfiles"
+	"github.com/fastagi/zmail/api/internal/infra/projectfiles"
 )
 
 // SlotMarker starts every slot marker comment, for example `// fastbuild:slot api.starter.names`

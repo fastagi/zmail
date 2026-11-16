@@ -1,6 +1,6 @@
 package operator
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import "github.com/fastagi/zmail/api/internal/infra/router"
 
 // RegisterRoutes attaches the operator browser session and operator-only routes.
 func (h *Handler) RegisterRoutes(r *router.Router) {

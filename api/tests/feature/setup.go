@@ -6,10 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/bootstrap"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	test_platform "github.com/fastagi/fastmail/api/internal/infra/testing"
-	"github.com/fastagi/fastmail/api/internal/wiring"
+	"github.com/fastagi/zmail/api/internal/bootstrap"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	test_platform "github.com/fastagi/zmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/wiring"
 )
 
 // SetupApp initializes the feature-test application by reusing the production DI graph

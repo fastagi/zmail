@@ -1,14 +1,14 @@
-# FastMail Email Worker
+# Zmail Email Worker
 
 The mail edge of the `mailbox` starter. Cloudflare Email Routing hands every message for the
-mailbox domain to this Worker; the Worker signs it and posts the raw message to the FastMail API.
+mailbox domain to this Worker; the Worker signs it and posts the raw message to the Zmail API.
 The API owns mailboxes and decides whether the recipient exists. Behavior is defined in
 [`contracts/MAILBOXES.md`](../../../contracts/MAILBOXES.md).
 
 ## Requirements
 
 - The mailbox domain uses Cloudflare DNS, with Email Routing enabled.
-- The FastMail API is reachable over public HTTPS and runs with `OPTIONAL_STARTERS` containing
+- The Zmail API is reachable over public HTTPS and runs with `OPTIONAL_STARTERS` containing
   `mailbox`, `MAILBOX_DOMAIN` set to the domain, and a `MAILBOX_INBOUND_SECRET` of at least 32
   characters.
 
@@ -28,8 +28,8 @@ The API owns mailboxes and decides whether the recipient exists. Behavior is def
    ```
 
 4. In the Cloudflare dashboard, open the domain's Email Routing rules and point the catch-all
-   address at the `fastmail-email-worker` Worker. The catch-all sends every address on the domain
-   to FastMail; mail for an address that is not a mailbox is bounced.
+   address at the `zmail-email-worker` Worker. The catch-all sends every address on the domain
+   to Zmail; mail for an address that is not a mailbox is bounced.
 
 ## Outbound Mail
 

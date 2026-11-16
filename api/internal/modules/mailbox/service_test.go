@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/mailtransport"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
 )
 
 // testCreator is the user recorded as the creator of test mailboxes; it grants nothing.

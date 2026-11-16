@@ -12,8 +12,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
 var organizationInvitationTokenPattern = regexp.MustCompile(`oinv_[a-z0-9_-]+\.[a-f0-9]{48}`)

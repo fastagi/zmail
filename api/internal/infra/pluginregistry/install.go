@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/infra/projectfiles"
+	"github.com/fastagi/zmail/api/internal/infra/projectfiles"
 )
 
 // LockFile records installed plugins at the repository root.

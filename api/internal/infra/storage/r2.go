@@ -17,8 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
 
-	storagecap "github.com/fastagi/fastmail/api/internal/capabilities/storage"
-	"github.com/fastagi/fastmail/api/pkg/tracedhttp"
+	storagecap "github.com/fastagi/zmail/api/internal/capabilities/storage"
+	"github.com/fastagi/zmail/api/pkg/tracedhttp"
 )
 
 // R2Options configures the private S3-compatible Cloudflare R2 adapter.

@@ -7,7 +7,7 @@ IMAGE_TAG="${1:-fastbuild-api:container-check}"
 CONTAINER_NAME="fastbuild-api-container-check-$$"
 TMP_DIR="$(mktemp -d)"
 BUILD_METADATA_OUTPUT="${BUILD_METADATA_OUTPUT:-${TMP_DIR}/fastbuild-api.build-metadata.json}"
-OCI_SOURCE="${OCI_SOURCE:-https://github.com/fastagi/fastmail}"
+OCI_SOURCE="${OCI_SOURCE:-https://github.com/fastagi/zmail}"
 OCI_REVISION="${OCI_REVISION:-$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD 2>/dev/null || printf 'unknown')}"
 OCI_VERSION="${OCI_VERSION:-$(git -C "${REPOSITORY_ROOT}" describe --tags --always 2>/dev/null || printf 'dev')}"
 

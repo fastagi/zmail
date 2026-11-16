@@ -1,6 +1,6 @@
 package organization
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import "github.com/fastagi/zmail/api/internal/infra/router"
 
 // RegisterMiddleware exposes verified active organization context to downstream modules.
 func (h *Handler) RegisterMiddleware(r *router.Router) {

@@ -32,8 +32,8 @@ capabilities may depend on `pkg/` and the standard library, but must not depend 
 
 ```go
 import (
-    "github.com/fastagi/fastmail/api/internal/capabilities/crypto"
-    "github.com/fastagi/fastmail/api/internal/capabilities/idgen"
+    "github.com/fastagi/zmail/api/internal/capabilities/crypto"
+    "github.com/fastagi/zmail/api/internal/capabilities/idgen"
 )
 
 // ID generation

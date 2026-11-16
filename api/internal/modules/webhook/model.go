@@ -6,8 +6,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/modules/organization"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/modules/organization"
 )
 
 const (

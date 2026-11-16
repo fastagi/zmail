@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/router"
-	"github.com/fastagi/fastmail/api/internal/modules/notification"
-	"github.com/fastagi/fastmail/api/internal/modules/organization"
-	"github.com/fastagi/fastmail/api/internal/modules/webhook"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/modules/notification"
+	"github.com/fastagi/zmail/api/internal/modules/organization"
+	"github.com/fastagi/zmail/api/internal/modules/webhook"
 )
 
 var starterSurfaceRoutes = map[string][]string{

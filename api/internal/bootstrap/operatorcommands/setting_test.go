@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	infracommands "github.com/fastagi/fastmail/api/internal/infra/console/commands"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	infracommands "github.com/fastagi/zmail/api/internal/infra/console/commands"
 )
 
 type settingAuditRecorder struct {

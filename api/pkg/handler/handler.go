@@ -21,7 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // ParseID extracts and validates an ID parameter from the URL.

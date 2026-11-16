@@ -3,13 +3,13 @@ package app
 import (
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/email"
-	"github.com/fastagi/fastmail/api/internal/infra/events"
-	"github.com/fastagi/fastmail/api/internal/infra/migration"
-	"github.com/fastagi/fastmail/api/internal/infra/ratelimit"
-	"github.com/fastagi/fastmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/email"
+	"github.com/fastagi/zmail/api/internal/infra/events"
+	"github.com/fastagi/zmail/api/internal/infra/migration"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
+	"github.com/fastagi/zmail/api/internal/starter"
 )
 
 // Application holds all application dependencies injected via Wire.

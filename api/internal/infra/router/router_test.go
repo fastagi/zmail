@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 func TestRouteConstraintFailureUsesUnifiedErrorResponse(t *testing.T) {

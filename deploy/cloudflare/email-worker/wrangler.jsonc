@@ -1,12 +1,12 @@
 {
-  // FastMail mail edge. Deploy with: npx wrangler deploy
+  // Zmail mail edge. Deploy with: npx wrangler deploy
   "$schema": "https://unpkg.com/wrangler/config-schema.json",
-  "name": "fastmail-email-worker",
+  "name": "zmail-email-worker",
   "main": "worker.js",
   "compatibility_date": "2026-01-01",
   "observability": { "enabled": true },
   "vars": {
-    // The public HTTPS URL of the FastMail API inbound route.
+    // The public HTTPS URL of the Zmail API inbound route.
     "MAILBOX_INBOUND_URL": "https://api.example.com/v1/inbound-mail-messages"
   }
   // MAILBOX_INBOUND_SECRET is a secret, never a variable:

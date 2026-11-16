@@ -19,7 +19,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
   return (
     <html lang="en">
       <head>
-        <title>FastBuild | Application error</title>
+        <title>Zmail | Application error</title>
       </head>
       <body className="min-h-screen bg-bg-canvas text-text-main antialiased">
         <main

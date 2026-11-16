@@ -3,9 +3,9 @@ package bootstrap
 import (
 	"net/http"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/starter"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/starter"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // registerDomainErrorMappings installs the shared domain errors, then lets each active starter map

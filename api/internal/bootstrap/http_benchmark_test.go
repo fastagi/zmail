@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/infra/metrics"
-	infraMiddleware "github.com/fastagi/fastmail/api/internal/infra/middleware"
+	"github.com/fastagi/zmail/api/internal/infra/metrics"
+	infraMiddleware "github.com/fastagi/zmail/api/internal/infra/middleware"
 )
 
 type benchmarkResponseWriter struct {

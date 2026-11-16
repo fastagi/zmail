@@ -3,7 +3,7 @@ package notification
 import (
 	"time"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 type replaceNotificationReadStateRequest struct {

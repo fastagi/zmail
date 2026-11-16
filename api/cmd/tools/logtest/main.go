@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/fastagi/fastmail/api/pkg/logger"
+	"github.com/fastagi/zmail/api/pkg/logger"
 )
 
 func main() {

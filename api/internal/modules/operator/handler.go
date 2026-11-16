@@ -7,15 +7,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/modules/notification"
-	"github.com/fastagi/fastmail/api/internal/modules/organization"
-	"github.com/fastagi/fastmail/api/internal/modules/setting"
-	"github.com/fastagi/fastmail/api/internal/modules/user"
-	"github.com/fastagi/fastmail/api/internal/modules/webhook"
-	"github.com/fastagi/fastmail/api/pkg/handler"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/modules/notification"
+	"github.com/fastagi/zmail/api/internal/modules/organization"
+	"github.com/fastagi/zmail/api/internal/modules/setting"
+	"github.com/fastagi/zmail/api/internal/modules/user"
+	"github.com/fastagi/zmail/api/internal/modules/webhook"
+	"github.com/fastagi/zmail/api/pkg/handler"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 const (

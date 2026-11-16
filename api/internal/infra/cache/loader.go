@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/fastagi/fastmail/api/internal/infra/metrics"
+	"github.com/fastagi/zmail/api/internal/infra/metrics"
 )
 
 // Loader collapses concurrent misses for one explicitly owned Store. It has no

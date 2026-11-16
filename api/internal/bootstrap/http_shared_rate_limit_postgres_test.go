@@ -8,10 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/database/migrations"
-	"github.com/fastagi/fastmail/api/internal/infra/config"
-	"github.com/fastagi/fastmail/api/internal/infra/ratelimit"
-	testplatform "github.com/fastagi/fastmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/database/migrations"
+	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
+	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
 // TestApplyGlobalMiddleware_SharedStoreEnforcesOneBudgetAcrossReplicas proves the kernel hands the

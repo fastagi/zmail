@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/infra/console"
-	"github.com/fastagi/fastmail/api/internal/infra/plugin"
+	"github.com/fastagi/zmail/api/internal/infra/console"
+	"github.com/fastagi/zmail/api/internal/infra/plugin"
 )
 
 // PluginListCommand lists external CLI commands: executables named fastbuild-<name> on PATH.

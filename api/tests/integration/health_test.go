@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/fastagi/fastmail/api/internal/infra/health"
+	"github.com/fastagi/zmail/api/internal/infra/health"
 )
 
 func init() {

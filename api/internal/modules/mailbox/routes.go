@@ -1,8 +1,8 @@
 package mailbox
 
 import (
-	"github.com/fastagi/fastmail/api/internal/infra/router"
-	"github.com/fastagi/fastmail/api/internal/modules/apikey"
+	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/modules/apikey"
 )
 
 // RegisterRoutes registers HTTP routes for the mailbox starter. Member routes require a

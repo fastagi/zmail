@@ -3,8 +3,8 @@ package asset
 import (
 	"net/http"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // RegisterErrorMappings maps this starter's domain errors to public status codes and error codes.

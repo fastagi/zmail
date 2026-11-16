@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 const (

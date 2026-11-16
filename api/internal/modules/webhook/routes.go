@@ -1,6 +1,6 @@
 package webhook
 
-import "github.com/fastagi/fastmail/api/internal/infra/router"
+import "github.com/fastagi/zmail/api/internal/infra/router"
 
 // RegisterRoutes attaches organization-scoped webhook management resources.
 func (h *Handler) RegisterRoutes(r *router.Router) {

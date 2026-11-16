@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fastagi/fastmail/api/internal/starter/assembly"
+	"github.com/fastagi/zmail/api/internal/starter/assembly"
 )
 
 var starterNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)

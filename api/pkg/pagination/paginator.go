@@ -30,7 +30,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/zmail/api/pkg/response"
 )
 
 // Paginator holds pagination state and generates URLs.
