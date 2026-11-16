@@ -202,6 +202,24 @@ function delegatesWebhookGuard(path: string, handler: RouteHandlerSource): boole
   );
 }
 
+/**
+ * Routes that are public on purpose: a signed token in the path is the only credential, and the
+ * callers (mail clients doing one-click unsubscribe, or a recipient without a session) cannot
+ * meet the session or same-origin rules. Each one has a dedicated test below.
+ */
+const publicTokenRouteModule = resolve(
+  process.cwd(),
+  'src/features/mailbox/server/unsubscribe-route.ts'
+);
+
+function delegatesPublicTokenGuard(path: string, handler: RouteHandlerSource): boolean {
+  return (
+    relativeRoute(path) === 'mail-unsubscribes/[token]/route.ts' &&
+    handler.method === 'POST' &&
+    /\bunsubscribeRoute\(/.test(handler.source)
+  );
+}
+
 function pluginRouteModuleFor(path: string): PluginRouteModule | undefined {
   const source = readRoute(path);
   return pluginRouteModules.find(routeModule =>
@@ -289,7 +307,8 @@ describe('mock BFF route contract', () => {
             !delegatesSettingGuard(path, handler) &&
             !delegatesUsageGuard(path, handler) &&
             !delegatesWebhookGuard(path, handler) &&
-            !delegatesPluginGuard(path, handler)
+            !delegatesPluginGuard(path, handler) &&
+            !delegatesPublicTokenGuard(path, handler)
         )
         .map(handler => `${relativeRoute(path)}:${handler.method}`)
     );
@@ -310,6 +329,7 @@ describe('mock BFF route contract', () => {
         .filter(handler => !delegatesUsageGuard(path, handler))
         .filter(handler => !delegatesWebhookGuard(path, handler))
         .filter(handler => !delegatesPluginGuard(path, handler))
+        .filter(handler => !delegatesPublicTokenGuard(path, handler))
         .filter(handler => {
           const availabilityGuard = handler.source.indexOf(productionGuard(path));
           const originGuard = handler.source.indexOf('guardSameOriginMutation(');
@@ -479,6 +499,27 @@ describe('mock BFF route contract', () => {
       }
     });
   }
+
+  it('keeps the public unsubscribe route token-only, feature-gated, and session-free', () => {
+    const source = readFileSync(publicTokenRouteModule, 'utf8');
+    const handler = exportedFunction(source, 'unsubscribeRoute');
+    const availability = handler.indexOf('resolveMailboxRoute(');
+    const tokenCheck = handler.indexOf('MAIL_UNSUBSCRIBE_TOKEN_PATTERN.test(');
+    const forward = handler.indexOf('forwardPublicGoApi(');
+    expect(availability).toBeGreaterThanOrEqual(0);
+    expect(tokenCheck).toBeGreaterThan(availability);
+    expect(forward).toBeGreaterThan(tokenCheck);
+    for (const forbidden of [
+      'getApiSessionToken',
+      'getSessionUser',
+      'forwardAuthenticatedGoApi',
+      'readJsonBody',
+      '.json(',
+      '.text(',
+    ]) {
+      expect(source, forbidden).not.toContain(forbidden);
+    }
+  });
 
   it('keeps usage reads behind feature availability and authentication', () => {
     const source = readFileSync(usageRouteModule, 'utf8');

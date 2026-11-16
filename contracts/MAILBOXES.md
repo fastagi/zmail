@@ -315,6 +315,81 @@ The response counts `rows`, `created`, `updated`, and `skipped_count`, and lists
 skipped rows by `line` (the header is line 1) and `reason`. Values are stored as plain strings;
 nothing in a cell is evaluated.
 
+### Broadcasts
+
+A broadcast sends one template from one mailbox to the subscribed contacts of one list, one
+message per contact. Every member manages the organization's broadcasts.
+
+Broadcasts need unsubscribe links, so they are available only when the API has
+`MAILBOX_INBOUND_SECRET` (the links are signed with a key derived from it) and `MAILBOX_PUBLIC_URL`
+(the public origin of the Web console). `GET /v1/mailbox-domains` reports `broadcasts_enabled`;
+without it, sending is `503 MAILBOX.BROADCAST_DISABLED`.
+
+| Status | Meaning |
+|---|---|
+| `draft` | Editable. Has no recipients. |
+| `scheduled` | Recipients are fixed; sending starts at `scheduled_at`. |
+| `sending` | The worker is sending its recipients. |
+| `sent` | No recipient is pending. |
+| `canceled` | Stopped; recipients not yet sent became `canceled`. |
+
+`POST /v1/mail-broadcasts` creates a draft from `name`, `mailbox_id`, `template_id`, `list_id`,
+and an optional `unsubscribe_label`. Each must belong to the organization. `PUT` replaces a draft
+and is `409 MAILBOX.BROADCAST_NOT_EDITABLE` in any other state.
+
+`POST /v1/mail-broadcasts/{id}/sends` with an optional `scheduled_at` starts a draft:
+
+- The template is copied into the broadcast, so later edits to the template do not change it.
+- One recipient is added per contact of the list whose status is `subscribed`. A list without one
+  is `422 MAILBOX.BROADCAST_NO_RECIPIENTS`, and the draft stays a draft.
+- Without `scheduled_at`, or with a time in the past, the broadcast is `sending`; otherwise it is
+  `scheduled`, at most a year ahead.
+
+`POST /v1/mail-broadcasts/{id}/cancellations` cancels a `scheduled` or `sending` broadcast. A
+broadcast can be deleted when it is `draft`, `sent`, or `canceled`; messages already sent stay in
+the mailbox.
+
+#### Sending
+
+The `mail:broadcast:work` worker sends each recipient as an ordinary outbound message from the
+broadcast's mailbox, so the organization's send limit, delivery events, the log, and webhooks apply
+to it.
+
+- Variables come from the contact: `email`, `first_name`, `last_name`, every property, and
+  `unsubscribe_url`. A variable without a value or fallback fails that recipient with
+  `template.variables_missing`.
+- If the template does not use `{{unsubscribe_url}}`, a small link with `unsubscribe_label` (or
+  `Unsubscribe`) is added at the end of the HTML body and the text body.
+- Every message carries `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`,
+  so mail clients can offer one-click unsubscribe.
+- A contact that is no longer `subscribed` when its turn comes is `skipped`
+  (`contact_not_subscribed`); a deleted contact is `skipped` (`contact_deleted`).
+- Each recipient is sent with an idempotency key of its broadcast and contact, so a worker that stops
+  after the provider call never sends that contact a second message.
+- When the send limit is reached, the broadcast keeps `sending` with `stop_reason`
+  `send_limit_reached` and continues when the 24-hour window has room.
+
+The broadcast reports `counts` of its recipients by status. `GET
+/v1/mail-broadcasts/{id}/recipients` pages them, with an optional `status` filter, each with the
+stored `message_id` and a `failure_code`.
+
+#### Unsubscribe And Suppression
+
+An unsubscribe link is `{MAILBOX_PUBLIC_URL}/unsubscribe/{token}`, a page of the Web console. The
+token names one contact and does not expire. `POST /v1/mail-unsubscribes/{token}` needs no session:
+
+- A valid token is `204`; the contact becomes `unsubscribed` with `status_reason`
+  `unsubscribe_link`. A contact already unsubscribed or suppressed, or one that no longer exists,
+  also gets `204`, so the answer discloses nothing.
+- Any other token is `404 MAILBOX.UNSUBSCRIBE_INVALID`.
+
+The `List-Unsubscribe` header points at `{MAILBOX_PUBLIC_URL}/api/mail-unsubscribes/{token}`,
+which the Web console forwards to this route for mail clients.
+
+A broadcast recipient whose message bounces permanently, is refused by the provider's suppression
+list, or draws a spam complaint becomes `suppressed`, with `status_reason` `bounced`, `rejected`, or
+`complained`. Later broadcasts skip it.
+
 ### Log And Statistics
 
 `GET /v1/mail-messages` lists messages across every mailbox of the organization, newest first, as
@@ -547,3 +622,9 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.CONTACT_LIST_LIMIT_REACHED` | 409 |
 | `MAILBOX.CONTACT_INVALID` | 422 |
 | `MAILBOX.CONTACT_IMPORT_INVALID` | 422 |
+| `MAILBOX.BROADCAST_NOT_FOUND` | 404 |
+| `MAILBOX.UNSUBSCRIBE_INVALID` | 404 |
+| `MAILBOX.BROADCAST_NOT_EDITABLE` | 409 |
+| `MAILBOX.BROADCAST_INVALID` | 422 |
+| `MAILBOX.BROADCAST_NO_RECIPIENTS` | 422 |
+| `MAILBOX.BROADCAST_DISABLED` | 503 |

@@ -121,6 +121,12 @@ const (
 	CodeMailContactListNameTaken     = "MAILBOX.CONTACT_LIST_NAME_TAKEN"
 	CodeMailContactListLimitReached  = "MAILBOX.CONTACT_LIST_LIMIT_REACHED"
 	CodeMailContactImportInvalid     = "MAILBOX.CONTACT_IMPORT_INVALID"
+	CodeMailBroadcastNotFound        = "MAILBOX.BROADCAST_NOT_FOUND"
+	CodeMailBroadcastInvalid         = "MAILBOX.BROADCAST_INVALID"
+	CodeMailBroadcastNotEditable     = "MAILBOX.BROADCAST_NOT_EDITABLE"
+	CodeMailBroadcastNoRecipients    = "MAILBOX.BROADCAST_NO_RECIPIENTS"
+	CodeMailBroadcastDisabled        = "MAILBOX.BROADCAST_DISABLED"
+	CodeMailUnsubscribeInvalid       = "MAILBOX.UNSUBSCRIBE_INVALID"
 
 	CodeOperatorForbidden       = "OPERATOR.FORBIDDEN"
 	CodeOperatorOriginRejected  = "OPERATOR.ORIGIN_REJECTED"

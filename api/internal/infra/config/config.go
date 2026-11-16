@@ -429,6 +429,9 @@ type MailboxConfig struct {
 	// InboundSecret signs deliveries from the mail edge. Empty disables inbound mail.
 	InboundSecret  string
 	DailySendLimit int
+	// PublicURL is the public origin of the Web console, such as https://app.example.com. Broadcast
+	// unsubscribe links point at it; empty disables broadcasts.
+	PublicURL string
 }
 
 // Resolved fills the development defaults: outside production an unset domain is
@@ -439,6 +442,7 @@ func (m MailboxConfig) Resolved(production bool) MailboxConfig {
 	m.CloudflareAccountID = strings.TrimSpace(m.CloudflareAccountID)
 	m.CloudflareAPIToken = strings.TrimSpace(m.CloudflareAPIToken)
 	m.InboundSecret = strings.TrimSpace(m.InboundSecret)
+	m.PublicURL = strings.TrimRight(strings.TrimSpace(m.PublicURL), "/")
 	if !production {
 		if m.Domain == "" {
 			m.Domain = DefaultMailboxDomain
@@ -632,6 +636,7 @@ func Load() (*Config, error) {
 			RequestTimeout:      env.GetDuration("MAILBOX_REQUEST_TIMEOUT", DefaultMailboxRequestTimeout),
 			InboundSecret:       env.Get("MAILBOX_INBOUND_SECRET", ""),
 			DailySendLimit:      env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
+			PublicURL:           env.Get("MAILBOX_PUBLIC_URL", ""),
 		},
 		Webhook: WebhookConfig{
 			EncryptionKey:       env.Get("WEBHOOK_ENCRYPTION_KEY", ""),
@@ -1261,6 +1266,13 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 	}
 	if resolved.DailySendLimit <= 0 || resolved.DailySendLimit > 100000 {
 		return fmt.Errorf("MAILBOX_DAILY_SEND_LIMIT must be between 1 and 100000")
+	}
+	if resolved.PublicURL != "" {
+		parsed, err := url.Parse(resolved.PublicURL)
+		if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
+			(parsed.Scheme != "https" && (production || parsed.Scheme != "http")) {
+			return fmt.Errorf("MAILBOX_PUBLIC_URL must be an https URL without credentials, query, or fragment")
+		}
 	}
 	return nil
 }

@@ -126,9 +126,18 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 			Disposition: "attachment",
 		})
 	}
+	if len(mail.Headers) > 0 {
+		body.Headers = make(map[string]string, len(mail.Headers)+2)
+		for name, value := range mail.Headers {
+			body.Headers[name] = value
+		}
+	}
 	if mail.InReplyTo != "" {
 		reference := "<" + mail.InReplyTo + ">"
-		body.Headers = map[string]string{"In-Reply-To": reference, "References": reference}
+		if body.Headers == nil {
+			body.Headers = map[string]string{}
+		}
+		body.Headers["In-Reply-To"], body.Headers["References"] = reference, reference
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {

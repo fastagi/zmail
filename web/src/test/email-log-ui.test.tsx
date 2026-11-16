@@ -1129,6 +1129,7 @@ function domain(overrides: Record<string, unknown> = {}) {
     provider: 'cloudflare',
     inbound_enabled: true,
     daily_send_limit: 200,
+    broadcasts_enabled: true,
     ...overrides,
   };
 }

@@ -81,6 +81,38 @@ TABLE mail_attachments
   COLUMN content bytea NOT NULL
   COLUMN created_at timestamp with time zone
 
+TABLE mail_broadcast_recipients
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_broadcast_recipients_id_seq'::regclass)
+  COLUMN broadcast_id bigint NOT NULL
+  COLUMN contact_id bigint NOT NULL
+  COLUMN email character varying(320) NOT NULL
+  COLUMN status character varying(16) NOT NULL DEFAULT 'pending'::character varying
+  COLUMN message_id bigint
+  COLUMN failure_code character varying(120) NOT NULL DEFAULT ''::character varying
+  COLUMN lease_until timestamp with time zone
+  COLUMN created_at timestamp with time zone
+  COLUMN updated_at timestamp with time zone
+
+TABLE mail_broadcasts
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_broadcasts_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN name character varying(100) NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN template_id bigint NOT NULL
+  COLUMN list_id bigint NOT NULL
+  COLUMN unsubscribe_label character varying(50) NOT NULL DEFAULT ''::character varying
+  COLUMN status character varying(16) NOT NULL DEFAULT 'draft'::character varying
+  COLUMN subject character varying(998) NOT NULL DEFAULT ''::character varying
+  COLUMN html_body text NOT NULL DEFAULT ''::text
+  COLUMN text_body text NOT NULL DEFAULT ''::text
+  COLUMN scheduled_at timestamp with time zone
+  COLUMN started_at timestamp with time zone
+  COLUMN finished_at timestamp with time zone
+  COLUMN stop_reason character varying(64) NOT NULL DEFAULT ''::character varying
+  COLUMN created_by bigint NOT NULL
+  COLUMN created_at timestamp with time zone
+  COLUMN updated_at timestamp with time zone
+
 TABLE mail_contact_list_members
   COLUMN list_id bigint NOT NULL
   COLUMN contact_id bigint NOT NULL
@@ -453,6 +485,12 @@ CONSTRAINT authentication_sessions.chk_authentication_sessions_audience CHECK ((
 CONSTRAINT mail_attachments.chk_mail_attachments_size CHECK (((size >= 0) AND (size = octet_length(content))))
 CONSTRAINT mail_attachments.fk_mail_attachments_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_attachments.mail_attachments_pkey PRIMARY KEY (id)
+CONSTRAINT mail_broadcast_recipients.chk_mail_broadcast_recipients_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'sent'::character varying, 'failed'::character varying, 'skipped'::character varying, 'canceled'::character varying])::text[])))
+CONSTRAINT mail_broadcast_recipients.fk_mail_broadcast_recipients_broadcast FOREIGN KEY (broadcast_id) REFERENCES mail_broadcasts(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_broadcast_recipients.mail_broadcast_recipients_pkey PRIMARY KEY (id)
+CONSTRAINT mail_broadcasts.chk_mail_broadcasts_status CHECK (((status)::text = ANY ((ARRAY['draft'::character varying, 'scheduled'::character varying, 'sending'::character varying, 'sent'::character varying, 'canceled'::character varying])::text[])))
+CONSTRAINT mail_broadcasts.fk_mail_broadcasts_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_broadcasts.mail_broadcasts_pkey PRIMARY KEY (id)
 CONSTRAINT mail_contact_list_members.fk_mail_contact_list_members_contact FOREIGN KEY (contact_id) REFERENCES mail_contacts(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_contact_list_members.fk_mail_contact_list_members_list FOREIGN KEY (list_id) REFERENCES mail_contact_lists(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_contact_list_members.mail_contact_list_members_pkey PRIMARY KEY (list_id, contact_id)
@@ -605,6 +643,13 @@ INDEX CREATE UNIQUE INDEX idx_authentication_sessions_token_hash ON authenticati
 INDEX CREATE INDEX idx_authentication_sessions_user_id ON authentication_sessions USING btree (user_id)
 INDEX CREATE INDEX idx_mail_attachments_message ON mail_attachments USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_attachments_pkey ON mail_attachments USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_broadcast_recipients_contact ON mail_broadcast_recipients USING btree (broadcast_id, contact_id)
+INDEX CREATE INDEX idx_mail_broadcast_recipients_message ON mail_broadcast_recipients USING btree (message_id) WHERE (message_id IS NOT NULL)
+INDEX CREATE INDEX idx_mail_broadcast_recipients_pending ON mail_broadcast_recipients USING btree (broadcast_id, id) WHERE ((status)::text = 'pending'::text)
+INDEX CREATE UNIQUE INDEX mail_broadcast_recipients_pkey ON mail_broadcast_recipients USING btree (id)
+INDEX CREATE INDEX idx_mail_broadcasts_due ON mail_broadcasts USING btree (status, scheduled_at)
+INDEX CREATE INDEX idx_mail_broadcasts_listing ON mail_broadcasts USING btree (organization_id, id)
+INDEX CREATE UNIQUE INDEX mail_broadcasts_pkey ON mail_broadcasts USING btree (id)
 INDEX CREATE INDEX idx_mail_contact_list_members_contact ON mail_contact_list_members USING btree (contact_id)
 INDEX CREATE UNIQUE INDEX mail_contact_list_members_pkey ON mail_contact_list_members USING btree (list_id, contact_id)
 INDEX CREATE UNIQUE INDEX idx_mail_contact_lists_name ON mail_contact_lists USING btree (organization_id, name)

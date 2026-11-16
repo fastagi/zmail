@@ -162,6 +162,12 @@ func (s *service) RecordDeliveryEvent(
 			return nil, addErr
 		}
 		message.LastEvent = summary
+		// A permanent bounce or a complaint from a broadcast recipient suppresses that contact.
+		if added > 0 && (event.Type == domain.MailEventBounced || event.Type == domain.MailEventComplained) {
+			if suppressErr := s.broadcasts.SuppressContactForMessage(tx, message.ID, string(event.Type)); suppressErr != nil {
+				return nil, suppressErr
+			}
+		}
 		eventType, publish := webhookTypeForEvent(event.Type)
 		if added == 0 || !publish {
 			return nil, nil

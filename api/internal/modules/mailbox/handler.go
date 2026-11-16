@@ -55,11 +55,12 @@ func (h *Handler) ListDomains(c *gin.Context) {
 	}
 	privateResponse(c)
 	response.Success(c, []MailboxDomainResponse{{
-		Domain:         h.service.Domain(),
-		MaxMailboxes:   domain.MaxMailboxesPerOrganization,
-		Provider:       h.service.Provider(),
-		InboundEnabled: h.service.InboundEnabled(),
-		DailySendLimit: h.service.DailySendLimit(),
+		Domain:            h.service.Domain(),
+		MaxMailboxes:      domain.MaxMailboxesPerOrganization,
+		Provider:          h.service.Provider(),
+		InboundEnabled:    h.service.InboundEnabled(),
+		DailySendLimit:    h.service.DailySendLimit(),
+		BroadcastsEnabled: h.service.BroadcastsEnabled(),
 	}})
 }
 

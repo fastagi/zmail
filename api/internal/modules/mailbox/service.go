@@ -33,6 +33,8 @@ type Settings struct {
 	InboundSecret    string
 	InboundTolerance time.Duration
 	DailySendLimit   int
+	// PublicURL is the public Web origin unsubscribe links point at; empty disables broadcasts.
+	PublicURL string
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -60,6 +62,9 @@ type SendInput struct {
 	Attachments []AttachmentInput
 	// Template, when set, supplies the subject and bodies; Subject, Text, and HTML must be empty.
 	Template *TemplateSendInput
+	// Headers are extra message headers set by Zmail itself, such as List-Unsubscribe. Requests
+	// from members and API keys never set them.
+	Headers map[string]string
 	// IdempotencyKey is optional. A repeated send with the same key and the same content in the
 	// same mailbox returns the first attempt's outcome instead of sending again.
 	IdempotencyKey string
@@ -94,6 +99,16 @@ type Service interface {
 	CreateContactList(ctx context.Context, organizationID uint, name string) (*domain.MailContactList, error)
 	RenameContactList(ctx context.Context, organizationID, id uint, name string) (*domain.MailContactList, error)
 	DeleteContactList(ctx context.Context, organizationID, id uint) error
+	BroadcastsEnabled() bool
+	ListBroadcasts(ctx context.Context, organizationID uint, page, perPage int) ([]*domain.MailBroadcast, int64, error)
+	GetBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error)
+	CreateBroadcast(ctx context.Context, organizationID, createdBy uint, input BroadcastInput) (*domain.MailBroadcast, error)
+	UpdateBroadcast(ctx context.Context, organizationID, id uint, input BroadcastInput) (*domain.MailBroadcast, error)
+	DeleteBroadcast(ctx context.Context, organizationID, id uint) error
+	SendBroadcast(ctx context.Context, organizationID, id uint, scheduledAt *time.Time) (*domain.MailBroadcast, error)
+	CancelBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error)
+	ListBroadcastRecipients(ctx context.Context, organizationID, id uint, status domain.MailRecipientStatus, page, perPage int) ([]*domain.MailBroadcastRecipient, int64, error)
+	Unsubscribe(ctx context.Context, token string) error
 	// GetAttachment returns one attachment of a message with its content.
 	GetAttachment(ctx context.Context, organizationID, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error)
 	GetOutboundMessage(ctx context.Context, organizationID, messageID uint) (*domain.MailMessage, error)
@@ -116,10 +131,12 @@ type service struct {
 	repo      domain.MailboxRepository
 	templates domain.MailTemplateRepository
 	contacts  domain.MailContactRepository
-	transport mailtransport.Transport
-	notifier  mailNotifier
-	settings  Settings
-	now       func() time.Time
+	// broadcasts is the broadcast store; nil until NewService wires it.
+	broadcasts domain.MailBroadcastRepository
+	transport  mailtransport.Transport
+	notifier   mailNotifier
+	settings   Settings
+	now        func() time.Time
 }
 
 var _ Service = (*service)(nil)
@@ -129,12 +146,13 @@ func NewService(
 	repo domain.MailboxRepository,
 	templates domain.MailTemplateRepository,
 	contacts domain.MailContactRepository,
+	broadcasts domain.MailBroadcastRepository,
 	transport mailtransport.Transport,
 	notifier mailNotifier,
 	settings Settings,
 ) *service {
 	return &service{
-		repo: repo, templates: templates, contacts: contacts, transport: transport,
+		repo: repo, templates: templates, contacts: contacts, broadcasts: broadcasts, transport: transport,
 		notifier: notifier, settings: settings, now: time.Now,
 	}
 }
@@ -183,6 +201,7 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.Domain = resolved.Domain
 	settings.Provider = resolved.Provider
 	settings.InboundSecret = resolved.InboundSecret
+	settings.PublicURL = resolved.PublicURL
 	if resolved.DailySendLimit > 0 {
 		settings.DailySendLimit = resolved.DailySendLimit
 	}
@@ -451,6 +470,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		HTMLBody:    message.HTMLBody,
 		InReplyTo:   message.InReplyTo,
 		Attachments: files,
+		Headers:     input.Headers,
 	})
 
 	message.Status = domain.MailStatusSent

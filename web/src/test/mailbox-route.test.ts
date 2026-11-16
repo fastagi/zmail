@@ -187,6 +187,7 @@ describe('mailbox browser route boundary', () => {
           provider: 'log',
           inbound_enabled: false,
           daily_send_limit: 200,
+          broadcasts_enabled: true,
         },
       ],
     });
@@ -1353,6 +1354,245 @@ describe('mailbox browser route boundary', () => {
     }
   });
 
+  it('runs a broadcast in the mock and unsubscribes through its link', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const { unsubscribeRoute } = await import('@/features/mailbox/server/unsubscribe-route');
+    const json = (path: string, body: unknown, method = 'POST') =>
+      request(path, { method, body: JSON.stringify(body) });
+
+    const mailbox = (await (await create(route, { local_part: 'news' })).json()).data;
+    const template = (
+      await (
+        await route.createMailTemplateRoute(
+          json('/api/mail-templates', {
+            name: 'News',
+            subject: 'Hi {{first_name|there}}',
+            text: 'Plan {{plan}}. Leave: {{unsubscribe_url}}',
+          })
+        )
+      ).json()
+    ).data;
+    const list = (
+      await (
+        await route.saveMailContactListRoute(json('/api/mail-contact-lists', { name: 'All' }))
+      ).json()
+    ).data;
+    for (const [email, plan] of [
+      ['ann@example.com', 'pro'],
+      ['bob@example.com', ''],
+    ]) {
+      await route.createMailContactRoute(
+        json('/api/mail-contacts', {
+          email,
+          first_name: email.slice(0, 3),
+          properties: plan ? { plan } : {},
+          list_ids: [list.id],
+        })
+      );
+    }
+
+    const draft = (
+      await (
+        await route.saveMailBroadcastRoute(
+          json('/api/mail-broadcasts', {
+            name: 'Launch',
+            mailbox_id: mailbox.id,
+            template_id: template.id,
+            list_id: list.id,
+          })
+        )
+      ).json()
+    ).data;
+    expect(draft).toMatchObject({ status: 'draft', counts: { total: 0 } });
+
+    const sent = await route.sendMailBroadcastRoute(
+      json(`/api/mail-broadcasts/${draft.id}/sends`, {}),
+      String(draft.id)
+    );
+    // Bob has no plan and the template has no fallback for it, so his message fails.
+    expect((await sent.json()).data).toMatchObject({
+      status: 'sent',
+      counts: { total: 2, sent: 1, failed: 1 },
+    });
+    const failed = await (
+      await route.listMailBroadcastRecipientsRoute(
+        request(`/api/mail-broadcasts/${draft.id}/recipients?status=failed`),
+        String(draft.id)
+      )
+    ).json();
+    expect(failed.data).toEqual([
+      expect.objectContaining({
+        email: 'bob@example.com',
+        failure_code: 'template.variables_missing',
+      }),
+    ]);
+    await expectError(
+      await route.sendMailBroadcastRoute(
+        json(`/api/mail-broadcasts/${draft.id}/sends`, {}),
+        String(draft.id)
+      ),
+      409,
+      'MAILBOX.BROADCAST_NOT_EDITABLE'
+    );
+
+    const outbound = await (
+      await route.listMailMessagesRoute(
+        request(`/api/mailboxes/${mailbox.id}/messages?direction=outbound`),
+        String(mailbox.id)
+      )
+    ).json();
+    const message = (
+      await (
+        await route.getMailMessageRoute(
+          request(`/api/mailboxes/${mailbox.id}/messages/${outbound.data[0].id}`),
+          String(mailbox.id),
+          String(outbound.data[0].id)
+        )
+      ).json()
+    ).data;
+    const token = /\/unsubscribe\/([^\s]+)/u.exec(message.text_body)?.[1] ?? '';
+    expect(message.text_body).toContain('Plan pro.');
+
+    // The public route needs no session and no same-origin browser.
+    getSessionUser.mockResolvedValue(null);
+    const external = new Request(`https://app.example.com/api/mail-unsubscribes/${token}`, {
+      method: 'POST',
+      body: 'List-Unsubscribe=One-Click',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: 'https://mail.google.com',
+      },
+    });
+    const unsubscribed = await unsubscribeRoute(external, token);
+    expect(unsubscribed.status).toBe(204);
+    for (const bad of ['1.2', `${token}x`, '1.2.' + 'a'.repeat(22)]) {
+      const response = await unsubscribeRoute(
+        new Request('https://app.example.com/', { method: 'POST' }),
+        bad
+      );
+      expect(response.status).toBe(404);
+    }
+
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const ann = await (
+      await route.listMailContactsRoute(request('/api/mail-contacts?q=ann'))
+    ).json();
+    expect(ann.data[0]).toMatchObject({
+      status: 'unsubscribed',
+      status_reason: 'unsubscribe_link',
+    });
+
+    const scheduled = (
+      await (
+        await route.saveMailBroadcastRoute(
+          json('/api/mail-broadcasts', {
+            name: 'Later',
+            mailbox_id: mailbox.id,
+            template_id: template.id,
+            list_id: list.id,
+          })
+        )
+      ).json()
+    ).data;
+    const later = await route.sendMailBroadcastRoute(
+      json(`/api/mail-broadcasts/${scheduled.id}/sends`, {
+        scheduled_at: new Date(Date.now() + 3_600_000).toISOString(),
+      }),
+      String(scheduled.id)
+    );
+    expect((await later.json()).data).toMatchObject({ status: 'scheduled', counts: { total: 1 } });
+    await expectError(
+      await route.deleteMailBroadcastRoute(
+        request(`/api/mail-broadcasts/${scheduled.id}`, { method: 'DELETE' }),
+        String(scheduled.id)
+      ),
+      409,
+      'MAILBOX.BROADCAST_NOT_EDITABLE'
+    );
+    const canceled = await route.cancelMailBroadcastRoute(
+      json(`/api/mail-broadcasts/${scheduled.id}/cancellations`, {}),
+      String(scheduled.id)
+    );
+    expect((await canceled.json()).data).toMatchObject({
+      status: 'canceled',
+      counts: { canceled: 1 },
+    });
+
+    const list2 = await (
+      await route.listMailBroadcastsRoute(request('/api/mail-broadcasts'))
+    ).json();
+    expect(list2.data.map((item: { name: string }) => item.name)).toEqual(['Later', 'Launch']);
+  });
+
+  it('forwards broadcast routes and the public unsubscribe route to the fixed API paths', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () => Response.json({ code: 0, message: 'ok', data: [] }));
+    const route = await loadRoute();
+    const { unsubscribeRoute } = await import('@/features/mailbox/server/unsubscribe-route');
+    const body = JSON.stringify({ name: 'A', mailbox_id: 1, template_id: 2, list_id: 3 });
+
+    await route.listMailBroadcastsRoute(request('/api/mail-broadcasts?page=2'));
+    await route.saveMailBroadcastRoute(request('/api/mail-broadcasts', { method: 'POST', body }));
+    await route.saveMailBroadcastRoute(
+      request('/api/mail-broadcasts/5', { method: 'PUT', body }),
+      '5'
+    );
+    await route.getMailBroadcastRoute(request('/api/mail-broadcasts/5'), '5');
+    await route.sendMailBroadcastRoute(
+      request('/api/mail-broadcasts/5/sends', {
+        method: 'POST',
+        body: JSON.stringify({ scheduled_at: '2030-01-01T10:00:00+08:00' }),
+      }),
+      '5'
+    );
+    await route.cancelMailBroadcastRoute(
+      request('/api/mail-broadcasts/5/cancellations', { method: 'POST', body: '{}' }),
+      '5'
+    );
+    await route.listMailBroadcastRecipientsRoute(
+      request('/api/mail-broadcasts/5/recipients?status=failed'),
+      '5'
+    );
+    await route.deleteMailBroadcastRoute(
+      request('/api/mail-broadcasts/5', { method: 'DELETE' }),
+      '5'
+    );
+    fetchMock.mockImplementationOnce(async () => new Response(null, { status: 204 }));
+    const token = `1.2.${'a'.repeat(22)}`;
+    const unsubscribed = await unsubscribeRoute(
+      new Request(`https://app.example.com/api/mail-unsubscribes/${token}`, { method: 'POST' }),
+      token
+    );
+    expect(unsubscribed.status).toBe(204);
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const parsed = new URL(String(url));
+      return `${init?.method} ${parsed.pathname}${parsed.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/mail-broadcasts?page=2&per_page=15',
+      'POST /v1/mail-broadcasts',
+      'PUT /v1/mail-broadcasts/5',
+      'GET /v1/mail-broadcasts/5',
+      'POST /v1/mail-broadcasts/5/sends',
+      'POST /v1/mail-broadcasts/5/cancellations',
+      'GET /v1/mail-broadcasts/5/recipients?page=1&per_page=15&status=failed',
+      'DELETE /v1/mail-broadcasts/5',
+      `POST /v1/mail-unsubscribes/${token}`,
+    ]);
+    // The schedule is forwarded in UTC, and the public call carries no credentials.
+    expect(JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body))).toEqual({
+      scheduled_at: '2030-01-01T02:00:00.000Z',
+    });
+    const publicHeaders = new Headers(fetchMock.mock.calls[8]?.[1]?.headers);
+    expect(publicHeaders.get('authorization')).toBeNull();
+    expect(publicHeaders.get('organization-id')).toBeNull();
+  });
+
   it('forwards only the fixed production paths, methods, and whitelisted query', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
@@ -1860,6 +2100,8 @@ async function loadRoute(): Promise<MailboxRoute> {
   store.mockMailboxStore.reset();
   const contacts = await import('@/features/mailbox/server/mock-contact-store');
   contacts.mockContactStore.reset();
+  const broadcasts = await import('@/features/mailbox/server/mock-broadcast-store');
+  broadcasts.mockBroadcastStore.reset();
   return route;
 }
 

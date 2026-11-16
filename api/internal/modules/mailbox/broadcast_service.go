@@ -1,0 +1,451 @@
+package mailbox
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"html"
+	"log/slog"
+	"strconv"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/fastagi/zmail/api/internal/domain"
+)
+
+const (
+	maxBroadcastNameLength       = 100
+	maxUnsubscribeLabelLength    = 50
+	defaultUnsubscribeLabel      = "Unsubscribe"
+	maxBroadcastSchedule         = 365 * 24 * time.Hour
+	broadcastLease               = 5 * time.Minute
+	unsubscribeVariable          = "unsubscribe_url"
+	stopReasonSendLimit          = "send_limit_reached"
+	recipientSkippedUnsubscribed = "contact_not_subscribed"
+	recipientSkippedDeleted      = "contact_deleted"
+	recipientFailedVariables     = "template.variables_missing"
+	recipientFailedMailbox       = "mailbox_not_found"
+	recipientFailedMessage       = "message_invalid"
+	unsubscribeReasonLink        = "unsubscribe_link"
+)
+
+// BroadcastInput is the editable content of a draft broadcast.
+type BroadcastInput struct {
+	Name             string
+	MailboxID        uint
+	TemplateID       uint
+	ListID           uint
+	UnsubscribeLabel string
+}
+
+// BroadcastsEnabled reports whether broadcasts can run: unsubscribe links need the signing
+// secret and the public Web origin.
+func (s *service) BroadcastsEnabled() bool {
+	return s.settings.InboundSecret != "" && s.settings.PublicURL != ""
+}
+
+func (s *service) ListBroadcasts(ctx context.Context, organizationID uint, page, perPage int) ([]*domain.MailBroadcast, int64, error) {
+	return s.broadcasts.ListBroadcasts(ctx, organizationID, page, perPage)
+}
+
+func (s *service) GetBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error) {
+	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
+}
+
+func (s *service) CreateBroadcast(ctx context.Context, organizationID, createdBy uint, input BroadcastInput) (*domain.MailBroadcast, error) {
+	broadcast, err := s.buildBroadcast(ctx, organizationID, input)
+	if err != nil {
+		return nil, err
+	}
+	broadcast.CreatedBy = createdBy
+	if err := s.broadcasts.CreateBroadcast(ctx, broadcast); err != nil {
+		return nil, err
+	}
+	return broadcast, nil
+}
+
+func (s *service) UpdateBroadcast(ctx context.Context, organizationID, id uint, input BroadcastInput) (*domain.MailBroadcast, error) {
+	if _, err := s.broadcasts.FindBroadcast(ctx, organizationID, id); err != nil {
+		return nil, err
+	}
+	broadcast, err := s.buildBroadcast(ctx, organizationID, input)
+	if err != nil {
+		return nil, err
+	}
+	broadcast.ID = id
+	if err := s.broadcasts.UpdateDraft(ctx, broadcast); err != nil {
+		return nil, err
+	}
+	return broadcast, nil
+}
+
+func (s *service) DeleteBroadcast(ctx context.Context, organizationID, id uint) error {
+	return s.broadcasts.DeleteBroadcast(ctx, organizationID, id)
+}
+
+// buildBroadcast validates the fields and confirms the mailbox, template, and list belong to the
+// organization.
+func (s *service) buildBroadcast(ctx context.Context, organizationID uint, input BroadcastInput) (*domain.MailBroadcast, error) {
+	name := strings.Join(strings.Fields(cleanText(input.Name)), " ")
+	if name == "" || utf8.RuneCountInString(name) > maxBroadcastNameLength || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return nil, fmt.Errorf("%w: name", ErrMailBroadcastInvalid)
+	}
+	label := strings.Join(strings.Fields(cleanText(input.UnsubscribeLabel)), " ")
+	if utf8.RuneCountInString(label) > maxUnsubscribeLabelLength || strings.IndexFunc(label, unicode.IsControl) >= 0 {
+		return nil, fmt.Errorf("%w: unsubscribe_label", ErrMailBroadcastInvalid)
+	}
+	if input.MailboxID == 0 || input.TemplateID == 0 || input.ListID == 0 {
+		return nil, fmt.Errorf("%w: mailbox_id, template_id, and list_id are required", ErrMailBroadcastInvalid)
+	}
+	if _, err := s.repo.FindMailbox(ctx, organizationID, input.MailboxID); err != nil {
+		return nil, err
+	}
+	if _, err := s.templates.FindTemplate(ctx, organizationID, input.TemplateID); err != nil {
+		return nil, err
+	}
+	lists, err := s.contacts.ListContactLists(ctx, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for _, list := range lists {
+		found = found || list.ID == input.ListID
+	}
+	if !found {
+		return nil, ErrMailContactListNotFound
+	}
+	return &domain.MailBroadcast{
+		OrganizationID:   organizationID,
+		Name:             name,
+		MailboxID:        input.MailboxID,
+		TemplateID:       input.TemplateID,
+		ListID:           input.ListID,
+		UnsubscribeLabel: label,
+	}, nil
+}
+
+// SendBroadcast fixes the recipients and the template of a draft and hands it to the worker,
+// now or at scheduledAt.
+func (s *service) SendBroadcast(ctx context.Context, organizationID, id uint, scheduledAt *time.Time) (*domain.MailBroadcast, error) {
+	if !s.BroadcastsEnabled() {
+		return nil, ErrMailBroadcastDisabled
+	}
+	broadcast, err := s.broadcasts.FindBroadcast(ctx, organizationID, id)
+	if err != nil {
+		return nil, err
+	}
+	if broadcast.Status != domain.MailBroadcastDraft {
+		return nil, ErrMailBroadcastNotEditable
+	}
+	if _, err = s.repo.FindMailbox(ctx, organizationID, broadcast.MailboxID); err != nil {
+		return nil, err
+	}
+	template, err := s.templates.FindTemplate(ctx, organizationID, broadcast.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := parseStoredTemplate(template); err != nil {
+		return nil, err
+	}
+	now := s.now().UTC()
+	broadcast.Subject, broadcast.HTMLBody, broadcast.TextBody = template.Subject, template.HTMLBody, template.TextBody
+	switch {
+	case scheduledAt == nil || !scheduledAt.After(now):
+		broadcast.Status, broadcast.StartedAt, broadcast.ScheduledAt = domain.MailBroadcastSending, &now, nil
+	case scheduledAt.Sub(now) > maxBroadcastSchedule:
+		return nil, fmt.Errorf("%w: scheduled_at is more than a year ahead", ErrMailBroadcastInvalid)
+	default:
+		at := scheduledAt.UTC()
+		broadcast.Status, broadcast.ScheduledAt = domain.MailBroadcastScheduled, &at
+	}
+	if _, err := s.broadcasts.StartBroadcast(ctx, broadcast); err != nil {
+		return nil, err
+	}
+	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
+}
+
+func (s *service) CancelBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error) {
+	if err := s.broadcasts.CancelBroadcast(ctx, organizationID, id); err != nil {
+		return nil, err
+	}
+	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
+}
+
+func (s *service) ListBroadcastRecipients(
+	ctx context.Context,
+	organizationID, id uint,
+	status domain.MailRecipientStatus,
+	page, perPage int,
+) ([]*domain.MailBroadcastRecipient, int64, error) {
+	switch status {
+	case "", domain.MailRecipientPending, domain.MailRecipientSent, domain.MailRecipientFailed,
+		domain.MailRecipientSkipped, domain.MailRecipientCanceled:
+	default:
+		return nil, 0, domain.ErrInvalidInput
+	}
+	return s.broadcasts.ListRecipients(ctx, organizationID, id, status, page, perPage)
+}
+
+// DispatchBroadcasts sends up to limit due recipients and returns how many it finished. A
+// recipient is sent with an idempotency key of its broadcast and contact, so a worker that stops
+// after the provider call never mails the same person twice.
+func (s *service) DispatchBroadcasts(ctx context.Context, limit int) (int, error) {
+	now := s.now().UTC()
+	if err := s.broadcasts.PromoteScheduled(ctx, now); err != nil {
+		return 0, err
+	}
+	recipients, err := s.broadcasts.LeasePending(ctx, now, now.Add(broadcastLease), limit)
+	if err != nil {
+		return 0, err
+	}
+	run := &broadcastRun{service: s, broadcasts: map[uint]*preparedBroadcast{}, paused: map[uint]bool{}}
+	processed := 0
+	for _, recipient := range recipients {
+		if ctx.Err() != nil {
+			break
+		}
+		finished, err := run.send(ctx, recipient)
+		if err != nil {
+			return processed, err
+		}
+		if finished {
+			processed++
+		}
+	}
+	for id, prepared := range run.broadcasts {
+		if !run.paused[id] && prepared.broadcast.StopReason != "" {
+			if err := s.broadcasts.SetStopReason(ctx, id, ""); err != nil {
+				return processed, err
+			}
+		}
+	}
+	if _, err := s.broadcasts.FinishBroadcasts(ctx, s.now().UTC()); err != nil {
+		return processed, err
+	}
+	return processed, nil
+}
+
+// preparedBroadcast is what one worker batch needs to send a broadcast's recipients.
+type preparedBroadcast struct {
+	broadcast *domain.MailBroadcast
+	mailbox   *domain.Mailbox
+	parsed    *parsedTemplate
+	// linked tells whether the template places the unsubscribe link itself.
+	linked bool
+	err    error
+}
+
+type broadcastRun struct {
+	service    *service
+	broadcasts map[uint]*preparedBroadcast
+	paused     map[uint]bool
+}
+
+func (run *broadcastRun) prepare(ctx context.Context, id uint) *preparedBroadcast {
+	if prepared, ok := run.broadcasts[id]; ok {
+		return prepared
+	}
+	prepared := &preparedBroadcast{}
+	run.broadcasts[id] = prepared
+	broadcast, err := run.service.broadcasts.FindBroadcastForWorker(ctx, id)
+	if err != nil {
+		prepared.err = err
+		return prepared
+	}
+	prepared.broadcast = broadcast
+	prepared.parsed, prepared.err = parseStoredTemplate(&domain.MailTemplate{
+		Subject: broadcast.Subject, HTMLBody: broadcast.HTMLBody, TextBody: broadcast.TextBody,
+	})
+	if prepared.err != nil {
+		return prepared
+	}
+	for _, name := range prepared.parsed.variables() {
+		prepared.linked = prepared.linked || name == unsubscribeVariable
+	}
+	prepared.mailbox, err = run.service.repo.FindMailbox(ctx, broadcast.OrganizationID, broadcast.MailboxID)
+	if err != nil && !errors.Is(err, ErrMailboxNotFound) {
+		prepared.err = err
+	}
+	return prepared
+}
+
+// send finishes one recipient. It reports false when the recipient goes back to pending.
+func (run *broadcastRun) send(ctx context.Context, recipient *domain.MailBroadcastRecipient) (bool, error) {
+	s := run.service
+	prepared := run.prepare(ctx, recipient.BroadcastID)
+	if prepared.err != nil {
+		if errors.Is(prepared.err, ErrMailBroadcastNotFound) {
+			return false, nil
+		}
+		return false, prepared.err
+	}
+	broadcast := prepared.broadcast
+	if broadcast.Status != domain.MailBroadcastSending || run.paused[broadcast.ID] {
+		return false, s.broadcasts.ReleaseRecipient(ctx, recipient.ID)
+	}
+	finish := func(status domain.MailRecipientStatus, messageID uint, code string) (bool, error) {
+		return true, s.broadcasts.FinishRecipient(ctx, recipient.ID, status, messageID, code)
+	}
+	if prepared.mailbox == nil {
+		return finish(domain.MailRecipientFailed, 0, recipientFailedMailbox)
+	}
+	contact, err := s.broadcasts.FindContactForBroadcast(ctx, broadcast.OrganizationID, recipient.ContactID)
+	if errors.Is(err, ErrMailContactNotFound) {
+		return finish(domain.MailRecipientSkipped, 0, recipientSkippedDeleted)
+	}
+	if err != nil {
+		return false, err
+	}
+	// The status at the moment of sending wins: an unsubscribe after the broadcast started counts.
+	if contact.Status != domain.MailContactSubscribed {
+		return finish(domain.MailRecipientSkipped, 0, recipientSkippedUnsubscribed)
+	}
+
+	token := s.unsubscribeToken(broadcast.OrganizationID, contact.ID)
+	unsubscribeURL := s.settings.PublicURL + "/unsubscribe/" + token
+	values := map[string]string{}
+	for name, value := range contact.Properties {
+		values[name] = value
+	}
+	values["email"], values["first_name"], values["last_name"] = contact.Email, contact.FirstName, contact.LastName
+	values[unsubscribeVariable] = unsubscribeURL
+	rendered := prepared.parsed.render(values)
+	if len(rendered.Missing) > 0 {
+		return finish(domain.MailRecipientFailed, 0, recipientFailedVariables)
+	}
+	if !prepared.linked {
+		rendered.HTML, rendered.Text = withUnsubscribeFooter(rendered.HTML, rendered.Text, unsubscribeURL, broadcast.UnsubscribeLabel)
+	}
+
+	message, _, err := s.send(ctx, prepared.mailbox, SendInput{
+		To:             []string{contact.Email},
+		Subject:        rendered.Subject,
+		HTML:           rendered.HTML,
+		Text:           rendered.Text,
+		IdempotencyKey: "broadcast-" + strconv.FormatUint(uint64(broadcast.ID), 10) + "-" + strconv.FormatUint(uint64(contact.ID), 10),
+		Headers: map[string]string{
+			"List-Unsubscribe":      "<" + s.settings.PublicURL + "/api/mail-unsubscribes/" + token + ">",
+			"List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+		},
+	})
+	switch {
+	case errors.Is(err, ErrMailSendLimitReached):
+		run.paused[broadcast.ID] = true
+		if stopErr := s.broadcasts.SetStopReason(ctx, broadcast.ID, stopReasonSendLimit); stopErr != nil {
+			return false, stopErr
+		}
+		return false, s.broadcasts.ReleaseRecipient(ctx, recipient.ID)
+	case errors.Is(err, ErrMailSendInProgress):
+		return false, s.broadcasts.ReleaseRecipient(ctx, recipient.ID)
+	case message == nil:
+		slog.WarnContext(ctx, "mailbox broadcast recipient not sent",
+			slog.Uint64("broadcast_id", uint64(broadcast.ID)), slog.String("error", err.Error()))
+		return finish(domain.MailRecipientFailed, 0, recipientFailedMessage)
+	}
+	status, code := domain.MailRecipientFailed, message.FailureCode
+	if message.Status == domain.MailStatusSent {
+		status, code = domain.MailRecipientSent, ""
+	}
+	if _, err := finish(status, message.ID, code); err != nil {
+		return false, err
+	}
+	// Suppression finds the contact through the recipient's message, so it follows the finish.
+	if reason := refusalReason(message); reason != "" {
+		if err := s.broadcasts.SuppressContactForMessage(ctx, message.ID, reason); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// refusalReason says why a message's recipient must not be mailed again: a permanent bounce or
+// a suppression reported at send time.
+func refusalReason(message *domain.MailMessage) string {
+	for _, event := range message.Events {
+		switch event.Type {
+		case domain.MailEventBounced:
+			return "bounced"
+		case domain.MailEventRejected:
+			return "rejected"
+		case domain.MailEventAccepted, domain.MailEventDelivered, domain.MailEventDeferred,
+			domain.MailEventFailed, domain.MailEventComplained:
+		}
+	}
+	return ""
+}
+
+// withUnsubscribeFooter adds the unsubscribe link to bodies whose template does not place it.
+func withUnsubscribeFooter(htmlBody, textBody, link, label string) (string, string) {
+	if label == "" {
+		label = defaultUnsubscribeLabel
+	}
+	if htmlBody != "" {
+		footer := `<p style="margin:24px 0 0;font-size:12px;color:#71717a;text-align:center;"><a href="` +
+			html.EscapeString(link) + `" style="color:#71717a;">` + html.EscapeString(label) + `</a></p>`
+		if index := strings.LastIndex(strings.ToLower(htmlBody), "</body>"); index >= 0 {
+			htmlBody = htmlBody[:index] + footer + htmlBody[index:]
+		} else {
+			htmlBody += footer
+		}
+	}
+	if textBody != "" || htmlBody == "" {
+		textBody = strings.TrimRight(textBody, "\n") + "\n\n" + label + ": " + link + "\n"
+	}
+	return htmlBody, textBody
+}
+
+// unsubscribeToken names one contact of one organization. It is signed with a key derived from
+// the inbound secret and never expires, so a link in an old message keeps working.
+func (s *service) unsubscribeToken(organizationID, contactID uint) string {
+	payload := strconv.FormatUint(uint64(organizationID), 10) + "." + strconv.FormatUint(uint64(contactID), 10)
+	return payload + "." + s.unsubscribeMAC(payload)
+}
+
+func (s *service) unsubscribeMAC(payload string) string {
+	key := hmac.New(sha256.New, []byte(s.settings.InboundSecret))
+	key.Write([]byte("zmail-unsubscribe-v1"))
+	mac := hmac.New(sha256.New, key.Sum(nil))
+	mac.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)[:16])
+}
+
+// Unsubscribe applies one unsubscribe link. A valid link always succeeds, even for a contact that
+// was deleted, so the answer discloses nothing; a suppressed contact stays suppressed.
+func (s *service) Unsubscribe(ctx context.Context, token string) error {
+	if s.settings.InboundSecret == "" || len(token) > 200 {
+		return ErrMailUnsubscribeInvalid
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ErrMailUnsubscribeInvalid
+	}
+	payload := parts[0] + "." + parts[1]
+	if !hmac.Equal([]byte(parts[2]), []byte(s.unsubscribeMAC(payload))) {
+		return ErrMailUnsubscribeInvalid
+	}
+	organizationID, orgErr := strconv.ParseUint(parts[0], 10, 32)
+	contactID, contactErr := strconv.ParseUint(parts[1], 10, 32)
+	if orgErr != nil || contactErr != nil {
+		return ErrMailUnsubscribeInvalid
+	}
+	contact, err := s.broadcasts.FindContactForBroadcast(ctx, uint(organizationID), uint(contactID))
+	if errors.Is(err, ErrMailContactNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if contact.Status != domain.MailContactSubscribed {
+		return nil
+	}
+	err = s.broadcasts.SetContactStatus(ctx, uint(organizationID), uint(contactID), domain.MailContactUnsubscribed, unsubscribeReasonLink)
+	if errors.Is(err, ErrMailContactNotFound) {
+		return nil
+	}
+	return err
+}

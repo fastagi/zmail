@@ -365,3 +365,86 @@ type MailContactListMemberPO struct {
 func (MailContactListMemberPO) TableName() string {
 	return "mail_contact_list_members"
 }
+
+// MailBroadcastPO is the persistent object for one broadcast.
+type MailBroadcastPO struct {
+	ID               uint       `gorm:"primaryKey"`
+	OrganizationID   uint       `gorm:"not null;index:idx_mail_broadcasts_listing,priority:1"`
+	Name             string     `gorm:"size:100;not null"`
+	MailboxID        uint       `gorm:"not null"`
+	TemplateID       uint       `gorm:"not null"`
+	ListID           uint       `gorm:"not null"`
+	UnsubscribeLabel string     `gorm:"size:50;not null;default:''"`
+	Status           string     `gorm:"size:16;not null;default:'draft';index:idx_mail_broadcasts_due,priority:1"`
+	Subject          string     `gorm:"size:998;not null;default:''"`
+	HTMLBody         string     `gorm:"column:html_body;type:text;not null;default:''"`
+	TextBody         string     `gorm:"type:text;not null;default:''"`
+	ScheduledAt      *time.Time `gorm:"index:idx_mail_broadcasts_due,priority:2"`
+	StartedAt        *time.Time
+	FinishedAt       *time.Time
+	StopReason       string `gorm:"size:64;not null;default:''"`
+	CreatedBy        uint   `gorm:"not null"`
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+func (MailBroadcastPO) TableName() string {
+	return "mail_broadcasts"
+}
+
+func (po *MailBroadcastPO) toDomain() *domain.MailBroadcast {
+	return &domain.MailBroadcast{
+		ID:               po.ID,
+		OrganizationID:   po.OrganizationID,
+		Name:             po.Name,
+		MailboxID:        po.MailboxID,
+		TemplateID:       po.TemplateID,
+		ListID:           po.ListID,
+		UnsubscribeLabel: po.UnsubscribeLabel,
+		Status:           domain.MailBroadcastStatus(po.Status),
+		Subject:          po.Subject,
+		HTMLBody:         po.HTMLBody,
+		TextBody:         po.TextBody,
+		ScheduledAt:      po.ScheduledAt,
+		StartedAt:        po.StartedAt,
+		FinishedAt:       po.FinishedAt,
+		StopReason:       po.StopReason,
+		CreatedBy:        po.CreatedBy,
+		CreatedAt:        po.CreatedAt,
+		UpdatedAt:        po.UpdatedAt,
+	}
+}
+
+// MailBroadcastRecipientPO is the persistent object for one recipient of a broadcast.
+type MailBroadcastRecipientPO struct {
+	ID          uint   `gorm:"primaryKey"`
+	BroadcastID uint   `gorm:"not null;uniqueIndex:idx_mail_broadcast_recipients_contact,priority:1"`
+	ContactID   uint   `gorm:"not null;uniqueIndex:idx_mail_broadcast_recipients_contact,priority:2"`
+	Email       string `gorm:"size:320;not null"`
+	Status      string `gorm:"size:16;not null;default:'pending'"`
+	MessageID   *uint
+	FailureCode string `gorm:"size:120;not null;default:''"`
+	LeaseUntil  *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+func (MailBroadcastRecipientPO) TableName() string {
+	return "mail_broadcast_recipients"
+}
+
+func (po *MailBroadcastRecipientPO) toDomain() *domain.MailBroadcastRecipient {
+	recipient := &domain.MailBroadcastRecipient{
+		ID:          po.ID,
+		BroadcastID: po.BroadcastID,
+		ContactID:   po.ContactID,
+		Email:       po.Email,
+		Status:      domain.MailRecipientStatus(po.Status),
+		FailureCode: po.FailureCode,
+		UpdatedAt:   po.UpdatedAt,
+	}
+	if po.MessageID != nil {
+		recipient.MessageID = *po.MessageID
+	}
+	return recipient
+}

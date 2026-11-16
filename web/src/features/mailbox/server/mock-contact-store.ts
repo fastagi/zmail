@@ -242,6 +242,30 @@ export class MockContactStore {
     return { ok: true, result };
   }
 
+  hasList(organizationId: number, listId: number): boolean {
+    return this.of(organizationId).lists.has(listId);
+  }
+
+  /** The subscribed contacts of a list, oldest first. */
+  subscribedIn(organizationId: number, listId: number): MailContact[] {
+    return [...this.of(organizationId).contacts.values()]
+      .filter(contact => contact.status === 'subscribed' && contact.list_ids.includes(listId))
+      .sort((a, b) => a.id - b.id);
+  }
+
+  /** Applies an unsubscribe link; unknown or non-subscribed contacts are left alone. */
+  unsubscribe(organizationId: number, contactId: number): void {
+    const contact = this.of(organizationId).contacts.get(contactId);
+    if (contact?.status === 'subscribed') {
+      this.of(organizationId).contacts.set(contactId, {
+        ...contact,
+        status: 'unsubscribed',
+        status_reason: 'unsubscribe_link',
+        updated_at: this.timestamp(),
+      });
+    }
+  }
+
   /** Test seam: forget every contact and list. */
   reset(): void {
     this.nextId = 1;
