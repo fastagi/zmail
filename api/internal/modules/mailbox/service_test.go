@@ -19,6 +19,9 @@ type fakeRepository struct {
 	// hideIdempotencyLookup simulates a concurrent request that stores its message between
 	// this request's lookup and its insert.
 	hideIdempotencyLookup bool
+	lastLogFilter         domain.MailLogFilter
+	lastStatsSince        time.Time
+	stats                 []domain.MailDayStats
 }
 
 var _ domain.MailboxRepository = (*fakeRepository)(nil)
@@ -208,6 +211,22 @@ func (r *fakeRepository) CountOutboundSince(_ context.Context, userID uint, _ ti
 		}
 	}
 	return count, nil
+}
+
+func (r *fakeRepository) ListMessagesForUser(_ context.Context, userID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error) {
+	r.lastLogFilter = filter
+	var listed []*domain.MailMessage
+	for _, message := range r.messages {
+		if mailbox, ok := r.mailboxes[message.MailboxID]; ok && mailbox.UserID == userID {
+			listed = append(listed, message)
+		}
+	}
+	return listed, int64(len(listed)), nil
+}
+
+func (r *fakeRepository) StatsForUser(_ context.Context, _ uint, since time.Time) ([]domain.MailDayStats, error) {
+	r.lastStatsSince = since
+	return r.stats, nil
 }
 
 // fakeTransport records what the service hands to the provider.
@@ -714,5 +733,68 @@ func TestSendFingerprintSeparatesFieldBoundaries(t *testing.T) {
 	b := sendFingerprint([]string{"a@x.io"}, nil, "a", "bc", "", "")
 	if a == b {
 		t.Fatal("moving text between subject and body kept the same fingerprint")
+	}
+}
+
+func TestListLogValidatesFiltersAndTrimsTheQuery(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+	mine := fixture.mailbox(t, 1, "mine")
+	fixture.mailbox(t, 2, "theirs")
+	if _, _, err := fixture.service.SendMessage(ctx, 1, mine.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	messages, total, err := fixture.service.ListLog(ctx, 1, domain.MailLogFilter{Query: "  receipt  "})
+	if err != nil || total != 1 || len(messages) != 1 {
+		t.Fatalf("ListLog = %d messages, total %d, err %v", len(messages), total, err)
+	}
+	if fixture.repo.lastLogFilter.Query != "receipt" {
+		t.Fatalf("query = %q; want it trimmed", fixture.repo.lastLogFilter.Query)
+	}
+	if _, total, _ := fixture.service.ListLog(ctx, 2, domain.MailLogFilter{}); total != 0 {
+		t.Fatalf("another user sees %d messages", total)
+	}
+
+	invalid := []domain.MailLogFilter{
+		{Direction: "sideways"},
+		{Status: "delivered"},
+		{Query: strings.Repeat("q", 201)},
+	}
+	for _, filter := range invalid {
+		if _, _, err := fixture.service.ListLog(ctx, 1, filter); !errors.Is(err, domain.ErrInvalidInput) {
+			t.Fatalf("filter %+v error = %v; want ErrInvalidInput", filter, err)
+		}
+	}
+}
+
+func TestStatsCoversEveryDayOfTheWindow(t *testing.T) {
+	fixture := newServiceFixture(t)
+	fixture.now = time.Date(2026, 11, 16, 15, 30, 0, 0, time.UTC)
+	fixture.repo.stats = []domain.MailDayStats{
+		{Day: time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC), Sent: 4, Failed: 1, Received: 2},
+	}
+
+	stats, err := fixture.service.Stats(context.Background(), 1, 3)
+	if err != nil || len(stats) != 3 {
+		t.Fatalf("Stats = %v, %v", stats, err)
+	}
+	if want := time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC); !fixture.repo.lastStatsSince.Equal(want) {
+		t.Fatalf("window starts %v; want %v", fixture.repo.lastStatsSince, want)
+	}
+	if stats[0].Sent != 0 || !stats[0].Day.Equal(time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("first day = %+v; want an empty 14th", stats[0])
+	}
+	if stats[1].Sent != 4 || stats[1].Failed != 1 || stats[1].Received != 2 {
+		t.Fatalf("second day = %+v", stats[1])
+	}
+	if !stats[2].Day.Equal(time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)) || stats[2].Received != 0 {
+		t.Fatalf("last day = %+v; want an empty today", stats[2])
+	}
+
+	for _, days := range []int{0, -1, MaxStatsDays + 1} {
+		if _, err := fixture.service.Stats(context.Background(), 1, days); !errors.Is(err, domain.ErrInvalidInput) {
+			t.Fatalf("days %d error = %v; want ErrInvalidInput", days, err)
+		}
 	}
 }

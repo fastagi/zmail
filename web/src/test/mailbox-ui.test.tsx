@@ -55,7 +55,7 @@ describe('mailbox workspace', () => {
   beforeEach(() => {
     toast.success.mockReset();
     toast.error.mockReset();
-    state.domains.data = [{ domain: 'mail.example.com', max_mailboxes: 10 }];
+    state.domains.data = [domain(10)];
     state.mailboxes.data = [mailbox(1, 'hello', 'Hello Team'), mailbox(2, 'sales', '')];
     state.inbox.data = page([
       summary({ id: 11, subject: 'Unread question', read: false }),
@@ -176,7 +176,7 @@ describe('mailbox workspace', () => {
   });
 
   it('replaces the create form with the limit once it is reached', () => {
-    state.domains.data = [{ domain: 'mail.example.com', max_mailboxes: 2 }];
+    state.domains.data = [domain(2)];
     renderWorkspace();
 
     expect(screen.getByText(/reached the limit of 2 mailboxes/u)).toBeInTheDocument();
@@ -442,6 +442,16 @@ function fillValidMessage(dialog: HTMLElement) {
   fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
   fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Hello' } });
   fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Body' } });
+}
+
+function domain(maxMailboxes: number) {
+  return {
+    domain: 'mail.example.com',
+    max_mailboxes: maxMailboxes,
+    provider: 'log',
+    inbound_enabled: false,
+    daily_send_limit: 200,
+  };
 }
 
 function mailbox(id: number, localPart: string, displayName: string, unreadCount = 0) {

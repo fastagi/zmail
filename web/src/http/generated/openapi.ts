@@ -342,6 +342,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail-message-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count the caller's mail per UTC day
+         * @description Returns one entry for every day of the window, oldest first, including days without mail.
+         */
+        get: operations["listMailMessageStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List messages across every mailbox the caller owns, newest first
+         * @description The log carries summaries without bodies; read a message through its mailbox.
+         */
+        get: operations["listMailLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mailbox-domains": {
         parameters: {
             query?: never;
@@ -1903,8 +1943,17 @@ export interface components {
             unread_count: number;
         };
         MailboxDomain: {
+            /** @description Outbound messages one user may attempt per rolling 24 hours. */
+            daily_send_limit: number;
             domain: string;
+            /** @description Whether the API accepts signed deliveries from the mail edge. */
+            inbound_enabled: boolean;
             max_mailboxes: number;
+            /**
+             * @description Outbound transport. `cloudflare` delivers mail; `log` only records it and exists for development.
+             * @enum {string}
+             */
+            provider: "cloudflare" | "log";
         };
         MailboxDomainListResponse: {
             /** @constant */
@@ -1924,8 +1973,48 @@ export interface components {
             data: components["schemas"]["Mailbox"];
             message: string;
         };
+        MailDayStats: {
+            /**
+             * Format: date
+             * @description UTC calendar day.
+             */
+            day: string;
+            failed: number;
+            received: number;
+            sent: number;
+        };
+        MailDayStatsListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailDayStats"][];
+            message: string;
+        };
         /** @enum {string} */
         MailDirection: "inbound" | "outbound";
+        MailLogEntry: {
+            cc: string[];
+            /** Format: date-time */
+            created_at: string;
+            direction: components["schemas"]["MailDirection"];
+            failure_code: string;
+            from: components["schemas"]["MailAddress"];
+            id: components["schemas"]["PositiveID"];
+            /** @description Address of the mailbox the message belongs to. */
+            mailbox_address: string;
+            mailbox_id: components["schemas"]["PositiveID"];
+            read: boolean;
+            status: components["schemas"]["MailStatus"];
+            subject: string;
+            to: string[];
+        };
+        MailLogPageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailLogEntry"][];
+            links: components["schemas"]["PaginationLinks"];
+            message: string;
+            meta: components["schemas"]["PaginationMeta"];
+        };
         MailMessage: {
             cc: string[];
             /** Format: date-time */
@@ -3932,6 +4021,66 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["AuthenticationAccountDisabled"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailMessageStats: {
+        parameters: {
+            query?: {
+                /** @description Window length ending today (UTC). Defaults to 7. */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-day counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDayStatsListResponse"];
+                };
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailLog: {
+        parameters: {
+            query?: {
+                direction?: components["schemas"]["MailDirection"];
+                /** @description Keep only one mailbox. Another user's mailbox matches nothing. */
+                mailbox_id?: components["schemas"]["PositiveID"];
+                /** @description One-based page number. */
+                page?: components["parameters"]["Page"];
+                /** @description Requested page size, capped by the API. */
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Case-insensitive match on the subject, the sender address, or a recipient address. */
+                q?: string;
+                status?: components["schemas"]["MailStatus"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the log. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailLogPageResponse"];
+                };
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

@@ -1,20 +1,7 @@
 'use client';
 
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { useLocale } from 'next-intl';
-import {
-  AlertCircle,
-  ArrowLeft,
-  Inbox,
-  Mail,
-  MailOpen,
-  PenLine,
-  Plus,
-  RefreshCw,
-  Reply,
-  Send,
-  Trash2,
-} from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { AlertCircle, ArrowLeft, Inbox, Mail, PenLine, Plus, Send, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -22,7 +9,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
-  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -32,26 +18,33 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Textarea } from '@/components/ui/textarea';
+import {
+  ComposeDialog,
+  emptyDraft,
+  replyDraft,
+  type ComposeDraft,
+} from '@/features/mailbox/components/compose-dialog';
+import {
+  EmptyState,
+  ErrorAlert,
+  MailHtmlFrame,
+  useDateTimeFormat,
+} from '@/features/mailbox/components/mail-shared';
+import { MessageActions } from '@/features/mailbox/components/message-actions';
 import {
   useCreateMailbox,
-  useDeleteMailMessage,
   useDeleteMailbox,
   useMailMessage,
   useMailMessages,
   useMailboxDomains,
   useMailboxes,
-  useSendMailMessage,
   useUpdateMailMessage,
 } from '@/features/mailbox/hooks/use-mailbox';
 import {
   MAILBOX_DISPLAY_NAME_MAX_LENGTH,
   MAILBOX_LOCAL_PART_MAX_LENGTH,
-  MAIL_SUBJECT_MAX_LENGTH,
   normalizeDisplayName,
   normalizeLocalPart,
-  normalizeMailMessage,
-  splitRecipients,
 } from '@/features/mailbox/schemas';
 import type {
   MailDirection,
@@ -60,30 +53,9 @@ import type {
   Mailbox,
   MailboxDomain,
 } from '@/features/mailbox/types';
-import {
-  isStoredSendFailure,
-  resolveMailboxErrorKey,
-  type MailboxErrorKey,
-} from '@/features/mailbox/utils/mailbox-error';
+import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
-
-interface ComposeDraft {
-  to: string;
-  subject: string;
-  inReplyTo: string;
-  reply: boolean;
-}
-
-const emptyDraft: ComposeDraft = { to: '', subject: '', inReplyTo: '', reply: false };
-
-/**
- * Blocks every network load inside the message frame. The frame's empty `sandbox` already stops
- * scripts and gives the content an opaque origin; this also stops remote images and stylesheets,
- * so opening a message tells the sender nothing.
- */
-const frameContentPolicy =
-  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'">';
 
 /**
  * Mailbox console: the signed-in user's addresses on the configured domain, with the inbox and
@@ -376,15 +348,7 @@ function MailboxMessages({ mailbox }: { mailbox: Mailbox }) {
   };
 
   const reply = (message: MailMessage) => {
-    const subject = /^re:/iu.test(message.subject)
-      ? message.subject
-      : t('compose.replySubject', { subject: message.subject });
-    setDraft({
-      to: message.from.address,
-      subject,
-      inReplyTo: message.message_id,
-      reply: true,
-    });
+    setDraft(replyDraft(message, subject => t('compose.replySubject', { subject })));
   };
 
   return (
@@ -601,9 +565,6 @@ function MessageDetail({
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
   const query = useMailMessage(mailboxId, messageId);
-  const update = useUpdateMailMessage(mailboxId);
-  const remove = useDeleteMailMessage(mailboxId);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [plainText, setPlainText] = useState(false);
 
   const back = (
@@ -640,68 +601,15 @@ function MessageDetail({
   }
 
   const message = query.data;
-  const inbound = message.direction === 'inbound';
   const hasHtml = message.html_body !== '';
   const hasText = message.text_body !== '';
   const showHtml = hasHtml && !(plainText && hasText);
-
-  const markUnread = async () => {
-    try {
-      await update.mutateAsync({ messageId: message.id, read: false });
-      onClose();
-    } catch (failure) {
-      toast.error(t(resolveMailboxErrorKey(failure)));
-    }
-  };
-
-  const confirmRemove = async () => {
-    try {
-      await remove.mutateAsync(message.id);
-      toast.success(t('messages.messageDeleted'));
-      onClose();
-    } catch (failure) {
-      toast.error(t(resolveMailboxErrorKey(failure)));
-    }
-  };
 
   return (
     <article className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {back}
-        <div className="flex flex-wrap gap-2">
-          {inbound ? (
-            <>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                icon={<Reply className="size-4" />}
-                onClick={() => onReply(message)}
-              >
-                {t('actions.reply')}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                loading={update.isPending}
-                icon={<MailOpen className="size-4" />}
-                onClick={() => void markUnread()}
-              >
-                {t('actions.markUnread')}
-              </Button>
-            </>
-          ) : null}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            icon={<Trash2 className="size-4" />}
-            onClick={() => setConfirmDelete(true)}
-          >
-            {t('actions.delete')}
-          </Button>
-        </div>
+        <MessageActions message={message} onReply={onReply} onClose={onClose} />
       </div>
 
       <div className="space-y-3 rounded-md border p-4">
@@ -765,15 +673,7 @@ function MessageDetail({
         ) : null}
 
         {showHtml ? (
-          // Sender HTML is untrusted. The empty sandbox runs no script and gives the content an
-          // opaque origin, so it can never act as this application or read its cookies.
-          <iframe
-            sandbox=""
-            srcDoc={frameContentPolicy + message.html_body}
-            title={t('message.htmlTitle')}
-            referrerPolicy="no-referrer"
-            className="h-96 w-full rounded-md border bg-white"
-          />
+          <MailHtmlFrame html={message.html_body} title={t('message.htmlTitle')} />
         ) : hasText ? (
           <pre className="font-sans text-sm break-words whitespace-pre-wrap">
             {message.text_body}
@@ -782,221 +682,7 @@ function MessageDetail({
           <p className="text-sm text-muted-foreground">{t('message.emptyBody')}</p>
         )}
       </div>
-
-      <Dialog
-        open={confirmDelete}
-        onOpenChange={open => !open && !remove.isPending && setConfirmDelete(false)}
-      >
-        <DialogContent size="sm">
-          <DialogHeader>
-            <DialogTitle>{t('deleteMessage.title')}</DialogTitle>
-            <DialogDescription>
-              {t('deleteMessage.description', {
-                subject: message.subject || t('list.noSubject'),
-              })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={remove.isPending}
-              onClick={() => setConfirmDelete(false)}
-            >
-              {t('actions.cancel')}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              loading={remove.isPending}
-              icon={<Trash2 className="size-4" />}
-              onClick={() => void confirmRemove()}
-            >
-              {t('actions.delete')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </article>
-  );
-}
-
-function ComposeDialog({
-  mailbox,
-  draft,
-  onClose,
-  onStored,
-}: {
-  mailbox: Mailbox;
-  draft: ComposeDraft;
-  onClose: () => void;
-  /** The sent folder has a new entry: a delivered message, or one stored as failed. */
-  onStored: () => void;
-}) {
-  const t = useT('mailbox');
-  const send = useSendMailMessage(mailbox.id);
-  const [to, setTo] = useState(draft.to);
-  const [cc, setCc] = useState('');
-  const [subject, setSubject] = useState(draft.subject);
-  const [body, setBody] = useState('');
-  const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setErrorKey(null);
-    const normalized = normalizeMailMessage({
-      to: splitRecipients(to),
-      cc: splitRecipients(cc),
-      subject,
-      text: body,
-      in_reply_to: draft.inReplyTo,
-    });
-    if (!normalized) {
-      setErrorKey('errors.messageInvalid');
-      return;
-    }
-    try {
-      await send.mutateAsync({
-        to: normalized.to,
-        ...(normalized.cc.length > 0 ? { cc: normalized.cc } : {}),
-        subject: normalized.subject,
-        text: normalized.text,
-        ...(normalized.in_reply_to === '' ? {} : { in_reply_to: normalized.in_reply_to }),
-      });
-      toast.success(t('messages.sent'));
-      onStored();
-      onClose();
-    } catch (failure) {
-      // The dialog stays open so the failure cannot be missed or mistaken for a delivery.
-      setErrorKey(resolveMailboxErrorKey(failure));
-      if (isStoredSendFailure(failure)) onStored();
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={open => !open && !send.isPending && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t(draft.reply ? 'compose.replyTitle' : 'compose.title')}</DialogTitle>
-          <DialogDescription>
-            {t('compose.description', { address: mailbox.address })}
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit}>
-          <DialogBody className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="mail-compose-to">{t('compose.to')}</Label>
-              <Textarea
-                id="mail-compose-to"
-                value={to}
-                rows={2}
-                spellCheck={false}
-                disabled={send.isPending}
-                placeholder={t('compose.toPlaceholder')}
-                aria-describedby="mail-compose-recipients-hint"
-                onChange={event => setTo(event.target.value)}
-              />
-              <p id="mail-compose-recipients-hint" className="text-xs text-muted-foreground">
-                {t('compose.recipientsHint')}
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="mail-compose-cc">{t('compose.cc')}</Label>
-              <Textarea
-                id="mail-compose-cc"
-                value={cc}
-                rows={1}
-                spellCheck={false}
-                disabled={send.isPending}
-                onChange={event => setCc(event.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="mail-compose-subject">{t('compose.subject')}</Label>
-              <Input
-                id="mail-compose-subject"
-                value={subject}
-                maxLength={MAIL_SUBJECT_MAX_LENGTH}
-                disabled={send.isPending}
-                onChange={event => setSubject(event.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="mail-compose-body">{t('compose.body')}</Label>
-              <Textarea
-                id="mail-compose-body"
-                value={body}
-                rows={8}
-                disabled={send.isPending}
-                onChange={event => setBody(event.target.value)}
-              />
-            </div>
-            {errorKey ? (
-              <Alert variant="destructive">
-                <AlertCircle className="size-4" aria-hidden="true" />
-                <AlertDescription>{t(errorKey)}</AlertDescription>
-              </Alert>
-            ) : null}
-          </DialogBody>
-          <DialogFooter className="mt-4">
-            <Button type="button" variant="outline" disabled={send.isPending} onClick={onClose}>
-              {t('actions.cancel')}
-            </Button>
-            <Button type="submit" loading={send.isPending} icon={<Send className="size-4" />}>
-              {t('actions.send')}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ErrorAlert({
-  message,
-  retryLabel,
-  onRetry,
-}: {
-  message: string;
-  retryLabel: string;
-  onRetry: () => void;
-}) {
-  return (
-    <Alert variant="destructive">
-      <AlertCircle className="size-4" aria-hidden="true" />
-      <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-        <span>{message}</span>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          icon={<RefreshCw className="size-3.5" />}
-          onClick={onRetry}
-        >
-          {retryLabel}
-        </Button>
-      </AlertDescription>
-    </Alert>
-  );
-}
-
-function EmptyState({
-  icon,
-  title,
-  description,
-}: {
-  icon: ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex flex-col items-center rounded-md border border-dashed px-6 py-10 text-center">
-      <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        {icon}
-      </div>
-      <p className="mt-3 text-sm font-medium">{title}</p>
-      <p className="mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
-    </div>
   );
 }
 
@@ -1016,13 +702,5 @@ function WorkspaceSkeleton() {
       <ListSkeleton />
       <Skeleton className="h-48 w-full" />
     </div>
-  );
-}
-
-function useDateTimeFormat(): Intl.DateTimeFormat {
-  const locale = useLocale();
-  return useMemo(
-    () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }),
-    [locale]
   );
 }

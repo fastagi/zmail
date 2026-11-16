@@ -50,6 +50,49 @@ type UpdateMailMessageRequest struct {
 type MailboxDomainResponse struct {
 	Domain       string `json:"domain"`
 	MaxMailboxes int    `json:"max_mailboxes"`
+	// Provider is the outbound transport: "cloudflare" delivers, "log" only records.
+	Provider string `json:"provider"`
+	// InboundEnabled tells whether the API accepts signed deliveries from the mail edge.
+	InboundEnabled bool `json:"inbound_enabled"`
+	DailySendLimit int  `json:"daily_send_limit"`
+}
+
+// MailLogEntryResponse is one row of the cross-mailbox log.
+type MailLogEntryResponse struct {
+	MailMessageSummaryResponse
+	MailboxAddress string `json:"mailbox_address"`
+}
+
+// MailDayStatsResponse counts one UTC day.
+type MailDayStatsResponse struct {
+	Day      string `json:"day"`
+	Sent     int    `json:"sent"`
+	Failed   int    `json:"failed"`
+	Received int    `json:"received"`
+}
+
+func toMailLogEntries(messages []*domain.MailMessage) []MailLogEntryResponse {
+	entries := make([]MailLogEntryResponse, 0, len(messages))
+	for _, message := range messages {
+		entries = append(entries, MailLogEntryResponse{
+			MailMessageSummaryResponse: toMailMessageSummary(message),
+			MailboxAddress:             message.MailboxAddress,
+		})
+	}
+	return entries
+}
+
+func toMailDayStats(stats []domain.MailDayStats) []MailDayStatsResponse {
+	days := make([]MailDayStatsResponse, 0, len(stats))
+	for _, day := range stats {
+		days = append(days, MailDayStatsResponse{
+			Day:      day.Day.Format("2006-01-02"),
+			Sent:     day.Sent,
+			Failed:   day.Failed,
+			Received: day.Received,
+		})
+	}
+	return days
 }
 
 // MailboxResponse is the public shape of a mailbox.

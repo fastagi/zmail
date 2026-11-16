@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  mailDayStatsListSchema,
+  mailLogPageEnvelopeSchema,
   mailMessagePageEnvelopeSchema,
   mailboxDomainListSchema,
   mailboxListSchema,
@@ -28,9 +30,22 @@ describe('mailbox service boundary', () => {
   });
 
   it('accepts domains, mailboxes, and pages without bodies', () => {
-    expect(
-      mailboxDomainListSchema.safeParse([{ domain: 'mail.example.com', max_mailboxes: 10 }]).success
-    ).toBe(true);
+    expect(mailboxDomainListSchema.safeParse([domain()]).success).toBe(true);
+    expect(mailboxDomainListSchema.safeParse([domain({ provider: 'log' })]).success).toBe(true);
+    // The provider, the inbound state, and the send limit are required parts of the answer.
+    for (const field of ['provider', 'inbound_enabled', 'daily_send_limit']) {
+      const partial: Record<string, unknown> = domain();
+      delete partial[field];
+      expect(mailboxDomainListSchema.safeParse([partial]).success, field).toBe(false);
+    }
+    for (const drift of [
+      { provider: 'smtp' },
+      { inbound_enabled: 'yes' },
+      { daily_send_limit: 0 },
+      { daily_send_limit: 1.5 },
+    ]) {
+      expect(mailboxDomainListSchema.safeParse([domain(drift)]).success).toBe(false);
+    }
     expect(
       mailboxListSchema.safeParse([
         {
@@ -62,6 +77,54 @@ describe('mailbox service boundary', () => {
     });
     expect(mailMessagePageEnvelopeSchema.safeParse(page([summary()])).success).toBe(true);
     expect(mailMessagePageEnvelopeSchema.safeParse(page([message()])).success).toBe(false);
+  });
+
+  it('accepts log pages with the owning address and rejects drift', () => {
+    const entry = { ...summary(), mailbox_address: 'hello@mail.example.com' };
+    const page = (data: unknown[]) => ({
+      code: 0,
+      message: 'success',
+      data,
+      meta: { current_page: 1, per_page: 20, total: 1, last_page: 1, from: 1, to: 1 },
+      links: { first: '/a', last: '/a', prev: null, next: null },
+    });
+
+    expect(mailLogPageEnvelopeSchema.safeParse(page([entry])).success).toBe(true);
+    expect(mailLogPageEnvelopeSchema.safeParse(page([])).success).toBe(true);
+    // A log entry always names its mailbox and never carries a body.
+    expect(mailLogPageEnvelopeSchema.safeParse(page([summary()])).success).toBe(false);
+    expect(
+      mailLogPageEnvelopeSchema.safeParse(page([{ ...entry, text_body: 'Plain body' }])).success
+    ).toBe(false);
+    expect(
+      mailLogPageEnvelopeSchema.safeParse(page([{ ...entry, status: 'bounced' }])).success
+    ).toBe(false);
+    expect(mailLogPageEnvelopeSchema.safeParse({ ...page([entry]), meta: undefined }).success).toBe(
+      false
+    );
+  });
+
+  it('accepts per-day statistics and rejects drift', () => {
+    const day = { day: '2026-11-16', sent: 3, failed: 1, received: 2 };
+
+    expect(mailDayStatsListSchema.safeParse([day, { ...day, day: '2026-11-17' }]).success).toBe(
+      true
+    );
+    expect(mailDayStatsListSchema.safeParse([]).success).toBe(true);
+    for (const drift of [
+      { day: '2026-11-16T00:00:00Z' },
+      { day: '16/11/2026' },
+      { sent: -1 },
+      { failed: 0.5 },
+      { received: '2' },
+      { queued: 1 },
+    ]) {
+      expect(mailDayStatsListSchema.safeParse([{ ...day, ...drift }]).success).toBe(false);
+    }
+    expect(
+      mailDayStatsListSchema.safeParse([{ day: day.day, sent: day.sent, failed: day.failed }])
+        .success
+    ).toBe(false);
   });
 
   it('applies the address rules of the contract', () => {
@@ -158,6 +221,17 @@ describe('mailbox service boundary', () => {
     expect(isStoredSendFailure(error(ApiErrorCode.MAILBOX_MESSAGE_INVALID))).toBe(false);
   });
 });
+
+function domain(overrides: Record<string, unknown> = {}) {
+  return {
+    domain: 'mail.example.com',
+    max_mailboxes: 10,
+    provider: 'cloudflare',
+    inbound_enabled: true,
+    daily_send_limit: 200,
+    ...overrides,
+  };
+}
 
 function summary() {
   return {

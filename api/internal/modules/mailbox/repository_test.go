@@ -435,6 +435,123 @@ func TestRepositoryCountsUnreadInboundMessagesPerMailbox(t *testing.T) {
 	}
 }
 
+func TestRepositoryListsTheLogAcrossAUsersMailboxes(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	createOwner(t, db, 2)
+	first := createMailbox(t, repo, "first@mail.example")
+	second := createMailbox(t, repo, "second@mail.example")
+	foreign := &domain.Mailbox{UserID: 2, Address: "foreign@mail.example"}
+	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerUser); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	add := func(mailboxID uint, direction domain.MailDirection, status domain.MailStatus, from, to, subject string) {
+		message := &domain.MailMessage{
+			MailboxID: mailboxID, Direction: direction, Status: status,
+			FromAddress: from, To: []string{to}, Subject: subject, TextBody: "secret body",
+		}
+		if _, err := repo.CreateMessage(ctx, message); err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+	}
+	add(first.ID, domain.MailDirectionInbound, domain.MailStatusReceived, "alice@sender.test", "first@mail.example", "Invoice 100% due")
+	add(first.ID, domain.MailDirectionOutbound, domain.MailStatusSent, "first@mail.example", "bob@example.com", "Receipt")
+	add(second.ID, domain.MailDirectionOutbound, domain.MailStatusFailed, "second@mail.example", "carol@example.com", "Reminder")
+	add(foreign.ID, domain.MailDirectionInbound, domain.MailStatusReceived, "alice@sender.test", "foreign@mail.example", "Invoice for someone else")
+
+	list := func(filter domain.MailLogFilter) []*domain.MailMessage {
+		t.Helper()
+		messages, total, err := repo.ListMessagesForUser(ctx, 1, filter)
+		if err != nil || int(total) != len(messages) {
+			t.Fatalf("ListMessagesForUser(%+v) = %d rows, total %d, err %v", filter, len(messages), total, err)
+		}
+		return messages
+	}
+
+	all := list(domain.MailLogFilter{})
+	if len(all) != 3 || all[0].Subject != "Reminder" || all[0].MailboxAddress != "second@mail.example" {
+		t.Fatalf("log = %d rows, first %+v; want 3 newest first with the mailbox address", len(all), all[0])
+	}
+	if all[0].TextBody != "" {
+		t.Fatalf("the log returned a body")
+	}
+	if got := list(domain.MailLogFilter{Direction: domain.MailDirectionOutbound}); len(got) != 2 {
+		t.Fatalf("outbound = %d; want 2", len(got))
+	}
+	if got := list(domain.MailLogFilter{Status: domain.MailStatusFailed}); len(got) != 1 || got[0].Subject != "Reminder" {
+		t.Fatalf("failed = %+v", got)
+	}
+	if got := list(domain.MailLogFilter{MailboxID: first.ID}); len(got) != 2 {
+		t.Fatalf("first mailbox = %d; want 2", len(got))
+	}
+	// Another user's mailbox id filters to nothing instead of leaking their mail.
+	if got := list(domain.MailLogFilter{MailboxID: foreign.ID}); len(got) != 0 {
+		t.Fatalf("foreign mailbox filter returned %d rows", len(got))
+	}
+	for query, want := range map[string]string{"INVOICE": "Invoice 100% due", "bob@example": "Receipt", "ALICE@sender": "Invoice 100% due"} {
+		if got := list(domain.MailLogFilter{Query: query}); len(got) != 1 || got[0].Subject != want {
+			t.Fatalf("query %q = %+v; want %q", query, got, want)
+		}
+	}
+	// LIKE wildcards in the query match literally.
+	if got := list(domain.MailLogFilter{Query: "100%"}); len(got) != 1 {
+		t.Fatalf("literal %% query = %d rows; want 1", len(got))
+	}
+	if got := list(domain.MailLogFilter{Query: "%"}); len(got) != 1 {
+		t.Fatalf("a lone %% matched %d rows; want only the subject that contains it", len(got))
+	}
+	if got := list(domain.MailLogFilter{Query: "_"}); len(got) != 0 {
+		t.Fatalf("a lone _ matched %d rows; want 0", len(got))
+	}
+
+	page, total, err := repo.ListMessagesForUser(ctx, 1, domain.MailLogFilter{Page: 2, PerPage: 2})
+	if err != nil || total != 3 || len(page) != 1 || page[0].Subject != "Invoice 100% due" {
+		t.Fatalf("page 2 = %+v, total %d, err %v", page, total, err)
+	}
+}
+
+func TestRepositoryCountsMailPerDay(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	createOwner(t, db, 2)
+	mailbox := createMailbox(t, repo, "hello@mail.example")
+	foreign := &domain.Mailbox{UserID: 2, Address: "foreign@mail.example"}
+	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerUser); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	add := func(mailboxID uint, direction domain.MailDirection, status domain.MailStatus, at time.Time) {
+		message := &domain.MailMessage{MailboxID: mailboxID, Direction: direction, Status: status, FromAddress: "a@sender.test", Subject: "s"}
+		if _, err := repo.CreateMessage(ctx, message); err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+		if err := db.Model(&MailMessagePO{}).Where("id = ?", message.ID).UpdateColumn("created_at", at).Error; err != nil {
+			t.Fatalf("set created_at: %v", err)
+		}
+	}
+	day1 := time.Date(2026, 11, 14, 23, 30, 0, 0, time.UTC)
+	day2 := time.Date(2026, 11, 15, 0, 30, 0, 0, time.UTC)
+	add(mailbox.ID, domain.MailDirectionOutbound, domain.MailStatusSent, day1)
+	add(mailbox.ID, domain.MailDirectionOutbound, domain.MailStatusSent, day2)
+	add(mailbox.ID, domain.MailDirectionOutbound, domain.MailStatusFailed, day2)
+	add(mailbox.ID, domain.MailDirectionOutbound, domain.MailStatusQueued, day2)
+	add(mailbox.ID, domain.MailDirectionInbound, domain.MailStatusReceived, day2)
+	add(mailbox.ID, domain.MailDirectionInbound, domain.MailStatusReceived, time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))
+	add(foreign.ID, domain.MailDirectionInbound, domain.MailStatusReceived, day2)
+
+	stats, err := repo.StatsForUser(ctx, 1, time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC))
+	if err != nil || len(stats) != 2 {
+		t.Fatalf("StatsForUser = %+v, %v; want 2 days", stats, err)
+	}
+	if !stats[0].Day.Equal(time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)) || stats[0].Sent != 1 || stats[0].Failed != 0 || stats[0].Received != 0 {
+		t.Fatalf("first day = %+v", stats[0])
+	}
+	if !stats[1].Day.Equal(time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)) || stats[1].Sent != 1 || stats[1].Failed != 1 || stats[1].Received != 1 {
+		t.Fatalf("second day = %+v; a queued message counts as neither sent nor failed", stats[1])
+	}
+}
+
 func TestRepositoryReportsADisabledDatabase(t *testing.T) {
 	repo := NewRepository(nil)
 	if _, err := repo.ListMailboxes(context.Background(), 1); !errors.Is(err, domain.ErrServiceUnavailable) {

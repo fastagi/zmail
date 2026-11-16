@@ -8,6 +8,11 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Email log and statistics.** `GET /v1/mail-messages` lists messages across all of a user's
+  mailboxes with direction, status, mailbox, and text filters. `GET /v1/mail-message-stats`
+  returns sent, failed, and received counts per UTC day. `GET /v1/mailbox-domains` now reports the
+  outbound provider, whether inbound mail is enabled, and the daily send limit. The Web console
+  gains an Emails page built on them.
 - **Unread counts.** `GET /v1/mailboxes` returns `unread_count` for each mailbox, and the Web
   console shows it as a badge that follows read state.
 - **Programmatic sending.** Backend services send mail with an API key through

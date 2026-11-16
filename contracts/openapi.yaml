@@ -3866,6 +3866,85 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-messages:
+    get:
+      operationId: listMailLog
+      summary: List messages across every mailbox the caller owns, newest first
+      description: The log carries summaries without bodies; read a message through its mailbox.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - name: direction
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/MailDirection'
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/MailStatus'
+        - name: mailbox_id
+          in: query
+          required: false
+          description: Keep only one mailbox. Another user's mailbox matches nothing.
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive match on the subject, the sender address, or a recipient address.
+          schema:
+            type: string
+            maxLength: 200
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: One page of the log.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailLogPageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-message-stats:
+    get:
+      operationId: listMailMessageStats
+      summary: Count the caller's mail per UTC day
+      description: Returns one entry for every day of the window, oldest first, including days without mail.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - name: days
+          in: query
+          required: false
+          description: Window length ending today (UTC). Defaults to 7.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 90
+      responses:
+        '200':
+          description: Per-day counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDayStatsListResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 components:
   securitySchemes:
     bearerSession:
@@ -7137,6 +7216,9 @@ components:
       required:
         - domain
         - max_mailboxes
+        - provider
+        - inbound_enabled
+        - daily_send_limit
       properties:
         domain:
           type: string
@@ -7144,6 +7226,19 @@ components:
           maxLength: 253
         max_mailboxes:
           type: integer
+          minimum: 1
+        provider:
+          type: string
+          description: Outbound transport. `cloudflare` delivers mail; `log` only records it and exists for development.
+          enum:
+            - cloudflare
+            - log
+        inbound_enabled:
+          type: boolean
+          description: Whether the API accepts signed deliveries from the mail edge.
+        daily_send_limit:
+          type: integer
+          description: Outbound messages one user may attempt per rolling 24 hours.
           minimum: 1
     MailboxDomainListResponse:
       type: object
@@ -7511,3 +7606,118 @@ components:
         in_reply_to:
           type: string
           maxLength: 900
+    MailLogEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mailbox_id
+        - mailbox_address
+        - direction
+        - status
+        - from
+        - to
+        - cc
+        - subject
+        - read
+        - failure_code
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_address:
+          type: string
+          description: Address of the mailbox the message belongs to.
+          maxLength: 320
+        direction:
+          $ref: '#/components/schemas/MailDirection'
+        status:
+          $ref: '#/components/schemas/MailStatus'
+        from:
+          $ref: '#/components/schemas/MailAddress'
+        to:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
+        cc:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
+        subject:
+          type: string
+          maxLength: 998
+        read:
+          type: boolean
+        failure_code:
+          type: string
+          maxLength: 120
+        created_at:
+          type: string
+          format: date-time
+    MailLogPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailLogEntry'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    MailDayStats:
+      type: object
+      additionalProperties: false
+      required:
+        - day
+        - sent
+        - failed
+        - received
+      properties:
+        day:
+          type: string
+          format: date
+          description: UTC calendar day.
+        sent:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        received:
+          type: integer
+          minimum: 0
+    MailDayStatsListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 90
+          items:
+            $ref: '#/components/schemas/MailDayStats'

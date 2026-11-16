@@ -28,6 +28,8 @@ message that belongs to another user is reported exactly like one that does not 
 | Get message | `GET /api/mailboxes/:id/messages/:messageId` | `GET /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
 | Mark read or unread | `PUT /api/mailboxes/:id/messages/:messageId` | `PUT /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
 | Delete message | `DELETE /api/mailboxes/:id/messages/:messageId` | `DELETE /v1/mailboxes/:mailbox_id/messages/:message_id` | `204` |
+| List the log | `GET /api/mail-messages` | `GET /v1/mail-messages` | Paginated envelope |
+| Per-day statistics | `GET /api/mail-message-stats` | `GET /v1/mail-message-stats` | `200` envelope, at most 90 items |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
 | Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
 | Inbound delivery | none | `POST /v1/inbound-mail-messages` | `201`, or `200` for a repeat |
@@ -51,7 +53,10 @@ has no browser route: only the mail edge calls it.
   `422 MAILBOX.ADDRESS_RESERVED`.
 - `display_name` is optional, at most 120 characters, and may not contain `<`, `>`, or `"`; a
   violation is also `422 MAILBOX.ADDRESS_INVALID`.
-- The address is `<local_part>@<configured domain>`. An address that is or ever was a mailbox is
+- The address is `<local_part>@<configured domain>`. `GET /v1/mailbox-domains` returns that domain
+  with `max_mailboxes`, the outbound `provider` (`cloudflare` delivers; `log` only records and is
+  for development), `inbound_enabled`, and `daily_send_limit`.
+- An address that is or ever was a mailbox is
   `409 MAILBOX.ADDRESS_TAKEN`: deleting a mailbox keeps its address reserved, so a later owner
   never receives mail meant for the previous one.
 - A user owns at most 10 mailboxes; one more is `409 MAILBOX.LIMIT_REACHED`.
@@ -132,6 +137,33 @@ the send limit. The limit is a soft bound: concurrent requests may exceed it by 
 requests in flight. There is no automatic retry. A client that retries a `502` without an
 `Idempotency-Key` may send a duplicate when the first attempt reached the provider but the answer
 was lost (`failure_code` `transport.unreachable`); see [Idempotency](#idempotency).
+
+### Log And Statistics
+
+`GET /v1/mail-messages` lists messages across every mailbox the caller owns, newest first, as
+summaries with the owning `mailbox_address` and without bodies. Read a message through
+`GET /v1/mailboxes/:mailbox_id/messages/:message_id`.
+
+| Query | Meaning |
+|---|---|
+| `direction` | `inbound` or `outbound` |
+| `status` | `received`, `queued`, `sent`, or `failed` |
+| `mailbox_id` | One mailbox. Another user's mailbox matches nothing. |
+| `q` | Case-insensitive match on the subject, the sender address, or a recipient address; at most 200 characters. `%` and `_` match literally. |
+| `page`, `per_page` | Pagination |
+
+An unknown `direction` or `status`, a non-positive `mailbox_id`, or an over-long `q` is
+`400 COMMON.INVALID_INPUT`. Messages of deleted mailboxes do not appear.
+
+`GET /v1/mail-message-stats?days=N` returns one entry per UTC day for the last `N` days ending
+today, oldest first, including days without mail. `N` defaults to 7 and is 1 to 90.
+
+```json
+{ "day": "2026-11-16", "sent": 3, "failed": 1, "received": 2 }
+```
+
+`sent` and `failed` count outbound messages by their final status; a message still `queued` is in
+neither. `received` counts inbound messages.
 
 ### Idempotency
 
