@@ -13,6 +13,8 @@ const messages = {
   analytics: '数据分析',
   styleguide: '设计规范',
   mailboxes: '邮箱',
+  emails: '邮件',
+  mailDomain: '域名',
   // fastbuild:slot web.i18n.nav.zh-hans
 } as const satisfies LocaleMessageShape<NavMessages>;
 

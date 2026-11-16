@@ -7,7 +7,11 @@ import {
   normalizeMailMessage,
 } from '@/features/mailbox/schemas';
 import type {
+  MailDayStats,
   MailDirection,
+  MailLogEntry,
+  MailLogFilters,
+  MailLogPage,
   MailMessage,
   MailMessagePage,
   MailMessageSummary,
@@ -19,9 +23,13 @@ import type {
  * Development-only mailboxes, isolated per mock user. It mirrors the browser-facing rules of the
  * Go mailbox starter: address validation and reserved names, addresses that stay reserved after
  * a mailbox is deleted, the per-user mailbox limit, send validation, newest-first listings
- * without bodies, and read state. Nothing leaves the process: a "sent" message is only stored.
+ * without bodies, read state, the cross-mailbox log, and per-day counts. Nothing leaves the
+ * process: a "sent" message is only stored, which is what the `log` provider means.
  */
 export const MOCK_MAILBOX_DOMAIN = 'mail.example.com';
+export const MOCK_DAILY_SEND_LIMIT = 200;
+
+const dayMilliseconds = 24 * 60 * 60 * 1_000;
 
 const maxMockUsers = 1_000;
 const maxMockMessagesPerMailbox = 500;
@@ -59,7 +67,15 @@ export class MockMailboxStore {
   ) {}
 
   domains(): MailboxDomain[] {
-    return [{ domain: MOCK_MAILBOX_DOMAIN, max_mailboxes: MAILBOX_MAX_PER_USER }];
+    return [
+      {
+        domain: MOCK_MAILBOX_DOMAIN,
+        max_mailboxes: MAILBOX_MAX_PER_USER,
+        provider: 'log',
+        inbound_enabled: false,
+        daily_send_limit: MOCK_DAILY_SEND_LIMIT,
+      },
+    ];
   }
 
   /** Oldest first, as the API lists them. */
@@ -115,7 +131,63 @@ export class MockMailboxStore {
       .filter(message => direction === null || message.direction === direction)
       .sort((left, right) => right.id - left.id)
       .map(summaryOf);
-    return paginated(all, page, perPage, mailboxId, direction);
+    const filter = direction === null ? '' : `direction=${direction}&`;
+    return paginated(all, page, perPage, `/api/mailboxes/${mailboxId}/messages?${filter}`);
+  }
+
+  /**
+   * Every mailbox of the user, newest first, without bodies. The search is a case-insensitive
+   * substring match on the subject, the sender address, and each recipient address, so `%` and
+   * `_` only match themselves. Another user's mailbox matches nothing.
+   */
+  listLog(userKey: string, filters: MailLogFilters, page: number, perPage: number): MailLogPage {
+    const needle = filters.q?.trim().toLowerCase() ?? '';
+    const entries: MailLogEntry[] = [];
+    for (const state of this.mailboxesOf(userKey).values()) {
+      if (filters.mailboxId !== undefined && state.mailbox.id !== filters.mailboxId) continue;
+      for (const message of state.messages.values()) {
+        if (filters.direction && message.direction !== filters.direction) continue;
+        if (filters.status && message.status !== filters.status) continue;
+        if (needle !== '' && !matchesSearch(message, needle)) continue;
+        entries.push({ ...summaryOf(message), mailbox_address: state.mailbox.address });
+      }
+    }
+    entries.sort((left, right) => right.id - left.id);
+
+    const query = new URLSearchParams();
+    if (filters.direction) query.set('direction', filters.direction);
+    if (filters.status) query.set('status', filters.status);
+    if (filters.mailboxId !== undefined) query.set('mailbox_id', String(filters.mailboxId));
+    if (needle !== '') query.set('q', filters.q?.trim() ?? '');
+    const prefix = query.size > 0 ? `${query.toString()}&` : '';
+    return paginated(entries, page, perPage, `/api/mail-messages?${prefix}`);
+  }
+
+  /**
+   * One entry per UTC day for the last `days` days ending today, oldest first, empty days
+   * included. `sent` and `failed` count outbound messages by final status; `received` counts
+   * inbound messages.
+   */
+  stats(userKey: string, days: number): MailDayStats[] {
+    const now = this.dependencies.now();
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const entries = Array.from({ length: days }, (_, index): MailDayStats => ({
+      day: dayOf(today - (days - 1 - index) * dayMilliseconds),
+      sent: 0,
+      failed: 0,
+      received: 0,
+    }));
+    const byDay = new Map(entries.map(entry => [entry.day, entry]));
+    for (const state of this.mailboxesOf(userKey).values()) {
+      for (const message of state.messages.values()) {
+        const entry = byDay.get(message.created_at.slice(0, 10));
+        if (!entry) continue;
+        if (message.direction === 'inbound') entry.received += 1;
+        else if (message.status === 'sent') entry.sent += 1;
+        else if (message.status === 'failed') entry.failed += 1;
+      }
+    }
+    return entries;
   }
 
   getMessage(userKey: string, mailboxId: number, messageId: number): MockMailMessageResult {
@@ -253,20 +325,31 @@ function summaryOf(message: MailMessage): MailMessageSummary {
   };
 }
 
-function paginated(
-  items: MailMessageSummary[],
+function matchesSearch(message: MailMessage, needle: string): boolean {
+  return (
+    message.subject.toLowerCase().includes(needle) ||
+    message.from.address.toLowerCase().includes(needle) ||
+    message.to.some(address => address.toLowerCase().includes(needle))
+  );
+}
+
+/** The UTC calendar day of a timestamp, as `YYYY-MM-DD`. */
+function dayOf(milliseconds: number): string {
+  return new Date(milliseconds).toISOString().slice(0, 10);
+}
+
+/** `hrefPrefix` is the listing path with its filters, ready for `page=` to be appended. */
+function paginated<T>(
+  items: T[],
   page: number,
   perPage: number,
-  mailboxId: number,
-  direction: MailDirection | null
-): MailMessagePage {
+  hrefPrefix: string
+): { items: T[]; meta: MailMessagePage['meta']; links: MailMessagePage['links'] } {
   const total = items.length;
   const lastPage = Math.max(1, Math.ceil(total / perPage));
   const start = (page - 1) * perPage;
   const data = items.slice(start, start + perPage);
-  const filter = direction === null ? '' : `direction=${direction}&`;
-  const href = (target: number) =>
-    `/api/mailboxes/${mailboxId}/messages?${filter}page=${target}&per_page=${perPage}`;
+  const href = (target: number) => `${hrefPrefix}page=${target}&per_page=${perPage}`;
   return {
     items: data,
     meta: {

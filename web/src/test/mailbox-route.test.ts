@@ -154,7 +154,15 @@ describe('mailbox browser route boundary', () => {
     const domains = await route.listMailboxDomainsRoute(request('/api/mailbox-domains'));
     await expect(domains.json()).resolves.toMatchObject({
       code: 0,
-      data: [{ domain: 'mail.example.com', max_mailboxes: 10 }],
+      data: [
+        {
+          domain: 'mail.example.com',
+          max_mailboxes: 10,
+          provider: 'log',
+          inbound_enabled: false,
+          daily_send_limit: 200,
+        },
+      ],
     });
 
     const created = await create(route, {
@@ -572,6 +580,307 @@ describe('mailbox browser route boundary', () => {
       422,
       'COMMON.VALIDATION_FAILED'
     );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('guards the log and the statistics like every other read', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    process.env.NEXT_PUBLIC_OPTIONAL_FEATURES = '';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    let route = await loadRoute();
+
+    for (const response of [
+      await route.listMailLogRoute(request('/api/mail-messages')),
+      await route.listMailMessageStatsRoute(request('/api/mail-message-stats')),
+    ]) {
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error_code: 'COMMON.SERVICE_UNAVAILABLE',
+      });
+    }
+    expect(getSessionUser).not.toHaveBeenCalled();
+
+    vi.resetModules();
+    process.env.NEXT_PUBLIC_OPTIONAL_FEATURES = 'mailbox';
+    getSessionUser.mockResolvedValue(null);
+    route = await loadRoute();
+    // Authentication comes before validation: a signed-out caller learns nothing about the query.
+    for (const response of [
+      await route.listMailLogRoute(request('/api/mail-messages?direction=spam')),
+      await route.listMailMessageStatsRoute(request('/api/mail-message-stats?days=0')),
+    ]) {
+      await expectError(response, 401, 'AUTH.UNAUTHORIZED');
+    }
+  });
+
+  it('lists the log across mailboxes, newest first, with the owning address', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const hello = (await (await create(route, { local_part: 'hello' })).json()).data;
+    const sales = (await (await create(route, { local_part: 'sales' })).json()).data;
+    const offer = (
+      await (
+        await send(route, hello.id, {
+          to: ['Bob@Example.com'],
+          subject: '100% off_today',
+          text: 'Body',
+        })
+      ).json()
+    ).data;
+    const invoice = (
+      await (
+        await send(route, sales.id, {
+          to: ['carol@example.org', 'dave@example.com'],
+          subject: 'Invoice 1000 offXtoday',
+          html: '<p>x</p>',
+        })
+      ).json()
+    ).data;
+    const log = async (query = '') =>
+      (await route.listMailLogRoute(request(`/api/mail-messages${query}`))).json();
+    const ids = async (query: string) =>
+      (await log(query)).data.map((item: { id: number }) => item.id);
+
+    const response = await route.listMailLogRoute(request('/api/mail-messages'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('vary')).toContain('Cookie');
+    const everything = await response.json();
+    // Two welcome messages and two sends, newest first.
+    expect(everything.data.map((item: { id: number }) => item.id)).toEqual([
+      invoice.id,
+      offer.id,
+      invoice.id - 2,
+      offer.id - 2,
+    ]);
+    expect(everything.meta).toMatchObject({ current_page: 1, per_page: 15, total: 4 });
+    expect(everything.data[0]).toMatchObject({
+      mailbox_id: sales.id,
+      mailbox_address: 'sales@mail.example.com',
+      direction: 'outbound',
+      status: 'sent',
+    });
+    expect(everything.data[1].mailbox_address).toBe('hello@mail.example.com');
+    for (const entry of everything.data) {
+      expect(entry).not.toHaveProperty('text_body');
+      expect(entry).not.toHaveProperty('html_body');
+    }
+
+    expect(await ids('?direction=outbound')).toEqual([invoice.id, offer.id]);
+    expect(await ids('?direction=inbound')).toEqual([invoice.id - 2, offer.id - 2]);
+    expect(await ids('?status=received')).toEqual([invoice.id - 2, offer.id - 2]);
+    expect(await ids('?status=sent')).toEqual([invoice.id, offer.id]);
+    expect(await ids('?status=failed')).toEqual([]);
+    expect(await ids('?status=queued')).toEqual([]);
+    expect(await ids(`?mailbox_id=${hello.id}`)).toEqual([offer.id, offer.id - 2]);
+    expect(await ids(`?mailbox_id=${sales.id}&direction=outbound&status=sent`)).toEqual([
+      invoice.id,
+    ]);
+    // An empty value does not filter, as in the API.
+    expect(await ids('?direction=&status=&mailbox_id=&q=')).toHaveLength(4);
+
+    // The search covers the subject, the sender address, and every recipient address.
+    expect(await ids('?q=INVOICE')).toEqual([invoice.id]);
+    expect(await ids('?q=%20invoice%20')).toEqual([invoice.id]);
+    expect(await ids('?q=BOB%40example')).toEqual([offer.id]);
+    expect(await ids('?q=dave%40')).toEqual([invoice.id]);
+    expect(await ids('?q=sales%40mail.example.com')).toEqual([invoice.id, invoice.id - 2]);
+    expect(await ids('?q=nothing-like-this')).toEqual([]);
+    // `%` and `_` are ordinary characters, not wildcards.
+    expect(await ids('?q=100%25')).toEqual([offer.id]);
+    expect(await ids('?q=off_today')).toEqual([offer.id]);
+    expect(await ids('?q=%25')).toEqual([offer.id]);
+    expect(await ids('?q=_')).toEqual([offer.id]);
+
+    const page = await log('?direction=outbound&q=today&per_page=1&page=2');
+    expect(page.data.map((item: { id: number }) => item.id)).toEqual([offer.id]);
+    expect(page.meta).toMatchObject({ current_page: 2, per_page: 1, total: 2, last_page: 2 });
+    expect(page.links.prev).toBe('/api/mail-messages?direction=outbound&q=today&page=1&per_page=1');
+    expect(page.links.next).toBeNull();
+
+    // A deleted mailbox takes its messages out of the log.
+    await route.deleteMailboxRoute(
+      request(`/api/mailboxes/${sales.id}`, { method: 'DELETE' }),
+      String(sales.id)
+    );
+    expect(await ids('')).toEqual([offer.id, offer.id - 2]);
+
+    // Another user sees none of it, even when naming the mailbox.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect(await ids('')).toEqual([]);
+    expect(await ids(`?mailbox_id=${hello.id}`)).toEqual([]);
+  });
+
+  it('rejects an invalid log or statistics query with invalid input', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+
+    for (const query of [
+      '?direction=all',
+      '?direction=inbound&direction=outbound',
+      '?direction=inbound&direction=inbound',
+      '?status=bounced',
+      '?status=sent&status=failed',
+      '?mailbox_id=0',
+      '?mailbox_id=-1',
+      '?mailbox_id=abc',
+      '?mailbox_id=1.5',
+      '?mailbox_id=1&mailbox_id=2',
+      `?q=${'a'.repeat(201)}`,
+      '?q=a&q=b',
+    ]) {
+      await expectError(
+        await route.listMailLogRoute(request(`/api/mail-messages${query}`)),
+        400,
+        'COMMON.INVALID_INPUT'
+      );
+    }
+    // 200 characters is the limit, counted after trimming.
+    const longest = await route.listMailLogRoute(
+      request(`/api/mail-messages?q=%20${'a'.repeat(200)}%20`)
+    );
+    expect(longest.status).toBe(200);
+
+    for (const query of [
+      '?days=0',
+      '?days=91',
+      '?days=-7',
+      '?days=abc',
+      '?days=1.5',
+      '?days=',
+      '?days=7&days=7',
+    ]) {
+      await expectError(
+        await route.listMailMessageStatsRoute(request(`/api/mail-message-stats${query}`)),
+        400,
+        'COMMON.INVALID_INPUT'
+      );
+    }
+  });
+
+  it('counts mail per UTC day over the window, empty days included', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      process.env.MOCK_BFF_ENABLED = 'true';
+      getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+      const route = await loadRoute();
+      const stats = async (query = '') => {
+        const response = await route.listMailMessageStatsRoute(
+          request(`/api/mail-message-stats${query}`)
+        );
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('private, no-store');
+        return (await response.json()).data;
+      };
+      const empty = { sent: 0, failed: 0, received: 0 };
+
+      // Late on the 14th in UTC: the welcome message arrives.
+      vi.setSystemTime(new Date('2026-11-14T23:59:30Z'));
+      const mailbox = (await (await create(route, { local_part: 'hello' })).json()).data;
+      // Just after midnight on the 16th: two messages go out.
+      vi.setSystemTime(new Date('2026-11-16T00:00:05Z'));
+      for (const subject of ['One', 'Two']) {
+        await send(route, mailbox.id, { to: ['bob@example.com'], subject, text: 'Body' });
+      }
+
+      expect(await stats('?days=3')).toEqual([
+        { day: '2026-11-14', sent: 0, failed: 0, received: 1 },
+        { day: '2026-11-15', ...empty },
+        { day: '2026-11-16', sent: 2, failed: 0, received: 0 },
+      ]);
+      expect(await stats('?days=1')).toEqual([
+        { day: '2026-11-16', sent: 2, failed: 0, received: 0 },
+      ]);
+      // The window defaults to a week, oldest day first.
+      const week = await stats();
+      expect(week.map((entry: { day: string }) => entry.day)).toEqual([
+        '2026-11-10',
+        '2026-11-11',
+        '2026-11-12',
+        '2026-11-13',
+        '2026-11-14',
+        '2026-11-15',
+        '2026-11-16',
+      ]);
+      expect(week.slice(0, 4)).toEqual(
+        ['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13'].map(day => ({ day, ...empty }))
+      );
+      expect(await stats('?days=90')).toHaveLength(90);
+
+      // Another user has the same window with nothing in it.
+      getSessionUser.mockResolvedValue(mockUser('demo-member'));
+      const theirs = await stats();
+      expect(theirs).toHaveLength(7);
+      expect(theirs.every((entry: typeof empty) => entry.sent + entry.received === 0)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('forwards the log and the statistics with only the whitelisted query', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () =>
+      Response.json({ code: 0, message: 'success', data: [] })
+    );
+    const route = await loadRoute();
+
+    await route.listMailLogRoute(request('/api/mail-messages'));
+    await route.listMailLogRoute(
+      request(
+        '/api/mail-messages?q=%20100%25%20off%20&status=failed&user_id=9&mailbox_id=12&direction=outbound&per_page=500&page=3&sort=subject'
+      )
+    );
+    await route.listMailLogRoute(request('/api/mail-messages?direction=&q=%20&page=x'));
+    await route.listMailMessageStatsRoute(request('/api/mail-message-stats?user_id=9'));
+    await route.listMailMessageStatsRoute(request('/api/mail-message-stats?days=30&since=2020'));
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const target = new URL(String(url));
+      return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/mail-messages?page=1&per_page=15',
+      'GET /v1/mail-messages?page=3&per_page=100&direction=outbound&status=failed&mailbox_id=12&q=100%25+off',
+      'GET /v1/mail-messages?page=1&per_page=15',
+      'GET /v1/mail-message-stats?days=7',
+      'GET /v1/mail-message-stats?days=30',
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).has('organization-id')).toBe(false);
+    }
+    expect(getSessionUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid log or statistics query before it reaches the API', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    const route = await loadRoute();
+
+    for (const query of [
+      '?direction=all',
+      '?status=bounced',
+      '?mailbox_id=0',
+      `?q=${'a'.repeat(201)}`,
+      '?status=sent&status=sent',
+    ]) {
+      await expectError(
+        await route.listMailLogRoute(request(`/api/mail-messages${query}`)),
+        400,
+        'COMMON.INVALID_INPUT'
+      );
+    }
+    for (const query of ['?days=0', '?days=91', '?days=week']) {
+      await expectError(
+        await route.listMailMessageStatsRoute(request(`/api/mail-message-stats${query}`)),
+        400,
+        'COMMON.INVALID_INPUT'
+      );
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

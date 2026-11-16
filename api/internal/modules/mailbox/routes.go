@@ -14,6 +14,9 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 
 		auth.GET("/mailbox-domains", h.ListDomains).Name("mailbox_domains.index")
 
+		auth.GET("/mail-messages", h.ListLog).Name("mail_messages.index")
+		auth.GET("/mail-message-stats", h.ListStats).Name("mail_message_stats.index")
+
 		auth.GET("/mailboxes", h.ListMailboxes).Name("mailboxes.index")
 		auth.POST("/mailboxes", h.CreateMailbox).Name("mailboxes.store")
 		auth.DELETE("/mailboxes/:mailbox_id", h.DeleteMailbox).Name("mailboxes.destroy").WhereNumber("mailbox_id")

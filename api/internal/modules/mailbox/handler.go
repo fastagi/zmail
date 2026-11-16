@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -62,8 +63,11 @@ func (h *Handler) ListDomains(c *gin.Context) {
 	}
 	privateResponse(c)
 	response.Success(c, []MailboxDomainResponse{{
-		Domain:       h.service.Domain(),
-		MaxMailboxes: domain.MaxMailboxesPerUser,
+		Domain:         h.service.Domain(),
+		MaxMailboxes:   domain.MaxMailboxesPerUser,
+		Provider:       h.service.Provider(),
+		InboundEnabled: h.service.InboundEnabled(),
+		DailySendLimit: h.service.DailySendLimit(),
 	}})
 }
 
@@ -111,6 +115,65 @@ func (h *Handler) DeleteMailbox(c *gin.Context) {
 		return
 	}
 	response.NoContent(c)
+}
+
+// ListLog lists messages across every mailbox the caller owns, newest first.
+func (h *Handler) ListLog(c *gin.Context) {
+	userID, ok := httphandler.GetUserID(c)
+	if !ok {
+		return
+	}
+	var mailboxID uint
+	if raw := c.Query("mailbox_id"); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 32)
+		if err != nil || parsed == 0 {
+			response.HandleError(c, "Invalid mailbox filter", domain.ErrInvalidInput)
+			return
+		}
+		mailboxID = uint(parsed)
+	}
+	page := pagination.FromContext(c)
+	messages, total, err := h.service.ListLog(c.Request.Context(), userID, domain.MailLogFilter{
+		Direction: domain.MailDirection(c.Query("direction")),
+		Status:    domain.MailStatus(c.Query("status")),
+		MailboxID: mailboxID,
+		Query:     c.Query("q"),
+		Page:      page.GetPage(),
+		PerPage:   page.GetPerPage(),
+	})
+	if err != nil {
+		response.HandleError(c, "Failed to list mail messages", err)
+		return
+	}
+	paginator := pagination.NewPaginator(toMailLogEntries(messages), total, page.GetPage(), page.GetPerPage())
+	paginator.SetPath(c.Request.URL.Path)
+	privateResponse(c)
+	response.Success(c, paginator)
+}
+
+// ListStats returns per-day counts for the caller's mail.
+// fastbuild:bounded-list max=90 reason=one entry per day of a window capped at MaxStatsDays
+func (h *Handler) ListStats(c *gin.Context) {
+	userID, ok := httphandler.GetUserID(c)
+	if !ok {
+		return
+	}
+	days := 7
+	if raw := c.Query("days"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			response.HandleError(c, "Invalid statistics window", domain.ErrInvalidInput)
+			return
+		}
+		days = parsed
+	}
+	stats, err := h.service.Stats(c.Request.Context(), userID, days)
+	if err != nil {
+		response.HandleError(c, "Failed to load mail statistics", err)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, toMailDayStats(stats))
 }
 
 func (h *Handler) ListMessages(c *gin.Context) {

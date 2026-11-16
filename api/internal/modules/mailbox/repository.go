@@ -379,6 +379,111 @@ func (r *repository) CountOutboundSince(ctx context.Context, userID uint, since 
 	return count, err
 }
 
+type mailLogRow struct {
+	MailMessagePO
+	MailboxAddress string
+}
+
+func (r *repository) ListMessagesForUser(
+	ctx context.Context,
+	userID uint,
+	filter domain.MailLogFilter,
+) ([]*domain.MailMessage, int64, error) {
+	if r.db == nil {
+		return nil, 0, domain.ErrServiceUnavailable
+	}
+	page, perPage := filter.Page, filter.PerPage
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 15
+	}
+
+	query := r.db.WithContext(ctx).Table("mail_messages").
+		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
+		Where("mailboxes.user_id = ?", userID)
+	if filter.Direction != "" {
+		query = query.Where("mail_messages.direction = ?", string(filter.Direction))
+	}
+	if filter.Status != "" {
+		query = query.Where("mail_messages.status = ?", string(filter.Status))
+	}
+	if filter.MailboxID != 0 {
+		query = query.Where("mail_messages.mailbox_id = ?", filter.MailboxID)
+	}
+	if filter.Query != "" {
+		pattern := "%" + escapeLike(filter.Query) + "%"
+		query = query.Where(
+			`(mail_messages.subject ILIKE ? ESCAPE '\' OR mail_messages.from_address ILIKE ? ESCAPE '\' OR mail_messages.to_addresses ILIKE ? ESCAPE '\')`,
+			pattern, pattern, pattern,
+		)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []mailLogRow
+	// The log never needs the bodies; the detail endpoint returns them.
+	err := query.
+		Select(`mail_messages.id, mail_messages.mailbox_id, mail_messages.direction, mail_messages.status,
+			mail_messages.from_address, mail_messages.from_name, mail_messages.to_addresses,
+			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
+			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.read_at,
+			mail_messages.created_at, mail_messages.updated_at, mailboxes.address AS mailbox_address`).
+		Order("mail_messages.id DESC").
+		Offset((page - 1) * perPage).
+		Limit(perPage).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	messages := make([]*domain.MailMessage, 0, len(rows))
+	for i := range rows {
+		message := rows[i].toDomain()
+		message.MailboxAddress = rows[i].MailboxAddress
+		messages = append(messages, message)
+	}
+	return messages, total, nil
+}
+
+func (r *repository) StatsForUser(ctx context.Context, userID uint, since time.Time) ([]domain.MailDayStats, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var rows []struct {
+		Day      time.Time
+		Sent     int
+		Failed   int
+		Received int
+	}
+	err := r.db.WithContext(ctx).Table("mail_messages").
+		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
+		Select(`date_trunc('day', mail_messages.created_at AT TIME ZONE 'UTC') AS day,
+			COUNT(*) FILTER (WHERE mail_messages.status = 'sent') AS sent,
+			COUNT(*) FILTER (WHERE mail_messages.status = 'failed') AS failed,
+			COUNT(*) FILTER (WHERE mail_messages.direction = 'inbound') AS received`).
+		Where("mailboxes.user_id = ? AND mail_messages.created_at >= ?", userID, since).
+		Group("day").
+		Order("day ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	stats := make([]domain.MailDayStats, 0, len(rows))
+	for _, row := range rows {
+		day := time.Date(row.Day.Year(), row.Day.Month(), row.Day.Day(), 0, 0, 0, 0, time.UTC)
+		stats = append(stats, domain.MailDayStats{Day: day, Sent: row.Sent, Failed: row.Failed, Received: row.Received})
+	}
+	return stats, nil
+}
+
+// escapeLike makes user text match literally inside a LIKE pattern.
+func escapeLike(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
+}
+
 func isUniqueViolation(err error) bool {
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
 		return true

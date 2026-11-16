@@ -10,6 +10,8 @@ const messages = {
   analytics: 'Analytics',
   styleguide: 'Styleguide',
   mailboxes: 'Mailboxes',
+  emails: 'Emails',
+  mailDomain: 'Domain',
   // fastbuild:slot web.i18n.nav.en-us
 } as const;
 

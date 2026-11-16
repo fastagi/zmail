@@ -1,7 +1,12 @@
 import type { z } from 'zod/mini';
 
 import {
+  MAIL_LOG_QUERY_MAX_LENGTH,
   MAIL_PAGE_MAX_SIZE,
+  MAIL_STATS_DEFAULT_DAYS,
+  MAIL_STATS_MAX_DAYS,
+  mailDayStatsListSchema,
+  mailLogPageEnvelopeSchema,
   mailMessagePageEnvelopeSchema,
   mailMessageSchema,
   mailboxDomainListSchema,
@@ -10,7 +15,10 @@ import {
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
+  MailDayStats,
   MailDirection,
+  MailLogFilters,
+  MailLogPage,
   MailMessage,
   MailMessagePage,
   Mailbox,
@@ -31,6 +39,11 @@ import request, { ApiError } from '@/http/request';
 
 interface ListMessagesOptions {
   direction: MailDirection;
+  page?: number;
+  perPage?: number;
+}
+
+interface ListLogOptions extends MailLogFilters {
   page?: number;
   perPage?: number;
 }
@@ -81,6 +94,49 @@ export const mailboxService = {
     const parsed = mailMessagePageEnvelopeSchema.safeParse(value);
     if (!parsed.success) throw invalidResponse();
     return { items: parsed.data.data, meta: parsed.data.meta, links: parsed.data.links };
+  },
+
+  /** Messages across every mailbox of the signed-in user, newest first, without bodies. */
+  async listLog({
+    direction,
+    status,
+    mailboxId,
+    q,
+    page = 1,
+    perPage = 20,
+  }: ListLogOptions = {}): Promise<MailLogPage> {
+    validId(page);
+    if (mailboxId !== undefined) validId(mailboxId);
+    if (!Number.isSafeInteger(perPage) || perPage < 1 || perPage > MAIL_PAGE_MAX_SIZE) {
+      throw invalidResponse();
+    }
+    const query = q?.trim() ?? '';
+    if (Array.from(query).length > MAIL_LOG_QUERY_MAX_LENGTH) throw invalidResponse();
+    const value = await request.getEnvelope<unknown>('/mail-messages', {
+      params: {
+        ...(direction ? { direction } : {}),
+        ...(status ? { status } : {}),
+        ...(mailboxId === undefined ? {} : { mailbox_id: mailboxId }),
+        ...(query === '' ? {} : { q: query }),
+        page,
+        per_page: perPage,
+      },
+    });
+    const parsed = mailLogPageEnvelopeSchema.safeParse(value);
+    if (!parsed.success) throw invalidResponse();
+    return { items: parsed.data.data, meta: parsed.data.meta, links: parsed.data.links };
+  },
+
+  /** One entry per UTC day for the last `days` days, oldest first, empty days included. */
+  async stats(days: number = MAIL_STATS_DEFAULT_DAYS): Promise<MailDayStats[]> {
+    if (!Number.isSafeInteger(days) || days < 1 || days > MAIL_STATS_MAX_DAYS) {
+      throw invalidResponse();
+    }
+    const parsed = mailDayStatsListSchema.safeParse(
+      await request.get<unknown>('/mail-message-stats', { params: { days } })
+    );
+    if (!parsed.success || parsed.data.length !== days) throw invalidResponse();
+    return parsed.data;
   },
 
   async message(mailboxId: number, messageId: number): Promise<MailMessage> {
@@ -155,3 +211,9 @@ assertContract<
   Accepts<z.input<typeof mailMessageSchema>, ContractData<'updateMailMessage', 200>>
 >();
 assertContract<Sends<UpdateMailMessageInput, ContractRequest<'updateMailMessage'>>>();
+assertContract<
+  Accepts<z.input<typeof mailLogPageEnvelopeSchema>, ContractResponse<'listMailLog', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailDayStatsListSchema>, ContractData<'listMailMessageStats', 200>>
+>();

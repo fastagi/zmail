@@ -22,15 +22,20 @@ import {
   MAILBOX_LOCAL_PART_MAX_LENGTH,
   MAIL_ADDRESS_MAX_LENGTH,
   MAIL_BODY_MAX_BYTES,
+  MAIL_LOG_QUERY_MAX_LENGTH,
   MAIL_MAX_RECIPIENTS,
   MAIL_MESSAGE_ID_MAX_LENGTH,
   MAIL_PAGE_MAX_SIZE,
+  MAIL_STATS_DEFAULT_DAYS,
+  MAIL_STATS_MAX_DAYS,
   MAIL_SUBJECT_MAX_LENGTH,
 } from '@/features/mailbox/schemas';
 import { mockMailboxStore } from '@/features/mailbox/server/mock-mailbox-store';
 import type {
   CreateMailboxInput,
   MailDirection,
+  MailLogFilters,
+  MailStatus,
   SendMailMessageInput,
 } from '@/features/mailbox/types';
 import { ApiErrorCode, type ApiErrorCodeValue } from '@/http/codes';
@@ -210,6 +215,56 @@ export async function listMailMessagesRoute(
   );
   if (!result) return mailboxNotFound();
   return apiPaginatedResponse(result.items, result.meta, result.links, privateMailboxHeaders());
+}
+
+/** The log: every mailbox of the caller, filtered by the whitelisted parameters only. */
+export async function listMailLogRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute();
+  if (!target.available) return target.response;
+  const query = new URL(request.url).searchParams;
+  const filters = parseLogFilters(query);
+  if (!filters.ok) return filters.response;
+  const page = positiveInteger(query.get('page'), 1);
+  const perPage = Math.min(
+    positiveInteger(query.get('per_page'), defaultPerPage),
+    MAIL_PAGE_MAX_SIZE
+  );
+
+  if (target.backend === 'go-api') {
+    // Only these six parameters reach the API; anything else in the query is dropped.
+    const searchParams = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+    const { direction, status, mailboxId, q } = filters.value;
+    if (direction) searchParams.set('direction', direction);
+    if (status) searchParams.set('status', status);
+    if (mailboxId !== undefined) searchParams.set('mailbox_id', String(mailboxId));
+    if (q) searchParams.set('q', q);
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mail-messages',
+      accessToken: target.accessToken,
+      searchParams,
+    });
+  }
+  const result = mockMailboxStore.listLog(target.user.id, filters.value, page, perPage);
+  return apiPaginatedResponse(result.items, result.meta, result.links, privateMailboxHeaders());
+}
+
+/** Per-day counts for the last `days` UTC days; the window defaults to a week. */
+export async function listMailMessageStatsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute();
+  if (!target.available) return target.response;
+  const days = parseStatsDays(new URL(request.url).searchParams.getAll('days'));
+  if (!days.ok) return days.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mail-message-stats',
+      accessToken: target.accessToken,
+      searchParams: new URLSearchParams({ days: String(days.value) }),
+    });
+  }
+  return success(mockMailboxStore.stats(target.user.id, days.value));
 }
 
 export async function sendMailMessageRoute(
@@ -489,6 +544,64 @@ function parseDirection(values: string[]): Parsed<MailDirection | null> {
     return { ok: true, value };
   }
   return { ok: false, response: invalidInput('Invalid message direction') };
+}
+
+const logDirections: readonly MailDirection[] = ['inbound', 'outbound'];
+const logStatuses: readonly MailStatus[] = ['received', 'queued', 'sent', 'failed'];
+
+/**
+ * As in the API, an absent or empty parameter does not filter. A repeated parameter, an unknown
+ * direction or status, a non-positive mailbox, or an over-long search is invalid input.
+ */
+function parseLogFilters(query: URLSearchParams): Parsed<MailLogFilters> {
+  const invalid = (message: string): Parsed<MailLogFilters> => ({
+    ok: false,
+    response: invalidInput(message),
+  });
+  const single = (name: string): string | null => {
+    const values = query.getAll(name);
+    return values.length > 1 ? null : (values[0] ?? '');
+  };
+  const direction = single('direction');
+  if (direction === null || (direction !== '' && !isOneOf(logDirections, direction))) {
+    return invalid('Invalid message direction');
+  }
+  const status = single('status');
+  if (status === null || (status !== '' && !isOneOf(logStatuses, status))) {
+    return invalid('Invalid message status');
+  }
+  const mailbox = single('mailbox_id');
+  if (mailbox === null) return invalid('Invalid mailbox filter');
+  const mailboxId = mailbox === '' ? null : parseRouteId(mailbox);
+  if (mailboxId !== null && !mailboxId.ok) return invalid('Invalid mailbox filter');
+  const rawSearch = single('q');
+  if (rawSearch === null) return invalid('Invalid search');
+  const q = rawSearch.trim();
+  if (Array.from(q).length > MAIL_LOG_QUERY_MAX_LENGTH) return invalid('Invalid search');
+
+  return {
+    ok: true,
+    value: {
+      ...(direction === '' ? {} : { direction }),
+      ...(status === '' ? {} : { status }),
+      ...(mailboxId === null ? {} : { mailboxId: mailboxId.value }),
+      ...(q === '' ? {} : { q }),
+    },
+  };
+}
+
+function isOneOf<T extends string>(allowed: readonly T[], value: string): value is T {
+  return (allowed as readonly string[]).includes(value);
+}
+
+/** Absent means the default week; anything but one integer from 1 to 90 is invalid input. */
+function parseStatsDays(values: string[]): Parsed<number> {
+  if (values.length === 0) return { ok: true, value: MAIL_STATS_DEFAULT_DAYS };
+  const [value] = values;
+  const days = values.length === 1 && /^[1-9]\d?$/u.test(value) ? Number(value) : Number.NaN;
+  return days >= 1 && days <= MAIL_STATS_MAX_DAYS
+    ? { ok: true, value: days }
+    : { ok: false, response: invalidInput('Invalid statistics window') };
 }
 
 /** Mirrors the API: a missing or malformed number uses the fallback. */

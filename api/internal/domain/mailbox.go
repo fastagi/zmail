@@ -44,6 +44,16 @@ const (
 	MailStatusFailed MailStatus = "failed"
 )
 
+// Valid reports whether the status is a known value.
+func (s MailStatus) Valid() bool {
+	switch s {
+	case MailStatusReceived, MailStatusQueued, MailStatusSent, MailStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Mailbox is one address a user sends from and receives at.
 type Mailbox struct {
 	ID          uint
@@ -83,8 +93,10 @@ type MailMessage struct {
 	// request is refused instead of answered with an unrelated message.
 	IdempotencyFingerprint string
 	ReadAt                 *time.Time
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// MailboxAddress is the address of the owning mailbox. Only the cross-mailbox log fills it.
+	MailboxAddress string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // MailMessageFilter narrows a mailbox message listing.
@@ -92,6 +104,25 @@ type MailMessageFilter struct {
 	Direction MailDirection
 	Page      int
 	PerPage   int
+}
+
+// MailLogFilter narrows the log of every message in every mailbox a user owns.
+type MailLogFilter struct {
+	Direction MailDirection
+	Status    MailStatus
+	MailboxID uint
+	// Query matches the subject, the sender address, or a recipient address, ignoring case.
+	Query   string
+	Page    int
+	PerPage int
+}
+
+// MailDayStats counts one UTC day of a user's mail.
+type MailDayStats struct {
+	Day      time.Time
+	Sent     int
+	Failed   int
+	Received int
 }
 
 // MailboxRepository defines persistence for mailboxes and their messages.
@@ -120,4 +151,9 @@ type MailboxRepository interface {
 	SetMessageRead(ctx context.Context, mailboxID, id uint, readAt *time.Time) error
 	DeleteMessage(ctx context.Context, mailboxID, id uint) error
 	CountOutboundSince(ctx context.Context, userID uint, since time.Time) (int64, error)
+	// ListMessagesForUser lists messages across every mailbox the user owns, newest first,
+	// without bodies.
+	ListMessagesForUser(ctx context.Context, userID uint, filter MailLogFilter) ([]*MailMessage, int64, error)
+	// StatsForUser counts messages per UTC day from since, for days that have any.
+	StatsForUser(ctx context.Context, userID uint, since time.Time) ([]MailDayStats, error)
 }

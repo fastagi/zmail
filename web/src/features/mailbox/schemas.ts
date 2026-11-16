@@ -25,6 +25,9 @@ export const MAIL_SUBJECT_MAX_LENGTH = 998;
 export const MAIL_BODY_MAX_BYTES = 256 * 1_024;
 export const MAIL_MESSAGE_ID_MAX_LENGTH = 900;
 export const MAIL_PAGE_MAX_SIZE = 100;
+export const MAIL_LOG_QUERY_MAX_LENGTH = 200;
+export const MAIL_STATS_DEFAULT_DAYS = 7;
+export const MAIL_STATS_MAX_DAYS = 90;
 
 const localPartPattern = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/u;
 const recipientPattern = /^[^\s@<>"(),:;\\[\]]+@[^\s@<>"(),:;\\[\]]+\.[^\s@<>"(),:;\\[\]]+$/u;
@@ -59,6 +62,10 @@ export const mailStatusSchema = union([
 export const mailboxDomainSchema = strictObject({
   domain: string(),
   max_mailboxes: number().check(int()),
+  // `cloudflare` delivers; `log` only records and is for development.
+  provider: union([literal('cloudflare'), literal('log')]),
+  inbound_enabled: boolean(),
+  daily_send_limit: positiveIntegerSchema,
 });
 export const mailboxDomainListSchema = array(mailboxDomainSchema);
 
@@ -97,25 +104,48 @@ export const mailMessageSchema = strictObject({
   in_reply_to: string(),
 });
 
+const pageMetaSchema = strictObject({
+  current_page: positiveIntegerSchema,
+  per_page: positiveIntegerSchema,
+  total: nonnegativeIntegerSchema,
+  last_page: positiveIntegerSchema,
+  from: nonnegativeIntegerSchema,
+  to: nonnegativeIntegerSchema,
+});
+const pageLinksSchema = strictObject({
+  first: string(),
+  last: string(),
+  prev: nullable(string()),
+  next: nullable(string()),
+});
+
 export const mailMessagePageEnvelopeSchema = strictObject({
   code: literal(0),
   message: string(),
   data: array(mailMessageSummarySchema),
-  meta: strictObject({
-    current_page: positiveIntegerSchema,
-    per_page: positiveIntegerSchema,
-    total: nonnegativeIntegerSchema,
-    last_page: positiveIntegerSchema,
-    from: nonnegativeIntegerSchema,
-    to: nonnegativeIntegerSchema,
-  }),
-  links: strictObject({
-    first: string(),
-    last: string(),
-    prev: nullable(string()),
-    next: nullable(string()),
-  }),
+  meta: pageMetaSchema,
+  links: pageLinksSchema,
 });
+
+/** A log entry is a summary plus the address of the mailbox that owns it. */
+export const mailLogEntrySchema = strictObject({ ...summaryShape, mailbox_address: string() });
+
+export const mailLogPageEnvelopeSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: array(mailLogEntrySchema),
+  meta: pageMetaSchema,
+  links: pageLinksSchema,
+});
+
+/** One UTC calendar day of the statistics window. */
+export const mailDayStatsSchema = strictObject({
+  day: iso.date(),
+  sent: nonnegativeIntegerSchema,
+  failed: nonnegativeIntegerSchema,
+  received: nonnegativeIntegerSchema,
+});
+export const mailDayStatsListSchema = array(mailDayStatsSchema);
 
 /** Request bodies. Field rules beyond the types are checked by the normalizers below. */
 export const createMailboxSchema = strictObject({

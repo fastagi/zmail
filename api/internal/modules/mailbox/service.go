@@ -26,7 +26,9 @@ const (
 
 // Settings is the resolved policy the service runs with.
 type Settings struct {
-	Domain           string
+	Domain string
+	// Provider names the outbound transport, for display only.
+	Provider         string
 	InboundSecret    string
 	InboundTolerance time.Duration
 	DailySendLimit   int
@@ -67,6 +69,13 @@ type Service interface {
 	GetOutboundMessage(ctx context.Context, userID, messageID uint) (*domain.MailMessage, error)
 	SetMessageRead(ctx context.Context, userID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error)
 	DeleteMessage(ctx context.Context, userID, mailboxID, messageID uint) error
+	// ListLog lists messages across every mailbox the user owns.
+	ListLog(ctx context.Context, userID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
+	// Stats returns one entry per UTC day for the last days days, oldest first, including empty days.
+	Stats(ctx context.Context, userID uint, days int) ([]domain.MailDayStats, error)
+	Provider() string
+	InboundEnabled() bool
+	DailySendLimit() int
 	ReceiveInbound(ctx context.Context, delivery InboundDelivery) (message *domain.MailMessage, created bool, err error)
 }
 
@@ -88,6 +97,7 @@ func NewService(repo domain.MailboxRepository, transport mailtransport.Transport
 func SettingsFromConfig(cfg *config.Config) Settings {
 	settings := Settings{
 		Domain:           config.DefaultMailboxDomain,
+		Provider:         config.MailboxProviderLog,
 		InboundTolerance: config.DefaultMailboxInboundTolerance,
 		DailySendLimit:   config.DefaultMailboxDailySendLimit,
 	}
@@ -96,6 +106,7 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	}
 	resolved := cfg.Mailbox.Resolved(cfg.IsProduction())
 	settings.Domain = resolved.Domain
+	settings.Provider = resolved.Provider
 	settings.InboundSecret = resolved.InboundSecret
 	if resolved.DailySendLimit > 0 {
 		settings.DailySendLimit = resolved.DailySendLimit
@@ -105,6 +116,63 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 
 func (s *service) Domain() string {
 	return s.settings.Domain
+}
+
+func (s *service) Provider() string {
+	return s.settings.Provider
+}
+
+func (s *service) DailySendLimit() int {
+	return s.settings.DailySendLimit
+}
+
+func (s *service) InboundEnabled() bool {
+	return s.settings.InboundSecret != ""
+}
+
+const (
+	maxLogQueryLength = 200
+	// MaxStatsDays bounds the statistics window.
+	MaxStatsDays = 90
+)
+
+func (s *service) ListLog(ctx context.Context, userID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error) {
+	if filter.Direction != "" && !filter.Direction.Valid() {
+		return nil, 0, domain.ErrInvalidInput
+	}
+	if filter.Status != "" && !filter.Status.Valid() {
+		return nil, 0, domain.ErrInvalidInput
+	}
+	filter.Query = strings.TrimSpace(filter.Query)
+	if len(filter.Query) > maxLogQueryLength {
+		return nil, 0, domain.ErrInvalidInput
+	}
+	return s.repo.ListMessagesForUser(ctx, userID, filter)
+}
+
+func (s *service) Stats(ctx context.Context, userID uint, days int) ([]domain.MailDayStats, error) {
+	if days < 1 || days > MaxStatsDays {
+		return nil, domain.ErrInvalidInput
+	}
+	now := s.now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	first := today.AddDate(0, 0, -(days - 1))
+	counted, err := s.repo.StatsForUser(ctx, userID, first)
+	if err != nil {
+		return nil, err
+	}
+	byDay := make(map[time.Time]domain.MailDayStats, len(counted))
+	for _, day := range counted {
+		byDay[day.Day] = day
+	}
+	// Every day of the window is present, so a chart needs no gap filling.
+	stats := make([]domain.MailDayStats, 0, days)
+	for day := first; !day.After(today); day = day.AddDate(0, 0, 1) {
+		entry := byDay[day]
+		entry.Day = day
+		stats = append(stats, entry)
+	}
+	return stats, nil
 }
 
 func (s *service) CreateMailbox(ctx context.Context, userID uint, localPart, displayName string) (*domain.Mailbox, error) {
