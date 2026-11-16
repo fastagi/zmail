@@ -1122,6 +1122,237 @@ describe('mailbox browser route boundary', () => {
     }
   });
 
+  it('keeps contacts and lists per organization in the mock', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const post = (path: string, body: unknown, method = 'POST') =>
+      request(path, { method, body: JSON.stringify(body) });
+
+    const vip = (
+      await (
+        await route.saveMailContactListRoute(post('/api/mail-contact-lists', { name: ' VIP ' }))
+      ).json()
+    ).data;
+    expect(vip).toMatchObject({ name: 'VIP', contact_count: 0 });
+    await expectError(
+      await route.saveMailContactListRoute(post('/api/mail-contact-lists', { name: 'VIP' })),
+      409,
+      'MAILBOX.CONTACT_LIST_NAME_TAKEN'
+    );
+
+    const created = await route.createMailContactRoute(
+      post('/api/mail-contacts', {
+        email: ' Ann@Example.com ',
+        first_name: ' Ann ',
+        properties: { plan: 'pro' },
+        list_ids: [vip.id],
+      })
+    );
+    expect(created.status).toBe(201);
+    const ann = (await created.json()).data;
+    expect(ann).toMatchObject({
+      email: 'ann@example.com',
+      first_name: 'Ann',
+      status: 'subscribed',
+      list_ids: [vip.id],
+    });
+    await expectError(
+      await route.createMailContactRoute(post('/api/mail-contacts', { email: 'ann@example.com' })),
+      409,
+      'MAILBOX.CONTACT_EXISTS'
+    );
+    await expectError(
+      await route.createMailContactRoute(
+        post('/api/mail-contacts', { email: 'Bob <b@example.com>' })
+      ),
+      422,
+      'MAILBOX.CONTACT_INVALID'
+    );
+    await expectError(
+      await route.createMailContactRoute(
+        post('/api/mail-contacts', { email: 'c@example.com', list_ids: [999] })
+      ),
+      404,
+      'MAILBOX.CONTACT_LIST_NOT_FOUND'
+    );
+
+    const updated = await route.updateMailContactRoute(
+      post(
+        `/api/mail-contacts/${ann.id}`,
+        {
+          email: 'x@example.com',
+          first_name: 'Ann',
+          status: 'unsubscribed',
+          list_ids: [],
+        },
+        'PUT'
+      ),
+      String(ann.id)
+    );
+    expect((await updated.json()).data).toMatchObject({
+      email: 'ann@example.com',
+      status: 'unsubscribed',
+      status_reason: 'manual',
+      list_ids: [],
+    });
+
+    const imported = await route.importMailContactsRoute(
+      post('/api/mail-contact-imports', {
+        csv: 'Email,First Name,Plan,Phone #\nann@example.com,,team,1\nbad,,,\nbob@example.com,Bob,,\n',
+        list_id: vip.id,
+      })
+    );
+    expect((await imported.json()).data).toEqual({
+      rows: 3,
+      created: 1,
+      updated: 1,
+      skipped_count: 1,
+      skipped: [{ line: 3, reason: 'invalid_email' }],
+      ignored_columns: ['Phone #'],
+    });
+    await expectError(
+      await route.importMailContactsRoute(
+        post('/api/mail-contact-imports', { csv: 'name\nAnn\n' })
+      ),
+      422,
+      'MAILBOX.CONTACT_IMPORT_INVALID'
+    );
+
+    const list = async (query: string) =>
+      (
+        await (await route.listMailContactsRoute(request(`/api/mail-contacts${query}`))).json()
+      ).data.map((contact: { email: string }) => contact.email);
+    expect(await list('')).toEqual(['bob@example.com', 'ann@example.com']);
+    expect(await list(`?list_id=${vip.id}`)).toEqual(['bob@example.com', 'ann@example.com']);
+    expect(await list('?status=unsubscribed')).toEqual(['ann@example.com']);
+    expect(await list('?q=BOB')).toEqual(['bob@example.com']);
+    const annAfter = (
+      await (await route.listMailContactsRoute(request('/api/mail-contacts?q=ann'))).json()
+    ).data[0];
+    // The import kept the status and the first name, and merged the property.
+    expect(annAfter).toMatchObject({
+      status: 'unsubscribed',
+      first_name: 'Ann',
+      properties: { plan: 'team' },
+    });
+    await expectError(
+      await route.listMailContactsRoute(request('/api/mail-contacts?status=bounced')),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+
+    const lists = (
+      await (await route.listMailContactListsRoute(request('/api/mail-contact-lists'))).json()
+    ).data;
+    expect(lists).toEqual([expect.objectContaining({ id: vip.id, contact_count: 2 })]);
+
+    activeOrganization = await secondOrganization();
+    expect(await list('')).toEqual([]);
+    await expectError(
+      await route.deleteMailContactRoute(
+        request(`/api/mail-contacts/${ann.id}`, { method: 'DELETE' }),
+        String(ann.id)
+      ),
+      404,
+      'MAILBOX.CONTACT_NOT_FOUND'
+    );
+    activeOrganization = '1';
+
+    const removedList = await route.deleteMailContactListRoute(
+      request(`/api/mail-contact-lists/${vip.id}`, { method: 'DELETE' }),
+      String(vip.id)
+    );
+    expect(removedList.status).toBe(204);
+    expect(await list('')).toHaveLength(2);
+  });
+
+  it('forwards contact routes to the fixed API paths', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () => Response.json({ code: 0, message: 'ok', data: [] }));
+    const route = await loadRoute();
+    const body = (value: unknown) => JSON.stringify(value);
+
+    await route.listMailContactsRoute(
+      request('/api/mail-contacts?q=ann&status=subscribed&list_id=4&page=2')
+    );
+    await route.createMailContactRoute(
+      request('/api/mail-contacts', { method: 'POST', body: body({ email: 'a@example.com' }) })
+    );
+    await route.updateMailContactRoute(
+      request('/api/mail-contacts/3', { method: 'PUT', body: body({ first_name: 'A' }) }),
+      '3'
+    );
+    await route.deleteMailContactRoute(request('/api/mail-contacts/3', { method: 'DELETE' }), '3');
+    await route.importMailContactsRoute(
+      request('/api/mail-contact-imports', {
+        method: 'POST',
+        body: body({ csv: 'email\n', list_id: 4 }),
+      })
+    );
+    await route.listMailContactListsRoute(request('/api/mail-contact-lists'));
+    await route.saveMailContactListRoute(
+      request('/api/mail-contact-lists', { method: 'POST', body: body({ name: 'A' }) })
+    );
+    await route.saveMailContactListRoute(
+      request('/api/mail-contact-lists/4', { method: 'PUT', body: body({ name: 'B' }) }),
+      '4'
+    );
+    await route.deleteMailContactListRoute(
+      request('/api/mail-contact-lists/4', { method: 'DELETE' }),
+      '4'
+    );
+
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => {
+        const parsed = new URL(String(url));
+        return `${init?.method} ${parsed.pathname}${parsed.search}`;
+      })
+    ).toEqual([
+      'GET /v1/mail-contacts?q=ann&status=subscribed&list_id=4&page=2&per_page=15',
+      'POST /v1/mail-contacts',
+      'PUT /v1/mail-contacts/3',
+      'DELETE /v1/mail-contacts/3',
+      'POST /v1/mail-contact-imports',
+      'GET /v1/mail-contact-lists',
+      'POST /v1/mail-contact-lists',
+      'PUT /v1/mail-contact-lists/4',
+      'DELETE /v1/mail-contact-lists/4',
+    ]);
+  });
+
+  it('rejects malformed contact bodies before they reach the backend', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    for (const body of [
+      { email: 7 },
+      { email: 'a@example.com', status: 'suppressed' },
+      { email: 'a@example.com', list_ids: ['1'] },
+      { email: 'a@example.com', properties: { plan: 1 } },
+      { email: 'a@example.com', extra: true },
+    ]) {
+      await expectError(
+        await route.createMailContactRoute(
+          request('/api/mail-contacts', { method: 'POST', body: JSON.stringify(body) })
+        ),
+        422,
+        'COMMON.VALIDATION_FAILED'
+      );
+    }
+    for (const body of [{}, { csv: '' }, { csv: 'email', list_id: 'x' }]) {
+      await expectError(
+        await route.importMailContactsRoute(
+          request('/api/mail-contact-imports', { method: 'POST', body: JSON.stringify(body) })
+        ),
+        422,
+        'COMMON.VALIDATION_FAILED'
+      );
+    }
+  });
+
   it('forwards only the fixed production paths, methods, and whitelisted query', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
@@ -1627,6 +1858,8 @@ async function loadRoute(): Promise<MailboxRoute> {
   const route = await import('@/features/mailbox/server/mailbox-route');
   const store = await import('@/features/mailbox/server/mock-mailbox-store');
   store.mockMailboxStore.reset();
+  const contacts = await import('@/features/mailbox/server/mock-contact-store');
+  contacts.mockContactStore.reset();
   return route;
 }
 

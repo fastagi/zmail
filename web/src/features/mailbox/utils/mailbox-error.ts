@@ -4,6 +4,14 @@ import { ApiError } from '@/http/request';
 export type MailboxErrorKey =
   | 'errors.addressInvalid'
   | 'errors.attachmentsInvalid'
+  | 'errors.contactExists'
+  | 'errors.contactImportInvalid'
+  | 'errors.contactInvalid'
+  | 'errors.contactLimitReached'
+  | 'errors.contactListLimitReached'
+  | 'errors.contactListNameTaken'
+  | 'errors.contactListNotFound'
+  | 'errors.contactNotFound'
   | 'errors.addressReserved'
   | 'errors.addressTaken'
   | 'errors.deliveryFailed'
@@ -47,6 +55,14 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_SEND_LIMIT_REACHED]: 'errors.sendLimitReached',
   [ApiErrorCode.MAILBOX_DELIVERY_FAILED]: 'errors.deliveryFailed',
   [ApiErrorCode.MAILBOX_SENDER_NOT_CONFIGURED]: 'errors.senderNotConfigured',
+  [ApiErrorCode.MAILBOX_CONTACT_NOT_FOUND]: 'errors.contactNotFound',
+  [ApiErrorCode.MAILBOX_CONTACT_EXISTS]: 'errors.contactExists',
+  [ApiErrorCode.MAILBOX_CONTACT_INVALID]: 'errors.contactInvalid',
+  [ApiErrorCode.MAILBOX_CONTACT_LIMIT_REACHED]: 'errors.contactLimitReached',
+  [ApiErrorCode.MAILBOX_CONTACT_LIST_NOT_FOUND]: 'errors.contactListNotFound',
+  [ApiErrorCode.MAILBOX_CONTACT_LIST_NAME_TAKEN]: 'errors.contactListNameTaken',
+  [ApiErrorCode.MAILBOX_CONTACT_LIST_LIMIT_REACHED]: 'errors.contactListLimitReached',
+  [ApiErrorCode.MAILBOX_CONTACT_IMPORT_INVALID]: 'errors.contactImportInvalid',
   [ApiErrorCode.MAILBOX_TEMPLATE_NOT_FOUND]: 'errors.templateNotFound',
   [ApiErrorCode.MAILBOX_TEMPLATE_INVALID]: 'errors.templateInvalid',
   [ApiErrorCode.MAILBOX_TEMPLATE_NAME_TAKEN]: 'errors.templateNameTaken',

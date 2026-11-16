@@ -23,7 +23,7 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{})
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{})
 	return NewRepository(db), db
 }
 
@@ -760,5 +760,175 @@ func TestRepositoryKeepsTemplatesPerOrganization(t *testing.T) {
 	}
 	if err := repo.DeleteTemplate(ctx, 1, template.ID); err != nil {
 		t.Fatalf("DeleteTemplate: %v", err)
+	}
+}
+
+func TestRepositoryManagesContactsAndLists(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	createOwner(t, db, 2)
+
+	vip := &domain.MailContactList{OrganizationID: 1, Name: "VIP"}
+	news := &domain.MailContactList{OrganizationID: 1, Name: "News"}
+	for _, list := range []*domain.MailContactList{vip, news} {
+		if err := repo.CreateContactList(ctx, list, 2); err != nil {
+			t.Fatalf("CreateContactList: %v", err)
+		}
+	}
+	if err := repo.CreateContactList(ctx, &domain.MailContactList{OrganizationID: 1, Name: "Third"}, 2); !errors.Is(err, ErrMailContactListLimit) {
+		t.Fatalf("list limit error = %v", err)
+	}
+	foreign := &domain.MailContactList{OrganizationID: 2, Name: "VIP"}
+	if err := repo.CreateContactList(ctx, foreign, 2); err != nil {
+		t.Fatalf("same list name in another organization: %v", err)
+	}
+
+	ann := &domain.MailContact{
+		OrganizationID: 1, Email: "ann@example.com", FirstName: "Ann", Properties: map[string]string{"plan": "pro"},
+		Status: domain.MailContactSubscribed, ListIDs: []uint{vip.ID, news.ID},
+	}
+	if err := repo.CreateContact(ctx, ann, 2); err != nil || ann.ID == 0 || len(ann.ListIDs) != 2 {
+		t.Fatalf("CreateContact = %+v, %v", ann, err)
+	}
+	if err := repo.CreateContact(ctx, &domain.MailContact{OrganizationID: 1, Email: "ann@example.com", Status: "subscribed"}, 2); !errors.Is(err, ErrMailContactExists) {
+		t.Fatalf("duplicate error = %v", err)
+	}
+	if err := repo.CreateContact(ctx, &domain.MailContact{OrganizationID: 1, Email: "x@example.com", Status: "subscribed", ListIDs: []uint{foreign.ID}}, 5); !errors.Is(err, ErrMailContactListNotFound) {
+		t.Fatalf("another organization's list error = %v", err)
+	}
+	bob := &domain.MailContact{OrganizationID: 1, Email: "bob@example.com", LastName: "Smith", Status: domain.MailContactUnsubscribed, StatusReason: "manual"}
+	if err := repo.CreateContact(ctx, bob, 2); err != nil {
+		t.Fatalf("CreateContact bob: %v", err)
+	}
+	if err := repo.CreateContact(ctx, &domain.MailContact{OrganizationID: 1, Email: "c@example.com", Status: "subscribed"}, 2); !errors.Is(err, ErrMailContactLimitReached) {
+		t.Fatalf("contact limit error = %v", err)
+	}
+
+	page := func(filter domain.MailContactFilter) []string {
+		filter.Page, filter.PerPage = 1, 10
+		contacts, total, err := repo.ListContacts(ctx, 1, filter)
+		if err != nil || int(total) != len(contacts) {
+			t.Fatalf("ListContacts(%+v) = %d of %d, %v", filter, len(contacts), total, err)
+		}
+		emails := make([]string, 0, len(contacts))
+		for _, contact := range contacts {
+			emails = append(emails, contact.Email)
+		}
+		return emails
+	}
+	if got := page(domain.MailContactFilter{}); len(got) != 2 || got[0] != "bob@example.com" {
+		t.Fatalf("all contacts = %v; want newest first", got)
+	}
+	if got := page(domain.MailContactFilter{ListID: vip.ID}); len(got) != 1 || got[0] != "ann@example.com" {
+		t.Fatalf("VIP contacts = %v", got)
+	}
+	if got := page(domain.MailContactFilter{Query: "SMI"}); len(got) != 1 || got[0] != "bob@example.com" {
+		t.Fatalf("search = %v", got)
+	}
+	if got := page(domain.MailContactFilter{Query: "%"}); len(got) != 0 {
+		t.Fatalf("a literal percent sign matched %v", got)
+	}
+	if got := page(domain.MailContactFilter{Status: domain.MailContactUnsubscribed}); len(got) != 1 || got[0] != "bob@example.com" {
+		t.Fatalf("unsubscribed = %v", got)
+	}
+
+	ann.FirstName, ann.ListIDs, ann.Properties = "Annie", []uint{news.ID}, map[string]string{"city": "Oslo"}
+	if err := repo.UpdateContact(ctx, ann); err != nil || ann.FirstName != "Annie" || len(ann.ListIDs) != 1 || ann.Properties["plan"] != "" {
+		t.Fatalf("UpdateContact = %+v, %v", ann, err)
+	}
+	ann.OrganizationID = 2
+	if err := repo.UpdateContact(ctx, ann); !errors.Is(err, ErrMailContactNotFound) {
+		t.Fatalf("update from another organization error = %v", err)
+	}
+	ann.OrganizationID = 1
+
+	lists, err := repo.ListContactLists(ctx, 1)
+	if err != nil || len(lists) != 2 || lists[0].Name != "News" || lists[0].ContactCount != 1 || lists[1].ContactCount != 0 {
+		t.Fatalf("ListContactLists = %+v, %v", lists, err)
+	}
+	if _, err = repo.RenameContactList(ctx, 1, vip.ID, "News"); !errors.Is(err, ErrMailContactListNameTaken) {
+		t.Fatalf("rename onto another list error = %v", err)
+	}
+	renamed, err := repo.RenameContactList(ctx, 1, vip.ID, "Gold")
+	if err != nil || renamed.Name != "Gold" {
+		t.Fatalf("RenameContactList = %+v, %v", renamed, err)
+	}
+	if err = repo.DeleteContactList(ctx, 2, news.ID); !errors.Is(err, ErrMailContactListNotFound) {
+		t.Fatalf("delete from another organization error = %v", err)
+	}
+	if err = repo.DeleteContactList(ctx, 1, news.ID); err != nil {
+		t.Fatalf("DeleteContactList: %v", err)
+	}
+	stored, err := repo.FindContact(ctx, 1, ann.ID)
+	if err != nil || len(stored.ListIDs) != 0 {
+		t.Fatalf("contact after deleting its list = %+v, %v; want kept without the list", stored, err)
+	}
+	if err := repo.DeleteContact(ctx, 1, bob.ID); err != nil {
+		t.Fatalf("DeleteContact: %v", err)
+	}
+	if _, err := repo.FindContact(ctx, 1, bob.ID); !errors.Is(err, ErrMailContactNotFound) {
+		t.Fatalf("deleted contact error = %v", err)
+	}
+}
+
+func TestRepositoryImportsContacts(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	list := &domain.MailContactList{OrganizationID: 1, Name: "Imported"}
+	if err := repo.CreateContactList(ctx, list, 10); err != nil {
+		t.Fatalf("CreateContactList: %v", err)
+	}
+	existing := &domain.MailContact{
+		OrganizationID: 1, Email: "ann@example.com", FirstName: "Ann", LastName: "Lee",
+		Properties: map[string]string{"plan": "free", "city": "Oslo"},
+		Status:     domain.MailContactUnsubscribed, StatusReason: "manual",
+	}
+	if err := repo.CreateContact(ctx, existing, 10); err != nil {
+		t.Fatalf("CreateContact: %v", err)
+	}
+
+	rows := []domain.MailContactImportRow{
+		{Email: "ann@example.com", FirstName: "", LastName: "Smith", Properties: map[string]string{"plan": "pro"}},
+		{Email: "bob@example.com", FirstName: "Bob", Properties: map[string]string{"plan": "free"}},
+	}
+	counts, err := repo.ImportContacts(ctx, 1, rows, list.ID, 10)
+	if err != nil || counts.Created != 1 || counts.Updated != 1 {
+		t.Fatalf("ImportContacts = %+v, %v", counts, err)
+	}
+	ann, err := repo.FindContact(ctx, 1, existing.ID)
+	if err != nil {
+		t.Fatalf("FindContact: %v", err)
+	}
+	// An empty cell keeps the stored value, properties merge, and the status is untouched.
+	if ann.FirstName != "Ann" || ann.LastName != "Smith" || ann.Properties["plan"] != "pro" || ann.Properties["city"] != "Oslo" ||
+		ann.Status != domain.MailContactUnsubscribed || len(ann.ListIDs) != 1 {
+		t.Fatalf("updated contact = %+v", ann)
+	}
+	contacts, total, err := repo.ListContacts(ctx, 1, domain.MailContactFilter{ListID: list.ID, Page: 1, PerPage: 10})
+	if err != nil || total != 2 || contacts[0].Status != domain.MailContactSubscribed {
+		t.Fatalf("imported list = %+v (%d), %v", contacts, total, err)
+	}
+
+	// Importing again is idempotent for list membership.
+	if _, err = repo.ImportContacts(ctx, 1, rows, list.ID, 10); err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	lists, err := repo.ListContactLists(ctx, 1)
+	if err != nil || lists[0].ContactCount != 2 {
+		t.Fatalf("lists after a second import = %+v, %v", lists, err)
+	}
+
+	// The limit counts only new addresses, and a refused import stores nothing.
+	more := []domain.MailContactImportRow{{Email: "c@example.com"}, {Email: "d@example.com"}}
+	if _, err := repo.ImportContacts(ctx, 1, more, 0, 3); !errors.Is(err, ErrMailContactLimitReached) {
+		t.Fatalf("limit error = %v", err)
+	}
+	if _, total, _ := repo.ListContacts(ctx, 1, domain.MailContactFilter{Page: 1, PerPage: 10}); total != 2 {
+		t.Fatalf("contacts after a refused import = %d; want 2", total)
+	}
+	if _, err := repo.ImportContacts(ctx, 1, more, 999, 10); !errors.Is(err, ErrMailContactListNotFound) {
+		t.Fatalf("missing list error = %v", err)
 	}
 }

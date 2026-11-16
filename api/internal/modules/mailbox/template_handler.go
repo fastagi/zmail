@@ -98,6 +98,8 @@ func toMailTemplateResponse(template *domain.MailTemplate) MailTemplateResponse 
 	}
 }
 
+// ListTemplates returns every template of the organization by name, without bodies.
+// fastbuild:bounded-list max=200 reason=an organization keeps at most MaxMailTemplatesPerOrganization templates
 func (h *Handler) ListTemplates(c *gin.Context) {
 	organizationID, ok := currentOrganizationID(c)
 	if !ok {

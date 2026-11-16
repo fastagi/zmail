@@ -18,6 +18,7 @@ import {
   Send,
   Globe,
   FileText,
+  Users,
   // fastbuild:slot web.console.nav-icons
 } from 'lucide-react';
 
@@ -111,6 +112,11 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             titleKey: 'nav.mailboxes' as const,
             href: ROUTES.CONSOLE.MAILBOXES,
             icon: Mail,
+          },
+          {
+            titleKey: 'nav.mailContacts' as const,
+            href: ROUTES.CONSOLE.MAIL_CONTACTS,
+            icon: Users,
           },
           {
             titleKey: 'nav.mailTemplates' as const,

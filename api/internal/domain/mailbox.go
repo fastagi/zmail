@@ -25,6 +25,12 @@ const (
 	MaxMailAttachmentNameLength = 255
 	// MaxMailTemplatesPerOrganization bounds how many templates one organization keeps.
 	MaxMailTemplatesPerOrganization = 200
+	// MaxMailContactsPerOrganization bounds how many contacts one organization keeps.
+	MaxMailContactsPerOrganization = 100_000
+	// MaxMailContactListsPerOrganization bounds how many lists one organization keeps.
+	MaxMailContactListsPerOrganization = 100
+	// MaxMailContactProperties bounds the custom properties of one contact.
+	MaxMailContactProperties = 50
 )
 
 // MailDirection tells whether a message arrived at or left a mailbox.
@@ -242,6 +248,92 @@ type MailTemplate struct {
 	CreatedBy       uint
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// MailContactStatus says whether a contact may receive broadcasts.
+type MailContactStatus string
+
+const (
+	// MailContactSubscribed contacts receive broadcasts.
+	MailContactSubscribed MailContactStatus = "subscribed"
+	// MailContactUnsubscribed contacts asked not to receive broadcasts.
+	MailContactUnsubscribed MailContactStatus = "unsubscribed"
+	// MailContactSuppressed contacts bounced permanently or complained; Zmail set the status.
+	MailContactSuppressed MailContactStatus = "suppressed"
+)
+
+// Valid reports whether the status is a known value.
+func (s MailContactStatus) Valid() bool {
+	return s == MailContactSubscribed || s == MailContactUnsubscribed || s == MailContactSuppressed
+}
+
+// MailContact is one address an organization sends broadcasts to.
+type MailContact struct {
+	ID             uint
+	OrganizationID uint
+	Email          string
+	FirstName      string
+	LastName       string
+	// Properties are custom string fields; their names follow the template variable rules.
+	Properties map[string]string
+	Status     MailContactStatus
+	// StatusReason is a short machine-readable reason for unsubscribed or suppressed.
+	StatusReason string
+	// ListIDs are the lists the contact belongs to, ascending.
+	ListIDs   []uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// MailContactList groups contacts of one organization.
+type MailContactList struct {
+	ID             uint
+	OrganizationID uint
+	Name           string
+	ContactCount   int
+	CreatedAt      time.Time
+}
+
+// MailContactFilter narrows a contact listing.
+type MailContactFilter struct {
+	Query   string
+	ListID  uint
+	Status  MailContactStatus
+	Page    int
+	PerPage int
+}
+
+// MailContactImportRow is one valid row of an import.
+type MailContactImportRow struct {
+	Email      string
+	FirstName  string
+	LastName   string
+	Properties map[string]string
+}
+
+// MailContactImportCounts says what an import changed.
+type MailContactImportCounts struct {
+	Created int
+	Updated int
+}
+
+// MailContactRepository stores contacts and lists. Every call is scoped to an organization.
+type MailContactRepository interface {
+	ListContacts(ctx context.Context, organizationID uint, filter MailContactFilter) ([]*MailContact, int64, error)
+	FindContact(ctx context.Context, organizationID, id uint) (*MailContact, error)
+	// CreateContact stores a contact with its list memberships unless the organization has limit contacts.
+	CreateContact(ctx context.Context, contact *MailContact, limit int) error
+	// UpdateContact replaces the names, properties, status, and list memberships of a contact.
+	UpdateContact(ctx context.Context, contact *MailContact) error
+	DeleteContact(ctx context.Context, organizationID, id uint) error
+	// ImportContacts creates or updates contacts by address in one transaction and adds them to
+	// listID when it is not zero. It never changes the status of an existing contact.
+	ImportContacts(ctx context.Context, organizationID uint, rows []MailContactImportRow, listID uint, limit int) (MailContactImportCounts, error)
+
+	ListContactLists(ctx context.Context, organizationID uint) ([]*MailContactList, error)
+	CreateContactList(ctx context.Context, list *MailContactList, limit int) error
+	RenameContactList(ctx context.Context, organizationID, id uint, name string) (*MailContactList, error)
+	DeleteContactList(ctx context.Context, organizationID, id uint) error
 }
 
 // MailTemplateRepository stores templates. Every lookup is scoped to an organization.

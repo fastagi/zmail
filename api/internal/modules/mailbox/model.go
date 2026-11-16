@@ -290,3 +290,78 @@ func newMailTemplatePO(template *domain.MailTemplate) *MailTemplatePO {
 		CreatedBy:       template.CreatedBy,
 	}
 }
+
+// MailContactPO is the persistent object for one contact.
+type MailContactPO struct {
+	ID             uint   `gorm:"primaryKey"`
+	OrganizationID uint   `gorm:"not null;uniqueIndex:idx_mail_contacts_email,priority:1;index:idx_mail_contacts_listing,priority:1"`
+	Email          string `gorm:"size:320;not null;uniqueIndex:idx_mail_contacts_email,priority:2"`
+	FirstName      string `gorm:"size:100;not null;default:''"`
+	LastName       string `gorm:"size:100;not null;default:''"`
+	Properties     string `gorm:"type:jsonb;not null;default:'{}'"`
+	Status         string `gorm:"size:16;not null;default:'subscribed'"`
+	StatusReason   string `gorm:"size:64;not null;default:''"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func (MailContactPO) TableName() string {
+	return "mail_contacts"
+}
+
+func (po *MailContactPO) toDomain() *domain.MailContact {
+	properties := map[string]string{}
+	if po.Properties != "" {
+		if err := json.Unmarshal([]byte(po.Properties), &properties); err != nil {
+			properties = map[string]string{}
+		}
+	}
+	return &domain.MailContact{
+		ID:             po.ID,
+		OrganizationID: po.OrganizationID,
+		Email:          po.Email,
+		FirstName:      po.FirstName,
+		LastName:       po.LastName,
+		Properties:     properties,
+		Status:         domain.MailContactStatus(po.Status),
+		StatusReason:   po.StatusReason,
+		ListIDs:        []uint{},
+		CreatedAt:      po.CreatedAt,
+		UpdatedAt:      po.UpdatedAt,
+	}
+}
+
+func encodeProperties(properties map[string]string) string {
+	if properties == nil {
+		properties = map[string]string{}
+	}
+	encoded, err := json.Marshal(properties)
+	if err != nil {
+		return "{}"
+	}
+	return string(encoded)
+}
+
+// MailContactListPO is the persistent object for one list.
+type MailContactListPO struct {
+	ID             uint   `gorm:"primaryKey"`
+	OrganizationID uint   `gorm:"not null;uniqueIndex:idx_mail_contact_lists_name,priority:1"`
+	Name           string `gorm:"size:100;not null;uniqueIndex:idx_mail_contact_lists_name,priority:2"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func (MailContactListPO) TableName() string {
+	return "mail_contact_lists"
+}
+
+// MailContactListMemberPO puts one contact in one list.
+type MailContactListMemberPO struct {
+	ListID    uint `gorm:"primaryKey;autoIncrement:false"`
+	ContactID uint `gorm:"primaryKey;autoIncrement:false;index:idx_mail_contact_list_members_contact"`
+	CreatedAt time.Time
+}
+
+func (MailContactListMemberPO) TableName() string {
+	return "mail_contact_list_members"
+}

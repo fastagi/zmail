@@ -32,5 +32,13 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(ErrMailTemplateInvalid, http.StatusUnprocessableEntity, domain.CodeMailTemplateInvalid)
 	mapper.Register(ErrMailTemplateNameTaken, http.StatusConflict, domain.CodeMailTemplateNameTaken)
 	mapper.Register(ErrMailTemplateLimitReached, http.StatusConflict, domain.CodeMailTemplateLimitReached)
+	mapper.Register(ErrMailContactNotFound, http.StatusNotFound, domain.CodeMailContactNotFound)
+	mapper.Register(ErrMailContactExists, http.StatusConflict, domain.CodeMailContactExists)
+	mapper.Register(ErrMailContactInvalid, http.StatusUnprocessableEntity, domain.CodeMailContactInvalid)
+	mapper.Register(ErrMailContactLimitReached, http.StatusConflict, domain.CodeMailContactLimitReached)
+	mapper.Register(ErrMailContactListNotFound, http.StatusNotFound, domain.CodeMailContactListNotFound)
+	mapper.Register(ErrMailContactListNameTaken, http.StatusConflict, domain.CodeMailContactListNameTaken)
+	mapper.Register(ErrMailContactListLimit, http.StatusConflict, domain.CodeMailContactListLimitReached)
+	mapper.Register(ErrMailContactImportInvalid, http.StatusUnprocessableEntity, domain.CodeMailContactImportInvalid)
 	mapper.Register(ErrMailTemplateVariablesMissing, http.StatusUnprocessableEntity, domain.CodeMailTemplateVariablesMissing)
 }

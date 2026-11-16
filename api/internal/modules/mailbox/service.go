@@ -84,6 +84,16 @@ type Service interface {
 	DeleteTemplate(ctx context.Context, organizationID, id uint) error
 	PreviewTemplate(ctx context.Context, organizationID uint, input PreviewInput) (*TemplatePreview, error)
 	SendTemplateTest(ctx context.Context, organizationID, templateID, mailboxID uint, to []string, values map[string]string) (*domain.MailMessage, error)
+	ListContacts(ctx context.Context, organizationID uint, filter domain.MailContactFilter) ([]*domain.MailContact, int64, error)
+	GetContact(ctx context.Context, organizationID, id uint) (*domain.MailContact, error)
+	CreateContact(ctx context.Context, organizationID uint, input ContactInput) (*domain.MailContact, error)
+	UpdateContact(ctx context.Context, organizationID, id uint, input ContactInput) (*domain.MailContact, error)
+	DeleteContact(ctx context.Context, organizationID, id uint) error
+	ImportContacts(ctx context.Context, organizationID uint, text string, listID uint) (*ContactImportResult, error)
+	ListContactLists(ctx context.Context, organizationID uint) ([]*domain.MailContactList, error)
+	CreateContactList(ctx context.Context, organizationID uint, name string) (*domain.MailContactList, error)
+	RenameContactList(ctx context.Context, organizationID, id uint, name string) (*domain.MailContactList, error)
+	DeleteContactList(ctx context.Context, organizationID, id uint) error
 	// GetAttachment returns one attachment of a message with its content.
 	GetAttachment(ctx context.Context, organizationID, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error)
 	GetOutboundMessage(ctx context.Context, organizationID, messageID uint) (*domain.MailMessage, error)
@@ -105,6 +115,7 @@ type Service interface {
 type service struct {
 	repo      domain.MailboxRepository
 	templates domain.MailTemplateRepository
+	contacts  domain.MailContactRepository
 	transport mailtransport.Transport
 	notifier  mailNotifier
 	settings  Settings
@@ -117,11 +128,15 @@ var _ Service = (*service)(nil)
 func NewService(
 	repo domain.MailboxRepository,
 	templates domain.MailTemplateRepository,
+	contacts domain.MailContactRepository,
 	transport mailtransport.Transport,
 	notifier mailNotifier,
 	settings Settings,
 ) *service {
-	return &service{repo: repo, templates: templates, transport: transport, notifier: notifier, settings: settings, now: time.Now}
+	return &service{
+		repo: repo, templates: templates, contacts: contacts, transport: transport,
+		notifier: notifier, settings: settings, now: time.Now,
+	}
 }
 
 // apply runs a state change and publishes the notifications it returns in one transaction, so
