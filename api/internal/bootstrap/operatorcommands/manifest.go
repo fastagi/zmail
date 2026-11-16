@@ -1,0 +1,28 @@
+package operatorcommands
+
+import infracommands "github.com/fastagi/fastmail/api/internal/infra/console/commands"
+
+// Manifest returns business-aware operator commands assembled outside infrastructure packages.
+func Manifest() infracommands.Manifest {
+	return infracommands.NewManifest(
+		"operator",
+		infracommands.Registration{Command: NewSettingListCommand()},
+		infracommands.Registration{Command: NewSettingSetCommand()},
+		infracommands.Registration{Command: NewSettingResetCommand()},
+		infracommands.Registration{Command: NewAuthenticationSessionPruneCommand()},
+		infracommands.Registration{Command: NewAuditPruneCommand()},
+		infracommands.Registration{Command: NewUsageListCommand()},
+		infracommands.Registration{Command: NewUsageRecordCommand()},
+		infracommands.Registration{Command: NewUsageConsumeCommand()},
+		infracommands.Registration{Command: NewUsageQuotaSetCommand()},
+		infracommands.Registration{Command: NewUsageQuotaResetCommand()},
+		infracommands.Registration{Command: NewUsagePruneCommand()},
+		infracommands.Registration{Command: NewWebhookWorkCommand()},
+		infracommands.Registration{Command: NewWebhookPublishTestCommand()},
+		infracommands.Registration{Command: NewWebhookReplayCommand()},
+		infracommands.Registration{Command: NewWebhookPruneCommand()},
+		infracommands.Registration{Command: NewOperatorGrantCommand()},
+		infracommands.Registration{Command: NewOperatorRevokeCommand()},
+		infracommands.Registration{Command: NewOperatorListCommand()},
+	)
+}

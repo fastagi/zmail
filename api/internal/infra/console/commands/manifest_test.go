@@ -1,0 +1,33 @@
+package commands
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/fastagi/fastmail/api/internal/infra/console"
+)
+
+func TestDefaultManifestsRegisterExpectedCommands(t *testing.T) {
+	app := console.New("fastbuild", "test")
+	RegisterManifests(app, DefaultManifests("test")...)
+
+	assert.True(t, app.HasCommand("make:module"))
+	assert.True(t, app.HasCommand("migrate"))
+	assert.True(t, app.HasCommand("db:status"))
+	assert.True(t, app.HasCommand("migrate:status"))
+	assert.True(t, app.HasCommand("seed"))
+	assert.True(t, app.HasCommand("ai:chat"))
+	assert.True(t, app.HasCommand("doctor"))
+	assert.True(t, app.HasCommand("health:check"))
+	assert.True(t, app.HasCommand("workflow:work"))
+	assert.True(t, app.HasCommand("ratelimit:prune"))
+	assert.True(t, app.HasCommand("workflow:schedule:run"))
+	assert.True(t, app.HasCommand("workflow:schedule:work"))
+	assert.True(t, app.HasCommand("asset:prune"))
+	assert.True(t, app.HasCommand("starter:list"))
+	assert.True(t, app.HasCommand("starter:check"))
+	assert.True(t, app.HasCommand("starter:enable"))
+	assert.True(t, app.HasCommand("starter:disable"))
+	assert.False(t, app.HasCommand("deploy:run"))
+}

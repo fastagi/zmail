@@ -1,0 +1,113 @@
+package user
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+
+	"github.com/fastagi/fastmail/api/internal/domain"
+)
+
+// UserPO is the persistent object for database operations (internal to repository)
+// This struct contains GORM tags and is NOT exposed outside the repository layer.
+// JSON tags are removed to prevent accidental exposure of database structure.
+type UserPO struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
+	Username  string         `gorm:"size:50;not null;uniqueIndex"`
+	Password  string         `gorm:"size:100;not null"`
+	Email     string         `gorm:"size:100;not null;unique"`
+	Nickname  string         `gorm:"size:50"`
+	Avatar    string         `gorm:"size:255"`
+	Phone     string         `gorm:"size:20"`
+	Bio       string         `gorm:"size:500"`
+	Status    int            `gorm:"default:1"` // 1: active, 0: disabled
+	LastLogin *time.Time
+}
+
+// TableName specifies the database table name
+func (UserPO) TableName() string {
+	return "users"
+}
+
+// PasswordResetTokenPO stores one-time password reset tokens.
+// Tokens are stored as hashes so plaintext reset secrets never hit the database.
+type PasswordResetTokenPO struct {
+	ID        uint `gorm:"primaryKey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	UserID    uint       `gorm:"not null;index"`
+	TokenHash string     `gorm:"size:64;not null;uniqueIndex"`
+	ExpiresAt time.Time  `gorm:"not null;index"`
+	UsedAt    *time.Time `gorm:"index"`
+}
+
+// TableName specifies the password reset token table name.
+func (PasswordResetTokenPO) TableName() string {
+	return "password_reset_tokens"
+}
+
+// AuthenticationSessionPO stores one opaque user session credential by hash.
+// Transport credentials and request fingerprint data never enter this record.
+type AuthenticationSessionPO struct {
+	ID               string `gorm:"size:32;primaryKey"`
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	UserID           uint       `gorm:"not null;index"`
+	Audience         string     `gorm:"size:16;not null;default:user"`
+	TokenHash        string     `gorm:"size:64;not null;uniqueIndex"`
+	ExpiresAt        time.Time  `gorm:"not null;index"`
+	IdleExpiresAt    time.Time  `gorm:"not null;index"`
+	LastSeenAt       time.Time  `gorm:"not null"`
+	RevokedAt        *time.Time `gorm:"index"`
+	RevocationReason string     `gorm:"size:32;not null;default:''"`
+}
+
+// TableName specifies the authentication session table name.
+func (AuthenticationSessionPO) TableName() string {
+	return "authentication_sessions"
+}
+
+// toDomain converts UserPO to domain.User
+func (po *UserPO) toDomain() *domain.User {
+	if po == nil {
+		return nil
+	}
+	return &domain.User{
+		ID:        po.ID,
+		Username:  po.Username,
+		Email:     po.Email,
+		Password:  po.Password,
+		Nickname:  po.Nickname,
+		Avatar:    po.Avatar,
+		Phone:     po.Phone,
+		Bio:       po.Bio,
+		Status:    po.Status,
+		LastLogin: po.LastLogin,
+		CreatedAt: po.CreatedAt,
+		UpdatedAt: po.UpdatedAt,
+	}
+}
+
+// newUserPO converts domain.User to UserPO for database operations
+func newUserPO(u *domain.User) *UserPO {
+	if u == nil {
+		return nil
+	}
+	return &UserPO{
+		ID:        u.ID,
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
+		Username:  u.Username,
+		Email:     u.Email,
+		Password:  u.Password,
+		Nickname:  u.Nickname,
+		Avatar:    u.Avatar,
+		Phone:     u.Phone,
+		Bio:       u.Bio,
+		Status:    u.Status,
+		LastLogin: u.LastLogin,
+	}
+}

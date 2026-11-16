@@ -1,0 +1,330 @@
+package bootstrap
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"slices"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+
+	"github.com/fastagi/fastmail/api/internal/app"
+	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/fastmail/api/internal/infra/exception"
+	"github.com/fastagi/fastmail/api/internal/infra/health"
+	"github.com/fastagi/fastmail/api/internal/infra/metrics"
+	infraMiddleware "github.com/fastagi/fastmail/api/internal/infra/middleware"
+	"github.com/fastagi/fastmail/api/internal/infra/ratelimit"
+	"github.com/fastagi/fastmail/api/internal/infra/tracing"
+	"github.com/fastagi/fastmail/api/pkg/logger"
+	"github.com/fastagi/fastmail/api/pkg/response"
+	"github.com/fastagi/fastmail/api/routes"
+)
+
+// HttpKernel handles HTTP server lifecycle
+type HttpKernel struct {
+	App            *app.Application
+	Engine         *gin.Engine
+	TracerProvider *tracing.TracerProvider
+	Health         *health.Health
+}
+
+// NewHttpKernel creates a new HTTP kernel from Wire-injected Application
+func NewHttpKernel(application *app.Application) *HttpKernel {
+	// Set Mode
+	setGinMode(application.Config.Server.Mode)
+	registerDomainErrorMappings(response.DefaultErrorMapper, application.Starters)
+
+	// Create Engine
+	r := gin.New()
+	configureTrustedProxies(r, application.Config)
+
+	// Tracing shares one bootstrap helper with the worker commands.
+	tracerProvider := InitTracing(application.Config, application.DB)
+	if tracerProvider != nil {
+		r.Use(tracing.Middleware(application.Config.App.Name))
+		r.Use(tracing.InjectTraceID())
+	}
+
+	// Add custom logger and recovery middleware
+	r.Use(infraMiddleware.RequestID())
+	r.Use(logger.GinLogger())
+	r.Use(exception.Recovery(application.Config.App.Debug))
+
+	// Request metrics are opt-in in production. When disabled, the kernel avoids
+	// both the public scrape endpoint and per-request instrumentation overhead.
+	if application.Config.Metrics.Enabled {
+		r.Use(metrics.Middleware())
+	}
+
+	// Apply global HTTP guardrails: security headers, request limits,
+	// cooperative timeout, CORS, and rate limit. Auth/audit middleware remains
+	// starter-owned and route-scoped.
+	applyGlobalMiddleware(r, application.Config, application.RateLimitStores)
+
+	// Let event-aware starters attach subscribers without exposing that dispatch to callers.
+	application.Starters.RegisterEvents(application.EventBus)
+
+	h := RegisterHTTPRoutes(r, application)
+
+	return &HttpKernel{
+		App:            application,
+		Engine:         r,
+		TracerProvider: tracerProvider,
+		Health:         h,
+	}
+}
+
+// RegisterHTTPRoutes assembles every core and starter-owned HTTP route from one
+// application snapshot. Operator discovery uses this same seam as the server so
+// route inventory cannot silently omit operational endpoints.
+func RegisterHTTPRoutes(engine *gin.Engine, application *app.Application) *health.Health {
+	previousMode := gin.Mode()
+	gin.SetMode(gin.ReleaseMode)
+	defer gin.SetMode(previousMode)
+
+	h := health.New()
+	h.Register("database", health.DatabaseChecker(application.DB))
+	h.RegisterRoutes(engine)
+	if application.Config.Metrics.Enabled {
+		engine.GET("/metrics", metrics.Handler())
+	}
+	routes.Setup(engine, application.Starters)
+	return h
+}
+
+// Handle starts the HTTP server with graceful shutdown
+func (k *HttpKernel) Handle() {
+	if !k.App.Config.Log.JSON {
+		printBanner("1.0.0")
+	}
+
+	cfg := k.App.Config
+	srv := newHTTPServer(cfg, k.Engine)
+	diagnostics := newDiagnosticsServer(cfg)
+	startDiagnosticsServer(diagnostics)
+
+	serverErr := make(chan error, 1)
+
+	// Start Server in goroutine. Errors are forwarded to the main
+	// goroutine so they go through the same shutdown path as SIGTERM
+	// (log.Fatal here would os.Exit and skip resource cleanup).
+	go func() {
+		url := "http://" + srv.Addr
+		// JSON logging (the production default) gets one structured record instead of the banner.
+		if cfg.Log.JSON {
+			slog.Info("server.started", "listen", url, "mode", cfg.Server.Mode)
+		} else {
+			log.Printf("\n")
+			log.Printf("  🚀 FastBuild Server Started!")
+			log.Printf("  ➜ Listen:  \033[36m%s\033[0m", url)
+			log.Printf("  ➜ Mode:    %s", cfg.Server.Mode)
+			log.Printf("\n")
+		}
+
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+	}()
+
+	// Graceful Shutdown
+	k.gracefulShutdown(srv, serverErr, diagnostics)
+}
+
+func newHTTPServer(cfg *config.Config, handler http.Handler) *http.Server {
+	serverCfg := config.ServerConfig{}
+	if cfg != nil {
+		serverCfg = cfg.Server
+	}
+
+	host := strings.TrimSpace(serverCfg.Host)
+	if host == "" {
+		host = config.DefaultServerHost
+	}
+
+	return &http.Server{
+		Addr:              net.JoinHostPort(host, strconv.Itoa(serverCfg.Port)),
+		Handler:           handler,
+		ReadTimeout:       time.Duration(serverCfg.ReadTimeout) * time.Second,
+		ReadHeaderTimeout: time.Duration(serverCfg.ReadHeaderTimeout) * time.Second,
+		WriteTimeout:      time.Duration(serverCfg.WriteTimeout) * time.Second,
+		IdleTimeout:       time.Duration(serverCfg.IdleTimeout) * time.Second,
+		MaxHeaderBytes:    serverCfg.MaxHeaderBytes,
+	}
+}
+
+// gracefulShutdown handles graceful shutdown of the server and resources
+func (k *HttpKernel) gracefulShutdown(srv *http.Server, serverErr <-chan error, diagnostics *http.Server) {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case <-quit:
+		log.Println("Shutting down server...")
+	case err := <-serverErr:
+		log.Printf("HTTP server failed to start: %v — shutting down", err)
+	}
+
+	// Create context with timeout for shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. Shutdown HTTP server (stop accepting new requests, wait for existing)
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
+	if diagnostics != nil {
+		_ = diagnostics.Close() // profiles in progress are diagnostic only; do not delay shutdown
+	}
+
+	// 2. Let starters finish background work, such as queued audit records, while the database is open.
+	if k.App.Starters != nil {
+		if err := k.App.Starters.Shutdown(ctx); err != nil {
+			log.Printf("Starter shutdown error: %v", err)
+		}
+	}
+
+	// 3. Shutdown tracer provider (flush remaining spans)
+	ShutdownTracing(k.TracerProvider)
+
+	// 4. Close database connection
+	if k.App.DB != nil {
+		if sqlDB, err := k.App.DB.DB(); err == nil {
+			if err := sqlDB.Close(); err != nil {
+				log.Printf("Database close error: %v", err)
+			} else {
+				log.Println("Database connection closed")
+			}
+		}
+	}
+
+	log.Println("Server exited gracefully")
+}
+
+func setGinMode(mode string) {
+	switch strings.ToLower(mode) {
+	case "release", "prod", "production":
+		gin.SetMode(gin.ReleaseMode)
+	case "test":
+		gin.SetMode(gin.TestMode)
+	default:
+		gin.SetMode(gin.DebugMode)
+	}
+}
+
+func configureTrustedProxies(r *gin.Engine, cfg *config.Config) {
+	var trustedProxies []string
+	if cfg != nil && len(cfg.Server.TrustedProxies) > 0 {
+		trustedProxies = cfg.Server.TrustedProxies
+	}
+	if err := r.SetTrustedProxies(trustedProxies); err != nil {
+		panic(fmt.Sprintf("invalid SERVER_TRUSTED_PROXIES: %v", err))
+	}
+}
+
+func applyGlobalMiddleware(r *gin.Engine, cfg *config.Config, stores *ratelimit.Stores) {
+	cfg = effectiveHTTPConfig(cfg)
+
+	r.Use(infraMiddleware.Helmet())
+	r.Use(infraMiddleware.BodyLimit(bodyLimitBytes(cfg)))
+	r.Use(infraMiddleware.Timeout(requestTimeout(cfg)))
+
+	r.Use(cors.New(corsMiddlewareConfig(cfg)))
+
+	if cfg.Middleware.RateLimit.Enabled {
+		r.Use(ratelimit.Middleware(ratelimit.Config{
+			Max:        cfg.Middleware.RateLimit.Max,
+			Duration:   cfg.Middleware.RateLimit.Window,
+			MaxBuckets: cfg.Middleware.RateLimit.MaxBuckets,
+			// A nil factory yields the process-local store.
+			Store: stores.New(ratelimit.Rule{
+				Name:       "global",
+				Max:        cfg.Middleware.RateLimit.Max,
+				Window:     cfg.Middleware.RateLimit.Window,
+				MaxBuckets: cfg.Middleware.RateLimit.MaxBuckets,
+			}),
+			SkipFunc: func(c *gin.Context) bool {
+				return pathInList(c.Request.URL.Path, cfg.Middleware.RateLimit.SkipPaths)
+			},
+		}))
+	}
+}
+
+func effectiveHTTPConfig(cfg *config.Config) *config.Config {
+	if cfg != nil {
+		return cfg
+	}
+
+	return &config.Config{
+		CORS: config.CORSConfig{
+			AllowOrigins:     []string{"http://localhost:3000"},
+			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "Organization-Id", "Idempotency-Key", "If-Match", "X-Request-ID"},
+			ExposeHeaders:    []string{"Content-Length", "ETag", "X-Request-ID"},
+			AllowCredentials: true,
+		},
+	}
+}
+
+// corsMiddlewareConfig builds the kernel CORS policy. When the operator starter is selected, its exact
+// Admin Console origins are always allowed, together with the CSRF header and PATCH, so an Admin origin
+// that reaches the API through a proxy or CDN is not rejected before the operator session checks run.
+func corsMiddlewareConfig(cfg *config.Config) cors.Config {
+	policy := cors.Config{
+		AllowOrigins:     slices.Clone(cfg.CORS.AllowOrigins),
+		AllowMethods:     slices.Clone(cfg.CORS.AllowMethods),
+		AllowHeaders:     slices.Clone(cfg.CORS.AllowHeaders),
+		ExposeHeaders:    cfg.CORS.ExposeHeaders,
+		AllowCredentials: cfg.CORS.AllowCredentials,
+	}
+	if cfg.Starters.Selected(config.StarterOperator) {
+		policy.AllowOrigins = appendMissing(policy.AllowOrigins, cfg.Operator.AllowedOrigins...)
+		policy.AllowHeaders = appendMissing(policy.AllowHeaders, "X-CSRF-Token")
+		policy.AllowMethods = appendMissing(policy.AllowMethods, http.MethodPatch)
+	}
+	return policy
+}
+
+func appendMissing(values []string, additions ...string) []string {
+	for _, addition := range additions {
+		addition = strings.TrimSpace(addition)
+		if addition != "" && !slices.Contains(values, addition) {
+			values = append(values, addition)
+		}
+	}
+	return values
+}
+
+func requestTimeout(cfg *config.Config) time.Duration {
+	if cfg != nil && cfg.Middleware.RequestTimeout > 0 {
+		return time.Duration(cfg.Middleware.RequestTimeout) * time.Second
+	}
+	return infraMiddleware.DefaultTimeoutConfig().Timeout
+}
+
+func bodyLimitBytes(cfg *config.Config) int64 {
+	if cfg != nil && cfg.Middleware.BodyLimit > 0 {
+		return cfg.Middleware.BodyLimit
+	}
+	return infraMiddleware.DefaultBodyLimitConfig().MaxSize
+}
+
+func pathInList(path string, paths []string) bool {
+	for _, candidate := range paths {
+		if path == candidate {
+			return true
+		}
+	}
+	return false
+}

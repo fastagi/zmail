@@ -1,0 +1,294 @@
+package logger
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Handler defines the interface for log handlers
+type Handler interface {
+	Handle(ctx context.Context, entry *Entry) error
+	Close() error
+}
+
+// Entry represents a log entry
+type Entry struct {
+	Level     Level
+	Message   string
+	Context   map[string]any
+	Time      time.Time
+	Channel   string
+	RequestID string
+	TraceID   string
+}
+
+// ConsoleHandler outputs logs to console with optional colors
+type ConsoleHandler struct {
+	mu           sync.Mutex
+	writer       io.Writer
+	level        Level
+	colorEnabled bool
+	json         bool
+	timeFormat   string
+}
+
+// NewConsoleHandler creates a new console handler
+func NewConsoleHandler(level Level, colorEnabled bool) *ConsoleHandler {
+	return newConsoleHandler(level, colorEnabled, false, time.RFC3339)
+}
+
+func newConsoleHandler(level Level, colorEnabled bool, jsonOutput bool, timeFormat string) *ConsoleHandler {
+	if timeFormat == "" {
+		timeFormat = time.RFC3339
+	}
+	return &ConsoleHandler{
+		writer:       os.Stdout,
+		level:        level,
+		colorEnabled: colorEnabled,
+		json:         jsonOutput,
+		timeFormat:   timeFormat,
+	}
+}
+
+func (h *ConsoleHandler) Handle(ctx context.Context, entry *Entry) error {
+	if entry.Level < h.level {
+		return nil
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.json {
+		data, err := marshalJSONEntry(entry, h.timeFormat)
+		if err != nil {
+			return err
+		}
+		_, err = h.writer.Write(data)
+		return err
+	}
+
+	var sb strings.Builder
+
+	// Time
+	sb.WriteString(entry.Time.Format(h.timeFormat))
+	sb.WriteString(" ")
+
+	// Level with color
+	levelStr := fmt.Sprintf("%-9s", entry.Level.String())
+	if h.colorEnabled {
+		sb.WriteString(levelColors[entry.Level])
+		sb.WriteString(levelStr)
+		sb.WriteString(colorReset)
+	} else {
+		sb.WriteString(levelStr)
+	}
+	sb.WriteString(" ")
+
+	// Channel
+	if entry.Channel != "" {
+		sb.WriteString("[")
+		sb.WriteString(entry.Channel)
+		sb.WriteString("] ")
+	}
+
+	// Message
+	sb.WriteString(entry.Message)
+
+	// Context
+	if len(entry.Context) > 0 {
+		sb.WriteString(" ")
+		// Context is map[string]any; values that can't marshal (e.g. funcs)
+		// produce an empty result — falling back to an empty trailer is
+		// acceptable for a logger.
+		contextBytes, _ := json.Marshal(entry.Context) //nolint:errcheck
+		sb.Write(contextBytes)
+	}
+
+	sb.WriteString("\n")
+
+	_, err := h.writer.Write([]byte(sb.String()))
+	return err
+}
+
+func (h *ConsoleHandler) Close() error {
+	return nil
+}
+
+// FileHandler appends logs to a local file. Retention and rotation are owned
+// by the deployment platform rather than simulated inside the process.
+type FileHandler struct {
+	mu         sync.Mutex
+	path       string
+	file       string
+	level      Level
+	timeFormat string
+	json       bool
+
+	currentFile *os.File
+	currentDate string
+}
+
+// NewFileHandler creates a new file handler
+func NewFileHandler(cfg *Config) *FileHandler {
+	return &FileHandler{
+		path:       cfg.Path,
+		file:       cfg.File,
+		level:      cfg.Level,
+		timeFormat: cfg.TimeFormat,
+		json:       cfg.JSON,
+	}
+}
+
+func (h *FileHandler) Handle(ctx context.Context, entry *Entry) error {
+	if entry.Level < h.level {
+		return nil
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if err := h.ensureFile(entry.Time); err != nil {
+		return err
+	}
+
+	var data []byte
+	var err error
+
+	if h.json {
+		data, err = h.formatJSON(entry)
+	} else {
+		data = h.formatText(entry)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	_, err = h.currentFile.Write(data)
+	return err
+}
+
+func (h *FileHandler) formatJSON(entry *Entry) ([]byte, error) {
+	return marshalJSONEntry(entry, h.timeFormat)
+}
+
+func marshalJSONEntry(entry *Entry, timeFormat string) ([]byte, error) {
+	if timeFormat == "" {
+		timeFormat = time.RFC3339
+	}
+	record := map[string]any{
+		"time":    entry.Time.Format(timeFormat),
+		"level":   entry.Level.String(),
+		"message": entry.Message,
+	}
+	if entry.Channel != "" {
+		record["channel"] = entry.Channel
+	}
+	if entry.RequestID != "" {
+		record["request_id"] = entry.RequestID
+	}
+	if entry.TraceID != "" {
+		record["trace_id"] = entry.TraceID
+	}
+	if len(entry.Context) > 0 {
+		record["context"] = entry.Context
+	}
+
+	data, err := json.Marshal(record)
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+func (h *FileHandler) formatText(entry *Entry) []byte {
+	var sb strings.Builder
+
+	sb.WriteString(entry.Time.Format("2006-01-02 15:04:05"))
+	sb.WriteString("] ")
+
+	levelStr := fmt.Sprintf("%-9s", entry.Level.String())
+	sb.WriteString(levelStr)
+	sb.WriteString(" ")
+
+	if entry.Channel != "" {
+		sb.WriteString("[")
+		sb.WriteString(entry.Channel)
+		sb.WriteString("] ")
+	}
+
+	sb.WriteString(entry.Message)
+
+	if len(entry.Context) > 0 {
+		sb.WriteString(" ")
+		// Context is map[string]any; values that can't marshal (e.g. funcs)
+		// produce an empty result — falling back to an empty trailer is
+		// acceptable for a logger.
+		contextBytes, _ := json.Marshal(entry.Context) //nolint:errcheck
+		sb.Write(contextBytes)
+	}
+
+	sb.WriteString("\n")
+	return []byte(sb.String())
+}
+
+func (h *FileHandler) ensureFile(t time.Time) error {
+	date := t.Format("2006-01-02")
+
+	// Check if we need to rotate
+	needRotate := h.currentFile == nil || h.currentDate != date
+
+	if !needRotate {
+		return nil
+	}
+
+	// Close current file
+	if h.currentFile != nil {
+		h.currentFile.Close()
+	}
+
+	// Create directory if not exists
+	if err := os.MkdirAll(h.path, 0755); err != nil {
+		return err
+	}
+
+	// Generate filename
+	filename := h.generateFilename(t)
+	fullPath := filepath.Join(h.path, filename)
+
+	// Open file
+	f, err := os.OpenFile(fullPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+
+	h.currentFile = f
+	h.currentDate = date
+
+	return nil
+}
+
+func (h *FileHandler) generateFilename(t time.Time) string {
+	filename := h.file
+	filename = strings.ReplaceAll(filename, "{Y}", t.Format("2006"))
+	filename = strings.ReplaceAll(filename, "{m}", t.Format("01"))
+	filename = strings.ReplaceAll(filename, "{d}", t.Format("02"))
+	filename = strings.ReplaceAll(filename, "{H}", t.Format("15"))
+	return filename
+}
+
+func (h *FileHandler) Close() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.currentFile != nil {
+		return h.currentFile.Close()
+	}
+	return nil
+}

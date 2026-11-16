@@ -1,0 +1,43 @@
+package infra
+
+import (
+	"github.com/google/wire"
+
+	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/fastmail/api/internal/infra/database"
+	"github.com/fastagi/fastmail/api/internal/infra/email"
+	"github.com/fastagi/fastmail/api/internal/infra/events"
+	"github.com/fastagi/fastmail/api/internal/infra/migration"
+	"github.com/fastagi/fastmail/api/internal/infra/ratelimit"
+	"github.com/fastagi/fastmail/api/internal/infra/storage"
+)
+
+// ProviderSet aggregates all infrastructure providers for Wire DI.
+// This is the single source of truth for infrastructure dependencies.
+var ProviderSet = wire.NewSet(
+	// Config - loaded from environment
+	config.Load,
+	ConfiguredProviderSet,
+)
+
+// ConfiguredProviderSet aggregates infrastructure providers that depend on an already-resolved config.
+// Bootstraps and tests reuse this graph through wiring.InitApplicationWithConfig.
+var ConfiguredProviderSet = wire.NewSet(
+	// Database - depends on Config
+	database.NewDB,
+
+	// Email Service - depends on Config
+	email.NewService,
+
+	// Event Bus
+	events.NewEventBus,
+
+	// Object storage - disabled, local, or private R2 from the typed config.
+	storage.ProviderSet,
+
+	// Migration - depends on Database and EventBus
+	migration.ProviderSet,
+
+	// Rate-limit stores - process-local or shared PostgreSQL, from the typed config
+	ratelimit.ProvideStores,
+)

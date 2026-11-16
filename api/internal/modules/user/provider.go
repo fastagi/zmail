@@ -1,0 +1,58 @@
+package user
+
+import (
+	"github.com/google/wire"
+
+	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/fastmail/api/internal/infra/email"
+	"github.com/fastagi/fastmail/api/internal/starter/assembly"
+)
+
+// ProviderSet is the provider set for this module
+// It binds concrete implementations to domain interfaces
+var ProviderSet = wire.NewSet(
+	NewRepository,
+	wire.Bind(new(domain.UserRepository), new(*repository)),
+	wire.Bind(new(userRepository), new(*repository)),
+	wire.Bind(new(passwordResetStore), new(*repository)),
+	NewSessionService,
+	wire.Bind(new(authenticationSessionIssuer), new(*SessionService)),
+	wire.Bind(new(domain.AuthenticationSessionMaintainer), new(*SessionService)),
+	wire.Bind(new(domain.SessionAuthenticator), new(*SessionService)),
+	wire.Bind(new(domain.SessionRevoker), new(*SessionService)),
+	NewUserMailer,
+	NewAccountDeletionPolicy,
+	ProvideService,
+	wire.Bind(new(AuthService), new(*service)),
+	wire.Bind(new(ProfileService), new(*service)),
+	wire.Bind(new(UserQueryService), new(*service)),
+	wire.Bind(new(Service), new(*service)),
+	wire.Bind(new(domain.CredentialSignIn), new(*service)),
+	wire.Bind(new(domain.UserAdministrator), new(*service)),
+	NewAuthAbuseGuard,
+	NewHandler,
+)
+
+// NewUserMailer adapts the shared email service to the user module email seam.
+func NewUserMailer(service *email.Service) UserMailer {
+	return service
+}
+
+// NewStarterManifest describes how the user starter participates in the default scaffold.
+func NewStarterManifest(handler *Handler) assembly.StarterManifest {
+	return assembly.NewStaticStarterManifest(
+		config.StarterUser,
+		assembly.WithStarterSummary("Registration, sign-in, revocable sessions, profile, and password reset."),
+		assembly.WithStarterModule(handler),
+		assembly.WithStarterMigrationNames(
+			"2025_06_18_000000_create_users_table",
+			"2026_04_27_000000_create_password_reset_tokens_table",
+			"2026_04_27_000001_add_unique_index_to_users_username",
+			"2026_04_27_000003_create_authentication_sessions_table",
+			"2026_10_04_000000_add_audience_to_authentication_sessions",
+			"2025_06_18_000001_seed_default_users",
+		),
+		assembly.WithStarterSeederNames("users"),
+	)
+}

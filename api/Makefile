@@ -1,0 +1,356 @@
+BINARY_NAME=fastbuild
+SERVER_BINARY=server
+OUTPUT_DIR=bin
+
+# Version information
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION) -X main.GitCommit=$(GIT_COMMIT) -X main.BuildTime=$(BUILD_TIME)"
+
+# Detect OS for platform-specific commands
+ifeq ($(OS),Windows_NT)
+	BINARY_EXT=.exe
+	RM=del /Q
+	MKDIR=mkdir
+	PATH_SEP=\\
+else
+	BINARY_EXT=
+	RM=rm -f
+	MKDIR=mkdir -p
+	PATH_SEP=/
+endif
+
+.PHONY: all build build-server build-all container-check compose-check route-catalog-check wire-check clean test test-kest test-race test-race-critical test-postgres-compatibility benchmark-cache benchmark-database benchmark-http benchmark-rate-limit benchmark-workflow perf starter-catalog cover lint lint-fix generate wire mock dev air server migrate seed tidy update vuln setup install build-windows build-linux build-darwin build-all-platforms build-prod help
+
+# Default target
+all: lint test build
+
+# Create output directory
+$(OUTPUT_DIR):
+	@$(MKDIR) $(OUTPUT_DIR)
+
+# Build CLI binary for current platform (auto-runs wire first)
+build: wire $(OUTPUT_DIR)
+	@echo "Building $(BINARY_NAME)..."
+	go build $(LDFLAGS) -o $(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) cmd/fastbuild/main.go
+
+# Build server binary for current platform
+build-server: $(OUTPUT_DIR)
+	@echo "Building $(SERVER_BINARY)..."
+	go build $(LDFLAGS) -o $(OUTPUT_DIR)$(PATH_SEP)$(SERVER_BINARY)$(BINARY_EXT) cmd/server/main.go
+
+# Build both binaries
+build-all: build build-server
+	@echo "Build completed for current platform"
+
+# Build and exercise the production container contract.
+container-check:
+	@bash scripts/verify-container.sh
+
+# Exercise the local Compose database, migration, readiness, and starter flow.
+compose-check:
+	@bash scripts/verify-compose.sh
+
+# Exercise and validate the deterministic runtime route catalog.
+route-catalog-check:
+	@bash scripts/verify-route-catalog.sh
+
+# Build Windows binaries
+build-windows: $(OUTPUT_DIR)
+	@echo "Building Windows binaries..."
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(OUTPUT_DIR)/$(BINARY_NAME).exe cmd/fastbuild/main.go
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(OUTPUT_DIR)/$(SERVER_BINARY).exe cmd/server/main.go
+	@echo "✅ Windows binaries built successfully"
+
+# Build Linux binaries
+build-linux: $(OUTPUT_DIR)
+	@echo "Building Linux binaries..."
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(OUTPUT_DIR)/$(BINARY_NAME)-linux cmd/fastbuild/main.go
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(OUTPUT_DIR)/$(SERVER_BINARY)-linux cmd/server/main.go
+	@echo "✅ Linux binaries built successfully"
+
+# Build macOS binaries (both Intel and Apple Silicon)
+build-darwin: $(OUTPUT_DIR)
+	@echo "Building macOS binaries..."
+	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(OUTPUT_DIR)/$(BINARY_NAME)-darwin-amd64 cmd/fastbuild/main.go
+	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(OUTPUT_DIR)/$(SERVER_BINARY)-darwin-amd64 cmd/server/main.go
+	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(OUTPUT_DIR)/$(BINARY_NAME)-darwin-arm64 cmd/fastbuild/main.go
+	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(OUTPUT_DIR)/$(SERVER_BINARY)-darwin-arm64 cmd/server/main.go
+	@echo "✅ macOS binaries built successfully"
+
+# Build for all platforms
+build-all-platforms: build-windows build-linux build-darwin
+	@echo "✅ All platform binaries built successfully"
+
+# Production build with optimizations
+build-prod: wire $(OUTPUT_DIR)
+	@echo "Building production binaries..."
+	go build -ldflags="-s -w" -o $(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) cmd/fastbuild/main.go
+	go build -ldflags="-s -w" -o $(OUTPUT_DIR)$(PATH_SEP)$(SERVER_BINARY)$(BINARY_EXT) cmd/server/main.go
+	@echo "✅ Production binaries built successfully"
+
+# Install CLI to $GOPATH/bin or /usr/local/bin
+install: build
+	@echo "Installing $(BINARY_NAME)..."
+ifeq ($(OS),Windows_NT)
+	go install $(LDFLAGS) ./cmd/fastbuild
+else
+	go install $(LDFLAGS) ./cmd/fastbuild
+endif
+	@echo "✅ $(BINARY_NAME) installed successfully"
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning..."
+	go clean
+ifeq ($(OS),Windows_NT)
+	@if exist $(OUTPUT_DIR) rmdir /s /q $(OUTPUT_DIR)
+else
+	@rm -rf $(OUTPUT_DIR)
+endif
+	@rm -f coverage.txt coverage.html
+	@echo "✅ Cleaned"
+
+# Run tests
+test:
+	@echo "Running tests..."
+	go test ./... -v
+
+# Run Kest flow tests against a local ephemeral server
+test-kest:
+	@echo "Running Kest flow tests..."
+	@./tests/kest/run_local.sh
+
+# Run tests with race detection
+test-race:
+	@echo "Running tests with race detection..."
+	go test ./... -race -v
+
+# Run the concurrency-critical queue lifecycle suite used by CI
+test-race-critical:
+	@echo "Running concurrency-critical race tests..."
+	go test -race ./internal/capabilities/workflow -run 'TestMemoryDriver|TestWorker_(StopInterruptsEmptyMemoryQueue|ExitsOnDriverCloseAndAcceptsConcurrentStop)' -count=1
+
+# Verify every SQL-owning package against one caller-provided PostgreSQL version.
+test-postgres-compatibility:
+	@test -n "$${FASTBUILD_TEST_POSTGRES_DSN}" || { echo "FASTBUILD_TEST_POSTGRES_DSN is required" >&2; exit 2; }
+	go test -count=1 \
+		./database/migrations \
+		./internal/capabilities/workflow \
+		./internal/infra/database \
+		./internal/infra/migration/... \
+		./internal/modules/... \
+		./tests/feature \
+		./tests/integration
+
+# Measure the in-process memory queue round trip
+benchmark-workflow:
+	@echo "Benchmarking workflow memory queue..."
+	go test ./internal/capabilities/workflow -run '^$$' -bench '^BenchmarkMemoryDriver_RoundTrip$$' -benchmem
+
+# Measure the steady-state core HTTP middleware chain with metrics off and on
+benchmark-http:
+	@echo "Benchmarking core HTTP middleware..."
+	go test ./internal/bootstrap -run '^$$' -bench '^BenchmarkHTTPMiddlewareChain$$' -benchmem -count=5
+
+# Measure process-local rate-limit hot paths and bounded identity churn
+benchmark-rate-limit:
+	@echo "Benchmarking process-local rate limiter..."
+	go test ./internal/infra/ratelimit -run '^$$' -bench '^BenchmarkMemoryStoreTake$$' -benchmem -count=5
+
+# Measure bounded process-local cache reads and unique-key churn
+benchmark-cache:
+	@echo "Benchmarking bounded process-local cache..."
+	go test ./internal/infra/cache -run '^$$' -bench '^BenchmarkMemory(Get|GetParallel|BoundedChurn)$$' -benchmem -count=5
+
+# Profile default user repository paths against an isolated PostgreSQL schema.
+# Regenerate the starter table in internal/modules/README.md from the starter manifests
+starter-catalog:
+	FASTBUILD_UPDATE_STARTER_CATALOG=1 go test ./internal/infra/console/commands -run '^TestModulesReadmeStarterCatalogIsGenerated$$' -count=1
+
+# k6 load baseline with p95 budgets against a release build (needs k6 and a disposable database)
+perf:
+	@test -n "$$FASTBUILD_PERF_POSTGRES_DSN" || (echo "FASTBUILD_PERF_POSTGRES_DSN must be a disposable PostgreSQL connection URI" >&2; exit 2)
+	bash scripts/perf.sh
+
+benchmark-database:
+	@test -n "$$FASTBUILD_TEST_POSTGRES_DSN" || (echo "FASTBUILD_TEST_POSTGRES_DSN must be a disposable PostgreSQL connection URI" >&2; exit 2)
+	go test ./internal/infra/database ./internal/modules/user -run 'TestNewDB_PostgresAppliesRuntimeConnectionPolicy|TestPostgresUserRepository(QueryShape|PerformanceProfile)' -v -count=1
+	go test ./internal/modules/user -run '^$$' -bench '^BenchmarkPostgresUserRepository(List|Create)$$' -benchmem -benchtime=2s -count=5
+
+# Run tests with coverage
+cover:
+	@echo "Running tests with coverage..."
+	go test ./... -coverprofile=coverage.txt -covermode=atomic
+	go tool cover -html=coverage.txt -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+# Run linter
+lint:
+	@echo "Running linter..."
+	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
+	golangci-lint run ./...
+
+# Fix lint issues automatically
+lint-fix:
+	@echo "Fixing lint issues..."
+	golangci-lint run --fix ./...
+
+# Generate code (Wire, etc.)
+generate:
+	@echo "Generating code..."
+	go generate ./...
+
+# Run Wire dependency injection
+wire:
+	@echo "Running Wire..."
+	cd internal/wiring && go tool wire
+
+# Fail when wire_gen.go differs from what the current providers generate. The file is restored
+# afterwards, so the check never rewrites the working tree.
+wire-check:
+	@snapshot=$$(mktemp) && cp internal/wiring/wire_gen.go "$$snapshot" && \
+	(cd internal/wiring && go tool wire >/dev/null 2>&1) ; \
+	if cmp -s "$$snapshot" internal/wiring/wire_gen.go; then rm -f "$$snapshot"; else \
+	diff -u "$$snapshot" internal/wiring/wire_gen.go; cp "$$snapshot" internal/wiring/wire_gen.go; rm -f "$$snapshot"; \
+	echo "wire_gen.go is stale: run 'make wire' and commit the result" >&2; exit 1; fi
+
+# Generate mocks
+mock:
+	@echo "Generating mocks..."
+	@which mockgen > /dev/null || (echo "Installing mockgen..." && go install go.uber.org/mock/mockgen@latest)
+	go generate ./...
+
+# Run development server
+dev:
+	go run cmd/server/main.go
+
+# Run with Air hot-reload
+air:
+	@which air > /dev/null || (echo "Installing air..." && go install github.com/air-verse/air@latest)
+ifeq ($(OS),Windows_NT)
+	@if exist .air.windows.toml (air -c .air.windows.toml) else (air)
+else
+	air
+endif
+
+# Run server (alias for dev)
+server: dev
+
+# Database migrations
+migrate:
+	@echo "Running migrations..."
+ifeq ($(OS),Windows_NT)
+	@if exist $(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) ($(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) migrate) else (go run cmd/fastbuild/main.go migrate)
+else
+	@if [ -f $(OUTPUT_DIR)/$(BINARY_NAME) ]; then ./$(OUTPUT_DIR)/$(BINARY_NAME) migrate; else go run cmd/fastbuild/main.go migrate; fi
+endif
+
+migrate-fresh:
+	@echo "Running fresh migrations..."
+ifeq ($(OS),Windows_NT)
+	@if exist $(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) ($(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) migrate:fresh) else (go run cmd/fastbuild/main.go migrate:fresh)
+else
+	@if [ -f $(OUTPUT_DIR)/$(BINARY_NAME) ]; then ./$(OUTPUT_DIR)/$(BINARY_NAME) migrate:fresh; else go run cmd/fastbuild/main.go migrate:fresh; fi
+endif
+
+migrate-rollback:
+	@echo "Rolling back migrations..."
+ifeq ($(OS),Windows_NT)
+	@if exist $(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) ($(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) migrate:rollback) else (go run cmd/fastbuild/main.go migrate:rollback)
+else
+	@if [ -f $(OUTPUT_DIR)/$(BINARY_NAME) ]; then ./$(OUTPUT_DIR)/$(BINARY_NAME) migrate:rollback; else go run cmd/fastbuild/main.go migrate:rollback; fi
+endif
+
+# Database seeding
+seed:
+	@echo "Running seeders..."
+ifeq ($(OS),Windows_NT)
+	@if exist $(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) ($(OUTPUT_DIR)$(PATH_SEP)$(BINARY_NAME)$(BINARY_EXT) db:seed) else (go run cmd/fastbuild/main.go db:seed)
+else
+	@if [ -f $(OUTPUT_DIR)/$(BINARY_NAME) ]; then ./$(OUTPUT_DIR)/$(BINARY_NAME) db:seed; else go run cmd/fastbuild/main.go db:seed; fi
+endif
+
+# Tidy dependencies
+tidy:
+	@echo "Tidying dependencies..."
+	go mod tidy
+
+# Update dependencies
+update:
+	@echo "Updating dependencies..."
+	go get -u ./...
+	go mod tidy
+
+# Check for vulnerabilities
+vuln:
+	@echo "Checking for vulnerabilities..."
+	go tool govulncheck ./...
+
+# Setup development environment
+setup:
+	@echo "Setting up development environment..."
+	@go mod download
+ifeq ($(OS),Windows_NT)
+	@echo "⚠️  Git hooks setup requires Git Bash or WSL on Windows"
+	@echo "   Run: git config core.hooksPath .githooks"
+else
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/*
+	@echo "✅ Git hooks configured"
+endif
+	@echo "✅ Dependencies downloaded"
+	@echo "Run 'make install' to install fastbuild CLI globally"
+
+# Show help
+help:
+	@echo "Available targets:"
+	@echo ""
+	@echo "Build Commands:"
+	@echo "  make build              - Build CLI binary for current platform"
+	@echo "  make build-server       - Build server binary for current platform"
+	@echo "  make build-all          - Build both CLI and server binaries"
+	@echo "  make build-windows      - Build Windows binaries (.exe)"
+	@echo "  make build-linux        - Build Linux binaries"
+	@echo "  make build-darwin       - Build macOS binaries (amd64 + arm64)"
+	@echo "  make build-all-platforms- Build for all platforms"
+	@echo "  make build-prod         - Production build with optimizations"
+	@echo ""
+	@echo "Development Commands:"
+	@echo "  make dev                - Run development server"
+	@echo "  make server             - Run server (alias for dev)"
+	@echo "  make air                - Run with hot reload (Air)"
+	@echo "  make test               - Run tests"
+	@echo "  make test-kest          - Run Kest flow tests"
+	@echo "  make test-race          - Run tests with race detection"
+	@echo "  make test-race-critical - Run CI queue lifecycle race tests"
+	@echo "  make benchmark-http     - Benchmark core HTTP middleware with metrics off/on"
+	@echo "  make benchmark-cache    - Benchmark bounded memory-cache reads and churn"
+	@echo "  make benchmark-database - Profile user repository paths on disposable PostgreSQL"
+	@echo "  make starter-catalog    - Regenerate the starter table in internal/modules/README.md"
+	@echo "  make perf               - k6 load baseline with p95 budgets (FASTBUILD_PERF_POSTGRES_DSN, k6)"
+	@echo "  make benchmark-workflow - Benchmark memory queue round trips"
+	@echo "  make cover              - Run tests with coverage report"
+	@echo ""
+	@echo "Code Quality:"
+	@echo "  make lint               - Run golangci-lint"
+	@echo "  make lint-fix           - Fix lint issues automatically"
+	@echo "  make generate           - Run go generate"
+	@echo "  make wire               - Run Wire DI generator"
+	@echo "  make mock               - Generate mocks"
+	@echo ""
+	@echo "Database Commands:"
+	@echo "  make migrate            - Run database migrations"
+	@echo "  make migrate-fresh      - Fresh migration (drop & recreate)"
+	@echo "  make migrate-rollback   - Rollback last migration"
+	@echo "  make seed               - Run database seeders"
+	@echo ""
+	@echo "Maintenance:"
+	@echo "  make install            - Install CLI to system PATH"
+	@echo "  make clean              - Clean build artifacts"
+	@echo "  make tidy               - Tidy dependencies"
+	@echo "  make update             - Update dependencies"
+	@echo "  make vuln               - Check for vulnerabilities"
+	@echo "  make setup              - Setup development environment"
+	@echo "  make help               - Show this help"

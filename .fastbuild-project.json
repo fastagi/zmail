@@ -1,0 +1,9 @@
+{
+  "name": "FastMail",
+  "slug": "fastmail",
+  "module": "github.com/fastagi/fastmail/api",
+  "repository": "https://github.com/fastagi/fastmail",
+  "starters": [],
+  "scaffold_version": "unknown",
+  "initialized_at": "2026-11-16T10:09:32.998587Z"
+}

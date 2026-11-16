@@ -1,0 +1,28 @@
+# Top-level FastBuild monorepo .gitignore
+# Deployable-unit gitignores live under api/, web/, and admin/.
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local environment overrides (deployable-unit .env files are handled locally)
+.env.local
+.env.*.local
+
+# Build artifacts that escape deployable-unit scope
+/tmp/
+/dist/
+
+# Local tool caches. Keep dependency and scanner caches outside the repository.
+.cache/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# make dev build output and local object storage
+.fastbuild-dev/

@@ -1,0 +1,34 @@
+package audit
+
+import (
+	"github.com/google/wire"
+
+	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/fastmail/api/internal/starter/assembly"
+)
+
+// ProviderSet wires the audit starter.
+var ProviderSet = wire.NewSet(
+	NewRepository,
+	wire.Bind(new(domain.AuditLogRepository), new(*repository)),
+	ProvideService,
+	wire.Bind(new(Service), new(*service)),
+	wire.Bind(new(domain.AuditLogRecorder), new(*service)),
+	wire.Bind(new(domain.AuditLogMaintainer), new(*service)),
+	wire.Bind(new(domain.AuditLogQuery), new(*service)),
+	NewHandler,
+)
+
+// NewStarterManifest describes how the audit starter participates in the default scaffold.
+func NewStarterManifest(handler *Handler) assembly.StarterManifest {
+	return assembly.NewStaticStarterManifest(
+		config.StarterAudit,
+		assembly.WithStarterSummary("Write-request audit logging, history reads, and bounded retention."),
+		assembly.WithStarterModule(handler),
+		assembly.WithStarterMigrationNames("2026_04_26_000000_create_audit_logs_table"),
+		assembly.WithStarterMigrationNames("2026_04_27_000002_add_business_fields_to_audit_logs"),
+		assembly.WithStarterMigrationNames("2026_07_25_000000_add_audit_retention_index"),
+		assembly.WithStarterMigrationNames("2026_10_10_000000_add_audit_user_keyset_index"),
+	)
+}

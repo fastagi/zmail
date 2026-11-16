@@ -1,0 +1,30 @@
+package operator
+
+import (
+	"github.com/google/wire"
+
+	"github.com/fastagi/fastmail/api/internal/domain"
+	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/fastmail/api/internal/starter/assembly"
+)
+
+// ProviderSet wires the optional platform-operator starter.
+var ProviderSet = wire.NewSet(
+	NewRepository,
+	wire.Bind(new(grantStore), new(*repository)),
+	NewService,
+	wire.Bind(new(domain.OperatorGrantStore), new(*service)),
+	wire.Struct(new(Surfaces), "*"),
+	NewHandler,
+)
+
+// NewStarterManifest describes operator dependencies, routes, and persistence ownership.
+func NewStarterManifest(handler *Handler) assembly.StarterManifest {
+	return assembly.NewStaticStarterManifest(
+		config.StarterOperator,
+		assembly.WithStarterSummary("Platform operators: CLI-managed grants and the Admin Console cookie session."),
+		assembly.WithStarterDependencies(config.StarterUser, config.StarterAudit),
+		assembly.WithStarterModule(handler),
+		assembly.WithStarterMigrationNames("2026_10_01_000000_create_platform_operators_table"),
+	)
+}

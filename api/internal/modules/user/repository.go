@@ -1,0 +1,371 @@
+package user
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/fastagi/fastmail/api/internal/domain"
+	infradatabase "github.com/fastagi/fastmail/api/internal/infra/database"
+)
+
+// repository implements domain.UserRepository
+// It uses UserPO internally for database operations and converts to domain.User
+type repository struct {
+	db *gorm.DB
+}
+
+type userListRow struct {
+	ID        uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Username  string
+	Email     string
+	Nickname  string
+	Avatar    string
+	Phone     string
+	Bio       string
+	Status    int
+	LastLogin *time.Time
+	PageTotal int64 `gorm:"column:page_total"`
+}
+
+func (row userListRow) toDomain() *domain.User {
+	return &domain.User{
+		ID:        row.ID,
+		Username:  row.Username,
+		Email:     row.Email,
+		Nickname:  row.Nickname,
+		Avatar:    row.Avatar,
+		Phone:     row.Phone,
+		Bio:       row.Bio,
+		Status:    row.Status,
+		LastLogin: row.LastLogin,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+	}
+}
+
+// NewRepository creates a new repository instance that implements domain.UserRepository
+func NewRepository(db *gorm.DB) *repository {
+	return &repository{
+		db: db,
+	}
+}
+
+func (r *repository) withContext(ctx context.Context) (*gorm.DB, error) {
+	if r == nil || r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	return infradatabase.ResolveContextDB(ctx, r.db), nil
+}
+
+// Create adds a new user
+func (r *repository) Create(ctx context.Context, user *domain.User) error {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return err
+	}
+	po := newUserPO(user)
+	if err := db.Create(po).Error; err != nil {
+		return err
+	}
+	// Update the domain user with generated ID
+	user.ID = po.ID
+	user.CreatedAt = po.CreatedAt
+	user.UpdatedAt = po.UpdatedAt
+	return nil
+}
+
+// Update persists the mutable profile fields of a live account. Credentials, status, last login, and
+// deletion each have their own command, so a stale read can never write them back.
+func (r *repository) Update(ctx context.Context, user *domain.User) error {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	result := db.Model(&UserPO{}).Where("id = ?", user.ID).Updates(map[string]any{
+		"nickname":   user.Nickname,
+		"avatar":     user.Avatar,
+		"phone":      user.Phone,
+		"bio":        user.Bio,
+		"updated_at": now,
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return domain.ErrUserNotFound
+	}
+	user.UpdatedAt = now
+	return nil
+}
+
+// RecordLogin stores the time of a successful sign-in without touching any other column.
+func (r *repository) RecordLogin(ctx context.Context, userID uint, at time.Time) error {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return err
+	}
+	return db.Model(&UserPO{}).Where("id = ?", userID).UpdateColumn("last_login", at).Error
+}
+
+// Delete removes a user by ID
+func (r *repository) Delete(ctx context.Context, id uint) error {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return err
+	}
+	return db.Delete(&UserPO{}, id).Error
+}
+
+// DeleteAccount locks the undeleted user row, runs starter guards and cleanup, and soft-deletes
+// in one transaction shared through the callback context.
+func (r *repository) DeleteAccount(ctx context.Context, id uint, check func(context.Context) error) error {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return err
+	}
+	if id == 0 {
+		return domain.ErrInvalidInput
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var po UserPO
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE"})
+		if findErr := query.First(&po, id).Error; findErr != nil {
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return domain.ErrUserNotFound
+			}
+			return findErr
+		}
+
+		transactionContext := infradatabase.ContextWithTransaction(ctx, tx)
+		if check != nil {
+			if checkErr := check(transactionContext); checkErr != nil {
+				return checkErr
+			}
+		}
+		if revokeErr := revokeUserSessionsDB(
+			tx.WithContext(transactionContext),
+			id,
+			time.Now().UTC(),
+			sessionRevocationAccountDeleted,
+		); revokeErr != nil {
+			return revokeErr
+		}
+
+		result := tx.WithContext(transactionContext).Delete(&po)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrUserNotFound
+		}
+		return nil
+	})
+}
+
+// UpdatePasswordAndRevokeSessions changes the password and invalidates every active session atomically.
+func (r *repository) UpdatePasswordAndRevokeSessions(
+	ctx context.Context,
+	userID uint,
+	passwordHash string,
+	now time.Time,
+) error {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&UserPO{}).
+			Where("id = ?", userID).
+			Updates(map[string]any{
+				"password":   passwordHash,
+				"updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrUserNotFound
+		}
+		return revokeUserSessionsDB(tx, userID, now, sessionRevocationPasswordChange)
+	})
+}
+
+// FindByID retrieves a user by ID
+func (r *repository) FindByID(ctx context.Context, id uint) (*domain.User, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var po UserPO
+	if err := db.First(&po, id).Error; err != nil {
+		return nil, err
+	}
+	return po.toDomain(), nil
+}
+
+// FindAll retrieves users with pagination
+func (r *repository) FindAll(ctx context.Context, page, pageSize int) ([]*domain.User, int64, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	var rows []userListRow
+	offset := (page - 1) * pageSize
+	if err := db.Model(&UserPO{}).
+		Select(`
+			users.id, users.created_at, users.updated_at,
+			users.username, users.email, users.nickname, users.avatar,
+			users.phone, users.bio, users.status, users.last_login,
+			COUNT(*) OVER() AS page_total
+		`).
+		Order("users.id DESC").
+		Offset(offset).
+		Limit(pageSize).
+		Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(rows) == 0 {
+		var total int64
+		if err := db.Model(&UserPO{}).Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		return []*domain.User{}, total, nil
+	}
+
+	users := make([]*domain.User, len(rows))
+	for index := range rows {
+		users[index] = rows[index].toDomain()
+	}
+	return users, rows[0].PageTotal, nil
+}
+
+// FindByUsername retrieves a user by username
+func (r *repository) FindByUsername(ctx context.Context, username string) (*domain.User, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var po UserPO
+	if err := db.Where("username = ?", username).First(&po).Error; err != nil {
+		return nil, err
+	}
+	return po.toDomain(), nil
+}
+
+// FindByLoginIdentifier resolves username or email in one query. An identifier that contains "@"
+// matches the email first, so an account whose username was set to another account's email cannot
+// capture that account's sign-in; any other identifier matches the username first.
+func (r *repository) FindByLoginIdentifier(ctx context.Context, identifier string) (*domain.User, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	preferred := "username"
+	if strings.Contains(identifier, "@") {
+		preferred = "email"
+	}
+	var po UserPO
+	err = db.
+		Where("username = ? OR email = ?", identifier, identifier).
+		Order(clause.OrderBy{Expression: clause.Expr{
+			SQL:  "CASE WHEN " + preferred + " = ? THEN 0 ELSE 1 END, id",
+			Vars: []any{identifier},
+		}}).
+		// Take, not First: First appends a primary-key order that replaces the expression above.
+		Take(&po).Error
+	if err != nil {
+		return nil, err
+	}
+	return po.toDomain(), nil
+}
+
+// FindByEmail retrieves a user by email
+func (r *repository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var po UserPO
+	if err := db.Where("email = ?", email).First(&po).Error; err != nil {
+		return nil, err
+	}
+	return po.toDomain(), nil
+}
+
+// StorePasswordResetToken stores a one-time password reset token hash.
+func (r *repository) StorePasswordResetToken(ctx context.Context, userID uint, tokenHash string, expiresAt time.Time) error {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ? AND used_at IS NULL", userID).Delete(&PasswordResetTokenPO{}).Error; err != nil {
+			return err
+		}
+
+		token := &PasswordResetTokenPO{
+			UserID:    userID,
+			TokenHash: tokenHash,
+			ExpiresAt: expiresAt,
+		}
+		return tx.Create(token).Error
+	})
+}
+
+// ResetPasswordWithToken validates a reset token, updates the password, and consumes the token atomically.
+func (r *repository) ResetPasswordWithToken(ctx context.Context, tokenHash string, passwordHash string, now time.Time) error {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		var token PasswordResetTokenPO
+		if err := tx.Where("token_hash = ?", tokenHash).First(&token).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrPasswordResetTokenInvalid
+			}
+			return err
+		}
+
+		if token.UsedAt != nil {
+			return domain.ErrPasswordResetTokenInvalid
+		}
+		if now.After(token.ExpiresAt) {
+			return domain.ErrPasswordResetTokenExpired
+		}
+
+		if err := tx.Model(&UserPO{}).Where("id = ?", token.UserID).Update("password", passwordHash).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return domain.ErrUserNotFound
+			}
+			return err
+		}
+		if err := revokeUserSessionsDB(tx, token.UserID, now, sessionRevocationPasswordReset); err != nil {
+			return err
+		}
+
+		result := tx.Model(&PasswordResetTokenPO{}).
+			Where("id = ? AND used_at IS NULL", token.ID).
+			Updates(map[string]any{
+				"used_at":    now,
+				"updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return domain.ErrPasswordResetTokenInvalid
+		}
+
+		return nil
+	})
+}

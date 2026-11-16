@@ -1,0 +1,248 @@
+package commands
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"gorm.io/gorm"
+
+	"github.com/fastagi/fastmail/api/internal/bootstrap"
+	"github.com/fastagi/fastmail/api/internal/capabilities/workflow"
+	"github.com/fastagi/fastmail/api/internal/infra/config"
+	"github.com/fastagi/fastmail/api/internal/infra/console"
+	"github.com/fastagi/fastmail/api/internal/infra/database"
+	"github.com/fastagi/fastmail/api/internal/infra/metrics"
+)
+
+// WorkflowWorkCommand runs a workflow queue worker.
+type WorkflowWorkCommand struct {
+	output *console.Output
+}
+
+// WorkflowScheduleRunCommand runs due scheduled workflow tasks once.
+type WorkflowScheduleRunCommand struct {
+	output *console.Output
+}
+
+// WorkflowScheduleWorkCommand runs the workflow scheduler loop.
+type WorkflowScheduleWorkCommand struct {
+	output *console.Output
+}
+
+func NewWorkflowWorkCommand() *WorkflowWorkCommand {
+	return &WorkflowWorkCommand{output: console.NewOutput()}
+}
+
+func NewWorkflowScheduleRunCommand() *WorkflowScheduleRunCommand {
+	return &WorkflowScheduleRunCommand{output: console.NewOutput()}
+}
+
+func NewWorkflowScheduleWorkCommand() *WorkflowScheduleWorkCommand {
+	return &WorkflowScheduleWorkCommand{output: console.NewOutput()}
+}
+
+func (c *WorkflowWorkCommand) Name() string        { return "workflow:work" }
+func (c *WorkflowWorkCommand) Description() string { return "Run a background workflow worker" }
+func (c *WorkflowWorkCommand) Usage() string {
+	return "workflow:work [--queue=default] [--concurrency=1] [--max-jobs=0]"
+}
+
+func (c *WorkflowScheduleRunCommand) Name() string        { return "workflow:schedule:run" }
+func (c *WorkflowScheduleRunCommand) Description() string { return "Run due workflow schedules once" }
+func (c *WorkflowScheduleRunCommand) Usage() string       { return "workflow:schedule:run" }
+
+func (c *WorkflowScheduleWorkCommand) Name() string        { return "workflow:schedule:work" }
+func (c *WorkflowScheduleWorkCommand) Description() string { return "Run the workflow scheduler loop" }
+func (c *WorkflowScheduleWorkCommand) Usage() string       { return "workflow:schedule:work" }
+
+func (c *WorkflowWorkCommand) Run(args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if loggerErr := bootstrap.InitLogger(cfg); loggerErr != nil {
+		return loggerErr
+	}
+
+	var db *gorm.DB
+	if strings.EqualFold(cfg.Queue.Driver, "postgres") {
+		db, err = database.NewDB(cfg)
+		if err != nil {
+			return err
+		}
+		if db == nil {
+			return fmt.Errorf("QUEUE_DRIVER=postgres requires DB_ENABLED=true")
+		}
+		sqlDB, sqlErr := db.DB()
+		if sqlErr != nil {
+			return sqlErr
+		}
+		defer sqlDB.Close()
+	}
+
+	tracerProvider := bootstrap.InitTracing(cfg, db)
+	defer bootstrap.ShutdownTracing(tracerProvider)
+
+	manager, err := workflow.Bootstrap(workflowQueueRuntimeConfig(cfg, db))
+	if err != nil {
+		return err
+	}
+
+	workerCfg := workflow.WorkerConfig{
+		Queue:             cfg.Queue.DefaultQueue,
+		Concurrency:       cfg.Queue.WorkerConcurrency,
+		Sleep:             cfg.Queue.WorkerSleep,
+		Timeout:           cfg.Queue.WorkerTimeout,
+		LeaseDuration:     cfg.Queue.LeaseDuration,
+		HeartbeatInterval: cfg.Queue.HeartbeatInterval,
+		ObserveQueue:      metrics.SetWorkflowQueueStats,
+	}
+	if applyErr := applyWorkflowWorkerArgs(args, &workerCfg); applyErr != nil {
+		return applyErr
+	}
+	if strings.TrimSpace(workerCfg.Queue) == "" {
+		workerCfg.Queue = "default"
+	}
+
+	driverName := workflow.GlobalQueue().DefaultDriverName()
+	if driverName == "sync" {
+		c.output.Warning("QUEUE_DRIVER=sync executes jobs inline; use QUEUE_DRIVER=memory for a long-running worker")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	slog.Info("workflow.worker_started", "queue", workerCfg.Queue, "driver", driverName)
+	worker, err := manager.StartWorker(ctx, workerCfg)
+	if err != nil {
+		return fmt.Errorf("failed to start workflow worker: %w", err)
+	}
+
+	worker.Wait()
+	c.output.Success("Workflow worker stopped")
+	return nil
+}
+
+func (c *WorkflowScheduleRunCommand) Run(args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if loggerErr := bootstrap.InitLogger(cfg); loggerErr != nil {
+		return loggerErr
+	}
+
+	manager, err := workflow.Bootstrap(workflowQueueRuntimeConfig(cfg, nil))
+	if err != nil {
+		return err
+	}
+
+	if !cfg.Scheduler.Enabled {
+		c.output.Warning("SCHEDULER_ENABLED=false; running due schedules because command was invoked explicitly")
+	}
+
+	if err := manager.RunDue(context.Background(), time.Now()); err != nil {
+		return fmt.Errorf("failed to run due workflow schedules: %w", err)
+	}
+
+	c.output.Success("Workflow schedules run completed")
+	return nil
+}
+
+func (c *WorkflowScheduleWorkCommand) Run(args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if loggerErr := bootstrap.InitLogger(cfg); loggerErr != nil {
+		return loggerErr
+	}
+
+	manager, err := workflow.Bootstrap(workflowQueueRuntimeConfig(cfg, nil))
+	if err != nil {
+		return err
+	}
+
+	tracerProvider := bootstrap.InitTracing(cfg, nil)
+	defer bootstrap.ShutdownTracing(tracerProvider)
+
+	if !cfg.Scheduler.Enabled {
+		c.output.Warning("SCHEDULER_ENABLED=false; starting scheduler because command was invoked explicitly")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	slog.Info("workflow.scheduler_started")
+	manager.StartScheduler(ctx)
+	c.output.Success("Workflow scheduler stopped")
+	return nil
+}
+
+func applyWorkflowWorkerArgs(args []string, cfg *workflow.WorkerConfig) error {
+	if cfg == nil {
+		return nil
+	}
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		switch {
+		case arg == "--queue" && i+1 < len(args):
+			cfg.Queue = strings.TrimSpace(args[i+1])
+			i++
+		case strings.HasPrefix(arg, "--queue="):
+			cfg.Queue = strings.TrimSpace(strings.TrimPrefix(arg, "--queue="))
+
+		case arg == "--concurrency" && i+1 < len(args):
+			value, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return fmt.Errorf("invalid --concurrency value %q: %w", args[i+1], err)
+			}
+			cfg.Concurrency = value
+			i++
+		case strings.HasPrefix(arg, "--concurrency="):
+			value, err := strconv.Atoi(strings.TrimPrefix(arg, "--concurrency="))
+			if err != nil {
+				return fmt.Errorf("invalid --concurrency value: %w", err)
+			}
+			cfg.Concurrency = value
+
+		case arg == "--max-jobs" && i+1 < len(args):
+			value, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return fmt.Errorf("invalid --max-jobs value %q: %w", args[i+1], err)
+			}
+			cfg.MaxJobs = value
+			i++
+		case strings.HasPrefix(arg, "--max-jobs="):
+			value, err := strconv.Atoi(strings.TrimPrefix(arg, "--max-jobs="))
+			if err != nil {
+				return fmt.Errorf("invalid --max-jobs value: %w", err)
+			}
+			cfg.MaxJobs = value
+		}
+	}
+
+	return nil
+}
+
+func workflowQueueRuntimeConfig(cfg *config.Config, db *gorm.DB) workflow.QueueRuntimeConfig {
+	if cfg == nil {
+		return workflow.QueueRuntimeConfig{}
+	}
+
+	return workflow.QueueRuntimeConfig{
+		Driver:       cfg.Queue.Driver,
+		DefaultQueue: cfg.Queue.DefaultQueue,
+		BufferSize:   cfg.Queue.BufferSize,
+		Database:     db,
+	}
+}

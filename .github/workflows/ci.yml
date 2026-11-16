@@ -1,0 +1,325 @@
+name: CI
+
+# Pull requests run only the halves they change, on the production Node version. Pushes to main,
+# the weekly schedule, and manual runs check everything, including Node 24 and PostgreSQL 15/17/18.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "41 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Changed areas
+    if: github.event.pull_request.draft != true
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    outputs:
+      api: ${{ steps.areas.outputs.api }}
+      contracts: ${{ steps.areas.outputs.contracts }}
+      web: ${{ steps.areas.outputs.web }}
+      admin: ${{ steps.areas.outputs.admin }}
+      project: ${{ steps.areas.outputs.project }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+
+      - id: areas
+        name: Select the halves this change touches
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            for area in api contracts web admin project; do echo "$area=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+          changed=$(git diff --name-only "$BASE_SHA" HEAD)
+          # Shared inputs: this workflow, the tier runner, and the plugin registry, which every half checks.
+          shared='^(\.github/workflows/ci\.yml|\.agents/skills/verification-before-completion/|registry/)'
+          flag() {
+            if grep -Eq "$2|$shared" <<<"$changed"; then echo "$1=true"; else echo "$1=false"; fi >> "$GITHUB_OUTPUT"
+          }
+          flag api '^(api/|Makefile)'
+          flag contracts '^(contracts/|api/)'
+          flag web '^(web/|contracts/)'
+          flag admin '^(admin/|contracts/)'
+          # What a new project inherits: project:init, ignore rules, root docs, and repository checks.
+          flag project '^(api/internal/infra/console/|api/\.gitignore|\.gitignore|Makefile|README\.md|scripts/|contracts/scripts/|\.agents/skills/fastbuild-framework-review/scripts/)'
+          echo "Changed files:"; echo "$changed"
+
+  governance:
+    name: Governance
+    if: github.event.pull_request.draft != true
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Root governance guardrails
+        run: make governance
+
+  contracts:
+    name: HTTP Contracts
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: contracts/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: contracts/pnpm-lock.yaml
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      - name: Install contract tooling
+        working-directory: contracts
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate schema, generated types, and Go routes
+        run: make contract-check
+
+      - name: Reject breaking OpenAPI changes
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git cat-file -e "$BASE_SHA:contracts/openapi.yaml"; then
+            git show "$BASE_SHA:contracts/openapi.yaml" > "$RUNNER_TEMP/base-openapi.yaml"
+            GOBIN="$RUNNER_TEMP/bin" go install github.com/oasdiff/oasdiff@v1.11.7
+            "$RUNNER_TEMP/bin/oasdiff" breaking "$RUNNER_TEMP/base-openapi.yaml" contracts/openapi.yaml --fail-on ERR
+          else
+            echo "No target-branch OpenAPI baseline; accepting the initial contract."
+          fi
+
+  api:
+    name: API
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    services:
+      postgres:
+        image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777 # 16.14-alpine3.24
+        env:
+          POSTGRES_DB: fastbuild_test
+          POSTGRES_USER: fastbuild
+          POSTGRES_PASSWORD: fastbuild_test
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U fastbuild -d fastbuild_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      # Install only; run-tiers.sh owns the lint invocation and its arguments.
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+          install-only: true
+
+      - name: Verification — Tier 1 (build + lint + test) on the whole api/ tree
+        # The whole tree is now lint clean (golangci-lint run ./...). New
+        # debt anywhere blocks CI here.
+        env:
+          FASTBUILD_TEST_POSTGRES_DSN: postgres://fastbuild:fastbuild_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/fastbuild_test?sslmode=disable
+        run: bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh 1
+
+      - name: Verify Wire output is current
+        run: make wire-check
+
+      - name: Verify runtime route catalog
+        run: make route-catalog-check
+
+      - name: Concurrency-critical queue lifecycle race tests
+        run: make test-race-critical
+
+  postgres-compatibility:
+    name: PostgreSQL ${{ matrix.postgres-version }} compatibility
+    # PostgreSQL 16 runs with the API job on every change; other versions run after merge and weekly.
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres-version: "15"
+            postgres-image: postgres@sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f # 15.18-alpine3.24
+          - postgres-version: "17"
+            postgres-image: postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 # 17.10-alpine3.24
+          - postgres-version: "18"
+            postgres-image: postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15 # 18.4-alpine3.24
+    services:
+      postgres:
+        image: ${{ matrix.postgres-image }}
+        env:
+          POSTGRES_DB: fastbuild_test
+          POSTGRES_USER: fastbuild
+          POSTGRES_PASSWORD: fastbuild_test
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U fastbuild -d fastbuild_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+      - name: Verify migrations, repositories, locks, and durable tasks
+        env:
+          FASTBUILD_TEST_POSTGRES_DSN: postgres://fastbuild:fastbuild_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/fastbuild_test?sslmode=disable
+        run: make test-postgres-compatibility
+
+  web:
+    name: Web (Node ${{ matrix.node-version }})
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Node 22 is the production baseline; Node 24 runs after merge and weekly.
+        node-version: ${{ github.event_name == 'pull_request' && fromJSON('["22"]') || fromJSON('["22", "24"]') }}
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: web/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verification — Tier 2 (type-check + lint + test + build)
+        run: bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh 2
+
+  admin:
+    name: Admin Console (Node ${{ matrix.node-version }})
+    needs: changes
+    if: needs.changes.outputs.admin == 'true'
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Node 22 is the production baseline; Node 24 runs after merge and weekly.
+        node-version: ${{ github.event_name == 'pull_request' && fromJSON('["22"]') || fromJSON('["22", "24"]') }}
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: admin/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+          cache-dependency-path: admin/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verification — Tier 2 (type-check + lint + test + static build)
+        run: bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh 2
+
+  initialized-project:
+    name: Initialized project
+    needs: changes
+    if: needs.changes.outputs.project == 'true'
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: contracts/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: contracts/pnpm-lock.yaml
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: api/go.mod
+          cache-dependency-path: api/go.sum
+
+      - name: Install contract tooling
+        working-directory: contracts
+        run: pnpm install --frozen-lockfile
+
+      - name: Initialize a project and run its checks
+        run: scripts/verify-init-project.sh
