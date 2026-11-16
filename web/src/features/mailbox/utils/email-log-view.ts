@@ -28,9 +28,13 @@ export function parseEmailLogView(params: SearchParams): EmailLogView {
   };
 }
 
-/** The query string for a view, with its leading `?`, or '' for the unfiltered first page. */
-export function emailLogSearch(view: EmailLogView): string {
+/**
+ * The query string for a view, with its leading `?`, or '' for the unfiltered first page. The
+ * Emails page passes its organization, which the query then names first as `org`.
+ */
+export function emailLogSearch(view: EmailLogView, organizationId?: number): string {
   const query = new URLSearchParams();
+  if (organizationId !== undefined) query.set('org', String(organizationId));
   if (view.direction) query.set('direction', view.direction);
   if (view.status) query.set('status', view.status);
   if (view.mailboxId !== undefined) query.set('mailbox', String(view.mailboxId));

@@ -5,12 +5,13 @@ import (
 	"github.com/fastagi/fastmail/api/internal/modules/apikey"
 )
 
-// RegisterRoutes registers HTTP routes for the mailbox starter. User routes require a signed-in
-// user and only ever touch that user's mailboxes. The inbound route is authenticated by the
+// RegisterRoutes registers HTTP routes for the mailbox starter. Member routes require a
+// signed-in user and an organization the user belongs to, and only ever touch that
+// organization's mailboxes. The inbound route is authenticated by the
 // mail edge's HMAC signature instead of a session.
 func (h *Handler) RegisterRoutes(r *router.Router) {
 	r.Group("", func(auth *router.Router) {
-		auth.WithMiddleware("auth")
+		auth.WithMiddleware("auth", "organization_context")
 
 		auth.GET("/mailbox-domains", h.ListDomains).Name("mailbox_domains.index")
 
@@ -34,9 +35,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 	})
 
 	// Programmatic sending for backend services: an API key instead of a browser session, with
-	// scopes that limit the key to sending or to reading what it sent.
+	// scopes that limit the key to sending or to reading what was sent. The key acts with its
+	// owner's current membership of the organization named by Organization-Id.
 	r.Group("", func(key *router.Router) {
-		key.WithMiddleware("api_key")
+		key.WithMiddleware("api_key", "organization_context")
 
 		key.POST("/outbound-mail-messages", h.SendOutbound).
 			Name("outbound_mail_messages.store").Middleware(apikey.RequireScopes(ScopeMailSend))

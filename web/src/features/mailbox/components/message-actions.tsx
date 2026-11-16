@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { useDeleteMailMessage, useUpdateMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import type { MailMessage } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
@@ -32,8 +33,9 @@ export function MessageActions({
   onClose: () => void;
 }) {
   const t = useT('mailbox');
-  const update = useUpdateMailMessage(message.mailbox_id);
-  const remove = useDeleteMailMessage(message.mailbox_id);
+  const organizationId = useMailOrganizationId();
+  const update = useUpdateMailMessage(organizationId, message.mailbox_id);
+  const remove = useDeleteMailMessage(organizationId, message.mailbox_id);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const markUnread = async () => {

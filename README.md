@@ -1,8 +1,8 @@
 # FastMail
 
-Mailboxes on your own domain, built on Cloudflare Email Service. A signed-in user claims addresses
-on the deployment's mail domain, reads mail sent to them, and sends mail from them, through the Web
-console or the HTTP API. FastMail is built on the FastBuild scaffold: a Go API on PostgreSQL, a
+Team mailboxes on your own domain, built on Cloudflare Email Service. An organization claims
+addresses on the deployment's mail domain; its members read mail sent to them and send mail from
+them, through the Web console or the HTTP API. FastMail is built on the FastBuild scaffold: a Go API on PostgreSQL, a
 Next.js Web application, and an Admin Console.
 
 | Piece | Where | What it does |
@@ -13,7 +13,8 @@ Next.js Web application, and an Admin Console.
 | Web console | [`web/src/features/mailbox`](web/src/features/mailbox) | Mailbox list, inbox, sent folder, reading, composing |
 
 The HTTP behavior is in [`contracts/MAILBOXES.md`](contracts/MAILBOXES.md) and the design record in
-[`docs/plans/mailbox.md`](docs/plans/mailbox.md).
+[`docs/plans/mailbox.md`](docs/plans/mailbox.md) and
+[`docs/plans/mailbox-organizations.md`](docs/plans/mailbox-organizations.md).
 
 ## Run FastMail Locally
 
@@ -28,11 +29,13 @@ delivers nothing, so no Cloudflare account is needed. Sign in to the Web applica
 
 ## Send From A Backend Service
 
-Create an API key with the `mail:send` scope, then send from any mailbox its owner has:
+Create an API key with the `mail:send` scope, then send from any mailbox of an organization the
+key's owner belongs to, naming the organization in `Organization-Id`:
 
 ```bash
 curl https://<api host>/v1/outbound-mail-messages \
-  -H "X-API-Key: <key>" -H "Idempotency-Key: order-42-receipt" \
+  -H "X-API-Key: <key>" -H "Organization-Id: <organization id>" \
+  -H "Idempotency-Key: order-42-receipt" \
   -H "Content-Type: application/json" \
   -d '{"from":"hello@mail.example.com","to":["bob@example.com"],"subject":"Your receipt","text":"Thanks for your order."}'
 ```
@@ -44,16 +47,17 @@ A message the provider rejects answers `502` and is kept as `failed`.
 
 1. Put the mail domain on Cloudflare DNS and enable Email Routing.
 2. Onboard the domain under Email Service > Email Sending and create an API token that may send email.
-3. Run the API with `OPTIONAL_STARTERS` containing `mailbox` and set `MAILBOX_DOMAIN`,
+3. Run the API with `OPTIONAL_STARTERS` containing `organization` and `mailbox` and set `MAILBOX_DOMAIN`,
    `MAILBOX_PROVIDER=cloudflare`, `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN`,
    and a `MAILBOX_INBOUND_SECRET` of at least 32 characters. Every key is described in
    [`api/docs/CONFIGURATION.md`](api/docs/CONFIGURATION.md).
 4. Deploy the Email Worker and point the domain's catch-all rule at it, following
    [`deploy/cloudflare/email-worker/README.md`](deploy/cloudflare/email-worker/README.md).
-5. Build the Web application with `NEXT_PUBLIC_OPTIONAL_FEATURES` containing `mailbox`.
+5. Build the Web application with `NEXT_PUBLIC_OPTIONAL_FEATURES` containing `organization` and
+   `mailbox`.
 
-Attachments, background retry, and shared mailboxes are not built yet; the plan lists them as later
-slices.
+Attachments, background retry, and per-mailbox access rules are not built yet; the plans list
+them as later slices.
 
 The rest of this document is the guide to the FastBuild scaffold underneath.
 

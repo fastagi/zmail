@@ -18,6 +18,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import {
@@ -77,7 +78,7 @@ export function ComposeDialog({
   const t = useT('mailbox');
   const [fromId, setFromId] = useState(mailbox.id);
   const from = fromOptions?.find(option => option.id === fromId) ?? mailbox;
-  const send = useSendMailMessage(from.id);
+  const send = useSendMailMessage(useMailOrganizationId(), from.id);
   const [to, setTo] = useState(draft.to);
   const [cc, setCc] = useState('');
   const [subject, setSubject] = useState(draft.subject);

@@ -1,8 +1,9 @@
 const messages = {
   title: 'Mailboxes',
-  description: 'Create addresses on your mail domain, read what arrives, and send from them.',
+  description:
+    'Addresses of your organization on the mail domain: read what arrives and send from them.',
   mailboxes: {
-    title: 'Your mailboxes',
+    title: 'Mailboxes',
     count: '{count} of {max} used',
     noDisplayName: 'No display name',
     unreadCount: '{count} unread',
@@ -17,7 +18,8 @@ const messages = {
       'Lowercase letters and digits, with single dots, underscores, or hyphens inside.',
     displayName: 'Display name (optional)',
     displayNamePlaceholder: 'Hello Team',
-    limitReached: 'You have reached the limit of {max} mailboxes. Delete one to create another.',
+    limitReached:
+      'This organization has reached the limit of {max} mailboxes. Delete one to create another.',
     displayNameInvalid:
       'Use a display name of up to 120 characters without <, >, or quotation marks.',
   },
@@ -78,7 +80,7 @@ const messages = {
   },
   emails: {
     title: 'Emails',
-    description: 'Every message sent and received across your mailboxes.',
+    description: "Every message sent and received across your organization's mailboxes.",
     send: 'Send email',
     sendUnavailable: 'Create a mailbox before you send email.',
     statsTitle: 'Last 7 days',
@@ -132,9 +134,9 @@ const messages = {
     inboundHintEnabled: 'The API accepts signed deliveries from the mail edge.',
     inboundHintDisabled: 'The API rejects inbound deliveries until an inbound secret is set.',
     maxMailboxes: 'Mailbox limit',
-    maxMailboxesValue: '{count} per user',
+    maxMailboxesValue: '{count} per organization',
     dailySendLimit: 'Daily send limit',
-    dailySendLimitValue: '{count} messages per user in any 24 hours',
+    dailySendLimitValue: '{count} messages per organization in any 24 hours',
     checklistTitle: 'Cloudflare setup',
     checklistDescription:
       'Steps marked done are confirmed by the API. The others are made in Cloudflare and cannot be checked from here.',
@@ -155,10 +157,20 @@ const messages = {
     configBody: 'Set these values on the API and restart it.',
     apiTitle: 'Send from your backend',
     apiDescription:
-      'Create an API key with the mail:send scope and call the API. The sender must be one of your mailboxes, and a repeated Idempotency-Key never sends twice.',
+      "Create an API key with the mail:send scope and call the API with the Organization-Id header. The sender must be one of the organization's mailboxes, and a repeated Idempotency-Key never sends twice.",
     apiHostNote: 'Replace YOUR_API_HOST with the address of your API.',
     apiExample: 'Example request',
     apiKeys: 'Manage API keys',
+  },
+  organization: {
+    label: 'Organization',
+    loadFailed: 'Your organizations could not be loaded.',
+    emptyTitle: 'No organization yet',
+    empty:
+      'Mailboxes belong to an organization. Create an organization or join one to send and receive mail.',
+    open: 'Go to organizations',
+    lostTitle: 'No access to this organization',
+    readOnly: 'Owners and admins of this organization create and delete mailboxes.',
   },
   actions: {
     create: 'Create mailbox',
@@ -187,13 +199,17 @@ const messages = {
     generic: 'The mailbox request could not be completed.',
     invalidInput: 'Check the fields and try again.',
     invalidResponse: 'The mailbox service returned invalid data.',
-    limitReached: 'You have reached the mailbox limit. Delete a mailbox to create another.',
+    limitReached:
+      'This organization has reached the mailbox limit. Delete a mailbox to create another.',
     mailboxNotFound: 'This mailbox does not exist or was deleted.',
     messageInvalid:
       'Enter 1 to 50 plain email addresses, a one-line subject, and a message of up to 256 KB.',
     messageNotFound: 'This message does not exist or was deleted.',
+    organizationNotFound:
+      'This organization does not exist or you are no longer a member of it. Choose another organization.',
+    permissionDenied: 'Only owners and admins of the organization can create or delete mailboxes.',
     sendLimitReached:
-      'You have reached the 24-hour sending limit. Nothing was sent. Try again later.',
+      'This organization has reached the 24-hour sending limit. Nothing was sent. Try again later.',
     senderNotConfigured:
       'The message was NOT delivered: sending mail is not set up on this server. It is kept in Sent as failed.',
     tooLarge: 'The message is too large to send.',

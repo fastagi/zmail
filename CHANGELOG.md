@@ -8,6 +8,13 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Organization mailboxes.** Mailboxes and their mail now belong to an organization instead of a
+  user. Every mailbox route takes the `Organization-Id` header; members read and send, and only
+  owners and admins create or delete mailboxes. Limits are per organization (50 mailboxes, and the
+  daily send limit). API-key routes take the same header and act with the key owner's current
+  membership. Existing mailboxes move to the organization their creator joined first; a mailbox
+  whose creator belongs to none keeps its mail and is left unowned. `mailbox` now requires the
+  `organization` starter and Web feature.
 - **Email log and statistics.** `GET /v1/mail-messages` lists messages across all of a user's
   mailboxes with direction, status, mailbox, and text filters. `GET /v1/mail-message-stats`
   returns sent, failed, and received counts per UTC day. `GET /v1/mailbox-domains` now reports the

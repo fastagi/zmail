@@ -16,6 +16,7 @@ var ProviderSet = wire.NewSet(
 	mailtransport.New,
 	SettingsFromConfig,
 	NewService,
+	wire.Bind(new(Service), new(*service)),
 	NewHandler,
 )
 
@@ -23,12 +24,13 @@ var ProviderSet = wire.NewSet(
 func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 	return assembly.NewStaticStarterManifest(
 		config.StarterMailbox,
-		assembly.WithStarterSummary("User-owned mailboxes that send through Cloudflare Email Service and receive from its Email Worker."),
-		assembly.WithStarterDependencies(config.StarterUser, config.StarterAudit, config.StarterAPIKey),
+		assembly.WithStarterSummary("Organization mailboxes that send through Cloudflare Email Service and receive from its Email Worker."),
+		assembly.WithStarterDependencies(config.StarterUser, config.StarterAudit, config.StarterAPIKey, config.StarterOrganization),
 		assembly.WithStarterModule(handler),
 		assembly.WithStarterMigrationNames(
 			"2026_11_16_100000_create_mailbox_tables",
 			"2026_11_16_110000_add_mail_message_idempotency",
+			"2026_11_17_090000_move_mailboxes_to_organizations",
 		),
 	)
 }

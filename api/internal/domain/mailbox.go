@@ -7,8 +7,8 @@ import (
 
 // Mailbox limits shared by the service, persistence, and the HTTP contract.
 const (
-	// MaxMailboxesPerUser bounds how many addresses one account may own.
-	MaxMailboxesPerUser = 10
+	// MaxMailboxesPerOrganization bounds how many addresses one organization may own.
+	MaxMailboxesPerOrganization = 50
 	// MaxMailRecipients matches the provider limit across to and cc.
 	MaxMailRecipients = 50
 	// MaxMailSubjectLength is the RFC 5322 line limit for a subject.
@@ -54,10 +54,13 @@ func (s MailStatus) Valid() bool {
 	}
 }
 
-// Mailbox is one address a user sends from and receives at.
+// Mailbox is one address an organization sends from and receives at. Every member of the
+// organization may read and send its mail.
 type Mailbox struct {
-	ID          uint
-	UserID      uint
+	ID             uint
+	OrganizationID uint
+	// CreatedBy is the user who created the mailbox. It grants nothing.
+	CreatedBy   uint
 	Address     string
 	DisplayName string
 	// UnreadCount is the number of unread inbound messages. Only listings fill it.
@@ -106,7 +109,7 @@ type MailMessageFilter struct {
 	PerPage   int
 }
 
-// MailLogFilter narrows the log of every message in every mailbox a user owns.
+// MailLogFilter narrows the log of every message in every mailbox of an organization.
 type MailLogFilter struct {
 	Direction MailDirection
 	Status    MailStatus
@@ -117,7 +120,7 @@ type MailLogFilter struct {
 	PerPage int
 }
 
-// MailDayStats counts one UTC day of a user's mail.
+// MailDayStats counts one UTC day of an organization's mail.
 type MailDayStats struct {
 	Day      time.Time
 	Sent     int
@@ -128,20 +131,17 @@ type MailDayStats struct {
 // MailboxRepository defines persistence for mailboxes and their messages.
 type MailboxRepository interface {
 	CreateMailbox(ctx context.Context, mailbox *Mailbox, limit int) error
-	ListMailboxes(ctx context.Context, userID uint) ([]*Mailbox, error)
-	FindMailbox(ctx context.Context, userID, id uint) (*Mailbox, error)
+	ListMailboxes(ctx context.Context, organizationID uint) ([]*Mailbox, error)
+	FindMailbox(ctx context.Context, organizationID, id uint) (*Mailbox, error)
 	FindMailboxByAddress(ctx context.Context, address string) (*Mailbox, error)
-	DeleteMailbox(ctx context.Context, userID, id uint) error
-	// DeleteMailboxesForUser removes every mailbox and message of one user. It joins the
-	// transaction bound to ctx, so account deletion and this cleanup commit together.
-	DeleteMailboxesForUser(ctx context.Context, userID uint) error
+	DeleteMailbox(ctx context.Context, organizationID, id uint) error
 
 	// CreateMessage stores a message. With an idempotency key that the mailbox already used it
 	// reports created=false and fills message with the stored row.
 	CreateMessage(ctx context.Context, message *MailMessage) (created bool, err error)
 	FindMessageByIdempotencyKey(ctx context.Context, mailboxID uint, key string) (*MailMessage, error)
-	// FindOutboundMessageForUser finds an outbound message in any mailbox the user owns.
-	FindOutboundMessageForUser(ctx context.Context, userID, id uint) (*MailMessage, error)
+	// FindOutboundMessageForOrganization finds an outbound message in any mailbox of the organization.
+	FindOutboundMessageForOrganization(ctx context.Context, organizationID, id uint) (*MailMessage, error)
 	// CreateInboundMessage stores an inbound message once per mailbox and dedupe key. It
 	// reports created=false and fills message with the stored row on a repeated delivery.
 	CreateInboundMessage(ctx context.Context, message *MailMessage) (created bool, err error)
@@ -150,10 +150,10 @@ type MailboxRepository interface {
 	FindMessage(ctx context.Context, mailboxID, id uint) (*MailMessage, error)
 	SetMessageRead(ctx context.Context, mailboxID, id uint, readAt *time.Time) error
 	DeleteMessage(ctx context.Context, mailboxID, id uint) error
-	CountOutboundSince(ctx context.Context, userID uint, since time.Time) (int64, error)
-	// ListMessagesForUser lists messages across every mailbox the user owns, newest first,
+	CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error)
+	// ListMessagesForOrganization lists messages across every mailbox of the organization, newest first,
 	// without bodies.
-	ListMessagesForUser(ctx context.Context, userID uint, filter MailLogFilter) ([]*MailMessage, int64, error)
-	// StatsForUser counts messages per UTC day from since, for days that have any.
-	StatsForUser(ctx context.Context, userID uint, since time.Time) ([]MailDayStats, error)
+	ListMessagesForOrganization(ctx context.Context, organizationID uint, filter MailLogFilter) ([]*MailMessage, int64, error)
+	// StatsForOrganization counts messages per UTC day from since, for days that have any.
+	StatsForOrganization(ctx context.Context, organizationID uint, since time.Time) ([]MailDayStats, error)
 }

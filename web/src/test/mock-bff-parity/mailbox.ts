@@ -3,38 +3,45 @@ import { expect } from 'vitest';
 /**
  * Runs every mailbox service method against the mock BFF, so a mock response that drifts from the
  * service's schema fails as an invalid response. Loaded by `mock-bff-service-parity.test.ts`.
- * Mailboxes are user-owned, so the harness's organization is not used.
+ * Mailboxes belong to an organization: every call names the harness's organization, of which the
+ * harness user is the owner.
  */
-export async function runServiceParity(): Promise<void> {
+export async function runServiceParity(context: { organizationId: number }): Promise<void> {
+  const { organizationId } = context;
   const { mailboxService } = await import('@/features/mailbox/services/mailbox-service');
   const { mockMailboxStore } = await import('@/features/mailbox/server/mock-mailbox-store');
   mockMailboxStore.reset();
 
-  const [domain] = await mailboxService.domains();
+  const [domain] = await mailboxService.domains(organizationId);
   expect(domain).toMatchObject({
-    max_mailboxes: 10,
+    max_mailboxes: 50,
     provider: 'log',
     inbound_enabled: false,
     daily_send_limit: 200,
   });
 
-  const mailbox = await mailboxService.create({ local_part: 'Parity', display_name: 'Parity Box' });
+  const mailbox = await mailboxService.create(organizationId, {
+    local_part: 'Parity',
+    display_name: 'Parity Box',
+  });
   expect(mailbox.address).toBe(`parity@${domain.domain}`);
-  expect((await mailboxService.list()).map(item => item.id)).toEqual([mailbox.id]);
+  expect((await mailboxService.list(organizationId)).map(item => item.id)).toEqual([mailbox.id]);
 
-  const inbox = await mailboxService.messages(mailbox.id, { direction: 'inbound' });
+  const inbox = await mailboxService.messages(organizationId, mailbox.id, { direction: 'inbound' });
   expect(inbox.items).toHaveLength(1);
-  const welcome = await mailboxService.message(mailbox.id, inbox.items[0].id);
+  const welcome = await mailboxService.message(organizationId, mailbox.id, inbox.items[0].id);
   expect(welcome.read).toBe(false);
-  expect((await mailboxService.setRead(mailbox.id, welcome.id, true)).read).toBe(true);
+  expect((await mailboxService.setRead(organizationId, mailbox.id, welcome.id, true)).read).toBe(
+    true
+  );
 
-  const first = await mailboxService.send(mailbox.id, {
+  const first = await mailboxService.send(organizationId, mailbox.id, {
     to: ['Bob@Example.com'],
     subject: 'First',
     text: 'Plain body',
   });
   expect(first).toMatchObject({ status: 'sent', to: ['bob@example.com'], read: true });
-  const second = await mailboxService.send(mailbox.id, {
+  const second = await mailboxService.send(organizationId, mailbox.id, {
     to: ['bob@example.com'],
     cc: ['carol@example.com'],
     subject: 'Second',
@@ -43,7 +50,7 @@ export async function runServiceParity(): Promise<void> {
   });
   expect(second.in_reply_to).toBe(welcome.message_id);
 
-  const sent = await mailboxService.messages(mailbox.id, {
+  const sent = await mailboxService.messages(organizationId, mailbox.id, {
     direction: 'outbound',
     page: 1,
     perPage: 1,
@@ -52,8 +59,8 @@ export async function runServiceParity(): Promise<void> {
   expect(sent.meta).toMatchObject({ total: 2, last_page: 2 });
 
   // The log spans every mailbox, names the owner of each entry, and filters like the API.
-  const other = await mailboxService.create({ local_part: 'parity-two' });
-  const log = await mailboxService.listLog();
+  const other = await mailboxService.create(organizationId, { local_part: 'parity-two' });
+  const log = await mailboxService.listLog(organizationId);
   expect(log.items.map(item => item.id)).toEqual(
     [...log.items.map(item => item.id)].sort((left, right) => right - left)
   );
@@ -61,7 +68,7 @@ export async function runServiceParity(): Promise<void> {
   expect(new Set(log.items.map(item => item.mailbox_address))).toEqual(
     new Set([mailbox.address, other.address])
   );
-  const filtered = await mailboxService.listLog({
+  const filtered = await mailboxService.listLog(organizationId, {
     direction: 'outbound',
     status: 'sent',
     mailboxId: mailbox.id,
@@ -71,9 +78,9 @@ export async function runServiceParity(): Promise<void> {
   });
   expect(filtered.items.map(item => item.id)).toEqual([second.id]);
   expect(filtered.meta).toMatchObject({ total: 1, last_page: 1 });
-  expect((await mailboxService.listLog({ q: '100%' })).items).toEqual([]);
+  expect((await mailboxService.listLog(organizationId, { q: '100%' })).items).toEqual([]);
 
-  const week = await mailboxService.stats();
+  const week = await mailboxService.stats(organizationId);
   expect(week).toHaveLength(7);
   const totals = week.reduce(
     (sum, day) => ({
@@ -84,10 +91,10 @@ export async function runServiceParity(): Promise<void> {
     { sent: 0, failed: 0, received: 0 }
   );
   expect(totals).toEqual({ sent: 2, failed: 0, received: 2 });
-  expect(await mailboxService.stats(1)).toHaveLength(1);
+  expect(await mailboxService.stats(organizationId, 1)).toHaveLength(1);
 
-  await mailboxService.remove(other.id);
-  await mailboxService.removeMessage(mailbox.id, first.id);
-  await mailboxService.remove(mailbox.id);
-  expect(await mailboxService.list()).toEqual([]);
+  await mailboxService.remove(organizationId, other.id);
+  await mailboxService.removeMessage(organizationId, mailbox.id, first.id);
+  await mailboxService.remove(organizationId, mailbox.id);
+  expect(await mailboxService.list(organizationId)).toEqual([]);
 }

@@ -18,6 +18,7 @@ const featureDependencies: Partial<Record<OptionalWebFeature, readonly OptionalW
   setting: ['organization'],
   usage: ['organization'],
   webhook: ['organization'],
+  mailbox: ['organization'],
   // fastbuild:slot web.feature-dependencies
 };
 

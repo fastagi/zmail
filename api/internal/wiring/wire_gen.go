@@ -139,7 +139,7 @@ func InitApplication() (*app.Application, error) {
 	transport := mailtransport.New(configConfig)
 	settings := mailbox.SettingsFromConfig(configConfig)
 	mailboxService := mailbox.NewService(mailboxRepository, transport, settings)
-	mailboxHandler := mailbox.NewHandler(mailboxService, accountDeletionPolicy)
+	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
 		APIKey:       apikeyHandler,
@@ -292,7 +292,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	transport := mailtransport.New(cfg)
 	settings := mailbox.SettingsFromConfig(cfg)
 	mailboxService := mailbox.NewService(mailboxRepository, transport, settings)
-	mailboxHandler := mailbox.NewHandler(mailboxService, accountDeletionPolicy)
+	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
 		APIKey:       apikeyHandler,

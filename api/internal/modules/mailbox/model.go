@@ -11,13 +11,14 @@ import (
 
 // MailboxPO is the persistent object for a mailbox.
 type MailboxPO struct {
-	ID          uint   `gorm:"primaryKey"`
-	UserID      uint   `gorm:"not null"`
-	Address     string `gorm:"size:320;not null;uniqueIndex:idx_mailboxes_address"`
-	DisplayName string `gorm:"size:120;not null;default:''"`
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   gorm.DeletedAt
+	ID             uint   `gorm:"primaryKey"`
+	OrganizationID *uint  `gorm:"index:idx_mailboxes_organization"`
+	CreatedBy      uint   `gorm:"not null"`
+	Address        string `gorm:"size:320;not null;uniqueIndex:idx_mailboxes_address"`
+	DisplayName    string `gorm:"size:120;not null;default:''"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      gorm.DeletedAt
 }
 
 func (MailboxPO) TableName() string {
@@ -29,12 +30,13 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 		return nil
 	}
 	return &domain.Mailbox{
-		ID:          po.ID,
-		UserID:      po.UserID,
-		Address:     po.Address,
-		DisplayName: po.DisplayName,
-		CreatedAt:   po.CreatedAt,
-		UpdatedAt:   po.UpdatedAt,
+		ID:             po.ID,
+		OrganizationID: organizationIDOf(po),
+		CreatedBy:      po.CreatedBy,
+		Address:        po.Address,
+		DisplayName:    po.DisplayName,
+		CreatedAt:      po.CreatedAt,
+		UpdatedAt:      po.UpdatedAt,
 	}
 }
 
@@ -149,4 +151,11 @@ func decodeAddresses(raw string) []string {
 		return []string{}
 	}
 	return addresses
+}
+
+func organizationIDOf(po *MailboxPO) uint {
+	if po.OrganizationID == nil {
+		return 0
+	}
+	return *po.OrganizationID
 }

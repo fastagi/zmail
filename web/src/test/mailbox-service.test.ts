@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   mailDayStatsListSchema,
@@ -12,15 +12,124 @@ import {
   normalizeRecipient,
   splitRecipients,
 } from '@/features/mailbox/schemas';
-import { parseMailMessage } from '@/features/mailbox/services/mailbox-service';
+import { mailboxService, parseMailMessage } from '@/features/mailbox/services/mailbox-service';
 import {
+  isOrganizationLost,
   isStoredSendFailure,
   resolveMailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
-import { ApiError } from '@/http/request';
+import request, { ApiError } from '@/http/request';
 
 describe('mailbox service boundary', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('names the organization in a header on every call', async () => {
+    const pageEnvelope = {
+      code: 0 as const,
+      message: 'success',
+      data: [],
+      meta: { current_page: 1, per_page: 20, total: 0, last_page: 1, from: 0, to: 0 },
+      links: { first: '/a', last: '/a', prev: null, next: null },
+    };
+    const mailbox = {
+      id: 12,
+      address: 'hello@mail.example.com',
+      display_name: '',
+      unread_count: 0,
+      created_at: '2026-11-16T10:00:00Z',
+    };
+    const get = vi.spyOn(request, 'get').mockImplementation(async url => {
+      if (url === '/mail-message-stats') {
+        return Array.from({ length: 7 }, (_, index) => ({
+          day: `2026-11-1${index}`,
+          sent: 0,
+          failed: 0,
+          received: 0,
+        }));
+      }
+      return url.includes('/messages/') ? message() : [];
+    });
+    const getEnvelope = vi.spyOn(request, 'getEnvelope').mockResolvedValue(pageEnvelope);
+    const post = vi
+      .spyOn(request, 'post')
+      .mockImplementation(async url => (url === '/mailboxes' ? mailbox : message()));
+    const put = vi.spyOn(request, 'put').mockResolvedValue(message());
+    const remove = vi.spyOn(request, 'delete').mockResolvedValue(undefined);
+
+    await mailboxService.domains(7);
+    await mailboxService.list(7);
+    await mailboxService.stats(7);
+    await mailboxService.message(7, 12, 7);
+    await mailboxService.messages(7, 12, { direction: 'inbound' });
+    await mailboxService.listLog(7, { status: 'failed' });
+    await mailboxService.create(7, { local_part: 'hello' });
+    await mailboxService.send(7, 12, { to: ['bob@example.com'], subject: 'Hi', text: 'Body' });
+    await mailboxService.setRead(7, 12, 7, true);
+    await mailboxService.remove(7, 12);
+    await mailboxService.removeMessage(7, 12, 7);
+
+    const header = { 'Organization-Id': '7' };
+    const configs = [
+      ...get.mock.calls.map(call => call[1]),
+      ...getEnvelope.mock.calls.map(call => call[1]),
+      ...post.mock.calls.map(call => call[2]),
+      ...put.mock.calls.map(call => call[2]),
+      ...remove.mock.calls.map(call => call[1]),
+    ];
+    expect(configs).toHaveLength(11);
+    for (const config of configs) expect(config?.headers).toEqual(header);
+    expect(get.mock.calls.map(call => call[0])).toEqual([
+      '/mailbox-domains',
+      '/mailboxes',
+      '/mail-message-stats',
+      '/mailboxes/12/messages/7',
+    ]);
+    expect(getEnvelope.mock.calls.map(call => call[0])).toEqual([
+      '/mailboxes/12/messages',
+      '/mail-messages',
+    ]);
+    // The organization is never a query parameter or part of the body.
+    expect(getEnvelope.mock.calls[1][1]?.params).toEqual({
+      status: 'failed',
+      page: 1,
+      per_page: 20,
+    });
+    expect(post.mock.calls[0][1]).toEqual({ local_part: 'hello' });
+  });
+
+  it('refuses a call without a valid organization before any request', async () => {
+    const spies = [
+      vi.spyOn(request, 'get'),
+      vi.spyOn(request, 'getEnvelope'),
+      vi.spyOn(request, 'post'),
+      vi.spyOn(request, 'put'),
+      vi.spyOn(request, 'delete'),
+    ];
+
+    for (const organizationId of [0, -1, 1.5, Number.NaN]) {
+      const calls = [
+        () => mailboxService.domains(organizationId),
+        () => mailboxService.list(organizationId),
+        () => mailboxService.stats(organizationId),
+        () => mailboxService.message(organizationId, 12, 7),
+        () => mailboxService.messages(organizationId, 12, { direction: 'inbound' }),
+        () => mailboxService.listLog(organizationId),
+        () => mailboxService.create(organizationId, { local_part: 'hello' }),
+        () => mailboxService.send(organizationId, 12, { to: ['bob@example.com'], subject: 'Hi' }),
+        () => mailboxService.setRead(organizationId, 12, 7, true),
+        () => mailboxService.remove(organizationId, 12),
+        () => mailboxService.removeMessage(organizationId, 12, 7),
+      ];
+      for (const call of calls) {
+        await expect(call()).rejects.toMatchObject({ errorCode: ClientErrorCode.INVALID_RESPONSE });
+      }
+    }
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
   it('accepts contract-shaped messages and rejects drift', () => {
     expect(parseMailMessage(message(), 7)).toMatchObject({ id: 7, status: 'received' });
     expect(() => parseMailMessage(message(), 8)).toThrow(ApiError);
@@ -210,6 +319,16 @@ describe('mailbox service boundary', () => {
     expect(resolveMailboxErrorKey(error(ApiErrorCode.MAILBOX_SENDER_NOT_CONFIGURED))).toBe(
       'errors.senderNotConfigured'
     );
+    // A member who creates or deletes a mailbox, and a member who lost the organization.
+    expect(resolveMailboxErrorKey(error(ApiErrorCode.PERMISSION_DENIED))).toBe(
+      'errors.permissionDenied'
+    );
+    expect(resolveMailboxErrorKey(error(ApiErrorCode.ORGANIZATION_NOT_FOUND))).toBe(
+      'errors.organizationNotFound'
+    );
+    expect(isOrganizationLost(error(ApiErrorCode.ORGANIZATION_NOT_FOUND))).toBe(true);
+    expect(isOrganizationLost(error(ApiErrorCode.MAILBOX_NOT_FOUND))).toBe(false);
+    expect(isOrganizationLost(new Error('x'))).toBe(false);
     expect(resolveMailboxErrorKey(error(ClientErrorCode.INVALID_RESPONSE))).toBe(
       'errors.invalidResponse'
     );
@@ -225,7 +344,7 @@ describe('mailbox service boundary', () => {
 function domain(overrides: Record<string, unknown> = {}) {
   return {
     domain: 'mail.example.com',
-    max_mailboxes: 10,
+    max_mailboxes: 50,
     provider: 'cloudflare',
     inbound_enabled: true,
     daily_send_limit: 200,

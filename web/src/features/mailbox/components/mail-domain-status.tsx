@@ -8,10 +8,17 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ROUTES } from '@/constants/routes';
+import {
+  MailOrganizationBoundary,
+  MailPageHeader,
+  OrganizationLostState,
+  useMailOrganizationId,
+} from '@/features/mailbox/components/mail-organization';
 import { EmptyState, ErrorAlert } from '@/features/mailbox/components/mail-shared';
 import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
+import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import type { MailboxDomain } from '@/features/mailbox/types';
-import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
+import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -28,12 +35,28 @@ const apiSettings = [
 /**
  * Domain console: what the API reports about the configured mail domain, a Cloudflare setup
  * checklist, and how to send with an API key. Everything here is read-only; the configuration
- * lives on the API and in Cloudflare.
+ * lives on the API and in Cloudflare. The limits are those of the chosen organization.
  */
 export function MailDomainStatus() {
   const t = useT('mailbox');
-  const domains = useMailboxDomains();
-  const mailboxes = useMailboxes();
+  const scope = useMailOrganization();
+  return (
+    <div className="space-y-5">
+      <MailPageHeader
+        title={t('domain.title')}
+        description={t('domain.description')}
+        scope={scope}
+      />
+      <MailOrganizationBoundary scope={scope}>{() => <DomainStatus />}</MailOrganizationBoundary>
+    </div>
+  );
+}
+
+function DomainStatus() {
+  const t = useT('mailbox');
+  const organizationId = useMailOrganizationId();
+  const domains = useMailboxDomains(organizationId);
+  const mailboxes = useMailboxes(organizationId);
 
   if (domains.isPending) {
     return (
@@ -43,6 +66,7 @@ export function MailDomainStatus() {
       </div>
     );
   }
+  if (isOrganizationLost(domains.error)) return <OrganizationLostState />;
   if (domains.error || !domains.data) {
     return (
       <ErrorAlert
@@ -125,7 +149,7 @@ export function MailDomainStatus() {
           tabIndex={0}
           className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-xs focus-ring"
         >
-          <code>{apiExample(sender)}</code>
+          <code>{apiExample(sender, organizationId)}</code>
         </pre>
         <p className="text-xs text-muted-foreground">{t('domain.apiHostNote')}</p>
       </section>
@@ -271,8 +295,8 @@ function StateBadge({
   );
 }
 
-/** A copyable request; the sender is one of the user's own addresses on the real domain. */
-function apiExample(sender: string): string {
+/** A copyable request; the sender is one of the organization's addresses on the real domain. */
+function apiExample(sender: string, organizationId: number): string {
   const body = JSON.stringify(
     {
       from: sender,
@@ -286,6 +310,7 @@ function apiExample(sender: string): string {
   return [
     'curl -X POST https://YOUR_API_HOST/v1/outbound-mail-messages \\',
     '  -H "X-API-Key: $FASTBUILD_API_KEY" \\',
+    `  -H "Organization-Id: ${organizationId}" \\`,
     '  -H "Idempotency-Key: receipt-1042" \\',
     '  -H "Content-Type: application/json" \\',
     `  -d '${body}'`,

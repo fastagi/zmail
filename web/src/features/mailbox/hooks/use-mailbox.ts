@@ -20,118 +20,151 @@ import type {
 export const MAIL_PAGE_SIZE = 20;
 export const MAIL_STATS_DAYS = 7;
 
+/** Every key names the organization, so one organization's data is never shown for another. */
 export const mailboxKeys = {
   all: ['mailbox'] as const,
-  domains: () => [...mailboxKeys.all, 'domains'] as const,
-  list: () => [...mailboxKeys.all, 'list'] as const,
-  mailbox: (mailboxId: number) => [...mailboxKeys.all, mailboxId] as const,
-  messages: (mailboxId: number) => [...mailboxKeys.mailbox(mailboxId), 'messages'] as const,
-  page: (mailboxId: number, direction: MailDirection, page: number) =>
-    [...mailboxKeys.messages(mailboxId), direction, page] as const,
-  message: (mailboxId: number, messageId: number) =>
-    [...mailboxKeys.mailbox(mailboxId), 'message', messageId] as const,
-  log: () => [...mailboxKeys.all, 'log'] as const,
-  logPage: (filters: MailLogFilters, page: number) =>
+  organization: (organizationId: number) => [...mailboxKeys.all, organizationId] as const,
+  domains: (organizationId: number) =>
+    [...mailboxKeys.organization(organizationId), 'domains'] as const,
+  list: (organizationId: number) => [...mailboxKeys.organization(organizationId), 'list'] as const,
+  mailbox: (organizationId: number, mailboxId: number) =>
+    [...mailboxKeys.organization(organizationId), mailboxId] as const,
+  messages: (organizationId: number, mailboxId: number) =>
+    [...mailboxKeys.mailbox(organizationId, mailboxId), 'messages'] as const,
+  page: (organizationId: number, mailboxId: number, direction: MailDirection, page: number) =>
+    [...mailboxKeys.messages(organizationId, mailboxId), direction, page] as const,
+  message: (organizationId: number, mailboxId: number, messageId: number) =>
+    [...mailboxKeys.mailbox(organizationId, mailboxId), 'message', messageId] as const,
+  log: (organizationId: number) => [...mailboxKeys.organization(organizationId), 'log'] as const,
+  logPage: (organizationId: number, filters: MailLogFilters, page: number) =>
     [
-      ...mailboxKeys.log(),
+      ...mailboxKeys.log(organizationId),
       filters.direction ?? '',
       filters.status ?? '',
       filters.mailboxId ?? 0,
       filters.q ?? '',
       page,
     ] as const,
-  stats: () => [...mailboxKeys.all, 'stats'] as const,
-  statsWindow: (days: number) => [...mailboxKeys.stats(), days] as const,
+  stats: (organizationId: number) =>
+    [...mailboxKeys.organization(organizationId), 'stats'] as const,
+  statsWindow: (organizationId: number, days: number) =>
+    [...mailboxKeys.stats(organizationId), days] as const,
 };
 
 /** The log and the per-day counts span every mailbox, so any message change touches them. */
-function invalidateLog(queryClient: QueryClient, withStats = true) {
+function invalidateLog(queryClient: QueryClient, organizationId: number, withStats = true) {
   return Promise.all([
-    queryClient.invalidateQueries({ queryKey: mailboxKeys.log() }),
-    ...(withStats ? [queryClient.invalidateQueries({ queryKey: mailboxKeys.stats() })] : []),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.log(organizationId) }),
+    ...(withStats
+      ? [queryClient.invalidateQueries({ queryKey: mailboxKeys.stats(organizationId) })]
+      : []),
   ]);
+}
+
+function validId(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
 }
 
 // The workspace renders every error inline, so the global error toast stays quiet.
 
-export function useMailboxDomains() {
+export function useMailboxDomains(organizationId: number) {
   return useQuery({
-    queryKey: mailboxKeys.domains(),
-    queryFn: () => mailboxService.domains(),
+    queryKey: mailboxKeys.domains(organizationId),
+    queryFn: () => mailboxService.domains(organizationId),
+    enabled: validId(organizationId),
     staleTime: 5 * 60_000,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
 
-export function useMailboxes() {
+export function useMailboxes(organizationId: number) {
   return useQuery({
-    queryKey: mailboxKeys.list(),
-    queryFn: () => mailboxService.list(),
+    queryKey: mailboxKeys.list(organizationId),
+    queryFn: () => mailboxService.list(organizationId),
+    enabled: validId(organizationId),
     staleTime: 15_000,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
 
-export function useCreateMailbox() {
+export function useCreateMailbox(organizationId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateMailboxInput) => mailboxService.create(input),
+    mutationFn: (input: CreateMailboxInput) => mailboxService.create(organizationId, input),
     meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: mailboxKeys.list() }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
   });
 }
 
-export function useDeleteMailbox() {
+export function useDeleteMailbox(organizationId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (mailboxId: number) => mailboxService.remove(mailboxId),
+    mutationFn: (mailboxId: number) => mailboxService.remove(organizationId, mailboxId),
     meta: LOCAL_ERROR_HANDLING_META,
     onSuccess: (_result, mailboxId) => {
-      queryClient.removeQueries({ queryKey: mailboxKeys.mailbox(mailboxId) });
+      queryClient.removeQueries({ queryKey: mailboxKeys.mailbox(organizationId, mailboxId) });
     },
     // Messages of a deleted mailbox leave the log and the counts.
     onSettled: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.list() }),
-        invalidateLog(queryClient),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+        invalidateLog(queryClient, organizationId),
       ]),
   });
 }
 
-export function useMailMessages(mailboxId: number, direction: MailDirection, page: number) {
+export function useMailMessages(
+  organizationId: number,
+  mailboxId: number,
+  direction: MailDirection,
+  page: number
+) {
   return useQuery({
-    queryKey: mailboxKeys.page(mailboxId, direction, page),
-    queryFn: () => mailboxService.messages(mailboxId, { direction, page, perPage: MAIL_PAGE_SIZE }),
+    queryKey: mailboxKeys.page(organizationId, mailboxId, direction, page),
+    queryFn: () =>
+      mailboxService.messages(organizationId, mailboxId, {
+        direction,
+        page,
+        perPage: MAIL_PAGE_SIZE,
+      }),
+    enabled: validId(organizationId),
     placeholderData: keepPreviousData,
     staleTime: 15_000,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
 
-export function useMailLog(filters: MailLogFilters, page: number) {
+export function useMailLog(organizationId: number, filters: MailLogFilters, page: number) {
   return useQuery({
-    queryKey: mailboxKeys.logPage(filters, page),
-    queryFn: () => mailboxService.listLog({ ...filters, page, perPage: MAIL_PAGE_SIZE }),
+    queryKey: mailboxKeys.logPage(organizationId, filters, page),
+    queryFn: () =>
+      mailboxService.listLog(organizationId, { ...filters, page, perPage: MAIL_PAGE_SIZE }),
+    enabled: validId(organizationId),
     placeholderData: keepPreviousData,
     staleTime: 15_000,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
 
-export function useMailStats(days: number = MAIL_STATS_DAYS) {
+export function useMailStats(organizationId: number, days: number = MAIL_STATS_DAYS) {
   return useQuery({
-    queryKey: mailboxKeys.statsWindow(days),
-    queryFn: () => mailboxService.stats(days),
+    queryKey: mailboxKeys.statsWindow(organizationId, days),
+    queryFn: () => mailboxService.stats(organizationId, days),
+    enabled: validId(organizationId),
     staleTime: 60_000,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
 
-export function useMailMessage(mailboxId: number, messageId: number | null) {
+export function useMailMessage(
+  organizationId: number,
+  mailboxId: number,
+  messageId: number | null
+) {
   return useQuery({
-    queryKey: mailboxKeys.message(mailboxId, messageId ?? 0),
-    queryFn: () => mailboxService.message(mailboxId, messageId ?? 0),
-    enabled: messageId !== null,
+    queryKey: mailboxKeys.message(organizationId, mailboxId, messageId ?? 0),
+    queryFn: () => mailboxService.message(organizationId, mailboxId, messageId ?? 0),
+    enabled: validId(organizationId) && messageId !== null,
     staleTime: 15_000,
     meta: LOCAL_ERROR_HANDLING_META,
   });
@@ -141,34 +174,39 @@ export function useMailMessage(mailboxId: number, messageId: number | null) {
  * The sent folder is refreshed after every attempt: a send the provider rejected is still stored,
  * with status `failed`.
  */
-export function useSendMailMessage(mailboxId: number) {
+export function useSendMailMessage(organizationId: number, mailboxId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: SendMailMessageInput) => mailboxService.send(mailboxId, input),
+    mutationFn: (input: SendMailMessageInput) =>
+      mailboxService.send(organizationId, mailboxId, input),
     meta: LOCAL_ERROR_HANDLING_META,
     onSettled: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.messages(mailboxId) }),
-        invalidateLog(queryClient),
+        queryClient.invalidateQueries({
+          queryKey: mailboxKeys.messages(organizationId, mailboxId),
+        }),
+        invalidateLog(queryClient, organizationId),
       ]),
   });
 }
 
-export function useUpdateMailMessage(mailboxId: number) {
+export function useUpdateMailMessage(organizationId: number, mailboxId: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ messageId, read }: { messageId: number; read: boolean }) =>
-      mailboxService.setRead(mailboxId, messageId, read),
+      mailboxService.setRead(organizationId, mailboxId, messageId, read),
     meta: LOCAL_ERROR_HANDLING_META,
     onSuccess: message => {
-      queryClient.setQueryData(mailboxKeys.message(mailboxId, message.id), message);
+      queryClient.setQueryData(mailboxKeys.message(organizationId, mailboxId, message.id), message);
     },
     // Read state changes the unread count shown in the mailbox list.
     onSettled: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.messages(mailboxId) }),
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.list() }),
-        invalidateLog(queryClient, false),
+        queryClient.invalidateQueries({
+          queryKey: mailboxKeys.messages(organizationId, mailboxId),
+        }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+        invalidateLog(queryClient, organizationId, false),
       ]),
   });
 }
@@ -177,38 +215,45 @@ export function useUpdateMailMessage(mailboxId: number) {
  * Marks a message read from the log, where each row belongs to a different mailbox, so the
  * mailbox is a variable of the mutation rather than of the hook.
  */
-export function useMarkMailMessageRead() {
+export function useMarkMailMessageRead(organizationId: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ mailboxId, messageId }: { mailboxId: number; messageId: number }) =>
-      mailboxService.setRead(mailboxId, messageId, true),
+      mailboxService.setRead(organizationId, mailboxId, messageId, true),
     meta: LOCAL_ERROR_HANDLING_META,
     onSuccess: (message, { mailboxId }) => {
-      queryClient.setQueryData(mailboxKeys.message(mailboxId, message.id), message);
+      queryClient.setQueryData(mailboxKeys.message(organizationId, mailboxId, message.id), message);
     },
     onSettled: (_message, _error, { mailboxId }) =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.messages(mailboxId) }),
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.list() }),
-        invalidateLog(queryClient, false),
+        queryClient.invalidateQueries({
+          queryKey: mailboxKeys.messages(organizationId, mailboxId),
+        }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+        invalidateLog(queryClient, organizationId, false),
       ]),
   });
 }
 
-export function useDeleteMailMessage(mailboxId: number) {
+export function useDeleteMailMessage(organizationId: number, mailboxId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (messageId: number) => mailboxService.removeMessage(mailboxId, messageId),
+    mutationFn: (messageId: number) =>
+      mailboxService.removeMessage(organizationId, mailboxId, messageId),
     meta: LOCAL_ERROR_HANDLING_META,
     onSuccess: (_result, messageId) => {
-      queryClient.removeQueries({ queryKey: mailboxKeys.message(mailboxId, messageId) });
+      queryClient.removeQueries({
+        queryKey: mailboxKeys.message(organizationId, mailboxId, messageId),
+      });
     },
     // Deleting an unread message lowers the unread count shown in the mailbox list.
     onSettled: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.messages(mailboxId) }),
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.list() }),
-        invalidateLog(queryClient),
+        queryClient.invalidateQueries({
+          queryKey: mailboxKeys.messages(organizationId, mailboxId),
+        }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+        invalidateLog(queryClient, organizationId),
       ]),
   });
 }

@@ -49,37 +49,46 @@ interface ListLogOptions extends MailLogFilters {
 }
 
 /**
- * Browser service for the mailbox routes in `contracts/MAILBOXES.md`. Mailboxes belong to the
- * signed-in user, so no call carries an organization.
+ * Browser service for the mailbox routes in `contracts/MAILBOXES.md`. Mailboxes belong to an
+ * organization, so every call names it in the `Organization-Id` header.
  */
 export const mailboxService = {
-  async domains(): Promise<MailboxDomain[]> {
+  async domains(organizationId: number): Promise<MailboxDomain[]> {
     const parsed = mailboxDomainListSchema.safeParse(
-      await request.get<unknown>('/mailbox-domains')
+      await request.get<unknown>('/mailbox-domains', {
+        headers: organizationHeaders(organizationId),
+      })
     );
     if (!parsed.success) throw invalidResponse();
     return parsed.data;
   },
 
-  async list(): Promise<Mailbox[]> {
-    const parsed = mailboxListSchema.safeParse(await request.get<unknown>('/mailboxes'));
+  async list(organizationId: number): Promise<Mailbox[]> {
+    const parsed = mailboxListSchema.safeParse(
+      await request.get<unknown>('/mailboxes', { headers: organizationHeaders(organizationId) })
+    );
     if (!parsed.success) throw invalidResponse();
     return parsed.data;
   },
 
-  async create(input: CreateMailboxInput): Promise<Mailbox> {
-    const value = await request.post<unknown, CreateMailboxInput>('/mailboxes', input);
+  async create(organizationId: number, input: CreateMailboxInput): Promise<Mailbox> {
+    const value = await request.post<unknown, CreateMailboxInput>('/mailboxes', input, {
+      headers: organizationHeaders(organizationId),
+    });
     const parsed = mailboxSchema.safeParse(value);
     if (!parsed.success) throw invalidResponse();
     return parsed.data;
   },
 
-  async remove(mailboxId: number): Promise<void> {
+  async remove(organizationId: number, mailboxId: number): Promise<void> {
     validId(mailboxId);
-    await request.delete<void>(`/mailboxes/${mailboxId}`);
+    await request.delete<void>(`/mailboxes/${mailboxId}`, {
+      headers: organizationHeaders(organizationId),
+    });
   },
 
   async messages(
+    organizationId: number,
     mailboxId: number,
     { direction, page = 1, perPage = 20 }: ListMessagesOptions
   ): Promise<MailMessagePage> {
@@ -89,6 +98,7 @@ export const mailboxService = {
       throw invalidResponse();
     }
     const value = await request.getEnvelope<unknown>(`/mailboxes/${mailboxId}/messages`, {
+      headers: organizationHeaders(organizationId),
       params: { direction, page, per_page: perPage },
     });
     const parsed = mailMessagePageEnvelopeSchema.safeParse(value);
@@ -96,15 +106,11 @@ export const mailboxService = {
     return { items: parsed.data.data, meta: parsed.data.meta, links: parsed.data.links };
   },
 
-  /** Messages across every mailbox of the signed-in user, newest first, without bodies. */
-  async listLog({
-    direction,
-    status,
-    mailboxId,
-    q,
-    page = 1,
-    perPage = 20,
-  }: ListLogOptions = {}): Promise<MailLogPage> {
+  /** Messages across every mailbox of the organization, newest first, without bodies. */
+  async listLog(
+    organizationId: number,
+    { direction, status, mailboxId, q, page = 1, perPage = 20 }: ListLogOptions = {}
+  ): Promise<MailLogPage> {
     validId(page);
     if (mailboxId !== undefined) validId(mailboxId);
     if (!Number.isSafeInteger(perPage) || perPage < 1 || perPage > MAIL_PAGE_MAX_SIZE) {
@@ -113,6 +119,7 @@ export const mailboxService = {
     const query = q?.trim() ?? '';
     if (Array.from(query).length > MAIL_LOG_QUERY_MAX_LENGTH) throw invalidResponse();
     const value = await request.getEnvelope<unknown>('/mail-messages', {
+      headers: organizationHeaders(organizationId),
       params: {
         ...(direction ? { direction } : {}),
         ...(status ? { status } : {}),
@@ -128,21 +135,33 @@ export const mailboxService = {
   },
 
   /** One entry per UTC day for the last `days` days, oldest first, empty days included. */
-  async stats(days: number = MAIL_STATS_DEFAULT_DAYS): Promise<MailDayStats[]> {
+  async stats(
+    organizationId: number,
+    days: number = MAIL_STATS_DEFAULT_DAYS
+  ): Promise<MailDayStats[]> {
     if (!Number.isSafeInteger(days) || days < 1 || days > MAIL_STATS_MAX_DAYS) {
       throw invalidResponse();
     }
     const parsed = mailDayStatsListSchema.safeParse(
-      await request.get<unknown>('/mail-message-stats', { params: { days } })
+      await request.get<unknown>('/mail-message-stats', {
+        headers: organizationHeaders(organizationId),
+        params: { days },
+      })
     );
     if (!parsed.success || parsed.data.length !== days) throw invalidResponse();
     return parsed.data;
   },
 
-  async message(mailboxId: number, messageId: number): Promise<MailMessage> {
+  async message(
+    organizationId: number,
+    mailboxId: number,
+    messageId: number
+  ): Promise<MailMessage> {
     validId(mailboxId);
     validId(messageId);
-    const value = await request.get<unknown>(`/mailboxes/${mailboxId}/messages/${messageId}`);
+    const value = await request.get<unknown>(`/mailboxes/${mailboxId}/messages/${messageId}`, {
+      headers: organizationHeaders(organizationId),
+    });
     return parseMailMessage(value, messageId);
   },
 
@@ -150,29 +169,42 @@ export const mailboxService = {
    * Resolves only when the provider accepted the message. A rejected send throws
    * `MAILBOX.DELIVERY_FAILED`; the message then stays in the sent folder as `failed`.
    */
-  async send(mailboxId: number, input: SendMailMessageInput): Promise<MailMessage> {
+  async send(
+    organizationId: number,
+    mailboxId: number,
+    input: SendMailMessageInput
+  ): Promise<MailMessage> {
     validId(mailboxId);
     const value = await request.post<unknown, SendMailMessageInput>(
       `/mailboxes/${mailboxId}/messages`,
-      input
+      input,
+      { headers: organizationHeaders(organizationId) }
     );
     return parseMailMessage(value);
   },
 
-  async setRead(mailboxId: number, messageId: number, read: boolean): Promise<MailMessage> {
+  async setRead(
+    organizationId: number,
+    mailboxId: number,
+    messageId: number,
+    read: boolean
+  ): Promise<MailMessage> {
     validId(mailboxId);
     validId(messageId);
     const value = await request.put<unknown, UpdateMailMessageInput>(
       `/mailboxes/${mailboxId}/messages/${messageId}`,
-      { read }
+      { read },
+      { headers: organizationHeaders(organizationId) }
     );
     return parseMailMessage(value, messageId);
   },
 
-  async removeMessage(mailboxId: number, messageId: number): Promise<void> {
+  async removeMessage(organizationId: number, mailboxId: number, messageId: number): Promise<void> {
     validId(mailboxId);
     validId(messageId);
-    await request.delete<void>(`/mailboxes/${mailboxId}/messages/${messageId}`);
+    await request.delete<void>(`/mailboxes/${mailboxId}/messages/${messageId}`, {
+      headers: organizationHeaders(organizationId),
+    });
   },
 };
 
@@ -182,6 +214,12 @@ export function parseMailMessage(value: unknown, expectedId?: number): MailMessa
     throw invalidResponse();
   }
   return parsed.data;
+}
+
+/** The organization the request acts in; an invalid id never leaves the browser. */
+function organizationHeaders(organizationId: number): Record<string, string> {
+  validId(organizationId);
+  return { 'Organization-Id': String(organizationId) };
 }
 
 function validId(value: number): void {

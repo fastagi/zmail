@@ -25,6 +25,12 @@ import {
   type ComposeDraft,
 } from '@/features/mailbox/components/compose-dialog';
 import {
+  MailOrganizationBoundary,
+  MailPageHeader,
+  OrganizationLostState,
+  useMailOrganizationId,
+} from '@/features/mailbox/components/mail-organization';
+import {
   EmptyState,
   ErrorAlert,
   MailHtmlFrame,
@@ -40,6 +46,7 @@ import {
   useMailboxes,
   useUpdateMailMessage,
 } from '@/features/mailbox/hooks/use-mailbox';
+import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import {
   MAILBOX_DISPLAY_NAME_MAX_LENGTH,
   MAILBOX_LOCAL_PART_MAX_LENGTH,
@@ -53,24 +60,40 @@ import type {
   Mailbox,
   MailboxDomain,
 } from '@/features/mailbox/types';
-import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
+import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
 /**
- * Mailbox console: the signed-in user's addresses on the configured domain, with the inbox and
- * sent folder of the selected one. The API remains the authority for ownership, address rules,
- * and delivery; the checks here only save a round trip.
+ * Mailbox console: the addresses of the chosen organization on the configured domain, with the
+ * inbox and sent folder of the selected one. Every member reads and sends; only owners and admins
+ * see the controls that create and delete mailboxes. The API remains the authority for
+ * membership, roles, address rules, and delivery; the checks here only save a round trip.
  */
 export function MailboxWorkspace() {
   const t = useT('mailbox');
-  const domains = useMailboxDomains();
-  const mailboxes = useMailboxes();
+  const scope = useMailOrganization();
+  return (
+    <div className="space-y-5">
+      <MailPageHeader title={t('title')} description={t('description')} scope={scope} />
+      <MailOrganizationBoundary scope={scope}>
+        {organization => <Workspace canManage={organization.canManage} />}
+      </MailOrganizationBoundary>
+    </div>
+  );
+}
+
+function Workspace({ canManage }: { canManage: boolean }) {
+  const t = useT('mailbox');
+  const organizationId = useMailOrganizationId();
+  const domains = useMailboxDomains(organizationId);
+  const mailboxes = useMailboxes(organizationId);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Mailbox | null>(null);
 
   if (mailboxes.isPending || domains.isPending) return <WorkspaceSkeleton />;
   const loadError = mailboxes.error ?? domains.error;
+  if (isOrganizationLost(loadError)) return <OrganizationLostState />;
   if (loadError || !mailboxes.data || !domains.data) {
     return (
       <ErrorAlert
@@ -105,7 +128,7 @@ export function MailboxWorkspace() {
           <EmptyState
             icon={<Mail className="size-5" aria-hidden="true" />}
             title={t('mailboxes.emptyTitle')}
-            description={t('mailboxes.empty')}
+            description={t(canManage ? 'mailboxes.empty' : 'organization.readOnly')}
           />
         ) : (
           <ul className="space-y-1">
@@ -137,22 +160,28 @@ export function MailboxWorkspace() {
                     {mailbox.display_name || t('mailboxes.noDisplayName')}
                   </span>
                 </button>
-                <Button
-                  type="button"
-                  isIcon
-                  size="sm"
-                  variant="ghost"
-                  aria-label={t('deleteMailbox.label', { address: mailbox.address })}
-                  title={t('deleteMailbox.label', { address: mailbox.address })}
-                  onClick={() => setDeleteTarget(mailbox)}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
+                {canManage ? (
+                  <Button
+                    type="button"
+                    isIcon
+                    size="sm"
+                    variant="ghost"
+                    aria-label={t('deleteMailbox.label', { address: mailbox.address })}
+                    title={t('deleteMailbox.label', { address: mailbox.address })}
+                    onClick={() => setDeleteTarget(mailbox)}
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ul>
         )}
-        {domain ? (
+        {!canManage ? (
+          items.length > 0 ? (
+            <p className="text-xs text-muted-foreground">{t('organization.readOnly')}</p>
+          ) : null
+        ) : domain ? (
           <CreateMailboxForm
             domain={domain}
             count={items.length}
@@ -165,7 +194,9 @@ export function MailboxWorkspace() {
         {selected ? <MailboxMessages key={selected.id} mailbox={selected} /> : null}
       </section>
 
-      <DeleteMailboxDialog mailbox={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      {canManage ? (
+        <DeleteMailboxDialog mailbox={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      ) : null}
     </div>
   );
 }
@@ -180,7 +211,7 @@ function CreateMailboxForm({
   onCreated: (mailbox: Mailbox) => void;
 }) {
   const t = useT('mailbox');
-  const create = useCreateMailbox();
+  const create = useCreateMailbox(useMailOrganizationId());
   const [localPart, setLocalPart] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -284,7 +315,7 @@ function DeleteMailboxDialog({
   onClose: () => void;
 }) {
   const t = useT('mailbox');
-  const remove = useDeleteMailbox();
+  const remove = useDeleteMailbox(useMailOrganizationId());
 
   const confirm = async () => {
     if (!mailbox) return;
@@ -331,7 +362,7 @@ function MailboxMessages({ mailbox }: { mailbox: Mailbox }) {
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<number | null>(null);
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
-  const update = useUpdateMailMessage(mailbox.id);
+  const update = useUpdateMailMessage(useMailOrganizationId(), mailbox.id);
 
   const showFolder = (next: MailDirection) => {
     setDirection(next);
@@ -437,7 +468,7 @@ function MessageList({
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
-  const messages = useMailMessages(mailbox.id, direction, page);
+  const messages = useMailMessages(useMailOrganizationId(), mailbox.id, direction, page);
 
   if (messages.isPending) return <ListSkeleton />;
   if (messages.error || !messages.data) {
@@ -564,7 +595,7 @@ function MessageDetail({
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
-  const query = useMailMessage(mailboxId, messageId);
+  const query = useMailMessage(useMailOrganizationId(), mailboxId, messageId);
   const [plainText, setPlainText] = useState(false);
 
   const back = (

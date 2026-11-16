@@ -24,6 +24,9 @@ const state = vi.hoisted(() => {
   });
   const mutation = () => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() });
   return {
+    organizations: query(),
+    /** The organization id each mailbox hook was called with, in call order. */
+    organizationIds: [] as number[],
     domains: query(),
     mailboxes: query(),
     log: query(),
@@ -40,36 +43,74 @@ const state = vi.hoisted(() => {
   };
 });
 
+/** A router whose `replace` changes the URL the page reads, as the real one does. */
+const navigation = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    listeners,
+    replace: vi.fn((url: string) => {
+      window.history.replaceState(null, '', url);
+      for (const listener of listeners) listener();
+    }),
+  };
+});
+
 vi.mock('sonner', () => ({ toast }));
-vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
-  MAIL_STATS_DAYS: 7,
-  useMailboxDomains: () => state.domains,
-  useMailboxes: () => state.mailboxes,
-  useMailLog: (filters: Record<string, unknown>, page: number) => {
-    state.logCalls.push({ filters, page });
-    return state.log;
-  },
-  useMailStats: (days: number) => {
-    state.statsCalls.push(days);
-    return state.stats;
-  },
-  useMailMessage: (mailboxId: number, messageId: number | null) => {
-    state.detailCalls.push({ mailboxId, messageId });
-    return state.detail;
-  },
-  useMarkMailMessageRead: () => state.markRead,
-  useSendMailMessage: (mailboxId: number) => {
-    state.sendCalls.push(mailboxId);
-    return state.send;
-  },
-  useUpdateMailMessage: () => state.update,
-  useDeleteMailMessage: () => state.removeMessage,
+vi.mock('next/navigation', async () => {
+  const { useSyncExternalStore } = await import('react');
+  const router = { replace: navigation.replace };
+  const subscribe = (listener: () => void) => {
+    navigation.listeners.add(listener);
+    return () => navigation.listeners.delete(listener);
+  };
+  return {
+    useRouter: () => router,
+    usePathname: () => window.location.pathname,
+    useSearchParams: () =>
+      new URLSearchParams(useSyncExternalStore(subscribe, () => window.location.search)),
+  };
+});
+vi.mock('@/features/organization/hooks/use-organizations', () => ({
+  useOrganizations: () => state.organizations,
 }));
+vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
+  const scoped = <T,>(organizationId: number, result: T): T => {
+    state.organizationIds.push(organizationId);
+    return result;
+  };
+  return {
+    MAIL_STATS_DAYS: 7,
+    useMailboxDomains: (organizationId: number) => scoped(organizationId, state.domains),
+    useMailboxes: (organizationId: number) => scoped(organizationId, state.mailboxes),
+    useMailLog: (organizationId: number, filters: Record<string, unknown>, page: number) => {
+      state.logCalls.push({ filters, page });
+      return scoped(organizationId, state.log);
+    },
+    useMailStats: (organizationId: number, days: number) => {
+      state.statsCalls.push(days);
+      return scoped(organizationId, state.stats);
+    },
+    useMailMessage: (organizationId: number, mailboxId: number, messageId: number | null) => {
+      state.detailCalls.push({ mailboxId, messageId });
+      return scoped(organizationId, state.detail);
+    },
+    useMarkMailMessageRead: (organizationId: number) => scoped(organizationId, state.markRead),
+    useSendMailMessage: (organizationId: number, mailboxId: number) => {
+      state.sendCalls.push(mailboxId);
+      return scoped(organizationId, state.send);
+    },
+    useUpdateMailMessage: (organizationId: number) => scoped(organizationId, state.update),
+    useDeleteMailMessage: (organizationId: number) => scoped(organizationId, state.removeMessage),
+  };
+});
 
 beforeEach(() => {
   toast.success.mockReset();
   toast.error.mockReset();
+  navigation.replace.mockClear();
   window.history.replaceState(null, '', '/console/emails');
+  state.organizations.data = page([organization(1, 'Acme', 'owner')]);
+  state.organizationIds = [];
   state.domains.data = [domain()];
   state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales')];
   state.log.data = page([
@@ -112,7 +153,14 @@ beforeEach(() => {
     { day: '2026-11-16', sent: 3, failed: 1, received: 2 },
   ];
   state.detail.data = message();
-  for (const query of [state.domains, state.mailboxes, state.log, state.stats, state.detail]) {
+  for (const query of [
+    state.organizations,
+    state.domains,
+    state.mailboxes,
+    state.log,
+    state.stats,
+    state.detail,
+  ]) {
     query.isPending = false;
     query.isSuccess = true;
     query.error = null;
@@ -180,27 +228,27 @@ describe('emails console', () => {
 
     expect(state.logCalls.at(-1)).toEqual({ filters: { status: 'failed' }, page: 3 });
     expect(screen.getByLabelText('Status')).toHaveValue('failed');
-    expect(window.location.search).toBe('?status=failed&page=3');
+    expect(window.location.search).toBe('?org=1&status=failed&page=3');
 
     fireEvent.change(screen.getByLabelText('Direction'), { target: { value: 'outbound' } });
     expect(state.logCalls.at(-1)).toEqual({
       filters: { direction: 'outbound', status: 'failed' },
       page: 1,
     });
-    expect(window.location.search).toBe('?direction=outbound&status=failed');
+    expect(window.location.search).toBe('?org=1&direction=outbound&status=failed');
 
     fireEvent.change(screen.getByLabelText('Mailbox'), { target: { value: '2' } });
     expect(state.logCalls.at(-1)).toEqual({
       filters: { direction: 'outbound', status: 'failed', mailboxId: 2 },
       page: 1,
     });
-    expect(window.location.search).toBe('?direction=outbound&status=failed&mailbox=2');
+    expect(window.location.search).toBe('?org=1&direction=outbound&status=failed&mailbox=2');
 
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('Direction'), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('Mailbox'), { target: { value: '' } });
     expect(state.logCalls.at(-1)).toEqual({ filters: {}, page: 1 });
-    expect(window.location.search).toBe('');
+    expect(window.location.search).toBe('?org=1');
   });
 
   it('offers every direction, status, and mailbox as a filter', () => {
@@ -243,13 +291,13 @@ describe('emails console', () => {
 
     act(() => void vi.advanceTimersByTime(1));
     expect(state.logCalls.at(-1)).toEqual({ filters: { q: 'invoice' }, page: 1 });
-    expect(window.location.search).toBe('?q=invoice');
+    expect(window.location.search).toBe('?org=1&q=invoice');
     expect(state.logCalls.some(call => call.filters.q === 'inv')).toBe(false);
 
     fireEvent.change(search, { target: { value: '   ' } });
     act(() => void vi.advanceTimersByTime(300));
     expect(state.logCalls.at(-1)).toEqual({ filters: {}, page: 1 });
-    expect(window.location.search).toBe('');
+    expect(window.location.search).toBe('?org=1');
   });
 
   it('reads and writes the view as a query string', () => {
@@ -281,6 +329,144 @@ describe('emails console', () => {
       parseEmailLogView(Object.fromEntries(new URLSearchParams(emailLogSearch(view))))
     ).toEqual(view);
     expect(emailLogSearch({ page: 1 })).toBe('');
+    // The Emails page names its organization first, also on the unfiltered first page.
+    expect(emailLogSearch(view, 7)).toBe('?org=7&direction=inbound&mailbox=3&q=100%25+off&page=2');
+    expect(emailLogSearch({ page: 1 }, 7)).toBe('?org=7');
+    expect(
+      parseEmailLogView(Object.fromEntries(new URLSearchParams(emailLogSearch(view, 7))))
+    ).toEqual(view);
+  });
+
+  it('keeps the organization in the URL while filters, search, and pages change', () => {
+    vi.useFakeTimers();
+    state.organizations.data = page([
+      organization(1, 'Acme', 'owner'),
+      organization(2, 'Globex', 'member'),
+    ]);
+    state.log.data = page([entry({ id: 31 })], { current_page: 1, last_page: 3, total: 41 });
+    window.history.replaceState(null, '', '/console/emails?org=2&status=failed');
+    renderLog({ status: 'failed', page: 1 });
+
+    expect(screen.getByLabelText('Organization')).toHaveValue('2');
+    expect(new Set(state.organizationIds)).toEqual(new Set([2]));
+    expect(window.location.search).toBe('?org=2&status=failed');
+
+    fireEvent.change(screen.getByLabelText('Direction'), { target: { value: 'inbound' } });
+    expect(window.location.search).toBe('?org=2&direction=inbound&status=failed');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(window.location.search).toBe('?org=2&direction=inbound&status=failed&page=2');
+    fireEvent.change(screen.getByLabelText('Search emails'), { target: { value: 'invoice' } });
+    act(() => void vi.advanceTimersByTime(300));
+    expect(window.location.search).toBe('?org=2&direction=inbound&status=failed&q=invoice');
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Direction'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Search emails'), { target: { value: '' } });
+    act(() => void vi.advanceTimersByTime(300));
+    expect(window.location.search).toBe('?org=2');
+    // The organization never came from a fallback, and every request stayed in it.
+    expect(navigation.replace).not.toHaveBeenCalled();
+    expect(new Set(state.organizationIds)).toEqual(new Set([2]));
+  });
+
+  it('starts another organization without the filters of the previous one', () => {
+    state.organizations.data = page([
+      organization(1, 'Acme', 'owner'),
+      organization(2, 'Globex', 'member'),
+    ]);
+    window.history.replaceState(null, '', '/console/emails?org=1&status=failed&mailbox=2&page=3');
+    renderLog({ status: 'failed', mailboxId: 2, page: 3 });
+    expect(state.logCalls.at(-1)).toEqual({ filters: { status: 'failed', mailboxId: 2 }, page: 3 });
+
+    state.organizationIds = [];
+    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: '2' } });
+
+    expect(navigation.replace).toHaveBeenCalledWith('/console/emails?org=2', { scroll: false });
+    expect(state.logCalls.at(-1)).toEqual({ filters: {}, page: 1 });
+    expect(screen.getByLabelText('Status')).toHaveValue('');
+    expect(window.location.search).toBe('?org=2');
+    expect(new Set(state.organizationIds)).toEqual(new Set([2]));
+  });
+
+  it('names the only organization as text and writes the fallback into the URL', () => {
+    renderLog();
+
+    expect(screen.getByTestId('mail-organization-name')).toHaveTextContent('Acme');
+    expect(screen.queryByLabelText('Organization')).toBeNull();
+    expect(window.location.search).toBe('?org=1');
+    expect(new Set(state.organizationIds)).toEqual(new Set([1]));
+  });
+
+  it('falls back to the first organization and keeps the filters of the URL', () => {
+    state.organizations.data = page([
+      organization(4, 'Acme', 'owner'),
+      organization(5, 'Globex', 'member'),
+    ]);
+    window.history.replaceState(null, '', '/console/emails?org=9&status=failed&page=3');
+    renderLog({ status: 'failed', page: 3 });
+
+    expect(screen.getByLabelText('Organization')).toHaveValue('4');
+    expect(window.location.search).toBe('?org=4&status=failed&page=3');
+    expect(state.logCalls.at(-1)).toEqual({ filters: { status: 'failed' }, page: 3 });
+    expect(new Set(state.organizationIds)).toEqual(new Set([4]));
+  });
+
+  it('explains that email needs an organization when the user has none', () => {
+    state.organizations.data = page([]);
+    renderLog({ status: 'failed', page: 2 });
+
+    expect(screen.getByRole('heading', { name: 'Emails' })).toBeInTheDocument();
+    expect(screen.getByText('No organization yet')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Go to organizations' })).toHaveAttribute(
+      'href',
+      '/console/organizations'
+    );
+    expect(screen.queryByRole('button', { name: 'Send email' })).toBeNull();
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(state.organizationIds).toEqual([]);
+  });
+
+  it('shows loading and a retryable error for the organization list', () => {
+    state.organizations.data = undefined;
+    state.organizations.isPending = true;
+    const view = renderLog();
+    expect(screen.getByRole('heading', { name: 'Emails' })).toBeInTheDocument();
+    expect(screen.queryByRole('table')).toBeNull();
+    view.unmount();
+
+    state.organizations.isPending = false;
+    state.organizations.error = new ApiError('boom', ApiErrorCode.COMMON_SERVICE_UNAVAILABLE);
+    renderLog();
+    expect(screen.getByText('Your organizations could not be loaded.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(state.organizations.refetch).toHaveBeenCalled();
+    expect(state.organizationIds).toEqual([]);
+  });
+
+  it('leads back to the organizations when access to the organization was lost', () => {
+    state.mailboxes.data = undefined;
+    state.mailboxes.isSuccess = false;
+    state.mailboxes.error = new ApiError('gone', ApiErrorCode.ORGANIZATION_NOT_FOUND, 404);
+    renderLog();
+
+    expect(screen.getByText('No access to this organization')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Go to organizations' })).toHaveAttribute(
+      'href',
+      '/console/organizations'
+    );
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send email' })).toBeDisabled();
+  });
+
+  it('gives a member the whole page: reading, sending, marking, and deleting', () => {
+    state.organizations.data = page([organization(1, 'Acme', 'member')]);
+    renderLog();
+
+    expect(screen.getByRole('button', { name: 'Send email' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
+    expect(state.markRead.mutate).toHaveBeenCalledWith({ mailboxId: 1, messageId: 31 });
+    expect(screen.getByRole('button', { name: 'Reply' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mark unread' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
   });
 
   it('shows the counterpart, the status, the subject, the mailbox, and the time of each row', () => {
@@ -335,7 +521,7 @@ describe('emails console', () => {
     expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(state.logCalls.at(-1)).toEqual({ filters: { direction: 'inbound' }, page: 3 });
-    expect(window.location.search).toBe('?direction=inbound&page=3');
+    expect(window.location.search).toBe('?org=1&direction=inbound&page=3');
     fireEvent.click(screen.getByRole('button', { name: 'Previous' }));
     expect(state.logCalls.at(-1)).toEqual({ filters: { direction: 'inbound' }, page: 1 });
   });
@@ -354,7 +540,7 @@ describe('emails console', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(state.logCalls.at(-1)).toEqual({ filters: {}, page: 1 });
     expect(screen.getByLabelText('Search emails')).toHaveValue('');
-    expect(window.location.search).toBe('');
+    expect(window.location.search).toBe('?org=1');
   });
 
   it('points to the mailboxes page when there is no mailbox to send from', () => {
@@ -363,9 +549,10 @@ describe('emails console', () => {
     renderLog();
 
     expect(screen.getByRole('button', { name: 'Send email' })).toBeDisabled();
+    // The link keeps the organization.
     expect(screen.getByRole('link', { name: 'Go to mailboxes' })).toHaveAttribute(
       'href',
-      '/console/mailboxes'
+      '/console/mailboxes?org=1'
     );
   });
 
@@ -635,8 +822,12 @@ describe('mail domain console', () => {
     const inbound = screen.getByTestId('mail-domain-inbound');
     expect(inbound).toHaveTextContent('Enabled');
     expect(inbound).toHaveAttribute('data-state', 'on');
-    expect(screen.getByText('10 per user')).toBeInTheDocument();
-    expect(screen.getByText('200 messages per user in any 24 hours')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Domain' })).toBeInTheDocument();
+    expect(screen.getByTestId('mail-organization-name')).toHaveTextContent('Acme');
+    // The limits are those of the organization.
+    expect(screen.getByText('50 per organization')).toBeInTheDocument();
+    expect(screen.getByText('200 messages per organization in any 24 hours')).toBeInTheDocument();
+    expect(new Set(state.organizationIds)).toEqual(new Set([1]));
     expect(stepStates()).toEqual({
       routing: 'manual',
       rule: 'manual',
@@ -702,6 +893,7 @@ describe('mail domain console', () => {
     const example = screen.getByLabelText('Example request');
     expect(example).toHaveTextContent('POST https://YOUR_API_HOST/v1/outbound-mail-messages');
     expect(example).toHaveTextContent('X-API-Key:');
+    expect(example).toHaveTextContent('Organization-Id: 1');
     expect(example).toHaveTextContent('Idempotency-Key:');
     expect(example).toHaveTextContent('"from": "hello@mail.example.com"');
     expect(screen.getByRole('link', { name: 'Manage API keys' })).toHaveAttribute(
@@ -734,6 +926,35 @@ describe('mail domain console', () => {
     expect(screen.getByText('No mail domain')).toBeInTheDocument();
     expect(screen.queryByTestId('mail-domain-provider')).toBeNull();
   });
+
+  it('shows the domain of the chosen organization and the states without one', () => {
+    state.organizations.data = page([
+      organization(1, 'Acme', 'owner'),
+      organization(2, 'Globex', 'member'),
+    ]);
+    window.history.replaceState(null, '', '/console/mail-domain?org=2');
+    const view = renderDomain();
+    expect(screen.getByLabelText('Organization')).toHaveValue('2');
+    expect(new Set(state.organizationIds)).toEqual(new Set([2]));
+    expect(screen.getByLabelText('Example request')).toHaveTextContent('Organization-Id: 2');
+    view.unmount();
+
+    state.domains.data = undefined;
+    state.domains.error = new ApiError('gone', ApiErrorCode.ORGANIZATION_NOT_FOUND, 404);
+    const lost = renderDomain();
+    expect(screen.getByText('No access to this organization')).toBeInTheDocument();
+    lost.unmount();
+
+    state.organizations.data = page([]);
+    state.organizationIds = [];
+    renderDomain();
+    expect(screen.getByText('No organization yet')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Go to organizations' })).toHaveAttribute(
+      'href',
+      '/console/organizations'
+    );
+    expect(state.organizationIds).toEqual([]);
+  });
 });
 
 /** Radix tabs activate on mouse down, as a real pointer does. */
@@ -753,12 +974,16 @@ function stepStates(): Record<string, string | null> {
 function domain(overrides: Record<string, unknown> = {}) {
   return {
     domain: 'mail.example.com',
-    max_mailboxes: 10,
+    max_mailboxes: 50,
     provider: 'cloudflare',
     inbound_enabled: true,
     daily_send_limit: 200,
     ...overrides,
   };
+}
+
+function organization(id: number, name: string, role: 'owner' | 'admin' | 'member') {
+  return { id, name, slug: `org-${id}`, role, created_at: now(), updated_at: now() };
 }
 
 function mailbox(id: number, localPart: string) {

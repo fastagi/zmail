@@ -1,7 +1,7 @@
 import 'server-only';
 
 import {
-  MAILBOX_MAX_PER_USER,
+  MAILBOX_MAX_PER_ORGANIZATION,
   normalizeDisplayName,
   normalizeLocalPart,
   normalizeMailMessage,
@@ -20,18 +20,20 @@ import type {
 } from '@/features/mailbox/types';
 
 /**
- * Development-only mailboxes, isolated per mock user. It mirrors the browser-facing rules of the
- * Go mailbox starter: address validation and reserved names, addresses that stay reserved after
- * a mailbox is deleted, the per-user mailbox limit, send validation, newest-first listings
- * without bodies, read state, the cross-mailbox log, and per-day counts. Nothing leaves the
- * process: a "sent" message is only stored, which is what the `log` provider means.
+ * Development-only mailboxes, isolated per organization. It mirrors the browser-facing rules of
+ * the Go mailbox starter: address validation and reserved names, addresses that stay reserved
+ * after a mailbox is deleted, the per-organization mailbox limit, send validation, newest-first
+ * listings without bodies, read state shared by the organization, the cross-mailbox log, and
+ * per-day counts. Membership and roles are decided by the route before it calls the store.
+ * Nothing leaves the process: a "sent" message is only stored, which is what the `log` provider
+ * means.
  */
 export const MOCK_MAILBOX_DOMAIN = 'mail.example.com';
 export const MOCK_DAILY_SEND_LIMIT = 200;
 
 const dayMilliseconds = 24 * 60 * 60 * 1_000;
 
-const maxMockUsers = 1_000;
+const maxMockOrganizations = 1_000;
 const maxMockMessagesPerMailbox = 500;
 
 interface MailboxState {
@@ -58,8 +60,8 @@ interface MockMailboxStoreDependencies {
 export class MockMailboxStore {
   private nextMailboxId = 1;
   private nextMessageId = 1;
-  private users = new Map<string, Map<number, MailboxState>>();
-  /** Every address that is or ever was a mailbox, across all users. */
+  private organizations = new Map<number, Map<number, MailboxState>>();
+  /** Every address that is or ever was a mailbox, across all organizations. */
   private claimedAddresses = new Set<string>();
 
   constructor(
@@ -70,7 +72,7 @@ export class MockMailboxStore {
     return [
       {
         domain: MOCK_MAILBOX_DOMAIN,
-        max_mailboxes: MAILBOX_MAX_PER_USER,
+        max_mailboxes: MAILBOX_MAX_PER_ORGANIZATION,
         provider: 'log',
         inbound_enabled: false,
         daily_send_limit: MOCK_DAILY_SEND_LIMIT,
@@ -79,23 +81,27 @@ export class MockMailboxStore {
   }
 
   /** Oldest first, as the API lists them. */
-  list(userKey: string): Mailbox[] {
-    return [...this.mailboxesOf(userKey).values()]
+  list(organizationId: number): Mailbox[] {
+    return [...this.mailboxesOf(organizationId).values()]
       .map(state => ({ ...state.mailbox, unread_count: unreadCount(state) }))
       .sort((left, right) => left.id - right.id);
   }
 
-  create(userKey: string, rawLocalPart: string, rawDisplayName: string): MockMailboxCreateResult {
+  create(
+    organizationId: number,
+    rawLocalPart: string,
+    rawDisplayName: string
+  ): MockMailboxCreateResult {
     const localPart = normalizeLocalPart(rawLocalPart);
     if (!localPart.ok) return { ok: false, error: localPart.reason };
     const displayName = normalizeDisplayName(rawDisplayName);
     if (displayName === null) return { ok: false, error: 'invalid' };
 
     const address = `${localPart.value}@${MOCK_MAILBOX_DOMAIN}`;
-    // The API checks the ownership limit before the address, so a user at the limit learns
-    // about the limit even when the address is also taken.
-    const mailboxes = this.mailboxesOf(userKey);
-    if (mailboxes.size >= MAILBOX_MAX_PER_USER) return { ok: false, error: 'limit' };
+    // The API checks the organization's limit before the address, so an organization at the
+    // limit learns about the limit even when the address is also taken.
+    const mailboxes = this.mailboxesOf(organizationId);
+    if (mailboxes.size >= MAILBOX_MAX_PER_ORGANIZATION) return { ok: false, error: 'limit' };
     if (this.claimedAddresses.has(address)) return { ok: false, error: 'taken' };
 
     const mailbox: Mailbox = {
@@ -114,18 +120,18 @@ export class MockMailboxStore {
   }
 
   /** Deletes the mailbox and its messages; the address stays claimed. */
-  delete(userKey: string, mailboxId: number): boolean {
-    return this.mailboxesOf(userKey).delete(mailboxId);
+  delete(organizationId: number, mailboxId: number): boolean {
+    return this.mailboxesOf(organizationId).delete(mailboxId);
   }
 
   listMessages(
-    userKey: string,
+    organizationId: number,
     mailboxId: number,
     direction: MailDirection | null,
     page: number,
     perPage: number
   ): MailMessagePage | null {
-    const state = this.mailboxesOf(userKey).get(mailboxId);
+    const state = this.mailboxesOf(organizationId).get(mailboxId);
     if (!state) return null;
     const all = [...state.messages.values()]
       .filter(message => direction === null || message.direction === direction)
@@ -136,14 +142,19 @@ export class MockMailboxStore {
   }
 
   /**
-   * Every mailbox of the user, newest first, without bodies. The search is a case-insensitive
+   * Every mailbox of the organization, newest first, without bodies. The search is a case-insensitive
    * substring match on the subject, the sender address, and each recipient address, so `%` and
-   * `_` only match themselves. Another user's mailbox matches nothing.
+   * `_` only match themselves. Another organization's mailbox matches nothing.
    */
-  listLog(userKey: string, filters: MailLogFilters, page: number, perPage: number): MailLogPage {
+  listLog(
+    organizationId: number,
+    filters: MailLogFilters,
+    page: number,
+    perPage: number
+  ): MailLogPage {
     const needle = filters.q?.trim().toLowerCase() ?? '';
     const entries: MailLogEntry[] = [];
-    for (const state of this.mailboxesOf(userKey).values()) {
+    for (const state of this.mailboxesOf(organizationId).values()) {
       if (filters.mailboxId !== undefined && state.mailbox.id !== filters.mailboxId) continue;
       for (const message of state.messages.values()) {
         if (filters.direction && message.direction !== filters.direction) continue;
@@ -168,7 +179,7 @@ export class MockMailboxStore {
    * included. `sent` and `failed` count outbound messages by final status; `received` counts
    * inbound messages.
    */
-  stats(userKey: string, days: number): MailDayStats[] {
+  stats(organizationId: number, days: number): MailDayStats[] {
     const now = this.dependencies.now();
     const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     const entries = Array.from({ length: days }, (_, index): MailDayStats => ({
@@ -178,7 +189,7 @@ export class MockMailboxStore {
       received: 0,
     }));
     const byDay = new Map(entries.map(entry => [entry.day, entry]));
-    for (const state of this.mailboxesOf(userKey).values()) {
+    for (const state of this.mailboxesOf(organizationId).values()) {
       for (const message of state.messages.values()) {
         const entry = byDay.get(message.created_at.slice(0, 10));
         if (!entry) continue;
@@ -190,39 +201,43 @@ export class MockMailboxStore {
     return entries;
   }
 
-  getMessage(userKey: string, mailboxId: number, messageId: number): MockMailMessageResult {
-    const state = this.mailboxesOf(userKey).get(mailboxId);
+  getMessage(organizationId: number, mailboxId: number, messageId: number): MockMailMessageResult {
+    const state = this.mailboxesOf(organizationId).get(mailboxId);
     if (!state) return { ok: false, error: 'mailbox_not_found' };
     const message = state.messages.get(messageId);
     return message ? { ok: true, message } : { ok: false, error: 'not_found' };
   }
 
   setRead(
-    userKey: string,
+    organizationId: number,
     mailboxId: number,
     messageId: number,
     read: boolean
   ): MockMailMessageResult {
-    const found = this.getMessage(userKey, mailboxId, messageId);
+    const found = this.getMessage(organizationId, mailboxId, messageId);
     if (!found.ok) return found;
     const message = { ...found.message, read };
-    this.mailboxesOf(userKey).get(mailboxId)?.messages.set(messageId, message);
+    this.mailboxesOf(organizationId).get(mailboxId)?.messages.set(messageId, message);
     return { ok: true, message };
   }
 
-  deleteMessage(userKey: string, mailboxId: number, messageId: number): MockMailDeleteResult {
-    const state = this.mailboxesOf(userKey).get(mailboxId);
+  deleteMessage(
+    organizationId: number,
+    mailboxId: number,
+    messageId: number
+  ): MockMailDeleteResult {
+    const state = this.mailboxesOf(organizationId).get(mailboxId);
     if (!state) return { ok: false, error: 'mailbox_not_found' };
     return state.messages.delete(messageId) ? { ok: true } : { ok: false, error: 'not_found' };
   }
 
   /** Validates like the API and stores the message as `sent`; the mock has no provider. */
   send(
-    userKey: string,
+    organizationId: number,
     mailboxId: number,
     draft: Parameters<typeof normalizeMailMessage>[0]
   ): MockMailSendResult {
-    const state = this.mailboxesOf(userKey).get(mailboxId);
+    const state = this.mailboxesOf(organizationId).get(mailboxId);
     if (!state) return { ok: false, error: 'mailbox_not_found' };
     const normalized = normalizeMailMessage(draft);
     if (!normalized) return { ok: false, error: 'invalid' };
@@ -237,7 +252,7 @@ export class MockMailboxStore {
       to: normalized.to,
       cc: normalized.cc,
       subject: normalized.subject,
-      // The owner wrote it, so it starts out read.
+      // A member wrote it, so it starts out read.
       read: true,
       failure_code: '',
       created_at: this.timestamp(),
@@ -254,7 +269,7 @@ export class MockMailboxStore {
   reset(): void {
     this.nextMailboxId = 1;
     this.nextMessageId = 1;
-    this.users.clear();
+    this.organizations.clear();
     this.claimedAddresses.clear();
   }
 
@@ -290,15 +305,15 @@ export class MockMailboxStore {
     };
   }
 
-  private mailboxesOf(userKey: string): Map<number, MailboxState> {
-    const existing = this.users.get(userKey);
+  private mailboxesOf(organizationId: number): Map<number, MailboxState> {
+    const existing = this.organizations.get(organizationId);
     if (existing) return existing;
-    if (this.users.size >= maxMockUsers) {
-      const oldest = this.users.keys().next().value;
-      if (oldest !== undefined) this.users.delete(oldest);
+    if (this.organizations.size >= maxMockOrganizations) {
+      const oldest = this.organizations.keys().next().value;
+      if (oldest !== undefined) this.organizations.delete(oldest);
     }
     const created = new Map<number, MailboxState>();
-    this.users.set(userKey, created);
+    this.organizations.set(organizationId, created);
     return created;
   }
 
