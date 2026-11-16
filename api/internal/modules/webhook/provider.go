@@ -9,8 +9,9 @@ import (
 )
 
 // ProviderSet wires the optional durable outbound webhook starter.
+// The event catalog is provided by the product (mailbox.NewWebhookCatalog), which extends
+// DefaultDefinitions with its own event types.
 var ProviderSet = wire.NewSet(
-	NewDefaultCatalog,
 	NewRepository,
 	wire.Bind(new(webhookStore), new(*repository)),
 	NewSecretProtector,

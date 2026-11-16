@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/fastagi/zmail/api/internal/domain"
+	infradatabase "github.com/fastagi/zmail/api/internal/infra/database"
 )
 
 type repository struct {
@@ -23,13 +24,30 @@ func NewRepository(db *gorm.DB) *repository {
 	return &repository{db: db}
 }
 
+// conn returns the transaction bound to ctx, or the pool.
+func (r *repository) conn(ctx context.Context) *gorm.DB {
+	return infradatabase.ResolveContextDB(ctx, r.db)
+}
+
+func (r *repository) InTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	if _, bound := infradatabase.TransactionFromContext(ctx); bound {
+		return fn(ctx)
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(infradatabase.ContextWithTransaction(ctx, tx))
+	})
+}
+
 // CreateMailbox inserts a mailbox while holding a per-organization advisory lock, so two concurrent
 // requests cannot both pass the ownership limit.
 func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox, limit int) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('mailbox_owner'), ?)`, int32(mailbox.OrganizationID)).Error; err != nil { //nolint:gosec // lock key only needs to be stable per user
 			return err
 		}
@@ -65,7 +83,7 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID uint) ([]
 		return nil, domain.ErrServiceUnavailable
 	}
 	var rows []MailboxPO
-	err := r.db.WithContext(ctx).
+	err := r.conn(ctx).
 		Where("organization_id = ?", organizationID).
 		Order("id asc").
 		Limit(domain.MaxMailboxesPerOrganization).
@@ -88,7 +106,7 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID uint) ([]
 		MailboxID uint
 		Unread    int
 	}
-	err = r.db.WithContext(ctx).Model(&MailMessagePO{}).
+	err = r.conn(ctx).Model(&MailMessagePO{}).
 		Select("mailbox_id, COUNT(*) AS unread").
 		Where("mailbox_id IN ? AND direction = ? AND read_at IS NULL", ids, string(domain.MailDirectionInbound)).
 		Group("mailbox_id").
@@ -111,7 +129,7 @@ func (r *repository) FindMailbox(ctx context.Context, organizationID, id uint) (
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailboxPO
-	if err := r.db.WithContext(ctx).Where("id = ? AND organization_id = ?", id, organizationID).First(&po).Error; err != nil {
+	if err := r.conn(ctx).Where("id = ? AND organization_id = ?", id, organizationID).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailboxNotFound
 		}
@@ -125,7 +143,7 @@ func (r *repository) FindMailboxByAddress(ctx context.Context, address string) (
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailboxPO
-	if err := r.db.WithContext(ctx).Where("address = ?", strings.ToLower(address)).First(&po).Error; err != nil {
+	if err := r.conn(ctx).Where("address = ?", strings.ToLower(address)).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailboxNotFound
 		}
@@ -140,7 +158,7 @@ func (r *repository) DeleteMailbox(ctx context.Context, organizationID, id uint)
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Where("id = ? AND organization_id = ?", id, organizationID).Delete(&MailboxPO{})
 		if result.Error != nil {
 			return result.Error
@@ -157,7 +175,7 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 		return false, domain.ErrServiceUnavailable
 	}
 	po := newMailMessagePO(message)
-	query := r.db.WithContext(ctx)
+	query := r.conn(ctx)
 	if message.IdempotencyKey != "" {
 		query = query.Clauses(clause.OnConflict{
 			Columns:     []clause.Column{{Name: "mailbox_id"}, {Name: "idempotency_key"}},
@@ -188,7 +206,7 @@ func (r *repository) FindMessageByIdempotencyKey(ctx context.Context, mailboxID 
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailMessagePO
-	err := r.db.WithContext(ctx).Where("mailbox_id = ? AND idempotency_key = ?", mailboxID, key).First(&po).Error
+	err := r.conn(ctx).Where("mailbox_id = ? AND idempotency_key = ?", mailboxID, key).First(&po).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailMessageNotFound
@@ -203,7 +221,7 @@ func (r *repository) FindOutboundMessageForOrganization(ctx context.Context, org
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailMessagePO
-	err := r.db.WithContext(ctx).
+	err := r.conn(ctx).
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
 		Where("mail_messages.id = ? AND mailboxes.organization_id = ? AND mail_messages.direction = ?",
 			id, organizationID, string(domain.MailDirectionOutbound)).
@@ -225,7 +243,7 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 		return false, ErrMailMessageInvalid
 	}
 	po := newMailMessagePO(message)
-	result := r.db.WithContext(ctx).
+	result := r.conn(ctx).
 		Clauses(clause.OnConflict{
 			Columns:     []clause.Column{{Name: "mailbox_id"}, {Name: "dedupe_key"}},
 			TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "dedupe_key IS NOT NULL"}}},
@@ -243,7 +261,7 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 	}
 
 	var existing MailMessagePO
-	err := r.db.WithContext(ctx).
+	err := r.conn(ctx).
 		Where("mailbox_id = ? AND dedupe_key = ?", message.MailboxID, message.DedupeKey).
 		First(&existing).Error
 	if err != nil {
@@ -263,7 +281,7 @@ func (r *repository) UpdateMessageDelivery(
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	return r.db.WithContext(ctx).Model(&MailMessagePO{}).Where("id = ?", id).Updates(map[string]any{
+	return r.conn(ctx).Model(&MailMessagePO{}).Where("id = ?", id).Updates(map[string]any{
 		"status":       string(status),
 		"message_id":   messageID,
 		"failure_code": failureCode,
@@ -286,7 +304,7 @@ func (r *repository) ListMessages(
 		perPage = 15
 	}
 
-	query := r.db.WithContext(ctx).Model(&MailMessagePO{}).Where("mailbox_id = ?", mailboxID)
+	query := r.conn(ctx).Model(&MailMessagePO{}).Where("mailbox_id = ?", mailboxID)
 	if filter.Direction != "" {
 		query = query.Where("direction = ?", string(filter.Direction))
 	}
@@ -317,7 +335,7 @@ func (r *repository) FindMessage(ctx context.Context, mailboxID, id uint) (*doma
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailMessagePO
-	if err := r.db.WithContext(ctx).Where("id = ? AND mailbox_id = ?", id, mailboxID).First(&po).Error; err != nil {
+	if err := r.conn(ctx).Where("id = ? AND mailbox_id = ?", id, mailboxID).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailMessageNotFound
 		}
@@ -330,7 +348,7 @@ func (r *repository) SetMessageRead(ctx context.Context, mailboxID, id uint, rea
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	result := r.db.WithContext(ctx).Model(&MailMessagePO{}).
+	result := r.conn(ctx).Model(&MailMessagePO{}).
 		Where("id = ? AND mailbox_id = ?", id, mailboxID).
 		Update("read_at", readAt)
 	if result.Error != nil {
@@ -346,7 +364,7 @@ func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) erro
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	result := r.db.WithContext(ctx).Where("id = ? AND mailbox_id = ?", id, mailboxID).Delete(&MailMessagePO{})
+	result := r.conn(ctx).Where("id = ? AND mailbox_id = ?", id, mailboxID).Delete(&MailMessagePO{})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -363,7 +381,7 @@ func (r *repository) CountOutboundSince(ctx context.Context, organizationID uint
 		return 0, domain.ErrServiceUnavailable
 	}
 	var count int64
-	err := r.db.WithContext(ctx).Model(&MailMessagePO{}).
+	err := r.conn(ctx).Model(&MailMessagePO{}).
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
 		Where("mailboxes.organization_id = ? AND mail_messages.direction = ? AND mail_messages.created_at >= ?",
 			organizationID, string(domain.MailDirectionOutbound), since).
@@ -392,7 +410,7 @@ func (r *repository) ListMessagesForOrganization(
 		perPage = 15
 	}
 
-	query := r.db.WithContext(ctx).Table("mail_messages").
+	query := r.conn(ctx).Table("mail_messages").
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
 		Where("mailboxes.organization_id = ?", organizationID)
 	if filter.Direction != "" {
@@ -451,7 +469,7 @@ func (r *repository) StatsForOrganization(ctx context.Context, organizationID ui
 		Failed   int
 		Received int
 	}
-	err := r.db.WithContext(ctx).Table("mail_messages").
+	err := r.conn(ctx).Table("mail_messages").
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
 		Select(`date_trunc('day', mail_messages.created_at AT TIME ZONE 'UTC') AS day,
 			COUNT(*) FILTER (WHERE mail_messages.status = 'sent') AS sent,
@@ -485,7 +503,7 @@ func (r *repository) AddMessageEvents(
 	}
 	added := 0
 	var summary domain.MailEventType
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		var locked MailMessagePO
 		lock := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", messageID).First(&locked)
 		if lock.Error != nil {
@@ -541,7 +559,7 @@ func (r *repository) ListMessageEvents(ctx context.Context, messageID uint) ([]d
 		return nil, domain.ErrServiceUnavailable
 	}
 	var rows []MailMessageEventPO
-	err := r.db.WithContext(ctx).Where("message_id = ?", messageID).Order("occurred_at ASC, id ASC").Find(&rows).Error
+	err := r.conn(ctx).Where("message_id = ?", messageID).Order("occurred_at ASC, id ASC").Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -559,19 +577,35 @@ func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, provid
 	if providerMessageID == "" {
 		return nil, ErrMailMessageNotFound
 	}
-	var po MailMessagePO
-	err := r.db.WithContext(ctx).
-		Omit("text_body", "html_body").
-		Where("message_id = ? AND direction = ?", providerMessageID, string(domain.MailDirectionOutbound)).
-		Order("id DESC").
-		First(&po).Error
+	var row struct {
+		MailMessagePO
+		MailboxAddress string
+		OrganizationID *uint
+	}
+	err := r.conn(ctx).Table("mail_messages").
+		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
+		Select(`mail_messages.id, mail_messages.mailbox_id, mail_messages.direction, mail_messages.status,
+			mail_messages.from_address, mail_messages.from_name, mail_messages.to_addresses,
+			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
+			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
+			mail_messages.read_at, mail_messages.created_at, mail_messages.updated_at,
+			mailboxes.address AS mailbox_address, mailboxes.organization_id AS organization_id`).
+		Where("mail_messages.message_id = ? AND mail_messages.direction = ?", providerMessageID, string(domain.MailDirectionOutbound)).
+		Order("mail_messages.id DESC").
+		Limit(1).
+		Scan(&row).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrMailMessageNotFound
-		}
 		return nil, err
 	}
-	return po.toDomain(), nil
+	if row.ID == 0 {
+		return nil, ErrMailMessageNotFound
+	}
+	message := row.toDomain()
+	message.MailboxAddress = row.MailboxAddress
+	if row.OrganizationID != nil {
+		message.OrganizationID = *row.OrganizationID
+	}
+	return message, nil
 }
 
 // escapeLike makes user text match literally inside a LIKE pattern.

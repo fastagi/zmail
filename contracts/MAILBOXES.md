@@ -260,6 +260,48 @@ state is its latest event: `complained`, then `bounced`, `failed`, `rejected`, `
 message to two recipients, one delivered and one bounced, shows `bounced`; a recipient deferred
 and then delivered counts as `delivered`.
 
+### Webhooks
+
+When the `webhook` starter is selected, an organization's webhook endpoints can subscribe to mail
+events. Endpoints, signing, retries, and delivery history are those of [WEBHOOKS.md](WEBHOOKS.md);
+this section defines only the mail events.
+
+| Event type | Published when |
+|---|---|
+| `mail.message.sent` | The provider took an outbound message. |
+| `mail.message.failed` | The provider refused an outbound message at send time, or later gave up on a recipient without a bounce. |
+| `mail.message.received` | An inbound message was stored in a mailbox. |
+| `mail.message.delivered` | A recipient's mail server accepted the message. |
+| `mail.message.delivery_delayed` | A temporary failure; the provider is still retrying. |
+| `mail.message.bounced` | A recipient's mail server refused the message for good. |
+| `mail.message.complained` | A recipient reported the message as spam. |
+| `mail.message.suppressed` | The provider did not attempt a recipient on its suppression list. |
+
+Every mail event has the same `data` object, with every field always present:
+
+| Field | Value |
+|---|---|
+| `message_id` | The message's id, as used by the message routes. |
+| `mailbox_id` | The mailbox that holds the message. |
+| `mailbox_address` | That mailbox's address. |
+| `direction` | `outbound` or `inbound`. |
+| `from` | The sender address. |
+| `to` | The `to` recipients, possibly empty. |
+| `recipient` | The address a per-recipient event is about; empty for `sent`, `received`, and a send-time `failed`. |
+| `reason` | A short machine-readable code such as `5.1.1 permanent_failure`, `suppressed`, or a send failure code; empty when there is nothing to explain. |
+
+The payload never contains a subject, a body, or free-form provider text. A receiver that needs
+the content reads the message through the API with its own credentials.
+
+A webhook is queued in the same database transaction as the state change it reports, so an event
+is published exactly when its change is stored, and each change publishes once: a repeated inbound
+delivery, a repeated provider event, or an idempotent replay of a send publishes nothing new. A
+send to several recipients publishes one `sent` and then one event per recipient outcome.
+
+If the webhook cannot be queued, the mail state is still recorded and the failure is logged; that
+one webhook is lost. Mail that was really sent or received is never dropped because of a webhook
+failure. Without the `webhook` starter nothing is published.
+
 ### Event Intake
 
 `POST /v1/mail-delivery-events` carries one Cloudflare Email Sending event

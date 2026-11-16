@@ -179,6 +179,10 @@ up() {
   if wants api; then
     run_prefixed api bash -c "cd '${ROOT_DIR}/api' && exec '${STATE_DIR}/bin/fastbuild' serve"
     wait_for API "http://127.0.0.1:${API_PORT}/health/ready"
+    # Webhook deliveries are sent by a separate worker; without it queued events never leave.
+    if [[ ",${STARTERS}," == *",webhook,"* ]]; then
+      run_prefixed webhook bash -c "cd '${ROOT_DIR}/api' && exec '${STATE_DIR}/bin/fastbuild' webhook:work --poll=2s"
+    fi
   fi
   if wants web; then
     run_prefixed web env \

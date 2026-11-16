@@ -15,6 +15,10 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailboxRepository), new(*repository)),
 	mailtransport.New,
 	SettingsFromConfig,
+	// The product webhook catalog: the webhook starter's definitions plus the mail events.
+	NewWebhookCatalog,
+	NewWebhookNotifier,
+	wire.Bind(new(mailNotifier), new(*webhookNotifier)),
 	NewService,
 	wire.Bind(new(Service), new(*service)),
 	NewHandler,

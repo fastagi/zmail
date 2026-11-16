@@ -26,7 +26,7 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := newFakeRepository()
-	svc := NewService(repo, &fakeTransport{}, Settings{
+	svc := NewService(repo, &fakeTransport{}, &fakeNotifier{}, Settings{
 		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5,
 	})
 	handler := NewHandler(svc)

@@ -106,6 +106,53 @@ describe('webhook management workflow', () => {
     expect(screen.queryByDisplayValue(signingSecret)).not.toBeInTheDocument();
   });
 
+  it('subscribes a new endpoint to every catalog event and lets one be cleared', async () => {
+    state.eventTypes.data = ['mail.message.bounced', 'mail.message.sent', 'webhook.test'];
+    state.create.mutateAsync.mockResolvedValue({
+      endpoint,
+      signing_secret: `whsec_${'B'.repeat(43)}=`,
+      previous_secret_expiry: null,
+    });
+    renderWithMessages(<WebhookManagement organizationId={7} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create endpoint' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Mail events' } });
+    fireEvent.change(screen.getByLabelText('Target URL'), {
+      target: { value: 'https://mail.example.com/hooks' },
+    });
+    fireEvent.click(screen.getByLabelText('webhook.test'));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create endpoint' }).at(-1)!);
+
+    await waitFor(() => expect(state.create.mutateAsync).toHaveBeenCalled());
+    expect(state.create.mutateAsync).toHaveBeenCalledWith({
+      name: 'Mail events',
+      url: 'https://mail.example.com/hooks',
+      event_types: ['mail.message.bounced', 'mail.message.sent'],
+    });
+  });
+
+  it('keeps the existing subscriptions of an edited endpoint and can add one', async () => {
+    state.eventTypes.data = ['mail.message.bounced', 'mail.message.sent', 'webhook.test'];
+    state.update.mutateAsync.mockResolvedValue(endpoint);
+    renderWithMessages(<WebhookManagement organizationId={7} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit endpoint' }));
+    expect(screen.getByLabelText('webhook.test')).toBeChecked();
+    expect(screen.getByLabelText('mail.message.sent')).not.toBeChecked();
+    fireEvent.click(screen.getByLabelText('mail.message.sent'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(state.update.mutateAsync).toHaveBeenCalled());
+    expect(state.update.mutateAsync).toHaveBeenCalledWith({
+      endpoint,
+      input: {
+        name: endpoint.name,
+        url: endpoint.url,
+        event_types: ['mail.message.sent', 'webhook.test'],
+      },
+    });
+  });
+
   it('queues only a fixed endpoint test with a fresh canonical idempotency key', () => {
     renderWithMessages(<WebhookManagement organizationId={7} />);
 

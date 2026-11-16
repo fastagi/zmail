@@ -26,6 +26,7 @@ type fakeRepository struct {
 	lastLogFilter         domain.MailLogFilter
 	lastStatsSince        time.Time
 	stats                 []domain.MailDayStats
+	transactions          int
 }
 
 var _ domain.MailboxRepository = (*fakeRepository)(nil)
@@ -36,6 +37,30 @@ func newFakeRepository() *fakeRepository {
 		messages:  map[uint]*domain.MailMessage{},
 		events:    map[uint][]domain.MailEvent{},
 	}
+}
+
+// InTransaction restores the stored state when fn fails, as a database transaction would.
+func (r *fakeRepository) InTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+	messages := make(map[uint]domain.MailMessage, len(r.messages))
+	for id, message := range r.messages {
+		messages[id] = *message
+	}
+	events := make(map[uint][]domain.MailEvent, len(r.events))
+	for id, stored := range r.events {
+		events[id] = append([]domain.MailEvent(nil), stored...)
+	}
+	r.transactions++
+	err := fn(ctx)
+	if err == nil {
+		return nil
+	}
+	r.messages = make(map[uint]*domain.MailMessage, len(messages))
+	for id, message := range messages {
+		restored := message
+		r.messages[id] = &restored
+	}
+	r.events = events
+	return err
 }
 
 func (r *fakeRepository) id() uint {
@@ -255,10 +280,37 @@ func (r *fakeRepository) FindOutboundMessageByProviderID(_ context.Context, prov
 	for _, message := range r.messages {
 		if message.Direction == domain.MailDirectionOutbound && message.MessageID == providerMessageID && providerMessageID != "" {
 			copied := *message
+			if mailbox, ok := r.mailboxes[message.MailboxID]; ok {
+				copied.MailboxAddress, copied.OrganizationID = mailbox.Address, mailbox.OrganizationID
+			}
 			return &copied, nil
 		}
 	}
 	return nil, ErrMailMessageNotFound
+}
+
+// fakeNotifier records the notifications the service publishes; failures makes that many
+// publications fail first.
+type fakeNotifier struct {
+	sent     []MailNotification
+	failures int
+}
+
+func (n *fakeNotifier) Notify(_ context.Context, notification MailNotification) error {
+	if n.failures > 0 {
+		n.failures--
+		return errors.New("webhook outbox unavailable")
+	}
+	n.sent = append(n.sent, notification)
+	return nil
+}
+
+func (n *fakeNotifier) types() []string {
+	types := make([]string, 0, len(n.sent))
+	for _, notification := range n.sent {
+		types = append(types, notification.Type)
+	}
+	return types
 }
 
 // fakeTransport records what the service hands to the provider.
@@ -277,6 +329,7 @@ type serviceFixture struct {
 	service   *service
 	repo      *fakeRepository
 	transport *fakeTransport
+	notifier  *fakeNotifier
 	now       time.Time
 }
 
@@ -285,9 +338,10 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 	fixture := &serviceFixture{
 		repo:      newFakeRepository(),
 		transport: &fakeTransport{},
+		notifier:  &fakeNotifier{},
 		now:       time.Unix(1_800_000_000, 0).UTC(),
 	}
-	fixture.service = NewService(fixture.repo, fixture.transport, Settings{
+	fixture.service = NewService(fixture.repo, fixture.transport, fixture.notifier, Settings{
 		Domain:           "mail.example",
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,
