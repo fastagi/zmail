@@ -22,7 +22,8 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
-	db := testplatform.OpenPostgres(t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{})
+	db := testplatform.OpenPostgres(
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{}, &MailMessageEventPO{})
 	return NewRepository(db), db
 }
 
@@ -492,6 +493,88 @@ func TestRepositoryCountsMailPerDay(t *testing.T) {
 	}
 	if !stats[1].Day.Equal(time.Date(2026, 11, 15, 0, 0, 0, 0, time.UTC)) || stats[1].Sent != 1 || stats[1].Failed != 1 || stats[1].Received != 1 {
 		t.Fatalf("second day = %+v; a queued message counts as neither sent nor failed", stats[1])
+	}
+}
+
+func TestRepositoryStoresDeliveryEventsOnceAndSummarizesThem(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	mailbox := createMailbox(t, repo, "hello@mail.example")
+	message := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusSent,
+		FromAddress: "hello@mail.example", To: []string{"bob@example.com", "amy@example.org"},
+		Subject: "Out", MessageID: "prov-9@mail.example",
+	}
+	if _, err := repo.CreateMessage(ctx, message); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	at := func(second int) time.Time { return time.Date(2027, 1, 1, 0, 0, second, 0, time.UTC) }
+
+	added, summary, err := repo.AddMessageEvents(ctx, message.ID, []domain.MailEvent{
+		{Type: domain.MailEventAccepted, OccurredAt: at(0)},
+		{Type: domain.MailEventDeferred, Recipient: "bob@example.com", Detail: "4.2.2", ProviderEventID: "evt-a", OccurredAt: at(1)},
+	})
+	if err != nil || added != 2 || summary != domain.MailEventDeferred {
+		t.Fatalf("first batch = added %d, summary %q, err %v", added, summary, err)
+	}
+	// A provider redelivery of evt-a is skipped; the new event still lands.
+	added, summary, err = repo.AddMessageEvents(ctx, message.ID, []domain.MailEvent{
+		{Type: domain.MailEventDeferred, Recipient: "bob@example.com", Detail: "4.2.2", ProviderEventID: "evt-a", OccurredAt: at(1)},
+		{Type: domain.MailEventDelivered, Recipient: "bob@example.com", Detail: "2.0.0", ProviderEventID: "evt-b", OccurredAt: at(5)},
+	})
+	if err != nil || added != 1 || summary != domain.MailEventDelivered {
+		t.Fatalf("second batch = added %d, summary %q, err %v; want 1 new event and a delivered summary", added, summary, err)
+	}
+	added, summary, err = repo.AddMessageEvents(ctx, message.ID, []domain.MailEvent{
+		{Type: domain.MailEventBounced, Recipient: "amy@example.org", Detail: "5.1.1 permanent_failure", ProviderEventID: "evt-c", OccurredAt: at(6)},
+	})
+	if err != nil || added != 1 || summary != domain.MailEventBounced {
+		t.Fatalf("third batch = added %d, summary %q, err %v", added, summary, err)
+	}
+
+	events, err := repo.ListMessageEvents(ctx, message.ID)
+	if err != nil || len(events) != 4 {
+		t.Fatalf("ListMessageEvents = %d events, err %v; want 4", len(events), err)
+	}
+	if events[0].Type != domain.MailEventAccepted || events[3].Type != domain.MailEventBounced || events[3].Detail != "5.1.1 permanent_failure" {
+		t.Fatalf("events are not oldest first: %+v", events)
+	}
+	stored, err := repo.FindMessage(ctx, mailbox.ID, message.ID)
+	if err != nil || stored.LastEvent != domain.MailEventBounced {
+		t.Fatalf("stored summary = %q, err %v", stored.LastEvent, err)
+	}
+	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, domain.MailLogFilter{})
+	if err != nil || len(listed) != 1 || listed[0].LastEvent != domain.MailEventBounced {
+		t.Fatalf("the log does not carry the summary: %+v, %v", listed, err)
+	}
+
+	found, err := repo.FindOutboundMessageByProviderID(ctx, "prov-9@mail.example")
+	if err != nil || found.ID != message.ID {
+		t.Fatalf("FindOutboundMessageByProviderID = %+v, %v", found, err)
+	}
+	for _, missing := range []string{"", "unknown@mail.example"} {
+		if _, err := repo.FindOutboundMessageByProviderID(ctx, missing); !errors.Is(err, ErrMailMessageNotFound) {
+			t.Fatalf("provider id %q error = %v", missing, err)
+		}
+	}
+	// An inbound message that happens to carry the same Message-ID is not an outbound send.
+	inbound := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
+		FromAddress: "a@sender.test", Subject: "In", MessageID: "only-inbound@sender.test",
+	}
+	if _, err := repo.CreateMessage(ctx, inbound); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := repo.FindOutboundMessageByProviderID(ctx, "only-inbound@sender.test"); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("an inbound message matched a provider event: %v", err)
+	}
+	if _, _, err := repo.AddMessageEvents(ctx, 999999, []domain.MailEvent{{Type: domain.MailEventAccepted, OccurredAt: at(0)}}); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("events for a missing message error = %v", err)
+	}
+
+	if err := repo.DeleteMessage(ctx, mailbox.ID, message.ID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
 	}
 }
 

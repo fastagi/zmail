@@ -37,9 +37,26 @@ func (e *Error) Error() string {
 	return "mail transport failed: " + e.Code
 }
 
-// Transport sends one outbound message through a provider.
+// Result is what the provider reported when it accepted a message. A recipient appears in at
+// most one list; a provider that reports nothing per recipient leaves them all empty.
+type Result struct {
+	// MessageID is the provider's identifier for the message, without angle brackets. Later
+	// delivery events name the message by it.
+	MessageID string
+	// Delivered recipients were handed to their mail server during the send call.
+	Delivered []string
+	// Queued recipients were accepted and will be attempted later.
+	Queued []string
+	// Bounced recipients were permanently refused.
+	Bounced []string
+	// Suppressed recipients were not attempted because the provider's suppression list has them.
+	Suppressed []string
+}
+
+// Transport sends one outbound message through a provider. An error means no recipient was
+// accepted; the Result may still say why.
 type Transport interface {
-	Send(ctx context.Context, mail Message) error
+	Send(ctx context.Context, mail Message) (Result, error)
 }
 
 // New selects the outbound transport from typed configuration. An unknown or unset provider
@@ -61,6 +78,6 @@ func New(cfg *config.Config) Transport {
 
 type unconfigured struct{}
 
-func (unconfigured) Send(_ context.Context, _ Message) error {
-	return ErrNotConfigured
+func (unconfigured) Send(_ context.Context, _ Message) (Result, error) {
+	return Result{}, ErrNotConfigured
 }

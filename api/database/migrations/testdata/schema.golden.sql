@@ -72,6 +72,16 @@ TABLE authentication_sessions
   COLUMN revocation_reason character varying(32) NOT NULL DEFAULT ''::character varying
   COLUMN audience character varying(16) NOT NULL DEFAULT 'user'::character varying
 
+TABLE mail_message_events
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_message_events_id_seq'::regclass)
+  COLUMN message_id bigint NOT NULL
+  COLUMN type character varying(16) NOT NULL
+  COLUMN recipient character varying(320) NOT NULL DEFAULT ''::character varying
+  COLUMN detail character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN provider_event_id character varying(128)
+  COLUMN occurred_at timestamp with time zone NOT NULL
+  COLUMN created_at timestamp with time zone
+
 TABLE mail_messages
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_messages_id_seq'::regclass)
   COLUMN mailbox_id bigint NOT NULL
@@ -93,6 +103,7 @@ TABLE mail_messages
   COLUMN updated_at timestamp with time zone
   COLUMN idempotency_key character varying(255)
   COLUMN idempotency_fingerprint character varying(64) NOT NULL DEFAULT ''::character varying
+  COLUMN last_event character varying(16) NOT NULL DEFAULT ''::character varying
 
 TABLE mailboxes
   COLUMN id bigint NOT NULL DEFAULT nextval('mailboxes_id_seq'::regclass)
@@ -392,6 +403,9 @@ CONSTRAINT assets.fk_assets_user FOREIGN KEY (user_id) REFERENCES users(id) ON U
 CONSTRAINT audit_logs.audit_logs_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.authentication_sessions_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.chk_authentication_sessions_audience CHECK (((audience)::text = ANY ((ARRAY['user'::character varying, 'operator'::character varying])::text[])))
+CONSTRAINT mail_message_events.chk_mail_message_events_type CHECK (((type)::text = ANY ((ARRAY['accepted'::character varying, 'delivered'::character varying, 'deferred'::character varying, 'bounced'::character varying, 'failed'::character varying, 'rejected'::character varying, 'complained'::character varying])::text[])))
+CONSTRAINT mail_message_events.fk_mail_message_events_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_message_events.mail_message_events_pkey PRIMARY KEY (id)
 CONSTRAINT mail_messages.chk_mail_messages_direction CHECK (((direction)::text = ANY ((ARRAY['inbound'::character varying, 'outbound'::character varying])::text[])))
 CONSTRAINT mail_messages.chk_mail_messages_status CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'queued'::character varying, 'sent'::character varying, 'failed'::character varying])::text[])))
 CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -529,9 +543,13 @@ INDEX CREATE INDEX idx_authentication_sessions_idle_expires_at ON authentication
 INDEX CREATE INDEX idx_authentication_sessions_revoked_at ON authentication_sessions USING btree (revoked_at)
 INDEX CREATE UNIQUE INDEX idx_authentication_sessions_token_hash ON authentication_sessions USING btree (token_hash)
 INDEX CREATE INDEX idx_authentication_sessions_user_id ON authentication_sessions USING btree (user_id)
+INDEX CREATE INDEX idx_mail_message_events_message ON mail_message_events USING btree (message_id, occurred_at, id)
+INDEX CREATE UNIQUE INDEX idx_mail_message_events_provider ON mail_message_events USING btree (provider_event_id) WHERE (provider_event_id IS NOT NULL)
+INDEX CREATE UNIQUE INDEX mail_message_events_pkey ON mail_message_events USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree (mailbox_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING btree (mailbox_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
+INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (message_id) WHERE (((direction)::text = 'outbound'::text) AND ((message_id)::text <> ''::text))
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address)
 INDEX CREATE INDEX idx_mailboxes_organization ON mailboxes USING btree (organization_id, id) WHERE (deleted_at IS NULL)

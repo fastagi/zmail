@@ -26,5 +26,6 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(ErrMailInboundSignature, http.StatusUnauthorized, domain.CodeMailInboundSignature)
 	mapper.Register(ErrMailInboundUnparseable, http.StatusUnprocessableEntity, domain.CodeMailInboundUnparseable)
 	mapper.Register(ErrMailInboundTooLarge, http.StatusRequestEntityTooLarge, domain.CodeMailInboundTooLarge)
+	mapper.Register(ErrMailDeliveryEventInvalid, http.StatusUnprocessableEntity, domain.CodeMailDeliveryEventInvalid)
 	mapper.Register(ErrMailRecipientNotFound, http.StatusNotFound, domain.CodeMailRecipientNotFound)
 }

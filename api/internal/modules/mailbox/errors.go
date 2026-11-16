@@ -21,5 +21,6 @@ var (
 	ErrMailInboundSignature      = errors.New("inbound mail signature is invalid")
 	ErrMailInboundUnparseable    = errors.New("inbound mail could not be parsed")
 	ErrMailInboundTooLarge       = errors.New("inbound mail is too large")
+	ErrMailDeliveryEventInvalid  = errors.New("mail delivery event is invalid")
 	ErrMailRecipientNotFound     = errors.New("inbound mail recipient not found")
 )

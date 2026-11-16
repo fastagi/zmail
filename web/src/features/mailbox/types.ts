@@ -7,6 +7,9 @@ import type {
   mailLogPageEnvelopeSchema,
   mailStatusSchema,
   mailDirectionSchema,
+  mailEventSchema,
+  mailEventSummarySchema,
+  mailEventTypeSchema,
   mailMessagePageEnvelopeSchema,
   mailMessageSchema,
   mailMessageSummarySchema,
@@ -20,6 +23,9 @@ export type MailboxDomain = Infer<typeof mailboxDomainSchema>;
 export type Mailbox = Infer<typeof mailboxSchema>;
 export type MailDirection = Infer<typeof mailDirectionSchema>;
 export type MailStatus = Infer<typeof mailStatusSchema>;
+export type MailEventType = Infer<typeof mailEventTypeSchema>;
+export type MailEventSummary = Infer<typeof mailEventSummarySchema>;
+export type MailEvent = Infer<typeof mailEventSchema>;
 export type MailMessageSummary = Infer<typeof mailMessageSummarySchema>;
 export type MailMessage = Infer<typeof mailMessageSchema>;
 export type MailLogEntry = Infer<typeof mailLogEntrySchema>;

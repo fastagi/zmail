@@ -3979,6 +3979,73 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-delivery-events:
+    post:
+      operationId: receiveMailDeliveryEvent
+      summary: Accept one provider delivery event from the mail edge
+      description: "Called by the Cloudflare Email Worker's queue consumer, not by browsers. The body is
+        one Cloudflare Email Sending event (`cf.email.sending.message.*`, schema version 1),
+        unchanged. `X-Mailbox-Signature` is `t=<unix seconds>,v1=<hex HMAC-SHA256>` computed with the
+        shared inbound secret over `<t>.delivery-event.<body>`. A repeated event returns `200` with
+        `duplicate: true`."
+      tags:
+        - Mailboxes
+      security: []
+      parameters:
+        - name: X-Mailbox-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A Cloudflare Email Sending event. Only identifiers, the recipient, status codes, and
+                classifications are read.
+      responses:
+        '200':
+          description: The event was already recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDeliveryEventResponse'
+        '201':
+          description: The event is recorded and the message summary is updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDeliveryEventResponse'
+        '401':
+          description: The signature is missing, stale, or wrong (`MAILBOX.INBOUND_SIGNATURE_INVALID`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No outbound message has the event's message id (`MAILBOX.MESSAGE_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: The body is not a usable Email Sending event (`MAILBOX.DELIVERY_EVENT_INVALID`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: No shared secret is configured (`MAILBOX.INBOUND_DISABLED`), or the database is
+            unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     bearerSession:
@@ -4630,6 +4697,7 @@ components:
         - MAILBOX.IDEMPOTENCY_CONFLICT
         - MAILBOX.IDEMPOTENCY_KEY_INVALID
         - MAILBOX.SEND_IN_PROGRESS
+        - MAILBOX.DELIVERY_EVENT_INVALID
     FieldErrors:
       type: object
       additionalProperties:
@@ -7390,6 +7458,7 @@ components:
         - subject
         - read
         - failure_code
+        - last_event
         - created_at
       properties:
         id:
@@ -7423,6 +7492,8 @@ components:
           type: string
           description: Stable provider or transport reason when `status` is `failed`; empty otherwise.
           maxLength: 120
+        last_event:
+          $ref: '#/components/schemas/MailEventSummary'
         created_at:
           type: string
           format: date-time
@@ -7440,11 +7511,13 @@ components:
         - subject
         - read
         - failure_code
+        - last_event
         - created_at
         - text_body
         - html_body
         - message_id
         - in_reply_to
+        - events
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -7476,6 +7549,8 @@ components:
         failure_code:
           type: string
           maxLength: 120
+        last_event:
+          $ref: '#/components/schemas/MailEventSummary'
         created_at:
           type: string
           format: date-time
@@ -7493,6 +7568,13 @@ components:
         in_reply_to:
           type: string
           maxLength: 998
+        events:
+          type: array
+          description: Delivery history of an outbound message, oldest first; empty for inbound messages.
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/MailEvent'
+
     SendMailMessageRequest:
       type: object
       additionalProperties: false
@@ -7655,6 +7737,7 @@ components:
         - subject
         - read
         - failure_code
+        - last_event
         - created_at
       properties:
         id:
@@ -7691,6 +7774,8 @@ components:
         failure_code:
           type: string
           maxLength: 120
+        last_event:
+          $ref: '#/components/schemas/MailEventSummary'
         created_at:
           type: string
           format: date-time
@@ -7755,3 +7840,81 @@ components:
           maxItems: 90
           items:
             $ref: '#/components/schemas/MailDayStats'
+    MailEventType:
+      type: string
+      description: "`accepted`: the provider took the message. `delivered`: the recipient's server
+        accepted it. `deferred`: a temporary failure that is still being retried. `bounced`: refused for
+        good. `failed`: the provider gave up. `rejected`: not attempted, for example a suppressed
+        recipient. `complained`: reported as spam."
+      enum:
+        - accepted
+        - delivered
+        - deferred
+        - bounced
+        - failed
+        - rejected
+        - complained
+    MailEventSummary:
+      type: string
+      description: The most severe current state among the recipients of an outbound message, where a
+        recipient's current state is its latest event. Empty when nothing was recorded, which is always
+        the case for inbound messages.
+      enum:
+        - ''
+        - accepted
+        - delivered
+        - deferred
+        - bounced
+        - failed
+        - rejected
+        - complained
+    MailEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - recipient
+        - detail
+        - occurred_at
+      properties:
+        type:
+          $ref: '#/components/schemas/MailEventType'
+        recipient:
+          type: string
+          description: The address the event is about; empty for a message-level event.
+          maxLength: 320
+        detail:
+          type: string
+          description: Short machine-readable reason such as `5.1.1 permanent_failure`; never provider free text.
+          maxLength: 255
+        occurred_at:
+          type: string
+          format: date-time
+    MailDeliveryEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - message_id
+        - type
+        - duplicate
+      properties:
+        message_id:
+          $ref: '#/components/schemas/PositiveID'
+        type:
+          $ref: '#/components/schemas/MailEventType'
+        duplicate:
+          type: boolean
+    MailDeliveryEventResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailDeliveryEvent'

@@ -8,6 +8,11 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Delivery events.** A sent message now records what happened to it per recipient: `accepted`,
+  `delivered`, `deferred`, `bounced`, `failed`, `rejected`, and `complained`. The send call stores
+  the provider's immediate result; later events come from a Cloudflare Queues event subscription
+  through the Email Worker and `POST /v1/mail-delivery-events`. Message detail returns the history
+  as `events`, and listings carry a `last_event` summary. Opens and clicks are not tracked.
 - **Organization mailboxes.** Mailboxes and their mail now belong to an organization instead of a
   user. Every mailbox route takes the `Organization-Id` header; members read and send, and only
   owners and admins create or delete mailboxes. Limits are per organization (50 mailboxes, and the

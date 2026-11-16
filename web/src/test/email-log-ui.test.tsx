@@ -514,6 +514,63 @@ describe('emails console', () => {
     expect(screen.getByText('1–4 of 4')).toBeInTheDocument();
   });
 
+  it('shows the delivery summary of a sent message in place of its status', () => {
+    const outbound = { direction: 'outbound', status: 'sent', read: true };
+    state.log.data = page([
+      entry({ ...outbound, id: 45, to: ['a@example.com'], last_event: 'bounced' }),
+      entry({ ...outbound, id: 44, to: ['b@example.com'], last_event: 'delivered' }),
+      entry({ ...outbound, id: 43, to: ['c@example.com'], last_event: 'deferred' }),
+      entry({ ...outbound, id: 42, to: ['d@example.com'], last_event: 'accepted' }),
+      entry({ ...outbound, id: 41, to: ['e@example.com'], last_event: 'complained' }),
+      // No event yet: the status stays.
+      entry({ ...outbound, id: 40, to: ['f@example.com'], last_event: '' }),
+      // The provider never took it: "Failed" and its code win over any event.
+      entry({
+        ...outbound,
+        id: 39,
+        to: ['g@example.com'],
+        status: 'failed',
+        failure_code: 'provider.rejected',
+        last_event: 'rejected',
+      }),
+      entry({ id: 38 }),
+    ]);
+    renderLog();
+    const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1);
+    const badge = (row: HTMLElement) => row.querySelector('[data-slot="badge"]');
+
+    expect(rows.map(row => badge(row)?.textContent)).toEqual([
+      'Bounced',
+      'Delivered',
+      'Delayed',
+      'Accepted',
+      'Complained',
+      'Sent',
+      'Failed',
+      'Received',
+    ]);
+    expect(rows.map(row => badge(row)?.getAttribute('data-event'))).toEqual([
+      'bounced',
+      'delivered',
+      'deferred',
+      'accepted',
+      'complained',
+      null,
+      null,
+      null,
+    ]);
+    // Tones: destructive, success, warning, neutral.
+    expect(badge(rows[0])).toHaveClass('bg-error-subtle', 'text-error');
+    expect(badge(rows[1])).toHaveClass('bg-success-subtle', 'text-success');
+    expect(badge(rows[2])).toHaveClass('bg-warning-subtle', 'text-warning');
+    expect(badge(rows[3])).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(badge(rows[4])).toHaveClass('bg-error-subtle', 'text-error');
+
+    expect(badge(rows[6])).toHaveAttribute('data-status', 'failed');
+    expect(within(rows[6]).getByText('provider.rejected')).toBeInTheDocument();
+    expect(within(rows[6]).queryByText('Rejected')).toBeNull();
+  });
+
   it('pages through the log and keeps the filters', () => {
     state.log.data = page([entry({ id: 31 })], { current_page: 2, last_page: 3, total: 41 });
     renderLog({ direction: 'inbound', page: 2 });
@@ -619,6 +676,96 @@ describe('emails console', () => {
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Mark unread' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('lists the delivery events of a sent message, oldest first', () => {
+    state.detail.data = message({
+      id: 30,
+      mailbox_id: 2,
+      direction: 'outbound',
+      status: 'sent',
+      last_event: 'bounced',
+      to: ['carol@example.com', 'dave@example.com'],
+      events: [
+        { type: 'accepted', recipient: '', detail: '', occurred_at: '2026-11-16T10:00:00Z' },
+        {
+          type: 'delivered',
+          recipient: 'carol@example.com',
+          detail: '',
+          occurred_at: '2026-11-16T10:00:02Z',
+        },
+        {
+          type: 'deferred',
+          recipient: 'dave@example.com',
+          detail: '4.2.2 mailbox_full',
+          occurred_at: '2026-11-16T10:00:03Z',
+        },
+        {
+          type: 'bounced',
+          recipient: 'dave@example.com',
+          detail: '5.1.1 permanent_failure',
+          occurred_at: '2026-11-16T10:05:00Z',
+        },
+      ],
+    });
+    renderLog();
+    fireEvent.click(screen.getByRole('button', { name: /carol@example\.com/u }));
+
+    // The header shows the summary, not "Sent".
+    const section = screen.getByRole('region', { name: 'Delivery' });
+    const headerBadge = screen.getAllByText('Bounced').find(element => !section.contains(element));
+    expect(headerBadge).toHaveAttribute('data-event', 'bounced');
+    expect(headerBadge).toHaveAttribute('data-status', 'sent');
+    expect(screen.queryByText('Sent')).toBeNull();
+
+    const rows = within(section).getAllByRole('listitem');
+    expect(
+      rows.map(row => [
+        row.querySelector('[data-slot="badge"]')?.textContent,
+        row.querySelector('span:not([data-slot])')?.textContent ?? null,
+        row.querySelector('code')?.textContent ?? null,
+      ])
+    ).toEqual([
+      ['Accepted', null, null],
+      ['Delivered', 'carol@example.com', null],
+      ['Delayed', 'dave@example.com', '4.2.2 mailbox_full'],
+      ['Bounced', 'dave@example.com', '5.1.1 permanent_failure'],
+    ]);
+    expect(rows[3].querySelector('[data-slot="badge"]')).toHaveClass('text-error');
+    expect(rows[3].querySelector('code')).toHaveClass('font-mono', 'text-muted-foreground');
+    // Relative time on screen, the absolute time on hover.
+    const time = rows[3].querySelector('time');
+    expect(time).toHaveAttribute('datetime', '2026-11-16T10:05:00Z');
+    expect(time?.getAttribute('title')).toMatch(/2026/u);
+    expect(time?.textContent).not.toBe('');
+    // The timeline sits between the header fields and the content tabs.
+    const tabs = screen.getByRole('tablist');
+    expect(section.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      screen.getByText('Status').compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it('says when a sent message has no delivery events and omits the section for inbound mail', () => {
+    state.detail.data = message({ id: 30, mailbox_id: 2, direction: 'outbound', status: 'sent' });
+    const view = renderLog();
+    fireEvent.click(screen.getByRole('button', { name: /carol@example\.com/u }));
+
+    const section = screen.getByRole('region', { name: 'Delivery' });
+    expect(
+      within(section).getByText('No delivery events have been reported yet.')
+    ).toBeInTheDocument();
+    expect(within(section).queryByRole('list')).toBeNull();
+    expect(screen.getByText('Sent')).toHaveAttribute('data-status', 'sent');
+    view.unmount();
+
+    state.detail.data = message();
+    renderLog();
+    fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
+    expect(screen.getByRole('heading', { name: 'Unread question' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Delivery' })).toBeNull();
+    expect(screen.queryByText('Delivery')).toBeNull();
+    expect(screen.queryByText('No delivery events have been reported yet.')).toBeNull();
   });
 
   it('previews HTML only in a fully sandboxed frame and shows the source as text', () => {
@@ -1009,6 +1156,7 @@ function entry(overrides: Record<string, unknown> = {}) {
     subject: 'Unread question',
     read: false,
     failure_code: '',
+    last_event: '',
     created_at: now(),
     ...overrides,
   };
@@ -1023,6 +1171,7 @@ function message(overrides: Record<string, unknown> = {}) {
     html_body: '<p>Formatted question</p>',
     message_id: 'question-1@example.com',
     in_reply_to: '',
+    events: [],
     ...overrides,
   };
 }

@@ -41,6 +41,12 @@ type InboundDelivery struct {
 	Raw       []byte
 }
 
+// DeliveryEvent is one signed provider event forwarded by the mail edge.
+type DeliveryEvent struct {
+	Signature string
+	Raw       []byte
+}
+
 // SendInput is a validated request to send one message.
 type SendInput struct {
 	To        []string
@@ -76,6 +82,9 @@ type Service interface {
 	Provider() string
 	InboundEnabled() bool
 	DailySendLimit() int
+	// RecordDeliveryEvent stores one signed provider event about an outbound message. It
+	// reports recorded=false when the event was already stored.
+	RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (message *domain.MailMessage, event domain.MailEvent, recorded bool, err error)
 	ReceiveInbound(ctx context.Context, delivery InboundDelivery) (message *domain.MailMessage, created bool, err error)
 }
 
@@ -222,7 +231,20 @@ func (s *service) GetMessage(ctx context.Context, organizationID, mailboxID, mes
 	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
 		return nil, err
 	}
-	return s.repo.FindMessage(ctx, mailboxID, messageID)
+	message, err := s.repo.FindMessage(ctx, mailboxID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	return s.withEvents(ctx, message)
+}
+
+func (s *service) withEvents(ctx context.Context, message *domain.MailMessage) (*domain.MailMessage, error) {
+	events, err := s.repo.ListMessageEvents(ctx, message.ID)
+	if err != nil {
+		return nil, err
+	}
+	message.Events = events
+	return message, nil
 }
 
 func (s *service) SetMessageRead(ctx context.Context, organizationID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error) {
@@ -275,7 +297,11 @@ func (s *service) SendFromAddress(ctx context.Context, organizationID uint, from
 }
 
 func (s *service) GetOutboundMessage(ctx context.Context, organizationID, messageID uint) (*domain.MailMessage, error) {
-	return s.repo.FindOutboundMessageForOrganization(ctx, organizationID, messageID)
+	message, err := s.repo.FindOutboundMessageForOrganization(ctx, organizationID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	return s.withEvents(ctx, message)
 }
 
 func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput) (*domain.MailMessage, bool, error) {
@@ -313,7 +339,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		return replayed, false, replayErr
 	}
 
-	sendErr := s.transport.Send(ctx, mailtransport.Message{
+	outcome, sendErr := s.transport.Send(ctx, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,
 		To:          message.To,
@@ -325,6 +351,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	})
 
 	message.Status = domain.MailStatusSent
+	message.MessageID = outcome.MessageID
 	var result error
 	if sendErr != nil {
 		message.Status = domain.MailStatusFailed
@@ -338,7 +365,36 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	if err := s.repo.UpdateMessageDelivery(recordContext, message.ID, message.Status, message.MessageID, message.FailureCode); err != nil {
 		return nil, false, err
 	}
+	if events := sendEvents(outcome, sendErr == nil, s.now().UTC()); len(events) > 0 {
+		_, summary, err := s.repo.AddMessageEvents(recordContext, message.ID, events)
+		if err != nil {
+			return nil, false, err
+		}
+		message.LastEvent = summary
+		message.Events = events
+	}
 	return message, true, result
+}
+
+// sendEvents turns what the provider said during the send call into delivery events.
+func sendEvents(outcome mailtransport.Result, accepted bool, at time.Time) []domain.MailEvent {
+	var events []domain.MailEvent
+	if accepted {
+		events = append(events, domain.MailEvent{Type: domain.MailEventAccepted, OccurredAt: at})
+	}
+	add := func(recipients []string, eventType domain.MailEventType, detail string) {
+		for _, recipient := range recipients {
+			address, ok := normalizeRecipient(recipient)
+			if !ok {
+				continue
+			}
+			events = append(events, domain.MailEvent{Type: eventType, Recipient: address, Detail: detail, OccurredAt: at})
+		}
+	}
+	add(outcome.Delivered, domain.MailEventDelivered, "")
+	add(outcome.Bounced, domain.MailEventBounced, "permanent_failure")
+	add(outcome.Suppressed, domain.MailEventRejected, "suppressed")
+	return events
 }
 
 // replayOutbound answers a send whose idempotency key already names a message. The provider is

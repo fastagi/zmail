@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   mailDayStatsListSchema,
+  mailLogEntrySchema,
   mailLogPageEnvelopeSchema,
   mailMessagePageEnvelopeSchema,
+  mailMessageSchema,
+  mailMessageSummarySchema,
   mailboxDomainListSchema,
   mailboxListSchema,
   normalizeDisplayName,
@@ -136,6 +139,70 @@ describe('mailbox service boundary', () => {
     expect(() => parseMailMessage({ ...message(), extra: true })).toThrow(ApiError);
     expect(() => parseMailMessage({ ...message(), status: 'bounced' })).toThrow(ApiError);
     expect(() => parseMailMessage({ ...message(), html_body: undefined })).toThrow(ApiError);
+  });
+
+  it('requires the delivery summary and events and rejects unknown event types', () => {
+    const sent = sentMessage();
+    expect(parseMailMessage(sent, 7)).toMatchObject({
+      last_event: 'bounced',
+      events: [
+        { type: 'accepted', recipient: '' },
+        { type: 'bounced', recipient: 'bob@example.com', detail: '5.1.1 permanent_failure' },
+      ],
+    });
+    for (const type of [
+      'accepted',
+      'delivered',
+      'deferred',
+      'bounced',
+      'failed',
+      'rejected',
+      'complained',
+    ]) {
+      const one = { ...sent, last_event: type, events: [{ ...sent.events[1], type }] };
+      expect(mailMessageSchema.safeParse(one).success, type).toBe(true);
+    }
+
+    // Both fields are required parts of the answer, on the detail and in every listing.
+    for (const field of ['last_event', 'events']) {
+      const partial: Record<string, unknown> = sentMessage();
+      delete partial[field];
+      expect(mailMessageSchema.safeParse(partial).success, field).toBe(false);
+    }
+    const withoutSummary: Record<string, unknown> = summary();
+    delete withoutSummary.last_event;
+    expect(mailMessageSummarySchema.safeParse(summary()).success).toBe(true);
+    expect(mailMessageSummarySchema.safeParse(withoutSummary).success).toBe(false);
+    const entry = { ...summary(), mailbox_address: 'hello@mail.example.com' };
+    expect(mailLogEntrySchema.safeParse(entry).success).toBe(true);
+    expect(mailLogEntrySchema.safeParse({ ...entry, last_event: 'delivered' }).success).toBe(true);
+    expect(
+      mailLogEntrySchema.safeParse({ ...withoutSummary, mailbox_address: entry.mailbox_address })
+        .success
+    ).toBe(false);
+    // Only the detail carries the events.
+    expect(mailMessageSummarySchema.safeParse({ ...summary(), events: [] }).success).toBe(false);
+    expect(mailLogEntrySchema.safeParse({ ...entry, events: [] }).success).toBe(false);
+
+    for (const drift of [
+      { last_event: 'opened' },
+      { last_event: null },
+      { events: [{ ...sent.events[1], type: 'opened' }] },
+      { events: [{ ...sent.events[1], type: '' }] },
+      { events: [{ ...sent.events[1], occurred_at: 'yesterday' }] },
+      { events: [{ ...sent.events[1], recipient: undefined }] },
+      { events: [{ ...sent.events[1], detail: undefined }] },
+      { events: [{ ...sent.events[1], smtp_response: '550 no such user' }] },
+    ]) {
+      expect(mailMessageSchema.safeParse({ ...sent, ...drift }).success).toBe(false);
+    }
+    expect(() =>
+      parseMailMessage({ ...sent, events: [{ ...sent.events[1], type: 'opened' }] })
+    ).toThrow(ApiError);
+    expect(mailMessageSummarySchema.safeParse({ ...summary(), last_event: 'opened' }).success).toBe(
+      false
+    );
+    expect(mailLogEntrySchema.safeParse({ ...entry, last_event: 'opened' }).success).toBe(false);
   });
 
   it('accepts domains, mailboxes, and pages without bodies', () => {
@@ -364,6 +431,7 @@ function summary() {
     subject: 'Hello',
     read: false,
     failure_code: '',
+    last_event: '',
     created_at: '2026-11-16T10:00:00.123456+08:00',
   };
 }
@@ -375,5 +443,25 @@ function message() {
     html_body: '<p>HTML body</p>',
     message_id: 'previous-id@example.com',
     in_reply_to: '',
+    events: [],
+  };
+}
+
+function sentMessage() {
+  return {
+    ...message(),
+    direction: 'outbound',
+    status: 'sent',
+    read: true,
+    last_event: 'bounced',
+    events: [
+      { type: 'accepted', recipient: '', detail: '', occurred_at: '2026-11-16T10:00:00Z' },
+      {
+        type: 'bounced',
+        recipient: 'bob@example.com',
+        detail: '5.1.1 permanent_failure',
+        occurred_at: '2026-11-16T10:00:05Z',
+      },
+    ],
   };
 }

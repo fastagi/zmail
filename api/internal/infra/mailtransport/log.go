@@ -22,7 +22,7 @@ func NewLog(logger *slog.Logger) *Log {
 }
 
 // Send logs the envelope only. Subjects and bodies stay out of the log.
-func (l *Log) Send(ctx context.Context, mail Message) error {
+func (l *Log) Send(ctx context.Context, mail Message) (Result, error) {
 	l.logger.InfoContext(ctx, "mailbox outbound mail recorded by the log transport",
 		slog.String("from", mail.FromAddress),
 		slog.Int("to_count", len(mail.To)),
@@ -30,5 +30,6 @@ func (l *Log) Send(ctx context.Context, mail Message) error {
 		slog.Int("text_bytes", len(mail.TextBody)),
 		slog.Int("html_bytes", len(mail.HTMLBody)),
 	)
-	return nil
+	// Nothing is delivered, so nothing is reported per recipient.
+	return Result{}, nil
 }

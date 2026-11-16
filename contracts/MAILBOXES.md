@@ -49,6 +49,7 @@ is shared: a message one member reads is read for the whole organization.
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
 | Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
 | Inbound delivery | none | `POST /v1/inbound-mail-messages` | `201`, or `200` for a repeat |
+| Delivery event | none | `POST /v1/mail-delivery-events` | `201`, or `200` for a repeat |
 
 The Web production API adapter owns the HttpOnly API session credential and forwards only these
 fixed relative paths together with the `Organization-Id` header. Every member response is
@@ -113,8 +114,10 @@ Listing returns summaries, newest first, without bodies. `direction=inbound` is 
 | `to`, `cc` | Lowercase addresses |
 | `read` | Inbound messages start unread; outbound messages start read. |
 | `failure_code` | Stable provider or transport reason when `status` is `failed`, otherwise empty |
+| `last_event` | Summary of the delivery events of an outbound message; see [Delivery Events](#delivery-events). Empty when none are recorded. |
 
-The detail response adds `text_body`, `html_body`, `message_id`, and `in_reply_to`. `html_body` is
+The detail response adds `text_body`, `html_body`, `message_id`, `in_reply_to`, and `events`, the
+delivery history of an outbound message. `html_body` is
 untrusted sender content: a client must render it only inside a sandbox that runs no script and
 loads nothing with the user's credentials.
 
@@ -228,6 +231,57 @@ another organization's mailbox, is `404 MAILBOX.NOT_FOUND`. The remaining fields
 `403 PERMISSION.DENIED`. The read route returns only outbound messages, so a `mail:read` key cannot
 read mail that was received. Both routes are limited to the organization in the header.
 
+## Delivery Events
+
+`status` says whether the provider took a message. What happened to it afterwards is recorded as
+events, one per recipient:
+
+| Event | Meaning |
+|---|---|
+| `accepted` | The provider took the message. Recorded once per message, with no recipient. |
+| `delivered` | The recipient's mail server accepted the message. |
+| `deferred` | A temporary failure; the provider is still retrying. |
+| `bounced` | The recipient's mail server refused the message for good. |
+| `failed` | The provider gave up without a bounce. |
+| `rejected` | The provider did not attempt the recipient, for example a suppressed address. |
+| `complained` | The recipient reported the message as spam. |
+
+Each event has `type`, `recipient`, `occurred_at`, and `detail`. `detail` holds short
+machine-readable tokens such as `5.1.1 permanent_failure` or `suppressed`. Free-form provider text,
+including the SMTP response line, is never stored or returned.
+
+Events come from two places. The send call records `accepted` and whatever the provider reported
+for each recipient at once (`delivered`, `bounced`, `rejected`). Later events arrive from the mail
+edge through `POST /v1/mail-delivery-events`.
+
+`last_event` is the most severe current state among the recipients, where a recipient's current
+state is its latest event: `complained`, then `bounced`, `failed`, `rejected`, `deferred`,
+`delivered`. With no recipient event it is `accepted` when the provider took the message. So a
+message to two recipients, one delivered and one bounced, shows `bounced`; a recipient deferred
+and then delivered counts as `delivered`.
+
+### Event Intake
+
+`POST /v1/mail-delivery-events` carries one Cloudflare Email Sending event
+(`cf.email.sending.message.*`, schema version 1) as JSON, at most 64 KiB, with
+`X-Mailbox-Signature: t=<unix seconds>,v1=<hex>`. `v1` is HMAC-SHA256, keyed with
+`MAILBOX_INBOUND_SECRET`, over `<t>.delivery-event.<body>`. The fixed `delivery-event` scope takes
+the place of the recipient in the inbound signature, so a signed inbound message cannot be replayed
+as an event. The same five-minute window applies.
+
+| Condition | Response | Mail edge action |
+|---|---|---|
+| Recorded | `201` `{ "message_id", "type", "duplicate": false }` | Acknowledge |
+| Event already recorded | `200` with `duplicate: true` | Acknowledge |
+| Missing, stale, or wrong signature | `401 MAILBOX.INBOUND_SIGNATURE_INVALID` | Retry |
+| No outbound message has the event's message id | `404 MAILBOX.MESSAGE_NOT_FOUND` | Acknowledge |
+| Not a usable Email Sending event | `422 MAILBOX.DELIVERY_EVENT_INVALID` | Acknowledge |
+| No inbound secret configured | `503 MAILBOX.INBOUND_DISABLED` | Retry |
+
+An event is matched to a message by the provider's message id, which the send call stores as
+`message_id`, and is idempotent by the provider's event id. Opens and clicks are not tracked.
+Messages sent with the development `log` provider have no provider id and never receive events.
+
 ## Inbound Delivery
 
 `POST /v1/inbound-mail-messages` carries one raw RFC 5322 message (`Content-Type: message/rfc822`,
@@ -280,3 +334,4 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.INBOUND_TOO_LARGE` | 413 |
 | `MAILBOX.INBOUND_UNPARSEABLE` | 422 |
 | `MAILBOX.INBOUND_DISABLED` | 503 |
+| `MAILBOX.DELIVERY_EVENT_INVALID` | 422 |

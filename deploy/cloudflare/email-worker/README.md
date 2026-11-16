@@ -38,6 +38,36 @@ directly. Onboard the domain under Email Service > Email Sending, create an API 
 email, and set `MAILBOX_PROVIDER=cloudflare`, `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, and
 `MAILBOX_CLOUDFLARE_API_TOKEN` on the API.
 
+## Delivery Events
+
+Cloudflare reports what happened to sent mail (delivered, deferred, bounced, failed, rejected,
+complained) through a Queues event subscription. This Worker also consumes that queue and forwards
+each event to `POST /v1/mail-delivery-events`, signed like inbound mail.
+
+1. Create a queue and subscribe the sending domain's events to it:
+
+   ```bash
+   npx wrangler queues create zmail-email-events
+   npx wrangler queues subscription create zmail-email-events \
+     --source email.sending --domain mail.example.com \
+     --events message.delivered,message.deferred,message.bounced,message.failed,message.rejected,message.complained
+   ```
+
+   The subscription flags follow Wrangler's event-subscription command; check
+   `npx wrangler queues subscription create --help` for the exact names in your version, or
+   create the subscription in the dashboard under the queue's Event Subscriptions tab.
+
+2. Add the queue as a consumer in `wrangler.jsonc` and redeploy:
+
+   ```jsonc
+   "queues": { "consumers": [{ "queue": "zmail-email-events", "max_retries": 5 }] }
+   ```
+
+The API route defaults to the inbound URL with its last segment replaced by
+`mail-delivery-events`; set `MAILBOX_EVENTS_URL` to override it. An event for a message that was
+not sent through Zmail, or one the API cannot use, is acknowledged and dropped. Anything else is
+retried by the queue.
+
 ## What Happens To A Message
 
 | API answer | Worker action | Sender sees |

@@ -34,16 +34,19 @@ func TestCloudflareSendsTheDocumentedRequest(t *testing.T) {
 		path, authorization = r.URL.Path, r.Header.Get("Authorization")
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &body)
-		_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{"delivered":["bob@example.com"],"permanent_bounces":[],"queued":[]}}`))
+		_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{"message_id":"<abc123@mail.example>","delivered":["bob@example.com"],"permanent_bounces":[],"queued":["amy@example.org"],"suppressed_recipients":[]}}`))
 	})
 
-	err := transport.Send(context.Background(), Message{
+	result, err := transport.Send(context.Background(), Message{
 		FromAddress: "hello@mail.example", FromName: "Hello",
 		To: []string{"bob@example.com"}, Cc: []string{"amy@example.org"},
 		Subject: "Hi", TextBody: "text", HTMLBody: "<p>html</p>", InReplyTo: "prev@example.com",
 	})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
+	}
+	if result.MessageID != "abc123@mail.example" || len(result.Delivered) != 1 || len(result.Queued) != 1 {
+		t.Fatalf("result = %+v; want the provider's id without brackets and its recipient lists", result)
 	}
 	if path != "/accounts/acct123/email/sending/send" || authorization != "Bearer token-value" {
 		t.Fatalf("request = %s, %q", path, authorization)
@@ -91,7 +94,7 @@ func TestCloudflareMapsProviderFailures(t *testing.T) {
 				w.WriteHeader(test.status)
 				_, _ = w.Write([]byte(test.body))
 			})
-			err := transport.Send(context.Background(), Message{FromAddress: "a@mail.example", To: []string{"b@example.com"}, Subject: "s", TextBody: "t"})
+			_, err := transport.Send(context.Background(), Message{FromAddress: "a@mail.example", To: []string{"b@example.com"}, Subject: "s", TextBody: "t"})
 			var transportErr *Error
 			if !errors.As(err, &transportErr) {
 				t.Fatalf("error = %v; want *Error", err)
@@ -103,11 +106,33 @@ func TestCloudflareMapsProviderFailures(t *testing.T) {
 	}
 }
 
+func TestCloudflareReportsWhoWasRefusedWhenNobodyIsAccepted(t *testing.T) {
+	transport := cloudflareAgainst(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":true,"result":{"message_id":"m1@mail.example","delivered":[],"permanent_bounces":[],"queued":[],"suppressed_recipients":["b@example.com"]}}`))
+	})
+	result, err := transport.Send(context.Background(), Message{FromAddress: "a@mail.example", To: []string{"b@example.com"}, Subject: "s", TextBody: "t"})
+	var transportErr *Error
+	if !errors.As(err, &transportErr) || transportErr.Code != failureSuppressed || !transportErr.Permanent {
+		t.Fatalf("error = %v; want a permanent %q", err, failureSuppressed)
+	}
+	if len(result.Suppressed) != 1 || result.MessageID != "m1@mail.example" {
+		t.Fatalf("result = %+v; the refusal must still name the recipient", result)
+	}
+}
+
+func TestCloudflareIgnoresAnUnusableMessageID(t *testing.T) {
+	for _, id := range []string{"", "has space@x", "<a@b> <c@d>"} {
+		if got := normalizeProviderMessageID(id); got != "" {
+			t.Fatalf("normalizeProviderMessageID(%q) = %q; want empty", id, got)
+		}
+	}
+}
+
 func TestCloudflareAcceptsQueuedDelivery(t *testing.T) {
 	transport := cloudflareAgainst(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"success":true,"result":{"delivered":[],"permanent_bounces":[],"queued":["b@example.com"]}}`))
 	})
-	if err := transport.Send(context.Background(), Message{FromAddress: "a@mail.example", To: []string{"b@example.com"}, Subject: "s", TextBody: "t"}); err != nil {
+	if _, err := transport.Send(context.Background(), Message{FromAddress: "a@mail.example", To: []string{"b@example.com"}, Subject: "s", TextBody: "t"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 }
@@ -116,7 +141,7 @@ func TestCloudflareReportsAnUnreachableProvider(t *testing.T) {
 	transport := cloudflareAgainst(t, func(http.ResponseWriter, *http.Request) {})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := transport.Send(ctx, Message{FromAddress: "a@mail.example", To: []string{"b@example.com"}, Subject: "s", TextBody: "t"})
+	_, err := transport.Send(ctx, Message{FromAddress: "a@mail.example", To: []string{"b@example.com"}, Subject: "s", TextBody: "t"})
 	var transportErr *Error
 	if !errors.As(err, &transportErr) || transportErr.Code != failureTransport || transportErr.Permanent {
 		t.Fatalf("error = %v; want a retryable %q", err, failureTransport)
@@ -124,7 +149,7 @@ func TestCloudflareReportsAnUnreachableProvider(t *testing.T) {
 }
 
 func TestNewSelectsTheConfiguredTransport(t *testing.T) {
-	if err := New(nil).Send(context.Background(), Message{}); !errors.Is(err, ErrNotConfigured) {
+	if _, err := New(nil).Send(context.Background(), Message{}); !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("nil config error = %v", err)
 	}
 
@@ -141,7 +166,7 @@ func TestNewSelectsTheConfiguredTransport(t *testing.T) {
 	}
 
 	unknown := &config.Config{Mailbox: config.MailboxConfig{Provider: "smtp"}}
-	if err := New(unknown).Send(context.Background(), Message{}); !errors.Is(err, ErrNotConfigured) {
+	if _, err := New(unknown).Send(context.Background(), Message{}); !errors.Is(err, ErrNotConfigured) {
 		t.Fatalf("unknown provider error = %v", err)
 	}
 }

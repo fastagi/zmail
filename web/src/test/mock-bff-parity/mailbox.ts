@@ -31,6 +31,7 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   expect(inbox.items).toHaveLength(1);
   const welcome = await mailboxService.message(organizationId, mailbox.id, inbox.items[0].id);
   expect(welcome.read).toBe(false);
+  expect(welcome).toMatchObject({ last_event: '', events: [] });
   expect((await mailboxService.setRead(organizationId, mailbox.id, welcome.id, true)).read).toBe(
     true
   );
@@ -41,6 +42,11 @@ export async function runServiceParity(context: { organizationId: number }): Pro
     text: 'Plain body',
   });
   expect(first).toMatchObject({ status: 'sent', to: ['bob@example.com'], read: true });
+  expect(first.last_event).toBe('delivered');
+  expect(first.events.map(event => [event.type, event.recipient])).toEqual([
+    ['accepted', ''],
+    ['delivered', 'bob@example.com'],
+  ]);
   const second = await mailboxService.send(organizationId, mailbox.id, {
     to: ['bob@example.com'],
     cc: ['carol@example.com'],
@@ -56,6 +62,7 @@ export async function runServiceParity(context: { organizationId: number }): Pro
     perPage: 1,
   });
   expect(sent.items.map(item => item.id)).toEqual([second.id]);
+  expect(sent.items[0].last_event).toBe('delivered');
   expect(sent.meta).toMatchObject({ total: 2, last_page: 2 });
 
   // The log spans every mailbox, names the owner of each entry, and filters like the API.
@@ -65,6 +72,7 @@ export async function runServiceParity(context: { organizationId: number }): Pro
     [...log.items.map(item => item.id)].sort((left, right) => right - left)
   );
   expect(log.meta.total).toBe(4);
+  expect(log.items.map(item => item.last_event).sort()).toEqual(['', '', 'delivered', 'delivered']);
   expect(new Set(log.items.map(item => item.mailbox_address))).toEqual(
     new Set([mailbox.address, other.address])
   );

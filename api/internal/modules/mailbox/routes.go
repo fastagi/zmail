@@ -48,4 +48,5 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 	})
 
 	r.POST("/inbound-mail-messages", h.ReceiveInbound).Name("inbound_mail_messages.store")
+	r.POST("/mail-delivery-events", h.ReceiveDeliveryEvent).Name("mail_delivery_events.store")
 }

@@ -54,6 +54,95 @@ func (s MailStatus) Valid() bool {
 	}
 }
 
+// MailEventType is one step in the delivery of an outbound message, as the provider reported it.
+type MailEventType string
+
+const (
+	// MailEventAccepted: the provider took the message for delivery.
+	MailEventAccepted MailEventType = "accepted"
+	// MailEventDelivered: the recipient's mail server accepted the message.
+	MailEventDelivered MailEventType = "delivered"
+	// MailEventDeferred: a temporary failure; the provider is still retrying.
+	MailEventDeferred MailEventType = "deferred"
+	// MailEventBounced: the recipient's mail server refused the message for good.
+	MailEventBounced MailEventType = "bounced"
+	// MailEventFailed: the provider gave up without a bounce.
+	MailEventFailed MailEventType = "failed"
+	// MailEventRejected: the provider did not attempt the recipient, for example a suppressed one.
+	MailEventRejected MailEventType = "rejected"
+	// MailEventComplained: the recipient reported the message as spam.
+	MailEventComplained MailEventType = "complained"
+)
+
+// severity orders event types by how much attention they need; the summary of a message is
+// the most severe current state among its recipients.
+func (t MailEventType) severity() int {
+	switch t {
+	case MailEventComplained:
+		return 6
+	case MailEventBounced:
+		return 5
+	case MailEventFailed:
+		return 4
+	case MailEventRejected:
+		return 3
+	case MailEventDeferred:
+		return 2
+	case MailEventDelivered:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// Valid reports whether the type is a known value.
+func (t MailEventType) Valid() bool {
+	return t == MailEventAccepted || t.severity() > 0
+}
+
+// MailEvent is one recorded delivery step of a message.
+type MailEvent struct {
+	ID        uint
+	MessageID uint
+	Type      MailEventType
+	// Recipient is the address the event is about; empty for a message-level event.
+	Recipient string
+	// Detail is a short machine-readable reason such as "5.1.1 permanent_failure"; never free text.
+	Detail string
+	// ProviderEventID makes a provider event idempotent. Empty for events recorded at send time.
+	ProviderEventID string
+	OccurredAt      time.Time
+}
+
+// SummarizeMailEvents returns the state a listing shows for a message: the most severe current
+// state among its recipients, where a recipient's current state is its latest event. With no
+// recipient events it is "accepted" when the provider took the message, and empty otherwise.
+func SummarizeMailEvents(events []MailEvent) MailEventType {
+	latest := map[string]MailEvent{}
+	accepted := false
+	for _, event := range events {
+		if event.Recipient == "" {
+			accepted = accepted || event.Type == MailEventAccepted
+			continue
+		}
+		current, seen := latest[event.Recipient]
+		if !seen || event.OccurredAt.After(current.OccurredAt) ||
+			(event.OccurredAt.Equal(current.OccurredAt) && event.ID >= current.ID) {
+			latest[event.Recipient] = event
+		}
+	}
+	var summary MailEventType
+	for _, event := range latest {
+		if summary == "" || event.Type.severity() > summary.severity() {
+			summary = event.Type
+		}
+	}
+	if summary == "" && accepted {
+		return MailEventAccepted
+	}
+	return summary
+}
+
 // Mailbox is one address an organization sends from and receives at. Every member of the
 // organization may read and send its mail.
 type Mailbox struct {
@@ -98,8 +187,12 @@ type MailMessage struct {
 	ReadAt                 *time.Time
 	// MailboxAddress is the address of the owning mailbox. Only the cross-mailbox log fills it.
 	MailboxAddress string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// LastEvent summarizes the delivery events of an outbound message; see SummarizeMailEvents.
+	LastEvent MailEventType
+	// Events is the delivery history, oldest first. Only the detail lookup fills it.
+	Events    []MailEvent
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // MailMessageFilter narrows a mailbox message listing.
@@ -151,6 +244,13 @@ type MailboxRepository interface {
 	SetMessageRead(ctx context.Context, mailboxID, id uint, readAt *time.Time) error
 	DeleteMessage(ctx context.Context, mailboxID, id uint) error
 	CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error)
+	// AddMessageEvents records delivery events and refreshes the message's summary in one
+	// transaction. An event whose ProviderEventID is already stored is skipped; the count of
+	// newly stored events is returned.
+	AddMessageEvents(ctx context.Context, messageID uint, events []MailEvent) (added int, summary MailEventType, err error)
+	ListMessageEvents(ctx context.Context, messageID uint) ([]MailEvent, error)
+	// FindOutboundMessageByProviderID finds the outbound message a provider event names.
+	FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*MailMessage, error)
 	// ListMessagesForOrganization lists messages across every mailbox of the organization, newest first,
 	// without bodies.
 	ListMessagesForOrganization(ctx context.Context, organizationID uint, filter MailLogFilter) ([]*MailMessage, int64, error)

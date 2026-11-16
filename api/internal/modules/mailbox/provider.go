@@ -31,6 +31,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_16_100000_create_mailbox_tables",
 			"2026_11_16_110000_add_mail_message_idempotency",
 			"2026_11_17_090000_move_mailboxes_to_organizations",
+			"2026_11_17_100000_create_mail_message_events",
 		),
 	)
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -9,10 +9,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import {
   ErrorAlert,
+  MailEventBadge,
   MailHtmlFrame,
   MailStatusBadge,
-  mailStatusKey,
+  mailBadgeKey,
+  mailEventKey,
+  relativeTime,
   useDateTimeFormat,
+  useRelativeTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
 import { useMailMessage } from '@/features/mailbox/hooks/use-mailbox';
@@ -42,6 +46,9 @@ export function EmailDetail({
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
   const query = useMailMessage(useMailOrganizationId(), mailboxId, messageId);
+  const relative = useRelativeTimeFormat();
+  const [now] = useState(() => Date.now());
+  const deliveryHeadingId = useId();
   const [chosenTab, setChosenTab] = useState<ContentTab | null>(null);
 
   const back = (
@@ -118,7 +125,7 @@ export function EmailDetail({
           </dd>
           <dt className="text-muted-foreground">{t('emails.status')}</dt>
           <dd className="flex flex-wrap items-center gap-2">
-            <MailStatusBadge status={message.status} label={t(mailStatusKey[message.status])} />
+            <MailStatusBadge message={message} label={t(mailBadgeKey(message))} />
             {message.status === 'failed' && message.failure_code ? (
               <code className="text-xs break-all text-muted-foreground">
                 {message.failure_code}
@@ -126,6 +133,47 @@ export function EmailDetail({
             ) : null}
           </dd>
         </dl>
+
+        {message.direction === 'outbound' ? (
+          <section aria-labelledby={deliveryHeadingId} className="space-y-2">
+            <h3 id={deliveryHeadingId} className="text-sm font-medium">
+              {t('emails.delivery')}
+            </h3>
+            {message.events.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t('emails.deliveryEmpty')}</p>
+            ) : (
+              <ol className="divide-y rounded-md border text-sm">
+                {message.events.map((event, index) => {
+                  const occurred = new Date(event.occurred_at);
+                  return (
+                    // Events are append-only and listed oldest first, so the position is stable.
+                    <li
+                      key={index}
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2"
+                    >
+                      <MailEventBadge type={event.type} label={t(mailEventKey[event.type])} />
+                      {event.recipient ? (
+                        <span className="min-w-0 break-all">{event.recipient}</span>
+                      ) : null}
+                      {event.detail ? (
+                        <code className="min-w-0 font-mono text-xs break-all text-muted-foreground">
+                          {event.detail}
+                        </code>
+                      ) : null}
+                      <time
+                        dateTime={event.occurred_at}
+                        title={formatter.format(occurred)}
+                        className="ml-auto text-xs whitespace-nowrap text-muted-foreground"
+                      >
+                        {relativeTime(relative, occurred.getTime(), now)}
+                      </time>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </section>
+        ) : null}
 
         <Tabs value={tab} onValueChange={value => setChosenTab(value as ContentTab)}>
           <TabsList aria-label={t('emails.tabs')}>
