@@ -5,6 +5,7 @@ const messages = {
     title: 'Your mailboxes',
     count: '{count} of {max} used',
     noDisplayName: 'No display name',
+    unreadCount: '{count} unread',
     emptyTitle: 'No mailboxes yet',
     empty: 'Create an address to start receiving and sending mail.',
   },

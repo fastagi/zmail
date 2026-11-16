@@ -69,8 +69,34 @@ func (r *repository) ListMailboxes(ctx context.Context, userID uint) ([]*domain.
 		return nil, err
 	}
 	mailboxes := make([]*domain.Mailbox, 0, len(rows))
+	ids := make([]uint, 0, len(rows))
 	for i := range rows {
 		mailboxes = append(mailboxes, rows[i].toDomain())
+		ids = append(ids, rows[i].ID)
+	}
+	if len(ids) == 0 {
+		return mailboxes, nil
+	}
+
+	// One grouped query for every mailbox, served by the (mailbox_id, direction) index.
+	var counts []struct {
+		MailboxID uint
+		Unread    int
+	}
+	err = r.db.WithContext(ctx).Model(&MailMessagePO{}).
+		Select("mailbox_id, COUNT(*) AS unread").
+		Where("mailbox_id IN ? AND direction = ? AND read_at IS NULL", ids, string(domain.MailDirectionInbound)).
+		Group("mailbox_id").
+		Scan(&counts).Error
+	if err != nil {
+		return nil, err
+	}
+	unread := make(map[uint]int, len(counts))
+	for _, count := range counts {
+		unread[count.MailboxID] = count.Unread
+	}
+	for _, mailbox := range mailboxes {
+		mailbox.UnreadCount = unread[mailbox.ID]
 	}
 	return mailboxes, nil
 }

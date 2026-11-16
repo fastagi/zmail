@@ -148,7 +148,19 @@ export function MailboxWorkspace() {
                   )}
                   onClick={() => setSelectedId(mailbox.id)}
                 >
-                  <span className="block truncate text-sm font-medium">{mailbox.address}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {mailbox.address}
+                    </span>
+                    {mailbox.unread_count > 0 ? (
+                      <span
+                        className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground"
+                        aria-label={t('mailboxes.unreadCount', { count: mailbox.unread_count })}
+                      >
+                        {mailbox.unread_count > 99 ? '99+' : mailbox.unread_count}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="block truncate text-xs text-muted-foreground">
                     {mailbox.display_name || t('mailboxes.noDisplayName')}
                   </span>

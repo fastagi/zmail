@@ -395,6 +395,46 @@ func TestRepositoryStoresOneOutboundMessagePerIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestRepositoryCountsUnreadInboundMessagesPerMailbox(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	busy := createMailbox(t, repo, "busy@mail.example")
+	quiet := createMailbox(t, repo, "quiet@mail.example")
+	readAt := time.Now().UTC()
+	add := func(mailboxID uint, direction domain.MailDirection, read bool) {
+		message := &domain.MailMessage{
+			MailboxID: mailboxID, Direction: direction, Status: domain.MailStatusReceived,
+			FromAddress: "alice@sender.test", Subject: "Hi",
+		}
+		if direction == domain.MailDirectionOutbound {
+			message.Status = domain.MailStatusSent
+		}
+		if read {
+			message.ReadAt = &readAt
+		}
+		if _, err := repo.CreateMessage(ctx, message); err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+	}
+	add(busy.ID, domain.MailDirectionInbound, false)
+	add(busy.ID, domain.MailDirectionInbound, false)
+	add(busy.ID, domain.MailDirectionInbound, true)
+	// An outbound message is never unread mail, even without a read time.
+	add(busy.ID, domain.MailDirectionOutbound, false)
+
+	owned, err := repo.ListMailboxes(ctx, 1)
+	if err != nil || len(owned) != 2 {
+		t.Fatalf("ListMailboxes = %v, %v", owned, err)
+	}
+	if owned[0].ID != busy.ID || owned[0].UnreadCount != 2 {
+		t.Fatalf("busy mailbox unread = %d; want 2", owned[0].UnreadCount)
+	}
+	if owned[1].ID != quiet.ID || owned[1].UnreadCount != 0 {
+		t.Fatalf("quiet mailbox unread = %d; want 0", owned[1].UnreadCount)
+	}
+}
+
 func TestRepositoryReportsADisabledDatabase(t *testing.T) {
 	repo := NewRepository(nil)
 	if _, err := repo.ListMailboxes(context.Background(), 1); !errors.Is(err, domain.ErrServiceUnavailable) {

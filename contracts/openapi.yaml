@@ -7169,6 +7169,7 @@ components:
         - id
         - address
         - display_name
+        - unread_count
         - created_at
       properties:
         id:
@@ -7180,6 +7181,10 @@ components:
         display_name:
           type: string
           maxLength: 120
+        unread_count:
+          type: integer
+          description: Number of unread inbound messages in the mailbox.
+          minimum: 0
         created_at:
           type: string
           format: date-time

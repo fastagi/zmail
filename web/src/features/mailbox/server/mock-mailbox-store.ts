@@ -65,7 +65,7 @@ export class MockMailboxStore {
   /** Oldest first, as the API lists them. */
   list(userKey: string): Mailbox[] {
     return [...this.mailboxesOf(userKey).values()]
-      .map(state => state.mailbox)
+      .map(state => ({ ...state.mailbox, unread_count: unreadCount(state) }))
       .sort((left, right) => left.id - right.id);
   }
 
@@ -76,14 +76,18 @@ export class MockMailboxStore {
     if (displayName === null) return { ok: false, error: 'invalid' };
 
     const address = `${localPart.value}@${MOCK_MAILBOX_DOMAIN}`;
-    if (this.claimedAddresses.has(address)) return { ok: false, error: 'taken' };
+    // The API checks the ownership limit before the address, so a user at the limit learns
+    // about the limit even when the address is also taken.
     const mailboxes = this.mailboxesOf(userKey);
     if (mailboxes.size >= MAILBOX_MAX_PER_USER) return { ok: false, error: 'limit' };
+    if (this.claimedAddresses.has(address)) return { ok: false, error: 'taken' };
 
     const mailbox: Mailbox = {
       id: this.nextMailboxId++,
       address,
       display_name: displayName,
+      // As in the API, a create response reports 0; listings count unread inbound messages.
+      unread_count: 0,
       created_at: this.timestamp(),
     };
     const state: MailboxState = { mailbox, messages: new Map() };
@@ -280,4 +284,12 @@ function paginated(
       next: page < lastPage ? href(page + 1) : null,
     },
   };
+}
+
+function unreadCount(state: MailboxState): number {
+  let unread = 0;
+  for (const message of state.messages.values()) {
+    if (message.direction === 'inbound' && !message.read) unread += 1;
+  }
+  return unread;
 }

@@ -270,6 +270,56 @@ describe('mailbox browser route boundary', () => {
     );
   });
 
+  it('counts unread inbound messages per mailbox and follows the read state', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const created = (await (await create(route, { local_part: 'hello' })).json()).data;
+    // A create response reports 0; the listing counts the unread welcome message.
+    expect(created.unread_count).toBe(0);
+    const id = String(created.id);
+    const path = `/api/mailboxes/${id}/messages`;
+    const unreadOf = async () =>
+      (await (await route.listMailboxesRoute(request('/api/mailboxes'))).json()).data[0]
+        .unread_count;
+    expect(await unreadOf()).toBe(1);
+
+    // Sending never adds unread mail.
+    await route.sendMailMessageRoute(
+      request(path, {
+        method: 'POST',
+        body: JSON.stringify({ to: ['bob@example.com'], subject: 'Hi', text: 'Body' }),
+      }),
+      id
+    );
+    expect(await unreadOf()).toBe(1);
+
+    const inbox = await (
+      await route.listMailMessagesRoute(request(`${path}?direction=inbound`), id)
+    ).json();
+    const welcomeId = String(inbox.data[0].id);
+    const setRead = (read: boolean) =>
+      route.updateMailMessageRoute(
+        request(`${path}/${welcomeId}`, { method: 'PUT', body: JSON.stringify({ read }) }),
+        id,
+        welcomeId
+      );
+    await setRead(true);
+    expect(await unreadOf()).toBe(0);
+    await setRead(false);
+    expect(await unreadOf()).toBe(1);
+  });
+
+  it('reports the mailbox limit before a taken address, as the API does', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    for (let index = 0; index < 10; index += 1) {
+      expect((await create(route, { local_part: `full${index}` })).status).toBe(201);
+    }
+    await expectError(await create(route, { local_part: 'full0' }), 409, 'MAILBOX.LIMIT_REACHED');
+  });
+
   it('lists newest first without bodies, tracks read state, and deletes messages', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockUser('demo-admin'));

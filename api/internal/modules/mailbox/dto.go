@@ -54,9 +54,11 @@ type MailboxDomainResponse struct {
 
 // MailboxResponse is the public shape of a mailbox.
 type MailboxResponse struct {
-	ID          uint      `json:"id"`
-	Address     string    `json:"address"`
-	DisplayName string    `json:"display_name"`
+	ID          uint   `json:"id"`
+	Address     string `json:"address"`
+	DisplayName string `json:"display_name"`
+	// UnreadCount counts unread inbound messages. A newly created mailbox reports 0.
+	UnreadCount int       `json:"unread_count"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -104,6 +106,7 @@ func toMailboxResponse(mailbox *domain.Mailbox) *MailboxResponse {
 		ID:          mailbox.ID,
 		Address:     mailbox.Address,
 		DisplayName: mailbox.DisplayName,
+		UnreadCount: mailbox.UnreadCount,
 		CreatedAt:   mailbox.CreatedAt,
 	}
 }
