@@ -14,6 +14,7 @@ cloud, registry, rollout controller, secret store, or migration orchestrator for
 | `.github/workflows/container.yml` | CI | Runs the same container verifier when API or container sources change. |
 | `fastbuild notification:work` | Optional notification starter | Processes durable email deliveries with bounded database leases. |
 | `fastbuild webhook:work` | Optional webhook starter | Processes signed outbound deliveries with bounded network calls and database leases. |
+| `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit. |
 | [`deploy/kubernetes`](../../deploy/kubernetes/README.md) | Example | Hardened kustomize reference for the API, workers, retention jobs, migration job, and Web. |
 | Production deployment manifests | Downstream app | Own secrets, network policy, replicas, migrations, rollout, and rollback. |
 
@@ -200,6 +201,22 @@ The job requires the same database, R2 secrets, object-storage policy, and `OPTI
 snapshot as HTTP replicas. Provider lifecycle rules on `asset-uploads/` remain defense in depth.
 Monitor nonzero failed counts and oldest pending age without logging filenames, object keys, signed
 URLs, checksums, or content. See [`ASSETS.md`](ASSETS.md) for lifecycle, recovery, and removal.
+
+## Mail Broadcast Worker
+
+When `mailbox` is selected and broadcasts are used, deploy the same image as a separate
+long-running worker:
+
+```bash
+/app/fastbuild mail:broadcast:work --batch=25 --poll=2s
+```
+
+It needs the same database, mail provider settings, `MAILBOX_INBOUND_SECRET`, and
+`MAILBOX_PUBLIC_URL` as HTTP replicas. Recipients are claimed with row leases, so several workers
+can run; each recipient is sent with an idempotency key of its broadcast and contact, so a worker
+that stops after the provider call does not mail that contact again. When the organization's
+24-hour send limit is reached, the broadcast shows `stop_reason` `send_limit_reached` and resumes
+when the window has room.
 
 ## Webhook Worker And Retention
 

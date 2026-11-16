@@ -14,6 +14,9 @@ import {
   mailboxSchema,
   mailTemplateListSchema,
   mailContactImportSchema,
+  mailBroadcastPageEnvelopeSchema,
+  mailBroadcastRecipientPageEnvelopeSchema,
+  mailBroadcastSchema,
   mailContactListListSchema,
   mailContactListSchema,
   mailContactPageEnvelopeSchema,
@@ -23,6 +26,12 @@ import {
 import type {
   CreateMailboxInput,
   MailAttachment,
+  MailBroadcast,
+  MailBroadcastInput,
+  MailBroadcastPage,
+  MailBroadcastRecipientPage,
+  MailBroadcastSendInput,
+  MailRecipientStatus,
   MailContact,
   MailContactFilters,
   MailContactImport,
@@ -183,6 +192,104 @@ export const mailboxService = {
       headers: organizationHeaders(organizationId),
     });
     return parseMailMessage(value, messageId);
+  },
+
+  /** One page of broadcasts, newest first, with recipient counts. */
+  async broadcasts(organizationId: number, page = 1, perPage = 20): Promise<MailBroadcastPage> {
+    validId(page);
+    if (!Number.isSafeInteger(perPage) || perPage < 1 || perPage > MAIL_PAGE_MAX_SIZE) {
+      throw invalidResponse();
+    }
+    const value = await request.getEnvelope<unknown>('/mail-broadcasts', {
+      headers: organizationHeaders(organizationId),
+      params: { page, per_page: perPage },
+    });
+    const parsed = mailBroadcastPageEnvelopeSchema.safeParse(value);
+    if (!parsed.success) throw invalidResponse();
+    return { items: parsed.data.data, meta: parsed.data.meta, links: parsed.data.links };
+  },
+
+  async broadcast(organizationId: number, broadcastId: number): Promise<MailBroadcast> {
+    validId(broadcastId);
+    return parseBroadcast(
+      await request.get<unknown>(`/mail-broadcasts/${broadcastId}`, {
+        headers: organizationHeaders(organizationId),
+      }),
+      broadcastId
+    );
+  },
+
+  /** Creates a draft, or replaces one when `broadcastId` is given. */
+  async saveBroadcast(
+    organizationId: number,
+    input: MailBroadcastInput,
+    broadcastId?: number
+  ): Promise<MailBroadcast> {
+    if (broadcastId !== undefined) validId(broadcastId);
+    const config = { headers: organizationHeaders(organizationId) };
+    const value =
+      broadcastId === undefined
+        ? await request.post<unknown, MailBroadcastInput>('/mail-broadcasts', input, config)
+        : await request.put<unknown, MailBroadcastInput>(
+            `/mail-broadcasts/${broadcastId}`,
+            input,
+            config
+          );
+    return parseBroadcast(value, broadcastId);
+  },
+
+  async deleteBroadcast(organizationId: number, broadcastId: number): Promise<void> {
+    validId(broadcastId);
+    await request.delete<void>(`/mail-broadcasts/${broadcastId}`, {
+      headers: organizationHeaders(organizationId),
+    });
+  },
+
+  /** Starts a draft now, or schedules it when `scheduled_at` is in the future. */
+  async sendBroadcast(
+    organizationId: number,
+    broadcastId: number,
+    input: MailBroadcastSendInput
+  ): Promise<MailBroadcast> {
+    validId(broadcastId);
+    return parseBroadcast(
+      await request.post<unknown, MailBroadcastSendInput>(
+        `/mail-broadcasts/${broadcastId}/sends`,
+        input,
+        { headers: organizationHeaders(organizationId) }
+      ),
+      broadcastId
+    );
+  },
+
+  async cancelBroadcast(organizationId: number, broadcastId: number): Promise<MailBroadcast> {
+    validId(broadcastId);
+    return parseBroadcast(
+      await request.post<unknown>(`/mail-broadcasts/${broadcastId}/cancellations`, undefined, {
+        headers: organizationHeaders(organizationId),
+      }),
+      broadcastId
+    );
+  },
+
+  async broadcastRecipients(
+    organizationId: number,
+    broadcastId: number,
+    {
+      status,
+      page = 1,
+      perPage = 25,
+    }: { status?: MailRecipientStatus; page?: number; perPage?: number } = {}
+  ): Promise<MailBroadcastRecipientPage> {
+    validId(broadcastId);
+    validId(page);
+    const value = await request.getEnvelope<unknown>(`/mail-broadcasts/${broadcastId}/recipients`, {
+      headers: organizationHeaders(organizationId),
+      params: { ...(status ? { status } : {}), page, per_page: perPage },
+    });
+    const parsed = mailBroadcastRecipientPageEnvelopeSchema.safeParse(value);
+    if (!parsed.success) throw invalidResponse();
+    return { items: parsed.data.data, meta: parsed.data.meta, links: parsed.data.links };
   },
 
   /** One page of contacts, newest first. */
@@ -455,6 +562,14 @@ export function parseMailMessage(value: unknown, expectedId?: number): MailMessa
 }
 
 /** The organization the request acts in; an invalid id never leaves the browser. */
+function parseBroadcast(value: unknown, expectedId?: number): MailBroadcast {
+  const parsed = mailBroadcastSchema.safeParse(value);
+  if (!parsed.success || (expectedId !== undefined && parsed.data.id !== expectedId)) {
+    throw invalidResponse();
+  }
+  return parsed.data;
+}
+
 function organizationHeaders(organizationId: number): Record<string, string> {
   validId(organizationId);
   return { 'Organization-Id': String(organizationId) };
@@ -525,3 +640,27 @@ assertContract<
   Accepts<z.input<typeof mailContactListSchema>, ContractData<'createMailContactList', 201>>
 >();
 assertContract<Sends<MailContactListInput, ContractRequest<'createMailContactList'>>>();
+assertContract<
+  Accepts<
+    z.input<typeof mailBroadcastPageEnvelopeSchema>,
+    ContractResponse<'listMailBroadcasts', 200>
+  >
+>();
+assertContract<
+  Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'getMailBroadcast', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'createMailBroadcast', 201>>
+>();
+assertContract<Sends<MailBroadcastInput, ContractRequest<'createMailBroadcast'>>>();
+assertContract<Sends<MailBroadcastInput, ContractRequest<'updateMailBroadcast'>>>();
+assertContract<Sends<MailBroadcastSendInput, ContractRequest<'sendMailBroadcast'>>>();
+assertContract<
+  Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'sendMailBroadcast', 200>>
+>();
+assertContract<
+  Accepts<
+    z.input<typeof mailBroadcastRecipientPageEnvelopeSchema>,
+    ContractResponse<'listMailBroadcastRecipients', 200>
+  >
+>();

@@ -40,5 +40,11 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(ErrMailContactListNameTaken, http.StatusConflict, domain.CodeMailContactListNameTaken)
 	mapper.Register(ErrMailContactListLimit, http.StatusConflict, domain.CodeMailContactListLimitReached)
 	mapper.Register(ErrMailContactImportInvalid, http.StatusUnprocessableEntity, domain.CodeMailContactImportInvalid)
+	mapper.Register(ErrMailBroadcastNotFound, http.StatusNotFound, domain.CodeMailBroadcastNotFound)
+	mapper.Register(ErrMailBroadcastInvalid, http.StatusUnprocessableEntity, domain.CodeMailBroadcastInvalid)
+	mapper.Register(ErrMailBroadcastNotEditable, http.StatusConflict, domain.CodeMailBroadcastNotEditable)
+	mapper.Register(ErrMailBroadcastNoRecipients, http.StatusUnprocessableEntity, domain.CodeMailBroadcastNoRecipients)
+	mapper.Register(ErrMailBroadcastDisabled, http.StatusServiceUnavailable, domain.CodeMailBroadcastDisabled)
+	mapper.Register(ErrMailUnsubscribeInvalid, http.StatusNotFound, domain.CodeMailUnsubscribeInvalid)
 	mapper.Register(ErrMailTemplateVariablesMissing, http.StatusUnprocessableEntity, domain.CodeMailTemplateVariablesMissing)
 }

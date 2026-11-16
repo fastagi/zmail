@@ -193,5 +193,7 @@ like the existing mailbox suites; a live broadcast to the test mailbox on `mail.
 2. **Contacts** (done): contacts, lists, CSV import, and the Contacts console page. The import
    takes CSV text inside JSON rather than a file upload, so the browser adapter forwards it like
    any other body; the 5 MiB bound keeps that reasonable.
-3. **Broadcasts**: broadcasts, the worker, unsubscribe and suppression, and the Broadcasts console
-   page.
+3. **Broadcasts** (done): broadcasts, the worker, unsubscribe and suppression, and the Broadcasts
+   console page. Unsubscribe links point at a Web console page, configured by `MAILBOX_PUBLIC_URL`;
+   the one-click endpoint is forwarded by the Web console, so a single public origin serves both.
+   Recipient counts are computed from the recipient rows on read instead of stored counters.

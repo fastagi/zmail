@@ -106,6 +106,7 @@ export class MockMailboxStore {
         provider: 'log',
         inbound_enabled: false,
         daily_send_limit: MOCK_DAILY_SEND_LIMIT,
+        broadcasts_enabled: true,
       },
     ];
   }
@@ -285,6 +286,11 @@ export class MockMailboxStore {
         created_at: template.created_at,
         updated_at: template.updated_at,
       }));
+  }
+
+  /** True when the organization has the mailbox. */
+  hasMailbox(organizationId: number, mailboxId: number): boolean {
+    return this.mailboxesOf(organizationId).has(mailboxId);
   }
 
   getTemplate(organizationId: number, templateId: number): MockMailTemplateResult {

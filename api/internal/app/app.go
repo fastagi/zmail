@@ -41,4 +41,6 @@ type Application struct {
 	WebhookTester          domain.WebhookTester
 	WebhookMaintainer      domain.WebhookMaintainer
 	OperatorGrants         domain.OperatorGrantStore
+	// MailBroadcasts sends broadcast recipients; nil when the mailbox starter is not selected.
+	MailBroadcasts domain.MailBroadcastDispatcher
 }

@@ -336,6 +336,127 @@ type MailContactRepository interface {
 	DeleteContactList(ctx context.Context, organizationID, id uint) error
 }
 
+// MailBroadcastStatus is the state of a broadcast.
+type MailBroadcastStatus string
+
+const (
+	// MailBroadcastDraft broadcasts can be edited and have no recipients yet.
+	MailBroadcastDraft MailBroadcastStatus = "draft"
+	// MailBroadcastScheduled broadcasts have their recipients and wait for scheduled_at.
+	MailBroadcastScheduled MailBroadcastStatus = "scheduled"
+	// MailBroadcastSending broadcasts are being sent by the worker.
+	MailBroadcastSending MailBroadcastStatus = "sending"
+	// MailBroadcastSent broadcasts have no pending recipient left.
+	MailBroadcastSent MailBroadcastStatus = "sent"
+	// MailBroadcastCanceled broadcasts were stopped; recipients not yet sent were not sent.
+	MailBroadcastCanceled MailBroadcastStatus = "canceled"
+)
+
+// MailRecipientStatus is the state of one recipient of a broadcast.
+type MailRecipientStatus string
+
+const (
+	MailRecipientPending  MailRecipientStatus = "pending"
+	MailRecipientSent     MailRecipientStatus = "sent"
+	MailRecipientFailed   MailRecipientStatus = "failed"
+	MailRecipientSkipped  MailRecipientStatus = "skipped"
+	MailRecipientCanceled MailRecipientStatus = "canceled"
+)
+
+// MailBroadcastCounts counts the recipients of a broadcast by status.
+type MailBroadcastCounts struct {
+	Total    int
+	Pending  int
+	Sent     int
+	Failed   int
+	Skipped  int
+	Canceled int
+}
+
+// MailBroadcast sends one template from one mailbox to the subscribed contacts of one list.
+type MailBroadcast struct {
+	ID             uint
+	OrganizationID uint
+	Name           string
+	MailboxID      uint
+	TemplateID     uint
+	ListID         uint
+	// UnsubscribeLabel is the text of the unsubscribe link added when the template has none.
+	UnsubscribeLabel string
+	Status           MailBroadcastStatus
+	// Subject, HTMLBody, and TextBody are the template as it was when sending started.
+	Subject     string
+	HTMLBody    string
+	TextBody    string
+	ScheduledAt *time.Time
+	StartedAt   *time.Time
+	FinishedAt  *time.Time
+	// StopReason is a short code when the worker paused or stopped, such as send_limit_reached.
+	StopReason string
+	Counts     MailBroadcastCounts
+	CreatedBy  uint
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// MailBroadcastRecipient is one contact of a broadcast, fixed when sending starts.
+type MailBroadcastRecipient struct {
+	ID          uint
+	BroadcastID uint
+	ContactID   uint
+	Email       string
+	Status      MailRecipientStatus
+	// MessageID is the stored message once it was sent or failed.
+	MessageID   uint
+	FailureCode string
+	UpdatedAt   time.Time
+}
+
+// MailBroadcastRepository stores broadcasts and their recipients. Every member call is scoped
+// to an organization; the worker calls are not.
+type MailBroadcastRepository interface {
+	ListBroadcasts(ctx context.Context, organizationID uint, page, perPage int) ([]*MailBroadcast, int64, error)
+	FindBroadcast(ctx context.Context, organizationID, id uint) (*MailBroadcast, error)
+	CreateBroadcast(ctx context.Context, broadcast *MailBroadcast) error
+	// UpdateDraft replaces the editable fields of a draft broadcast.
+	UpdateDraft(ctx context.Context, broadcast *MailBroadcast) error
+	DeleteBroadcast(ctx context.Context, organizationID, id uint) error
+	// StartBroadcast moves a draft to scheduled or sending, stores the template snapshot, and adds
+	// one recipient per subscribed contact of the list. It returns the number of recipients.
+	StartBroadcast(ctx context.Context, broadcast *MailBroadcast) (int, error)
+	// CancelBroadcast stops a scheduled or sending broadcast; pending recipients become canceled.
+	CancelBroadcast(ctx context.Context, organizationID, id uint) error
+	ListRecipients(ctx context.Context, organizationID, broadcastID uint, status MailRecipientStatus, page, perPage int) ([]*MailBroadcastRecipient, int64, error)
+
+	// PromoteScheduled moves scheduled broadcasts whose time has come to sending.
+	PromoteScheduled(ctx context.Context, now time.Time) error
+	// LeasePending claims up to limit pending recipients of sending broadcasts until leaseUntil.
+	LeasePending(ctx context.Context, now, leaseUntil time.Time, limit int) ([]*MailBroadcastRecipient, error)
+	// FindBroadcastForWorker loads a broadcast without an organization scope.
+	FindBroadcastForWorker(ctx context.Context, id uint) (*MailBroadcast, error)
+	// FinishRecipient records the outcome of one recipient.
+	FinishRecipient(ctx context.Context, id uint, status MailRecipientStatus, messageID uint, failureCode string) error
+	// ReleaseRecipient returns a leased recipient to pending.
+	ReleaseRecipient(ctx context.Context, id uint) error
+	// SetStopReason records why the worker paused a broadcast; empty clears it.
+	SetStopReason(ctx context.Context, id uint, reason string) error
+	// FinishBroadcasts marks sending broadcasts without pending recipients as sent.
+	FinishBroadcasts(ctx context.Context, now time.Time) (int, error)
+
+	// FindContactForBroadcast loads a contact by id within an organization, without its lists.
+	FindContactForBroadcast(ctx context.Context, organizationID, id uint) (*MailContact, error)
+	// SetContactStatus changes the status of a contact; reason is stored with it.
+	SetContactStatus(ctx context.Context, organizationID, id uint, status MailContactStatus, reason string) error
+	// SuppressContactForMessage marks the contact a broadcast message went to as suppressed,
+	// unless it already is. It does nothing for a message that was not part of a broadcast.
+	SuppressContactForMessage(ctx context.Context, messageID uint, reason string) error
+}
+
+// MailBroadcastDispatcher sends due broadcast recipients outside request paths.
+type MailBroadcastDispatcher interface {
+	DispatchBroadcasts(ctx context.Context, limit int) (int, error)
+}
+
 // MailTemplateRepository stores templates. Every lookup is scoped to an organization.
 type MailTemplateRepository interface {
 	// CreateTemplate stores a template unless the organization already has limit templates.

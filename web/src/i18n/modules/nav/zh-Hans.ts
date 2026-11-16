@@ -14,6 +14,7 @@ const messages = {
   styleguide: '设计规范',
   mailboxes: '邮箱',
   emails: '邮件',
+  mailBroadcasts: '群发',
   mailContacts: '联系人',
   mailTemplates: '模板',
   mailDomain: '域名',

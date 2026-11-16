@@ -78,6 +78,9 @@ type MailboxDomainResponse struct {
 	// InboundEnabled tells whether the API accepts signed deliveries from the mail edge.
 	InboundEnabled bool `json:"inbound_enabled"`
 	DailySendLimit int  `json:"daily_send_limit"`
+	// BroadcastsEnabled tells whether broadcasts can be sent: unsubscribe links need the inbound
+	// secret and MAILBOX_PUBLIC_URL.
+	BroadcastsEnabled bool `json:"broadcasts_enabled"`
 }
 
 // MailLogEntryResponse is one row of the cross-mailbox log.

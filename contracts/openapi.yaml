@@ -3416,6 +3416,320 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-broadcasts:
+    get:
+      operationId: listMailBroadcasts
+      summary: List the organization's broadcasts
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: One page of broadcasts, newest first, with recipient counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailBroadcastPageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailBroadcast
+      summary: Create a draft broadcast
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailBroadcastRequest'
+      responses:
+        '201':
+          description: The draft. A mailbox, template, or list of another organization is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailBroadcastResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: A field failed validation, or the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-broadcasts/{broadcast_id}:
+    get:
+      operationId: getMailBroadcast
+      summary: Get a broadcast
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailBroadcastID'
+      responses:
+        '200':
+          description: The broadcast with its recipient counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailBroadcastResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailBroadcast
+      summary: Replace a draft broadcast
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailBroadcastID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailBroadcastRequest'
+      responses:
+        '200':
+          description: The updated draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailBroadcastResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A field failed validation, or the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailBroadcast
+      summary: Delete a draft, sent, or canceled broadcast
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailBroadcastID'
+      responses:
+        '204':
+          description: The broadcast and its recipients are deleted; messages already sent are kept.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-broadcasts/{broadcast_id}/sends:
+    post:
+      operationId: sendMailBroadcast
+      summary: Send or schedule a draft broadcast
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailBroadcastID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailBroadcastSendRequest'
+      responses:
+        '200':
+          description: The broadcast, now `sending` or `scheduled`, with its recipients fixed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailBroadcastResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A field failed validation, `scheduled_at` is more than a year ahead (`MAILBOX.BROADCAST_INVALID`), or the list has no subscribed contact (`MAILBOX.BROADCAST_NO_RECIPIENTS`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Broadcasts are not configured (`MAILBOX.BROADCAST_DISABLED`), or the service is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/mail-broadcasts/{broadcast_id}/cancellations:
+    post:
+      operationId: cancelMailBroadcast
+      summary: Cancel a scheduled or sending broadcast
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailBroadcastID'
+      responses:
+        '200':
+          description: The canceled broadcast. Recipients not yet sent are `canceled`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailBroadcastResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-broadcasts/{broadcast_id}/recipients:
+    get:
+      operationId: listMailBroadcastRecipients
+      summary: List the recipients of a broadcast
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailBroadcastID'
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/MailBroadcastRecipientStatus'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: One page of recipients in the order they were added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailBroadcastRecipientPageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The status filter is invalid (`COMMON.INVALID_INPUT`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-unsubscribes/{token}:
+    post:
+      operationId: unsubscribeMailContact
+      summary: Unsubscribe the contact a signed link names
+      description: Needs no session; the token is the credential. Mail clients call it for one-click unsubscribe
+        (RFC 8058) with a form body, which is ignored. A valid token always succeeds, also for a contact that no
+        longer exists; a suppressed contact stays suppressed.
+      tags:
+        - Mailboxes
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        '204':
+          description: The contact is unsubscribed.
+        '404':
+          description: The token is not valid (`MAILBOX.UNSUBSCRIBE_INVALID`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-contacts:
     get:
       operationId: listMailContacts
@@ -4962,6 +5276,13 @@ components:
       description: Positive mailbox identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailBroadcastID:
+      name: broadcast_id
+      in: path
+      required: true
+      description: Positive mail broadcast identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     MailContactID:
       name: contact_id
       in: path
@@ -5408,6 +5729,12 @@ components:
         - MAILBOX.CONTACT_LIST_NAME_TAKEN
         - MAILBOX.CONTACT_LIST_LIMIT_REACHED
         - MAILBOX.CONTACT_IMPORT_INVALID
+        - MAILBOX.BROADCAST_NOT_FOUND
+        - MAILBOX.BROADCAST_INVALID
+        - MAILBOX.BROADCAST_NOT_EDITABLE
+        - MAILBOX.BROADCAST_NO_RECIPIENTS
+        - MAILBOX.BROADCAST_DISABLED
+        - MAILBOX.UNSUBSCRIBE_INVALID
     FieldErrors:
       type: object
       additionalProperties:
@@ -8031,6 +8358,7 @@ components:
         - provider
         - inbound_enabled
         - daily_send_limit
+        - broadcasts_enabled
       properties:
         domain:
           type: string
@@ -8052,6 +8380,9 @@ components:
           type: integer
           description: Outbound messages one organization may attempt per rolling 24 hours.
           minimum: 1
+        broadcasts_enabled:
+          type: boolean
+          description: Whether broadcasts can be sent. Unsubscribe links need `MAILBOX_INBOUND_SECRET` and `MAILBOX_PUBLIC_URL`.
     MailboxDomainListResponse:
       type: object
       additionalProperties: false
@@ -8361,6 +8692,238 @@ components:
           description: The file as standard base64. All files of a message decode to at most 4 MiB.
           minLength: 1
 
+    MailBroadcastStatus:
+      type: string
+      enum:
+        - draft
+        - scheduled
+        - sending
+        - sent
+        - canceled
+    MailBroadcastRecipientStatus:
+      type: string
+      enum:
+        - pending
+        - sent
+        - failed
+        - skipped
+        - canceled
+    MailBroadcastRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - mailbox_id
+        - template_id
+        - list_id
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 400
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        template_id:
+          $ref: '#/components/schemas/PositiveID'
+        list_id:
+          $ref: '#/components/schemas/PositiveID'
+        unsubscribe_label:
+          type: string
+          description: Text of the unsubscribe link Zmail adds when the template does not use `{{unsubscribe_url}}`;
+            `Unsubscribe` when empty.
+          maxLength: 200
+    MailBroadcastSendRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        scheduled_at:
+          description: When to start; omitted, null, or in the past starts now. At most a year ahead.
+          type:
+            - string
+            - 'null'
+          format: date-time
+    MailBroadcastCounts:
+      type: object
+      additionalProperties: false
+      required:
+        - total
+        - pending
+        - sent
+        - failed
+        - skipped
+        - canceled
+      properties:
+        total:
+          type: integer
+          minimum: 0
+        pending:
+          type: integer
+          minimum: 0
+        sent:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+        canceled:
+          type: integer
+          minimum: 0
+    MailBroadcast:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - mailbox_id
+        - template_id
+        - list_id
+        - unsubscribe_label
+        - status
+        - scheduled_at
+        - started_at
+        - finished_at
+        - stop_reason
+        - counts
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          maxLength: 100
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        template_id:
+          $ref: '#/components/schemas/PositiveID'
+        list_id:
+          $ref: '#/components/schemas/PositiveID'
+        unsubscribe_label:
+          type: string
+          maxLength: 50
+        status:
+          $ref: '#/components/schemas/MailBroadcastStatus'
+        scheduled_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        started_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        finished_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        stop_reason:
+          type: string
+          description: '`send_limit_reached` while the organization''s 24-hour send limit holds the broadcast; empty otherwise.'
+          maxLength: 64
+        counts:
+          $ref: '#/components/schemas/MailBroadcastCounts'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MailBroadcastResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailBroadcast'
+    MailBroadcastPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailBroadcast'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    MailBroadcastRecipient:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - contact_id
+        - email
+        - status
+        - message_id
+        - failure_code
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        contact_id:
+          $ref: '#/components/schemas/PositiveID'
+        email:
+          type: string
+          maxLength: 320
+        status:
+          $ref: '#/components/schemas/MailBroadcastRecipientStatus'
+        message_id:
+          description: The stored message once the recipient was sent or failed at the provider.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        failure_code:
+          type: string
+          description: Why a recipient failed or was skipped, such as `contact_not_subscribed` or a provider code.
+          maxLength: 120
+        updated_at:
+          type: string
+          format: date-time
+    MailBroadcastRecipientPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailBroadcastRecipient'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
     MailContactStatus:
       type: string
       description: '`suppressed` is set by Zmail after a permanent bounce or a complaint; members set the others.'

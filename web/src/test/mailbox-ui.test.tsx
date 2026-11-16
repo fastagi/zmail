@@ -874,6 +874,7 @@ function domain(maxMailboxes: number) {
     provider: 'log',
     inbound_enabled: false,
     daily_send_limit: 200,
+    broadcasts_enabled: true,
   };
 }
 

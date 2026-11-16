@@ -11,6 +11,7 @@ const messages = {
   styleguide: 'Styleguide',
   mailboxes: 'Mailboxes',
   emails: 'Emails',
+  mailBroadcasts: 'Broadcasts',
   mailContacts: 'Contacts',
   mailTemplates: 'Templates',
   mailDomain: 'Domain',

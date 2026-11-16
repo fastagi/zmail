@@ -27,6 +27,18 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_templates.tests.store").WhereNumber("template_id")
 		auth.POST("/mail-template-previews", h.PreviewTemplate).Name("mail_template_previews.store")
 
+		auth.GET("/mail-broadcasts", h.ListBroadcasts).Name("mail_broadcasts.index")
+		auth.POST("/mail-broadcasts", h.CreateBroadcast).Name("mail_broadcasts.store")
+		auth.GET("/mail-broadcasts/:broadcast_id", h.GetBroadcast).Name("mail_broadcasts.show").WhereNumber("broadcast_id")
+		auth.PUT("/mail-broadcasts/:broadcast_id", h.UpdateBroadcast).Name("mail_broadcasts.update").WhereNumber("broadcast_id")
+		auth.DELETE("/mail-broadcasts/:broadcast_id", h.DeleteBroadcast).Name("mail_broadcasts.destroy").WhereNumber("broadcast_id")
+		auth.POST("/mail-broadcasts/:broadcast_id/sends", h.SendBroadcast).
+			Name("mail_broadcasts.sends.store").WhereNumber("broadcast_id")
+		auth.POST("/mail-broadcasts/:broadcast_id/cancellations", h.CancelBroadcast).
+			Name("mail_broadcasts.cancellations.store").WhereNumber("broadcast_id")
+		auth.GET("/mail-broadcasts/:broadcast_id/recipients", h.ListBroadcastRecipients).
+			Name("mail_broadcasts.recipients.index").WhereNumber("broadcast_id")
+
 		auth.GET("/mail-contacts", h.ListContacts).Name("mail_contacts.index")
 		auth.POST("/mail-contacts", h.CreateContact).Name("mail_contacts.store")
 		auth.GET("/mail-contacts/:contact_id", h.GetContact).Name("mail_contacts.show").WhereNumber("contact_id")
@@ -72,4 +84,6 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 
 	r.POST("/inbound-mail-messages", h.ReceiveInbound).Name("inbound_mail_messages.store")
 	r.POST("/mail-delivery-events", h.ReceiveDeliveryEvent).Name("mail_delivery_events.store")
+	// A signed token authenticates an unsubscribe; recipients and mail clients have no session.
+	r.POST("/mail-unsubscribes/:token", h.Unsubscribe).Name("mail_unsubscribes.store")
 }

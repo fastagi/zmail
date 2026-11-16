@@ -97,6 +97,8 @@ api_environment() {
   export WEBHOOK_ALLOW_PRIVATE_TARGETS=true
   # Local-only secret so signed inbound mail can be exercised without Cloudflare.
   export MAILBOX_INBOUND_SECRET=zmail-local-only-mailbox-inbound-secret-0123456789
+  # Broadcast unsubscribe links point at the local Web console.
+  export MAILBOX_PUBLIC_URL="http://localhost:${WEB_PORT}"
 }
 
 prepare_api() {
@@ -182,6 +184,10 @@ up() {
     # Webhook deliveries are sent by a separate worker; without it queued events never leave.
     if [[ ",${STARTERS}," == *",webhook,"* ]]; then
       run_prefixed webhook bash -c "cd '${ROOT_DIR}/api' && exec '${STATE_DIR}/bin/fastbuild' webhook:work --poll=2s"
+    fi
+    # Broadcast recipients are sent by their own worker, like webhook deliveries.
+    if [[ ",${STARTERS}," == *",mailbox,"* ]]; then
+      run_prefixed broadcast bash -c "cd '${ROOT_DIR}/api' && exec '${STATE_DIR}/bin/fastbuild' mail:broadcast:work --poll=2s"
     fi
   fi
   if wants web; then

@@ -47,6 +47,10 @@ export const MAIL_CONTACT_MAX_LISTS = 100;
 export const MAIL_CONTACT_IMPORT_MAX_BYTES = 5 * 1_024 * 1_024;
 export const MAIL_CONTACT_IMPORT_MAX_ROWS = 10_000;
 /** Contact fields with a fixed meaning; they cannot be custom properties. */
+export const MAIL_BROADCAST_NAME_MAX_LENGTH = 100;
+export const MAIL_BROADCAST_LABEL_MAX_LENGTH = 50;
+/** An unsubscribe token: organization id, contact id, and a 16-byte base64url signature. */
+export const MAIL_UNSUBSCRIBE_TOKEN_PATTERN = /^[1-9]\d{0,9}\.[1-9]\d{0,9}\.[A-Za-z0-9_-]{22}$/u;
 export const MAIL_CONTACT_RESERVED_FIELDS = ['email', 'first_name', 'last_name'] as const;
 /** A variable name: a letter, then letters, digits, or underscores. */
 export const MAIL_TEMPLATE_VARIABLE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
@@ -101,6 +105,8 @@ export const mailboxDomainSchema = strictObject({
   provider: union([literal('cloudflare'), literal('log')]),
   inbound_enabled: boolean(),
   daily_send_limit: positiveIntegerSchema,
+  // Broadcasts need the inbound secret and MAILBOX_PUBLIC_URL for their unsubscribe links.
+  broadcasts_enabled: boolean(),
 });
 export const mailboxDomainListSchema = array(mailboxDomainSchema);
 
@@ -374,6 +380,84 @@ export const mailContactImportInputSchema = strictObject({
 });
 
 export const mailContactListInputSchema = strictObject({ name: string() });
+
+export const mailBroadcastStatusSchema = union([
+  literal('draft'),
+  literal('scheduled'),
+  literal('sending'),
+  literal('sent'),
+  literal('canceled'),
+]);
+
+export const mailRecipientStatusSchema = union([
+  literal('pending'),
+  literal('sent'),
+  literal('failed'),
+  literal('skipped'),
+  literal('canceled'),
+]);
+
+export const mailBroadcastSchema = strictObject({
+  id: safeIdSchema,
+  name: string(),
+  mailbox_id: safeIdSchema,
+  template_id: safeIdSchema,
+  list_id: safeIdSchema,
+  unsubscribe_label: string(),
+  status: mailBroadcastStatusSchema,
+  scheduled_at: nullable(timestampSchema),
+  started_at: nullable(timestampSchema),
+  finished_at: nullable(timestampSchema),
+  stop_reason: string(),
+  counts: strictObject({
+    total: nonnegativeIntegerSchema,
+    pending: nonnegativeIntegerSchema,
+    sent: nonnegativeIntegerSchema,
+    failed: nonnegativeIntegerSchema,
+    skipped: nonnegativeIntegerSchema,
+    canceled: nonnegativeIntegerSchema,
+  }),
+  created_at: timestampSchema,
+  updated_at: timestampSchema,
+});
+
+export const mailBroadcastPageEnvelopeSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: array(mailBroadcastSchema),
+  meta: pageMetaSchema,
+  links: pageLinksSchema,
+});
+
+export const mailBroadcastRecipientSchema = strictObject({
+  id: safeIdSchema,
+  contact_id: safeIdSchema,
+  email: string(),
+  status: mailRecipientStatusSchema,
+  message_id: nullable(safeIdSchema),
+  failure_code: string(),
+  updated_at: timestampSchema,
+});
+
+export const mailBroadcastRecipientPageEnvelopeSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: array(mailBroadcastRecipientSchema),
+  meta: pageMetaSchema,
+  links: pageLinksSchema,
+});
+
+export const mailBroadcastInputSchema = strictObject({
+  name: string(),
+  mailbox_id: safeIdSchema,
+  template_id: safeIdSchema,
+  list_id: safeIdSchema,
+  unsubscribe_label: optional(string()),
+});
+
+export const mailBroadcastSendInputSchema = strictObject({
+  scheduled_at: optional(nullable(string())),
+});
 
 export const updateMailMessageSchema = strictObject({ read: boolean() });
 

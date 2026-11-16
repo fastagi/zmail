@@ -23,6 +23,8 @@ type Message struct {
 	InReplyTo string
 	// Attachments are files sent with the message.
 	Attachments []Attachment
+	// Headers are extra headers such as List-Unsubscribe.
+	Headers map[string]string
 }
 
 // Attachment is one file of an outbound message.

@@ -4,6 +4,11 @@ import { ApiError } from '@/http/request';
 export type MailboxErrorKey =
   | 'errors.addressInvalid'
   | 'errors.attachmentsInvalid'
+  | 'errors.broadcastDisabled'
+  | 'errors.broadcastInvalid'
+  | 'errors.broadcastNoRecipients'
+  | 'errors.broadcastNotEditable'
+  | 'errors.broadcastNotFound'
   | 'errors.contactExists'
   | 'errors.contactImportInvalid'
   | 'errors.contactInvalid'
@@ -55,6 +60,11 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_SEND_LIMIT_REACHED]: 'errors.sendLimitReached',
   [ApiErrorCode.MAILBOX_DELIVERY_FAILED]: 'errors.deliveryFailed',
   [ApiErrorCode.MAILBOX_SENDER_NOT_CONFIGURED]: 'errors.senderNotConfigured',
+  [ApiErrorCode.MAILBOX_BROADCAST_NOT_FOUND]: 'errors.broadcastNotFound',
+  [ApiErrorCode.MAILBOX_BROADCAST_INVALID]: 'errors.broadcastInvalid',
+  [ApiErrorCode.MAILBOX_BROADCAST_NOT_EDITABLE]: 'errors.broadcastNotEditable',
+  [ApiErrorCode.MAILBOX_BROADCAST_NO_RECIPIENTS]: 'errors.broadcastNoRecipients',
+  [ApiErrorCode.MAILBOX_BROADCAST_DISABLED]: 'errors.broadcastDisabled',
   [ApiErrorCode.MAILBOX_CONTACT_NOT_FOUND]: 'errors.contactNotFound',
   [ApiErrorCode.MAILBOX_CONTACT_EXISTS]: 'errors.contactExists',
   [ApiErrorCode.MAILBOX_CONTACT_INVALID]: 'errors.contactInvalid',

@@ -20,6 +20,14 @@ import type {
   updateMailMessageSchema,
   mailTemplateInputSchema,
   mailContactImportInputSchema,
+  mailBroadcastInputSchema,
+  mailBroadcastPageEnvelopeSchema,
+  mailBroadcastRecipientPageEnvelopeSchema,
+  mailBroadcastRecipientSchema,
+  mailBroadcastSchema,
+  mailBroadcastSendInputSchema,
+  mailBroadcastStatusSchema,
+  mailRecipientStatusSchema,
   mailContactImportSchema,
   mailContactImportSkipReasonSchema,
   mailContactInputSchema,
@@ -98,4 +106,26 @@ export interface MailLogFilters {
   status?: MailStatus;
   mailboxId?: number;
   q?: string;
+}
+
+export type MailBroadcastStatus = Infer<typeof mailBroadcastStatusSchema>;
+export type MailRecipientStatus = Infer<typeof mailRecipientStatusSchema>;
+export type MailBroadcast = Infer<typeof mailBroadcastSchema>;
+export type MailBroadcastRecipient = Infer<typeof mailBroadcastRecipientSchema>;
+export type MailBroadcastInput = Infer<typeof mailBroadcastInputSchema>;
+export type MailBroadcastSendInput = Infer<typeof mailBroadcastSendInputSchema>;
+
+type MailBroadcastPageEnvelope = Infer<typeof mailBroadcastPageEnvelopeSchema>;
+type MailBroadcastRecipientPageEnvelope = Infer<typeof mailBroadcastRecipientPageEnvelopeSchema>;
+
+export interface MailBroadcastPage {
+  items: MailBroadcast[];
+  meta: MailBroadcastPageEnvelope['meta'];
+  links: MailBroadcastPageEnvelope['links'];
+}
+
+export interface MailBroadcastRecipientPage {
+  items: MailBroadcastRecipient[];
+  meta: MailBroadcastRecipientPageEnvelope['meta'];
+  links: MailBroadcastRecipientPageEnvelope['links'];
 }
