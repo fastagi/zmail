@@ -16,6 +16,15 @@ import (
 	"github.com/fastagi/fastmail/api/pkg/response"
 )
 
+// IdempotencyKeyHeader names a send so a retry returns the first attempt instead of sending again.
+const IdempotencyKeyHeader = "Idempotency-Key"
+
+// API key scopes of the programmatic mail routes.
+const (
+	ScopeMailSend = "mail:send"
+	ScopeMailRead = "mail:read"
+)
+
 // Handler handles HTTP requests for the mailbox starter.
 type Handler struct {
 	service        Service
@@ -148,13 +157,57 @@ func (h *Handler) SendMessage(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	message, err := h.service.SendMessage(c.Request.Context(), userID, mailboxID, SendInput(req))
+	message, created, err := h.service.SendMessage(
+		c.Request.Context(), userID, mailboxID, req.input(c.GetHeader(IdempotencyKeyHeader)))
+	respondSent(c, message, created, err)
+}
+
+// SendOutbound sends one message with an API key that holds the mail:send scope.
+func (h *Handler) SendOutbound(c *gin.Context) {
+	userID, ok := httphandler.GetUserID(c)
+	if !ok {
+		return
+	}
+	var req SendOutboundMailRequest
+	if !httphandler.BindJSON(c, &req) {
+		return
+	}
+	message, created, err := h.service.SendFromAddress(
+		c.Request.Context(), userID, req.From, req.input(c.GetHeader(IdempotencyKeyHeader)))
+	respondSent(c, message, created, err)
+}
+
+// GetOutbound returns one message the API key owner sent, so a sender can check its outcome.
+func (h *Handler) GetOutbound(c *gin.Context) {
+	userID, ok := httphandler.GetUserID(c)
+	if !ok {
+		return
+	}
+	messageID, ok := httphandler.ParseID(c, "message_id")
+	if !ok {
+		return
+	}
+	message, err := h.service.GetOutboundMessage(c.Request.Context(), userID, messageID)
+	if err != nil {
+		response.HandleError(c, "Failed to get mail message", err)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, toMailMessageResponse(message))
+}
+
+// respondSent answers 201 for a new send and 200 when an idempotency key replayed an earlier one.
+func respondSent(c *gin.Context, message *domain.MailMessage, created bool, err error) {
 	if err != nil {
 		response.HandleError(c, "Failed to send mail message", err)
 		return
 	}
 	privateResponse(c)
-	response.Created(c, toMailMessageResponse(message))
+	if created {
+		response.Created(c, toMailMessageResponse(message))
+		return
+	}
+	response.Success(c, toMailMessageResponse(message))
 }
 
 func (h *Handler) UpdateMessage(c *gin.Context) {

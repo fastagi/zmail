@@ -22,6 +22,25 @@ type SendMailMessageRequest struct {
 	InReplyTo string   `json:"in_reply_to" binding:"max=900"`
 }
 
+// SendOutboundMailRequest asks to send one message with an API key. From names one of the key
+// owner's mailboxes.
+type SendOutboundMailRequest struct {
+	From string `json:"from" binding:"required,max=320"`
+	SendMailMessageRequest
+}
+
+func (r SendMailMessageRequest) input(idempotencyKey string) SendInput {
+	return SendInput{
+		To:             r.To,
+		Cc:             r.Cc,
+		Subject:        r.Subject,
+		Text:           r.Text,
+		HTML:           r.HTML,
+		InReplyTo:      r.InReplyTo,
+		IdempotencyKey: idempotencyKey,
+	}
+}
+
 // UpdateMailMessageRequest changes the read state of one message.
 type UpdateMailMessageRequest struct {
 	Read *bool `json:"read" binding:"required"`

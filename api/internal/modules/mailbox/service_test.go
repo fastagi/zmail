@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,9 @@ type fakeRepository struct {
 	mailboxes map[uint]*domain.Mailbox
 	messages  map[uint]*domain.MailMessage
 	nextID    uint
+	// hideIdempotencyLookup simulates a concurrent request that stores its message between
+	// this request's lookup and its insert.
+	hideIdempotencyLookup bool
 }
 
 var _ domain.MailboxRepository = (*fakeRepository)(nil)
@@ -97,11 +101,45 @@ func (r *fakeRepository) DeleteMailboxesForUser(_ context.Context, userID uint) 
 	return nil
 }
 
-func (r *fakeRepository) CreateMessage(_ context.Context, message *domain.MailMessage) error {
+func (r *fakeRepository) CreateMessage(_ context.Context, message *domain.MailMessage) (bool, error) {
+	if message.IdempotencyKey != "" {
+		for _, existing := range r.messages {
+			if existing.MailboxID == message.MailboxID && existing.IdempotencyKey == message.IdempotencyKey {
+				*message = *existing
+				return false, nil
+			}
+		}
+	}
 	message.ID = r.id()
 	stored := *message
 	r.messages[message.ID] = &stored
-	return nil
+	return true, nil
+}
+
+func (r *fakeRepository) FindMessageByIdempotencyKey(_ context.Context, mailboxID uint, key string) (*domain.MailMessage, error) {
+	if r.hideIdempotencyLookup {
+		return nil, ErrMailMessageNotFound
+	}
+	for _, existing := range r.messages {
+		if existing.MailboxID == mailboxID && existing.IdempotencyKey == key {
+			copied := *existing
+			return &copied, nil
+		}
+	}
+	return nil, ErrMailMessageNotFound
+}
+
+func (r *fakeRepository) FindOutboundMessageForUser(_ context.Context, userID, id uint) (*domain.MailMessage, error) {
+	message, ok := r.messages[id]
+	if !ok || message.Direction != domain.MailDirectionOutbound {
+		return nil, ErrMailMessageNotFound
+	}
+	mailbox, ok := r.mailboxes[message.MailboxID]
+	if !ok || mailbox.UserID != userID {
+		return nil, ErrMailMessageNotFound
+	}
+	copied := *message
+	return &copied, nil
 }
 
 func (r *fakeRepository) CreateInboundMessage(ctx context.Context, message *domain.MailMessage) (bool, error) {
@@ -111,7 +149,8 @@ func (r *fakeRepository) CreateInboundMessage(ctx context.Context, message *doma
 			return false, nil
 		}
 	}
-	return true, r.CreateMessage(ctx, message)
+	_, err := r.CreateMessage(ctx, message)
+	return true, err
 }
 
 func (r *fakeRepository) UpdateMessageDelivery(_ context.Context, id uint, status domain.MailStatus, messageID, failureCode string) error {
@@ -237,7 +276,7 @@ func TestMailboxesAreInvisibleToOtherUsers(t *testing.T) {
 	fixture := newServiceFixture(t)
 	ctx := context.Background()
 	mailbox := fixture.mailbox(t, 1, "owner")
-	message, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
+	message, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
@@ -249,7 +288,7 @@ func TestMailboxesAreInvisibleToOtherUsers(t *testing.T) {
 	if _, err := fixture.service.GetMessage(ctx, stranger, mailbox.ID, message.ID); !errors.Is(err, ErrMailboxNotFound) {
 		t.Fatalf("GetMessage error = %v", err)
 	}
-	if _, err := fixture.service.SendMessage(ctx, stranger, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}); !errors.Is(err, ErrMailboxNotFound) {
+	if _, _, err := fixture.service.SendMessage(ctx, stranger, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}); !errors.Is(err, ErrMailboxNotFound) {
 		t.Fatalf("SendMessage error = %v", err)
 	}
 	if _, err := fixture.service.SetMessageRead(ctx, stranger, mailbox.ID, message.ID, false); !errors.Is(err, ErrMailboxNotFound) {
@@ -270,7 +309,7 @@ func TestSendMessageRecordsSentAndNormalizesRecipients(t *testing.T) {
 	fixture := newServiceFixture(t)
 	mailbox := fixture.mailbox(t, 1, "hello")
 
-	message, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, SendInput{
+	message, _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, SendInput{
 		To:        []string{"Bob@Example.com", "bob@example.com"},
 		Cc:        []string{"bob@example.com", "amy@example.org"},
 		Subject:   "  Greetings ",
@@ -304,7 +343,7 @@ func TestSendMessageReportsProviderFailureInsteadOfSent(t *testing.T) {
 	mailbox := fixture.mailbox(t, 1, "hello")
 	fixture.transport.err = &mailtransport.Error{Code: "email.sending.error.throttled"}
 
-	message, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
+	message, _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
 	if !errors.Is(err, ErrMailDeliveryFailed) {
 		t.Fatalf("error = %v; want ErrMailDeliveryFailed", err)
 	}
@@ -317,7 +356,7 @@ func TestSendMessageReportsProviderFailureInsteadOfSent(t *testing.T) {
 	}
 
 	fixture.transport.err = mailtransport.ErrNotConfigured
-	_, err = fixture.service.SendMessage(context.Background(), 1, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
+	_, _, err = fixture.service.SendMessage(context.Background(), 1, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
 	if !errors.Is(err, ErrMailSenderNotConfigured) {
 		t.Fatalf("error = %v; want ErrMailSenderNotConfigured", err)
 	}
@@ -334,7 +373,7 @@ func TestSendMessageRecordsOutcomeAfterTheCallerCancels(t *testing.T) {
 		return nil
 	})
 
-	message, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
+	message, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
@@ -380,7 +419,7 @@ func TestSendMessageValidatesInput(t *testing.T) {
 		"bad in_reply_to":     {To: []string{"x@example.com"}, Subject: "s", Text: "b", InReplyTo: "not an id"},
 	}
 	for name, input := range cases {
-		if _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, input); !errors.Is(err, ErrMailMessageInvalid) {
+		if _, _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, input); !errors.Is(err, ErrMailMessageInvalid) {
 			t.Fatalf("%s: error = %v; want ErrMailMessageInvalid", name, err)
 		}
 	}
@@ -394,11 +433,11 @@ func TestSendMessageEnforcesTheDailyLimit(t *testing.T) {
 	mailbox := fixture.mailbox(t, 1, "hello")
 	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}
 	for i := 0; i < 3; i++ {
-		if _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, input); err != nil {
+		if _, _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, input); err != nil {
 			t.Fatalf("send %d: %v", i+1, err)
 		}
 	}
-	if _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, input); !errors.Is(err, ErrMailSendLimitReached) {
+	if _, _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, input); !errors.Is(err, ErrMailSendLimitReached) {
 		t.Fatalf("error = %v; want ErrMailSendLimitReached", err)
 	}
 	if len(fixture.transport.sent) != 3 {
@@ -515,7 +554,7 @@ func TestAccountDeletionRemovesOnlyThatUsersMail(t *testing.T) {
 	leaving := fixture.mailbox(t, 1, "leaving")
 	staying := fixture.mailbox(t, 2, "staying")
 	for _, mailbox := range []*domain.Mailbox{leaving, staying} {
-		if _, err := fixture.service.SendMessage(ctx, mailbox.UserID, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}); err != nil {
+		if _, _, err := fixture.service.SendMessage(ctx, mailbox.UserID, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}); err != nil {
 			t.Fatalf("SendMessage: %v", err)
 		}
 	}
@@ -534,5 +573,146 @@ func TestAccountDeletionRemovesOnlyThatUsersMail(t *testing.T) {
 	}
 	if len(fixture.repo.messages) != 1 {
 		t.Fatalf("messages left = %d; want only the other account's", len(fixture.repo.messages))
+	}
+}
+
+func TestSendMessageWithAnIdempotencyKeySendsOnce(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+	mailbox := fixture.mailbox(t, 1, "hello")
+	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b", IdempotencyKey: " order-42 "}
+
+	first, created, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input)
+	if err != nil || !created || first.IdempotencyKey != "order-42" {
+		t.Fatalf("first send = %+v, created %v, err %v", first, created, err)
+	}
+	// The retry differs only in ways normalization removes.
+	retry := input
+	retry.To = []string{"X@Example.com"}
+	retry.Subject = " s "
+	again, created, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, retry)
+	if err != nil || created || again.ID != first.ID {
+		t.Fatalf("retry = id %d, created %v, err %v; want the first message %d", again.ID, created, err, first.ID)
+	}
+	if len(fixture.transport.sent) != 1 {
+		t.Fatalf("transport calls = %d; a retry must not send again", len(fixture.transport.sent))
+	}
+
+	changed := input
+	changed.Text = "a different body"
+	if _, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, changed); !errors.Is(err, ErrMailIdempotencyConflict) {
+		t.Fatalf("changed content error = %v; want ErrMailIdempotencyConflict", err)
+	}
+
+	// The key is scoped to one mailbox.
+	other := fixture.mailbox(t, 1, "other")
+	if _, created, err := fixture.service.SendMessage(ctx, 1, other.ID, input); err != nil || !created {
+		t.Fatalf("same key in another mailbox = created %v, err %v", created, err)
+	}
+	if len(fixture.transport.sent) != 2 {
+		t.Fatalf("transport calls = %d; want 2", len(fixture.transport.sent))
+	}
+}
+
+func TestSendMessageReplaysAFailedOrUnfinishedAttempt(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+	mailbox := fixture.mailbox(t, 1, "hello")
+	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b", IdempotencyKey: "k1"}
+
+	fixture.transport.err = &mailtransport.Error{Code: "transport.unreachable"}
+	failed, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input)
+	if !errors.Is(err, ErrMailDeliveryFailed) {
+		t.Fatalf("first send error = %v", err)
+	}
+
+	// The provider may have accepted the first attempt, so the same key must not send again
+	// even now that the provider would answer.
+	fixture.transport.err = nil
+	again, created, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input)
+	if !errors.Is(err, ErrMailDeliveryFailed) || created || again.ID != failed.ID || again.FailureCode != "transport.unreachable" {
+		t.Fatalf("replay = %+v, created %v, err %v", again, created, err)
+	}
+	if len(fixture.transport.sent) != 1 {
+		t.Fatalf("transport calls = %d; want 1", len(fixture.transport.sent))
+	}
+
+	fixture.repo.messages[failed.ID].Status = domain.MailStatusQueued
+	if _, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input); !errors.Is(err, ErrMailSendInProgress) {
+		t.Fatalf("unfinished attempt error = %v; want ErrMailSendInProgress", err)
+	}
+}
+
+func TestSendMessageSurvivesAConcurrentRequestWithTheSameKey(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+	mailbox := fixture.mailbox(t, 1, "hello")
+	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b", IdempotencyKey: "race"}
+	first, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input)
+	if err != nil {
+		t.Fatalf("first send: %v", err)
+	}
+
+	// The second request misses the lookup and loses the insert to the unique index.
+	fixture.repo.hideIdempotencyLookup = true
+	again, created, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input)
+	if err != nil || created || again.ID != first.ID {
+		t.Fatalf("racing send = id %d, created %v, err %v", again.ID, created, err)
+	}
+	if len(fixture.transport.sent) != 1 || len(fixture.repo.messages) != 1 {
+		t.Fatalf("transport calls = %d, messages = %d; want 1 and 1", len(fixture.transport.sent), len(fixture.repo.messages))
+	}
+}
+
+func TestSendMessageRejectsAnUnusableIdempotencyKey(t *testing.T) {
+	fixture := newServiceFixture(t)
+	mailbox := fixture.mailbox(t, 1, "hello")
+	for _, key := range []string{"has space", "非ascii", strings.Repeat("k", 256), "line\nbreak"} {
+		input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b", IdempotencyKey: key}
+		if _, _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, input); !errors.Is(err, ErrMailIdempotencyKeyInvalid) {
+			t.Fatalf("key %q error = %v; want ErrMailIdempotencyKeyInvalid", key, err)
+		}
+	}
+	if len(fixture.transport.sent) != 0 {
+		t.Fatalf("an invalid key reached the provider")
+	}
+}
+
+func TestSendFromAddressUsesOnlyTheCallersMailbox(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+	fixture.mailbox(t, 1, "mine")
+	fixture.mailbox(t, 2, "theirs")
+	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}
+
+	message, created, err := fixture.service.SendFromAddress(ctx, 1, "Mine@Mail.Example", input)
+	if err != nil || !created || message.FromAddress != "mine@mail.example" {
+		t.Fatalf("SendFromAddress = %+v, created %v, err %v", message, created, err)
+	}
+	for _, from := range []string{"theirs@mail.example", "nobody@mail.example"} {
+		if _, _, err := fixture.service.SendFromAddress(ctx, 1, from, input); !errors.Is(err, ErrMailboxNotFound) {
+			t.Fatalf("from %q error = %v; want ErrMailboxNotFound", from, err)
+		}
+	}
+	if _, _, err := fixture.service.SendFromAddress(ctx, 1, "Mine <mine@mail.example>", input); !errors.Is(err, ErrMailMessageInvalid) {
+		t.Fatalf("display-name from error = %v", err)
+	}
+	if len(fixture.transport.sent) != 1 {
+		t.Fatalf("transport calls = %d; want 1", len(fixture.transport.sent))
+	}
+
+	if found, err := fixture.service.GetOutboundMessage(ctx, 1, message.ID); err != nil || found.ID != message.ID {
+		t.Fatalf("GetOutboundMessage = %+v, %v", found, err)
+	}
+	if _, err := fixture.service.GetOutboundMessage(ctx, 2, message.ID); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("another user's lookup error = %v", err)
+	}
+}
+
+func TestSendFingerprintSeparatesFieldBoundaries(t *testing.T) {
+	a := sendFingerprint([]string{"a@x.io"}, nil, "ab", "c", "", "")
+	b := sendFingerprint([]string{"a@x.io"}, nil, "a", "bc", "", "")
+	if a == b {
+		t.Fatal("moving text between subject and body kept the same fingerprint")
 	}
 }

@@ -91,6 +91,8 @@ TABLE mail_messages
   COLUMN read_at timestamp with time zone
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
+  COLUMN idempotency_key character varying(255)
+  COLUMN idempotency_fingerprint character varying(64) NOT NULL DEFAULT ''::character varying
 
 TABLE mailboxes
   COLUMN id bigint NOT NULL DEFAULT nextval('mailboxes_id_seq'::regclass)
@@ -527,6 +529,7 @@ INDEX CREATE INDEX idx_authentication_sessions_revoked_at ON authentication_sess
 INDEX CREATE UNIQUE INDEX idx_authentication_sessions_token_hash ON authentication_sessions USING btree (token_hash)
 INDEX CREATE INDEX idx_authentication_sessions_user_id ON authentication_sessions USING btree (user_id)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree (mailbox_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
+INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING btree (mailbox_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address)

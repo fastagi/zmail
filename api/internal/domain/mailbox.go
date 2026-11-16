@@ -74,9 +74,15 @@ type MailMessage struct {
 	// DedupeKey makes inbound delivery idempotent for one mailbox. Empty for outbound.
 	DedupeKey   string
 	FailureCode string
-	ReadAt      *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// IdempotencyKey names an outbound message chosen by the sender; a later send with the same
+	// key in the same mailbox finds this message instead of sending again. Empty when unused.
+	IdempotencyKey string
+	// IdempotencyFingerprint is a hash of the send request, so a reused key with a different
+	// request is refused instead of answered with an unrelated message.
+	IdempotencyFingerprint string
+	ReadAt                 *time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 // MailMessageFilter narrows a mailbox message listing.
@@ -97,7 +103,12 @@ type MailboxRepository interface {
 	// transaction bound to ctx, so account deletion and this cleanup commit together.
 	DeleteMailboxesForUser(ctx context.Context, userID uint) error
 
-	CreateMessage(ctx context.Context, message *MailMessage) error
+	// CreateMessage stores a message. With an idempotency key that the mailbox already used it
+	// reports created=false and fills message with the stored row.
+	CreateMessage(ctx context.Context, message *MailMessage) (created bool, err error)
+	FindMessageByIdempotencyKey(ctx context.Context, mailboxID uint, key string) (*MailMessage, error)
+	// FindOutboundMessageForUser finds an outbound message in any mailbox the user owns.
+	FindOutboundMessageForUser(ctx context.Context, userID, id uint) (*MailMessage, error)
 	// CreateInboundMessage stores an inbound message once per mailbox and dedupe key. It
 	// reports created=false and fills message with the stored row on a repeated delivery.
 	CreateInboundMessage(ctx context.Context, message *MailMessage) (created bool, err error)

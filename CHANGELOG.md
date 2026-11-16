@@ -8,6 +8,11 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Programmatic sending.** Backend services send mail with an API key through
+  `POST /v1/outbound-mail-messages` (scope `mail:send`) and check a message with
+  `GET /v1/outbound-mail-messages/:message_id` (scope `mail:read`). Both send routes accept an
+  `Idempotency-Key`: a repeat with the same content returns the first attempt's outcome without
+  calling the provider again, and a repeat with different content is `409`.
 - **Mailbox starter.** The optional `mailbox` starter gives each user up to 10 addresses on one
   configured domain, with inbox and sent folders, read state, and deletion. Sending goes through the
   Cloudflare Email Sending REST API and reports the provider's real outcome: a rejected message

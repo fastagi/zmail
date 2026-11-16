@@ -146,7 +146,7 @@ func TestRepositoryStoresAnInboundMessageOncePerMailbox(t *testing.T) {
 			MailboxID: first.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusQueued,
 			FromAddress: "one@mail.example", To: []string{"bob@example.com"}, Subject: "Out",
 		}
-		if createErr := repo.CreateMessage(ctx, outbound); createErr != nil {
+		if _, createErr := repo.CreateMessage(ctx, outbound); createErr != nil {
 			t.Fatalf("CreateMessage %d: %v", i, createErr)
 		}
 	}
@@ -178,7 +178,7 @@ func TestRepositoryListsMessagesWithoutBodies(t *testing.T) {
 		if direction == domain.MailDirectionOutbound {
 			message.Status = domain.MailStatusQueued
 		}
-		if err := repo.CreateMessage(ctx, message); err != nil {
+		if _, err := repo.CreateMessage(ctx, message); err != nil {
 			t.Fatalf("CreateMessage %d: %v", i, err)
 		}
 	}
@@ -212,7 +212,7 @@ func TestRepositoryRecordsDeliveryReadStateAndDeletion(t *testing.T) {
 		MailboxID: mailbox.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusQueued,
 		FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Subject: "Out",
 	}
-	if err := repo.CreateMessage(ctx, message); err != nil {
+	if _, err := repo.CreateMessage(ctx, message); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 
@@ -259,7 +259,7 @@ func TestRepositoryDeletesMessagesWithTheirMailbox(t *testing.T) {
 	ctx := context.Background()
 	createOwner(t, db, 1)
 	mailbox := createMailbox(t, repo, "hello@mail.example")
-	if err := repo.CreateMessage(ctx, &domain.MailMessage{
+	if _, err := repo.CreateMessage(ctx, &domain.MailMessage{
 		MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
 		FromAddress: "alice@sender.test", Subject: "Hi",
 	}); err != nil {
@@ -286,7 +286,7 @@ func TestRepositoryCleansUpADeletedAccountInsideItsTransaction(t *testing.T) {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	for _, mailboxID := range []uint{leaving.ID, staying.ID} {
-		if err := repo.CreateMessage(ctx, &domain.MailMessage{
+		if _, err := repo.CreateMessage(ctx, &domain.MailMessage{
 			MailboxID: mailboxID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
 			FromAddress: "alice@sender.test", Subject: "Hi",
 		}); err != nil {
@@ -328,6 +328,70 @@ func TestRepositoryCleansUpADeletedAccountInsideItsTransaction(t *testing.T) {
 	reclaim := &domain.Mailbox{UserID: 2, Address: "leaving@mail.example"}
 	if err := repo.CreateMailbox(ctx, reclaim, domain.MaxMailboxesPerUser); !errors.Is(err, ErrMailboxAddressTaken) {
 		t.Fatalf("address of a deleted account error = %v; want ErrMailboxAddressTaken", err)
+	}
+}
+
+func TestRepositoryStoresOneOutboundMessagePerIdempotencyKey(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	createOwner(t, db, 2)
+	mailbox := createMailbox(t, repo, "hello@mail.example")
+	foreign := &domain.Mailbox{UserID: 2, Address: "other@mail.example"}
+	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerUser); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	outbound := func(mailboxID uint, key string) *domain.MailMessage {
+		return &domain.MailMessage{
+			MailboxID: mailboxID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusQueued,
+			FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Subject: "Out",
+			IdempotencyKey: key, IdempotencyFingerprint: "fp-" + key,
+		}
+	}
+
+	first := outbound(mailbox.ID, "k1")
+	created, err := repo.CreateMessage(ctx, first)
+	if err != nil || !created {
+		t.Fatalf("first = created %v, err %v", created, err)
+	}
+	duplicate := outbound(mailbox.ID, "k1")
+	duplicate.Subject = "a different request"
+	created, err = repo.CreateMessage(ctx, duplicate)
+	if err != nil || created || duplicate.ID != first.ID || duplicate.Subject != "Out" {
+		t.Fatalf("duplicate = created %v, id %d, subject %q, err %v; want the stored message", created, duplicate.ID, duplicate.Subject, err)
+	}
+	if created, err = repo.CreateMessage(ctx, outbound(foreign.ID, "k1")); err != nil || !created {
+		t.Fatalf("same key in another mailbox = created %v, err %v", created, err)
+	}
+	for i := 0; i < 2; i++ {
+		if created, err = repo.CreateMessage(ctx, outbound(mailbox.ID, "")); err != nil || !created {
+			t.Fatalf("message without a key %d = created %v, err %v", i, created, err)
+		}
+	}
+
+	found, err := repo.FindMessageByIdempotencyKey(ctx, mailbox.ID, "k1")
+	if err != nil || found.ID != first.ID || found.IdempotencyFingerprint != "fp-k1" {
+		t.Fatalf("FindMessageByIdempotencyKey = %+v, %v", found, err)
+	}
+	if _, err = repo.FindMessageByIdempotencyKey(ctx, mailbox.ID, "missing"); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("missing key error = %v", err)
+	}
+
+	if owned, findErr := repo.FindOutboundMessageForUser(ctx, 1, first.ID); findErr != nil || owned.ID != first.ID {
+		t.Fatalf("FindOutboundMessageForUser = %+v, %v", owned, findErr)
+	}
+	if _, err = repo.FindOutboundMessageForUser(ctx, 2, first.ID); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("another user's lookup error = %v", err)
+	}
+	inbound := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
+		FromAddress: "alice@sender.test", Subject: "In",
+	}
+	if _, err = repo.CreateMessage(ctx, inbound); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err = repo.FindOutboundMessageForUser(ctx, 1, inbound.ID); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("inbound message through the outbound lookup error = %v", err)
 	}
 }
 

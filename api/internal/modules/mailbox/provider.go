@@ -24,8 +24,11 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 	return assembly.NewStaticStarterManifest(
 		config.StarterMailbox,
 		assembly.WithStarterSummary("User-owned mailboxes that send through Cloudflare Email Service and receive from its Email Worker."),
-		assembly.WithStarterDependencies(config.StarterUser, config.StarterAudit),
+		assembly.WithStarterDependencies(config.StarterUser, config.StarterAudit, config.StarterAPIKey),
 		assembly.WithStarterModule(handler),
-		assembly.WithStarterMigrationNames("2026_11_16_100000_create_mailbox_tables"),
+		assembly.WithStarterMigrationNames(
+			"2026_11_16_100000_create_mailbox_tables",
+			"2026_11_16_110000_add_mail_message_idempotency",
+		),
 	)
 }

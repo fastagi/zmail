@@ -22,7 +22,7 @@ a Web console page; a Cloudflare Email Worker; a development transport that need
 account.
 
 **Out of scope for this slice.** Attachments, organization-shared mailboxes, several domains,
-background retry of failed sends, idempotency keys on send, search, spam filtering, bounce and
+background retry of failed sends, search, spam filtering, bounce and
 complaint ingestion, and an Admin Console view. Each is a later slice, not a hidden gap: section 13
 and the contract say what a caller must not assume.
 
@@ -31,6 +31,7 @@ and the contract say what a caller must not assume.
 | Actor | Surface | May |
 |---|---|---|
 | Signed-in user | Web console `/console/mailboxes`; `/v1/mailboxes...` with a session token | Manage only their own mailboxes and messages |
+| Backend service | `/v1/outbound-mail-messages` with a user's API key | Send from that user's mailboxes (`mail:send`) and read what was sent (`mail:read`) |
 | Mail edge (Cloudflare Email Worker) | `POST /v1/inbound-mail-messages` with an HMAC signature | Deliver one raw message to an existing address |
 | Mail provider (Cloudflare Email Sending) | Called by the API | Accept or reject an outbound message |
 | Operator | Environment configuration, Cloudflare dashboard | Choose the domain, provider credentials, inbound secret, and send limit |
@@ -160,8 +161,8 @@ plugin-feature convention checked by the Web guard tests. Sender HTML is rendere
   is `cloudflare`, so a deployment cannot silently pretend to deliver.
 
 Known limits, stated rather than hidden: the send limit is a soft bound under concurrency; a
-retried `502` can duplicate a message whose first attempt reached the provider; there is no spam
-or malware filtering beyond the provider's.
+`502` retried without an `Idempotency-Key` can duplicate a message whose first attempt reached the
+provider; there is no spam or malware filtering beyond the provider's.
 
 ## 14. Observability and Operations
 
@@ -188,6 +189,12 @@ through `status` and `failure_code`. Operations are documented in
 
 1. API module, transport, configuration, migration, contract, Worker (this slice).
 2. Web console page (this slice).
-3. Later slices, each with its own plan: attachments on R2 through the `asset` starter; background
-   retry with idempotency keys on the PostgreSQL job queue; bounce and complaint ingestion;
-   organization-shared mailboxes; search.
+3. Programmatic sending (second slice): `POST /v1/outbound-mail-messages` and its status lookup
+   behind API keys with the `mail:send` and `mail:read` scopes, and an `Idempotency-Key` on both
+   send routes. A key replays the first attempt's outcome, including a failure, because the provider
+   may have accepted a message whose answer was lost; migration
+   `2026_11_16_110000_add_mail_message_idempotency` adds the key, a request fingerprint, and a
+   unique partial index per mailbox that also settles two concurrent requests with one key.
+4. Later slices, each with its own plan: attachments on R2 through the `asset` starter; background
+   retry on the PostgreSQL job queue; bounce and complaint ingestion; organization-shared
+   mailboxes; search.

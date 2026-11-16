@@ -40,24 +40,26 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 
 // MailMessagePO is the persistent object for one stored message.
 type MailMessagePO struct {
-	ID          uint    `gorm:"primaryKey"`
-	MailboxID   uint    `gorm:"not null;index:idx_mail_messages_listing,priority:1;uniqueIndex:idx_mail_messages_dedupe,priority:1,where:dedupe_key IS NOT NULL"`
-	Direction   string  `gorm:"size:16;not null;index:idx_mail_messages_listing,priority:2"`
-	Status      string  `gorm:"size:16;not null"`
-	FromAddress string  `gorm:"size:320;not null"`
-	FromName    string  `gorm:"size:255;not null;default:''"`
-	ToAddresses string  `gorm:"type:text;not null;default:'[]'"`
-	CcAddresses string  `gorm:"type:text;not null;default:'[]'"`
-	Subject     string  `gorm:"size:998;not null;default:''"`
-	TextBody    string  `gorm:"type:text;not null;default:''"`
-	HTMLBody    string  `gorm:"column:html_body;type:text;not null;default:''"`
-	MessageID   string  `gorm:"size:998;not null;default:''"`
-	InReplyTo   string  `gorm:"size:998;not null;default:''"`
-	DedupeKey   *string `gorm:"size:64;uniqueIndex:idx_mail_messages_dedupe,priority:2,where:dedupe_key IS NOT NULL"`
-	FailureCode string  `gorm:"size:120;not null;default:''"`
-	ReadAt      *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID                     uint    `gorm:"primaryKey"`
+	MailboxID              uint    `gorm:"not null;index:idx_mail_messages_listing,priority:1;uniqueIndex:idx_mail_messages_dedupe,priority:1,where:dedupe_key IS NOT NULL;uniqueIndex:idx_mail_messages_idempotency,priority:1,where:idempotency_key IS NOT NULL"`
+	Direction              string  `gorm:"size:16;not null;index:idx_mail_messages_listing,priority:2"`
+	Status                 string  `gorm:"size:16;not null"`
+	FromAddress            string  `gorm:"size:320;not null"`
+	FromName               string  `gorm:"size:255;not null;default:''"`
+	ToAddresses            string  `gorm:"type:text;not null;default:'[]'"`
+	CcAddresses            string  `gorm:"type:text;not null;default:'[]'"`
+	Subject                string  `gorm:"size:998;not null;default:''"`
+	TextBody               string  `gorm:"type:text;not null;default:''"`
+	HTMLBody               string  `gorm:"column:html_body;type:text;not null;default:''"`
+	MessageID              string  `gorm:"size:998;not null;default:''"`
+	InReplyTo              string  `gorm:"size:998;not null;default:''"`
+	DedupeKey              *string `gorm:"size:64;uniqueIndex:idx_mail_messages_dedupe,priority:2,where:dedupe_key IS NOT NULL"`
+	FailureCode            string  `gorm:"size:120;not null;default:''"`
+	IdempotencyKey         *string `gorm:"size:255;uniqueIndex:idx_mail_messages_idempotency,priority:2,where:idempotency_key IS NOT NULL"`
+	IdempotencyFingerprint string  `gorm:"size:64;not null;default:''"`
+	ReadAt                 *time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 func (MailMessagePO) TableName() string {
@@ -90,6 +92,10 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 	if po.DedupeKey != nil {
 		message.DedupeKey = *po.DedupeKey
 	}
+	if po.IdempotencyKey != nil {
+		message.IdempotencyKey = *po.IdempotencyKey
+	}
+	message.IdempotencyFingerprint = po.IdempotencyFingerprint
 	return message
 }
 
@@ -115,6 +121,11 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		key := message.DedupeKey
 		po.DedupeKey = &key
 	}
+	if message.IdempotencyKey != "" {
+		key := message.IdempotencyKey
+		po.IdempotencyKey = &key
+	}
+	po.IdempotencyFingerprint = message.IdempotencyFingerprint
 	return po
 }
 

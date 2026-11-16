@@ -47,6 +47,9 @@ type SendInput struct {
 	Text      string
 	HTML      string
 	InReplyTo string
+	// IdempotencyKey is optional. A repeated send with the same key and the same content in the
+	// same mailbox returns the first attempt's outcome instead of sending again.
+	IdempotencyKey string
 }
 
 // Service defines the business interface of the mailbox starter.
@@ -57,7 +60,11 @@ type Service interface {
 	DeleteMailbox(ctx context.Context, userID, mailboxID uint) error
 	ListMessages(ctx context.Context, userID, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
 	GetMessage(ctx context.Context, userID, mailboxID, messageID uint) (*domain.MailMessage, error)
-	SendMessage(ctx context.Context, userID, mailboxID uint, input SendInput) (*domain.MailMessage, error)
+	// SendMessage reports created=false when an idempotency key replayed an earlier attempt.
+	SendMessage(ctx context.Context, userID, mailboxID uint, input SendInput) (message *domain.MailMessage, created bool, err error)
+	// SendFromAddress sends from the mailbox with this address, which the user must own.
+	SendFromAddress(ctx context.Context, userID uint, from string, input SendInput) (message *domain.MailMessage, created bool, err error)
+	GetOutboundMessage(ctx context.Context, userID, messageID uint) (*domain.MailMessage, error)
 	SetMessageRead(ctx context.Context, userID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error)
 	DeleteMessage(ctx context.Context, userID, mailboxID, messageID uint) error
 	ReceiveInbound(ctx context.Context, delivery InboundDelivery) (message *domain.MailMessage, created bool, err error)
@@ -185,26 +192,67 @@ func (s *service) DeleteMessage(ctx context.Context, userID, mailboxID, messageI
 // SendMessage stores the message as queued, calls the provider, and records the real outcome.
 // A provider failure keeps the message with status "failed" and returns ErrMailDeliveryFailed
 // together with the stored message, so a caller never sees a failed send reported as sent.
-func (s *service) SendMessage(ctx context.Context, userID, mailboxID uint, input SendInput) (*domain.MailMessage, error) {
+func (s *service) SendMessage(ctx context.Context, userID, mailboxID uint, input SendInput) (*domain.MailMessage, bool, error) {
 	mailbox, err := s.repo.FindMailbox(ctx, userID, mailboxID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	return s.send(ctx, mailbox, input)
+}
+
+func (s *service) SendFromAddress(ctx context.Context, userID uint, from string, input SendInput) (*domain.MailMessage, bool, error) {
+	address, ok := normalizeRecipient(from)
+	if !ok {
+		return nil, false, fmt.Errorf("%w: from", ErrMailMessageInvalid)
+	}
+	mailbox, err := s.repo.FindMailboxByAddress(ctx, address)
+	if err != nil {
+		return nil, false, err
+	}
+	// Another user's address answers exactly like an address that is not a mailbox.
+	if mailbox.UserID != userID {
+		return nil, false, ErrMailboxNotFound
+	}
+	return s.send(ctx, mailbox, input)
+}
+
+func (s *service) GetOutboundMessage(ctx context.Context, userID, messageID uint) (*domain.MailMessage, error) {
+	return s.repo.FindOutboundMessageForUser(ctx, userID, messageID)
+}
+
+func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput) (*domain.MailMessage, bool, error) {
 	message, err := s.buildOutbound(mailbox, input)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if message.IdempotencyKey != "" {
+		existing, findErr := s.repo.FindMessageByIdempotencyKey(ctx, mailbox.ID, message.IdempotencyKey)
+		if findErr == nil {
+			replayed, replayErr := replayOutbound(existing, message.IdempotencyFingerprint)
+			return replayed, false, replayErr
+		}
+		if !errors.Is(findErr, ErrMailMessageNotFound) {
+			return nil, false, findErr
+		}
 	}
 
-	sent, err := s.repo.CountOutboundSince(ctx, userID, s.now().Add(-sendLimitWindow))
+	sent, err := s.repo.CountOutboundSince(ctx, mailbox.UserID, s.now().Add(-sendLimitWindow))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if sent >= int64(s.settings.DailySendLimit) {
-		return nil, ErrMailSendLimitReached
+		return nil, false, ErrMailSendLimitReached
 	}
 
-	if err := s.repo.CreateMessage(ctx, message); err != nil {
-		return nil, err
+	fingerprint := message.IdempotencyFingerprint
+	created, err := s.repo.CreateMessage(ctx, message)
+	if err != nil {
+		return nil, false, err
+	}
+	if !created {
+		// A concurrent request with the same key stored its message first.
+		replayed, replayErr := replayOutbound(message, fingerprint)
+		return replayed, false, replayErr
 	}
 
 	sendErr := s.transport.Send(ctx, mailtransport.Message{
@@ -230,9 +278,29 @@ func (s *service) SendMessage(ctx context.Context, userID, mailboxID uint, input
 	recordContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryRecordTimeout)
 	defer cancel()
 	if err := s.repo.UpdateMessageDelivery(recordContext, message.ID, message.Status, message.MessageID, message.FailureCode); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return message, result
+	return message, true, result
+}
+
+// replayOutbound answers a send whose idempotency key already names a message. The provider is
+// not called again: the caller gets the first attempt's outcome, whatever it was.
+func replayOutbound(existing *domain.MailMessage, fingerprint string) (*domain.MailMessage, error) {
+	if existing.IdempotencyFingerprint != fingerprint {
+		return nil, ErrMailIdempotencyConflict
+	}
+	switch existing.Status {
+	case domain.MailStatusSent:
+		return existing, nil
+	case domain.MailStatusFailed:
+		code := existing.FailureCode
+		if code == failureNotConfigured {
+			return existing, ErrMailSenderNotConfigured
+		}
+		return existing, fmt.Errorf("%w: %s", ErrMailDeliveryFailed, code)
+	default:
+		return nil, ErrMailSendInProgress
+	}
 }
 
 func classifySendError(err error) (string, error) {
@@ -273,19 +341,30 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		return nil, fmt.Errorf("%w: in_reply_to", ErrMailMessageInvalid)
 	}
 
+	idempotencyKey := strings.TrimSpace(input.IdempotencyKey)
+	if !validIdempotencyKey(idempotencyKey) {
+		return nil, ErrMailIdempotencyKeyInvalid
+	}
+	fingerprint := ""
+	if idempotencyKey != "" {
+		fingerprint = sendFingerprint(to, cc, cleanText(subject), text, html, inReplyTo)
+	}
+
 	now := s.now().UTC()
 	return &domain.MailMessage{
-		MailboxID:   mailbox.ID,
-		Direction:   domain.MailDirectionOutbound,
-		Status:      domain.MailStatusQueued,
-		FromAddress: mailbox.Address,
-		FromName:    mailbox.DisplayName,
-		To:          to,
-		Cc:          cc,
-		Subject:     cleanText(subject),
-		TextBody:    text,
-		HTMLBody:    html,
-		InReplyTo:   inReplyTo,
+		IdempotencyKey:         idempotencyKey,
+		IdempotencyFingerprint: fingerprint,
+		MailboxID:              mailbox.ID,
+		Direction:              domain.MailDirectionOutbound,
+		Status:                 domain.MailStatusQueued,
+		FromAddress:            mailbox.Address,
+		FromName:               mailbox.DisplayName,
+		To:                     to,
+		Cc:                     cc,
+		Subject:                cleanText(subject),
+		TextBody:               text,
+		HTMLBody:               html,
+		InReplyTo:              inReplyTo,
 		// The owner wrote it, so it starts out read.
 		ReadAt: &now,
 	}, nil
@@ -360,4 +439,34 @@ func inboundDedupeKey(messageID string, raw []byte) string {
 		sum = sha256.Sum256(raw)
 	}
 	return hex.EncodeToString(sum[:])
+}
+
+// validIdempotencyKey accepts an empty key or 1 to 255 printable ASCII characters.
+func validIdempotencyKey(key string) bool {
+	if len(key) > 255 {
+		return false
+	}
+	for _, char := range key {
+		if char < 0x21 || char > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// sendFingerprint hashes the normalized request with length prefixes, so different field
+// boundaries can never produce the same digest.
+func sendFingerprint(to, cc []string, subject, text, html, inReplyTo string) string {
+	hash := sha256.New()
+	write := func(value string) {
+		fmt.Fprintf(hash, "%d:", len(value))
+		hash.Write([]byte(value))
+	}
+	write(strings.Join(to, ","))
+	write(strings.Join(cc, ","))
+	write(subject)
+	write(text)
+	write(html)
+	write(inReplyTo)
+	return hex.EncodeToString(hash.Sum(nil))
 }

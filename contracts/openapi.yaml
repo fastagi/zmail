@@ -3540,6 +3540,7 @@ paths:
         - bearerSession: []
       parameters:
         - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailIdempotencyKey'
       requestBody:
         required: true
         content:
@@ -3547,6 +3548,12 @@ paths:
             schema:
               $ref: '#/components/schemas/SendMailMessageRequest'
       responses:
+        '200':
+          description: The `Idempotency-Key` already named a sent message; it is returned and nothing is sent again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
         '201':
           description: The provider accepted the message.
           content:
@@ -3559,11 +3566,19 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The `Idempotency-Key` was used with different content (`MAILBOX.IDEMPOTENCY_CONFLICT`),
+            or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '422':
-          description: A field failed validation, or the recipients, subject, body, or reply reference are
-            unusable (`MAILBOX.MESSAGE_INVALID`).
+          description: A field failed validation, the recipients, subject, body, or reply reference are
+            unusable (`MAILBOX.MESSAGE_INVALID`), or the `Idempotency-Key` is not 1 to 255 printable
+            ASCII characters (`MAILBOX.IDEMPOTENCY_KEY_INVALID`).
           content:
             application/json:
               schema:
@@ -3745,6 +3760,112 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/outbound-mail-messages:
+    post:
+      operationId: sendOutboundMailMessage
+      summary: Send a message with an API key
+      description: "For backend services. The key must hold the `mail:send` scope, and `from` must be the
+        address of a mailbox the key's owner owns. Outcomes are the same as sending from a mailbox: a
+        message the provider does not accept answers `502 MAILBOX.DELIVERY_FAILED` and is kept with
+        status `failed`."
+      tags:
+        - Mailboxes
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MailIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendOutboundMailMessageRequest'
+      responses:
+        '200':
+          description: The `Idempotency-Key` already named a sent message; it is returned and nothing is sent
+            again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
+        '201':
+          description: The provider accepted the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No mailbox owned by the key's owner has the `from` address (`MAILBOX.NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The `Idempotency-Key` was used with different content (`MAILBOX.IDEMPOTENCY_CONFLICT`),
+            or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, the message is unusable (`MAILBOX.MESSAGE_INVALID`), or the
+            `Idempotency-Key` is malformed (`MAILBOX.IDEMPOTENCY_KEY_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: The key's owner reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: The mail provider did not accept the message (`MAILBOX.DELIVERY_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/outbound-mail-messages/{message_id}:
+    get:
+      operationId: getOutboundMailMessage
+      summary: Get a message the API key's owner sent
+      description: The key must hold the `mail:read` scope. Only outbound messages are visible here.
+      tags:
+        - Mailboxes
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MailMessageID'
+      responses:
+        '200':
+          description: The message with its delivery status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 components:
   securitySchemes:
     bearerSession:
@@ -3759,6 +3880,12 @@ components:
       description: HttpOnly platform-operator session cookie issued by POST /v1/operator/session. The
         name is `fastbuild_operator` outside production or `OPERATOR_SESSION_COOKIE_NAME` when configured.
         Unsafe methods also require an allowed `Origin` and the `X-CSRF-Token` header; see OPERATORS.md.
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: A user-owned API key from POST /v1/api-keys. Each operation names the scopes the
+        key must hold; see API_KEYS.md.
   parameters:
     Page:
       name: page
@@ -3993,6 +4120,17 @@ components:
       description: Positive mail message identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Names this send within its mailbox. A repeat with the same key and the same content
+        returns the first attempt's outcome and does not call the provider again.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+        pattern: ^[\x21-\x7E]+$
   responses:
     Forbidden:
       description: The caller is authenticated but not allowed to perform this operation.
@@ -4376,6 +4514,9 @@ components:
         - MAILBOX.INBOUND_UNPARSEABLE
         - MAILBOX.INBOUND_TOO_LARGE
         - MAILBOX.RECIPIENT_NOT_FOUND
+        - MAILBOX.IDEMPOTENCY_CONFLICT
+        - MAILBOX.IDEMPOTENCY_KEY_INVALID
+        - MAILBOX.SEND_IN_PROGRESS
     FieldErrors:
       type: object
       additionalProperties:
@@ -7324,3 +7465,44 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/InboundMailMessage'
+    SendOutboundMailMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - from
+        - to
+        - subject
+      properties:
+        from:
+          type: string
+          description: The address of a mailbox the API key's owner owns.
+          minLength: 3
+          maxLength: 320
+        to:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            minLength: 3
+            maxLength: 320
+        cc:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            minLength: 3
+            maxLength: 320
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 998
+        text:
+          type: string
+          maxLength: 262144
+        html:
+          type: string
+          maxLength: 262144
+        in_reply_to:
+          type: string
+          maxLength: 900

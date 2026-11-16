@@ -26,6 +26,20 @@ make dev
 delivers nothing, so no Cloudflare account is needed. Sign in to the Web application and open
 **Mailboxes**.
 
+## Send From A Backend Service
+
+Create an API key with the `mail:send` scope, then send from any mailbox its owner has:
+
+```bash
+curl https://<api host>/v1/outbound-mail-messages \
+  -H "X-API-Key: <key>" -H "Idempotency-Key: order-42-receipt" \
+  -H "Content-Type: application/json" \
+  -d '{"from":"hello@mail.example.com","to":["bob@example.com"],"subject":"Your receipt","text":"Thanks for your order."}'
+```
+
+A retry with the same `Idempotency-Key` returns the first attempt's result instead of sending again.
+A message the provider rejects answers `502` and is kept as `failed`.
+
 ## Go Live On Cloudflare
 
 1. Put the mail domain on Cloudflare DNS and enable Email Routing.
