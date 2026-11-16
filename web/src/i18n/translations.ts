@@ -3,6 +3,8 @@
 import { useTranslations } from 'next-intl';
 import {
   createTranslator,
+  scopedTranslator,
+  type AnyScopedTranslator,
   type AllScopePaths,
   type BaseTranslator,
   type ScopedTranslations,
@@ -23,11 +25,13 @@ export type {
 /**
  * Universal client-side translation hook.
  */
-export function useT(): UnifiedTranslations;
-export function useT<P extends AllScopePaths>(scope: P): ScopedTranslations<P>;
-export function useT(
-  scope?: AllScopePaths
-): UnifiedTranslations | ScopedTranslations<AllScopePaths> {
-  const rootT = useTranslations() as unknown as BaseTranslator;
-  return scope ? createTranslator(rootT, scope) : createTranslator(rootT);
+interface UseT {
+  (): UnifiedTranslations;
+  <P extends AllScopePaths>(scope: P): ScopedTranslations<P>;
 }
+
+// Cast through unknown for the reason given at createTranslator.
+export const useT = ((scope?: string): UnifiedTranslations | AnyScopedTranslator => {
+  const rootT = useTranslations() as unknown as BaseTranslator;
+  return scope ? scopedTranslator(rootT, scope) : createTranslator(rootT);
+}) as unknown as UseT;

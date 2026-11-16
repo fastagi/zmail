@@ -920,6 +920,208 @@ describe('mailbox browser route boundary', () => {
     );
   });
 
+  it('keeps templates per organization in the mock and sends with them', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const mailbox = (await (await create(route, { local_part: 'hello' })).json()).data;
+    const template = {
+      name: ' Welcome   email ',
+      subject: 'Welcome, {{first_name|friend}}',
+      html: '<p>Hi {{first_name|friend}}, code {{code}}</p>',
+      text: 'Code {{code}}',
+      sample_variables: { first_name: 'Ann', code: '1' },
+    };
+
+    const created = await route.createMailTemplateRoute(
+      request('/api/mail-templates', { method: 'POST', body: JSON.stringify(template) })
+    );
+    expect(created.status).toBe(201);
+    const stored = (await created.json()).data;
+    expect(stored).toMatchObject({
+      name: 'Welcome email',
+      variables: ['code', 'first_name'],
+      sample_variables: { first_name: 'Ann', code: '1' },
+    });
+    const duplicate = await route.createMailTemplateRoute(
+      request('/api/mail-templates', { method: 'POST', body: JSON.stringify(template) })
+    );
+    await expectError(duplicate, 409, 'MAILBOX.TEMPLATE_NAME_TAKEN');
+    const broken = await route.createMailTemplateRoute(
+      request('/api/mail-templates', {
+        method: 'POST',
+        body: JSON.stringify({ ...template, name: 'Broken', html: '<p>{{first name}}</p>' }),
+      })
+    );
+    await expectError(broken, 422, 'MAILBOX.TEMPLATE_INVALID');
+
+    const list = await (await route.listMailTemplatesRoute(request('/api/mail-templates'))).json();
+    expect(list.data).toEqual([expect.objectContaining({ id: stored.id, name: 'Welcome email' })]);
+    expect(list.data[0].html_body).toBeUndefined();
+
+    // A real send uses only the given values: first_name falls back, code is required.
+    const missing = await send(route, mailbox.id, {
+      to: ['bob@example.com'],
+      template: { id: stored.id },
+    });
+    const missingBody = await missing.json();
+    expect([missing.status, missingBody.error_code, missingBody.errors]).toEqual([
+      422,
+      'MAILBOX.TEMPLATE_VARIABLES_MISSING',
+      { 'template.variables.code': ['is required'] },
+    ]);
+    const sent = await send(route, mailbox.id, {
+      to: ['bob@example.com'],
+      template: { id: stored.id, variables: { code: '<9>' } },
+    });
+    expect(sent.status).toBe(201);
+    expect((await sent.json()).data).toMatchObject({
+      subject: 'Welcome, friend',
+      html_body: '<p>Hi friend, code &lt;9&gt;</p>',
+      text_body: 'Code <9>',
+      template_id: stored.id,
+    });
+    await expectError(
+      await send(route, mailbox.id, {
+        to: ['bob@example.com'],
+        subject: 'Both',
+        template: { id: stored.id, variables: { code: '1' } },
+      }),
+      422,
+      'MAILBOX.MESSAGE_INVALID'
+    );
+
+    const test = await route.sendMailTemplateTestRoute(
+      request(`/api/mail-templates/${stored.id}/tests`, {
+        method: 'POST',
+        body: JSON.stringify({ mailbox_id: mailbox.id, to: ['qa@example.com'] }),
+      }),
+      String(stored.id)
+    );
+    expect(test.status).toBe(201);
+    expect((await test.json()).data).toMatchObject({
+      subject: 'Welcome, Ann',
+      text_body: 'Code 1',
+    });
+
+    const updated = await route.updateMailTemplateRoute(
+      request(`/api/mail-templates/${stored.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...template, subject: 'Changed' }),
+      }),
+      String(stored.id)
+    );
+    expect((await updated.json()).data.subject).toBe('Changed');
+
+    activeOrganization = await secondOrganization();
+    await expectError(
+      await route.getMailTemplateRoute(
+        request(`/api/mail-templates/${stored.id}`),
+        String(stored.id)
+      ),
+      404,
+      'MAILBOX.TEMPLATE_NOT_FOUND'
+    );
+    activeOrganization = '1';
+
+    const removed = await route.deleteMailTemplateRoute(
+      request(`/api/mail-templates/${stored.id}`, { method: 'DELETE' }),
+      String(stored.id)
+    );
+    expect(removed.status).toBe(204);
+    await expectError(
+      await route.deleteMailTemplateRoute(
+        request(`/api/mail-templates/${stored.id}`, { method: 'DELETE' }),
+        String(stored.id)
+      ),
+      404,
+      'MAILBOX.TEMPLATE_NOT_FOUND'
+    );
+  });
+
+  it('rejects malformed template bodies before they reach the backend', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const valid = { name: 'A', subject: 'S', html: '<p>x</p>' };
+    for (const body of [
+      { ...valid, name: '' },
+      { ...valid, subject: 7 },
+      { ...valid, sample_variables: { 'bad-name': 'x' } },
+      { ...valid, sample_variables: { ok: 1 } },
+      { ...valid, extra: true },
+    ]) {
+      await expectError(
+        await route.createMailTemplateRoute(
+          request('/api/mail-templates', { method: 'POST', body: JSON.stringify(body) })
+        ),
+        422,
+        'COMMON.VALIDATION_FAILED'
+      );
+    }
+    for (const body of [
+      { to: ['qa@example.com'] },
+      { mailbox_id: 1, to: [] },
+      { mailbox_id: 1, to: Array.from({ length: 6 }, (_, index) => `q${index}@example.com`) },
+    ]) {
+      await expectError(
+        await route.sendMailTemplateTestRoute(
+          request('/api/mail-templates/1/tests', { method: 'POST', body: JSON.stringify(body) }),
+          '1'
+        ),
+        422,
+        'COMMON.VALIDATION_FAILED'
+      );
+    }
+    await expectError(
+      await send(route, 1, { to: ['bob@example.com'], template: { id: 'one' } }),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+  });
+
+  it('forwards template routes to the fixed API paths', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () => Response.json({ code: 0, message: 'ok', data: [] }));
+    const route = await loadRoute();
+    const body = JSON.stringify({ name: 'A', subject: 'S', text: 'x' });
+
+    await route.listMailTemplatesRoute(request('/api/mail-templates'));
+    await route.createMailTemplateRoute(request('/api/mail-templates', { method: 'POST', body }));
+    await route.getMailTemplateRoute(request('/api/mail-templates/3'), '3');
+    await route.updateMailTemplateRoute(
+      request('/api/mail-templates/3', { method: 'PUT', body }),
+      '3'
+    );
+    await route.deleteMailTemplateRoute(
+      request('/api/mail-templates/3', { method: 'DELETE' }),
+      '3'
+    );
+    await route.sendMailTemplateTestRoute(
+      request('/api/mail-templates/3/tests', {
+        method: 'POST',
+        body: JSON.stringify({ mailbox_id: 2, to: ['qa@example.com'] }),
+      }),
+      '3'
+    );
+
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => `${init?.method} ${new URL(String(url)).pathname}`)
+    ).toEqual([
+      'GET /v1/mail-templates',
+      'POST /v1/mail-templates',
+      'GET /v1/mail-templates/3',
+      'PUT /v1/mail-templates/3',
+      'DELETE /v1/mail-templates/3',
+      'POST /v1/mail-templates/3/tests',
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('organization-id')).toBe('1');
+    }
+  });
+
   it('forwards only the fixed production paths, methods, and whitelisted query', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';

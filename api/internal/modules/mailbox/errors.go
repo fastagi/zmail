@@ -23,4 +23,8 @@ var (
 	ErrMailInboundTooLarge       = errors.New("inbound mail is too large")
 	ErrMailDeliveryEventInvalid  = errors.New("mail delivery event is invalid")
 	ErrMailRecipientNotFound     = errors.New("inbound mail recipient not found")
+	ErrMailTemplateNotFound      = errors.New("mail template not found")
+	ErrMailTemplateInvalid       = errors.New("mail template is invalid")
+	ErrMailTemplateNameTaken     = errors.New("mail template name is already taken")
+	ErrMailTemplateLimitReached  = errors.New("mail template limit reached")
 )

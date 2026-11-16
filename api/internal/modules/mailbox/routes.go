@@ -18,6 +18,15 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.GET("/mail-messages", h.ListLog).Name("mail_messages.index")
 		auth.GET("/mail-message-stats", h.ListStats).Name("mail_message_stats.index")
 
+		auth.GET("/mail-templates", h.ListTemplates).Name("mail_templates.index")
+		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store")
+		auth.GET("/mail-templates/:template_id", h.GetTemplate).Name("mail_templates.show").WhereNumber("template_id")
+		auth.PUT("/mail-templates/:template_id", h.UpdateTemplate).Name("mail_templates.update").WhereNumber("template_id")
+		auth.DELETE("/mail-templates/:template_id", h.DeleteTemplate).Name("mail_templates.destroy").WhereNumber("template_id")
+		auth.POST("/mail-templates/:template_id/tests", h.SendTemplateTest).
+			Name("mail_templates.tests.store").WhereNumber("template_id")
+		auth.POST("/mail-template-previews", h.PreviewTemplate).Name("mail_template_previews.store")
+
 		auth.GET("/mailboxes", h.ListMailboxes).Name("mailboxes.index")
 		auth.POST("/mailboxes", h.CreateMailbox).Name("mailboxes.store")
 		auth.DELETE("/mailboxes/:mailbox_id", h.DeleteMailbox).Name("mailboxes.destroy").WhereNumber("mailbox_id")

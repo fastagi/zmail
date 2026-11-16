@@ -33,8 +33,17 @@ import {
   MAIL_STATS_DEFAULT_DAYS,
   MAIL_STATS_MAX_DAYS,
   MAIL_SUBJECT_MAX_LENGTH,
+  MAIL_TEMPLATE_MAX_VARIABLES,
+  MAIL_TEMPLATE_NAME_MAX_LENGTH,
+  MAIL_TEMPLATE_TEST_MAX_RECIPIENTS,
+  MAIL_TEMPLATE_VALUE_MAX_LENGTH,
+  MAIL_TEMPLATE_VARIABLE_PATTERN,
 } from '@/features/mailbox/schemas';
-import { mockMailboxStore } from '@/features/mailbox/server/mock-mailbox-store';
+import {
+  mockMailboxStore,
+  type MockMailSendResult,
+  type MockMailTemplateResult,
+} from '@/features/mailbox/server/mock-mailbox-store';
 import { mockOrganizationStore } from '@/features/organization/server/mock-organization-store';
 import { parseOrganizationId } from '@/features/organization/server/organization-route';
 import type { OrganizationContext } from '@/features/organization/types';
@@ -43,6 +52,8 @@ import type {
   MailDirection,
   MailLogFilters,
   MailStatus,
+  MailTemplateInput,
+  MailTemplateTestInput,
   SendMailMessageInput,
 } from '@/features/mailbox/types';
 import { ApiErrorCode, type ApiErrorCodeValue } from '@/http/codes';
@@ -92,6 +103,9 @@ const maxReadStateBodyBytes = 1_024;
 const maxSendBodyBytes = 8 * 1_024 * 1_024;
 // The largest download the API can answer, with room for nothing else.
 const maxAttachmentDownloadBytes = MAIL_ATTACHMENTS_MAX_BYTES;
+// Two 256 KiB bodies with JSON escaping.
+const maxTemplateBodyBytes = 2 * 1_024 * 1_024;
+const maxTemplateTestBodyBytes = 512 * 1_024;
 
 export function resolveMailboxRoute(
   environment: MailboxRouteEnvironment = currentEnvironment()
@@ -319,11 +333,194 @@ export async function sendMailMessageRoute(
       },
     });
   }
-  const result = mockMailboxStore.send(target.organizationId, mailboxId.value, input.value);
+  return mockSendResponse(
+    mockMailboxStore.send(target.organizationId, mailboxId.value, input.value)
+  );
+}
+
+function mockSendResponse(result: MockMailSendResult): NextResponse {
   if (result.ok) return success(result.message, 201);
-  return result.error === 'mailbox_not_found'
-    ? mailboxNotFound()
-    : failure(422, ApiErrorCode.MAILBOX_MESSAGE_INVALID, 'Mail message is invalid');
+  switch (result.error) {
+    case 'mailbox_not_found':
+      return mailboxNotFound();
+    case 'template_not_found':
+      return templateNotFound();
+    case 'variables_missing':
+      return apiErrorResponse({
+        status: 422,
+        errorCode: ApiErrorCode.MAILBOX_TEMPLATE_VARIABLES_MISSING,
+        message: 'Template variables are missing',
+        errors: Object.fromEntries(
+          result.missing.map(name => [`template.variables.${name}`, ['is required']])
+        ),
+        headers: privateMailboxHeaders(),
+      });
+    default:
+      return failure(422, ApiErrorCode.MAILBOX_MESSAGE_INVALID, 'Mail message is invalid');
+  }
+}
+
+export async function listMailTemplatesRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mail-templates',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return success(mockMailboxStore.listTemplates(target.organizationId));
+}
+
+export async function createMailTemplateRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const input = await templateBody(request);
+  if (!input.ok) return input.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'mail-templates',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: templateFieldMap,
+    });
+  }
+  return mockTemplateResponse(
+    mockMailboxStore.createTemplate(target.organizationId, input.value),
+    201
+  );
+}
+
+export async function getMailTemplateRoute(
+  request: Request,
+  rawTemplateId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const templateId = parseRouteId(rawTemplateId);
+  if (!templateId.ok) return templateId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mail-templates/${templateId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return mockTemplateResponse(
+    mockMailboxStore.getTemplate(target.organizationId, templateId.value)
+  );
+}
+
+export async function updateMailTemplateRoute(
+  request: Request,
+  rawTemplateId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const templateId = parseRouteId(rawTemplateId);
+  if (!templateId.ok) return templateId.response;
+  const input = await templateBody(request);
+  if (!input.ok) return input.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mail-templates/${templateId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: templateFieldMap,
+    });
+  }
+  return mockTemplateResponse(
+    mockMailboxStore.updateTemplate(target.organizationId, templateId.value, input.value)
+  );
+}
+
+export async function deleteMailTemplateRoute(
+  request: Request,
+  rawTemplateId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const templateId = parseRouteId(rawTemplateId);
+  if (!templateId.ok) return templateId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mail-templates/${templateId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return mockMailboxStore.deleteTemplate(target.organizationId, templateId.value)
+    ? privateMailboxResponse(apiNoContentResponse())
+    : templateNotFound();
+}
+
+export async function sendMailTemplateTestRoute(
+  request: Request,
+  rawTemplateId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const templateId = parseRouteId(rawTemplateId);
+  if (!templateId.ok) return templateId.response;
+  const input = await templateTestBody(request);
+  if (!input.ok) return input.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mail-templates/${templateId.value}/tests`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: { mailbox_id: 'mailbox_id', to: 'to' },
+    });
+  }
+  return mockSendResponse(
+    mockMailboxStore.sendTemplateTest(
+      target.organizationId,
+      templateId.value,
+      input.value.mailbox_id,
+      input.value.to,
+      input.value.variables ?? {}
+    )
+  );
+}
+
+const templateFieldMap = {
+  name: 'name',
+  subject: 'subject',
+  html: 'html',
+  text: 'text',
+  sample_variables: 'sample_variables',
+} as const;
+
+function mockTemplateResponse(result: MockMailTemplateResult, status: 200 | 201 = 200) {
+  if (result.ok) return success(result.template, status);
+  switch (result.error) {
+    case 'not_found':
+      return templateNotFound();
+    case 'taken':
+      return failure(409, ApiErrorCode.MAILBOX_TEMPLATE_NAME_TAKEN, 'Mail template name is taken');
+    case 'limit':
+      return failure(
+        409,
+        ApiErrorCode.MAILBOX_TEMPLATE_LIMIT_REACHED,
+        'Mail template limit reached'
+      );
+    default:
+      return failure(422, ApiErrorCode.MAILBOX_TEMPLATE_INVALID, 'Mail template is invalid');
+  }
+}
+
+function templateNotFound(): NextResponse {
+  return failure(404, ApiErrorCode.MAILBOX_TEMPLATE_NOT_FOUND, 'Mail template not found');
 }
 
 export async function getMailMessageRoute(
@@ -587,12 +784,20 @@ async function mailboxBody(request: Request): Promise<Parsed<CreateMailboxInput>
 async function sendBody(request: Request): Promise<Parsed<SendMailMessageInput>> {
   const body = await jsonObject(request, maxSendBodyBytes);
   if (!body.ok) return body;
-  const { to, cc, subject, text, html, in_reply_to: inReplyTo, attachments } = body.value;
+  const { to, cc, subject, text, html, in_reply_to: inReplyTo, attachments, template } = body.value;
   const errors: Record<string, string[]> = {};
   if (!addressList(to) || to.length === 0) errors.to = ['The to field is invalid'];
   if (cc !== undefined && !addressList(cc)) errors.cc = ['The cc field is invalid'];
-  if (!boundedString(subject, MAIL_SUBJECT_MAX_LENGTH) || subject === '') {
+  // A template supplies the subject; without one the subject is required.
+  if (
+    template === undefined
+      ? !boundedString(subject, MAIL_SUBJECT_MAX_LENGTH) || subject === ''
+      : subject !== undefined && !boundedString(subject, MAIL_SUBJECT_MAX_LENGTH)
+  ) {
     errors.subject = ['The subject field is invalid'];
+  }
+  if (template !== undefined && !templateReference(template)) {
+    errors.template = ['The template field is invalid'];
   }
   if (text !== undefined && !boundedString(text, MAIL_BODY_MAX_BYTES)) {
     errors.text = ['The text field is invalid'];
@@ -612,11 +817,101 @@ async function sendBody(request: Request): Promise<Parsed<SendMailMessageInput>>
     value: {
       to: to as string[],
       ...(cc === undefined ? {} : { cc: cc as string[] }),
-      subject: subject as string,
+      ...(typeof subject === 'string' ? { subject } : {}),
       ...(typeof text === 'string' ? { text } : {}),
       ...(typeof html === 'string' ? { html } : {}),
       ...(typeof inReplyTo === 'string' ? { in_reply_to: inReplyTo } : {}),
       ...(attachmentList(attachments) ? { attachments } : {}),
+      ...(templateReference(template) ? { template } : {}),
+    },
+  };
+}
+
+function templateReference(value: unknown): value is NonNullable<SendMailMessageInput['template']> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { id, variables, ...rest } = value as Record<string, unknown>;
+  return (
+    Object.keys(rest).length === 0 &&
+    typeof id === 'number' &&
+    Number.isSafeInteger(id) &&
+    id > 0 &&
+    (variables === undefined || variableMap(variables))
+  );
+}
+
+function variableMap(value: unknown): value is Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return (
+    entries.length <= MAIL_TEMPLATE_MAX_VARIABLES &&
+    entries.every(
+      ([name, item]) =>
+        MAIL_TEMPLATE_VARIABLE_PATTERN.test(name) &&
+        boundedString(item, MAIL_TEMPLATE_VALUE_MAX_LENGTH)
+    )
+  );
+}
+
+/** Shape checks only; names, placeholders, and bodies are judged by the API or the mock. */
+function templateFields(body: Record<string, unknown>): Parsed<MailTemplateInput> {
+  const { name, subject, html, text, sample_variables: samples, ...rest } = body;
+  const errors: Record<string, string[]> = {};
+  if (Object.keys(rest).length > 0) errors.body = ['Unknown fields'];
+  if (!boundedString(name, MAIL_TEMPLATE_NAME_MAX_LENGTH) || name === '') {
+    errors.name = ['The name field is invalid'];
+  }
+  if (!boundedString(subject, MAIL_SUBJECT_MAX_LENGTH) || subject === '') {
+    errors.subject = ['The subject field is invalid'];
+  }
+  if (html !== undefined && !boundedString(html, MAIL_BODY_MAX_BYTES)) {
+    errors.html = ['The html field is invalid'];
+  }
+  if (text !== undefined && !boundedString(text, MAIL_BODY_MAX_BYTES)) {
+    errors.text = ['The text field is invalid'];
+  }
+  if (samples !== undefined && !variableMap(samples)) {
+    errors.sample_variables = ['The sample_variables field is invalid'];
+  }
+  if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
+  return {
+    ok: true,
+    value: {
+      name: name as string,
+      subject: subject as string,
+      ...(typeof html === 'string' ? { html } : {}),
+      ...(typeof text === 'string' ? { text } : {}),
+      ...(variableMap(samples) ? { sample_variables: samples } : {}),
+    },
+  };
+}
+
+async function templateBody(request: Request): Promise<Parsed<MailTemplateInput>> {
+  const body = await jsonObject(request, maxTemplateBodyBytes);
+  return body.ok ? templateFields(body.value) : body;
+}
+
+async function templateTestBody(request: Request): Promise<Parsed<MailTemplateTestInput>> {
+  const body = await jsonObject(request, maxTemplateTestBodyBytes);
+  if (!body.ok) return body;
+  const { mailbox_id: mailboxId, to, variables, ...rest } = body.value;
+  const errors: Record<string, string[]> = {};
+  if (Object.keys(rest).length > 0) errors.body = ['Unknown fields'];
+  if (!(typeof mailboxId === 'number' && Number.isSafeInteger(mailboxId) && mailboxId > 0)) {
+    errors.mailbox_id = ['The mailbox_id field is invalid'];
+  }
+  if (!addressList(to) || to.length === 0 || to.length > MAIL_TEMPLATE_TEST_MAX_RECIPIENTS) {
+    errors.to = ['The to field is invalid'];
+  }
+  if (variables !== undefined && !variableMap(variables)) {
+    errors.variables = ['The variables field is invalid'];
+  }
+  if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
+  return {
+    ok: true,
+    value: {
+      mailbox_id: mailboxId as number,
+      to: to as string[],
+      ...(variableMap(variables) ? { variables } : {}),
     },
   };
 }

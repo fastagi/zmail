@@ -23,7 +23,7 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{}, &MailMessageEventPO{}, &MailAttachmentPO{})
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{})
 	return NewRepository(db), db
 }
 
@@ -702,5 +702,63 @@ func TestRepositoryStoresAttachmentsWithTheirMessage(t *testing.T) {
 	}
 	if err := db.Model(&MailAttachmentPO{}).Where("message_id = ?", message.ID).Count(&count).Error; err != nil || count != 0 {
 		t.Fatalf("attachments after deleting the message = %d, %v; want 0", count, err)
+	}
+}
+
+func TestRepositoryKeepsTemplatesPerOrganization(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	createOwner(t, db, 2)
+
+	template := &domain.MailTemplate{
+		OrganizationID: 1, Name: "Welcome", Subject: "Hi {{name}}", HTMLBody: "<p>{{name}}</p>",
+		SampleVariables: map[string]string{"name": "Ann"}, CreatedBy: 9,
+	}
+	if err := repo.CreateTemplate(ctx, template, 2); err != nil || template.ID == 0 {
+		t.Fatalf("CreateTemplate = %v, id %d", err, template.ID)
+	}
+	if err := repo.CreateTemplate(ctx, &domain.MailTemplate{OrganizationID: 1, Name: "Welcome", Subject: "x", TextBody: "x"}, 2); !errors.Is(err, ErrMailTemplateNameTaken) {
+		t.Fatalf("duplicate name error = %v", err)
+	}
+	if err := repo.CreateTemplate(ctx, &domain.MailTemplate{OrganizationID: 2, Name: "Welcome", Subject: "x", TextBody: "x"}, 2); err != nil {
+		t.Fatalf("same name in another organization: %v", err)
+	}
+	if err := repo.CreateTemplate(ctx, &domain.MailTemplate{OrganizationID: 1, Name: "Second", Subject: "x", TextBody: "x"}, 2); err != nil {
+		t.Fatalf("second template: %v", err)
+	}
+	if err := repo.CreateTemplate(ctx, &domain.MailTemplate{OrganizationID: 1, Name: "Third", Subject: "x", TextBody: "x"}, 2); !errors.Is(err, ErrMailTemplateLimitReached) {
+		t.Fatalf("limit error = %v", err)
+	}
+
+	found, err := repo.FindTemplate(ctx, 1, template.ID)
+	if err != nil || found.SampleVariables["name"] != "Ann" || found.CreatedBy != 9 {
+		t.Fatalf("FindTemplate = %+v, %v", found, err)
+	}
+	if _, err = repo.FindTemplate(ctx, 2, template.ID); !errors.Is(err, ErrMailTemplateNotFound) {
+		t.Fatalf("another organization's template error = %v", err)
+	}
+	listed, err := repo.ListTemplates(ctx, 1)
+	if err != nil || len(listed) != 2 || listed[0].Name != "Second" {
+		t.Fatalf("ListTemplates = %+v, %v; want two, by name", listed, err)
+	}
+
+	found.Name, found.Subject = "Second", "changed"
+	if err := repo.UpdateTemplate(ctx, found); !errors.Is(err, ErrMailTemplateNameTaken) {
+		t.Fatalf("rename onto another template error = %v", err)
+	}
+	found.Name = "Welcome back"
+	if err := repo.UpdateTemplate(ctx, found); err != nil || found.Subject != "changed" || found.CreatedBy != 9 {
+		t.Fatalf("UpdateTemplate = %+v, %v", found, err)
+	}
+	found.OrganizationID = 2
+	if err := repo.UpdateTemplate(ctx, found); !errors.Is(err, ErrMailTemplateNotFound) {
+		t.Fatalf("update from another organization error = %v", err)
+	}
+	if err := repo.DeleteTemplate(ctx, 2, template.ID); !errors.Is(err, ErrMailTemplateNotFound) {
+		t.Fatalf("delete from another organization error = %v", err)
+	}
+	if err := repo.DeleteTemplate(ctx, 1, template.ID); err != nil {
+		t.Fatalf("DeleteTemplate: %v", err)
 	}
 }

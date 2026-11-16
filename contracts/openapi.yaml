@@ -3416,6 +3416,264 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-templates:
+    get:
+      operationId: listMailTemplates
+      summary: List the organization's templates
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: Every template of the organization by name, without bodies.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTemplateListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailTemplate
+      summary: Create a template
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailTemplateRequest'
+      responses:
+        '201':
+          description: The created template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTemplateResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The name is taken in the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`) or the organization has 200 templates (`MAILBOX.TEMPLATE_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the name, subject, body, sample values, or placeholder syntax is unusable (`MAILBOX.TEMPLATE_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-templates/{template_id}:
+    get:
+      operationId: getMailTemplate
+      summary: Get a template with its bodies
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailTemplateID'
+      responses:
+        '200':
+          description: The template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTemplateResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailTemplate
+      summary: Replace a template
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailTemplateID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailTemplateRequest'
+      responses:
+        '200':
+          description: The updated template.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTemplateResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The name is taken by another template of the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the name, subject, body, sample values, or placeholder syntax is unusable (`MAILBOX.TEMPLATE_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailTemplate
+      summary: Delete a template
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailTemplateID'
+      responses:
+        '204':
+          description: The template is deleted. Messages sent with it keep their content and `template_id`.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-templates/{template_id}/tests:
+    post:
+      operationId: sendMailTemplateTest
+      summary: Send a template to test addresses
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailTemplateID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailTemplateTestRequest'
+      responses:
+        '201':
+          description: The provider accepted the test message. Sample values fill variables the request does not give.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: A field failed validation, the recipients are unusable (`MAILBOX.MESSAGE_INVALID`), or variables without a value or fallback remain (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, with one field error per variable).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: The mail provider did not accept the message (`MAILBOX.DELIVERY_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-template-previews:
+    post:
+      operationId: previewMailTemplate
+      summary: Render a template without sending it
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailTemplatePreviewRequest'
+      responses:
+        '200':
+          description: The rendered subject and bodies, with the variables still missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTemplatePreviewResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, both or neither of `template_id` and `source` were given, or the source is unusable (`MAILBOX.TEMPLATE_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes:
     get:
       operationId: listMailboxes
@@ -4334,6 +4592,13 @@ components:
       description: Positive mailbox identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailTemplateID:
+      name: template_id
+      in: path
+      required: true
+      description: Positive mail template identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     MailMessageID:
       name: message_id
       in: path
@@ -4746,6 +5011,11 @@ components:
         - MAILBOX.IDEMPOTENCY_KEY_INVALID
         - MAILBOX.SEND_IN_PROGRESS
         - MAILBOX.DELIVERY_EVENT_INVALID
+        - MAILBOX.TEMPLATE_NOT_FOUND
+        - MAILBOX.TEMPLATE_INVALID
+        - MAILBOX.TEMPLATE_NAME_TAKEN
+        - MAILBOX.TEMPLATE_LIMIT_REACHED
+        - MAILBOX.TEMPLATE_VARIABLES_MISSING
     FieldErrors:
       type: object
       additionalProperties:
@@ -7508,6 +7778,7 @@ components:
         - failure_code
         - last_event
         - attachment_count
+        - template_id
         - created_at
       properties:
         id:
@@ -7548,6 +7819,11 @@ components:
           description: How many files the message has; the detail lists them.
           minimum: 0
           maximum: 10
+        template_id:
+          description: The template the message was rendered from; null when none was used.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
         created_at:
           type: string
           format: date-time
@@ -7567,6 +7843,7 @@ components:
         - failure_code
         - last_event
         - attachment_count
+        - template_id
         - created_at
         - text_body
         - html_body
@@ -7612,6 +7889,11 @@ components:
           description: How many files the message has; the detail lists them.
           minimum: 0
           maximum: 10
+        template_id:
+          description: The template the message was rendered from; null when none was used.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
         created_at:
           type: string
           format: date-time
@@ -7687,12 +7969,230 @@ components:
           description: The file as standard base64. All files of a message decode to at most 4 MiB.
           minLength: 1
 
-    SendMailMessageRequest:
+    MailTemplateSendInput:
+      type: object
+      additionalProperties: false
+      description: Sends a stored template in place of `subject`, `text`, and `html`. Only these values fill
+        variables; sample values are never used for a real send.
+      required:
+        - id
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        variables:
+          $ref: '#/components/schemas/MailTemplateVariables'
+    MailTemplateVariables:
+      type: object
+      description: Values by variable name; names are a letter followed by letters, digits, or underscores.
+      maxProperties: 100
+      propertyNames:
+        pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+      additionalProperties:
+        type: string
+        maxLength: 2000
+    MailTemplateRequest:
       type: object
       additionalProperties: false
       required:
-        - to
+        - name
         - subject
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        subject:
+          type: string
+          description: May use `{{name}}` and `{{name|fallback}}` placeholders, as may both bodies.
+          minLength: 1
+          maxLength: 998
+        html:
+          type: string
+          description: At least one of `html` and `text` is required.
+          maxLength: 262144
+        text:
+          type: string
+          maxLength: 262144
+        sample_variables:
+          $ref: '#/components/schemas/MailTemplateVariables'
+    MailTemplateSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - subject
+        - variables
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          maxLength: 100
+        subject:
+          type: string
+          maxLength: 998
+        variables:
+          type: array
+          description: Every variable the template uses, sorted.
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MailTemplate:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - subject
+        - variables
+        - created_at
+        - updated_at
+        - html_body
+        - text_body
+        - sample_variables
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          maxLength: 100
+        subject:
+          type: string
+          maxLength: 998
+        variables:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        html_body:
+          type: string
+          maxLength: 262144
+        text_body:
+          type: string
+          maxLength: 262144
+        sample_variables:
+          $ref: '#/components/schemas/MailTemplateVariables'
+    MailTemplateResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailTemplate'
+    MailTemplateListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/MailTemplateSummary'
+    MailTemplatePreviewRequest:
+      type: object
+      additionalProperties: false
+      description: Give exactly one of `template_id` and `source`. Sample values fill variables not in
+        `variables`.
+      properties:
+        template_id:
+          $ref: '#/components/schemas/PositiveID'
+        source:
+          $ref: '#/components/schemas/MailTemplateRequest'
+        variables:
+          $ref: '#/components/schemas/MailTemplateVariables'
+    MailTemplatePreview:
+      type: object
+      additionalProperties: false
+      required:
+        - subject
+        - html_body
+        - text_body
+        - variables
+        - missing
+      properties:
+        subject:
+          type: string
+        html_body:
+          type: string
+          description: Untrusted HTML. Render it only inside a sandbox.
+        text_body:
+          type: string
+        variables:
+          type: array
+          items:
+            type: string
+        missing:
+          type: array
+          description: Variables with neither a value nor a fallback; a real send would be refused.
+          items:
+            type: string
+    MailTemplatePreviewResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailTemplatePreview'
+    MailTemplateTestRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - mailbox_id
+        - to
+      properties:
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        to:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            type: string
+            minLength: 3
+            maxLength: 320
+        variables:
+          $ref: '#/components/schemas/MailTemplateVariables'
+    SendMailMessageRequest:
+      type: object
+      description: Give `subject` with `text` or `html`, or give `template` and none of the three.
+      additionalProperties: false
+      required:
+        - to
       properties:
         to:
           type: array
@@ -7730,6 +8230,8 @@ components:
           maxItems: 10
           items:
             $ref: '#/components/schemas/MailAttachmentInput'
+        template:
+          $ref: '#/components/schemas/MailTemplateSendInput'
     UpdateMailMessageRequest:
       type: object
       additionalProperties: false
@@ -7805,7 +8307,6 @@ components:
       required:
         - from
         - to
-        - subject
       properties:
         from:
           type: string
@@ -7846,6 +8347,8 @@ components:
           maxItems: 10
           items:
             $ref: '#/components/schemas/MailAttachmentInput'
+        template:
+          $ref: '#/components/schemas/MailTemplateSendInput'
     MailLogEntry:
       type: object
       additionalProperties: false
@@ -7863,6 +8366,7 @@ components:
         - failure_code
         - last_event
         - attachment_count
+        - template_id
         - created_at
       properties:
         id:
@@ -7906,6 +8410,11 @@ components:
           description: How many files the message has; the detail lists them.
           minimum: 0
           maximum: 10
+        template_id:
+          description: The template the message was rendered from; null when none was used.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
         created_at:
           type: string
           format: date-time

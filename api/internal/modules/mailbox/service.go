@@ -58,6 +58,8 @@ type SendInput struct {
 	InReplyTo string
 	// Attachments are optional files, bounded in number and total size.
 	Attachments []AttachmentInput
+	// Template, when set, supplies the subject and bodies; Subject, Text, and HTML must be empty.
+	Template *TemplateSendInput
 	// IdempotencyKey is optional. A repeated send with the same key and the same content in the
 	// same mailbox returns the first attempt's outcome instead of sending again.
 	IdempotencyKey string
@@ -75,6 +77,13 @@ type Service interface {
 	SendMessage(ctx context.Context, organizationID, mailboxID uint, input SendInput) (message *domain.MailMessage, created bool, err error)
 	// SendFromAddress sends from the mailbox with this address, which the organization must own.
 	SendFromAddress(ctx context.Context, organizationID uint, from string, input SendInput) (message *domain.MailMessage, created bool, err error)
+	ListTemplates(ctx context.Context, organizationID uint) ([]*domain.MailTemplate, error)
+	GetTemplate(ctx context.Context, organizationID, id uint) (*domain.MailTemplate, error)
+	CreateTemplate(ctx context.Context, organizationID, createdBy uint, input TemplateInput) (*domain.MailTemplate, error)
+	UpdateTemplate(ctx context.Context, organizationID, id uint, input TemplateInput) (*domain.MailTemplate, error)
+	DeleteTemplate(ctx context.Context, organizationID, id uint) error
+	PreviewTemplate(ctx context.Context, organizationID uint, input PreviewInput) (*TemplatePreview, error)
+	SendTemplateTest(ctx context.Context, organizationID, templateID, mailboxID uint, to []string, values map[string]string) (*domain.MailMessage, error)
 	// GetAttachment returns one attachment of a message with its content.
 	GetAttachment(ctx context.Context, organizationID, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error)
 	GetOutboundMessage(ctx context.Context, organizationID, messageID uint) (*domain.MailMessage, error)
@@ -95,6 +104,7 @@ type Service interface {
 
 type service struct {
 	repo      domain.MailboxRepository
+	templates domain.MailTemplateRepository
 	transport mailtransport.Transport
 	notifier  mailNotifier
 	settings  Settings
@@ -106,11 +116,12 @@ var _ Service = (*service)(nil)
 // NewService creates the mailbox service.
 func NewService(
 	repo domain.MailboxRepository,
+	templates domain.MailTemplateRepository,
 	transport mailtransport.Transport,
 	notifier mailNotifier,
 	settings Settings,
 ) *service {
-	return &service{repo: repo, transport: transport, notifier: notifier, settings: settings, now: time.Now}
+	return &service{repo: repo, templates: templates, transport: transport, notifier: notifier, settings: settings, now: time.Now}
 }
 
 // apply runs a state change and publishes the notifications it returns in one transaction, so
@@ -363,10 +374,18 @@ func (s *service) GetOutboundMessage(ctx context.Context, organizationID, messag
 }
 
 func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput) (*domain.MailMessage, bool, error) {
+	var templateID uint
+	if input.Template != nil {
+		var err error
+		if input, templateID, err = s.applyTemplate(ctx, mailbox.OrganizationID, input); err != nil {
+			return nil, false, err
+		}
+	}
 	message, err := s.buildOutbound(mailbox, input)
 	if err != nil {
 		return nil, false, err
 	}
+	message.TemplateID = templateID
 	if message.IdempotencyKey != "" {
 		existing, findErr := s.repo.FindMessageByIdempotencyKey(ctx, mailbox.ID, message.IdempotencyKey)
 		if findErr == nil {
