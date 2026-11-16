@@ -15,6 +15,7 @@ export const AVAILABLE_MODULES = [
   'errors',
   'metadata',
   'test',
+  'mailbox',
   // fastbuild:slot web.i18n.modules
 ] as const;
 

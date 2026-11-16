@@ -72,6 +72,35 @@ TABLE authentication_sessions
   COLUMN revocation_reason character varying(32) NOT NULL DEFAULT ''::character varying
   COLUMN audience character varying(16) NOT NULL DEFAULT 'user'::character varying
 
+TABLE mail_messages
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_messages_id_seq'::regclass)
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN direction character varying(16) NOT NULL
+  COLUMN status character varying(16) NOT NULL
+  COLUMN from_address character varying(320) NOT NULL
+  COLUMN from_name character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN to_addresses text NOT NULL DEFAULT '[]'::text
+  COLUMN cc_addresses text NOT NULL DEFAULT '[]'::text
+  COLUMN subject character varying(998) NOT NULL DEFAULT ''::character varying
+  COLUMN text_body text NOT NULL DEFAULT ''::text
+  COLUMN html_body text NOT NULL DEFAULT ''::text
+  COLUMN message_id character varying(998) NOT NULL DEFAULT ''::character varying
+  COLUMN in_reply_to character varying(998) NOT NULL DEFAULT ''::character varying
+  COLUMN dedupe_key character varying(64)
+  COLUMN failure_code character varying(120) NOT NULL DEFAULT ''::character varying
+  COLUMN read_at timestamp with time zone
+  COLUMN created_at timestamp with time zone
+  COLUMN updated_at timestamp with time zone
+
+TABLE mailboxes
+  COLUMN id bigint NOT NULL DEFAULT nextval('mailboxes_id_seq'::regclass)
+  COLUMN user_id bigint NOT NULL
+  COLUMN address character varying(320) NOT NULL
+  COLUMN display_name character varying(120) NOT NULL DEFAULT ''::character varying
+  COLUMN created_at timestamp with time zone
+  COLUMN updated_at timestamp with time zone
+  COLUMN deleted_at timestamp with time zone
+
 TABLE migrations
   COLUMN id integer NOT NULL DEFAULT nextval('migrations_id_seq'::regclass)
   COLUMN migration character varying(255) NOT NULL
@@ -360,6 +389,12 @@ CONSTRAINT assets.fk_assets_user FOREIGN KEY (user_id) REFERENCES users(id) ON U
 CONSTRAINT audit_logs.audit_logs_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.authentication_sessions_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.chk_authentication_sessions_audience CHECK (((audience)::text = ANY ((ARRAY['user'::character varying, 'operator'::character varying])::text[])))
+CONSTRAINT mail_messages.chk_mail_messages_direction CHECK (((direction)::text = ANY ((ARRAY['inbound'::character varying, 'outbound'::character varying])::text[])))
+CONSTRAINT mail_messages.chk_mail_messages_status CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'queued'::character varying, 'sent'::character varying, 'failed'::character varying])::text[])))
+CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_messages.mail_messages_pkey PRIMARY KEY (id)
+CONSTRAINT mailboxes.fk_mailboxes_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
+CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT migrations.migrations_pkey PRIMARY KEY (id)
 CONSTRAINT notification_deliveries.fk_notifications_deliveries FOREIGN KEY (notification_id) REFERENCES notifications(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT notification_deliveries.notification_deliveries_channel_check CHECK (((channel)::text = ANY ((ARRAY['in_app'::character varying, 'email'::character varying])::text[])))
@@ -491,6 +526,12 @@ INDEX CREATE INDEX idx_authentication_sessions_idle_expires_at ON authentication
 INDEX CREATE INDEX idx_authentication_sessions_revoked_at ON authentication_sessions USING btree (revoked_at)
 INDEX CREATE UNIQUE INDEX idx_authentication_sessions_token_hash ON authentication_sessions USING btree (token_hash)
 INDEX CREATE INDEX idx_authentication_sessions_user_id ON authentication_sessions USING btree (user_id)
+INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree (mailbox_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
+INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
+INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address)
+INDEX CREATE INDEX idx_mailboxes_user ON mailboxes USING btree (user_id) WHERE (deleted_at IS NULL)
+INDEX CREATE UNIQUE INDEX mailboxes_pkey ON mailboxes USING btree (id)
 INDEX CREATE UNIQUE INDEX migrations_pkey ON migrations USING btree (id)
 INDEX CREATE INDEX idx_notification_deliveries_leased ON notification_deliveries USING btree (channel, status, lease_expires_at)
 INDEX CREATE UNIQUE INDEX idx_notification_deliveries_notification_channel ON notification_deliveries USING btree (notification_id, channel)

@@ -23,6 +23,7 @@ export const ROUTES = {
     ASSETS: '/console/assets',
     USAGE: '/console/usage',
     SETTINGS: '/console/settings',
+    MAILBOXES: '/console/mailboxes',
     // fastbuild:slot web.routes.console
   },
 

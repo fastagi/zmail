@@ -79,6 +79,10 @@ const moduleRegistry: ModuleRegistry = {
     'zh-Hans': () => import('./modules/test/zh-Hans'),
     'en-US': () => import('./modules/test/en-US'),
   },
+  mailbox: {
+    'zh-Hans': () => import('./modules/mailbox/zh-Hans'),
+    'en-US': () => import('./modules/mailbox/en-US'),
+  },
   // fastbuild:slot web.i18n.loaders
 };
 

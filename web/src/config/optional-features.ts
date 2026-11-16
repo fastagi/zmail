@@ -6,6 +6,7 @@ export const OPTIONAL_WEB_FEATURES = [
   'setting',
   'usage',
   'webhook',
+  'mailbox',
   // fastbuild:slot web.features
 ] as const;
 

@@ -245,6 +245,26 @@ The timeout is a duration value such as `3s` or `500ms`, not a bare millisecond 
 provider call independently and composes with caller cancellation. See [`EMAIL.md`](EMAIL.md) for the
 64 KiB response cap, privacy rules, best-effort semantics, and downstream adapter boundary.
 
+## Mailbox Starter Configuration
+
+The optional `mailbox` starter reads `MAILBOX_DOMAIN`, `MAILBOX_PROVIDER`,
+`MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN`, `MAILBOX_REQUEST_TIMEOUT`,
+`MAILBOX_INBOUND_SECRET`, and `MAILBOX_DAILY_SEND_LIMIT` from the same typed snapshot. They are
+validated only when the starter is selected.
+
+| Key | Default | Rule |
+|---|---|---|
+| `MAILBOX_DOMAIN` | `mail.localhost` outside production | The address domain of every mailbox. Production requires an explicit lowercase domain. |
+| `MAILBOX_PROVIDER` | `log` outside production | `log` records outbound mail without delivering it and is rejected in production. `cloudflare` delivers through the Cloudflare Email Sending REST API. |
+| `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN` | empty | Both are required when the provider is `cloudflare`. The token is a secret. |
+| `MAILBOX_REQUEST_TIMEOUT` | `15s` | Bounds one provider call; greater than 0 and at most `60s`. |
+| `MAILBOX_INBOUND_SECRET` | empty | Shared secret of at least 32 characters that signs deliveries from the mail edge. Empty keeps inbound mail disabled. |
+| `MAILBOX_DAILY_SEND_LIMIT` | `200` | Outbound messages one user may attempt per rolling 24 hours; 1 to 100000. |
+
+See [`../../contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md) for the HTTP behavior and
+[`../../deploy/cloudflare/email-worker/README.md`](../../deploy/cloudflare/email-worker/README.md)
+for the mail edge that signs inbound deliveries.
+
 ## Secrets And Deployment
 
 FastBuild does not serialize a configuration cache. A cache would duplicate database

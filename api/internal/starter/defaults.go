@@ -11,6 +11,7 @@ import (
 	"github.com/fastagi/fastmail/api/internal/modules/apikey"
 	"github.com/fastagi/fastmail/api/internal/modules/asset"
 	"github.com/fastagi/fastmail/api/internal/modules/audit"
+	"github.com/fastagi/fastmail/api/internal/modules/mailbox"
 	"github.com/fastagi/fastmail/api/internal/modules/notification"
 	"github.com/fastagi/fastmail/api/internal/modules/operator"
 	"github.com/fastagi/fastmail/api/internal/modules/organization"
@@ -36,6 +37,7 @@ var ProviderSet = wire.NewSet(
 	usage.ProviderSet,
 	webhook.ProviderSet,
 	operator.ProviderSet,
+	mailbox.ProviderSet,
 	// fastbuild:slot api.starter.providers
 	wire.Struct(new(Handlers), "*"),
 	NewConfiguredRegistry,
@@ -57,6 +59,7 @@ type Handlers struct {
 	Usage        *usage.Handler
 	Webhook      *webhook.Handler
 	Operator     *operator.Handler
+	Mailbox      *mailbox.Handler
 	// fastbuild:slot api.starter.handlers
 }
 
@@ -104,6 +107,7 @@ func OptionalManifests(handlers *Handlers) []assembly.StarterManifest {
 		usage.NewStarterManifest(h.Usage),
 		webhook.NewStarterManifest(h.Webhook),
 		operator.NewStarterManifest(h.Operator),
+		mailbox.NewStarterManifest(h.Mailbox),
 		// fastbuild:slot api.starter.manifests
 	}
 }

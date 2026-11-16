@@ -778,3 +778,71 @@ func TestValidateDiagnosticsAddrRequiresLoopback(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_MailboxPolicy(t *testing.T) {
+	selected := func(environment string) *Config {
+		cfg := baseValidConfig(environment)
+		cfg.Starters.Optional = []string{StarterMailbox}
+		cfg.Mailbox = MailboxConfig{
+			Domain:              "mail.example.com",
+			Provider:            MailboxProviderCloudflare,
+			CloudflareAccountID: "account",
+			CloudflareAPIToken:  "token",
+			RequestTimeout:      DefaultMailboxRequestTimeout,
+			InboundSecret:       strings.Repeat("s", 32),
+			DailySendLimit:      DefaultMailboxDailySendLimit,
+		}
+		return cfg
+	}
+	tests := []struct {
+		name        string
+		environment string
+		edit        func(*Config)
+		wantErr     string
+	}{
+		{name: "valid production", environment: "production"},
+		{name: "production needs a domain", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.Domain = "" }, wantErr: "MAILBOX_DOMAIN"},
+		{name: "production rejects the log provider", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.Provider = MailboxProviderLog }, wantErr: "MAILBOX_PROVIDER"},
+		{name: "production needs a provider", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.Provider = "" }, wantErr: "MAILBOX_PROVIDER"},
+		{name: "development defaults domain and provider", environment: "development", edit: func(cfg *Config) {
+			cfg.Mailbox.Domain, cfg.Mailbox.Provider = "", ""
+			cfg.Mailbox.CloudflareAccountID, cfg.Mailbox.CloudflareAPIToken = "", ""
+		}},
+		{name: "invalid domain", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.Domain = "not a domain" }, wantErr: "MAILBOX_DOMAIN"},
+		{name: "bare hostname", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.Domain = "localhost" }, wantErr: "MAILBOX_DOMAIN"},
+		{name: "unknown provider", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.Provider = "smtp" }, wantErr: "MAILBOX_PROVIDER"},
+		{name: "cloudflare needs an account", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.CloudflareAccountID = "" }, wantErr: "MAILBOX_CLOUDFLARE_ACCOUNT_ID"},
+		{name: "cloudflare needs a token", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.CloudflareAPIToken = " " }, wantErr: "MAILBOX_CLOUDFLARE_API_TOKEN"},
+		{name: "timeout too high", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.RequestTimeout = 61 * time.Second }, wantErr: "MAILBOX_REQUEST_TIMEOUT"},
+		{name: "timeout missing", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.RequestTimeout = 0 }, wantErr: "MAILBOX_REQUEST_TIMEOUT"},
+		{name: "short inbound secret", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "short" }, wantErr: "MAILBOX_INBOUND_SECRET"},
+		{name: "inbound may stay disabled", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "" }},
+		{name: "send limit must be positive", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailySendLimit = 0 }, wantErr: "MAILBOX_DAILY_SEND_LIMIT"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := selected(test.environment)
+			if test.edit != nil {
+				test.edit(cfg)
+			}
+			err := validate(cfg)
+			if test.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validate() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("validate() error = %v; want it to name %s", err, test.wantErr)
+			}
+		})
+	}
+
+	t.Run("ignored while the starter is not selected", func(t *testing.T) {
+		cfg := baseValidConfig("production")
+		cfg.Mailbox = MailboxConfig{Provider: "smtp", Domain: "not a domain"}
+		if err := validate(cfg); err != nil {
+			t.Fatalf("validate() error = %v", err)
+		}
+	})
+}
