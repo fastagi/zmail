@@ -13,11 +13,24 @@ import {
   mailboxListSchema,
   mailboxSchema,
   mailTemplateListSchema,
+  mailContactImportSchema,
+  mailContactListListSchema,
+  mailContactListSchema,
+  mailContactPageEnvelopeSchema,
+  mailContactSchema,
   mailTemplateSchema,
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
   MailAttachment,
+  MailContact,
+  MailContactFilters,
+  MailContactImport,
+  MailContactImportInput,
+  MailContactInput,
+  MailContactList,
+  MailContactListInput,
+  MailContactPage,
   MailTemplate,
   MailTemplateInput,
   MailTemplateSummary,
@@ -170,6 +183,123 @@ export const mailboxService = {
       headers: organizationHeaders(organizationId),
     });
     return parseMailMessage(value, messageId);
+  },
+
+  /** One page of contacts, newest first. */
+  async contacts(
+    organizationId: number,
+    {
+      q,
+      status,
+      listId,
+      page = 1,
+      perPage = 25,
+    }: MailContactFilters & {
+      page?: number;
+      perPage?: number;
+    } = {}
+  ): Promise<MailContactPage> {
+    validId(page);
+    if (listId !== undefined) validId(listId);
+    if (!Number.isSafeInteger(perPage) || perPage < 1 || perPage > MAIL_PAGE_MAX_SIZE) {
+      throw invalidResponse();
+    }
+    const query = q?.trim() ?? '';
+    if (Array.from(query).length > MAIL_LOG_QUERY_MAX_LENGTH) throw invalidResponse();
+    const value = await request.getEnvelope<unknown>('/mail-contacts', {
+      headers: organizationHeaders(organizationId),
+      params: {
+        ...(query === '' ? {} : { q: query }),
+        ...(status ? { status } : {}),
+        ...(listId === undefined ? {} : { list_id: listId }),
+        page,
+        per_page: perPage,
+      },
+    });
+    const parsed = mailContactPageEnvelopeSchema.safeParse(value);
+    if (!parsed.success) throw invalidResponse();
+    return { items: parsed.data.data, meta: parsed.data.meta, links: parsed.data.links };
+  },
+
+  /** Creates a contact, or replaces one when `contactId` is given. */
+  async saveContact(
+    organizationId: number,
+    input: MailContactInput,
+    contactId?: number
+  ): Promise<MailContact> {
+    if (contactId !== undefined) validId(contactId);
+    const config = { headers: organizationHeaders(organizationId) };
+    const value =
+      contactId === undefined
+        ? await request.post<unknown, MailContactInput>('/mail-contacts', input, config)
+        : await request.put<unknown, MailContactInput>(
+            `/mail-contacts/${contactId}`,
+            input,
+            config
+          );
+    const parsed = mailContactSchema.safeParse(value);
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  async deleteContact(organizationId: number, contactId: number): Promise<void> {
+    validId(contactId);
+    await request.delete<void>(`/mail-contacts/${contactId}`, {
+      headers: organizationHeaders(organizationId),
+    });
+  },
+
+  async importContacts(
+    organizationId: number,
+    input: MailContactImportInput
+  ): Promise<MailContactImport> {
+    const parsed = mailContactImportSchema.safeParse(
+      await request.post<unknown, MailContactImportInput>('/mail-contact-imports', input, {
+        headers: organizationHeaders(organizationId),
+        // A large file takes a while to store.
+        timeout: 120_000,
+      })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  async contactLists(organizationId: number): Promise<MailContactList[]> {
+    const parsed = mailContactListListSchema.safeParse(
+      await request.get<unknown>('/mail-contact-lists', {
+        headers: organizationHeaders(organizationId),
+      })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** Creates a list, or renames one when `listId` is given. */
+  async saveContactList(
+    organizationId: number,
+    input: MailContactListInput,
+    listId?: number
+  ): Promise<MailContactList> {
+    if (listId !== undefined) validId(listId);
+    const config = { headers: organizationHeaders(organizationId) };
+    const value =
+      listId === undefined
+        ? await request.post<unknown, MailContactListInput>('/mail-contact-lists', input, config)
+        : await request.put<unknown, MailContactListInput>(
+            `/mail-contact-lists/${listId}`,
+            input,
+            config
+          );
+    const parsed = mailContactListSchema.safeParse(value);
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  async deleteContactList(organizationId: number, listId: number): Promise<void> {
+    validId(listId);
+    await request.delete<void>(`/mail-contact-lists/${listId}`, {
+      headers: organizationHeaders(organizationId),
+    });
   },
 
   async templates(organizationId: number): Promise<MailTemplateSummary[]> {
@@ -373,3 +503,25 @@ assertContract<
 assertContract<Sends<MailTemplateInput, ContractRequest<'createMailTemplate'>>>();
 assertContract<Sends<MailTemplateInput, ContractRequest<'updateMailTemplate'>>>();
 assertContract<Sends<MailTemplateTestInput, ContractRequest<'sendMailTemplateTest'>>>();
+assertContract<
+  Accepts<z.input<typeof mailContactPageEnvelopeSchema>, ContractResponse<'listMailContacts', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailContactSchema>, ContractData<'createMailContact', 201>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailContactSchema>, ContractData<'updateMailContact', 200>>
+>();
+assertContract<Sends<MailContactInput, ContractRequest<'createMailContact'>>>();
+assertContract<Sends<MailContactInput, ContractRequest<'updateMailContact'>>>();
+assertContract<
+  Accepts<z.input<typeof mailContactImportSchema>, ContractData<'importMailContacts', 200>>
+>();
+assertContract<Sends<MailContactImportInput, ContractRequest<'importMailContacts'>>>();
+assertContract<
+  Accepts<z.input<typeof mailContactListListSchema>, ContractData<'listMailContactLists', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailContactListSchema>, ContractData<'createMailContactList', 201>>
+>();
+assertContract<Sends<MailContactListInput, ContractRequest<'createMailContactList'>>>();

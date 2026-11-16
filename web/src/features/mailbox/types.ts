@@ -19,6 +19,15 @@ import type {
   sendMailMessageSchema,
   updateMailMessageSchema,
   mailTemplateInputSchema,
+  mailContactImportInputSchema,
+  mailContactImportSchema,
+  mailContactImportSkipReasonSchema,
+  mailContactInputSchema,
+  mailContactListInputSchema,
+  mailContactListSchema,
+  mailContactPageEnvelopeSchema,
+  mailContactSchema,
+  mailContactStatusSchema,
   mailTemplateSchema,
   mailTemplateSummarySchema,
   mailTemplateTestInputSchema,
@@ -43,6 +52,29 @@ export type MailTemplateSummary = Infer<typeof mailTemplateSummarySchema>;
 export type MailTemplate = Infer<typeof mailTemplateSchema>;
 export type MailTemplateInput = Infer<typeof mailTemplateInputSchema>;
 export type MailTemplateTestInput = Infer<typeof mailTemplateTestInputSchema>;
+export type MailContactStatus = Infer<typeof mailContactStatusSchema>;
+export type MailContact = Infer<typeof mailContactSchema>;
+export type MailContactList = Infer<typeof mailContactListSchema>;
+export type MailContactImport = Infer<typeof mailContactImportSchema>;
+export type MailContactImportSkipReason = Infer<typeof mailContactImportSkipReasonSchema>;
+export type MailContactInput = Infer<typeof mailContactInputSchema>;
+export type MailContactImportInput = Infer<typeof mailContactImportInputSchema>;
+export type MailContactListInput = Infer<typeof mailContactListInputSchema>;
+
+type MailContactPageEnvelope = Infer<typeof mailContactPageEnvelopeSchema>;
+
+export interface MailContactPage {
+  items: MailContact[];
+  meta: MailContactPageEnvelope['meta'];
+  links: MailContactPageEnvelope['links'];
+}
+
+/** Filters of the contact listing; an absent field does not narrow it. */
+export interface MailContactFilters {
+  q?: string;
+  status?: MailContactStatus;
+  listId?: number;
+}
 
 type MailMessagePageEnvelope = Infer<typeof mailMessagePageEnvelopeSchema>;
 

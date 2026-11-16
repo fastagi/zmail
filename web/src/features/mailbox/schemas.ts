@@ -39,6 +39,15 @@ export const MAIL_TEMPLATE_MAX_PER_ORGANIZATION = 200;
 export const MAIL_TEMPLATE_MAX_VARIABLES = 100;
 export const MAIL_TEMPLATE_VALUE_MAX_LENGTH = 2_000;
 export const MAIL_TEMPLATE_TEST_MAX_RECIPIENTS = 5;
+export const MAIL_CONTACT_NAME_MAX_LENGTH = 100;
+export const MAIL_CONTACT_MAX_PROPERTIES = 50;
+export const MAIL_CONTACT_PROPERTY_MAX_LENGTH = 500;
+export const MAIL_CONTACT_LIST_NAME_MAX_LENGTH = 100;
+export const MAIL_CONTACT_MAX_LISTS = 100;
+export const MAIL_CONTACT_IMPORT_MAX_BYTES = 5 * 1_024 * 1_024;
+export const MAIL_CONTACT_IMPORT_MAX_ROWS = 10_000;
+/** Contact fields with a fixed meaning; they cannot be custom properties. */
+export const MAIL_CONTACT_RESERVED_FIELDS = ['email', 'first_name', 'last_name'] as const;
 /** A variable name: a letter, then letters, digits, or underscores. */
 export const MAIL_TEMPLATE_VARIABLE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
@@ -295,6 +304,76 @@ export const mailTemplateTestInputSchema = strictObject({
   to: array(string()),
   variables: optional(templateVariablesSchema),
 });
+
+export const mailContactStatusSchema = union([
+  literal('subscribed'),
+  literal('unsubscribed'),
+  literal('suppressed'),
+]);
+
+export const mailContactSchema = strictObject({
+  id: safeIdSchema,
+  email: string(),
+  first_name: string(),
+  last_name: string(),
+  properties: record(string(), string()),
+  status: mailContactStatusSchema,
+  status_reason: string(),
+  list_ids: array(safeIdSchema),
+  created_at: timestampSchema,
+  updated_at: timestampSchema,
+});
+
+export const mailContactPageEnvelopeSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: array(mailContactSchema),
+  meta: pageMetaSchema,
+  links: pageLinksSchema,
+});
+
+export const mailContactListSchema = strictObject({
+  id: safeIdSchema,
+  name: string(),
+  contact_count: nonnegativeIntegerSchema,
+  created_at: timestampSchema,
+});
+export const mailContactListListSchema = array(mailContactListSchema);
+
+export const mailContactImportSkipReasonSchema = union([
+  literal('invalid_email'),
+  literal('duplicate'),
+  literal('invalid_name'),
+  literal('invalid_property'),
+  literal('too_many_properties'),
+]);
+
+export const mailContactImportSchema = strictObject({
+  rows: nonnegativeIntegerSchema,
+  created: nonnegativeIntegerSchema,
+  updated: nonnegativeIntegerSchema,
+  skipped_count: nonnegativeIntegerSchema,
+  skipped: array(
+    strictObject({ line: positiveIntegerSchema, reason: mailContactImportSkipReasonSchema })
+  ),
+  ignored_columns: array(string()),
+});
+
+export const mailContactInputSchema = strictObject({
+  email: optional(string()),
+  first_name: optional(string()),
+  last_name: optional(string()),
+  properties: optional(record(string(), string())),
+  status: optional(union([literal('subscribed'), literal('unsubscribed')])),
+  list_ids: optional(array(safeIdSchema)),
+});
+
+export const mailContactImportInputSchema = strictObject({
+  csv: string(),
+  list_id: optional(safeIdSchema),
+});
+
+export const mailContactListInputSchema = strictObject({ name: string() });
 
 export const updateMailMessageSchema = strictObject({ read: boolean() });
 

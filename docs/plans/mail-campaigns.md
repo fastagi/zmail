@@ -188,8 +188,10 @@ like the existing mailbox suites; a live broadcast to the test mailbox on `mail.
 
 ## 16. Delivery Plan
 
-1. **Templates** (this slice): the template store, renderer, previews, test sends, sending by
+1. **Templates** (done): the template store, renderer, previews, test sends, sending by
    template on both send routes, starter templates, and the Templates console page.
-2. **Contacts**: contacts, lists, CSV import, and the Contacts console page.
+2. **Contacts** (done): contacts, lists, CSV import, and the Contacts console page. The import
+   takes CSV text inside JSON rather than a file upload, so the browser adapter forwards it like
+   any other body; the 5 MiB bound keeps that reasonable.
 3. **Broadcasts**: broadcasts, the worker, unsubscribe and suppression, and the Broadcasts console
    page.

@@ -81,6 +81,30 @@ TABLE mail_attachments
   COLUMN content bytea NOT NULL
   COLUMN created_at timestamp with time zone
 
+TABLE mail_contact_list_members
+  COLUMN list_id bigint NOT NULL
+  COLUMN contact_id bigint NOT NULL
+  COLUMN created_at timestamp with time zone
+
+TABLE mail_contact_lists
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_contact_lists_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN name character varying(100) NOT NULL
+  COLUMN created_at timestamp with time zone
+  COLUMN updated_at timestamp with time zone
+
+TABLE mail_contacts
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_contacts_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN email character varying(320) NOT NULL
+  COLUMN first_name character varying(100) NOT NULL DEFAULT ''::character varying
+  COLUMN last_name character varying(100) NOT NULL DEFAULT ''::character varying
+  COLUMN properties jsonb NOT NULL DEFAULT '{}'::jsonb
+  COLUMN status character varying(16) NOT NULL DEFAULT 'subscribed'::character varying
+  COLUMN status_reason character varying(64) NOT NULL DEFAULT ''::character varying
+  COLUMN created_at timestamp with time zone
+  COLUMN updated_at timestamp with time zone
+
 TABLE mail_message_events
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_message_events_id_seq'::regclass)
   COLUMN message_id bigint NOT NULL
@@ -429,6 +453,14 @@ CONSTRAINT authentication_sessions.chk_authentication_sessions_audience CHECK ((
 CONSTRAINT mail_attachments.chk_mail_attachments_size CHECK (((size >= 0) AND (size = octet_length(content))))
 CONSTRAINT mail_attachments.fk_mail_attachments_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_attachments.mail_attachments_pkey PRIMARY KEY (id)
+CONSTRAINT mail_contact_list_members.fk_mail_contact_list_members_contact FOREIGN KEY (contact_id) REFERENCES mail_contacts(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_contact_list_members.fk_mail_contact_list_members_list FOREIGN KEY (list_id) REFERENCES mail_contact_lists(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_contact_list_members.mail_contact_list_members_pkey PRIMARY KEY (list_id, contact_id)
+CONSTRAINT mail_contact_lists.fk_mail_contact_lists_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_contact_lists.mail_contact_lists_pkey PRIMARY KEY (id)
+CONSTRAINT mail_contacts.chk_mail_contacts_status CHECK (((status)::text = ANY ((ARRAY['subscribed'::character varying, 'unsubscribed'::character varying, 'suppressed'::character varying])::text[])))
+CONSTRAINT mail_contacts.fk_mail_contacts_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_contacts.mail_contacts_pkey PRIMARY KEY (id)
 CONSTRAINT mail_message_events.chk_mail_message_events_type CHECK (((type)::text = ANY ((ARRAY['accepted'::character varying, 'delivered'::character varying, 'deferred'::character varying, 'bounced'::character varying, 'failed'::character varying, 'rejected'::character varying, 'complained'::character varying])::text[])))
 CONSTRAINT mail_message_events.fk_mail_message_events_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_message_events.mail_message_events_pkey PRIMARY KEY (id)
@@ -573,6 +605,13 @@ INDEX CREATE UNIQUE INDEX idx_authentication_sessions_token_hash ON authenticati
 INDEX CREATE INDEX idx_authentication_sessions_user_id ON authentication_sessions USING btree (user_id)
 INDEX CREATE INDEX idx_mail_attachments_message ON mail_attachments USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_attachments_pkey ON mail_attachments USING btree (id)
+INDEX CREATE INDEX idx_mail_contact_list_members_contact ON mail_contact_list_members USING btree (contact_id)
+INDEX CREATE UNIQUE INDEX mail_contact_list_members_pkey ON mail_contact_list_members USING btree (list_id, contact_id)
+INDEX CREATE UNIQUE INDEX idx_mail_contact_lists_name ON mail_contact_lists USING btree (organization_id, name)
+INDEX CREATE UNIQUE INDEX mail_contact_lists_pkey ON mail_contact_lists USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_contacts_email ON mail_contacts USING btree (organization_id, email)
+INDEX CREATE INDEX idx_mail_contacts_listing ON mail_contacts USING btree (organization_id, id)
+INDEX CREATE UNIQUE INDEX mail_contacts_pkey ON mail_contacts USING btree (id)
 INDEX CREATE INDEX idx_mail_message_events_message ON mail_message_events USING btree (message_id, occurred_at, id)
 INDEX CREATE UNIQUE INDEX idx_mail_message_events_provider ON mail_message_events USING btree (provider_event_id) WHERE (provider_event_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_message_events_pkey ON mail_message_events USING btree (id)

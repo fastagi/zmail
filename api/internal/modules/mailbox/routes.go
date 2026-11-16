@@ -27,6 +27,17 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_templates.tests.store").WhereNumber("template_id")
 		auth.POST("/mail-template-previews", h.PreviewTemplate).Name("mail_template_previews.store")
 
+		auth.GET("/mail-contacts", h.ListContacts).Name("mail_contacts.index")
+		auth.POST("/mail-contacts", h.CreateContact).Name("mail_contacts.store")
+		auth.GET("/mail-contacts/:contact_id", h.GetContact).Name("mail_contacts.show").WhereNumber("contact_id")
+		auth.PUT("/mail-contacts/:contact_id", h.UpdateContact).Name("mail_contacts.update").WhereNumber("contact_id")
+		auth.DELETE("/mail-contacts/:contact_id", h.DeleteContact).Name("mail_contacts.destroy").WhereNumber("contact_id")
+		auth.POST("/mail-contact-imports", h.ImportContacts).Name("mail_contact_imports.store")
+		auth.GET("/mail-contact-lists", h.ListContactLists).Name("mail_contact_lists.index")
+		auth.POST("/mail-contact-lists", h.CreateContactList).Name("mail_contact_lists.store")
+		auth.PUT("/mail-contact-lists/:list_id", h.RenameContactList).Name("mail_contact_lists.update").WhereNumber("list_id")
+		auth.DELETE("/mail-contact-lists/:list_id", h.DeleteContactList).Name("mail_contact_lists.destroy").WhereNumber("list_id")
+
 		auth.GET("/mailboxes", h.ListMailboxes).Name("mailboxes.index")
 		auth.POST("/mailboxes", h.CreateMailbox).Name("mailboxes.store")
 		auth.DELETE("/mailboxes/:mailbox_id", h.DeleteMailbox).Name("mailboxes.destroy").WhereNumber("mailbox_id")

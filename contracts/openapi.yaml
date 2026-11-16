@@ -3416,6 +3416,376 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-contacts:
+    get:
+      operationId: listMailContacts
+      summary: List the organization's contacts
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive match on the address, first name, or last name.
+          schema:
+            type: string
+            maxLength: 200
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/MailContactStatus'
+        - name: list_id
+          in: query
+          required: false
+          description: Keep only members of one list. Another organization's list matches nothing.
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: One page of contacts, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailContactPageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The query is invalid (`COMMON.INVALID_INPUT` or `COMMON.VALIDATION_FAILED`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailContact
+      summary: Create a contact
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailContactRequest'
+      responses:
+        '201':
+          description: The created contact.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailContactResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The address is already a contact (`MAILBOX.CONTACT_EXISTS`) or the organization has 100000 contacts (`MAILBOX.CONTACT_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the address, a name, a property, the status, or a list id is unusable (`MAILBOX.CONTACT_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-contacts/{contact_id}:
+    get:
+      operationId: getMailContact
+      summary: Get a contact
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailContactID'
+      responses:
+        '200':
+          description: The contact.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailContactResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailContact
+      summary: Replace a contact's names, properties, status, and lists
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailContactID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailContactRequest'
+      responses:
+        '200':
+          description: The updated contact. The address never changes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailContactResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the address, a name, a property, the status, or a list id is unusable (`MAILBOX.CONTACT_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailContact
+      summary: Delete a contact
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailContactID'
+      responses:
+        '204':
+          description: The contact and its list memberships are deleted.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-contact-imports:
+    post:
+      operationId: importMailContacts
+      summary: Import contacts from CSV text
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailContactImportRequest'
+      responses:
+        '200':
+          description: What the import created, updated, and skipped.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailContactImportResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The import would pass the limit of 100000 contacts (`MAILBOX.CONTACT_LIMIT_REACHED`); nothing is stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the text is not usable CSV (not UTF-8, larger than 5 MiB, more than 10000 rows, no `email` column, a repeated column, or broken quoting) (`MAILBOX.CONTACT_IMPORT_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-contact-lists:
+    get:
+      operationId: listMailContactLists
+      summary: List the organization's contact lists
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: Every list by name, with its contact count.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailContactListListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailContactList
+      summary: Create a contact list
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailContactListRequest'
+      responses:
+        '201':
+          description: The created list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailContactListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The name is taken (`MAILBOX.CONTACT_LIST_NAME_TAKEN`) or the organization has 100 lists (`MAILBOX.CONTACT_LIST_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A field failed validation, or the name is unusable (`MAILBOX.CONTACT_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-contact-lists/{list_id}:
+    put:
+      operationId: renameMailContactList
+      summary: Rename a contact list
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailContactListID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailContactListRequest'
+      responses:
+        '200':
+          description: The renamed list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailContactListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The name is taken (`MAILBOX.CONTACT_LIST_NAME_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A field failed validation, or the name is unusable (`MAILBOX.CONTACT_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailContactList
+      summary: Delete a contact list
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailContactListID'
+      responses:
+        '204':
+          description: The list is deleted; its contacts are kept.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-templates:
     get:
       operationId: listMailTemplates
@@ -4592,6 +4962,20 @@ components:
       description: Positive mailbox identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailContactID:
+      name: contact_id
+      in: path
+      required: true
+      description: Positive mail contact identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    MailContactListID:
+      name: list_id
+      in: path
+      required: true
+      description: Positive mail contact list identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     MailTemplateID:
       name: template_id
       in: path
@@ -5016,6 +5400,14 @@ components:
         - MAILBOX.TEMPLATE_NAME_TAKEN
         - MAILBOX.TEMPLATE_LIMIT_REACHED
         - MAILBOX.TEMPLATE_VARIABLES_MISSING
+        - MAILBOX.CONTACT_NOT_FOUND
+        - MAILBOX.CONTACT_EXISTS
+        - MAILBOX.CONTACT_INVALID
+        - MAILBOX.CONTACT_LIMIT_REACHED
+        - MAILBOX.CONTACT_LIST_NOT_FOUND
+        - MAILBOX.CONTACT_LIST_NAME_TAKEN
+        - MAILBOX.CONTACT_LIST_LIMIT_REACHED
+        - MAILBOX.CONTACT_IMPORT_INVALID
     FieldErrors:
       type: object
       additionalProperties:
@@ -7969,6 +8361,274 @@ components:
           description: The file as standard base64. All files of a message decode to at most 4 MiB.
           minLength: 1
 
+    MailContactStatus:
+      type: string
+      description: '`suppressed` is set by Zmail after a permanent bounce or a complaint; members set the others.'
+      enum:
+        - subscribed
+        - unsubscribed
+        - suppressed
+    MailContactProperties:
+      type: object
+      description: Custom string fields. Names follow the template variable rules and cannot be `email`,
+        `first_name`, or `last_name`.
+      maxProperties: 50
+      propertyNames:
+        pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+      additionalProperties:
+        type: string
+        maxLength: 500
+    MailContact:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - email
+        - first_name
+        - last_name
+        - properties
+        - status
+        - status_reason
+        - list_ids
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        email:
+          type: string
+          maxLength: 320
+        first_name:
+          type: string
+          maxLength: 100
+        last_name:
+          type: string
+          maxLength: 100
+        properties:
+          $ref: '#/components/schemas/MailContactProperties'
+        status:
+          $ref: '#/components/schemas/MailContactStatus'
+        status_reason:
+          type: string
+          description: '`manual` when a member unsubscribed the contact; empty when subscribed.'
+          maxLength: 64
+        list_ids:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PositiveID'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MailContactRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          description: Required when creating; ignored when replacing, because the address never changes.
+          maxLength: 320
+        first_name:
+          type: string
+          maxLength: 400
+        last_name:
+          type: string
+          maxLength: 400
+        properties:
+          $ref: '#/components/schemas/MailContactProperties'
+        status:
+          type: string
+          description: '`subscribed` or `unsubscribed`. Omitted, a new contact is subscribed and an existing one keeps its status.'
+          enum:
+            - subscribed
+            - unsubscribed
+        list_ids:
+          type: array
+          description: The complete set of lists; every id must be a list of the organization.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PositiveID'
+    MailContactResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailContact'
+    MailContactPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailContact'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    MailContactImportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - csv
+      properties:
+        csv:
+          type: string
+          description: UTF-8 CSV text with a header row that has an `email` column. At most 5 MiB and 10000 rows.
+          minLength: 1
+        list_id:
+          $ref: '#/components/schemas/PositiveID'
+    MailContactImport:
+      type: object
+      additionalProperties: false
+      required:
+        - rows
+        - created
+        - updated
+        - skipped_count
+        - skipped
+        - ignored_columns
+      properties:
+        rows:
+          type: integer
+          description: Data rows read, without the header and blank lines.
+          minimum: 0
+        created:
+          type: integer
+          minimum: 0
+        updated:
+          type: integer
+          description: Rows whose address already was a contact.
+          minimum: 0
+        skipped_count:
+          type: integer
+          minimum: 0
+        skipped:
+          type: array
+          description: The first 100 skipped rows.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailContactImportSkip'
+        ignored_columns:
+          type: array
+          description: Header cells that cannot be a property name.
+          items:
+            type: string
+    MailContactImportSkip:
+      type: object
+      additionalProperties: false
+      required:
+        - line
+        - reason
+      properties:
+        line:
+          type: integer
+          description: Line in the file, counting the header as line 1.
+          minimum: 2
+        reason:
+          type: string
+          enum:
+            - invalid_email
+            - duplicate
+            - invalid_name
+            - invalid_property
+            - too_many_properties
+    MailContactImportResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailContactImport'
+    MailContactList:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - contact_count
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          maxLength: 100
+        contact_count:
+          type: integer
+          minimum: 0
+        created_at:
+          type: string
+          format: date-time
+    MailContactListRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 400
+    MailContactListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailContactList'
+    MailContactListListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailContactList'
     MailTemplateSendInput:
       type: object
       additionalProperties: false

@@ -249,6 +249,72 @@ it. The idempotency fingerprint covers the rendered content.
 
 A template of another organization is `404 MAILBOX.TEMPLATE_NOT_FOUND`.
 
+### Contacts
+
+A contact is one address an organization sends broadcasts to: `email`, `first_name`, `last_name`,
+up to 50 string `properties`, a `status`, and the lists it belongs to. An organization keeps at most
+100000 contacts, one per address. Every member reads and edits them.
+
+| Field | Rule |
+|---|---|
+| `email` | A bare address, lowercased. Set when the contact is created and never changed. |
+| `first_name`, `last_name` | Whitespace collapsed; at most 100 characters each; may be empty. |
+| `properties` | Names follow the template variable rules and cannot be `email`, `first_name`, or `last_name`. Values are trimmed, at most 500 characters; an empty value removes the property. |
+| `status` | `subscribed`, `unsubscribed`, or `suppressed`. Members set the first two; a new contact is subscribed. Zmail sets `suppressed` after a permanent bounce or a complaint (with the broadcasts slice). |
+| `status_reason` | `manual` when a member unsubscribed the contact; empty when subscribed; kept while suppressed. |
+| `list_ids` | The complete set of lists the contact belongs to. Every id must be a list of the organization. |
+
+`PUT` replaces the names, properties, status, and lists; it ignores `email`. Leaving `status` out
+keeps the current status, so editing a suppressed contact does not resubscribe it.
+
+`GET /v1/mail-contacts` pages contacts newest first. `q` matches the address, first name, or last
+name case-insensitively; `status` and `list_id` narrow it.
+
+A list is a named group of the organization's contacts, used to choose who receives a broadcast.
+Recipients never see lists. An organization keeps at most 100 lists, names are unique within it,
+and a contact may be in any number of them. `GET /v1/mail-contact-lists` returns every list with
+`contact_count`. Deleting a list keeps its contacts; deleting a contact removes it from its lists.
+
+A contact, list, or list id of another organization is `404` (`MAILBOX.CONTACT_NOT_FOUND` or
+`MAILBOX.CONTACT_LIST_NOT_FOUND`).
+
+### Contact Import
+
+```json
+{ "csv": "email,first_name,plan\nann@example.com,Ann,pro\n", "list_id": 3 }
+```
+
+`POST /v1/mail-contact-imports` reads UTF-8 CSV text of at most 5 MiB and 10000 data rows, with a
+header row. A leading byte-order mark is ignored and blank lines are skipped. Header names are
+compared case-insensitively, with spaces and hyphens read as underscores, so `First Name` is
+`first_name`.
+
+| Column | Meaning |
+|---|---|
+| `email` (also `e-mail`, `email address`) | Required. The contact's address. |
+| `first_name`, `last_name` | Names. |
+| Any other name that can be a property | A property. |
+| Anything else | Ignored, and listed in `ignored_columns`. |
+
+For each row:
+
+- A new address becomes a subscribed contact.
+- An existing address is updated: a non-empty cell replaces the stored value, an empty cell keeps
+  it, and properties are merged. The status never changes, so an unsubscribed contact stays
+  unsubscribed.
+- A row whose address is unusable, repeated earlier in the file, or whose names or properties
+  break the rules above is skipped with a reason: `invalid_email`, `duplicate`, `invalid_name`,
+  `invalid_property`, or `too_many_properties`.
+
+With `list_id`, every stored row joins that list. The stored rows are written in one transaction:
+an import that would pass the contact limit is `409 MAILBOX.CONTACT_LIMIT_REACHED` and stores
+nothing. A file that is not UTF-8, too large, has more rows, has no `email` column, repeats a column,
+or has broken quoting is `422 MAILBOX.CONTACT_IMPORT_INVALID`.
+
+The response counts `rows`, `created`, `updated`, and `skipped_count`, and lists the first 100
+skipped rows by `line` (the header is line 1) and `reason`. Values are stored as plain strings;
+nothing in a cell is evaluated.
+
 ### Log And Statistics
 
 `GET /v1/mail-messages` lists messages across every mailbox of the organization, newest first, as
@@ -473,3 +539,11 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.TEMPLATE_LIMIT_REACHED` | 409 |
 | `MAILBOX.TEMPLATE_INVALID` | 422 |
 | `MAILBOX.TEMPLATE_VARIABLES_MISSING` | 422 |
+| `MAILBOX.CONTACT_NOT_FOUND` | 404 |
+| `MAILBOX.CONTACT_LIST_NOT_FOUND` | 404 |
+| `MAILBOX.CONTACT_EXISTS` | 409 |
+| `MAILBOX.CONTACT_LIMIT_REACHED` | 409 |
+| `MAILBOX.CONTACT_LIST_NAME_TAKEN` | 409 |
+| `MAILBOX.CONTACT_LIST_LIMIT_REACHED` | 409 |
+| `MAILBOX.CONTACT_INVALID` | 422 |
+| `MAILBOX.CONTACT_IMPORT_INVALID` | 422 |

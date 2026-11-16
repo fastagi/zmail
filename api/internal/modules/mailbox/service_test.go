@@ -428,6 +428,7 @@ type serviceFixture struct {
 	repo      *fakeRepository
 	transport *fakeTransport
 	notifier  *fakeNotifier
+	contacts  *fakeContacts
 	now       time.Time
 }
 
@@ -437,9 +438,10 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		repo:      newFakeRepository(),
 		transport: &fakeTransport{},
 		notifier:  &fakeNotifier{},
+		contacts:  newFakeContacts(),
 		now:       time.Unix(1_800_000_000, 0).UTC(),
 	}
-	fixture.service = NewService(fixture.repo, fixture.repo, fixture.transport, fixture.notifier, Settings{
+	fixture.service = NewService(fixture.repo, fixture.repo, fixture.contacts, fixture.transport, fixture.notifier, Settings{
 		Domain:           "mail.example",
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,
