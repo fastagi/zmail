@@ -42,6 +42,8 @@ tags:
   - name: Operator
     description: 'Platform-operator browser session and operator-only reads and commands for the Admin
       Console (optional `operator` starter). Every response sends `Cache-Control: private, no-store`.'
+  - name: Mailboxes
+    description: User-owned mailboxes, their messages, and signed inbound delivery from the mail edge.
 paths:
   /health:
     get:
@@ -3389,6 +3391,360 @@ paths:
           $ref: '#/components/responses/OperatorTargetProtected'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailbox-domains:
+    get:
+      operationId: listMailboxDomains
+      summary: List the domains the caller may create mailboxes on
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      responses:
+        '200':
+          description: The configured mailbox domains.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxDomainListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes:
+    get:
+      operationId: listMailboxes
+      summary: List the caller's mailboxes
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      responses:
+        '200':
+          description: Every mailbox the caller owns, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailbox
+      summary: Create a mailbox on the configured domain
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMailboxRequest'
+      responses:
+        '201':
+          description: The created mailbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: The address is taken (`MAILBOX.ADDRESS_TAKEN`) or the caller owns the maximum number of
+            mailboxes (`MAILBOX.LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the local part is invalid (`MAILBOX.ADDRESS_INVALID`) or
+            reserved (`MAILBOX.ADDRESS_RESERVED`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}:
+    delete:
+      operationId: deleteMailbox
+      summary: Delete a mailbox and its messages
+      description: The address stays reserved and cannot be created again.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/MailboxID'
+      responses:
+        '204':
+          description: The mailbox and its messages are deleted.
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/messages:
+    get:
+      operationId: listMailMessages
+      summary: List the messages of a mailbox, newest first
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/MailboxID'
+        - name: direction
+          in: query
+          required: false
+          description: Keep only received (`inbound`) or sent (`outbound`) messages.
+          schema:
+            $ref: '#/components/schemas/MailDirection'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: One page of message summaries without bodies.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessagePageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: sendMailMessage
+      summary: Send a message from a mailbox
+      description: The message is stored, handed to the mail provider, and returned with its real outcome.
+        When the provider does not accept it the response is `502 MAILBOX.DELIVERY_FAILED` and the
+        message stays in the mailbox with status `failed`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMailMessageRequest'
+      responses:
+        '201':
+          description: The provider accepted the message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the recipients, subject, body, or reply reference are
+            unusable (`MAILBOX.MESSAGE_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: The caller reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: The mail provider did not accept the message (`MAILBOX.DELIVERY_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}:
+    get:
+      operationId: getMailMessage
+      summary: Get a message with its bodies
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailMessageID'
+      responses:
+        '200':
+          description: The message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailMessage
+      summary: Mark a message read or unread
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailMessageID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailMessageRequest'
+      responses:
+        '200':
+          description: The updated message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailMessage
+      summary: Delete a message
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailMessageID'
+      responses:
+        '204':
+          description: The message is deleted.
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/inbound-mail-messages:
+    post:
+      operationId: receiveInboundMailMessage
+      summary: Accept one raw message from the mail edge
+      description: 'Called by the Cloudflare Email Worker, not by browsers. The body is the raw RFC 5322
+        message. `X-Mailbox-Signature` is `t=<unix seconds>,v1=<hex HMAC-SHA256>` computed with the
+        shared inbound secret over `<t>.<lowercase recipient>.<body>`; a timestamp more than five
+        minutes from server time is rejected. A repeated delivery of the same message to the same
+        mailbox returns `200` with `duplicate: true`.'
+      tags:
+        - Mailboxes
+      security: []
+      parameters:
+        - name: X-Mailbox-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+        - name: X-Mailbox-Recipient
+          in: header
+          required: true
+          description: The envelope recipient the edge accepted the message for.
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 320
+      requestBody:
+        required: true
+        content:
+          message/rfc822:
+            schema:
+              type: string
+              format: binary
+              maxLength: 5242880
+      responses:
+        '200':
+          description: The message was already stored by an earlier delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundMailMessageResponse'
+        '201':
+          description: The message is stored in the recipient's mailbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundMailMessageResponse'
+        '401':
+          description: The signature is missing, stale, or wrong (`MAILBOX.INBOUND_SIGNATURE_INVALID`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No mailbox has the recipient address (`MAILBOX.RECIPIENT_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: The raw message exceeds 5 MiB (`MAILBOX.INBOUND_TOO_LARGE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The body is not a parseable message with a sender (`MAILBOX.INBOUND_UNPARSEABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Inbound mail has no shared secret configured (`MAILBOX.INBOUND_DISABLED`), or the
+            database is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     bearerSession:
@@ -3623,6 +3979,20 @@ components:
       schema:
         type: string
         minLength: 1
+    MailboxID:
+      name: mailbox_id
+      in: path
+      required: true
+      description: Positive mailbox identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    MailMessageID:
+      name: message_id
+      in: path
+      required: true
+      description: Positive mail message identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
   responses:
     Forbidden:
       description: The caller is authenticated but not allowed to perform this operation.
@@ -3991,6 +4361,21 @@ components:
         - OPERATOR.ORIGIN_REJECTED
         - OPERATOR.CSRF_REJECTED
         - OPERATOR.TARGET_PROTECTED
+        - MAILBOX.NOT_FOUND
+        - MAILBOX.ADDRESS_TAKEN
+        - MAILBOX.ADDRESS_INVALID
+        - MAILBOX.ADDRESS_RESERVED
+        - MAILBOX.LIMIT_REACHED
+        - MAILBOX.MESSAGE_NOT_FOUND
+        - MAILBOX.MESSAGE_INVALID
+        - MAILBOX.SEND_LIMIT_REACHED
+        - MAILBOX.DELIVERY_FAILED
+        - MAILBOX.SENDER_NOT_CONFIGURED
+        - MAILBOX.INBOUND_DISABLED
+        - MAILBOX.INBOUND_SIGNATURE_INVALID
+        - MAILBOX.INBOUND_UNPARSEABLE
+        - MAILBOX.INBOUND_TOO_LARGE
+        - MAILBOX.RECIPIENT_NOT_FOUND
     FieldErrors:
       type: object
       additionalProperties:
@@ -6591,3 +6976,351 @@ components:
         - text/plain
         - text/csv
       description: Media types the starter asset policy accepts.
+    MailDirection:
+      type: string
+      enum:
+        - inbound
+        - outbound
+    MailStatus:
+      type: string
+      description: '`received` for inbound messages. Outbound messages are `queued` while the provider
+        call is in flight, then `sent` or `failed`.'
+      enum:
+        - received
+        - queued
+        - sent
+        - failed
+    MailboxDomain:
+      type: object
+      additionalProperties: false
+      required:
+        - domain
+        - max_mailboxes
+      properties:
+        domain:
+          type: string
+          minLength: 1
+          maxLength: 253
+        max_mailboxes:
+          type: integer
+          minimum: 1
+    MailboxDomainListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 1
+          items:
+            $ref: '#/components/schemas/MailboxDomain'
+    Mailbox:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - address
+        - display_name
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        address:
+          type: string
+          minLength: 3
+          maxLength: 320
+        display_name:
+          type: string
+          maxLength: 120
+        created_at:
+          type: string
+          format: date-time
+    CreateMailboxRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - local_part
+      properties:
+        local_part:
+          type: string
+          description: Lowercase letters and digits with inner dots, underscores, or hyphens. Role addresses
+            such as `postmaster` are reserved.
+          minLength: 1
+          maxLength: 64
+        display_name:
+          type: string
+          maxLength: 120
+    MailboxResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/Mailbox'
+    MailboxListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/Mailbox'
+    MailAddress:
+      type: object
+      additionalProperties: false
+      required:
+        - address
+        - name
+      properties:
+        address:
+          type: string
+          maxLength: 320
+        name:
+          type: string
+          maxLength: 255
+    MailMessageSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mailbox_id
+        - direction
+        - status
+        - from
+        - to
+        - cc
+        - subject
+        - read
+        - failure_code
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        direction:
+          $ref: '#/components/schemas/MailDirection'
+        status:
+          $ref: '#/components/schemas/MailStatus'
+        from:
+          $ref: '#/components/schemas/MailAddress'
+        to:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
+        cc:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
+        subject:
+          type: string
+          maxLength: 998
+        read:
+          type: boolean
+        failure_code:
+          type: string
+          description: Stable provider or transport reason when `status` is `failed`; empty otherwise.
+          maxLength: 120
+        created_at:
+          type: string
+          format: date-time
+    MailMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mailbox_id
+        - direction
+        - status
+        - from
+        - to
+        - cc
+        - subject
+        - read
+        - failure_code
+        - created_at
+        - text_body
+        - html_body
+        - message_id
+        - in_reply_to
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        direction:
+          $ref: '#/components/schemas/MailDirection'
+        status:
+          $ref: '#/components/schemas/MailStatus'
+        from:
+          $ref: '#/components/schemas/MailAddress'
+        to:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
+        cc:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
+        subject:
+          type: string
+          maxLength: 998
+        read:
+          type: boolean
+        failure_code:
+          type: string
+          maxLength: 120
+        created_at:
+          type: string
+          format: date-time
+        text_body:
+          type: string
+          maxLength: 262144
+        html_body:
+          type: string
+          description: Untrusted HTML from the sender. Render it only inside a sandbox.
+          maxLength: 262144
+        message_id:
+          type: string
+          description: RFC 5322 Message-ID without angle brackets; empty when unknown.
+          maxLength: 998
+        in_reply_to:
+          type: string
+          maxLength: 998
+    SendMailMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - to
+        - subject
+      properties:
+        to:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            minLength: 3
+            maxLength: 320
+        cc:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            minLength: 3
+            maxLength: 320
+        subject:
+          type: string
+          minLength: 1
+          maxLength: 998
+        text:
+          type: string
+          description: Plain-text body. At least one of `text` and `html` is required.
+          maxLength: 262144
+        html:
+          type: string
+          maxLength: 262144
+        in_reply_to:
+          type: string
+          description: Message-ID of the message this one answers, with or without angle brackets.
+          maxLength: 900
+    UpdateMailMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - read
+      properties:
+        read:
+          type: boolean
+    MailMessageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailMessage'
+    MailMessagePageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailMessageSummary'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    InboundMailMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - duplicate
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        duplicate:
+          type: boolean
+    InboundMailMessageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/InboundMailMessage'

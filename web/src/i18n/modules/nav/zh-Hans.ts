@@ -12,6 +12,7 @@ const messages = {
   profile: '个人资料',
   analytics: '数据分析',
   styleguide: '设计规范',
+  mailboxes: '邮箱',
   // fastbuild:slot web.i18n.nav.zh-hans
 } as const satisfies LocaleMessageShape<NavMessages>;
 

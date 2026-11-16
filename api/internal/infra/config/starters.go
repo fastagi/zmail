@@ -17,6 +17,7 @@ const (
 	StarterUsage        = "usage"
 	StarterWebhook      = "webhook"
 	StarterOperator     = "operator"
+	StarterMailbox      = "mailbox"
 	// fastbuild:slot api.starter.constants
 )
 
@@ -34,6 +35,7 @@ func StarterNames() []string {
 		StarterUsage,
 		StarterWebhook,
 		StarterOperator,
+		StarterMailbox,
 		// fastbuild:slot api.starter.names
 	}
 }

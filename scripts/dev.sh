@@ -17,8 +17,8 @@ WEB_PORT="${FASTBUILD_WEB_PORT:-3000}"
 ADMIN_PORT="${FASTBUILD_ADMIN_PORT:-4173}"
 export FASTBUILD_DB_PORT="${FASTBUILD_DB_PORT:-55432}"
 SERVICES="${FASTBUILD_DEV_SERVICES:-api,web,admin}"
-STARTERS="${FASTBUILD_DEV_STARTERS:-organization,permission,notification,asset,setting,usage,webhook,operator}"
-WEB_FEATURES="${FASTBUILD_DEV_WEB_FEATURES:-organization,permission,notification,asset,setting,usage,webhook}"
+STARTERS="${FASTBUILD_DEV_STARTERS:-organization,permission,notification,asset,setting,usage,webhook,operator,mailbox}"
+WEB_FEATURES="${FASTBUILD_DEV_WEB_FEATURES:-organization,permission,notification,asset,setting,usage,webhook,mailbox}"
 ADMIN_FEATURES="${FASTBUILD_DEV_ADMIN_FEATURES:-operator,organization,webhook,notification}"
 
 print_usage() {
@@ -95,6 +95,8 @@ api_environment() {
   export WEBHOOK_ENCRYPTION_KEY=fastbuild-local-only-webhook-encryption-key-0123456789
   export WEBHOOK_ALLOW_INSECURE_HTTP=true
   export WEBHOOK_ALLOW_PRIVATE_TARGETS=true
+  # Local-only secret so signed inbound mail can be exercised without Cloudflare.
+  export MAILBOX_INBOUND_SECRET=fastmail-local-only-mailbox-inbound-secret-0123456789
 }
 
 prepare_api() {

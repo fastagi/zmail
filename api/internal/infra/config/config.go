@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/mail"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -101,6 +102,7 @@ type Config struct {
 	ObjectStorage  ObjectStorageConfig
 	Asset          AssetConfig
 	Webhook        WebhookConfig
+	Mailbox        MailboxConfig
 	Audit          AuditConfig
 	Operator       OperatorConfig
 	R2             R2Config
@@ -398,6 +400,56 @@ type EmailConfig struct {
 	RequestTimeout time.Duration
 }
 
+// Mailbox transport providers.
+const (
+	// MailboxProviderLog records outbound mail in the log instead of delivering it.
+	MailboxProviderLog = "log"
+	// MailboxProviderCloudflare delivers through the Cloudflare Email Sending REST API.
+	MailboxProviderCloudflare = "cloudflare"
+
+	// DefaultMailboxDomain is the development-only address domain.
+	DefaultMailboxDomain = "mail.localhost"
+	// DefaultMailboxRequestTimeout caps one outbound provider call.
+	DefaultMailboxRequestTimeout = 15 * time.Second
+	// DefaultMailboxDailySendLimit bounds outbound messages per user per 24 hours.
+	DefaultMailboxDailySendLimit = 200
+	// DefaultMailboxInboundTolerance is the accepted clock skew for a signed inbound delivery.
+	DefaultMailboxInboundTolerance = 5 * time.Minute
+)
+
+// MailboxConfig holds optional mailbox starter policy and its mail transport.
+type MailboxConfig struct {
+	// Domain is the address domain every mailbox belongs to.
+	Domain string
+	// Provider selects the outbound transport: "log" or "cloudflare".
+	Provider            string
+	CloudflareAccountID string
+	CloudflareAPIToken  string
+	RequestTimeout      time.Duration
+	// InboundSecret signs deliveries from the mail edge. Empty disables inbound mail.
+	InboundSecret  string
+	DailySendLimit int
+}
+
+// Resolved fills the development defaults: outside production an unset domain is
+// "mail.localhost" and an unset provider is "log". Production keeps both explicit.
+func (m MailboxConfig) Resolved(production bool) MailboxConfig {
+	m.Domain = strings.ToLower(strings.TrimSpace(m.Domain))
+	m.Provider = strings.ToLower(strings.TrimSpace(m.Provider))
+	m.CloudflareAccountID = strings.TrimSpace(m.CloudflareAccountID)
+	m.CloudflareAPIToken = strings.TrimSpace(m.CloudflareAPIToken)
+	m.InboundSecret = strings.TrimSpace(m.InboundSecret)
+	if !production {
+		if m.Domain == "" {
+			m.Domain = DefaultMailboxDomain
+		}
+		if m.Provider == "" {
+			m.Provider = MailboxProviderLog
+		}
+	}
+	return m
+}
+
 // OrganizationConfig holds optional organization starter policy.
 type OrganizationConfig struct {
 	InvitationTTL time.Duration
@@ -571,6 +623,15 @@ func Load() (*Config, error) {
 			UploadGrantTTL:     env.GetDuration("ASSET_UPLOAD_GRANT_TTL", DefaultAssetUploadGrantTTL),
 			DownloadGrantTTL:   env.GetDuration("ASSET_DOWNLOAD_GRANT_TTL", DefaultAssetDownloadGrantTTL),
 			PendingTTL:         env.GetDuration("ASSET_PENDING_TTL", DefaultAssetPendingTTL),
+		},
+		Mailbox: MailboxConfig{
+			Domain:              env.Get("MAILBOX_DOMAIN", ""),
+			Provider:            env.Get("MAILBOX_PROVIDER", ""),
+			CloudflareAccountID: env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", ""),
+			CloudflareAPIToken:  env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", ""),
+			RequestTimeout:      env.GetDuration("MAILBOX_REQUEST_TIMEOUT", DefaultMailboxRequestTimeout),
+			InboundSecret:       env.Get("MAILBOX_INBOUND_SECRET", ""),
+			DailySendLimit:      env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
 		},
 		Webhook: WebhookConfig{
 			EncryptionKey:       env.Get("WEBHOOK_ENCRYPTION_KEY", ""),
@@ -895,6 +956,9 @@ func validate(cfg *Config) error {
 	if err := validateOperatorConfig(cfg, cfg.Starters.Selected(StarterOperator)); err != nil {
 		return err
 	}
+	if err := validateMailboxConfig(cfg.Mailbox, cfg.Starters.Selected(StarterMailbox), isProd); err != nil {
+		return err
+	}
 
 	// CORS: wildcard origin + credentials is rejected by browsers anyway.
 	// Catch the misconfiguration early at startup.
@@ -1160,6 +1224,43 @@ func validateAssetConfig(asset AssetConfig, selected, localTransfers bool) error
 	}
 	if asset.PendingTTL < asset.UploadGrantTTL || asset.PendingTTL > 24*time.Hour {
 		return fmt.Errorf("ASSET_PENDING_TTL must be at least ASSET_UPLOAD_GRANT_TTL and no more than 24h")
+	}
+	return nil
+}
+
+var mailboxDomainPattern = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$|^[a-z0-9-]+\.localhost$`)
+
+func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) error {
+	if !selected {
+		return nil
+	}
+	resolved := mailbox.Resolved(production)
+	if resolved.Domain == "" {
+		return fmt.Errorf("MAILBOX_DOMAIN must be set in production when the mailbox starter is selected")
+	}
+	if len(resolved.Domain) > 253 || !mailboxDomainPattern.MatchString(resolved.Domain) {
+		return fmt.Errorf("MAILBOX_DOMAIN must be a valid lowercase domain name")
+	}
+	switch resolved.Provider {
+	case MailboxProviderCloudflare:
+		if resolved.CloudflareAccountID == "" || resolved.CloudflareAPIToken == "" {
+			return fmt.Errorf("MAILBOX_CLOUDFLARE_ACCOUNT_ID and MAILBOX_CLOUDFLARE_API_TOKEN are required when MAILBOX_PROVIDER is cloudflare")
+		}
+	case MailboxProviderLog:
+		if production {
+			return fmt.Errorf("MAILBOX_PROVIDER must be cloudflare in production: the log provider does not deliver mail")
+		}
+	default:
+		return fmt.Errorf("MAILBOX_PROVIDER must be %q or %q", MailboxProviderLog, MailboxProviderCloudflare)
+	}
+	if resolved.RequestTimeout <= 0 || resolved.RequestTimeout > 60*time.Second {
+		return fmt.Errorf("MAILBOX_REQUEST_TIMEOUT must be greater than 0 and no more than 60s")
+	}
+	if resolved.InboundSecret != "" && len(resolved.InboundSecret) < 32 {
+		return fmt.Errorf("MAILBOX_INBOUND_SECRET must be at least 32 characters when set")
+	}
+	if resolved.DailySendLimit <= 0 || resolved.DailySendLimit > 100000 {
+		return fmt.Errorf("MAILBOX_DAILY_SEND_LIMIT must be between 1 and 100000")
 	}
 	return nil
 }

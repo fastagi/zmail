@@ -14,6 +14,7 @@ import {
   Building2,
   FolderOpen,
   Gauge,
+  Mail,
   // fastbuild:slot web.console.nav-icons
 } from 'lucide-react';
 
@@ -93,6 +94,15 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             titleKey: 'nav.usage' as const,
             href: ROUTES.CONSOLE.USAGE,
             icon: Gauge,
+          },
+        ]
+      : []),
+    ...(isWebFeatureEnabled('mailbox')
+      ? [
+          {
+            titleKey: 'nav.mailboxes' as const,
+            href: ROUTES.CONSOLE.MAILBOXES,
+            icon: Mail,
           },
         ]
       : []),

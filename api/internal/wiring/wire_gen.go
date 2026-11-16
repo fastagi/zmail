@@ -12,12 +12,14 @@ import (
 	"github.com/fastagi/fastmail/api/internal/infra/database"
 	"github.com/fastagi/fastmail/api/internal/infra/email"
 	"github.com/fastagi/fastmail/api/internal/infra/events"
+	"github.com/fastagi/fastmail/api/internal/infra/mailtransport"
 	"github.com/fastagi/fastmail/api/internal/infra/migration"
 	"github.com/fastagi/fastmail/api/internal/infra/ratelimit"
 	"github.com/fastagi/fastmail/api/internal/infra/storage"
 	"github.com/fastagi/fastmail/api/internal/modules/apikey"
 	"github.com/fastagi/fastmail/api/internal/modules/asset"
 	"github.com/fastagi/fastmail/api/internal/modules/audit"
+	"github.com/fastagi/fastmail/api/internal/modules/mailbox"
 	"github.com/fastagi/fastmail/api/internal/modules/notification"
 	"github.com/fastagi/fastmail/api/internal/modules/operator"
 	"github.com/fastagi/fastmail/api/internal/modules/organization"
@@ -133,6 +135,11 @@ func InitApplication() (*app.Application, error) {
 		Notifications: notificationOperatorHandler,
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, configConfig, surfaces)
+	mailboxRepository := mailbox.NewRepository(db)
+	transport := mailtransport.New(configConfig)
+	settings := mailbox.SettingsFromConfig(configConfig)
+	mailboxService := mailbox.NewService(mailboxRepository, transport, settings)
+	mailboxHandler := mailbox.NewHandler(mailboxService, accountDeletionPolicy)
 	handlers := &starter.Handlers{
 		Audit:        handler,
 		APIKey:       apikeyHandler,
@@ -145,6 +152,7 @@ func InitApplication() (*app.Application, error) {
 		Usage:        usageHandler,
 		Webhook:      webhookHandler,
 		Operator:     handler2,
+		Mailbox:      mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(configConfig, migrator, handlers)
 	if err != nil {
@@ -280,6 +288,11 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		Notifications: notificationOperatorHandler,
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, cfg, surfaces)
+	mailboxRepository := mailbox.NewRepository(db)
+	transport := mailtransport.New(cfg)
+	settings := mailbox.SettingsFromConfig(cfg)
+	mailboxService := mailbox.NewService(mailboxRepository, transport, settings)
+	mailboxHandler := mailbox.NewHandler(mailboxService, accountDeletionPolicy)
 	handlers := &starter.Handlers{
 		Audit:        handler,
 		APIKey:       apikeyHandler,
@@ -292,6 +305,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		Usage:        usageHandler,
 		Webhook:      webhookHandler,
 		Operator:     handler2,
+		Mailbox:      mailboxHandler,
 	}
 	registry, err := starter.NewConfiguredRegistry(cfg, migrator, handlers)
 	if err != nil {

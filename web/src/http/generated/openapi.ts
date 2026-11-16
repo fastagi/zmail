@@ -288,6 +288,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/inbound-mail-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept one raw message from the mail edge
+         * @description Called by the Cloudflare Email Worker, not by browsers. The body is the raw RFC 5322 message. `X-Mailbox-Signature` is `t=<unix seconds>,v1=<hex HMAC-SHA256>` computed with the shared inbound secret over `<t>.<lowercase recipient>.<body>`; a timestamp more than five minutes from server time is rejected. A repeated delivery of the same message to the same mailbox returns `200` with `duplicate: true`.
+         */
+        post: operations["receiveInboundMailMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/login": {
         parameters: {
             query?: never;
@@ -317,6 +337,101 @@ export interface paths {
         /** Revoke the presented session */
         post: operations["logout"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailbox-domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the domains the caller may create mailboxes on */
+        get: operations["listMailboxDomains"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the caller's mailboxes */
+        get: operations["listMailboxes"];
+        put?: never;
+        /** Create a mailbox on the configured domain */
+        post: operations["createMailbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a mailbox and its messages
+         * @description The address stays reserved and cannot be created again.
+         */
+        delete: operations["deleteMailbox"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the messages of a mailbox, newest first */
+        get: operations["listMailMessages"];
+        put?: never;
+        /**
+         * Send a message from a mailbox
+         * @description The message is stored, handed to the mail provider, and returned with its real outcome. When the provider does not accept it the response is `502 MAILBOX.DELIVERY_FAILED` and the message stays in the mailbox with status `failed`.
+         */
+        post: operations["sendMailMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/messages/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a message with its bodies */
+        get: operations["getMailMessage"];
+        /** Mark a message read or unread */
+        put: operations["updateMailMessage"];
+        post?: never;
+        /** Delete a message */
+        delete: operations["deleteMailMessage"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1666,6 +1781,11 @@ export interface components {
             api_key: components["schemas"]["APIKey"];
             plaintext_key: string;
         };
+        CreateMailboxRequest: {
+            display_name?: string;
+            /** @description Lowercase letters and digits with inner dots, underscores, or hyphens. Role addresses such as `postmaster` are reserved. */
+            local_part: string;
+        };
         CursorPageMeta: {
             has_more: boolean;
             /** @description Pass as `cursor` to read the next, older page; null on the last page. */
@@ -1676,7 +1796,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -1719,6 +1839,105 @@ export interface components {
         };
         /** @enum {string} */
         HealthStatus: "up" | "degraded" | "down";
+        InboundMailMessage: {
+            duplicate: boolean;
+            id: components["schemas"]["PositiveID"];
+        };
+        InboundMailMessageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["InboundMailMessage"];
+            message: string;
+        };
+        MailAddress: {
+            address: string;
+            name: string;
+        };
+        Mailbox: {
+            address: string;
+            /** Format: date-time */
+            created_at: string;
+            display_name: string;
+            id: components["schemas"]["PositiveID"];
+        };
+        MailboxDomain: {
+            domain: string;
+            max_mailboxes: number;
+        };
+        MailboxDomainListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailboxDomain"][];
+            message: string;
+        };
+        MailboxListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["Mailbox"][];
+            message: string;
+        };
+        MailboxResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["Mailbox"];
+            message: string;
+        };
+        /** @enum {string} */
+        MailDirection: "inbound" | "outbound";
+        MailMessage: {
+            cc: string[];
+            /** Format: date-time */
+            created_at: string;
+            direction: components["schemas"]["MailDirection"];
+            failure_code: string;
+            from: components["schemas"]["MailAddress"];
+            /** @description Untrusted HTML from the sender. Render it only inside a sandbox. */
+            html_body: string;
+            id: components["schemas"]["PositiveID"];
+            in_reply_to: string;
+            mailbox_id: components["schemas"]["PositiveID"];
+            /** @description RFC 5322 Message-ID without angle brackets; empty when unknown. */
+            message_id: string;
+            read: boolean;
+            status: components["schemas"]["MailStatus"];
+            subject: string;
+            text_body: string;
+            to: string[];
+        };
+        MailMessagePageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailMessageSummary"][];
+            links: components["schemas"]["PaginationLinks"];
+            message: string;
+            meta: components["schemas"]["PaginationMeta"];
+        };
+        MailMessageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailMessage"];
+            message: string;
+        };
+        MailMessageSummary: {
+            cc: string[];
+            /** Format: date-time */
+            created_at: string;
+            direction: components["schemas"]["MailDirection"];
+            /** @description Stable provider or transport reason when `status` is `failed`; empty otherwise. */
+            failure_code: string;
+            from: components["schemas"]["MailAddress"];
+            id: components["schemas"]["PositiveID"];
+            mailbox_id: components["schemas"]["PositiveID"];
+            read: boolean;
+            status: components["schemas"]["MailStatus"];
+            subject: string;
+            to: string[];
+        };
+        /**
+         * @description `received` for inbound messages. Outbound messages are `queued` while the provider call is in flight, then `sent` or `failed`.
+         * @enum {string}
+         */
+        MailStatus: "received" | "queued" | "sent" | "failed";
         Notification: {
             /** @description Same-origin relative path; absent when the notification has no action. */
             action_url?: string;
@@ -2177,6 +2396,16 @@ export interface components {
         };
         /** Format: int64 */
         PositiveID: number;
+        SendMailMessageRequest: {
+            cc?: string[];
+            html?: string;
+            /** @description Message-ID of the message this one answers, with or without angle brackets. */
+            in_reply_to?: string;
+            subject: string;
+            /** @description Plain-text body. At least one of `text` and `html` is required. */
+            text?: string;
+            to: string[];
+        };
         Setting: {
             key: string;
             kind: components["schemas"]["SettingKind"];
@@ -2216,6 +2445,9 @@ export interface components {
         };
         /** @enum {string} */
         SettingVisibility: "public" | "private";
+        UpdateMailMessageRequest: {
+            read: boolean;
+        };
         /** @enum {string} */
         UsagePeriod: "day" | "month";
         /** @enum {string} */
@@ -2809,6 +3041,10 @@ export interface components {
         CSRFToken: string;
         /** @description Entity tag of the version the caller read; required for optimistic concurrency. */
         IfMatch: string;
+        /** @description Positive mailbox identifier. */
+        MailboxID: components["schemas"]["PositiveID"];
+        /** @description Positive mail message identifier. */
+        MailMessageID: components["schemas"]["PositiveID"];
         /** @description Positive notification identifier owned by the caller. */
         NotificationID: components["schemas"]["PositiveID"];
         /** @description Read-state filter. */
@@ -3509,6 +3745,88 @@ export interface operations {
             };
         };
     };
+    receiveInboundMailMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The envelope recipient the edge accepted the message for. */
+                "X-Mailbox-Recipient": string;
+                "X-Mailbox-Signature": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "message/rfc822": string;
+            };
+        };
+        responses: {
+            /** @description The message was already stored by an earlier delivery. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundMailMessageResponse"];
+                };
+            };
+            /** @description The message is stored in the recipient's mailbox. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundMailMessageResponse"];
+                };
+            };
+            /** @description The signature is missing, stale, or wrong (`MAILBOX.INBOUND_SIGNATURE_INVALID`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No mailbox has the recipient address (`MAILBOX.RECIPIENT_NOT_FOUND`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The raw message exceeds 5 MiB (`MAILBOX.INBOUND_TOO_LARGE`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not a parseable message with a sender (`MAILBOX.INBOUND_UNPARSEABLE`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Inbound mail has no shared secret configured (`MAILBOX.INBOUND_DISABLED`), or the database is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     login: {
         parameters: {
             query?: never;
@@ -3560,6 +3878,305 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["AuthenticationAccountDisabled"];
             429: components["responses"]["RateLimited"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailboxDomains: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The configured mailbox domains. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxDomainListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailboxes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every mailbox the caller owns, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createMailbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMailboxRequest"];
+            };
+        };
+        responses: {
+            /** @description The created mailbox. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxResponse"];
+                };
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The address is taken (`MAILBOX.ADDRESS_TAKEN`) or the caller owns the maximum number of mailboxes (`MAILBOX.LIMIT_REACHED`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation, or the local part is invalid (`MAILBOX.ADDRESS_INVALID`) or reserved (`MAILBOX.ADDRESS_RESERVED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The mailbox and its messages are deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailMessages: {
+        parameters: {
+            query?: {
+                /** @description Keep only received (`inbound`) or sent (`outbound`) messages. */
+                direction?: components["schemas"]["MailDirection"];
+                /** @description One-based page number. */
+                page?: components["parameters"]["Page"];
+                /** @description Requested page size, capped by the API. */
+                per_page?: components["parameters"]["PerPage"];
+            };
+            header?: never;
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of message summaries without bodies. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessagePageResponse"];
+                };
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    sendMailMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendMailMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description The provider accepted the message. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessageResponse"];
+                };
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation, or the recipients, subject, body, or reply reference are unusable (`MAILBOX.MESSAGE_INVALID`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caller reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The mail provider did not accept the message (`MAILBOX.DELIVERY_FAILED`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getMailMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail message identifier. */
+                message_id: components["parameters"]["MailMessageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The message. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessageResponse"];
+                };
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail message identifier. */
+                message_id: components["parameters"]["MailMessageID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated message. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessageResponse"];
+                };
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail message identifier. */
+                message_id: components["parameters"]["MailMessageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The message is deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

@@ -6,6 +6,18 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ## Unreleased
 
+### Added
+
+- **Mailbox starter.** The optional `mailbox` starter gives each user up to 10 addresses on one
+  configured domain, with inbox and sent folders, read state, and deletion. Sending goes through the
+  Cloudflare Email Sending REST API and reports the provider's real outcome: a rejected message
+  answers `502 MAILBOX.DELIVERY_FAILED` and stays in the sent folder as `failed`. Inbound mail
+  arrives from a Cloudflare Email Worker (`deploy/cloudflare/email-worker`) as an HMAC-signed
+  delivery that is stored once per mailbox. A log transport makes local development work without a
+  Cloudflare account, and production startup rejects it. Released addresses stay reserved, and
+  account deletion removes the user's mailboxes inside the account transaction. See
+  `contracts/MAILBOXES.md` and `docs/plans/mailbox.md`.
+
 ## v0.26.0 — 2026-10-25
 
 ### Added

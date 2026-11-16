@@ -1,0 +1,118 @@
+const messages = {
+  title: 'Mailboxes',
+  description: 'Create addresses on your mail domain, read what arrives, and send from them.',
+  mailboxes: {
+    title: 'Your mailboxes',
+    count: '{count} of {max} used',
+    noDisplayName: 'No display name',
+    emptyTitle: 'No mailboxes yet',
+    empty: 'Create an address to start receiving and sending mail.',
+  },
+  create: {
+    title: 'New mailbox',
+    localPart: 'Address',
+    localPartPlaceholder: 'hello',
+    localPartHint:
+      'Lowercase letters and digits, with single dots, underscores, or hyphens inside.',
+    displayName: 'Display name (optional)',
+    displayNamePlaceholder: 'Hello Team',
+    limitReached: 'You have reached the limit of {max} mailboxes. Delete one to create another.',
+    displayNameInvalid:
+      'Use a display name of up to 120 characters without <, >, or quotation marks.',
+  },
+  deleteMailbox: {
+    title: 'Delete mailbox',
+    description:
+      'Delete {address} and every message in it? The address cannot be created again. This cannot be undone.',
+    label: 'Delete {address}',
+  },
+  folders: {
+    label: 'Folder',
+    inbound: 'Inbox',
+    outbound: 'Sent',
+  },
+  list: {
+    to: 'To: {recipients}',
+    noSubject: '(no subject)',
+    unread: 'Unread',
+    failed: 'Failed',
+    emptyInboxTitle: 'Inbox is empty',
+    emptyInbox: 'Mail sent to {address} appears here.',
+    emptySentTitle: 'Nothing sent yet',
+    emptySent: 'Messages you send from {address} appear here, including failed attempts.',
+    page: 'Page {page} of {total}',
+    previous: 'Previous',
+    next: 'Next',
+  },
+  message: {
+    from: 'From',
+    to: 'To',
+    cc: 'Cc',
+    date: 'Date',
+    failed: 'This message was not delivered. Reason: {code}',
+    failedUnknown: 'This message was not delivered.',
+    emptyBody: 'This message has no content.',
+    htmlTitle: 'Message content',
+    viewLabel: 'Message format',
+    viewHtml: 'Formatted',
+    viewText: 'Plain text',
+  },
+  deleteMessage: {
+    title: 'Delete message',
+    description: 'Delete "{subject}"? This cannot be undone.',
+  },
+  compose: {
+    title: 'New message',
+    replyTitle: 'Reply',
+    description: 'Sent from {address}.',
+    to: 'To',
+    toPlaceholder: 'bob@example.com, carol@example.com',
+    recipientsHint: 'Separate addresses with commas or new lines.',
+    cc: 'Cc (optional)',
+    subject: 'Subject',
+    body: 'Message',
+    replySubject: 'Re: {subject}',
+  },
+  actions: {
+    create: 'Create mailbox',
+    compose: 'Compose',
+    send: 'Send',
+    reply: 'Reply',
+    markUnread: 'Mark unread',
+    delete: 'Delete',
+    cancel: 'Cancel',
+    retry: 'Retry',
+    back: 'Back to list',
+  },
+  messages: {
+    mailboxCreated: 'Mailbox created',
+    mailboxDeleted: 'Mailbox deleted',
+    sent: 'Message sent',
+    messageDeleted: 'Message deleted',
+  },
+  errors: {
+    addressInvalid:
+      'Use 1 to 64 lowercase letters and digits. Dots, underscores, and hyphens are allowed inside, one at a time.',
+    addressReserved: 'This address is reserved for the mail administrator. Choose another one.',
+    addressTaken: 'This address is already in use or was used before. Choose another one.',
+    deliveryFailed:
+      'The message was NOT delivered: the mail provider did not accept it. It is kept in Sent as failed. Sending again may deliver a duplicate.',
+    generic: 'The mailbox request could not be completed.',
+    invalidInput: 'Check the fields and try again.',
+    invalidResponse: 'The mailbox service returned invalid data.',
+    limitReached: 'You have reached the mailbox limit. Delete a mailbox to create another.',
+    mailboxNotFound: 'This mailbox does not exist or was deleted.',
+    messageInvalid:
+      'Enter 1 to 50 plain email addresses, a one-line subject, and a message of up to 256 KB.',
+    messageNotFound: 'This message does not exist or was deleted.',
+    sendLimitReached:
+      'You have reached the 24-hour sending limit. Nothing was sent. Try again later.',
+    senderNotConfigured:
+      'The message was NOT delivered: sending mail is not set up on this server. It is kept in Sent as failed.',
+    tooLarge: 'The message is too large to send.',
+    unavailable: 'The mailbox service is temporarily unavailable.',
+  },
+} as const;
+
+export default messages;
+export type MailboxMessages = typeof messages;
