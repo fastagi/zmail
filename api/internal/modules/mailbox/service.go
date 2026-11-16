@@ -56,6 +56,8 @@ type SendInput struct {
 	Text      string
 	HTML      string
 	InReplyTo string
+	// Attachments are optional files, bounded in number and total size.
+	Attachments []AttachmentInput
 	// IdempotencyKey is optional. A repeated send with the same key and the same content in the
 	// same mailbox returns the first attempt's outcome instead of sending again.
 	IdempotencyKey string
@@ -73,6 +75,8 @@ type Service interface {
 	SendMessage(ctx context.Context, organizationID, mailboxID uint, input SendInput) (message *domain.MailMessage, created bool, err error)
 	// SendFromAddress sends from the mailbox with this address, which the organization must own.
 	SendFromAddress(ctx context.Context, organizationID uint, from string, input SendInput) (message *domain.MailMessage, created bool, err error)
+	// GetAttachment returns one attachment of a message with its content.
+	GetAttachment(ctx context.Context, organizationID, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error)
 	GetOutboundMessage(ctx context.Context, organizationID, messageID uint) (*domain.MailMessage, error)
 	SetMessageRead(ctx context.Context, organizationID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error)
 	DeleteMessage(ctx context.Context, organizationID, mailboxID, messageID uint) error
@@ -274,12 +278,30 @@ func (s *service) GetMessage(ctx context.Context, organizationID, mailboxID, mes
 	return s.withEvents(ctx, message)
 }
 
+func (s *service) GetAttachment(ctx context.Context, organizationID, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error) {
+	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
+		return nil, err
+	}
+	if _, err := s.repo.FindMessage(ctx, mailboxID, messageID); err != nil {
+		return nil, err
+	}
+	return s.repo.FindMessageAttachment(ctx, messageID, attachmentID)
+}
+
+// withEvents fills in what only the detail of a message shows: its delivery history and the
+// list of its attachments.
 func (s *service) withEvents(ctx context.Context, message *domain.MailMessage) (*domain.MailMessage, error) {
 	events, err := s.repo.ListMessageEvents(ctx, message.ID)
 	if err != nil {
 		return nil, err
 	}
 	message.Events = events
+	message.Attachments = nil
+	if message.AttachmentCount > 0 {
+		if message.Attachments, err = s.repo.ListMessageAttachments(ctx, message.ID); err != nil {
+			return nil, err
+		}
+	}
 	return message, nil
 }
 
@@ -375,6 +397,16 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		return replayed, false, replayErr
 	}
 
+	files := make([]mailtransport.Attachment, 0, len(message.Attachments))
+	for i := range message.Attachments {
+		files = append(files, mailtransport.Attachment{
+			Filename:    message.Attachments[i].Filename,
+			ContentType: message.Attachments[i].ContentType,
+			Content:     message.Attachments[i].Content,
+		})
+		// The stored copy is the record; the response carries metadata only.
+		message.Attachments[i].Content = nil
+	}
 	outcome, sendErr := s.transport.Send(ctx, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,
@@ -384,6 +416,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		TextBody:    message.TextBody,
 		HTMLBody:    message.HTMLBody,
 		InReplyTo:   message.InReplyTo,
+		Attachments: files,
 	})
 
 	message.Status = domain.MailStatusSent
@@ -530,13 +563,18 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		return nil, fmt.Errorf("%w: in_reply_to", ErrMailMessageInvalid)
 	}
 
+	attachments, err := buildAttachments(input.Attachments)
+	if err != nil {
+		return nil, err
+	}
+
 	idempotencyKey := strings.TrimSpace(input.IdempotencyKey)
 	if !validIdempotencyKey(idempotencyKey) {
 		return nil, ErrMailIdempotencyKeyInvalid
 	}
 	fingerprint := ""
 	if idempotencyKey != "" {
-		fingerprint = sendFingerprint(to, cc, cleanText(subject), text, html, inReplyTo)
+		fingerprint = sendFingerprint(to, cc, cleanText(subject), text, html, inReplyTo, attachmentDigest(attachments))
 	}
 
 	now := s.now().UTC()
@@ -554,6 +592,8 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		TextBody:               text,
 		HTMLBody:               html,
 		InReplyTo:              inReplyTo,
+		Attachments:            attachments,
+		AttachmentCount:        len(attachments),
 		// The owner wrote it, so it starts out read.
 		ReadAt: &now,
 	}, nil
@@ -610,6 +650,7 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		MessageID:   parsed.MessageID,
 		InReplyTo:   parsed.InReplyTo,
 		DedupeKey:   inboundDedupeKey(parsed.MessageID, delivery.Raw),
+		Attachments: parsed.Attachments,
 	}
 	created := false
 	err = s.apply(ctx, func(tx context.Context) ([]MailNotification, error) {
@@ -658,7 +699,7 @@ func validIdempotencyKey(key string) bool {
 
 // sendFingerprint hashes the normalized request with length prefixes, so different field
 // boundaries can never produce the same digest.
-func sendFingerprint(to, cc []string, subject, text, html, inReplyTo string) string {
+func sendFingerprint(to, cc []string, subject, text, html, inReplyTo, attachments string) string {
 	hash := sha256.New()
 	write := func(value string) {
 		fmt.Fprintf(hash, "%d:", len(value))
@@ -670,5 +711,9 @@ func sendFingerprint(to, cc []string, subject, text, html, inReplyTo string) str
 	write(text)
 	write(html)
 	write(inReplyTo)
+	// A request without attachments keeps the digest it had before attachments existed.
+	if attachments != "" {
+		write(attachments)
+	}
 	return hex.EncodeToString(hash.Sum(nil))
 }

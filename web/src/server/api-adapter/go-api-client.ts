@@ -3,7 +3,7 @@ import 'server-only';
 import { isIP } from 'node:net';
 
 import { ApiErrorCode, HttpStatusErrorCodeMap, type ApiErrorCodeValue } from '@/http/codes';
-import { declaredBodyLength, readBoundedBody } from '@/server/http/bounded-body';
+import { declaredBodyLength, readBoundedBody, readBoundedBytes } from '@/server/http/bounded-body';
 
 const FORWARDED_RESPONSE_HEADERS = [
   'cache-control',
@@ -19,6 +19,8 @@ const SAFE_RELATIVE_PATH = /^[A-Za-z0-9._~!$&'()*+,;=@\/-]+$/;
 const SAFE_IF_MATCH = /^[\x20-\x7E]{1,128}$/;
 const SAFE_IF_NONE_MATCH = /^[\x20-\x7E]{1,1024}$/;
 const SAFE_IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
+// An upstream download disposition is forwarded only as `attachment` with visible ASCII.
+const SAFE_ATTACHMENT_DISPOSITION = /^attachment(?:;[\x20-\x7E]{0,1024})?$/;
 const knownErrorCodes = new Set<string>(Object.values(ApiErrorCode));
 
 export interface GoApiClientConfig {
@@ -48,6 +50,12 @@ export interface GoApiRequest {
   searchParams?: URLSearchParams;
   fieldMap?: Readonly<Record<string, string>>;
   signal?: AbortSignal;
+  /**
+   * `binary` reads a successful body as opaque bytes instead of a JSON envelope; errors are still
+   * JSON. `maxResponseBytes` then replaces the client limit for this request.
+   */
+  responseType?: 'binary' | 'json';
+  maxResponseBytes?: number;
 }
 
 export interface GoApiSuccessEnvelope {
@@ -61,6 +69,8 @@ export interface GoApiSuccessEnvelope {
 export interface GoApiSuccess {
   status: number;
   envelope: GoApiSuccessEnvelope | null;
+  /** The body of a successful `binary` request, with its safe attachment disposition. */
+  binary?: { bytes: Uint8Array; disposition: string | null };
   requestId: string;
   responseHeaders?: Record<string, string>;
 }
@@ -106,8 +116,11 @@ export class GoApiClient {
 
   private async performRequest(url: URL, options: GoApiRequest): Promise<GoApiResult> {
     const requestId = resolveRequestId(options.incomingHeaders, this.dependencies.randomUUID);
+    const binary = options.responseType === 'binary';
+    const maxResponseBytes =
+      (binary ? options.maxResponseBytes : undefined) ?? this.config.maxResponseBytes;
     const headers = new Headers({
-      accept: 'application/json',
+      accept: binary ? 'application/octet-stream, application/json' : 'application/json',
       'x-request-id': requestId,
     });
 
@@ -188,7 +201,7 @@ export class GoApiClient {
       };
     }
 
-    const declaredLength = declaredBodyLength(response.headers, this.config.maxResponseBytes);
+    const declaredLength = declaredBodyLength(response.headers, maxResponseBytes);
     if (declaredLength !== 'accepted') {
       await response.body?.cancel();
       return failure(
@@ -199,7 +212,34 @@ export class GoApiClient {
       );
     }
 
-    const body = await readBoundedBody(response.body, this.config.maxResponseBytes);
+    if (binary && response.ok) {
+      const bytes = await readBoundedBytes(response.body, maxResponseBytes);
+      if (!bytes.ok) {
+        return failure(
+          'unavailable',
+          ApiErrorCode.COMMON_SERVICE_UNAVAILABLE,
+          responseRequestId,
+          responseHeaders
+        );
+      }
+      const disposition = response.headers.get('content-disposition');
+      return {
+        ok: true,
+        data: {
+          status: response.status,
+          envelope: null,
+          binary: {
+            bytes: bytes.bytes,
+            disposition:
+              disposition && SAFE_ATTACHMENT_DISPOSITION.test(disposition) ? disposition : null,
+          },
+          requestId: responseRequestId,
+          ...(responseHeaders ? { responseHeaders } : {}),
+        },
+      };
+    }
+
+    const body = await readBoundedBody(response.body, maxResponseBytes);
     if (!body.ok) {
       return failure(
         'unavailable',

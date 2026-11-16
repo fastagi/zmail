@@ -3,6 +3,7 @@ package mailbox
 import (
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 
@@ -206,6 +207,29 @@ func (h *Handler) GetMessage(c *gin.Context) {
 	}
 	privateResponse(c)
 	response.Success(c, toMailMessageResponse(message))
+}
+
+// DownloadAttachment returns the bytes of one attached file. The declared media type is never
+// served: every file is an opaque download, so a browser cannot render or run it on this origin.
+func (h *Handler) DownloadAttachment(c *gin.Context) {
+	organizationID, mailboxID, messageID, ok := messageScope(c)
+	if !ok {
+		return
+	}
+	attachmentID, ok := httphandler.ParseID(c, "attachment_id")
+	if !ok {
+		return
+	}
+	attachment, err := h.service.GetAttachment(c.Request.Context(), organizationID, mailboxID, messageID, attachmentID)
+	if err != nil {
+		response.HandleError(c, "Failed to get mail attachment", err)
+		return
+	}
+	privateResponse(c)
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Security-Policy", "default-src 'none'; sandbox")
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": attachment.Filename}))
+	c.Data(http.StatusOK, "application/octet-stream", attachment.Content)
 }
 
 func (h *Handler) SendMessage(c *gin.Context) {

@@ -203,6 +203,12 @@ through `status` and `failure_code`. Operations are documented in
    secret under a separate scope and idempotent by the provider's event id. Only identifiers,
    status codes, and classifications are stored; provider free text is dropped. Opens and clicks
    are out of scope.
-5. Later slices, each with its own plan: attachments on R2 through the `asset` starter; background
-   retry on the PostgreSQL job queue; bounce and complaint ingestion; organization-shared
+5. Attachments (fifth slice): up to 10 files and 4 MiB per message, sent as base64 and parsed from
+   inbound MIME. Migration `2026_11_17_110000_create_mail_attachments` stores the bytes in
+   PostgreSQL (`bytea`) with the message rather than in object storage through the `asset`
+   starter: the files are small and bounded, they must be deleted with their message, and the
+   mailbox starter keeps no dependency on object storage. Downloads are always opaque
+   (`application/octet-stream`, `attachment`, `nosniff`); the declared type is untrusted. Moving
+   larger files to object storage is a later decision with its own plan.
+6. Later slices, each with its own plan: background retry on the PostgreSQL job queue; bounce and complaint ingestion; organization-shared
    mailboxes; search.

@@ -33,6 +33,7 @@ const messages = {
     outbound: '已发送',
   },
   list: {
+    attachments: '{count} 个附件',
     to: '收件人：{recipients}',
     noSubject: '（无主题）',
     unread: '未读',
@@ -46,6 +47,9 @@ const messages = {
     next: '下一页',
   },
   message: {
+    attachments: '附件',
+    download: '下载 {name}',
+    downloadFailed: '文件下载失败，请重试。',
     from: '发件人',
     to: '收件人',
     cc: '抄送',
@@ -74,6 +78,9 @@ const messages = {
     cc: '抄送（可选）',
     subject: '主题',
     body: '正文',
+    attach: '添加附件',
+    attachHint: '最多 10 个文件，合计不超过 4 MB。',
+    removeAttachment: '移除 {name}',
     replySubject: 'Re: {subject}',
   },
   emails: {
@@ -195,6 +202,7 @@ const messages = {
     messageDeleted: '邮件已删除',
   },
   errors: {
+    attachmentsInvalid: '最多添加 10 个非空文件，合计不超过 4 MB。',
     addressInvalid:
       '请使用 1 到 64 个小写字母和数字。中间可以有点、下划线和连字符，但不能连续出现。',
     addressReserved: '这个地址保留给邮件管理员使用，请换一个。',

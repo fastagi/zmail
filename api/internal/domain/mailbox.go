@@ -15,6 +15,14 @@ const (
 	MaxMailSubjectLength = 998
 	// MaxMailBodyBytes bounds each stored body representation.
 	MaxMailBodyBytes = 256 * 1024
+	// MaxMailAttachments bounds the attachments of one message.
+	MaxMailAttachments = 10
+	// MaxMailAttachmentBytes bounds the decoded size of all attachments of one message. It is
+	// larger than what a maximum-size inbound message can carry, so inbound attachments are
+	// never cut by size.
+	MaxMailAttachmentBytes = 4 * 1024 * 1024
+	// MaxMailAttachmentNameLength bounds a stored file name.
+	MaxMailAttachmentNameLength = 255
 )
 
 // MailDirection tells whether a message arrived at or left a mailbox.
@@ -194,9 +202,27 @@ type MailMessage struct {
 	// LastEvent summarizes the delivery events of an outbound message; see SummarizeMailEvents.
 	LastEvent MailEventType
 	// Events is the delivery history, oldest first. Only the detail lookup fills it.
-	Events    []MailEvent
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Events []MailEvent
+	// AttachmentCount is how many attachments the message has.
+	AttachmentCount int
+	// Attachments carries content when a message is being stored and metadata only when the
+	// detail lookup fills it.
+	Attachments []MailAttachment
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// MailAttachment is one file attached to a message.
+type MailAttachment struct {
+	ID        uint
+	MessageID uint
+	// Filename is a bare file name without any path.
+	Filename string
+	// ContentType is the media type the sender declared; it is never trusted for rendering.
+	ContentType string
+	Size        int
+	// Content is empty when only metadata was loaded.
+	Content []byte
 }
 
 // MailMessageFilter narrows a mailbox message listing.
@@ -233,13 +259,13 @@ type MailboxRepository interface {
 	FindMailboxByAddress(ctx context.Context, address string) (*Mailbox, error)
 	DeleteMailbox(ctx context.Context, organizationID, id uint) error
 
-	// CreateMessage stores a message. With an idempotency key that the mailbox already used it
+	// CreateMessage stores a message with its attachments. With an idempotency key that the mailbox already used it
 	// reports created=false and fills message with the stored row.
 	CreateMessage(ctx context.Context, message *MailMessage) (created bool, err error)
 	FindMessageByIdempotencyKey(ctx context.Context, mailboxID uint, key string) (*MailMessage, error)
 	// FindOutboundMessageForOrganization finds an outbound message in any mailbox of the organization.
 	FindOutboundMessageForOrganization(ctx context.Context, organizationID, id uint) (*MailMessage, error)
-	// CreateInboundMessage stores an inbound message once per mailbox and dedupe key. It
+	// CreateInboundMessage stores an inbound message with its attachments once per mailbox and dedupe key. It
 	// reports created=false and fills message with the stored row on a repeated delivery.
 	CreateInboundMessage(ctx context.Context, message *MailMessage) (created bool, err error)
 	UpdateMessageDelivery(ctx context.Context, id uint, status MailStatus, messageID, failureCode string) error
@@ -256,6 +282,10 @@ type MailboxRepository interface {
 	// newly stored events is returned.
 	AddMessageEvents(ctx context.Context, messageID uint, events []MailEvent) (added int, summary MailEventType, err error)
 	ListMessageEvents(ctx context.Context, messageID uint) ([]MailEvent, error)
+	// ListMessageAttachments lists the attachments of a message without their content.
+	ListMessageAttachments(ctx context.Context, messageID uint) ([]MailAttachment, error)
+	// FindMessageAttachment loads one attachment of a message with its content.
+	FindMessageAttachment(ctx context.Context, messageID, id uint) (*MailAttachment, error)
 	// FindOutboundMessageByProviderID finds the outbound message a provider event names.
 	FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*MailMessage, error)
 	// ListMessagesForOrganization lists messages across every mailbox of the organization, newest first,

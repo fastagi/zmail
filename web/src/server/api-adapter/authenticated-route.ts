@@ -20,6 +20,8 @@ interface AuthenticatedGoApiRequest {
   idempotencyKey?: string;
   searchParams?: URLSearchParams;
   fieldMap?: Readonly<Record<string, string>>;
+  responseType?: 'binary' | 'json';
+  maxResponseBytes?: number;
 }
 
 let client: GoApiClient | undefined;
@@ -67,6 +69,17 @@ export async function forwardAuthenticatedGoApi(
   }
 
   const headers = authenticatedResponseHeaders(result.data.responseHeaders, result.data.requestId);
+  if (result.data.binary) {
+    // An upstream file is always an opaque download, whatever it claims to be.
+    headers.set('content-type', 'application/octet-stream');
+    headers.set('x-content-type-options', 'nosniff');
+    headers.set('content-security-policy', "default-src 'none'; sandbox");
+    headers.set('content-disposition', result.data.binary.disposition ?? 'attachment');
+    return new NextResponse(new Uint8Array(result.data.binary.bytes), {
+      status: result.data.status,
+      headers,
+    });
+  }
   if (result.data.envelope === null) {
     return new NextResponse(null, { status: result.data.status, headers });
   }

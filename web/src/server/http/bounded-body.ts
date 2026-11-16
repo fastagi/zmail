@@ -1,8 +1,10 @@
 import 'server-only';
 
 export type BoundedBodyResult =
-  | { ok: true; text: string }
-  | { ok: false; error: 'invalid' | 'too_large' };
+  { ok: true; text: string } | { ok: false; error: 'invalid' | 'too_large' };
+
+export type BoundedBytesResult =
+  { ok: true; bytes: Uint8Array } | { ok: false; error: 'invalid' | 'too_large' };
 
 export function declaredBodyLength(
   headers: Headers,
@@ -28,6 +30,23 @@ export async function readBoundedBody(
   body: ReadableStream<Uint8Array> | null,
   maxBytes: number
 ): Promise<BoundedBodyResult> {
+  const result = await readBoundedBytes(body, maxBytes);
+  if (!result.ok) return result;
+  try {
+    return {
+      ok: true,
+      text: new TextDecoder('utf-8', { fatal: true }).decode(result.bytes),
+    };
+  } catch {
+    return { ok: false, error: 'invalid' };
+  }
+}
+
+/** Reads a whole body as bytes, refusing it as soon as it grows past `maxBytes`. */
+export async function readBoundedBytes(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number
+): Promise<BoundedBytesResult> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || body === null) {
     return { ok: false, error: 'invalid' };
   }
@@ -66,13 +85,5 @@ export async function readBoundedBody(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-
-  try {
-    return {
-      ok: true,
-      text: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
-    };
-  } catch {
-    return { ok: false, error: 'invalid' };
-  }
+  return { ok: true, bytes };
 }

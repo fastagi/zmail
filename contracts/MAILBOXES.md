@@ -115,9 +115,10 @@ Listing returns summaries, newest first, without bodies. `direction=inbound` is 
 | `read` | Inbound messages start unread; outbound messages start read. |
 | `failure_code` | Stable provider or transport reason when `status` is `failed`, otherwise empty |
 | `last_event` | Summary of the delivery events of an outbound message; see [Delivery Events](#delivery-events). Empty when none are recorded. |
+| `attachment_count` | How many files the message has |
 
-The detail response adds `text_body`, `html_body`, `message_id`, `in_reply_to`, and `events`, the
-delivery history of an outbound message. `html_body` is
+The detail response adds `text_body`, `html_body`, `message_id`, `in_reply_to`, `events` (the
+delivery history of an outbound message), and `attachments` (see [Attachments](#attachments)). `html_body` is
 untrusted sender content: a client must render it only inside a sandbox that runs no script and
 loads nothing with the user's credentials.
 
@@ -130,7 +131,10 @@ loads nothing with the user's credentials.
   "subject": "Hello",
   "text": "Plain body",
   "html": "<p>HTML body</p>",
-  "in_reply_to": "<previous-id@example.com>"
+  "in_reply_to": "<previous-id@example.com>",
+  "attachments": [
+    { "filename": "invoice.pdf", "content_type": "application/pdf", "content": "JVBERi0xLjQK..." }
+  ]
 }
 ```
 
@@ -139,6 +143,7 @@ loads nothing with the user's credentials.
 - `subject` is required, at most 998 characters, with no line breaks.
 - At least one of `text` and `html` is required; each is at most 256 KiB.
 - `in_reply_to` is an optional Message-ID. It is sent as the `In-Reply-To` and `References` headers.
+- `attachments` is optional; see [Attachments](#attachments) for its limits.
 - Any of these violations is `422 MAILBOX.MESSAGE_INVALID`.
 - The sender is always the mailbox address and display name; a request cannot set `from`.
 
@@ -157,6 +162,48 @@ per organization, and failed attempts count toward it. The limit is a soft bound
 requests in flight. There is no automatic retry. A client that retries a `502` without an
 `Idempotency-Key` may send a duplicate when the first attempt reached the provider but the answer
 was lost (`failure_code` `transport.unreachable`); see [Idempotency](#idempotency).
+
+### Attachments
+
+A message has at most 10 attachments, and together they are at most 4 MiB after decoding.
+
+To send files, each entry of `attachments` has:
+
+| Field | Rule |
+|---|---|
+| `filename` | Required. Only the last path segment is kept and control characters are removed; a name that is empty afterwards is rejected. At most 255 bytes are stored. |
+| `content_type` | Optional media type. Anything that is not a plain `type/subtype` becomes `application/octet-stream`. |
+| `content` | Required, standard base64, not empty. |
+
+More than 10 files, more than 4 MiB in total, or an unusable entry is `422 MAILBOX.MESSAGE_INVALID`
+and nothing is stored or sent. The request body is also subject to the API's general body limit
+(10 MiB by default). Attachments are part of the [idempotency](#idempotency) fingerprint.
+
+Inbound mail keeps its attached files under the same limits. Every leaf part that is not used as
+the text or HTML body is a file, including inline images. A part without a file name is named
+`attachment-N`. Because inbound mail is at most 5 MiB raw, its files always fit the size limit;
+parts after the tenth are not stored.
+
+The message detail lists files as `{ "id", "filename", "content_type", "size" }` without content.
+Listings carry only `attachment_count`.
+
+```http
+GET /v1/mailboxes/{mailbox_id}/messages/{message_id}/attachments/{attachment_id}
+```
+
+returns the bytes of one file to a member of the owning organization. A file that does not exist
+under that message is `404 MAILBOX.MESSAGE_NOT_FOUND`. The response is always an opaque download:
+`Content-Type: application/octet-stream`, `Content-Disposition: attachment` with the stored name,
+`X-Content-Type-Options: nosniff`, and `Cache-Control: private, no-store`. The declared
+`content_type` is untrusted sender data and is never used to serve the file. Files are not
+scanned for malware.
+
+Binary files arrive byte for byte. A file that is entirely ASCII text may be carried as text, and
+mail delivery then changes its line endings to CRLF; the received copy can differ from the sent
+one in exactly that way.
+
+Deleting a message or its mailbox deletes its files. API-key routes can send attachments and see
+their metadata; they cannot download files.
 
 ### Log And Statistics
 

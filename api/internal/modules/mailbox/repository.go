@@ -166,6 +166,10 @@ func (r *repository) DeleteMailbox(ctx context.Context, organizationID, id uint)
 		if result.RowsAffected == 0 {
 			return ErrMailboxNotFound
 		}
+		attached := tx.Model(&MailMessagePO{}).Select("id").Where("mailbox_id = ?", id)
+		if err := tx.Where("message_id IN (?)", attached).Delete(&MailAttachmentPO{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("mailbox_id = ?", id).Delete(&MailMessagePO{}).Error
 	})
 }
@@ -175,19 +179,30 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 		return false, domain.ErrServiceUnavailable
 	}
 	po := newMailMessagePO(message)
-	query := r.conn(ctx)
-	if message.IdempotencyKey != "" {
-		query = query.Clauses(clause.OnConflict{
-			Columns:     []clause.Column{{Name: "mailbox_id"}, {Name: "idempotency_key"}},
-			TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "idempotency_key IS NOT NULL"}}},
-			DoNothing:   true,
-		})
+	created := false
+	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx
+		if message.IdempotencyKey != "" {
+			query = query.Clauses(clause.OnConflict{
+				Columns:     []clause.Column{{Name: "mailbox_id"}, {Name: "idempotency_key"}},
+				TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "idempotency_key IS NOT NULL"}}},
+				DoNothing:   true,
+			})
+		}
+		result := query.Create(po)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		created = true
+		return createAttachments(tx, po.ID, message.Attachments)
+	})
+	if err != nil {
+		return false, err
 	}
-	result := query.Create(po)
-	if result.Error != nil {
-		return false, result.Error
-	}
-	if result.RowsAffected == 0 {
+	if !created {
 		existing, err := r.FindMessageByIdempotencyKey(ctx, message.MailboxID, message.IdempotencyKey)
 		if err != nil {
 			return false, err
@@ -196,9 +211,32 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 		return false, nil
 	}
 	message.ID = po.ID
+	message.AttachmentCount = po.AttachmentCount
 	message.CreatedAt = po.CreatedAt
 	message.UpdatedAt = po.UpdatedAt
 	return true, nil
+}
+
+// createAttachments stores the files of a new message and fills in their identifiers.
+func createAttachments(tx *gorm.DB, messageID uint, attachments []domain.MailAttachment) error {
+	for i := range attachments {
+		attachment := &attachments[i]
+		po := &MailAttachmentPO{
+			MessageID:   messageID,
+			Filename:    attachment.Filename,
+			ContentType: attachment.ContentType,
+			Size:        len(attachment.Content),
+			Content:     attachment.Content,
+		}
+		if po.Content == nil {
+			po.Content = []byte{}
+		}
+		if err := tx.Create(po).Error; err != nil {
+			return err
+		}
+		attachment.ID, attachment.MessageID, attachment.Size = po.ID, messageID, po.Size
+	}
+	return nil
 }
 
 func (r *repository) FindMessageByIdempotencyKey(ctx context.Context, mailboxID uint, key string) (*domain.MailMessage, error) {
@@ -243,25 +281,34 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 		return false, ErrMailMessageInvalid
 	}
 	po := newMailMessagePO(message)
-	result := r.conn(ctx).
-		Clauses(clause.OnConflict{
-			Columns:     []clause.Column{{Name: "mailbox_id"}, {Name: "dedupe_key"}},
-			TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "dedupe_key IS NOT NULL"}}},
-			DoNothing:   true,
-		}).
-		Create(po)
-	if result.Error != nil {
-		return false, result.Error
+	created := false
+	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.
+			Clauses(clause.OnConflict{
+				Columns:     []clause.Column{{Name: "mailbox_id"}, {Name: "dedupe_key"}},
+				TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "dedupe_key IS NOT NULL"}}},
+				DoNothing:   true,
+			}).
+			Create(po)
+		if result.Error != nil || result.RowsAffected == 0 {
+			return result.Error
+		}
+		created = true
+		return createAttachments(tx, po.ID, message.Attachments)
+	})
+	if err != nil {
+		return false, err
 	}
-	if result.RowsAffected == 1 {
+	if created {
 		message.ID = po.ID
+		message.AttachmentCount = po.AttachmentCount
 		message.CreatedAt = po.CreatedAt
 		message.UpdatedAt = po.UpdatedAt
 		return true, nil
 	}
 
 	var existing MailMessagePO
-	err := r.conn(ctx).
+	err = r.conn(ctx).
 		Where("mailbox_id = ? AND dedupe_key = ?", message.MailboxID, message.DedupeKey).
 		First(&existing).Error
 	if err != nil {
@@ -364,14 +411,18 @@ func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) erro
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	result := r.conn(ctx).Where("id = ? AND mailbox_id = ?", id, mailboxID).Delete(&MailMessagePO{})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return ErrMailMessageNotFound
-	}
-	return nil
+	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("id = ? AND mailbox_id = ?", id, mailboxID).Delete(&MailMessagePO{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrMailMessageNotFound
+		}
+		// The schema cascades too; deleting here keeps file content from outliving its message
+		// even where the foreign key is absent.
+		return tx.Where("message_id = ?", id).Delete(&MailAttachmentPO{}).Error
+	})
 }
 
 // CountOutboundSince counts messages the organization tried to send since the given time,
@@ -441,7 +492,7 @@ func (r *repository) ListMessagesForOrganization(
 			mail_messages.from_address, mail_messages.from_name, mail_messages.to_addresses,
 			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
 			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
-			mail_messages.read_at,
+			mail_messages.attachment_count, mail_messages.read_at,
 			mail_messages.created_at, mail_messages.updated_at, mailboxes.address AS mailbox_address`).
 		Order("mail_messages.id DESC").
 		Offset((page - 1) * perPage).
@@ -570,6 +621,38 @@ func (r *repository) ListMessageEvents(ctx context.Context, messageID uint) ([]d
 	return events, nil
 }
 
+func (r *repository) ListMessageAttachments(ctx context.Context, messageID uint) ([]domain.MailAttachment, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var rows []MailAttachmentPO
+	// The listing never loads file content.
+	err := r.conn(ctx).Omit("content").Where("message_id = ?", messageID).Order("id ASC").Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	attachments := make([]domain.MailAttachment, 0, len(rows))
+	for i := range rows {
+		attachments = append(attachments, rows[i].toDomain())
+	}
+	return attachments, nil
+}
+
+func (r *repository) FindMessageAttachment(ctx context.Context, messageID, id uint) (*domain.MailAttachment, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var po MailAttachmentPO
+	if err := r.conn(ctx).Where("id = ? AND message_id = ?", id, messageID).First(&po).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrMailMessageNotFound
+		}
+		return nil, err
+	}
+	attachment := po.toDomain()
+	return &attachment, nil
+}
+
 func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*domain.MailMessage, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
@@ -588,7 +671,8 @@ func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, provid
 			mail_messages.from_address, mail_messages.from_name, mail_messages.to_addresses,
 			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
 			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
-			mail_messages.read_at, mail_messages.created_at, mail_messages.updated_at,
+			mail_messages.attachment_count, mail_messages.read_at, mail_messages.created_at,
+			mail_messages.updated_at,
 			mailboxes.address AS mailbox_address, mailboxes.organization_id AS organization_id`).
 		Where("mail_messages.message_id = ? AND mail_messages.direction = ?", providerMessageID, string(domain.MailDirectionOutbound)).
 		Order("mail_messages.id DESC").

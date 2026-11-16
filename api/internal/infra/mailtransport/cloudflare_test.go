@@ -170,3 +170,28 @@ func TestNewSelectsTheConfiguredTransport(t *testing.T) {
 		t.Fatalf("unknown provider error = %v", err)
 	}
 }
+
+func TestCloudflareSendsAttachmentsAsBase64(t *testing.T) {
+	var body map[string]any
+	transport := cloudflareAgainst(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{"message_id":"<a@mail.example>","delivered":[],"permanent_bounces":[],"queued":["bob@example.com"],"suppressed_recipients":[]}}`))
+	})
+	_, err := transport.Send(context.Background(), Message{
+		FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Subject: "Hi", TextBody: "text",
+		Attachments: []Attachment{{Filename: "a.pdf", ContentType: "application/pdf", Content: []byte("%PDF-1.4")}},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	attachments, _ := body["attachments"].([]any)
+	if len(attachments) != 1 {
+		t.Fatalf("attachments = %v", body["attachments"])
+	}
+	first, _ := attachments[0].(map[string]any)
+	if first["content"] != "JVBERi0xLjQ=" || first["filename"] != "a.pdf" || first["type"] != "application/pdf" ||
+		first["disposition"] != "attachment" {
+		t.Fatalf("attachment = %v", first)
+	}
+}

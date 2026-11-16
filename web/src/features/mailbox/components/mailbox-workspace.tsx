@@ -38,6 +38,10 @@ import {
   mailBadgeKey,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import {
+  AttachmentIndicator,
+  MailAttachmentList,
+} from '@/features/mailbox/components/mail-attachments';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
 import {
   useCreateMailbox,
@@ -543,6 +547,7 @@ function MessageList({
                       unread ? 'font-medium' : 'text-muted-foreground'
                     )}
                   >
+                    <AttachmentIndicator count={message.attachment_count} />{' '}
                     {message.subject || t('list.noSubject')}
                   </span>
                 </span>
@@ -683,6 +688,8 @@ function MessageDetail({
             </time>
           </dd>
         </dl>
+
+        <MailAttachmentList message={message} />
 
         {hasHtml && hasText ? (
           <div role="group" aria-label={t('message.viewLabel')} className="flex gap-2">

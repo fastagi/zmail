@@ -18,6 +18,7 @@ import {
   useDateTimeFormat,
   useRelativeTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import { MailAttachmentList } from '@/features/mailbox/components/mail-attachments';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
 import { useMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import type { MailMessage } from '@/features/mailbox/types';
@@ -174,6 +175,8 @@ export function EmailDetail({
             )}
           </section>
         ) : null}
+
+        <MailAttachmentList message={message} />
 
         <Tabs value={tab} onValueChange={value => setChosenTab(value as ContentTab)}>
           <TabsList aria-label={t('emails.tabs')}>

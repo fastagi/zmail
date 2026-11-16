@@ -4,6 +4,7 @@ package mailtransport
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -54,6 +55,15 @@ type cloudflareSendRequest struct {
 	Text    string            `json:"text,omitempty"`
 	HTML    string            `json:"html,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// Attachments carry standard base64 content.
+	Attachments []cloudflareAttachment `json:"attachments,omitempty"`
+}
+
+type cloudflareAttachment struct {
+	Content     string `json:"content"`
+	Filename    string `json:"filename"`
+	Type        string `json:"type"`
+	Disposition string `json:"disposition"`
 }
 
 type cloudflareSendResponse struct {
@@ -107,6 +117,14 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 		Subject: mail.Subject,
 		Text:    mail.TextBody,
 		HTML:    mail.HTMLBody,
+	}
+	for _, attachment := range mail.Attachments {
+		body.Attachments = append(body.Attachments, cloudflareAttachment{
+			Content:     base64.StdEncoding.EncodeToString(attachment.Content),
+			Filename:    attachment.Filename,
+			Type:        attachment.ContentType,
+			Disposition: "attachment",
+		})
 	}
 	if mail.InReplyTo != "" {
 		reference := "<" + mail.InReplyTo + ">"

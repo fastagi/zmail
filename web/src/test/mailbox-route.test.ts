@@ -755,6 +755,171 @@ describe('mailbox browser route boundary', () => {
     expect(outbound.data).toEqual([]);
   });
 
+  it('stores attachments in the mock and serves them only as opaque downloads', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const mailbox = (await (await create(route, { local_part: 'hello' })).json()).data;
+    const html = '<script>alert(1)</script>';
+    const sent = await send(route, mailbox.id, {
+      to: ['bob@example.com'],
+      subject: 'Files',
+      text: 'See attached.',
+      attachments: [
+        { filename: '../résumé.html', content_type: 'text/html', content: base64(html) },
+        { filename: 'data.bin', content: base64('x') },
+      ],
+    });
+    expect(sent.status).toBe(201);
+    const message = (await sent.json()).data;
+    expect(message.attachment_count).toBe(2);
+    expect(message.attachments).toEqual([
+      { id: expect.any(Number), filename: 'résumé.html', content_type: 'text/html', size: 25 },
+      {
+        id: expect.any(Number),
+        filename: 'data.bin',
+        content_type: 'application/octet-stream',
+        size: 1,
+      },
+    ]);
+    const outbound = await (
+      await route.listMailMessagesRoute(
+        request(`/api/mailboxes/${mailbox.id}/messages?direction=outbound`),
+        String(mailbox.id)
+      )
+    ).json();
+    expect(outbound.data[0]).toMatchObject({ attachment_count: 2 });
+    expect(outbound.data[0].attachments).toBeUndefined();
+
+    const path = `/api/mailboxes/${mailbox.id}/messages/${message.id}/attachments`;
+    const file = message.attachments[0];
+    const download = await route.downloadMailAttachmentRoute(
+      request(`${path}/${file.id}`),
+      String(mailbox.id),
+      String(message.id),
+      String(file.id)
+    );
+    expect(download.status).toBe(200);
+    expect(await download.text()).toBe(html);
+    expect(download.headers.get('content-type')).toBe('application/octet-stream');
+    expect(download.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(download.headers.get('cache-control')).toBe('private, no-store');
+    expect(download.headers.get('content-disposition')).toBe(
+      `attachment; filename*=utf-8''${encodeURIComponent('résumé.html')}`
+    );
+
+    const missing = await route.downloadMailAttachmentRoute(
+      request(`${path}/999`),
+      String(mailbox.id),
+      String(message.id),
+      '999'
+    );
+    await expectError(missing, 404, 'MAILBOX.MESSAGE_NOT_FOUND');
+    const malformed = await route.downloadMailAttachmentRoute(
+      request(`${path}/abc`),
+      String(mailbox.id),
+      String(message.id),
+      'abc'
+    );
+    expect(malformed.status).toBe(400);
+
+    activeOrganization = await secondOrganization();
+    const stranger = await route.downloadMailAttachmentRoute(
+      request(`${path}/${file.id}`),
+      String(mailbox.id),
+      String(message.id),
+      String(file.id)
+    );
+    await expectError(stranger, 404, 'MAILBOX.NOT_FOUND');
+  });
+
+  it('validates attachments like the API', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const mailbox = (await (await create(route, { local_part: 'hello' })).json()).data;
+    const valid = { to: ['bob@example.com'], subject: 'Hi', text: 'Body' };
+    const half = base64('x'.repeat(2 * 1_024 * 1_024 + 1));
+
+    for (const attachments of [
+      Array.from({ length: 11 }, () => ({ filename: 'a.txt', content: base64('a') })),
+      [{ filename: 'a.txt', content: 'not base64!' }],
+      [{ filename: ' / ', content: base64('a') }],
+      [
+        { filename: 'a.bin', content: half },
+        { filename: 'b.bin', content: half },
+      ],
+    ]) {
+      const response = await send(route, mailbox.id, { ...valid, attachments });
+      const body = await response.json();
+      expect([response.status, body.error_code]).toEqual(
+        attachments.length > 10
+          ? [422, 'COMMON.VALIDATION_FAILED']
+          : [422, 'MAILBOX.MESSAGE_INVALID']
+      );
+    }
+    for (const attachments of [
+      'a.txt',
+      [{ filename: 'a.txt' }],
+      [{ filename: '', content: base64('a') }],
+      [{ filename: 'a.txt', content: base64('a'), path: '/etc' }],
+    ]) {
+      await expectError(
+        await send(route, mailbox.id, { ...valid, attachments }),
+        422,
+        'COMMON.VALIDATION_FAILED'
+      );
+    }
+  });
+
+  it('forwards an attachment download as opaque bytes from the API', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockResolvedValueOnce(
+      new Response(new Uint8Array([0, 1, 2, 255]), {
+        headers: {
+          'content-type': 'text/html',
+          'content-disposition': "attachment; filename*=utf-8''a.pdf",
+        },
+      })
+    );
+    const route = await loadRoute();
+
+    const response = await route.downloadMailAttachmentRoute(
+      request('/api/mailboxes/12/messages/34/attachments/56'),
+      '12',
+      '34',
+      '56'
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([0, 1, 2, 255]));
+    expect(response.headers.get('content-type')).toBe('application/octet-stream');
+    expect(response.headers.get('content-disposition')).toBe("attachment; filename*=utf-8''a.pdf");
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toBe('https://api.example.com/v1/mailboxes/12/messages/34/attachments/56');
+    expect(new Headers(init?.headers).get('organization-id')).toBe('1');
+
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { code: 404, error_code: 'MAILBOX.MESSAGE_NOT_FOUND', message: 'missing' },
+        { status: 404 }
+      )
+    );
+    await expectError(
+      await route.downloadMailAttachmentRoute(
+        request('/api/mailboxes/12/messages/34/attachments/57'),
+        '12',
+        '34',
+        '57'
+      ),
+      404,
+      'MAILBOX.MESSAGE_NOT_FOUND'
+    );
+  });
+
   it('forwards only the fixed production paths, methods, and whitelisted query', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
@@ -1334,4 +1499,8 @@ function request(
 
 function mockUser(id: string) {
   return { id, email: `${id}@example.com`, name: id };
+}
+
+function base64(value: string): string {
+  return Buffer.from(value).toString('base64');
 }

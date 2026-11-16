@@ -497,6 +497,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mailboxes/{mailbox_id}/messages/{message_id}/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download one attached file
+         * @description The file is always served as an opaque download; its declared media type is in the message detail and is never used as the response type.
+         */
+        get: operations["downloadMailAttachment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/notification-preferences": {
         parameters: {
             query?: never;
@@ -1953,6 +1973,22 @@ export interface components {
             address: string;
             name: string;
         };
+        MailAttachment: {
+            /** @description Media type the sender declared. It is untrusted and never used to serve the file. */
+            content_type: string;
+            /** @description Bare file name without a path. */
+            filename: string;
+            id: components["schemas"]["PositiveID"];
+            /** @description Size in bytes. */
+            size: number;
+        };
+        MailAttachmentInput: {
+            /** @description The file as standard base64. All files of a message decode to at most 4 MiB. */
+            content: string;
+            /** @description Media type; `application/octet-stream` when absent or unusable. */
+            content_type?: string;
+            filename: string;
+        };
         Mailbox: {
             address: string;
             /** Format: date-time */
@@ -2042,6 +2078,8 @@ export interface components {
          */
         MailEventType: "accepted" | "delivered" | "deferred" | "bounced" | "failed" | "rejected" | "complained";
         MailLogEntry: {
+            /** @description How many files the message has; the detail lists them. */
+            attachment_count: number;
             cc: string[];
             /** Format: date-time */
             created_at: string;
@@ -2067,6 +2105,10 @@ export interface components {
             meta: components["schemas"]["PaginationMeta"];
         };
         MailMessage: {
+            /** @description How many files the message has; the detail lists them. */
+            attachment_count: number;
+            /** @description The files of the message, without their content. */
+            attachments: components["schemas"]["MailAttachment"][];
             cc: string[];
             /** Format: date-time */
             created_at: string;
@@ -2104,6 +2146,8 @@ export interface components {
             message: string;
         };
         MailMessageSummary: {
+            /** @description How many files the message has; the detail lists them. */
+            attachment_count: number;
             cc: string[];
             /** Format: date-time */
             created_at: string;
@@ -2583,6 +2627,8 @@ export interface components {
         /** Format: int64 */
         PositiveID: number;
         SendMailMessageRequest: {
+            /** @description Optional files to send with the message. */
+            attachments?: components["schemas"]["MailAttachmentInput"][];
             cc?: string[];
             html?: string;
             /** @description Message-ID of the message this one answers, with or without angle brackets. */
@@ -2593,6 +2639,8 @@ export interface components {
             to: string[];
         };
         SendOutboundMailMessageRequest: {
+            /** @description Optional files to send with the message. */
+            attachments?: components["schemas"]["MailAttachmentInput"][];
             cc?: string[];
             /** @description The address of a mailbox of the organization. */
             from: string;
@@ -3237,6 +3285,8 @@ export interface components {
         CSRFToken: string;
         /** @description Entity tag of the version the caller read; required for optimistic concurrency. */
         IfMatch: string;
+        /** @description Positive mail attachment identifier. */
+        MailAttachmentID: components["schemas"]["PositiveID"];
         /** @description Positive mailbox identifier. */
         MailboxID: components["schemas"]["PositiveID"];
         /** @description Names this send within its mailbox. A repeat with the same key and the same content returns the first attempt's outcome and does not call the provider again. */
@@ -4565,6 +4615,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    downloadMailAttachment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail attachment identifier. */
+                attachment_id: components["parameters"]["MailAttachmentID"];
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail message identifier. */
+                message_id: components["parameters"]["MailMessageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file bytes. */
+            200: {
+                headers: {
+                    /** @description Always `private, no-store`. */
+                    "Cache-Control"?: "private, no-store";
+                    /** @description `attachment` with the stored file name. */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];

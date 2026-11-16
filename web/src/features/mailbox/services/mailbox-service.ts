@@ -15,6 +15,7 @@ import {
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
+  MailAttachment,
   MailDayStats,
   MailDirection,
   MailLogFilters,
@@ -163,6 +164,43 @@ export const mailboxService = {
       headers: organizationHeaders(organizationId),
     });
     return parseMailMessage(value, messageId);
+  },
+
+  /**
+   * Downloads one attached file and hands it to the browser as a file to save. The request
+   * carries the organization header, so a plain link cannot be used. The bytes are never shown
+   * in the page: the browser only saves them.
+   */
+  async downloadAttachment(
+    organizationId: number,
+    mailboxId: number,
+    messageId: number,
+    attachment: MailAttachment
+  ): Promise<void> {
+    validId(mailboxId);
+    validId(messageId);
+    validId(attachment.id);
+    const value = await request.get<unknown>(
+      `/mailboxes/${mailboxId}/messages/${messageId}/attachments/${attachment.id}`,
+      {
+        headers: organizationHeaders(organizationId),
+        responseType: 'blob',
+      }
+    );
+    if (!(value instanceof Blob) || value.size !== attachment.size) throw invalidResponse();
+    // A neutral type keeps the browser from opening the file in place.
+    const file = new Blob([value], { type: 'application/octet-stream' });
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = attachment.filename;
+      anchor.rel = 'noopener noreferrer';
+      anchor.click();
+    } finally {
+      // Revoke after the click has been handled, so the download can start.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    }
   },
 
   /**

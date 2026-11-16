@@ -2,11 +2,13 @@ import 'server-only';
 
 import {
   MAILBOX_MAX_PER_ORGANIZATION,
+  attachmentsWithinLimits,
   normalizeDisplayName,
   normalizeLocalPart,
   normalizeMailMessage,
 } from '@/features/mailbox/schemas';
 import type {
+  MailAttachment,
   MailDayStats,
   MailDirection,
   MailEvent,
@@ -18,6 +20,7 @@ import type {
   MailMessageSummary,
   Mailbox,
   MailboxDomain,
+  SendMailMessageInput,
 } from '@/features/mailbox/types';
 
 /**
@@ -40,6 +43,8 @@ const maxMockMessagesPerMailbox = 500;
 interface MailboxState {
   mailbox: Mailbox;
   messages: Map<number, MailMessage>;
+  /** File content by message, then by attachment id. */
+  files: Map<number, Map<number, { filename: string; content: Uint8Array }>>;
 }
 
 export type MockMailboxCreateResult =
@@ -51,6 +56,10 @@ export type MockMailMessageResult =
 export type MockMailSendResult =
   { ok: true; message: MailMessage } | { ok: false; error: 'mailbox_not_found' | 'invalid' };
 
+export type MockMailAttachmentResult =
+  | { ok: true; filename: string; content: Uint8Array }
+  | { ok: false; error: 'mailbox_not_found' | 'not_found' };
+
 export type MockMailDeleteResult =
   { ok: true } | { ok: false; error: 'mailbox_not_found' | 'not_found' };
 
@@ -61,6 +70,7 @@ interface MockMailboxStoreDependencies {
 export class MockMailboxStore {
   private nextMailboxId = 1;
   private nextMessageId = 1;
+  private nextAttachmentId = 1;
   private organizations = new Map<number, Map<number, MailboxState>>();
   /** Every address that is or ever was a mailbox, across all organizations. */
   private claimedAddresses = new Set<string>();
@@ -113,7 +123,7 @@ export class MockMailboxStore {
       unread_count: 0,
       created_at: this.timestamp(),
     };
-    const state: MailboxState = { mailbox, messages: new Map() };
+    const state: MailboxState = { mailbox, messages: new Map(), files: new Map() };
     mailboxes.set(mailbox.id, state);
     this.claimedAddresses.add(address);
     this.store(state, this.welcomeMessage(mailbox));
@@ -229,21 +239,51 @@ export class MockMailboxStore {
   ): MockMailDeleteResult {
     const state = this.mailboxesOf(organizationId).get(mailboxId);
     if (!state) return { ok: false, error: 'mailbox_not_found' };
+    state.files.delete(messageId);
     return state.messages.delete(messageId) ? { ok: true } : { ok: false, error: 'not_found' };
+  }
+
+  attachment(
+    organizationId: number,
+    mailboxId: number,
+    messageId: number,
+    attachmentId: number
+  ): MockMailAttachmentResult {
+    const state = this.mailboxesOf(organizationId).get(mailboxId);
+    if (!state) return { ok: false, error: 'mailbox_not_found' };
+    const file = state.files.get(messageId)?.get(attachmentId);
+    return file ? { ok: true, ...file } : { ok: false, error: 'not_found' };
   }
 
   /** Validates like the API and stores the message as `sent`; the mock has no provider. */
   send(
     organizationId: number,
     mailboxId: number,
-    draft: Parameters<typeof normalizeMailMessage>[0]
+    draft: Parameters<typeof normalizeMailMessage>[0] & Pick<SendMailMessageInput, 'attachments'>
   ): MockMailSendResult {
     const state = this.mailboxesOf(organizationId).get(mailboxId);
     if (!state) return { ok: false, error: 'mailbox_not_found' };
     const normalized = normalizeMailMessage(draft);
     if (!normalized) return { ok: false, error: 'invalid' };
+    const drafts = draft.attachments ?? [];
+    if (!attachmentsWithinLimits(drafts)) return { ok: false, error: 'invalid' };
 
     const id = this.nextMessageId++;
+    const files = new Map<number, { filename: string; content: Uint8Array }>();
+    const attachments = drafts.map((file): MailAttachment => {
+      const attachmentId = this.nextAttachmentId++;
+      const content = Uint8Array.from(Buffer.from(file.content, 'base64'));
+      const filename = file.filename.replaceAll('\\', '/').split('/').pop()?.trim() ?? '';
+      files.set(attachmentId, { filename, content });
+      return {
+        id: attachmentId,
+        filename,
+        content_type: /^[\w.+-]+\/[\w.+-]+$/u.test(file.content_type ?? '')
+          ? (file.content_type as string)
+          : 'application/octet-stream',
+        size: content.byteLength,
+      };
+    });
     const sentAt = this.timestamp();
     // As the API's send call does: one message-level `accepted`, then what the provider
     // reported for each recipient. The mock's provider delivers to everyone at once.
@@ -269,14 +309,17 @@ export class MockMailboxStore {
       read: true,
       failure_code: '',
       last_event: 'delivered',
+      attachment_count: attachments.length,
       created_at: sentAt,
       text_body: normalized.text,
       html_body: normalized.html,
       message_id: `mock-${id}@${MOCK_MAILBOX_DOMAIN}`,
       in_reply_to: normalized.in_reply_to,
       events,
+      attachments,
     };
     this.store(state, message);
+    if (files.size > 0) state.files.set(id, files);
     return { ok: true, message };
   }
 
@@ -284,6 +327,7 @@ export class MockMailboxStore {
   reset(): void {
     this.nextMailboxId = 1;
     this.nextMessageId = 1;
+    this.nextAttachmentId = 1;
     this.organizations.clear();
     this.claimedAddresses.clear();
   }
@@ -291,7 +335,10 @@ export class MockMailboxStore {
   private store(state: MailboxState, message: MailMessage): void {
     if (state.messages.size >= maxMockMessagesPerMailbox) {
       const oldest = state.messages.keys().next().value;
-      if (oldest !== undefined) state.messages.delete(oldest);
+      if (oldest !== undefined) {
+        state.messages.delete(oldest);
+        state.files.delete(oldest);
+      }
     }
     state.messages.set(message.id, message);
   }
@@ -311,6 +358,7 @@ export class MockMailboxStore {
       read: false,
       failure_code: '',
       last_event: '',
+      attachment_count: 0,
       created_at: this.timestamp(),
       text_body:
         'This message was created by the development mock. No mail is sent or received until the app uses the real API.',
@@ -319,6 +367,7 @@ export class MockMailboxStore {
       message_id: `mock-${id}@${MOCK_MAILBOX_DOMAIN}`,
       in_reply_to: '',
       events: [],
+      attachments: [],
     };
   }
 
@@ -354,6 +403,7 @@ function summaryOf(message: MailMessage): MailMessageSummary {
     read: message.read,
     failure_code: message.failure_code,
     last_event: message.last_event,
+    attachment_count: message.attachment_count,
     created_at: message.created_at,
   };
 }

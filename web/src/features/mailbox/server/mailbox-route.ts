@@ -21,6 +21,10 @@ import {
   MAILBOX_DISPLAY_NAME_MAX_LENGTH,
   MAILBOX_LOCAL_PART_MAX_LENGTH,
   MAIL_ADDRESS_MAX_LENGTH,
+  MAIL_ATTACHMENTS_MAX_BYTES,
+  MAIL_ATTACHMENT_NAME_MAX_LENGTH,
+  MAIL_ATTACHMENT_TYPE_MAX_LENGTH,
+  MAIL_MAX_ATTACHMENTS,
   MAIL_BODY_MAX_BYTES,
   MAIL_LOG_QUERY_MAX_LENGTH,
   MAIL_MAX_RECIPIENTS,
@@ -84,8 +88,10 @@ const routeIdPattern = /^[1-9]\d{0,15}$/u;
 const defaultPerPage = 15;
 const maxMailboxBodyBytes = 8 * 1_024;
 const maxReadStateBodyBytes = 1_024;
-// Two 256 KiB bodies; JSON escaping needs headroom.
-const maxSendBodyBytes = 1_024 * 1_024;
+// Two 256 KiB bodies and 4 MiB of files as base64; JSON escaping needs headroom.
+const maxSendBodyBytes = 8 * 1_024 * 1_024;
+// The largest download the API can answer, with room for nothing else.
+const maxAttachmentDownloadBytes = MAIL_ATTACHMENTS_MAX_BYTES;
 
 export function resolveMailboxRoute(
   environment: MailboxRouteEnvironment = currentEnvironment()
@@ -309,6 +315,7 @@ export async function sendMailMessageRoute(
         text: 'text',
         html: 'html',
         in_reply_to: 'in_reply_to',
+        attachments: 'attachments',
       },
     });
   }
@@ -343,6 +350,55 @@ export async function getMailMessageRoute(
     ids.value.messageId
   );
   return result.ok ? success(result.message) : missing(result.error);
+}
+
+export async function downloadMailAttachmentRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawMessageId: string,
+  rawAttachmentId: string
+): Promise<Response> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawMessageId);
+  if (!ids.ok) return ids.response;
+  const attachmentId = parseRouteId(rawAttachmentId);
+  if (!attachmentId.ok) return attachmentId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${ids.value.mailboxId}/messages/${ids.value.messageId}/attachments/${attachmentId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      responseType: 'binary',
+      maxResponseBytes: maxAttachmentDownloadBytes,
+    });
+  }
+  const result = mockMailboxStore.attachment(
+    target.organizationId,
+    ids.value.mailboxId,
+    ids.value.messageId,
+    attachmentId.value
+  );
+  if (!result.ok) return missing(result.error);
+  return new Response(new Uint8Array(result.content), {
+    status: 200,
+    headers: attachmentHeaders(result.filename),
+  });
+}
+
+/** Every file is an opaque download: the declared type is never served. */
+function attachmentHeaders(filename: string): Headers {
+  const headers = privateMailboxHeaders();
+  headers.set('content-type', 'application/octet-stream');
+  headers.set('x-content-type-options', 'nosniff');
+  headers.set('content-security-policy', "default-src 'none'; sandbox");
+  headers.set(
+    'content-disposition',
+    `attachment; filename*=utf-8''${encodeURIComponent(filename)}`
+  );
+  return headers;
 }
 
 export async function updateMailMessageRoute(
@@ -531,7 +587,7 @@ async function mailboxBody(request: Request): Promise<Parsed<CreateMailboxInput>
 async function sendBody(request: Request): Promise<Parsed<SendMailMessageInput>> {
   const body = await jsonObject(request, maxSendBodyBytes);
   if (!body.ok) return body;
-  const { to, cc, subject, text, html, in_reply_to: inReplyTo } = body.value;
+  const { to, cc, subject, text, html, in_reply_to: inReplyTo, attachments } = body.value;
   const errors: Record<string, string[]> = {};
   if (!addressList(to) || to.length === 0) errors.to = ['The to field is invalid'];
   if (cc !== undefined && !addressList(cc)) errors.cc = ['The cc field is invalid'];
@@ -547,6 +603,9 @@ async function sendBody(request: Request): Promise<Parsed<SendMailMessageInput>>
   if (inReplyTo !== undefined && !boundedString(inReplyTo, MAIL_MESSAGE_ID_MAX_LENGTH)) {
     errors.in_reply_to = ['The in_reply_to field is invalid'];
   }
+  if (attachments !== undefined && !attachmentList(attachments)) {
+    errors.attachments = ['The attachments field is invalid'];
+  }
   if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
   return {
     ok: true,
@@ -557,8 +616,37 @@ async function sendBody(request: Request): Promise<Parsed<SendMailMessageInput>>
       ...(typeof text === 'string' ? { text } : {}),
       ...(typeof html === 'string' ? { html } : {}),
       ...(typeof inReplyTo === 'string' ? { in_reply_to: inReplyTo } : {}),
+      ...(attachmentList(attachments) ? { attachments } : {}),
     },
   };
+}
+
+type AttachmentInput = NonNullable<SendMailMessageInput['attachments']>[number];
+
+/** Shape checks only; names, base64, and the total size are judged by the API or the mock. */
+function attachmentList(value: unknown): value is AttachmentInput[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAIL_MAX_ATTACHMENTS &&
+    value.every(item => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) return false;
+      const {
+        filename,
+        content_type: contentType,
+        content,
+        ...rest
+      } = item as Record<string, unknown>;
+      return (
+        Object.keys(rest).length === 0 &&
+        boundedString(filename, MAIL_ATTACHMENT_NAME_MAX_LENGTH) &&
+        filename !== '' &&
+        (contentType === undefined ||
+          boundedString(contentType, MAIL_ATTACHMENT_TYPE_MAX_LENGTH)) &&
+        boundedString(content, maxSendBodyBytes) &&
+        content !== ''
+      );
+    })
+  );
 }
 
 async function readStateBody(request: Request): Promise<Parsed<{ read: boolean }>> {
