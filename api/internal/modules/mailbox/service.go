@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -152,10 +153,14 @@ type service struct {
 	// domains and domainProvider serve organization domains; nil when a test does not need them.
 	domains        domain.MailDomainRepository
 	domainProvider mailtransport.DomainProvider
-	transport      mailtransport.Transport
-	notifier       mailNotifier
-	settings       Settings
-	now            func() time.Time
+	// domainSetups holds the IDs of domains whose setup runs in the background.
+	domainSetups sync.Map
+	// background runs domain setups off the request path; tests make it synchronous.
+	background func(func())
+	transport  mailtransport.Transport
+	notifier   mailNotifier
+	settings   Settings
+	now        func() time.Time
 }
 
 var _ Service = (*service)(nil)
@@ -175,6 +180,7 @@ func NewService(
 	return &service{
 		repo: repo, templates: templates, contacts: contacts, broadcasts: broadcasts, domains: domains,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
+		background: func(run func()) { go run() },
 	}
 }
 

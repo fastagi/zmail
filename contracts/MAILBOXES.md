@@ -131,8 +131,11 @@ shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DI
   SPF records), enables Email Sending for it, adds each sending record Cloudflare lists that the
   zone lacks, and adds `_dmarc.<domain>` with `v=DMARC1; p=none` when the domain has no DMARC
   record. It never edits or deletes a record and never changes a zone's catch-all rule.
-- A setup step the provider refuses does not fail the call: the domain is answered `pending` with
-  `last_error`, and `POST /v1/mail-domains/:domain_id/setups` runs every step again safely. A failed
+- The setup runs in the background, because it makes several provider calls that can outlast the
+  request: connecting answers at once with the domain `pending` and `setting_up` true, and clients
+  read the domain again until `setting_up` is false. A step the provider refuses leaves the domain
+  `pending` with `last_error`, and `POST /v1/mail-domains/:domain_id/setups` starts every step again
+  safely. One setup runs per domain at a time; a check while it runs returns the domain unchanged. A failed
   zone lookup while connecting is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`.
 - `POST /v1/mail-domains/:domain_id/checks` reads the zone and reports each required record with
   `purpose` (`receiving`, `sending`, `dmarc`), `type`, `name`, `content`, optional `priority`, and

@@ -50,6 +50,7 @@ const messages = {
 
   // Links
   noAccount: "Don't have an account?",
+  inviteOnly: 'No account yet? Ask an organization admin to invite you.',
   hasAccount: 'Already have an account?',
   rememberMe: 'Remember me',
 
@@ -58,7 +59,6 @@ const messages = {
   termsOfService: 'Terms of Service',
   and: 'and',
   privacyPolicy: 'Privacy Policy',
-  orContinueWith: 'Or continue with',
 
   // Password requirements
   passwordRequirements: 'Password requirements',
@@ -68,12 +68,13 @@ const messages = {
   passwordReqSpecial: 'Contains at least one special character',
 
   // Decorative panel
-  heroTitle: 'Build Amazing Products',
-  heroSubtitle: 'The modern web scaffold for fast, reliable product delivery',
-  feature1: 'Lightning-fast development',
-  feature2: 'Enterprise-grade security',
-  feature3: 'Scalable architecture',
-  feature4: '24/7 global support',
+  heroTitle: 'Mail for your whole team',
+  heroSubtitle:
+    'Send and receive on your own domains, broadcast product updates to your contacts, and see how every message lands',
+  feature1: 'Several custom domains',
+  feature2: 'Staged broadcasts with automatic pauses',
+  feature3: 'Templates and contact lists',
+  feature4: 'Organizations and member roles',
 
   // Validation messages
   nameRequired: 'Name is required',

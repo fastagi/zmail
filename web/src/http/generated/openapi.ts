@@ -601,7 +601,7 @@ export interface paths {
         put?: never;
         /**
          * Connect a domain and set it up
-         * @description The domain must be a zone, or a subdomain of a zone, that the instance's Cloudflare token can manage. Zmail enables Email Routing and Email Sending for it and adds the sending and DMARC records the zone lacks; it never edits or deletes existing records. A provider failure during setup still answers `201` with the domain pending and `last_error` set. Only owners and admins may.
+         * @description The domain must be a zone, or a subdomain of a zone, that the instance's Cloudflare token can manage. Zmail enables Email Routing and Email Sending for it and adds the sending and DMARC records the zone lacks; it never edits or deletes existing records. The setup runs in the background, so the answer is `201` at once with the domain pending and `setting_up` true, and a failed step later shows in `last_error`. Only owners and admins may.
          */
         post: operations["connectMailDomain"];
         delete?: never;
@@ -662,7 +662,7 @@ export interface paths {
         put?: never;
         /**
          * Run the domain setup again
-         * @description Safe to repeat. Adds only what is missing, then checks. Only owners and admins may.
+         * @description Safe to repeat. Starts the setup in the background, unless one is running, and answers at once with `setting_up` true. Adds only what is missing, then checks. Only owners and admins may.
          */
         post: operations["setUpMailDomain"];
         delete?: never;
@@ -2688,6 +2688,8 @@ export interface components {
             last_error?: string;
             name: string;
             records: components["schemas"]["MailDomainRecord"][];
+            /** @description A setup is running in the background. The domain changes when it finishes; read it again until this is false. */
+            setting_up: boolean;
             /**
              * @description `verified` when the last check found every record; mailboxes can be created only then.
              * @enum {string}
@@ -5998,7 +6000,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The domain after the setup and check; `last_error` explains a step that failed. */
+            /** @description The domain as it is now, with `setting_up` true while the setup runs. */
             200: {
                 headers: {
                     [name: string]: unknown;

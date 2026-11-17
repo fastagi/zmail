@@ -75,6 +75,17 @@ describe('auth form error feedback', () => {
     expect(screen.queryByText('Use the preset login')).not.toBeInTheDocument();
   });
 
+  it('offers sign-up only while registration is open and never a dead provider button', () => {
+    const { unmount } = renderWithMessages(<LoginForm />);
+    expect(screen.getByRole('link', { name: 'Sign Up' })).toHaveAttribute('href', '/register');
+    expect(screen.queryByRole('button', { name: 'GitHub' })).toBeNull();
+    unmount();
+
+    renderWithMessages(<LoginForm registrationEnabled={false} />);
+    expect(screen.queryByRole('link', { name: 'Sign Up' })).toBeNull();
+    expect(screen.getByText(/Ask an organization admin to invite you/u)).toBeInTheDocument();
+  });
+
   it('shows and prefills credentials only when the server enables the mock preset', () => {
     renderWithMessages(
       <LoginForm

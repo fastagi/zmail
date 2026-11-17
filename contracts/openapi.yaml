@@ -3453,8 +3453,9 @@ paths:
       summary: Connect a domain and set it up
       description: The domain must be a zone, or a subdomain of a zone, that the instance's Cloudflare token
         can manage. Zmail enables Email Routing and Email Sending for it and adds the sending and DMARC
-        records the zone lacks; it never edits or deletes existing records. A provider failure during setup
-        still answers `201` with the domain pending and `last_error` set. Only owners and admins may.
+        records the zone lacks; it never edits or deletes existing records. The setup runs in the background, so
+        the answer is `201` at once with the domain pending and `setting_up` true, and a failed step later shows
+        in `last_error`. Only owners and admins may.
       tags:
         - Mailboxes
       security:
@@ -3567,7 +3568,8 @@ paths:
     post:
       operationId: setUpMailDomain
       summary: Run the domain setup again
-      description: Safe to repeat. Adds only what is missing, then checks. Only owners and admins may.
+      description: Safe to repeat. Starts the setup in the background, unless one is running, and answers at
+        once with `setting_up` true. Adds only what is missing, then checks. Only owners and admins may.
       tags:
         - Mailboxes
       security:
@@ -3577,7 +3579,7 @@ paths:
         - $ref: '#/components/parameters/MailDomainID'
       responses:
         '200':
-          description: The domain after the setup and check; `last_error` explains a step that failed.
+          description: The domain as it is now, with `setting_up` true while the setup runs.
           content:
             application/json:
               schema:
@@ -9572,6 +9574,7 @@ components:
         - zone_name
         - status
         - records
+        - setting_up
         - checked_at
         - verified_at
         - created_at
@@ -9596,6 +9599,10 @@ components:
           maxItems: 50
           items:
             $ref: '#/components/schemas/MailDomainRecord'
+        setting_up:
+          type: boolean
+          description: A setup is running in the background. The domain changes when it finishes; read it again
+            until this is false.
         last_error:
           type: string
           description: The provider's explanation of the last failed setup step, while the domain is pending.

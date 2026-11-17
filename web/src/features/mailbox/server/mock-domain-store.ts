@@ -83,6 +83,7 @@ export class MockDomainStore {
       status: 'pending',
       // Sending records are still propagating right after the setup.
       records: requiredRecords(name, false),
+      setting_up: false,
       checked_at: now,
       verified_at: null,
       created_at: now,

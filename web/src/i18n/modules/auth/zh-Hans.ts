@@ -52,6 +52,7 @@ const messages = {
 
   // Links
   noAccount: '没有账号？',
+  inviteOnly: '没有账号？请联系组织管理员邀请你加入。',
   hasAccount: '已有账号？',
   rememberMe: '记住我',
 
@@ -60,7 +61,6 @@ const messages = {
   termsOfService: '服务条款',
   and: '和',
   privacyPolicy: '隐私政策',
-  orContinueWith: '或通过以下方式继续',
 
   // Password requirements
   passwordRequirements: '密码要求',
@@ -70,12 +70,12 @@ const messages = {
   passwordReqSpecial: '包含至少一个特殊字符',
 
   // Decorative panel
-  heroTitle: '构建卓越产品',
-  heroSubtitle: '现代化Web脚手架，助力快速可靠的产品交付',
-  feature1: '极速开发体验',
-  feature2: '企业级安全保障',
-  feature3: '可扩展架构',
-  feature4: '全天候技术支持',
+  heroTitle: '团队的邮件中心',
+  heroSubtitle: '用自己的域名收发邮件，向联系人群发产品更新，送达情况一目了然',
+  feature1: '绑定多个自有域名',
+  feature2: '分批群发与自动暂停保护',
+  feature3: '模版与联系人管理',
+  feature4: '多组织与成员权限',
 
   // Validation messages
   nameRequired: '请输入姓名',

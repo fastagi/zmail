@@ -8,6 +8,21 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **A Zmail console home and login page.** The console opens on the mail areas (emails,
+  broadcasts, contacts, templates, mailboxes, domain) and a getting-started checklist. The login
+  page describes Zmail, drops the inactive GitHub button, and replaces sign-up with an invitation
+  hint when the web runs with `AUTH_REGISTRATION_ENABLED=false`; `/register` then redirects to
+  `/login`.
+
+### Fixed
+
+- **Connecting a domain no longer times out in the console.** Cloudflare setup runs in the
+  background: `POST /v1/mail-domains` and `/setups` return at once with `setting_up: true`, and the
+  console reads the domain again every 3 seconds until the records appear. Before, the console's
+  5-second upstream timeout cancelled the setup halfway.
+
+### Added (earlier)
+
 - **System mail through Cloudflare, and password reset in the console.** `MAIL_PROVIDER=cloudflare`
   sends password resets, invitations, and notifications through Cloudflare Email Sending, reusing
   the mailbox credentials. The console gains a forgot-password page (`/forgot-password`) backed by

@@ -1,5 +1,17 @@
 import Link from 'next/link';
-import { Activity, ArrowUpRight, Code2, KeyRound, Rocket } from 'lucide-react';
+import {
+  Activity,
+  ArrowUpRight,
+  Code2,
+  FileText,
+  Globe,
+  Inbox,
+  KeyRound,
+  Mail,
+  Megaphone,
+  Rocket,
+  Users,
+} from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,11 +23,8 @@ import { getT } from '@/i18n/server';
 import { GreetingClock } from './_components/greeting-clock';
 
 /**
- * Console home (RSC).
- *
- * Default landing for authenticated users. Kept deliberately minimal —
- * this is a scaffold example, not a product. Replace with your real
- * domain UI.
+ * Console home (RSC): the Zmail areas a member works in, and the order a new
+ * organization sets them up in.
  *
  * Pattern: page is a Server Component; the only client island is
  * `GreetingClock` which re-renders the wall-clock every minute.
@@ -24,6 +33,42 @@ export default async function ConsoleHomePage() {
   const [user, t] = await Promise.all([getSessionUser(), getT('console')]);
 
   const quickLinks = [
+    {
+      title: t('home.quickLinks.emails.title'),
+      description: t('home.quickLinks.emails.description'),
+      href: ROUTES.CONSOLE.EMAILS,
+      icon: Inbox,
+    },
+    {
+      title: t('home.quickLinks.broadcasts.title'),
+      description: t('home.quickLinks.broadcasts.description'),
+      href: ROUTES.CONSOLE.MAIL_BROADCASTS,
+      icon: Megaphone,
+    },
+    {
+      title: t('home.quickLinks.contacts.title'),
+      description: t('home.quickLinks.contacts.description'),
+      href: ROUTES.CONSOLE.MAIL_CONTACTS,
+      icon: Users,
+    },
+    {
+      title: t('home.quickLinks.templates.title'),
+      description: t('home.quickLinks.templates.description'),
+      href: ROUTES.CONSOLE.MAIL_TEMPLATES,
+      icon: FileText,
+    },
+    {
+      title: t('home.quickLinks.mailboxes.title'),
+      description: t('home.quickLinks.mailboxes.description'),
+      href: ROUTES.CONSOLE.MAILBOXES,
+      icon: Mail,
+    },
+    {
+      title: t('home.quickLinks.domain.title'),
+      description: t('home.quickLinks.domain.description'),
+      href: ROUTES.CONSOLE.MAIL_DOMAIN,
+      icon: Globe,
+    },
     {
       title: t('home.quickLinks.apiAccess.title'),
       description: t('home.quickLinks.apiAccess.description'),
@@ -93,31 +138,49 @@ export default async function ConsoleHomePage() {
             <Rocket className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-base font-semibold">{t('home.nextSteps')}</h2>
-            <ul className="mt-2 space-y-1 text-sm text-text-muted">
-              <li>
-                {t('home.steps.apiBefore')}{' '}
-                <code className="font-mono text-xs">NEXT_PUBLIC_API_URL</code>{' '}
-                {t('home.steps.apiAfter')}
-              </li>
-              <li>
-                {t('home.steps.replaceBefore')}
-                <code className="font-mono text-xs">
-                  src/app/(protected)/(console)/console/page.tsx
-                </code>
-                {t('home.steps.replaceAfter')}
-              </li>
-              <li>
-                {t('home.steps.featuresBefore')}{' '}
-                <code className="font-mono text-xs">src/features/</code>{' '}
-                {t('home.steps.featuresBetween')}{' '}
-                <code className="font-mono text-xs">(protected)/(console)/</code>
-                {t('home.steps.featuresAfter')}
-              </li>
-            </ul>
+            <h2 className="text-base font-semibold">{t('home.gettingStartedTitle')}</h2>
+            <ol className="mt-2 list-decimal space-y-1 pl-4 text-sm text-text-muted">
+              {(['domain', 'mailbox', 'contacts', 'template', 'broadcast'] as const).map(step => (
+                <li key={step}>{t(`home.gettingStarted.${step}`)}</li>
+              ))}
+            </ol>
           </div>
         </div>
       </section>
+
+      {isDevtoolsEnabled() ? (
+        <section className="mt-10 rounded-xl border bg-bg-surface p-6">
+          <div className="flex items-start gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Rocket className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold">{t('home.developerStepsTitle')}</h2>
+              <ul className="mt-2 space-y-1 text-sm text-text-muted">
+                <li>
+                  {t('home.developerSteps.apiBefore')}{' '}
+                  <code className="font-mono text-xs">NEXT_PUBLIC_API_URL</code>{' '}
+                  {t('home.developerSteps.apiAfter')}
+                </li>
+                <li>
+                  {t('home.developerSteps.replaceBefore')}
+                  <code className="font-mono text-xs">
+                    src/app/(protected)/(console)/console/page.tsx
+                  </code>
+                  {t('home.developerSteps.replaceAfter')}
+                </li>
+                <li>
+                  {t('home.developerSteps.featuresBefore')}{' '}
+                  <code className="font-mono text-xs">src/features/</code>{' '}
+                  {t('home.developerSteps.featuresBetween')}{' '}
+                  <code className="font-mono text-xs">(protected)/(console)/</code>
+                  {t('home.developerSteps.featuresAfter')}
+                </li>
+              </ul>
+            </div>
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

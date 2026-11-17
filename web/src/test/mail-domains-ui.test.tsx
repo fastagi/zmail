@@ -101,6 +101,30 @@ describe('organization mail domains', () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Domain verified'));
   });
 
+  it('shows a domain whose setup still runs and holds its actions', async () => {
+    state.connect.mutateAsync.mockResolvedValue({
+      ...pendingDomain(),
+      records: [],
+      setting_up: true,
+    });
+    state.mailDomains.data = [{ ...pendingDomain(), records: [], setting_up: true }];
+    renderPage();
+
+    const card = screen.getByRole('article', { name: 'news.example.org' });
+    expect(within(card).getByTestId('mail-domain-status')).toHaveTextContent('Setting up');
+    expect(within(card).getByRole('status')).toHaveTextContent(
+      /setting up receiving, sending, and DMARC/u
+    );
+    expect(within(card).queryByRole('table')).toBeNull();
+    expect(within(card).getByRole('button', { name: 'Check DNS' })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'example.org' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith('Setting up the domain in Cloudflare')
+    );
+  });
+
   it('shows why a connection was refused', async () => {
     state.connect.mutateAsync.mockRejectedValue(
       new ApiError('zone', ApiErrorCode.MAILBOX_DOMAIN_ZONE_NOT_FOUND)
@@ -110,10 +134,9 @@ describe('organization mail domains', () => {
     fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'elsewhere.test' } });
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 
-    expect(await screen.findByText(/cannot reach a zone that contains this domain/u)).toHaveAttribute(
-      'role',
-      'alert'
-    );
+    expect(
+      await screen.findByText(/cannot reach a zone that contains this domain/u)
+    ).toHaveAttribute('role', 'alert');
   });
 
   it('checks a domain and removes it after confirmation', async () => {
@@ -188,6 +211,7 @@ function pendingDomain() {
     name: 'news.example.org',
     zone_name: 'example.org',
     status: 'pending',
+    setting_up: false,
     last_error: 'cloudflare enable email routing failed: Authentication error',
     records: [
       {

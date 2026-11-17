@@ -196,6 +196,10 @@ const messages = {
     connectReadOnly: 'Only owners and admins can connect domains.',
     statusVerified: 'Verified',
     statusPending: 'Pending',
+    statusSettingUp: 'Setting up',
+    settingUpHint:
+      'Zmail is setting up receiving, sending, and DMARC in Cloudflare. This takes up to a minute; the records appear here when it is done.',
+    settingUpToast: 'Setting up the domain in Cloudflare',
     pendingHint:
       'Mailboxes can use this domain once every record is in place. DNS changes can take a few minutes; check again afterwards.',
     lastError: 'The last setup step failed: {error}',
@@ -424,7 +428,7 @@ const messages = {
     statusDraft: 'Draft',
     statusScheduled: 'Scheduled',
     statusSending: 'Sending',
-    statusSent: 'Sent',
+    statusSent: 'Finished',
     statusCanceled: 'Canceled',
     statusPaused: 'Paused',
     fromDomain: 'Sending domain',
@@ -460,6 +464,7 @@ const messages = {
     pausedToast: 'Broadcast paused',
     resumedToast: 'Broadcast resumed',
     progressValue: '{sent} of {total} sent',
+    progressFailed: '{failed} failed',
     scheduledFor: 'Scheduled for {time}',
     startedAt: 'Started {time}',
     finishedAt: 'Finished {time}',

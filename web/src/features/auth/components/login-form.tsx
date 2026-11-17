@@ -25,10 +25,12 @@ interface LoginFormProps {
     email: string;
     password: string;
   };
+  /** False when the API only creates accounts through invitations. */
+  registrationEnabled?: boolean;
 }
 
 /** Login entry point with localized, contract-aware mutation feedback. */
-export function LoginForm({ demoCredentials }: LoginFormProps) {
+export function LoginForm({ demoCredentials, registrationEnabled = true }: LoginFormProps) {
   const t = useT();
   const { mutate: login, isPending, error, reset } = useLogin();
   const [email, setEmail] = useState(demoCredentials?.email ?? '');
@@ -126,30 +128,21 @@ export function LoginForm({ demoCredentials }: LoginFormProps) {
             </p>
           </div>
         )}
-
-        <div className="relative my-6">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-background px-2 text-muted-foreground">
-              {t.auth('orContinueWith')}
-            </span>
-          </div>
-        </div>
-
-        <Button variant="outline" className="w-full" type="button" disabled>
-          GitHub
-        </Button>
       </CardContent>
       <CardFooter className="px-0 flex flex-wrap items-center justify-center gap-1.5 text-sm text-muted-foreground mt-2">
-        {t.auth('noAccount')}
-        <Link
-          href="/register"
-          className="font-medium text-primary hover:underline hover:text-primary-deep transition-colors"
-        >
-          {t.auth('signUp')}
-        </Link>
+        {registrationEnabled ? (
+          <>
+            {t.auth('noAccount')}
+            <Link
+              href={authConfig.routes.register}
+              className="font-medium text-primary hover:underline hover:text-primary-deep transition-colors"
+            >
+              {t.auth('signUp')}
+            </Link>
+          </>
+        ) : (
+          t.auth('inviteOnly')
+        )}
       </CardFooter>
     </Card>
   );

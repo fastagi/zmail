@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
@@ -22,6 +25,9 @@ var (
 // defaultDMARC is added only when a domain has no DMARC record. p=none asks receivers to report,
 // not to reject, so it cannot break mail the domain already sends elsewhere.
 const defaultDMARC = "v=DMARC1; p=none"
+
+// domainSetupTimeout bounds one background setup: a handful of provider calls.
+const domainSetupTimeout = 2 * time.Minute
 
 // MailboxDomain is a domain the organization may create addresses on.
 type MailboxDomain struct {
@@ -63,14 +69,50 @@ func (s *service) ListMailDomains(ctx context.Context, organizationID uint) ([]*
 	if err := s.requireDomains(); err != nil {
 		return nil, err
 	}
-	return s.domains.ListDomains(ctx, organizationID)
+	domains, err := s.domains.ListDomains(ctx, organizationID)
+	for _, mailDomain := range domains {
+		s.markSettingUp(mailDomain)
+	}
+	return domains, err
 }
 
 func (s *service) GetMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error) {
 	if err := s.requireDomains(); err != nil {
 		return nil, err
 	}
-	return s.domains.FindDomain(ctx, organizationID, id)
+	mailDomain, err := s.domains.FindDomain(ctx, organizationID, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.markSettingUp(mailDomain), nil
+}
+
+func (s *service) markSettingUp(mailDomain *domain.MailDomain) *domain.MailDomain {
+	_, mailDomain.SettingUp = s.domainSetups.Load(mailDomain.ID)
+	return mailDomain
+}
+
+// startSetUp runs the setup of a domain in the background, once at a time per domain, and returns
+// the domain as it is now. The setup makes several provider calls, which can outlast the request
+// and the proxies in front of it; a background run is never cut off by a client that stops waiting.
+func (s *service) startSetUp(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
+	if _, running := s.domainSetups.LoadOrStore(mailDomain.ID, struct{}{}); !running {
+		target := *mailDomain
+		s.background(func() {
+			defer s.domainSetups.Delete(target.ID)
+			setupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), domainSetupTimeout)
+			defer cancel()
+			if _, err := s.setUp(setupContext, &target); err != nil {
+				slog.WarnContext(setupContext, "mail domain setup could not be stored",
+					slog.String("domain", target.Name), slog.String("error", err.Error()))
+			}
+		})
+	}
+	current, err := s.domains.FindDomain(ctx, mailDomain.OrganizationID, mailDomain.ID)
+	if err != nil {
+		return nil, err
+	}
+	return s.markSettingUp(current), nil
 }
 
 // normalizeDomainName lowercases a typed domain and rejects what no mailbox may use, including
@@ -117,7 +159,7 @@ func (s *service) ConnectMailDomain(ctx context.Context, organizationID, created
 	if err := s.domains.CreateDomain(ctx, mailDomain, domain.MaxMailDomainsPerOrganization); err != nil {
 		return nil, err
 	}
-	return s.setUp(ctx, mailDomain)
+	return s.startSetUp(ctx, mailDomain)
 }
 
 // providerError maps a provider failure on a step that cannot continue without it.
@@ -144,7 +186,7 @@ func (s *service) SetUpMailDomain(ctx context.Context, organizationID, id uint) 
 	if err != nil {
 		return nil, err
 	}
-	return s.setUp(ctx, mailDomain)
+	return s.startSetUp(ctx, mailDomain)
 }
 
 // CheckMailDomain compares the zone's records with what the domain needs, without writing DNS.
@@ -155,6 +197,10 @@ func (s *service) CheckMailDomain(ctx context.Context, organizationID, id uint) 
 	mailDomain, err := s.domains.FindDomain(ctx, organizationID, id)
 	if err != nil {
 		return nil, err
+	}
+	if _, running := s.domainSetups.Load(id); running {
+		// The running setup checks when it is done; a second check now would race it.
+		return s.markSettingUp(mailDomain), nil
 	}
 	return s.check(ctx, mailDomain, nil)
 }
@@ -281,17 +327,34 @@ func (s *service) evaluate(ctx context.Context, mailDomain *domain.MailDomain) (
 		})
 	}
 
-	existing := map[string][]mailtransport.DNSRecord{}
-	for i := range required {
-		name := strings.ToLower(required[i].Name)
-		if _, ok := existing[name]; !ok {
-			records, err := s.domainProvider.ListRecords(ctx, mailDomain.ZoneID, name)
-			if err != nil {
-				return nil, err
-			}
-			existing[name] = records
+	// Each name is read once, all names at the same time.
+	names := []string{}
+	seen := map[string]bool{}
+	for _, record := range required {
+		name := strings.ToLower(record.Name)
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
 		}
-		required[i] = compareRecord(required[i], existing[name])
+	}
+	found := make([][]mailtransport.DNSRecord, len(names))
+	group, groupContext := errgroup.WithContext(ctx)
+	for i, name := range names {
+		group.Go(func() error {
+			records, err := s.domainProvider.ListRecords(groupContext, mailDomain.ZoneID, name)
+			found[i] = records
+			return err
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+	existing := make(map[string][]mailtransport.DNSRecord, len(names))
+	for i, name := range names {
+		existing[name] = found[i]
+	}
+	for i := range required {
+		required[i] = compareRecord(required[i], existing[strings.ToLower(required[i].Name)])
 	}
 	return required, nil
 }

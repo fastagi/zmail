@@ -26,6 +26,7 @@ const parsed = serverEnvSchema.safeParse({
     'API_CLIENT_IP_HEADER',
     'AUTH_CLIENT_IP_HEADER'
   ),
+  AUTH_REGISTRATION_ENABLED: process.env.AUTH_REGISTRATION_ENABLED,
   MOCK_BFF_ENABLED: process.env.MOCK_BFF_ENABLED,
   SESSION_SECRET: process.env.SESSION_SECRET,
 });

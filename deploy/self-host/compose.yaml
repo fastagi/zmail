@@ -237,6 +237,8 @@ services:
       # Large enough for an attachment download (4 MiB) passing through the console.
       API_UPSTREAM_MAX_RESPONSE_BYTES: "6291456"
       MOCK_BFF_ENABLED: "false"
+      # Same switch as the API: the login page hides sign-up while registration is closed.
+      AUTH_REGISTRATION_ENABLED: ${AUTH_REGISTRATION_ENABLED:-false}
       SESSION_SECRET: ${SESSION_SECRET:?missing in .env}
       TZ: UTC
     <<: *hardening
