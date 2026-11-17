@@ -75,6 +75,8 @@ export const serverEnvSchema = z.object({
   API_CLIENT_IP_HEADER: optionalString(
     z.string().regex(/^[a-z0-9!#$%&'*+.^_`|~-]+$/i).transform((value) => value.toLowerCase())
   ),
+  // Mirrors the API's AUTH_REGISTRATION_ENABLED so the console hides sign-up when it is closed.
+  AUTH_REGISTRATION_ENABLED: booleanEnv.default(true),
   MOCK_BFF_ENABLED: booleanEnv.default(false),
   SESSION_SECRET: optionalString(z.string().min(32)),
 });

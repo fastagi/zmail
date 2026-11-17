@@ -122,7 +122,15 @@ function ConnectDomainForm() {
     try {
       const domain = await connect.mutateAsync(value);
       setName('');
-      toast.success(t(domain.status === 'verified' ? 'domain.verified' : 'domain.connected'));
+      toast.success(
+        t(
+          domain.setting_up
+            ? 'domain.settingUpToast'
+            : domain.status === 'verified'
+              ? 'domain.verified'
+              : 'domain.connected'
+        )
+      );
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
     }
@@ -176,11 +184,13 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
   const verified = domain.status === 'verified';
   const headingId = `mail-domain-${domain.id}`;
 
+  const settingUp = domain.setting_up;
   const run = async (action: 'setups' | 'checks') => {
     setError(null);
     try {
       const result = await refresh.mutateAsync({ domain, action });
-      if (result.status === 'verified') toast.success(t('domain.verified'));
+      if (result.setting_up) toast.message(t('domain.settingUpToast'));
+      else if (result.status === 'verified') toast.success(t('domain.verified'));
       else toast.message(t('domain.stillPending'));
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
@@ -215,7 +225,13 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
             verified ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning'
           )}
         >
-          {t(verified ? 'domain.statusVerified' : 'domain.statusPending')}
+          {t(
+            settingUp
+              ? 'domain.statusSettingUp'
+              : verified
+                ? 'domain.statusVerified'
+                : 'domain.statusPending'
+          )}
         </Badge>
         <span className="text-xs text-muted-foreground">
           {t('domain.zone', { zone: domain.zone_name })}
@@ -227,7 +243,7 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
               size="sm"
               variant="outline"
               loading={refresh.isPending && refresh.variables?.action === 'checks'}
-              disabled={refresh.isPending || remove.isPending}
+              disabled={settingUp || refresh.isPending || remove.isPending}
               icon={<RefreshCw className="size-4" />}
               onClick={() => void run('checks')}
             >
@@ -239,7 +255,7 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
                 size="sm"
                 variant="outline"
                 loading={refresh.isPending && refresh.variables?.action === 'setups'}
-                disabled={refresh.isPending || remove.isPending}
+                disabled={settingUp || refresh.isPending || remove.isPending}
                 icon={<Wrench className="size-4" />}
                 onClick={() => void run('setups')}
               >
@@ -260,10 +276,14 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
         ) : null}
       </div>
       <div className="space-y-3 p-3">
-        {!verified ? (
+        {settingUp ? (
+          <p className="text-sm text-muted-foreground" role="status">
+            {t('domain.settingUpHint')}
+          </p>
+        ) : !verified ? (
           <p className="text-sm text-muted-foreground">{t('domain.pendingHint')}</p>
         ) : null}
-        {domain.last_error ? (
+        {domain.last_error && !settingUp ? (
           <Alert className="border-warning/40 bg-warning-subtle text-warning">
             <AlertDescription className="break-words">
               {t('domain.lastError', { error: domain.last_error })}
@@ -275,7 +295,7 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
             {error}
           </p>
         ) : null}
-        <RecordTable records={domain.records} />
+        {domain.records.length > 0 ? <RecordTable records={domain.records} /> : null}
       </div>
       {confirmRemove ? (
         <Dialog open onOpenChange={open => !open && !remove.isPending && setConfirmRemove(false)}>

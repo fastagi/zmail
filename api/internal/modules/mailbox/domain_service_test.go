@@ -202,6 +202,8 @@ func newDomainFixture(t *testing.T) *domainFixture {
 	}
 	base.service.domains = fixture.domains
 	base.service.domainProvider = fixture.zones
+	// Setups run in the background in production; here they finish before the call returns.
+	base.service.background = func(run func()) { run() }
 	base.service.settings.CustomDomainsEnabled = true
 	base.service.settings.EmailWorker = "zmail-email-worker"
 	fixture.zones.sendingDNS = []mailtransport.DNSRecord{
@@ -510,5 +512,35 @@ func TestADMARCRecordAmongTheSendingRecordsIsShownOnce(t *testing.T) {
 	}
 	if dmarc != 1 || mailDomain.Status != domain.MailDomainStatusVerified {
 		t.Fatalf("dmarc rows = %d, status = %s: %+v", dmarc, mailDomain.Status, mailDomain.Records)
+	}
+}
+
+func TestADomainSetupRunsInTheBackgroundOncePerDomain(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	var pending []func()
+	fixture.service.background = func(run func()) { pending = append(pending, run) }
+
+	connected, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "news.example.com")
+	if err != nil || !connected.SettingUp || connected.Status != domain.MailDomainStatusPending || len(connected.Records) != 0 {
+		t.Fatalf("connected = %+v, %v; want a pending domain whose setup is running", connected, err)
+	}
+	// A second setup and a check while the first runs change nothing and start nothing.
+	again, err := fixture.service.SetUpMailDomain(ctx, 7, connected.ID)
+	if err != nil || !again.SettingUp || len(pending) != 1 {
+		t.Fatalf("second setup = %+v, %v, runs = %d", again, err, len(pending))
+	}
+	if checked, checkErr := fixture.service.CheckMailDomain(ctx, 7, connected.ID); checkErr != nil || !checked.SettingUp || checked.CheckedAt != nil {
+		t.Fatalf("check during setup = %+v, %v", checked, checkErr)
+	}
+
+	pending[0]()
+	done, err := fixture.service.GetMailDomain(ctx, 7, connected.ID)
+	if err != nil || done.SettingUp || done.Status != domain.MailDomainStatusVerified || len(done.Records) == 0 {
+		t.Fatalf("after the setup = %+v, %v", done, err)
+	}
+	listed, _ := fixture.service.ListMailDomains(ctx, 7)
+	if len(listed) != 1 || listed[0].SettingUp {
+		t.Fatalf("listed = %+v", listed)
 	}
 }

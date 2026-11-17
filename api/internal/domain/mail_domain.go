@@ -61,7 +61,9 @@ type MailDomain struct {
 	Status     MailDomainStatus
 	Records    []MailDomainRecord
 	// LastError is the provider's explanation of the last failed setup or check.
-	LastError  string
+	LastError string
+	// SettingUp is true while a setup runs in the background; it is not stored.
+	SettingUp  bool
 	CheckedAt  *time.Time
 	VerifiedAt *time.Time
 	CreatedBy  uint

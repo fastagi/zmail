@@ -244,6 +244,12 @@ function Progress({ broadcast }: { broadcast: MailBroadcast }) {
       </div>
       <span className="text-xs text-muted-foreground">
         {t('broadcasts.progressValue', { sent: counts.sent, total: counts.total })}
+        {counts.failed > 0 ? (
+          <span className="text-error">
+            {' · '}
+            {t('broadcasts.progressFailed', { failed: counts.failed })}
+          </span>
+        ) : null}
       </span>
     </div>
   );

@@ -136,6 +136,8 @@ export const mailDomainSchema = strictObject({
   zone_name: string(),
   status: union([literal('pending'), literal('verified')]),
   records: array(mailDomainRecordSchema),
+  // A setup runs in the background; read the domain again until this is false.
+  setting_up: boolean(),
   last_error: optional(string()),
   checked_at: nullable(timestampSchema),
   verified_at: nullable(timestampSchema),

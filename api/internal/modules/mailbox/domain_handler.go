@@ -35,6 +35,7 @@ type MailDomainResponse struct {
 	Status     string                     `json:"status"`
 	Records    []MailDomainRecordResponse `json:"records"`
 	LastError  string                     `json:"last_error,omitempty"`
+	SettingUp  bool                       `json:"setting_up"`
 	CheckedAt  *time.Time                 `json:"checked_at"`
 	VerifiedAt *time.Time                 `json:"verified_at"`
 	CreatedAt  time.Time                  `json:"created_at"`
@@ -60,6 +61,7 @@ func toMailDomainResponse(mailDomain *domain.MailDomain) MailDomainResponse {
 		Status:     string(mailDomain.Status),
 		Records:    records,
 		LastError:  mailDomain.LastError,
+		SettingUp:  mailDomain.SettingUp,
 		CheckedAt:  mailDomain.CheckedAt,
 		VerifiedAt: mailDomain.VerifiedAt,
 		CreatedAt:  mailDomain.CreatedAt,

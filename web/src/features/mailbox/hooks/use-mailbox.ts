@@ -19,6 +19,8 @@ import type {
 } from '@/features/mailbox/types';
 
 export const MAIL_PAGE_SIZE = 20;
+/** How often a domain whose setup runs is read again. */
+const setupRefreshMs = 3_000;
 export const MAIL_STATS_DAYS = 7;
 
 /** Every key names the organization, so one organization's data is never shown for another. */
@@ -86,6 +88,9 @@ export function useMailDomains(organizationId: number, enabled: boolean) {
     queryKey: mailboxKeys.mailDomains(organizationId),
     queryFn: () => mailboxService.mailDomains(organizationId),
     enabled: enabled && validId(organizationId),
+    // A setup runs in the background on the API; follow it until it is done.
+    refetchInterval: query =>
+      query.state.data?.some(domain => domain.setting_up) ? setupRefreshMs : false,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
