@@ -20,6 +20,8 @@ import {
 export const MAILBOX_LOCAL_PART_MAX_LENGTH = 64;
 export const MAILBOX_DISPLAY_NAME_MAX_LENGTH = 120;
 export const MAILBOX_MAX_PER_ORGANIZATION = 50;
+export const MAIL_DOMAIN_NAME_MAX_LENGTH = 253;
+export const MAIL_DOMAIN_MAX_PER_ORGANIZATION = 10;
 export const MAIL_MAX_RECIPIENTS = 50;
 export const MAIL_ADDRESS_MAX_LENGTH = 320;
 export const MAIL_SUBJECT_MAX_LENGTH = 998;
@@ -100,6 +102,8 @@ export const mailEventSummarySchema = union([literal(''), mailEventTypeSchema]);
 
 export const mailboxDomainSchema = strictObject({
   domain: string(),
+  // `shared` is the instance domain; `organization` a verified domain the organization connected.
+  kind: union([literal('shared'), literal('organization')]),
   max_mailboxes: number().check(int()),
   // `cloudflare` delivers; `log` only records and is for development.
   provider: union([literal('cloudflare'), literal('log')]),
@@ -107,8 +111,35 @@ export const mailboxDomainSchema = strictObject({
   daily_send_limit: positiveIntegerSchema,
   // Broadcasts need the inbound secret and MAILBOX_PUBLIC_URL for their unsubscribe links.
   broadcasts_enabled: boolean(),
+  // Instance-wide: whether owners and admins may connect their own domains.
+  custom_domains_enabled: boolean(),
 });
 export const mailboxDomainListSchema = array(mailboxDomainSchema);
+
+export const mailDomainRecordSchema = strictObject({
+  purpose: union([literal('receiving'), literal('sending'), literal('dmarc')]),
+  type: string(),
+  name: string(),
+  content: string(),
+  priority: optional(nonnegativeIntegerSchema),
+  status: union([literal('ok'), literal('missing'), literal('conflict')]),
+  found: optional(string()),
+});
+
+export const mailDomainSchema = strictObject({
+  id: safeIdSchema,
+  name: string(),
+  zone_name: string(),
+  status: union([literal('pending'), literal('verified')]),
+  records: array(mailDomainRecordSchema),
+  last_error: optional(string()),
+  checked_at: nullable(timestampSchema),
+  verified_at: nullable(timestampSchema),
+  created_at: timestampSchema,
+});
+export const mailDomainListSchema = array(mailDomainSchema);
+
+export const mailDomainInputSchema = strictObject({ name: string() });
 
 export const mailboxSchema = strictObject({
   id: safeIdSchema,
@@ -216,6 +247,8 @@ const templateVariablesSchema = record(string(), string());
 export const createMailboxSchema = strictObject({
   local_part: string(),
   display_name: optional(string()),
+  // A verified domain of the organization; absent means the shared domain.
+  domain: optional(string()),
 });
 
 export const sendMailMessageSchema = strictObject({

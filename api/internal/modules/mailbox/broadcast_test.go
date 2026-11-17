@@ -56,7 +56,7 @@ func newBroadcastFixture(t *testing.T, dailyLimit int) *broadcastFixture {
 		mailbox:   createMailbox(t, repo, "news@mail.example"),
 		now:       time.Now().UTC(),
 	}
-	fixture.service = NewService(repo, repo, repo, repo, fixture.transport, &fakeNotifier{}, Settings{
+	fixture.service = NewService(repo, repo, repo, repo, nil, nil, fixture.transport, &fakeNotifier{}, Settings{
 		Domain:           "mail.example",
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,

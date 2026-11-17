@@ -20,6 +20,15 @@ export type MailboxErrorKey =
   | 'errors.addressReserved'
   | 'errors.addressTaken'
   | 'errors.deliveryFailed'
+  | 'errors.domainInUse'
+  | 'errors.domainInvalid'
+  | 'errors.domainLimitReached'
+  | 'errors.domainNotFound'
+  | 'errors.domainNotVerified'
+  | 'errors.domainProviderFailed'
+  | 'errors.domainTaken'
+  | 'errors.domainZoneNotFound'
+  | 'errors.domainsDisabled'
   | 'errors.generic'
   | 'errors.invalidInput'
   | 'errors.invalidResponse'
@@ -78,6 +87,15 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_TEMPLATE_NAME_TAKEN]: 'errors.templateNameTaken',
   [ApiErrorCode.MAILBOX_TEMPLATE_LIMIT_REACHED]: 'errors.templateLimitReached',
   [ApiErrorCode.MAILBOX_TEMPLATE_VARIABLES_MISSING]: 'errors.templateVariablesMissing',
+  [ApiErrorCode.MAILBOX_DOMAIN_NOT_FOUND]: 'errors.domainNotFound',
+  [ApiErrorCode.MAILBOX_DOMAIN_INVALID]: 'errors.domainInvalid',
+  [ApiErrorCode.MAILBOX_DOMAIN_TAKEN]: 'errors.domainTaken',
+  [ApiErrorCode.MAILBOX_DOMAIN_LIMIT_REACHED]: 'errors.domainLimitReached',
+  [ApiErrorCode.MAILBOX_DOMAIN_ZONE_NOT_FOUND]: 'errors.domainZoneNotFound',
+  [ApiErrorCode.MAILBOX_DOMAIN_IN_USE]: 'errors.domainInUse',
+  [ApiErrorCode.MAILBOX_DOMAIN_NOT_VERIFIED]: 'errors.domainNotVerified',
+  [ApiErrorCode.MAILBOX_DOMAINS_DISABLED]: 'errors.domainsDisabled',
+  [ApiErrorCode.MAILBOX_DOMAIN_PROVIDER_FAILED]: 'errors.domainProviderFailed',
 };
 
 /** Maps a failure to stable local copy; backend message text is never shown. */

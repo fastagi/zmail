@@ -870,11 +870,13 @@ function fillValidMessage(dialog: HTMLElement) {
 function domain(maxMailboxes: number) {
   return {
     domain: 'mail.example.com',
+    kind: 'shared',
     max_mailboxes: maxMailboxes,
     provider: 'log',
     inbound_enabled: false,
     daily_send_limit: 200,
     broadcasts_enabled: true,
+    custom_domains_enabled: false,
   };
 }
 

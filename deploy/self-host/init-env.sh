@@ -92,6 +92,10 @@ MAILBOX_CLOUDFLARE_API_TOKEN=
 # Shared with the Cloudflare Email Worker: set the Worker secret MAILBOX_INBOUND_SECRET to this value.
 MAILBOX_INBOUND_SECRET=$inbound_secret
 MAILBOX_DAILY_SEND_LIMIT=200
+# Organizations' own domains. Turning this on needs a token that also has Zone Read, DNS Edit,
+# Zone Settings Edit, Email Routing Rules Edit, and Email Sending Edit, and the Email Worker name.
+MAILBOX_CUSTOM_DOMAINS_ENABLED=false
+MAILBOX_CLOUDFLARE_EMAIL_WORKER=
 EOF
 chmod 0600 "$tmp_file"
 mv "$tmp_file" "$env_file"

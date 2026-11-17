@@ -47,6 +47,19 @@ Inbound mail and delivery events arrive from the Cloudflare Email Worker in
 `MAILBOX_INBOUND_SECRET` to the value in `.env`, and its `MAILBOX_INBOUND_URL` to
 `https://<host>/v1/inbound-mail-messages`.
 
+## Organization Domains
+
+To let organizations connect their own domains, set in `.env`:
+
+- `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`
+- `MAILBOX_CLOUDFLARE_EMAIL_WORKER` to the name of the Email Worker above.
+- A `MAILBOX_CLOUDFLARE_API_TOKEN` that also has Zone Read, DNS Edit, Zone Settings Edit,
+  Email Routing Rules Edit, and Email Sending Edit.
+
+Then run `docker compose up -d --wait` again. Any owner or admin on the instance can connect any
+domain the token can reach, so scope the token to the zones organizations may use. See the Domains
+section of [`contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md).
+
 ## Secrets
 
 `.env` and `postgres-tls/` cannot be regenerated: back them up together with the database. A new

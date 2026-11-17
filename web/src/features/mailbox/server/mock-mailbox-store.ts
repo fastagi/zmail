@@ -98,17 +98,30 @@ export class MockMailboxStore {
     private readonly dependencies: MockMailboxStoreDependencies = { now: () => new Date() }
   ) {}
 
-  domains(): MailboxDomain[] {
+  /** The shared domain first, then the organization's verified domains. */
+  domains(verifiedDomains: readonly string[] = []): MailboxDomain[] {
+    const settings = {
+      max_mailboxes: MAILBOX_MAX_PER_ORGANIZATION,
+      provider: 'log' as const,
+      inbound_enabled: false,
+      daily_send_limit: MOCK_DAILY_SEND_LIMIT,
+      broadcasts_enabled: true,
+      custom_domains_enabled: true,
+    };
     return [
-      {
-        domain: MOCK_MAILBOX_DOMAIN,
-        max_mailboxes: MAILBOX_MAX_PER_ORGANIZATION,
-        provider: 'log',
-        inbound_enabled: false,
-        daily_send_limit: MOCK_DAILY_SEND_LIMIT,
-        broadcasts_enabled: true,
-      },
+      { domain: MOCK_MAILBOX_DOMAIN, kind: 'shared', ...settings },
+      ...verifiedDomains.map(domain => ({ domain, kind: 'organization' as const, ...settings })),
     ];
+  }
+
+  /** Whether a live mailbox of any organization has an address on the domain. */
+  usesDomain(name: string): boolean {
+    for (const mailboxes of this.organizations.values()) {
+      for (const state of mailboxes.values()) {
+        if (state.mailbox.address.endsWith(`@${name}`)) return true;
+      }
+    }
+    return false;
   }
 
   /** Oldest first, as the API lists them. */
@@ -118,17 +131,19 @@ export class MockMailboxStore {
       .sort((left, right) => left.id - right.id);
   }
 
+  /** `addressDomain` is the shared domain or a verified domain the route already resolved. */
   create(
     organizationId: number,
     rawLocalPart: string,
-    rawDisplayName: string
+    rawDisplayName: string,
+    addressDomain: string = MOCK_MAILBOX_DOMAIN
   ): MockMailboxCreateResult {
     const localPart = normalizeLocalPart(rawLocalPart);
     if (!localPart.ok) return { ok: false, error: localPart.reason };
     const displayName = normalizeDisplayName(rawDisplayName);
     if (displayName === null) return { ok: false, error: 'invalid' };
 
-    const address = `${localPart.value}@${MOCK_MAILBOX_DOMAIN}`;
+    const address = `${localPart.value}@${addressDomain}`;
     // The API checks the organization's limit before the address, so an organization at the
     // limit learns about the limit even when the address is also taken.
     const mailboxes = this.mailboxesOf(organizationId);

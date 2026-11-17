@@ -36,6 +36,7 @@ import {
   MailHtmlFrame,
   MailStatusBadge,
   mailBadgeKey,
+  nativeSelectClassName,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import {
@@ -114,7 +115,7 @@ function Workspace({ canManage }: { canManage: boolean }) {
   }
 
   const items = mailboxes.data;
-  const domain = domains.data[0] ?? null;
+  const domain = domains.data.find(item => item.kind === 'shared') ?? domains.data[0] ?? null;
   const selected = items.find(item => item.id === selectedId) ?? items[0] ?? null;
 
   return (
@@ -190,6 +191,7 @@ function Workspace({ canManage }: { canManage: boolean }) {
         ) : domain ? (
           <CreateMailboxForm
             domain={domain}
+            domains={domains.data}
             count={items.length}
             onCreated={mailbox => setSelectedId(mailbox.id)}
           />
@@ -209,10 +211,13 @@ function Workspace({ canManage }: { canManage: boolean }) {
 
 function CreateMailboxForm({
   domain,
+  domains,
   count,
   onCreated,
 }: {
   domain: MailboxDomain;
+  /** The shared domain and the organization's verified domains. */
+  domains: MailboxDomain[];
   count: number;
   onCreated: (mailbox: Mailbox) => void;
 }) {
@@ -220,8 +225,11 @@ function CreateMailboxForm({
   const create = useCreateMailbox(useMailOrganizationId());
   const [localPart, setLocalPart] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [addressDomain, setAddressDomain] = useState(domain.domain);
   const [error, setError] = useState<string | null>(null);
   const limitReached = count >= domain.max_mailboxes;
+  // A domain removed or unverified since the form opened falls back to the shared one.
+  const chosen = domains.find(item => item.domain === addressDomain) ?? domain;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -242,6 +250,7 @@ function CreateMailboxForm({
       const mailbox = await create.mutateAsync({
         local_part: normalized.value,
         ...(name === '' ? {} : { display_name: name }),
+        ...(chosen.kind === 'organization' ? { domain: chosen.domain } : {}),
       });
       setLocalPart('');
       setDisplayName('');
@@ -276,7 +285,26 @@ function CreateMailboxForm({
                 aria-describedby="mailbox-local-part-hint"
                 onChange={event => setLocalPart(event.target.value)}
               />
-              <span className="shrink-0 text-sm text-muted-foreground">@{domain.domain}</span>
+              {domains.length > 1 ? (
+                <span className="flex shrink-0 items-center gap-1 text-sm text-muted-foreground">
+                  @
+                  <select
+                    aria-label={t('create.domain')}
+                    className={cn(nativeSelectClassName, 'max-w-44')}
+                    value={chosen.domain}
+                    disabled={create.isPending}
+                    onChange={event => setAddressDomain(event.target.value)}
+                  >
+                    {domains.map(item => (
+                      <option key={item.domain} value={item.domain}>
+                        {item.domain}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+              ) : (
+                <span className="shrink-0 text-sm text-muted-foreground">@{domain.domain}</span>
+              )}
             </div>
             <p id="mailbox-local-part-hint" className="text-xs text-muted-foreground">
               {t('create.localPartHint')}

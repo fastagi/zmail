@@ -2,10 +2,10 @@
 
 This contract owns the optional `mailbox` starter across the Go API, the Web mailbox feature, the
 fixed production API adapter, the development mock BFF, and the Cloudflare Email Worker that
-delivers inbound mail. It defines mailboxes owned by an organization on one configured domain,
-sending through a mail provider from a session or an API key, and signed inbound delivery. It does
-not define attachments, per-mailbox access rules, custom domains per organization, mailing lists,
-or delivery webhooks.
+delivers inbound mail. It defines mailboxes owned by an organization on the instance's shared
+domain or on a domain the organization connected, sending through a mail provider from a session or
+an API key, and signed inbound delivery. It does not define per-mailbox access rules or domains on
+DNS providers other than Cloudflare.
 
 ## Activation
 
@@ -26,7 +26,7 @@ does not exist. A mailbox or message of another organization is likewise reporte
 | Role | May |
 |---|---|
 | `member` | List domains and mailboxes; list, read, send, mark read or unread, and delete messages; read the log and statistics |
-| `owner`, `admin` | Everything a member may, and create and delete mailboxes |
+| `owner`, `admin` | Everything a member may, create and delete mailboxes, and connect, set up, check, and remove domains |
 
 A member who creates or deletes a mailbox gets `403 PERMISSION.DENIED`. The user who created a
 mailbox is recorded but has no special rights to it; removing that user from the organization
@@ -35,7 +35,13 @@ is shared: a message one member reads is read for the whole organization.
 
 | Operation | Browser route | Go API route | Success |
 |---|---|---|---|
-| List domains | `GET /api/mailbox-domains` | `GET /v1/mailbox-domains` | `200` envelope, at most 1 item |
+| List domains | `GET /api/mailbox-domains` | `GET /v1/mailbox-domains` | `200` envelope, 1 to 11 items |
+| List connected domains | `GET /api/mail-domains` | `GET /v1/mail-domains` | `200` envelope, at most 10 items |
+| Connect a domain | `POST /api/mail-domains` | `POST /v1/mail-domains` | `201` envelope |
+| Get a connected domain | `GET /api/mail-domains/:id` | `GET /v1/mail-domains/:domain_id` | `200` envelope |
+| Set up a domain again | `POST /api/mail-domains/:id/setups` | `POST /v1/mail-domains/:domain_id/setups` | `200` envelope |
+| Check a domain | `POST /api/mail-domains/:id/checks` | `POST /v1/mail-domains/:domain_id/checks` | `200` envelope |
+| Remove a domain | `DELETE /api/mail-domains/:id` | `DELETE /v1/mail-domains/:domain_id` | `204` |
 | List mailboxes | `GET /api/mailboxes` | `GET /v1/mailboxes` | `200` envelope, at most 50 items |
 | Create mailbox | `POST /api/mailboxes` | `POST /v1/mailboxes` | `201` envelope |
 | Delete mailbox | `DELETE /api/mailboxes/:id` | `DELETE /v1/mailboxes/:mailbox_id` | `204` |
@@ -61,7 +67,7 @@ has no browser route: only the mail edge calls it.
 `POST /v1/mailboxes`:
 
 ```json
-{ "local_part": "hello", "display_name": "Hello Team" }
+{ "local_part": "hello", "display_name": "Hello Team", "domain": "example.com" }
 ```
 
 - `local_part` is trimmed and lowercased. It is 1 to 64 characters of lowercase ASCII letters and
@@ -71,9 +77,15 @@ has no browser route: only the mail edge calls it.
   `422 MAILBOX.ADDRESS_RESERVED`.
 - `display_name` is optional, at most 120 characters, and may not contain `<`, `>`, or `"`; a
   violation is also `422 MAILBOX.ADDRESS_INVALID`.
-- The address is `<local_part>@<configured domain>`. `GET /v1/mailbox-domains` returns that domain
-  with `max_mailboxes` (per organization), the outbound `provider` (`cloudflare` delivers; `log` only records and is
-  for development), `inbound_enabled`, and `daily_send_limit` (per organization).
+- The address is `<local_part>@<domain>`. Without `domain`, or with the shared domain, it is the
+  instance's `MAILBOX_DOMAIN`. Any other `domain` must be a verified domain of the organization
+  (see Domains): a pending one is `422 MAILBOX.DOMAIN_NOT_VERIFIED`, and one the organization did
+  not connect is `404 MAILBOX.DOMAIN_NOT_FOUND`.
+- `GET /v1/mailbox-domains` lists the shared domain first (`kind: "shared"`), then the
+  organization's verified domains (`kind: "organization"`). Every item repeats the instance
+  settings: `max_mailboxes` (per organization, across all domains), the outbound `provider`
+  (`cloudflare` delivers; `log` only records and is for development), `inbound_enabled`,
+  `daily_send_limit` (per organization), `broadcasts_enabled`, and `custom_domains_enabled`.
 - An address that is or ever was a mailbox is
   `409 MAILBOX.ADDRESS_TAKEN`: deleting a mailbox keeps its address reserved, so a later owner
   never receives mail meant for the previous one.
@@ -97,9 +109,66 @@ has no browser route: only the mail edge calls it.
 count.
 
 Deleting a mailbox deletes its messages in the same transaction; the address stays reserved and
-later mail for it is answered `404 MAILBOX.RECIPIENT_NOT_FOUND`. Deleting a user account does not
+later mail for it is answered `404 MAILBOX.RECIPIENT_NOT_FOUND`. A mailbox on a connected domain
+also loses its routing rule; if Cloudflare refuses to delete the rule, the deletion still succeeds
+and mail for the address is answered `404` as above. Deleting a user account does not
 touch mailboxes: the organization starter already refuses to delete an account that still belongs
 to an organization.
+
+## Domains
+
+With `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, an organization may use its own domains next to the
+shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DISABLED`.
+
+- A domain must be a Cloudflare zone, or a subdomain of a zone, that the instance's
+  `MAILBOX_CLOUDFLARE_API_TOKEN` can manage; otherwise connecting is
+  `422 MAILBOX.DOMAIN_ZONE_NOT_FOUND`. The name is trimmed, lowercased, and loses a trailing dot; one
+  that is not a domain is `422 MAILBOX.DOMAIN_INVALID`.
+- A domain belongs to one organization. A name another organization connected, or the shared
+  domain, is `409 MAILBOX.DOMAIN_TAKEN`. An organization connects at most 10 domains; one more is
+  `422 MAILBOX.DOMAIN_LIMIT_REACHED`.
+- Connecting runs the setup: Zmail enables Email Routing for the domain (Cloudflare adds its MX and
+  SPF records), enables Email Sending for it, adds each sending record Cloudflare lists that the
+  zone lacks, and adds `_dmarc.<domain>` with `v=DMARC1; p=none` when the domain has no DMARC
+  record. It never edits or deletes a record and never changes a zone's catch-all rule.
+- A setup step the provider refuses does not fail the call: the domain is answered `pending` with
+  `last_error`, and `POST /v1/mail-domains/:domain_id/setups` runs every step again safely. A failed
+  zone lookup while connecting is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`.
+- `POST /v1/mail-domains/:domain_id/checks` reads the zone and reports each required record with
+  `purpose` (`receiving`, `sending`, `dmarc`), `type`, `name`, `content`, optional `priority`, and
+  `status`: `ok`, `missing`, or `conflict` with the conflicting value in `found`. Receiving MX
+  records match by host, since Cloudflare chooses their priorities. An SPF record matches when it
+  includes what is required, and any DMARC record satisfies DMARC. A check never writes DNS.
+- The domain is `verified` when every record is `ok`, and `pending` otherwise. A later check can
+  return it to `pending`; its mailboxes keep working, but new ones wait until it verifies again.
+  `verified_at` keeps the first verification time.
+- Creating a mailbox on a verified domain also creates an Email Routing rule that delivers that one
+  address to the Email Worker named by `MAILBOX_CLOUDFLARE_EMAIL_WORKER`. A rule Cloudflare refuses
+  is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`, and no mailbox is created.
+- Removing a domain that a mailbox still uses is `409 MAILBOX.DOMAIN_IN_USE`. Removing forgets the
+  domain and leaves its DNS and Cloudflare settings as they are.
+- Any owner or admin may connect any domain the token can reach. An operator serving several
+  companies scopes the token to the zones they may use.
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": 3,
+    "name": "example.com",
+    "zone_name": "example.com",
+    "status": "verified",
+    "records": [
+      { "purpose": "receiving", "type": "MX", "name": "example.com", "content": "route1.mx.cloudflare.net", "status": "ok" },
+      { "purpose": "dmarc", "type": "TXT", "name": "_dmarc.example.com", "content": "v=DMARC1; p=none", "status": "ok" }
+    ],
+    "checked_at": "2026-11-17T10:00:00Z",
+    "verified_at": "2026-11-17T10:00:00Z",
+    "created_at": "2026-11-17T09:59:58Z"
+  }
+}
+```
 
 ## Messages
 
@@ -628,3 +697,12 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.BROADCAST_INVALID` | 422 |
 | `MAILBOX.BROADCAST_NO_RECIPIENTS` | 422 |
 | `MAILBOX.BROADCAST_DISABLED` | 503 |
+| `MAILBOX.DOMAIN_NOT_FOUND` | 404 |
+| `MAILBOX.DOMAINS_DISABLED` | 404 |
+| `MAILBOX.DOMAIN_TAKEN` | 409 |
+| `MAILBOX.DOMAIN_IN_USE` | 409 |
+| `MAILBOX.DOMAIN_INVALID` | 422 |
+| `MAILBOX.DOMAIN_LIMIT_REACHED` | 422 |
+| `MAILBOX.DOMAIN_ZONE_NOT_FOUND` | 422 |
+| `MAILBOX.DOMAIN_NOT_VERIFIED` | 422 |
+| `MAILBOX.DOMAIN_PROVIDER_FAILED` | 502 |

@@ -6,6 +6,15 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ## Unreleased
 
+### Added
+
+- **Organization domains.** With `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, owners and admins connect
+  their own domains through `/v1/mail-domains`. Zmail enables Email Routing and Email Sending in
+  Cloudflare, adds the missing sending and DMARC records without touching existing ones, and
+  reports each required record as in place, missing, or in conflict. Mailboxes can be created on a
+  verified domain with the new `domain` field; each gets its own routing rule to the Email Worker.
+  `GET /v1/mailbox-domains` now lists the shared domain and the verified organization domains.
+
 ## v0.27.0 — 2026-11-17
 
 ### Added

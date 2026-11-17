@@ -64,6 +64,7 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 			CreatedBy:      mailbox.CreatedBy,
 			Address:        mailbox.Address,
 			DisplayName:    mailbox.DisplayName,
+			RoutingRuleID:  mailbox.RoutingRuleID,
 		}
 		if err := tx.Create(po).Error; err != nil {
 			if isUniqueViolation(err) {

@@ -12,6 +12,7 @@ import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import type {
   CreateMailboxInput,
+  MailDomain,
   MailDirection,
   MailLogFilters,
   SendMailMessageInput,
@@ -26,6 +27,8 @@ export const mailboxKeys = {
   organization: (organizationId: number) => [...mailboxKeys.all, organizationId] as const,
   domains: (organizationId: number) =>
     [...mailboxKeys.organization(organizationId), 'domains'] as const,
+  mailDomains: (organizationId: number) =>
+    [...mailboxKeys.organization(organizationId), 'mail-domains'] as const,
   list: (organizationId: number) => [...mailboxKeys.organization(organizationId), 'list'] as const,
   mailbox: (organizationId: number, mailboxId: number) =>
     [...mailboxKeys.organization(organizationId), mailboxId] as const,
@@ -74,6 +77,52 @@ export function useMailboxDomains(organizationId: number) {
     enabled: validId(organizationId),
     staleTime: 5 * 60_000,
     meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+/** Connected domains; only loaded when the instance allows them. */
+export function useMailDomains(organizationId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: mailboxKeys.mailDomains(organizationId),
+    queryFn: () => mailboxService.mailDomains(organizationId),
+    enabled: enabled && validId(organizationId),
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+/** A connected domain changes which domains new mailboxes may use. */
+function refreshDomains(queryClient: QueryClient, organizationId: number) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.mailDomains(organizationId) }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.domains(organizationId) }),
+  ]);
+}
+
+export function useConnectMailDomain(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => mailboxService.connectMailDomain(organizationId, { name }),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: () => refreshDomains(queryClient, organizationId),
+  });
+}
+
+export function useRefreshMailDomain(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ domain, action }: { domain: MailDomain; action: 'setups' | 'checks' }) =>
+      mailboxService.refreshMailDomain(organizationId, domain.id, action),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: () => refreshDomains(queryClient, organizationId),
+  });
+}
+
+export function useRemoveMailDomain(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (domainId: number) => mailboxService.removeMailDomain(organizationId, domainId),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: () => refreshDomains(queryClient, organizationId),
   });
 }
 

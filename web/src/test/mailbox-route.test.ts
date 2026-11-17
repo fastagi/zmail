@@ -183,11 +183,13 @@ describe('mailbox browser route boundary', () => {
       data: [
         {
           domain: 'mail.example.com',
+          kind: 'shared',
           max_mailboxes: 50,
           provider: 'log',
           inbound_enabled: false,
           daily_send_limit: 200,
           broadcasts_enabled: true,
+          custom_domains_enabled: true,
         },
       ],
     });
@@ -1266,6 +1268,137 @@ describe('mailbox browser route boundary', () => {
     );
     expect(removedList.status).toBe(204);
     expect(await list('')).toHaveLength(2);
+  });
+
+  it('connects, verifies, and removes organization domains in the mock', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const connect = (name: unknown) =>
+      route.connectMailDomainRoute(
+        request('/api/mail-domains', { method: 'POST', body: JSON.stringify({ name }) })
+      );
+    const refresh = (id: number, action: 'setups' | 'checks') =>
+      route.refreshMailDomainRoute(
+        request(`/api/mail-domains/${id}/${action}`, { method: 'POST' }),
+        String(id),
+        action
+      );
+    const removeDomain = (id: number) =>
+      route.deleteMailDomainRoute(
+        request(`/api/mail-domains/${id}`, { method: 'DELETE' }),
+        String(id)
+      );
+
+    const connected = await connect(' News.Example.org. ');
+    expect(connected.status).toBe(201);
+    const domain = (await connected.json()).data;
+    expect(domain).toMatchObject({
+      name: 'news.example.org',
+      status: 'pending',
+      zone_name: 'example.org',
+    });
+    expect(domain.records.some((record: { status: string }) => record.status === 'missing')).toBe(
+      true
+    );
+
+    await expectError(await connect('news.example.org'), 409, 'MAILBOX.DOMAIN_TAKEN');
+    await expectError(await connect('mail.example.com'), 409, 'MAILBOX.DOMAIN_TAKEN');
+    await expectError(await connect('not a domain'), 422, 'MAILBOX.DOMAIN_INVALID');
+    await expectError(await connect('mail.example.invalid'), 422, 'MAILBOX.DOMAIN_ZONE_NOT_FOUND');
+    await expectError(await connect(42), 422, 'COMMON.VALIDATION_FAILED');
+
+    // A pending domain is not offered for mailboxes and refuses one.
+    const offered = async () =>
+      (
+        await (await route.listMailboxDomainsRoute(request('/api/mailbox-domains'))).json()
+      ).data.map((item: { domain: string; kind: string }) => `${item.kind}:${item.domain}`);
+    expect(await offered()).toEqual(['shared:mail.example.com']);
+    await expectError(
+      await create(route, { local_part: 'hello', domain: 'news.example.org' }),
+      422,
+      'MAILBOX.DOMAIN_NOT_VERIFIED'
+    );
+
+    const checked = await refresh(domain.id, 'checks');
+    expect((await checked.json()).data).toMatchObject({ status: 'verified' });
+    expect(await offered()).toEqual(['shared:mail.example.com', 'organization:news.example.org']);
+    const mailbox = await create(route, { local_part: 'hello', domain: 'news.example.org' });
+    expect(mailbox.status).toBe(201);
+    const created = (await mailbox.json()).data;
+    expect(created.address).toBe('hello@news.example.org');
+
+    // Another organization neither sees nor uses the domain.
+    activeOrganization = await secondOrganization();
+    expect(
+      (await (await route.listMailDomainsRoute(request('/api/mail-domains'))).json()).data
+    ).toEqual([]);
+    await expectError(
+      await create(route, { local_part: 'x', domain: 'news.example.org' }),
+      404,
+      'MAILBOX.DOMAIN_NOT_FOUND'
+    );
+    await expectError(await refresh(domain.id, 'setups'), 404, 'MAILBOX.DOMAIN_NOT_FOUND');
+    activeOrganization = '1';
+
+    await expectError(await removeDomain(domain.id), 409, 'MAILBOX.DOMAIN_IN_USE');
+    await route.deleteMailboxRoute(
+      request(`/api/mailboxes/${created.id}`, { method: 'DELETE' }),
+      String(created.id)
+    );
+    expect((await removeDomain(domain.id)).status).toBe(204);
+    expect(await offered()).toEqual(['shared:mail.example.com']);
+
+    // Members read domains but never change them.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect((await route.listMailDomainsRoute(request('/api/mail-domains'))).status).toBe(200);
+    await expectError(await connect('other.example.org'), 403, 'PERMISSION.DENIED');
+  });
+
+  it('forwards domain routes to the fixed API paths', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () => Response.json({ code: 0, message: 'ok', data: [] }));
+    const route = await loadRoute();
+
+    await route.listMailDomainsRoute(request('/api/mail-domains'));
+    await route.connectMailDomainRoute(
+      request('/api/mail-domains', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'example.org' }),
+      })
+    );
+    await route.getMailDomainRoute(request('/api/mail-domains/3'), '3');
+    await route.refreshMailDomainRoute(
+      request('/api/mail-domains/3/setups', { method: 'POST' }),
+      '3',
+      'setups'
+    );
+    await route.refreshMailDomainRoute(
+      request('/api/mail-domains/3/checks', { method: 'POST' }),
+      '3',
+      'checks'
+    );
+    await route.deleteMailDomainRoute(request('/api/mail-domains/3', { method: 'DELETE' }), '3');
+    await create(route, { local_part: 'hello', domain: 'example.org' });
+
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => `${init?.method} ${new URL(String(url)).pathname}`)
+    ).toEqual([
+      'GET /v1/mail-domains',
+      'POST /v1/mail-domains',
+      'GET /v1/mail-domains/3',
+      'POST /v1/mail-domains/3/setups',
+      'POST /v1/mail-domains/3/checks',
+      'DELETE /v1/mail-domains/3',
+      'POST /v1/mailboxes',
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ name: 'example.org' });
+    expect(JSON.parse(String(fetchMock.mock.calls[6]?.[1]?.body))).toEqual({
+      local_part: 'hello',
+      domain: 'example.org',
+    });
   });
 
   it('forwards contact routes to the fixed API paths', async () => {

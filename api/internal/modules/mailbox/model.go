@@ -16,6 +16,7 @@ type MailboxPO struct {
 	CreatedBy      uint   `gorm:"not null"`
 	Address        string `gorm:"size:320;not null;uniqueIndex:idx_mailboxes_address"`
 	DisplayName    string `gorm:"size:120;not null;default:''"`
+	RoutingRuleID  string `gorm:"size:64;not null;default:''"`
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      gorm.DeletedAt
@@ -35,6 +36,7 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 		CreatedBy:      po.CreatedBy,
 		Address:        po.Address,
 		DisplayName:    po.DisplayName,
+		RoutingRuleID:  po.RoutingRuleID,
 		CreatedAt:      po.CreatedAt,
 		UpdatedAt:      po.UpdatedAt,
 	}

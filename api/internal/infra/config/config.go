@@ -435,6 +435,13 @@ type MailboxConfig struct {
 	// PublicURL is the public origin of the Web console, such as https://app.example.com. Broadcast
 	// unsubscribe links point at it; empty disables broadcasts.
 	PublicURL string
+	// CustomDomainsEnabled lets organization owners and admins connect domains the Cloudflare
+	// token can manage. The token's zone scope is the trust boundary: any organization may claim
+	// a domain the token can reach.
+	CustomDomainsEnabled bool
+	// CloudflareEmailWorker names the Email Worker that routing rules of organization domains
+	// deliver to; the same Worker that posts to the inbound route.
+	CloudflareEmailWorker string
 }
 
 // Resolved fills the development defaults: outside production an unset domain is
@@ -446,6 +453,7 @@ func (m MailboxConfig) Resolved(production bool) MailboxConfig {
 	m.CloudflareAPIToken = strings.TrimSpace(m.CloudflareAPIToken)
 	m.InboundSecret = strings.TrimSpace(m.InboundSecret)
 	m.PublicURL = strings.TrimRight(strings.TrimSpace(m.PublicURL), "/")
+	m.CloudflareEmailWorker = strings.TrimSpace(m.CloudflareEmailWorker)
 	if !production {
 		if m.Domain == "" {
 			m.Domain = DefaultMailboxDomain
@@ -633,14 +641,16 @@ func Load() (*Config, error) {
 			PendingTTL:         env.GetDuration("ASSET_PENDING_TTL", DefaultAssetPendingTTL),
 		},
 		Mailbox: MailboxConfig{
-			Domain:              env.Get("MAILBOX_DOMAIN", ""),
-			Provider:            env.Get("MAILBOX_PROVIDER", ""),
-			CloudflareAccountID: env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", ""),
-			CloudflareAPIToken:  env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", ""),
-			RequestTimeout:      env.GetDuration("MAILBOX_REQUEST_TIMEOUT", DefaultMailboxRequestTimeout),
-			InboundSecret:       env.Get("MAILBOX_INBOUND_SECRET", ""),
-			DailySendLimit:      env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
-			PublicURL:           env.Get("MAILBOX_PUBLIC_URL", ""),
+			Domain:                env.Get("MAILBOX_DOMAIN", ""),
+			Provider:              env.Get("MAILBOX_PROVIDER", ""),
+			CloudflareAccountID:   env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", ""),
+			CloudflareAPIToken:    env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", ""),
+			RequestTimeout:        env.GetDuration("MAILBOX_REQUEST_TIMEOUT", DefaultMailboxRequestTimeout),
+			InboundSecret:         env.Get("MAILBOX_INBOUND_SECRET", ""),
+			DailySendLimit:        env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
+			PublicURL:             env.Get("MAILBOX_PUBLIC_URL", ""),
+			CustomDomainsEnabled:  env.GetBool("MAILBOX_CUSTOM_DOMAINS_ENABLED", false),
+			CloudflareEmailWorker: env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
 		},
 		Webhook: WebhookConfig{
 			EncryptionKey:       env.Get("WEBHOOK_ENCRYPTION_KEY", ""),
@@ -1237,6 +1247,13 @@ func validateAssetConfig(asset AssetConfig, selected, localTransfers bool) error
 	return nil
 }
 
+var mailboxWorkerPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// ValidMailboxDomain reports whether name is a lowercase domain name a mailbox address may use.
+func ValidMailboxDomain(name string) bool {
+	return len(name) <= 253 && mailboxDomainPattern.MatchString(name)
+}
+
 var mailboxDomainPattern = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$|^[a-z0-9-]+\.localhost$`)
 
 func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) error {
@@ -1276,6 +1293,14 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 		if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
 			(parsed.Scheme != "https" && (production || parsed.Scheme != "http")) {
 			return fmt.Errorf("MAILBOX_PUBLIC_URL must be an https URL without credentials, query, or fragment")
+		}
+	}
+	if resolved.CustomDomainsEnabled {
+		if resolved.Provider != MailboxProviderCloudflare {
+			return fmt.Errorf("MAILBOX_CUSTOM_DOMAINS_ENABLED requires MAILBOX_PROVIDER cloudflare")
+		}
+		if !mailboxWorkerPattern.MatchString(resolved.CloudflareEmailWorker) {
+			return fmt.Errorf("MAILBOX_CLOUDFLARE_EMAIL_WORKER must name the Email Worker when MAILBOX_CUSTOM_DOMAINS_ENABLED is true")
 		}
 	}
 	return nil

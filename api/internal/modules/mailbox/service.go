@@ -35,6 +35,10 @@ type Settings struct {
 	DailySendLimit   int
 	// PublicURL is the public Web origin unsubscribe links point at; empty disables broadcasts.
 	PublicURL string
+	// CustomDomainsEnabled lets organizations connect their own domains.
+	CustomDomainsEnabled bool
+	// EmailWorker names the Email Worker routing rules of organization domains deliver to.
+	EmailWorker string
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -73,7 +77,17 @@ type SendInput struct {
 // Service defines the business interface of the mailbox starter.
 type Service interface {
 	Domain() string
-	CreateMailbox(ctx context.Context, organizationID, createdBy uint, localPart, displayName string) (*domain.Mailbox, error)
+	// CreateMailbox creates an address on domainName, the shared domain when it is empty.
+	CreateMailbox(ctx context.Context, organizationID, createdBy uint, localPart, displayName, domainName string) (*domain.Mailbox, error)
+	CustomDomainsEnabled() bool
+	// MailboxDomains lists the shared domain and the organization's verified domains.
+	MailboxDomains(ctx context.Context, organizationID uint) ([]MailboxDomain, error)
+	ListMailDomains(ctx context.Context, organizationID uint) ([]*domain.MailDomain, error)
+	GetMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
+	ConnectMailDomain(ctx context.Context, organizationID, createdBy uint, name string) (*domain.MailDomain, error)
+	SetUpMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
+	CheckMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
+	DeleteMailDomain(ctx context.Context, organizationID, id uint) error
 	ListMailboxes(ctx context.Context, organizationID uint) ([]*domain.Mailbox, error)
 	DeleteMailbox(ctx context.Context, organizationID, mailboxID uint) error
 	ListMessages(ctx context.Context, organizationID, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
@@ -133,10 +147,13 @@ type service struct {
 	contacts  domain.MailContactRepository
 	// broadcasts is the broadcast store; nil until NewService wires it.
 	broadcasts domain.MailBroadcastRepository
-	transport  mailtransport.Transport
-	notifier   mailNotifier
-	settings   Settings
-	now        func() time.Time
+	// domains and domainProvider serve organization domains; nil when a test does not need them.
+	domains        domain.MailDomainRepository
+	domainProvider mailtransport.DomainProvider
+	transport      mailtransport.Transport
+	notifier       mailNotifier
+	settings       Settings
+	now            func() time.Time
 }
 
 var _ Service = (*service)(nil)
@@ -147,13 +164,15 @@ func NewService(
 	templates domain.MailTemplateRepository,
 	contacts domain.MailContactRepository,
 	broadcasts domain.MailBroadcastRepository,
+	domains domain.MailDomainRepository,
+	domainProvider mailtransport.DomainProvider,
 	transport mailtransport.Transport,
 	notifier mailNotifier,
 	settings Settings,
 ) *service {
 	return &service{
-		repo: repo, templates: templates, contacts: contacts, broadcasts: broadcasts, transport: transport,
-		notifier: notifier, settings: settings, now: time.Now,
+		repo: repo, templates: templates, contacts: contacts, broadcasts: broadcasts, domains: domains,
+		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 	}
 }
 
@@ -202,6 +221,8 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.Provider = resolved.Provider
 	settings.InboundSecret = resolved.InboundSecret
 	settings.PublicURL = resolved.PublicURL
+	settings.CustomDomainsEnabled = resolved.CustomDomainsEnabled
+	settings.EmailWorker = resolved.CloudflareEmailWorker
 	if resolved.DailySendLimit > 0 {
 		settings.DailySendLimit = resolved.DailySendLimit
 	}
@@ -269,7 +290,7 @@ func (s *service) Stats(ctx context.Context, organizationID uint, days int) ([]d
 	return stats, nil
 }
 
-func (s *service) CreateMailbox(ctx context.Context, organizationID, createdBy uint, localPart, displayName string) (*domain.Mailbox, error) {
+func (s *service) CreateMailbox(ctx context.Context, organizationID, createdBy uint, localPart, displayName, domainName string) (*domain.Mailbox, error) {
 	normalized, err := normalizeLocalPart(localPart)
 	if err != nil {
 		return nil, err
@@ -278,13 +299,33 @@ func (s *service) CreateMailbox(ctx context.Context, organizationID, createdBy u
 	if len(displayName) > 120 || strings.ContainsAny(displayName, "<>\"") {
 		return nil, fmt.Errorf("%w: display name", ErrMailboxAddressInvalid)
 	}
+	addressDomain, connected, err := s.mailboxDomainFor(ctx, organizationID, domainName)
+	if err != nil {
+		return nil, err
+	}
 	mailbox := &domain.Mailbox{
 		OrganizationID: organizationID,
 		CreatedBy:      createdBy,
-		Address:        normalized + "@" + s.settings.Domain,
+		Address:        normalized + "@" + addressDomain,
 		DisplayName:    displayName,
 	}
+	if connected != nil {
+		// Claim the address before routing mail to it, so a taken address never gets a rule.
+		if _, err := s.repo.FindMailboxByAddress(ctx, mailbox.Address); err == nil {
+			return nil, ErrMailboxAddressTaken
+		} else if !errors.Is(err, ErrMailboxNotFound) {
+			return nil, err
+		}
+		ruleID, err := s.domainProvider.CreateRoutingRule(ctx, connected.ZoneID, mailbox.Address, s.settings.EmailWorker)
+		if err != nil {
+			return nil, providerError(err)
+		}
+		mailbox.RoutingRuleID = ruleID
+	}
 	if err := s.repo.CreateMailbox(ctx, mailbox, domain.MaxMailboxesPerOrganization); err != nil {
+		if connected != nil {
+			s.removeRoutingRule(ctx, mailbox)
+		}
 		return nil, err
 	}
 	return mailbox, nil
@@ -295,7 +336,15 @@ func (s *service) ListMailboxes(ctx context.Context, organizationID uint) ([]*do
 }
 
 func (s *service) DeleteMailbox(ctx context.Context, organizationID, mailboxID uint) error {
-	return s.repo.DeleteMailbox(ctx, organizationID, mailboxID)
+	mailbox, err := s.repo.FindMailbox(ctx, organizationID, mailboxID)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.DeleteMailbox(ctx, organizationID, mailboxID); err != nil {
+		return err
+	}
+	s.removeRoutingRule(ctx, mailbox)
+	return nil
 }
 
 func (s *service) ListMessages(

@@ -26,7 +26,7 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := newFakeRepository()
-	svc := NewService(repo, repo, newFakeContacts(), &stubBroadcasts{}, &fakeTransport{}, &fakeNotifier{}, Settings{
+	svc := NewService(repo, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
 		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5,
 	})
 	handler := NewHandler(svc)
@@ -91,7 +91,7 @@ func TestOnlyManagersCreateAndDeleteMailboxes(t *testing.T) {
 
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
 	// A manager of the same organization created this one.
-	if _, err := fixture.service.CreateMailbox(t.Context(), 7, 1, "helpdesk", ""); err != nil {
+	if _, err := fixture.service.CreateMailbox(t.Context(), 7, 1, "helpdesk", "", ""); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	created, body := fixture.do(http.MethodPost, "/mailboxes", `{"local_part":"sales"}`)
@@ -109,10 +109,10 @@ func TestOnlyManagersCreateAndDeleteMailboxes(t *testing.T) {
 
 func TestMembersReadAndSendTheOrganizationsMail(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
-	if _, err := fixture.service.CreateMailbox(t.Context(), 7, 1, "helpdesk", "Helpdesk"); err != nil {
+	if _, err := fixture.service.CreateMailbox(t.Context(), 7, 1, "helpdesk", "Helpdesk", ""); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
-	if _, err := fixture.service.CreateMailbox(t.Context(), 8, 1, "elsewhere", ""); err != nil {
+	if _, err := fixture.service.CreateMailbox(t.Context(), 8, 1, "elsewhere", "", ""); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 

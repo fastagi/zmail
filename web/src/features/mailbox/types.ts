@@ -16,6 +16,9 @@ import type {
   mailMessageSummarySchema,
   mailboxDomainSchema,
   mailboxSchema,
+  mailDomainInputSchema,
+  mailDomainRecordSchema,
+  mailDomainSchema,
   sendMailMessageSchema,
   updateMailMessageSchema,
   mailTemplateInputSchema,
@@ -42,6 +45,9 @@ import type {
 } from './schemas';
 
 export type MailboxDomain = Infer<typeof mailboxDomainSchema>;
+export type MailDomain = Infer<typeof mailDomainSchema>;
+export type MailDomainRecord = Infer<typeof mailDomainRecordSchema>;
+export type MailDomainInput = Infer<typeof mailDomainInputSchema>;
 export type Mailbox = Infer<typeof mailboxSchema>;
 export type MailDirection = Infer<typeof mailDirectionSchema>;
 export type MailStatus = Infer<typeof mailStatusSchema>;

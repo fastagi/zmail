@@ -441,7 +441,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		contacts:  newFakeContacts(),
 		now:       time.Unix(1_800_000_000, 0).UTC(),
 	}
-	fixture.service = NewService(fixture.repo, fixture.repo, fixture.contacts, &stubBroadcasts{}, fixture.transport, fixture.notifier, Settings{
+	fixture.service = NewService(fixture.repo, fixture.repo, fixture.contacts, &stubBroadcasts{}, nil, nil, fixture.transport, fixture.notifier, Settings{
 		Domain:           "mail.example",
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,
@@ -453,7 +453,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 
 func (f *serviceFixture) mailbox(t *testing.T, organizationID uint, localPart string) *domain.Mailbox {
 	t.Helper()
-	mailbox, err := f.service.CreateMailbox(context.Background(), organizationID, testCreator, localPart, "Test Sender")
+	mailbox, err := f.service.CreateMailbox(context.Background(), organizationID, testCreator, localPart, "Test Sender", "")
 	if err != nil {
 		t.Fatalf("CreateMailbox(%q): %v", localPart, err)
 	}
@@ -467,13 +467,13 @@ func TestCreateMailboxBuildsAddressOnTheConfiguredDomain(t *testing.T) {
 		t.Fatalf("mailbox = %+v", mailbox)
 	}
 
-	if _, err := fixture.service.CreateMailbox(context.Background(), 8, testCreator, "HELLO", ""); !errors.Is(err, ErrMailboxAddressTaken) {
+	if _, err := fixture.service.CreateMailbox(context.Background(), 8, testCreator, "HELLO", "", ""); !errors.Is(err, ErrMailboxAddressTaken) {
 		t.Fatalf("duplicate address error = %v", err)
 	}
-	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "postmaster", ""); !errors.Is(err, ErrMailboxAddressReserved) {
+	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "postmaster", "", ""); !errors.Is(err, ErrMailboxAddressReserved) {
 		t.Fatalf("reserved address error = %v", err)
 	}
-	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "ok", `Eve <eve@evil.test>`); !errors.Is(err, ErrMailboxAddressInvalid) {
+	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "ok", `Eve <eve@evil.test>`, ""); !errors.Is(err, ErrMailboxAddressInvalid) {
 		t.Fatalf("display name error = %v", err)
 	}
 }
