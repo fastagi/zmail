@@ -372,6 +372,9 @@ type AuthenticationConfig struct {
 	SessionIdleTimeout   time.Duration
 	SessionTouchInterval time.Duration
 	SessionRetention     time.Duration
+	// RegistrationDisabled closes public self-registration (POST /v1/register). It is set by
+	// AUTH_REGISTRATION_ENABLED=false; the zero value keeps registration open.
+	RegistrationDisabled bool
 }
 
 type LogConfig struct {
@@ -586,6 +589,7 @@ func Load() (*Config, error) {
 			SessionIdleTimeout:   env.GetDuration("AUTH_SESSION_IDLE_TIMEOUT", DefaultAuthenticationSessionIdleTimeout),
 			SessionTouchInterval: env.GetDuration("AUTH_SESSION_TOUCH_INTERVAL", DefaultAuthenticationSessionTouchInterval),
 			SessionRetention:     env.GetDuration("AUTH_SESSION_RETENTION", DefaultAuthenticationSessionRetention),
+			RegistrationDisabled: !env.GetBool("AUTH_REGISTRATION_ENABLED", true),
 		},
 		Log: LogConfig{
 			Level:       env.Get("LOG_LEVEL", defaultLogLevel(isProd)),

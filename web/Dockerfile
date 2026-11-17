@@ -25,6 +25,20 @@ RUN mkdir -p public
 # Disable anonymous Next.js telemetry in the build and production runtime.
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Public values Next.js compiles into the bundle, so they are build arguments rather than runtime
+# environment. The defaults are the scaffold's own; a deployment passes its public origin and its
+# optional features. Never pass a secret here: build arguments are recorded in image metadata.
+ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
+ARG NEXT_PUBLIC_API_URL=/api
+ARG NEXT_PUBLIC_OPTIONAL_FEATURES=
+ARG NEXT_PUBLIC_DEFAULT_LOCALE=zh-Hans
+ARG NEXT_PUBLIC_LOCALE_SWITCHER_ENABLED=true
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL} \
+    NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
+    NEXT_PUBLIC_OPTIONAL_FEATURES=${NEXT_PUBLIC_OPTIONAL_FEATURES} \
+    NEXT_PUBLIC_DEFAULT_LOCALE=${NEXT_PUBLIC_DEFAULT_LOCALE} \
+    NEXT_PUBLIC_LOCALE_SWITCHER_ENABLED=${NEXT_PUBLIC_LOCALE_SWITCHER_ENABLED}
+
 RUN corepack enable pnpm && pnpm run build
 
 # Materialize a runtime root without development package managers. The scratch

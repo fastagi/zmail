@@ -111,6 +111,19 @@ legacy username equals it, so one account cannot capture another account's email
   with a stricter identity-enumeration threat model should replace those conflicts with one generic
   response or add an out-of-band registration flow.
 
+### Closing Registration
+
+Registration is open by default. `AUTH_REGISTRATION_ENABLED=false` closes it for every caller:
+`POST /v1/register` then answers `403 AUTH.FORBIDDEN` without reading or writing an account, and the
+browser adapter passes that status and code through. Login, password reset, and every existing
+account keep working. The switch is read at startup. An instance that should not accept sign-ups
+from the network keeps it `false` and creates accounts from a process started with it `true` that
+only the operator can reach; the self-hosting bundle does this
+([`../deploy/self-host/README.md`](../deploy/self-host/README.md)).
+
+A production instance (`APP_ENV=production`) starts with no account at all: the migration that
+creates the `admin` development account creates nothing in production.
+
 ### Abuse Protection
 
 Production enables endpoint-specific authentication limits by default. Login and password-reset

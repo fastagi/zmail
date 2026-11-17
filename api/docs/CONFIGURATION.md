@@ -136,6 +136,7 @@ restart-scoped; no JWT signing key or browser-readable claim is involved:
 | `AUTH_SESSION_IDLE_TIMEOUT` | `168h` | Inactivity lifetime, 5 minutes through the absolute TTL |
 | `AUTH_SESSION_TOUCH_INTERVAL` | `5m` | Activity-write throttle, positive, no more than one hour or the idle timeout |
 | `AUTH_SESSION_RETENTION` | `720h` | Terminal-row retention, zero through 365 days |
+| `AUTH_REGISTRATION_ENABLED` | `true` | Boolean; `false` closes public registration (`POST /v1/register` answers `403 AUTH.FORBIDDEN`) |
 
 The API remains authoritative even when a browser cookie has a longer local lifetime: revocation,
 idle expiry, account state, password security events, and persistence availability are checked on

@@ -263,6 +263,12 @@ paths:
                 $ref: '#/components/schemas/AuthenticationUserResponse'
         '400':
           $ref: '#/components/responses/InvalidInput'
+        '403':
+          description: '`AUTH.FORBIDDEN`: registration is closed on this instance (`AUTH_REGISTRATION_ENABLED=false`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: The username (`USER.USERNAME_ALREADY_EXISTS`) or email (`USER.EMAIL_ALREADY_EXISTS`)
             is taken.

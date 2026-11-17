@@ -1,0 +1,192 @@
+-- Database roles of the Zmail self-hosting bundle. Run by psql as the bootstrap superuser with
+-- two variables set, owner_password and app_password:
+--
+--   * on a new data volume, by 10-zmail-roles.sh from /docker-entrypoint-initdb.d;
+--   * on an existing installation, by ../upgrade-db-roles.sh.
+--
+-- Three roles, three purposes:
+--
+--   zmail        the image's bootstrap superuser (POSTGRES_USER): administration only, for
+--                   example pg_dump and pg_restore. No Zmail process connects as it.
+--   zmail_owner  owns the schema and every object in it; the `migrate` job connects as it. Not a
+--                   superuser, cannot create roles or databases, does not bypass row security.
+--   zmail_app    what the API connects as. Owns nothing, so it cannot ALTER or DROP a table or
+--                   disable a trigger; has
+--                   SELECT, INSERT, UPDATE, DELETE on tables and USAGE, SELECT on sequences, through
+--                   default privileges for every table a later migration creates. Without superuser
+--                   it cannot set session_replication_role or COPY ... TO PROGRAM.
+--
+-- Idempotent: a second run changes nothing but the two passwords, which it sets again.
+-- The file has no .sql suffix so that the image's entrypoint does not run it on its own.
+
+\set ON_ERROR_STOP on
+
+-- Statements below carry passwords: never write them to the server log, not even on error.
+SET log_statement = 'none';
+SET log_min_error_statement = panic;
+SET log_min_duration_statement = -1;
+
+SELECT current_database() AS zmail_database \gset
+
+BEGIN;
+
+SELECT 'CREATE ROLE zmail_owner'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'zmail_owner') \gexec
+SELECT 'CREATE ROLE zmail_app'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'zmail_app') \gexec
+
+ALTER ROLE zmail_owner WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    PASSWORD :'owner_password';
+ALTER ROLE zmail_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+    PASSWORD :'app_password';
+
+-- Neither role may inherit anything from another role (for example pg_execute_server_program).
+DO $$
+DECLARE
+    membership record;
+BEGIN
+    FOR membership IN
+        SELECT m.roleid::regrole AS granted, m.member::regrole AS member
+        FROM pg_auth_members m
+        WHERE m.member IN ('zmail_owner'::regrole, 'zmail_app'::regrole)
+    LOOP
+        EXECUTE format('REVOKE %s FROM %s', membership.granted, membership.member);
+    END LOOP;
+END
+$$;
+
+-- Only the two roles (and superusers) may connect.
+REVOKE ALL ON DATABASE :"zmail_database" FROM PUBLIC;
+GRANT CONNECT ON DATABASE :"zmail_database" TO zmail_owner, zmail_app;
+
+ALTER SCHEMA public OWNER TO zmail_owner;
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO zmail_app;
+
+-- Hand every existing object of the schema to the owner role. On a new volume there is nothing
+-- yet; on an installation made by the previous bundle, the bootstrap superuser owns everything.
+-- (REASSIGN OWNED cannot be used: the bootstrap superuser also owns the system catalogs.)
+DO $$
+DECLARE
+    target regrole := 'zmail_owner'::regrole;
+    object record;
+BEGIN
+    -- Tables, views, and foreign tables. Indexes, constraints, triggers, and the sequences that
+    -- belong to a column follow their table.
+    FOR object IN
+        SELECT c.oid::regclass AS name, c.relkind
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+          AND c.relowner <> target
+    LOOP
+        EXECUTE format('ALTER %s %s OWNER TO zmail_owner',
+            CASE object.relkind
+                WHEN 'v' THEN 'VIEW'
+                WHEN 'm' THEN 'MATERIALIZED VIEW'
+                WHEN 'f' THEN 'FOREIGN TABLE'
+                ELSE 'TABLE'
+            END,
+            object.name);
+    END LOOP;
+
+    -- Sequences that belong to no column.
+    FOR object IN
+        SELECT c.oid::regclass AS name
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'S' AND c.relowner <> target
+    LOOP
+        EXECUTE format('ALTER SEQUENCE %s OWNER TO zmail_owner', object.name);
+    END LOOP;
+
+    -- Functions, procedures, and aggregates.
+    FOR object IN
+        SELECT p.oid::regprocedure AS name, p.prokind
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.proowner <> target
+    LOOP
+        EXECUTE format('ALTER %s %s OWNER TO zmail_owner',
+            CASE object.prokind
+                WHEN 'p' THEN 'PROCEDURE'
+                WHEN 'a' THEN 'AGGREGATE'
+                ELSE 'FUNCTION'
+            END,
+            object.name);
+    END LOOP;
+
+    -- Enums, ranges, domains, and standalone composite types.
+    FOR object IN
+        SELECT t.oid::regtype AS name, t.typtype
+        FROM pg_type t
+        JOIN pg_namespace n ON n.oid = t.typnamespace
+        LEFT JOIN pg_class c ON c.oid = t.typrelid
+        WHERE n.nspname = 'public'
+          AND t.typowner <> target
+          AND (t.typtype IN ('e', 'r', 'd') OR (t.typtype = 'c' AND c.relkind = 'c'))
+    LOOP
+        EXECUTE format('ALTER %s %s OWNER TO zmail_owner',
+            CASE object.typtype WHEN 'd' THEN 'DOMAIN' ELSE 'TYPE' END,
+            object.name);
+    END LOOP;
+END
+$$;
+
+-- What the API may do, on what exists now and on what later migrations create.
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM zmail_app;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM zmail_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO zmail_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO zmail_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE zmail_owner IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO zmail_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE zmail_owner IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO zmail_app;
+
+-- Refuse to finish with anything left behind: an object the owner role does not own, a schema
+-- this file does not manage, or a runtime role with more power than intended.
+DO $$
+DECLARE
+    leftover text;
+BEGIN
+    SELECT string_agg(name, ', ') INTO leftover FROM (
+        SELECT c.oid::regclass::text AS name
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relowner <> 'zmail_owner'::regrole
+        UNION ALL
+        SELECT p.oid::regprocedure::text
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.proowner <> 'zmail_owner'::regrole
+        UNION ALL
+        SELECT t.oid::regtype::text
+        FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+        WHERE n.nspname = 'public' AND t.typowner <> 'zmail_owner'::regrole
+    ) objects;
+    IF leftover IS NOT NULL THEN
+        RAISE EXCEPTION 'objects in schema public still not owned by zmail_owner: %', leftover;
+    END IF;
+
+    SELECT string_agg(nspname, ', ') INTO leftover
+    FROM pg_namespace
+    WHERE nspname NOT IN ('public', 'pg_catalog', 'information_schema')
+      AND nspname NOT LIKE 'pg\_toast%'
+      AND nspname NOT LIKE 'pg\_temp\_%';
+    IF leftover IS NOT NULL THEN
+        RAISE EXCEPTION 'unexpected schemas, not managed by this bundle: %', leftover;
+    END IF;
+
+    IF EXISTS (
+        SELECT FROM pg_roles
+        WHERE rolname IN ('zmail_owner', 'zmail_app')
+          AND (rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls)
+    ) OR EXISTS (
+        SELECT FROM pg_auth_members
+        WHERE member IN ('zmail_owner'::regrole, 'zmail_app'::regrole)
+    ) THEN
+        RAISE EXCEPTION 'zmail_owner or zmail_app holds an attribute or membership it must not have';
+    END IF;
+END
+$$;
+
+COMMIT;

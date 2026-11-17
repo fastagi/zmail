@@ -8083,6 +8083,15 @@ export interface operations {
                 };
             };
             400: components["responses"]["InvalidInput"];
+            /** @description `AUTH.FORBIDDEN`: registration is closed on this instance (`AUTH_REGISTRATION_ENABLED=false`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description The username (`USER.USERNAME_ALREADY_EXISTS`) or email (`USER.EMAIL_ALREADY_EXISTS`) is taken. */
             409: {
                 headers: {
