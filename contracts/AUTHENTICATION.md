@@ -119,7 +119,7 @@ browser adapter passes that status and code through. Login, password reset, and 
 account keep working. The switch is read at startup. An instance that should not accept sign-ups
 from the network keeps it `false` and creates accounts from a process started with it `true` that
 only the operator can reach; the self-hosting bundle does this
-([`../docs/shipland/SELF_HOSTING.md`](../docs/shipland/SELF_HOSTING.md)).
+([`../deploy/self-host/README.md`](../deploy/self-host/README.md)).
 
 A production instance (`APP_ENV=production`) starts with no account at all: the migration that
 creates the `admin` development account creates nothing in production.
