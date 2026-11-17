@@ -85,7 +85,7 @@ WEBHOOK_ENCRYPTION_KEY=$webhook_key
 AUTH_REGISTRATION_ENABLED=false
 
 # Mail. The domain must be set up for Cloudflare Email Routing and Email Sending. Fill in the
-# account id and a token with Email Sending permission before the first `docker compose up`.
+# account id and a token with Email Sending permission before the first docker compose up.
 MAILBOX_DOMAIN=mail.example.com
 MAILBOX_CLOUDFLARE_ACCOUNT_ID=
 MAILBOX_CLOUDFLARE_API_TOKEN=
