@@ -118,6 +118,7 @@ export class MockBroadcastStore {
         template_id: input.template_id,
         list_id: input.list_id,
         unsubscribe_label: label,
+        variables: {},
         status: 'draft',
         scheduled_at: null,
         started_at: null,
@@ -140,6 +141,7 @@ export class MockBroadcastStore {
       template_id: input.template_id,
       list_id: input.list_id,
       unsubscribe_label: label,
+      variables: { ...input.variables },
       test_percent: testPercent,
       test_wait_minutes: testWait,
       updated_at: now,
@@ -252,6 +254,7 @@ export class MockBroadcastStore {
         template: {
           id: stored.broadcast.template_id,
           variables: {
+            ...stored.broadcast.variables,
             ...contact.properties,
             email: contact.email,
             first_name: contact.first_name,

@@ -551,8 +551,17 @@ const messages = {
     labelPlaceholder: 'Unsubscribe',
     labelHint:
       'Added at the end of every message, unless the template places the unsubscribe link itself.',
-    variablesHint:
-      'Each message is filled from the contact: email, first_name, last_name, every custom field, and unsubscribe_url.',
+    values: {
+      title: 'Template values',
+      fromContact: 'Filled from each contact: {names}.',
+      fromContactNone: 'This template uses no contact fields.',
+      none: 'The template has no other values to fill.',
+      hint: 'Shared by every message, such as a promotion code or a date. A contact field of the same name overrides it.',
+      placeholder: "Each contact's own value",
+      fallback: 'Leave empty to use "{value}"',
+      required:
+        'No value and no fallback: contacts without a "{name}" field will not get this broadcast.',
+    },
     save: 'Save draft',
     created: 'Draft created',
     saved: 'Draft saved',

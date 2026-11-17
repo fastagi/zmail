@@ -100,6 +100,31 @@ export function templateVariables(source: TemplateSource): string[] | null {
   return [...names].sort();
 }
 
+/**
+ * Every variable with its fallback, sorted by name. The fallback is null when at least one use of
+ * the variable has none, because that use fails without a value. Null when the source is malformed.
+ */
+export function templateFallbacks(
+  source: TemplateSource
+): { name: string; fallback: string | null }[] | null {
+  const fallbacks = new Map<string, string | null>();
+  for (const text of [source.subject, source.html, source.text]) {
+    const parts = parseTemplate(text);
+    if (!parts) return null;
+    for (const part of parts) {
+      if (part.kind !== 'variable') continue;
+      const known = fallbacks.get(part.name);
+      fallbacks.set(
+        part.name,
+        part.fallback === null || known === null ? null : (known ?? part.fallback)
+      );
+    }
+  }
+  return [...fallbacks.keys()]
+    .sort()
+    .map(name => ({ name, fallback: fallbacks.get(name) ?? null }));
+}
+
 /** Renders the source with values; null when the source is malformed. */
 export function renderTemplate(
   source: TemplateSource,

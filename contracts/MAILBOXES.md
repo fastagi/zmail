@@ -417,7 +417,11 @@ without it, sending is `503 MAILBOX.BROADCAST_DISABLED`.
 | `canceled` | Stopped; recipients not yet sent became `canceled`. |
 
 `POST /v1/mail-broadcasts` creates a draft from `name`, `mailbox_id`, `template_id`, `list_id`,
-and the optional `unsubscribe_label`, `test_percent`, and `test_wait_minutes`. Each must belong to the organization. `PUT` replaces a draft
+and the optional `unsubscribe_label`, `test_percent`, `test_wait_minutes`, and `variables`. Each must belong to the organization.
+`variables` are template values shared by every recipient, such as a promotion code or an event
+date: at most 100, with variable names, values of at most 2,000 characters, and none of `email`,
+`first_name`, `last_name`, or `unsubscribe_url`; otherwise `422 MAILBOX.BROADCAST_INVALID`. They are
+fixed with the rest of the draft when sending starts. `PUT` replaces a draft
 and is `409 MAILBOX.BROADCAST_NOT_EDITABLE` in any other state.
 
 `POST /v1/mail-broadcasts/{id}/sends` with an optional `scheduled_at` starts a draft:
@@ -455,7 +459,8 @@ The `mail:broadcast:work` worker sends each recipient as an ordinary outbound me
 broadcast's mailbox, so the organization's send limit, delivery events, the log, and webhooks apply
 to it.
 
-- Variables come from the contact: `email`, `first_name`, `last_name`, every property, and
+- Variables come from the broadcast's `variables`, then the contact's properties (which override a
+  shared value of the same name), then the contact's `email`, `first_name`, `last_name`, and
   `unsubscribe_url`. A variable without a value or fallback fails that recipient with
   `template.variables_missing`.
 - If the template does not use `{{unsubscribe_url}}`, a small link with `unsubscribe_label` (or

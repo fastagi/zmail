@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseTemplate,
   renderTemplate,
+  templateFallbacks,
   templateVariables,
 } from '@/features/mailbox/utils/template-render';
 
@@ -38,6 +39,21 @@ describe('template renderer', () => {
     ]) {
       expect(parseTemplate(source), source).toBeNull();
     }
+  });
+
+  it('reports each variable with a fallback only when every use has one', () => {
+    expect(
+      templateFallbacks({
+        subject: '{{first_name|there}} {{code}}',
+        html: '{{code|NONE}} {{ends|Friday}} {{ends|Sunday}}',
+        text: '{{first_name|you}}',
+      })
+    ).toEqual([
+      { name: 'code', fallback: null },
+      { name: 'ends', fallback: 'Friday' },
+      { name: 'first_name', fallback: 'there' },
+    ]);
+    expect(templateFallbacks({ subject: '{{bad', html: '', text: '' })).toBeNull();
   });
 
   it('fills, escapes, and reports missing variables like the API', () => {

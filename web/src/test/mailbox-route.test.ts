@@ -1795,6 +1795,77 @@ describe('mailbox browser route boundary', () => {
     expect(list2.data.map((item: { name: string }) => item.name)).toEqual(['Later', 'Launch']);
   });
 
+  it('fills shared broadcast values, lets contact fields win, and refuses reserved names', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const json = (path: string, body: unknown) =>
+      request(path, { method: 'POST', body: JSON.stringify(body) });
+    const data = async (response: Response) => (await response.json()).data;
+
+    const mailbox = await data(await create(route, { local_part: 'promo' }));
+    const template = await data(
+      await route.createMailTemplateRoute(
+        json('/api/mail-templates', { name: 'Sale', subject: 'Use {{code}}', text: 'Sale' })
+      )
+    );
+    const list = await data(
+      await route.saveMailContactListRoute(json('/api/mail-contact-lists', { name: 'Sale' }))
+    );
+    for (const [email, code] of [
+      ['ann@example.com', 'ANN50'],
+      ['bob@example.com', ''],
+    ]) {
+      await route.createMailContactRoute(
+        json('/api/mail-contacts', {
+          email,
+          properties: code ? { code } : {},
+          list_ids: [list.id],
+        })
+      );
+    }
+    const base = {
+      name: 'Sale',
+      mailbox_id: mailbox.id,
+      template_id: template.id,
+      list_id: list.id,
+    };
+    for (const variables of [{ first_name: 'x' }, { unsubscribe_url: 'x' }, { '1x': 'x' }, []]) {
+      await expectError(
+        await route.saveMailBroadcastRoute(json('/api/mail-broadcasts', { ...base, variables })),
+        422,
+        'COMMON.VALIDATION_FAILED'
+      );
+    }
+    const draft = await data(
+      await route.saveMailBroadcastRoute(
+        json('/api/mail-broadcasts', { ...base, variables: { code: 'NOV20' } })
+      )
+    );
+    expect(draft.variables).toEqual({ code: 'NOV20' });
+    const sent = await data(
+      await route.sendMailBroadcastRoute(
+        json(`/api/mail-broadcasts/${draft.id}/sends`, {}),
+        String(draft.id)
+      )
+    );
+    // Bob has no code of his own, so the shared one fills it instead of failing him.
+    expect(sent).toMatchObject({ status: 'sent', counts: { total: 2, sent: 2, failed: 0 } });
+    const messages = await (
+      await route.listMailMessagesRoute(
+        request(`/api/mailboxes/${mailbox.id}/messages?direction=outbound`),
+        String(mailbox.id)
+      )
+    ).json();
+    const subjects = Object.fromEntries(
+      messages.data.map((message: { to: string[]; subject: string }) => [
+        message.to[0],
+        message.subject,
+      ])
+    );
+    expect(subjects).toEqual({ 'ann@example.com': 'Use ANN50', 'bob@example.com': 'Use NOV20' });
+  });
+
   it('forwards broadcast routes and the public unsubscribe route to the fixed API paths', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';

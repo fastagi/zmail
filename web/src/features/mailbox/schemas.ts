@@ -61,6 +61,11 @@ export const MAIL_BROADCAST_LABEL_MAX_LENGTH = 50;
 /** An unsubscribe token: organization id, contact id, and a 16-byte base64url signature. */
 export const MAIL_UNSUBSCRIBE_TOKEN_PATTERN = /^[1-9]\d{0,9}\.[1-9]\d{0,9}\.[A-Za-z0-9_-]{22}$/u;
 export const MAIL_CONTACT_RESERVED_FIELDS = ['email', 'first_name', 'last_name'] as const;
+/** Filled from each contact on every broadcast message; a broadcast cannot set them. */
+export const MAIL_BROADCAST_CONTACT_VARIABLES = [
+  ...MAIL_CONTACT_RESERVED_FIELDS,
+  'unsubscribe_url',
+] as const;
 /** A variable name: a letter, then letters, digits, or underscores. */
 export const MAIL_TEMPLATE_VARIABLE_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
@@ -453,6 +458,8 @@ export const mailBroadcastSchema = strictObject({
   template_id: safeIdSchema,
   list_id: safeIdSchema,
   unsubscribe_label: string(),
+  // Template values shared by every recipient; a contact's properties override them.
+  variables: templateVariablesSchema,
   status: mailBroadcastStatusSchema,
   scheduled_at: nullable(timestampSchema),
   started_at: nullable(timestampSchema),
@@ -513,6 +520,7 @@ export const mailBroadcastInputSchema = strictObject({
   unsubscribe_label: optional(string()),
   test_percent: optional(nonnegativeIntegerSchema),
   test_wait_minutes: optional(nonnegativeIntegerSchema),
+  variables: optional(templateVariablesSchema),
 });
 
 export const mailBroadcastSendInputSchema = strictObject({

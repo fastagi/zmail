@@ -22,6 +22,7 @@ import {
   MAILBOX_LOCAL_PART_MAX_LENGTH,
   MAIL_ADDRESS_MAX_LENGTH,
   MAIL_ATTACHMENTS_MAX_BYTES,
+  MAIL_BROADCAST_CONTACT_VARIABLES,
   MAIL_BROADCAST_LABEL_MAX_LENGTH,
   MAIL_BROADCAST_NAME_MAX_LENGTH,
   MAIL_BROADCAST_TEST_MAX_PERCENT,
@@ -603,6 +604,7 @@ export async function saveMailBroadcastRoute(
         unsubscribe_label: 'unsubscribe_label',
         test_percent: 'test_percent',
         test_wait_minutes: 'test_wait_minutes',
+        variables: 'variables',
       },
     });
   }
@@ -798,6 +800,7 @@ async function broadcastBody(request: Request): Promise<Parsed<MailBroadcastInpu
     unsubscribe_label: label,
     test_percent: testPercent,
     test_wait_minutes: testWait,
+    variables,
     ...rest
   } = body.value;
   const errors: Record<string, string[]> = {};
@@ -821,6 +824,13 @@ async function broadcastBody(request: Request): Promise<Parsed<MailBroadcastInpu
   if (testWait !== undefined && !wholeNumber(testWait, MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES)) {
     errors.test_wait_minutes = ['The test_wait_minutes field is invalid'];
   }
+  if (
+    variables !== undefined &&
+    (!variableMap(variables) ||
+      MAIL_BROADCAST_CONTACT_VARIABLES.some(field => Object.hasOwn(variables, field)))
+  ) {
+    errors.variables = ['The variables field is invalid'];
+  }
   if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
   return {
     ok: true,
@@ -832,6 +842,7 @@ async function broadcastBody(request: Request): Promise<Parsed<MailBroadcastInpu
       ...(typeof label === 'string' ? { unsubscribe_label: label } : {}),
       ...(typeof testPercent === 'number' ? { test_percent: testPercent } : {}),
       ...(typeof testWait === 'number' ? { test_wait_minutes: testWait } : {}),
+      ...(variableMap(variables) ? { variables } : {}),
     },
   };
 }

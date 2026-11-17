@@ -59,7 +59,12 @@ type BroadcastInput struct {
 	TestPercent int
 	// TestWaitMinutes is the wait after the test wave; 0 means the default of 30 minutes.
 	TestWaitMinutes int
+	// Variables are template values shared by every recipient.
+	Variables map[string]string
 }
+
+// broadcastContactVariables are filled from each contact and cannot be set on a broadcast.
+var broadcastContactVariables = []string{"email", "first_name", "last_name", unsubscribeVariable}
 
 // BroadcastsEnabled reports whether broadcasts can run: unsubscribe links need the signing
 // secret and the public Web origin.
@@ -127,6 +132,15 @@ func (s *service) buildBroadcast(ctx context.Context, organizationID uint, input
 	if wait < minTestWaitMinutes || wait > maxTestWaitMinutes {
 		return nil, fmt.Errorf("%w: test_wait_minutes must be between %d and %d", ErrMailBroadcastInvalid, minTestWaitMinutes, maxTestWaitMinutes)
 	}
+	variables, ok := cleanTemplateValues(input.Variables)
+	if !ok {
+		return nil, fmt.Errorf("%w: variables", ErrMailBroadcastInvalid)
+	}
+	for _, name := range broadcastContactVariables {
+		if _, reserved := variables[name]; reserved {
+			return nil, fmt.Errorf("%w: variables cannot set %s, which comes from each contact", ErrMailBroadcastInvalid, name)
+		}
+	}
 	if input.MailboxID == 0 || input.TemplateID == 0 || input.ListID == 0 {
 		return nil, fmt.Errorf("%w: mailbox_id, template_id, and list_id are required", ErrMailBroadcastInvalid)
 	}
@@ -154,6 +168,7 @@ func (s *service) buildBroadcast(ctx context.Context, organizationID uint, input
 		TemplateID:       input.TemplateID,
 		ListID:           input.ListID,
 		UnsubscribeLabel: label,
+		Variables:        variables,
 		TestPercent:      input.TestPercent,
 		TestWaitMinutes:  wait,
 	}, nil
@@ -417,7 +432,11 @@ func (run *broadcastRun) send(ctx context.Context, recipient *domain.MailBroadca
 
 	token := s.unsubscribeToken(broadcast.OrganizationID, contact.ID)
 	unsubscribeURL := s.settings.PublicURL + "/unsubscribe/" + token
-	values := map[string]string{}
+	// Shared values first; the contact's own values override them.
+	values := make(map[string]string, len(broadcast.Variables)+len(contact.Properties)+4)
+	for name, value := range broadcast.Variables {
+		values[name] = value
+	}
 	for name, value := range contact.Properties {
 		values[name] = value
 	}

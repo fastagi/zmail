@@ -22,6 +22,7 @@ const state = vi.hoisted(() => {
     domains: query(),
     mailboxes: query(),
     templates: query(),
+    template: query(),
     lists: query(),
     broadcasts: query(),
     broadcast: query(),
@@ -51,6 +52,7 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
 }));
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
   useMailTemplates: () => state.templates,
+  useMailTemplate: () => state.template,
 }));
 vi.mock('@/features/mailbox/hooks/use-mail-contacts', () => ({
   useMailContactLists: () => state.lists,
@@ -97,12 +99,24 @@ describe('mail broadcasts console', () => {
       {
         id: 3,
         name: 'Newsletter',
-        subject: 's',
-        variables: [],
+        subject: '{{first_name|Hi}}, use {{code}}',
+        variables: ['code', 'ends', 'first_name', 'unsubscribe_url'],
         created_at: now(),
         updated_at: now(),
       },
     ];
+    state.template.data = {
+      id: 3,
+      name: 'Newsletter',
+      subject: '{{first_name|Hi}}, use {{code}}',
+      variables: ['code', 'ends', 'first_name', 'unsubscribe_url'],
+      html_body: '<p>{{code}} until {{ends|Friday}}</p><a href="{{unsubscribe_url}}">x</a>',
+      text_body: '',
+      sample_variables: {},
+      design: null,
+      created_at: now(),
+      updated_at: now(),
+    };
     state.lists.data = [{ id: 4, name: 'Customers', contact_count: 12, created_at: now() }];
     state.broadcasts.data = page([
       broadcast({
@@ -161,6 +175,21 @@ describe('mail broadcasts console', () => {
     fireEvent.change(screen.getByLabelText('Contact list'), { target: { value: '4' } });
     expect(screen.getByRole('option', { name: 'Customers (12 contacts)' })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Unsubscribe link text'), { target: { value: '退订' } });
+
+    // Contact fields fill themselves; the other variables can be shared by every message.
+    expect(
+      screen.getByText('Filled from each contact: first_name, unsubscribe_url.')
+    ).toBeInTheDocument();
+    const code = screen.getByRole('textbox', { name: 'code' });
+    expect(code).toHaveAccessibleDescription(
+      'No value and no fallback: contacts without a "code" field will not get this broadcast.'
+    );
+    expect(screen.getByRole('textbox', { name: 'ends' })).toHaveAttribute(
+      'placeholder',
+      'Leave empty to use "Friday"'
+    );
+    fireEvent.change(code, { target: { value: 'NOV20' } });
+    expect(code).not.toHaveAccessibleDescription();
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
 
     await waitFor(() =>
@@ -173,6 +202,7 @@ describe('mail broadcasts console', () => {
           unsubscribe_label: '退订',
           test_percent: 0,
           test_wait_minutes: 30,
+          variables: { code: 'NOV20' },
         },
       })
     );
@@ -316,6 +346,7 @@ function broadcast(overrides: Record<string, unknown> = {}) {
     template_id: 3,
     list_id: 4,
     unsubscribe_label: '',
+    variables: {},
     status: 'draft',
     scheduled_at: null,
     started_at: null,

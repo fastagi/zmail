@@ -2473,6 +2473,7 @@ export interface components {
             unsubscribe_label: string;
             /** Format: date-time */
             updated_at: string;
+            variables: components["schemas"]["MailBroadcastVariables"];
         };
         MailBroadcastCounts: {
             /** @description Sent or failed recipients whose message bounced or was rejected, at send time or later. */
@@ -2527,6 +2528,7 @@ export interface components {
             test_wait_minutes?: number;
             /** @description Text of the unsubscribe link Zmail adds when the template does not use `{{unsubscribe_url}}`; `Unsubscribe` when empty. */
             unsubscribe_label?: string;
+            variables?: components["schemas"]["MailBroadcastVariables"];
         };
         MailBroadcastResponse: {
             /** @constant */
@@ -2546,6 +2548,10 @@ export interface components {
          * @enum {string}
          */
         MailBroadcastStatus: "draft" | "scheduled" | "sending" | "paused" | "sent" | "canceled";
+        /** @description Template values shared by every recipient, at most 100. A contact's properties override a value of the same name. `email`, `first_name`, `last_name`, and `unsubscribe_url` come from each contact and cannot be set here. Absent means none. */
+        MailBroadcastVariables: {
+            [key: string]: string;
+        };
         MailContact: {
             /** Format: date-time */
             created_at: string;
