@@ -128,6 +128,98 @@ describe('mail templates console', () => {
     expect(toast.success).toHaveBeenCalledWith('Template created');
   });
 
+  it('builds a new template from blocks and saves the design with the rendered bodies', async () => {
+    state.save.mutateAsync.mockResolvedValue(template({ id: 9, name: 'Launch' }));
+    const { container } = renderTemplates();
+    fireEvent.click(screen.getByRole('button', { name: 'New template' }));
+    expect(screen.getByRole('button', { name: 'Visual' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText(/No blocks yet/u)).toBeInTheDocument();
+
+    const add = screen.getByRole('group', { name: 'Add' });
+    fireEvent.click(within(add).getByRole('button', { name: 'Heading' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Heading' }), {
+      target: { value: 'Big news, {{first_name|friend}}' },
+    });
+    fireEvent.click(within(add).getByRole('button', { name: 'Button' }));
+    expect(screen.getAllByText(/The button is left out of the email/u)).toHaveLength(2);
+    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'See what is new' } });
+    fireEvent.change(screen.getByLabelText('Link'), {
+      target: { value: 'https://acme.example/new' },
+    });
+    expect(screen.queryByText(/The button is left out of the email/u)).toBeNull();
+
+    // The preview shows the rendered blocks with sample values.
+    const srcdoc = container.querySelector('iframe')?.getAttribute('srcdoc') ?? '';
+    expect(srcdoc).toContain('Big news, friend');
+    expect(srcdoc).toContain('href="https://acme.example/new"');
+
+    // The heading moves below the button and back.
+    fireEvent.click(screen.getByRole('button', { name: 'Move Heading down' }));
+    const order = () =>
+      Array.from(container.querySelectorAll('li[data-block-type]')).map(item =>
+        item.getAttribute('data-block-type')
+      );
+    expect(order()).toEqual(['button', 'heading']);
+    fireEvent.click(screen.getByRole('button', { name: 'Move Heading up' }));
+    expect(order()).toEqual(['heading', 'button']);
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Launch' } });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'What is new' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(state.save.mutateAsync).toHaveBeenCalled());
+    const [{ input }] = state.save.mutateAsync.mock.calls[0] as [
+      { input: Record<string, unknown> },
+    ];
+    const design = input.design as { version: number; blocks: { type: string }[] };
+    expect(design.version).toBe(1);
+    expect(design.blocks.map(block => block.type)).toEqual(['heading', 'button']);
+    expect(input.html).toContain('Big news, {{first_name|friend}}');
+    expect(input.text).toBe(
+      'Big news, {{first_name|friend}}\n\nSee what is new: https://acme.example/new'
+    );
+  });
+
+  it('opens a visual template in the visual editor and switches to HTML after confirmation', async () => {
+    state.template.data = template({
+      design: {
+        version: 1,
+        settings: {},
+        blocks: [{ id: 'a', type: 'text', text: 'Hello **there**', align: 'left' }],
+      },
+    });
+    state.save.mutateAsync.mockResolvedValue(template());
+    renderTemplates();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Welcome' }));
+    expect(screen.getByRole('textbox', { name: 'Text' })).toHaveValue('Hello **there**');
+    expect(screen.queryByLabelText('HTML body')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'HTML' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Switch to HTML' }));
+    expect(screen.getByLabelText('HTML body')).toHaveValue(
+      '<p>Hi {{first_name|friend}}, code {{code}}</p>'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(state.save.mutateAsync).toHaveBeenCalled());
+    const [{ input }] = state.save.mutateAsync.mock.calls[0] as [
+      { input: Record<string, unknown> },
+    ];
+    expect(input.design).toBeNull();
+  });
+
+  it('keeps an HTML template in the HTML editor until a visual design is started', () => {
+    renderTemplates();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Welcome' }));
+    expect(screen.getByRole('button', { name: 'HTML' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Visual' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Start a visual design' })
+    );
+    expect(screen.queryByLabelText('HTML body')).toBeNull();
+    expect(screen.getByText(/No blocks yet/u)).toBeInTheDocument();
+  });
+
   it('warns about missing values and malformed placeholders while editing', () => {
     renderTemplates();
     fireEvent.click(screen.getByRole('button', { name: 'Edit Welcome' }));
@@ -212,6 +304,7 @@ function template(overrides: Record<string, unknown> = {}) {
     html_body: '<p>Hi {{first_name|friend}}, code {{code}}</p>',
     text_body: 'Code {{code}}',
     sample_variables: { first_name: 'Ann', code: '1234' },
+    design: null,
     ...overrides,
   };
 }

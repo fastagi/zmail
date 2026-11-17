@@ -2,7 +2,9 @@ package mailbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -714,6 +716,7 @@ func TestRepositoryKeepsTemplatesPerOrganization(t *testing.T) {
 	template := &domain.MailTemplate{
 		OrganizationID: 1, Name: "Welcome", Subject: "Hi {{name}}", HTMLBody: "<p>{{name}}</p>",
 		SampleVariables: map[string]string{"name": "Ann"}, CreatedBy: 9,
+		Design: `{"version":1,"blocks":[]}`,
 	}
 	if err := repo.CreateTemplate(ctx, template, 2); err != nil || template.ID == 0 {
 		t.Fatalf("CreateTemplate = %v, id %d", err, template.ID)
@@ -732,7 +735,7 @@ func TestRepositoryKeepsTemplatesPerOrganization(t *testing.T) {
 	}
 
 	found, err := repo.FindTemplate(ctx, 1, template.ID)
-	if err != nil || found.SampleVariables["name"] != "Ann" || found.CreatedBy != 9 {
+	if err != nil || found.SampleVariables["name"] != "Ann" || found.CreatedBy != 9 || !sameJSON(found.Design, `{"version":1,"blocks":[]}`) {
 		t.Fatalf("FindTemplate = %+v, %v", found, err)
 	}
 	if _, err = repo.FindTemplate(ctx, 2, template.ID); !errors.Is(err, ErrMailTemplateNotFound) {
@@ -747,9 +750,13 @@ func TestRepositoryKeepsTemplatesPerOrganization(t *testing.T) {
 	if err := repo.UpdateTemplate(ctx, found); !errors.Is(err, ErrMailTemplateNameTaken) {
 		t.Fatalf("rename onto another template error = %v", err)
 	}
-	found.Name = "Welcome back"
+	found.Name, found.Design = "Welcome back", ""
 	if err := repo.UpdateTemplate(ctx, found); err != nil || found.Subject != "changed" || found.CreatedBy != 9 {
 		t.Fatalf("UpdateTemplate = %+v, %v", found, err)
+	}
+	// Switching to HTML clears the design.
+	if reloaded, err := repo.FindTemplate(ctx, 1, template.ID); err != nil || reloaded.Design != "" {
+		t.Fatalf("design after switching to HTML = %q, %v", reloaded.Design, err)
 	}
 	found.OrganizationID = 2
 	if err := repo.UpdateTemplate(ctx, found); !errors.Is(err, ErrMailTemplateNotFound) {
@@ -931,4 +938,13 @@ func TestRepositoryImportsContacts(t *testing.T) {
 	if _, err := repo.ImportContacts(ctx, 1, more, 999, 10); !errors.Is(err, ErrMailContactListNotFound) {
 		t.Fatalf("missing list error = %v", err)
 	}
+}
+
+// sameJSON compares two JSON documents by content; jsonb does not keep key order or spacing.
+func sameJSON(a, b string) bool {
+	var left, right any
+	if json.Unmarshal([]byte(a), &left) != nil || json.Unmarshal([]byte(b), &right) != nil {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
 }

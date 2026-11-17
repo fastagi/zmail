@@ -2856,6 +2856,7 @@ export interface components {
         MailTemplate: {
             /** Format: date-time */
             created_at: string;
+            design: components["schemas"]["MailTemplateDesign"];
             html_body: string;
             id: components["schemas"]["PositiveID"];
             name: string;
@@ -2866,6 +2867,12 @@ export interface components {
             updated_at: string;
             variables: string[];
         };
+        /** @description The visual editor's document that `html` and `text` were rendered from, stored as given. The API checks only that it is an object of at most 256 KiB with a positive integer `version`; sending always uses the bodies. Null or absent means the template is written in HTML, and a replace without it clears the stored design. */
+        MailTemplateDesign: ({
+            version: number;
+        } & {
+            [key: string]: unknown;
+        }) | null;
         MailTemplateListResponse: {
             /** @constant */
             code: 0;
@@ -2894,6 +2901,7 @@ export interface components {
             message: string;
         };
         MailTemplateRequest: {
+            design?: components["schemas"]["MailTemplateDesign"];
             /** @description At least one of `html` and `text` is required. */
             html?: string;
             name: string;

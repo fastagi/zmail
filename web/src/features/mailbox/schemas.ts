@@ -13,6 +13,7 @@ import {
   record,
   strictObject,
   string,
+  looseObject,
   union,
 } from 'zod/mini';
 
@@ -39,6 +40,8 @@ export const MAIL_ATTACHMENT_TYPE_MAX_LENGTH = 127;
 export const MAIL_TEMPLATE_NAME_MAX_LENGTH = 100;
 export const MAIL_TEMPLATE_MAX_PER_ORGANIZATION = 200;
 export const MAIL_TEMPLATE_MAX_VARIABLES = 100;
+/** The visual editor's design document, as stored by the API. */
+export const MAIL_TEMPLATE_DESIGN_MAX_BYTES = 256 * 1_024;
 export const MAIL_TEMPLATE_VALUE_MAX_LENGTH = 2_000;
 export const MAIL_TEMPLATE_TEST_MAX_RECIPIENTS = 5;
 export const MAIL_CONTACT_NAME_MAX_LENGTH = 100;
@@ -324,6 +327,9 @@ export const mailTemplateSummarySchema = strictObject({
 });
 export const mailTemplateListSchema = array(mailTemplateSummarySchema);
 
+/** The contract checks only the version; the editor validates the rest of the document. */
+export const mailTemplateDesignSchema = looseObject({ version: number() });
+
 export const mailTemplateSchema = strictObject({
   id: safeIdSchema,
   name: string(),
@@ -334,6 +340,8 @@ export const mailTemplateSchema = strictObject({
   html_body: string(),
   text_body: string(),
   sample_variables: templateVariablesSchema,
+  // The visual editor reads it with its own parser; the API stores it as given.
+  design: nullable(mailTemplateDesignSchema),
 });
 
 export const mailTemplateInputSchema = strictObject({
@@ -342,6 +350,7 @@ export const mailTemplateInputSchema = strictObject({
   html: optional(string()),
   text: optional(string()),
   sample_variables: optional(templateVariablesSchema),
+  design: optional(nullable(mailTemplateDesignSchema)),
 });
 
 export const mailTemplateTestInputSchema = strictObject({

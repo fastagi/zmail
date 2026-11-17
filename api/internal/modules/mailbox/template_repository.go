@@ -82,6 +82,7 @@ func (r *repository) UpdateTemplate(ctx context.Context, template *domain.MailTe
 			"html_body":        po.HTMLBody,
 			"text_body":        po.TextBody,
 			"sample_variables": po.SampleVariables,
+			"design":           po.Design,
 			"updated_at":       gorm.Expr("now()"),
 		})
 	if result.Error != nil {

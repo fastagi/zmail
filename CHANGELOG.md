@@ -8,6 +8,12 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Visual template editor.** Templates are built from blocks (heading, text, button, image,
+  divider, spacer, footer) with email colors, a formatting toolbar, and a field picker, and preview
+  live. The console renders email-safe HTML and plain text from the design; the API stores the
+  design in the new `design` field (`mail_templates.design`, migration
+  `2026_11_18_090000_add_mail_template_design`) and keeps sending the bodies. HTML templates stay
+  in the HTML editor; switching between the two asks first.
 - **A Zmail console home and login page.** The console opens on the mail areas (emails,
   broadcasts, contacts, templates, mailboxes, domain) and a getting-started checklist. The login
   page describes Zmail, drops the inactive GitHub button, and replaces sign-up with an invitation
