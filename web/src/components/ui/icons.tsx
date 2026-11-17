@@ -55,19 +55,21 @@ export const Meta = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-// Brand logo
+// Brand logo — Zmail (n=3 Squircle + geometric Z with dot above tail)
 export const Logo = (props: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
-    viewBox="0 0 24 24"
+    viewBox="0 0 100 100"
     fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
+    aria-hidden="true"
     {...props}
   >
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+    <path
+      fill="currentColor"
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M50 0C89.16 0 100 10.84 100 50C100 89.16 89.16 100 50 100C10.84 100 0 89.16 0 50C0 10.84 10.84 0 50 0ZM27.5 23.5H72.5V30L44.5 66H72.5V76.5H27.5V70L55.5 34H27.5V23.5ZM66.2 48.2A5.8 5.8 0 1 0 66.2 59.8A5.8 5.8 0 1 0 66.2 48.2Z"
+    />
   </svg>
 );
  

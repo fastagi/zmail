@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LucideIcon,
-  BarChart3,
   Settings,
   Home,
   Bell,
@@ -24,6 +23,7 @@ import {
 } from 'lucide-react';
 
 import { cn } from '@/utils';
+import { Logo } from '@/components/ui/icons';
 import { ROUTES } from '@/constants/routes';
 import {
   DropdownMenu,
@@ -32,7 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LanguageSwitcher } from '@/components/common';
 import { useT, type AllTranslationKeys } from '@/i18n';
@@ -161,10 +161,8 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
       {/* Fixed Header */}
       <header className="flex h-16 shrink-0 items-center justify-between border-b bg-bg-surface px-4 md:px-6 shadow-sm z-50">
         <div className="flex min-w-0 items-center gap-2 sm:gap-4">
-          <Link href={ROUTES.SITE.HOME} className="flex items-center gap-2 group">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-transform group-hover:scale-110">
-              <BarChart3 className="h-5 w-5" />
-            </div>
+          <Link href={ROUTES.SITE.HOME} className="flex items-center gap-2.5 group">
+            <Logo className="h-8 w-8 text-primary transition-transform group-hover:scale-105" />
             <span className="hidden text-xl font-bold sm:inline">Zmail</span>
           </Link>
           {organizationEnabled ? (
@@ -204,28 +202,28 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                 className="h-9 w-9 rounded-full overflow-hidden border border-border/50 hover:border-primary/50 transition-colors"
               >
                 <Avatar className="h-full w-full">
-                  <AvatarImage src="https://github.com/shadcn.png" alt="" />
                   <AvatarFallback className="bg-primary/10 text-primary">
-                    {user?.name
-                      ?.split(' ')
+                    {(user?.name || user?.email || 'ZM')
+                      .split(/[\s@._-]+/)
+                      .filter(Boolean)
                       .map(part => part[0])
                       .join('')
                       .slice(0, 2)
-                      .toUpperCase() || 'LF'}
+                      .toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <span className="sr-only">{t('console.profile')}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 rounded-xl p-1 shadow-premium">
-              <div className="px-2 py-1.5 text-xs font-medium text-text-muted uppercase tracking-wider">
-                {user?.name || t('nav.profile')}
+              <div className="px-2 py-1.5 text-xs font-medium text-text-muted truncate">
+                {user?.name || user?.email || t('nav.profile')}
               </div>
-              <DropdownMenuItem className="rounded-lg cursor-pointer">
-                {t('nav.profile')}
+              <DropdownMenuItem asChild className="rounded-lg cursor-pointer">
+                <Link href={ROUTES.CONSOLE.SETTINGS}>{t('nav.profile')}</Link>
               </DropdownMenuItem>
-              <DropdownMenuItem className="rounded-lg cursor-pointer">
-                {t('nav.settings')}
+              <DropdownMenuItem asChild className="rounded-lg cursor-pointer">
+                <Link href={ROUTES.CONSOLE.SETTINGS}>{t('nav.settings')}</Link>
               </DropdownMenuItem>
               <div className="h-px bg-border/50 my-1" />
               <DropdownMenuItem
@@ -260,11 +258,13 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 transition-all hover:text-primary',
-                      isActive ? 'bg-muted text-primary' : 'text-text-subtle hover:bg-muted/50'
+                      'group flex items-center gap-3 rounded-lg px-3 py-2 transition-all duration-150 hover:text-primary active:scale-[0.99]',
+                      isActive
+                        ? 'bg-muted font-semibold text-primary shadow-2xs'
+                        : 'text-text-subtle hover:bg-muted/50'
                     )}
                   >
-                    <IconComponent className="h-4.5 w-4.5" />
+                    <IconComponent className="h-4.5 w-4.5 transition-transform duration-150 group-hover:scale-110" />
                     {t(item.titleKey)}
                   </Link>
                 );
@@ -301,7 +301,9 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
         </aside>
 
         {/* Scrollable Main Content */}
-        <main className="h-full min-w-0 w-full overflow-y-auto">{children}</main>
+        <main key={pathname} className="animate-enter h-full min-w-0 w-full overflow-y-auto">
+          {children}
+        </main>
       </div>
     </div>
   );
