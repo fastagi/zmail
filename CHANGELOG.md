@@ -8,6 +8,12 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Broadcast variables.** A broadcast can fill template values shared by every recipient, such
+  as a promotion code or an event date, in the new `variables` field
+  (`mail_broadcasts.variables`, migration `2026_11_18_100000_add_mail_broadcast_variables`). A
+  contact's own property of the same name wins; `email`, `first_name`, `last_name`, and
+  `unsubscribe_url` still come from each contact. The broadcast form lists the template's
+  variables and warns about one with no value and no fallback.
 - **Visual template editor.** Templates are built from blocks (heading, text, button, image,
   divider, spacer, footer) with email colors, a formatting toolbar, and a field picker, and preview
   live. The console renders email-safe HTML and plain text from the design; the API stores the

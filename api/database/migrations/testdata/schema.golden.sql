@@ -118,6 +118,7 @@ TABLE mail_broadcasts
   COLUMN current_wave smallint NOT NULL DEFAULT 1
   COLUMN resume_at timestamp with time zone
   COLUMN safety_override boolean NOT NULL DEFAULT false
+  COLUMN variables jsonb NOT NULL DEFAULT '{}'::jsonb
 
 TABLE mail_contact_list_members
   COLUMN list_id bigint NOT NULL
@@ -205,6 +206,7 @@ TABLE mail_templates
   COLUMN created_by bigint NOT NULL
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
+  COLUMN design jsonb
 
 TABLE mailboxes
   COLUMN id bigint NOT NULL DEFAULT nextval('mailboxes_id_seq'::regclass)

@@ -22,6 +22,8 @@ type MailBroadcastRequest struct {
 	TestPercent int `json:"test_percent" binding:"min=0,max=50"`
 	// TestWaitMinutes is the wait after the test wave, 5 to 1440; 0 means 30.
 	TestWaitMinutes int `json:"test_wait_minutes" binding:"min=0,max=1440"`
+	// Variables are template values shared by every recipient.
+	Variables map[string]string `json:"variables"`
 }
 
 func (r MailBroadcastRequest) input() BroadcastInput {
@@ -54,6 +56,7 @@ type MailBroadcastResponse struct {
 	TemplateID       uint                        `json:"template_id"`
 	ListID           uint                        `json:"list_id"`
 	UnsubscribeLabel string                      `json:"unsubscribe_label"`
+	Variables        map[string]string           `json:"variables"`
 	Status           string                      `json:"status"`
 	ScheduledAt      *time.Time                  `json:"scheduled_at"`
 	StartedAt        *time.Time                  `json:"started_at"`
@@ -88,6 +91,7 @@ func toMailBroadcastResponse(broadcast *domain.MailBroadcast) MailBroadcastRespo
 		TemplateID:       broadcast.TemplateID,
 		ListID:           broadcast.ListID,
 		UnsubscribeLabel: broadcast.UnsubscribeLabel,
+		Variables:        broadcastVariables(broadcast.Variables),
 		Status:           string(broadcast.Status),
 		ScheduledAt:      broadcast.ScheduledAt,
 		StartedAt:        broadcast.StartedAt,
@@ -284,4 +288,12 @@ func respondBroadcast(c *gin.Context, broadcast *domain.MailBroadcast, err error
 		return
 	}
 	response.Success(c, toMailBroadcastResponse(broadcast))
+}
+
+// broadcastVariables returns an object, never null, for a broadcast without shared values.
+func broadcastVariables(variables map[string]string) map[string]string {
+	if variables == nil {
+		return map[string]string{}
+	}
+	return variables
 }

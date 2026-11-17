@@ -64,15 +64,17 @@ import {
 } from '@/features/mailbox/hooks/use-mail-broadcasts';
 import { useMailContactLists } from '@/features/mailbox/hooks/use-mail-contacts';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
-import { useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
+import { useMailTemplate, useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
 import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
 import {
+  MAIL_BROADCAST_CONTACT_VARIABLES,
   MAIL_BROADCAST_LABEL_MAX_LENGTH,
   MAIL_BROADCAST_NAME_MAX_LENGTH,
   MAIL_BROADCAST_TEST_MAX_PERCENT,
   MAIL_BROADCAST_TEST_WAIT_DEFAULT_MINUTES,
   MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES,
   MAIL_BROADCAST_TEST_WAIT_MIN_MINUTES,
+  MAIL_TEMPLATE_VALUE_MAX_LENGTH,
 } from '@/features/mailbox/schemas';
 import type {
   MailBroadcast,
@@ -84,6 +86,7 @@ import {
   resolveMailboxErrorKey,
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
+import { templateFallbacks } from '@/features/mailbox/utils/template-render';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -472,6 +475,7 @@ function BroadcastEditor({
   const [templateId, setTemplateId] = useState<number | null>(broadcast?.template_id ?? null);
   const [listId, setListId] = useState<number | null>(broadcast?.list_id ?? null);
   const [label, setLabel] = useState(broadcast?.unsubscribe_label ?? '');
+  const [variables, setVariables] = useState<Record<string, string>>(broadcast?.variables ?? {});
   const [testPercent, setTestPercent] = useState(broadcast?.test_percent ?? 0);
   const [testWait, setTestWait] = useState(
     broadcast?.test_wait_minutes || MAIL_BROADCAST_TEST_WAIT_DEFAULT_MINUTES
@@ -519,6 +523,14 @@ function BroadcastEditor({
       setter(value);
     };
 
+  // Only values for variables the chosen template uses, and only filled ones, are saved.
+  const templateNames = new Set(
+    templates.data?.find(template => template.id === templateId)?.variables ?? []
+  );
+  const sharedValues = Object.fromEntries(
+    Object.entries(variables).filter(([name, value]) => templateNames.has(name) && value !== '')
+  );
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (mailboxId === null || templateId === null || listId === null) {
@@ -535,6 +547,7 @@ function BroadcastEditor({
           unsubscribe_label: label,
           test_percent: testPercent,
           test_wait_minutes: testWait,
+          variables: sharedValues,
         },
         ...(savedId === null ? {} : { broadcastId: savedId }),
       });
@@ -690,6 +703,15 @@ function BroadcastEditor({
             label: t('broadcasts.listOption', { name: list.name, count: list.contact_count }),
           }))
         )}
+        {templateId === null ? null : (
+          <SharedValues
+            organizationId={organizationId}
+            templateId={templateId}
+            values={variables}
+            disabled={pending}
+            onChange={(name, value) => change(setVariables)({ ...variables, [name]: value })}
+          />
+        )}
         <div className="space-y-2">
           <Label htmlFor={ids.label}>{t('broadcasts.label')}</Label>
           <Input
@@ -768,7 +790,6 @@ function BroadcastEditor({
           ) : null}
         </fieldset>
         <p className="text-sm text-muted-foreground">{t('broadcasts.safetyHint')}</p>
-        <p className="text-sm text-muted-foreground">{t('broadcasts.variablesHint')}</p>
         {errorKey ? (
           <Alert variant="destructive">
             <AlertCircle className="size-4" aria-hidden="true" />
@@ -848,6 +869,86 @@ function BroadcastEditor({
         />
       ) : null}
     </div>
+  );
+}
+
+const contactVariables: readonly string[] = MAIL_BROADCAST_CONTACT_VARIABLES;
+
+/** The template's variables: contact fields are filled per message, the rest can be shared. */
+function SharedValues({
+  organizationId,
+  templateId,
+  values,
+  disabled,
+  onChange,
+}: {
+  organizationId: number;
+  templateId: number;
+  values: Record<string, string>;
+  disabled: boolean;
+  onChange: (name: string, value: string) => void;
+}) {
+  const t = useT('mailbox');
+  const baseId = useId();
+  const template = useMailTemplate(organizationId, templateId);
+  if (!template.data) return null;
+  const fields =
+    templateFallbacks({
+      subject: template.data.subject,
+      html: template.data.html_body,
+      text: template.data.text_body,
+    }) ?? [];
+  const fromContact = fields.filter(field => contactVariables.includes(field.name));
+  const shared = fields.filter(field => !contactVariables.includes(field.name));
+  return (
+    <fieldset className="space-y-3 rounded-md border p-3">
+      <legend className="px-1 text-sm font-medium">{t('broadcasts.values.title')}</legend>
+      <p className="text-xs text-muted-foreground">
+        {fromContact.length > 0
+          ? t('broadcasts.values.fromContact', {
+              names: fromContact.map(field => field.name).join(', '),
+            })
+          : t('broadcasts.values.fromContactNone')}
+      </p>
+      {shared.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t('broadcasts.values.none')}</p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">{t('broadcasts.values.hint')}</p>
+          {shared.map(field => {
+            const id = `${baseId}-${field.name}`;
+            const hintId = `${id}-hint`;
+            const value = values[field.name] ?? '';
+            const atRisk = value === '' && field.fallback === null;
+            return (
+              <div key={field.name} className="space-y-1">
+                <Label htmlFor={id} className="font-mono text-xs">
+                  {field.name}
+                </Label>
+                <Input
+                  id={id}
+                  value={value}
+                  maxLength={MAIL_TEMPLATE_VALUE_MAX_LENGTH}
+                  placeholder={
+                    field.fallback === null
+                      ? t('broadcasts.values.placeholder')
+                      : t('broadcasts.values.fallback', { value: field.fallback })
+                  }
+                  aria-describedby={atRisk ? hintId : undefined}
+                  disabled={disabled}
+                  onChange={event => onChange(field.name, event.target.value)}
+                />
+                {atRisk ? (
+                  <p id={hintId} className="text-xs text-amber-700 dark:text-amber-400">
+                    {t('broadcasts.values.required', { name: field.name })}
+                  </p>
+                ) : null}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </fieldset>
   );
 }
 

@@ -531,8 +531,16 @@ const messages = {
     label: '退订链接文字',
     labelPlaceholder: '退订',
     labelHint: '模板里没有放退订链接时，会自动加在每封邮件末尾。',
-    variablesHint:
-      '每封邮件用联系人的资料填充：email、first_name、last_name、所有自定义字段，以及 unsubscribe_url。',
+    values: {
+      title: '模板变量',
+      fromContact: '按联系人自动填写：{names}。',
+      fromContactNone: '这个模板没有用到联系人字段。',
+      none: '模板里没有其他需要填写的变量。',
+      hint: '所有收件人共用，比如优惠码或活动日期。联系人有同名字段时，以联系人的为准。',
+      placeholder: '使用各联系人自己的值',
+      fallback: '留空则使用“{value}”',
+      required: '没有填写，也没有默认值：没有“{name}”字段的联系人将收不到这次群发。',
+    },
     save: '保存草稿',
     created: '草稿已创建',
     saved: '草稿已保存',

@@ -22,8 +22,7 @@ Verified by hand on production (`https://zmail.zgi.ai`) and on a local stack wir
 
 Known product gaps (do **not** file these as bugs; note them only if they block a case):
 
-- Templates are raw HTML; there is no visual editor.
-- No per-broadcast variables (only contact fields such as name and email).
+- Template images need a public https address; there is no image upload.
 - No open or click tracking.
 - Replies are plain text and do not quote the original.
 - System mail (password reset, invitation) is in English.
@@ -167,6 +166,7 @@ lists its environment(s). Record pass, fail, or blocked for each one, with evide
 | G7 | P1 | L | Bounce or complaint rate above the limit (unit test `broadcast_safety_test.go` covers the rule; on L, feed failed delivery events if practical) | The broadcast pauses with the reason shown |
 | G8 | P1 | L | As a member, try to start or pause | Not offered in the UI; the API returns 403 |
 | G9 | P2 | P | Production: a broadcast to a `codex-test-` list of at most 3 internal addresses | Arrives with a working unsubscribe link; delete the list and broadcast afterwards |
+| G10 | P0 | L | Broadcast a template using `{{code}}` with a value under "Template values"; one contact has its own `code` property | Every message shows the shared code except that contact, which shows its own; a variable left empty with no fallback is warned about on the form |
 
 ### H. API Sending
 

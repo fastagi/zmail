@@ -396,7 +396,10 @@ type MailBroadcast struct {
 	ListID         uint
 	// UnsubscribeLabel is the text of the unsubscribe link added when the template has none.
 	UnsubscribeLabel string
-	Status           MailBroadcastStatus
+	// Variables are template values shared by every recipient. A contact's properties and its
+	// email, first_name, and last_name override them.
+	Variables map[string]string
+	Status    MailBroadcastStatus
 	// Subject, HTMLBody, and TextBody are the template as it was when sending started.
 	Subject     string
 	HTMLBody    string

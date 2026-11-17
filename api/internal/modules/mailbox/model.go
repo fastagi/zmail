@@ -329,13 +329,19 @@ func (MailContactPO) TableName() string {
 	return "mail_contacts"
 }
 
-func (po *MailContactPO) toDomain() *domain.MailContact {
+// decodeProperties reads a stored jsonb object of strings; anything else reads as empty.
+func decodeProperties(encoded string) map[string]string {
 	properties := map[string]string{}
-	if po.Properties != "" {
-		if err := json.Unmarshal([]byte(po.Properties), &properties); err != nil {
+	if encoded != "" {
+		if err := json.Unmarshal([]byte(encoded), &properties); err != nil || properties == nil {
 			properties = map[string]string{}
 		}
 	}
+	return properties
+}
+
+func (po *MailContactPO) toDomain() *domain.MailContact {
+	properties := decodeProperties(po.Properties)
 	return &domain.MailContact{
 		ID:             po.ID,
 		OrganizationID: po.OrganizationID,
@@ -395,6 +401,7 @@ type MailBroadcastPO struct {
 	TemplateID       uint       `gorm:"not null"`
 	ListID           uint       `gorm:"not null"`
 	UnsubscribeLabel string     `gorm:"size:50;not null;default:''"`
+	Variables        string     `gorm:"type:jsonb;not null;default:'{}'"`
 	Status           string     `gorm:"size:16;not null;default:'draft';index:idx_mail_broadcasts_due,priority:1"`
 	Subject          string     `gorm:"size:998;not null;default:''"`
 	HTMLBody         string     `gorm:"column:html_body;type:text;not null;default:''"`
@@ -426,6 +433,7 @@ func (po *MailBroadcastPO) toDomain() *domain.MailBroadcast {
 		TemplateID:       po.TemplateID,
 		ListID:           po.ListID,
 		UnsubscribeLabel: po.UnsubscribeLabel,
+		Variables:        decodeProperties(po.Variables),
 		Status:           domain.MailBroadcastStatus(po.Status),
 		Subject:          po.Subject,
 		HTMLBody:         po.HTMLBody,
