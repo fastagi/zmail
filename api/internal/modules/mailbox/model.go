@@ -385,7 +385,12 @@ type MailBroadcastPO struct {
 	StartedAt        *time.Time
 	FinishedAt       *time.Time
 	StopReason       string `gorm:"size:64;not null;default:''"`
-	CreatedBy        uint   `gorm:"not null"`
+	TestPercent      int    `gorm:"type:smallint;not null;default:0"`
+	TestWaitMinutes  int    `gorm:"not null;default:30"`
+	CurrentWave      int    `gorm:"type:smallint;not null;default:1"`
+	ResumeAt         *time.Time
+	SafetyOverride   bool `gorm:"not null;default:false"`
+	CreatedBy        uint `gorm:"not null"`
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -411,6 +416,11 @@ func (po *MailBroadcastPO) toDomain() *domain.MailBroadcast {
 		StartedAt:        po.StartedAt,
 		FinishedAt:       po.FinishedAt,
 		StopReason:       po.StopReason,
+		TestPercent:      po.TestPercent,
+		TestWaitMinutes:  po.TestWaitMinutes,
+		CurrentWave:      po.CurrentWave,
+		ResumeAt:         po.ResumeAt,
+		SafetyOverride:   po.SafetyOverride,
 		CreatedBy:        po.CreatedBy,
 		CreatedAt:        po.CreatedAt,
 		UpdatedAt:        po.UpdatedAt,
@@ -426,6 +436,7 @@ type MailBroadcastRecipientPO struct {
 	Status      string `gorm:"size:16;not null;default:'pending'"`
 	MessageID   *uint
 	FailureCode string `gorm:"size:120;not null;default:''"`
+	Wave        int    `gorm:"type:smallint;not null;default:1"`
 	LeaseUntil  *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time

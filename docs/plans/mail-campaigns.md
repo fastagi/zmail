@@ -197,3 +197,19 @@ like the existing mailbox suites; a live broadcast to the test mailbox on `mail.
    console page. Unsubscribe links point at a Web console page, configured by `MAILBOX_PUBLIC_URL`;
    the one-click endpoint is forwarded by the Web console, so a single public origin serves both.
    Recipient counts are computed from the recipient rows on read instead of stored counters.
+
+## 17. Addendum — Broadcast Safety (reduced plan)
+
+Large lists need protection before a mistake reaches everyone. Settled behavior, owned by
+[contracts/MAILBOXES.md](../../contracts/MAILBOXES.md):
+
+- **Permission.** Members draft; only owners and admins send, cancel, pause, and resume.
+- **Staged sending.** `test_percent` (1–50) of the recipients, picked at random, form wave 1. The
+  rest is wave 2 and is leased only after wave 1 is done, `test_wait_minutes` (default 30) have
+  passed, and the health check passes. The waiting state is `paused` with `test_wave_complete`.
+- **Health check.** Before each worker round, with at least 20 finished recipients: 5% bounces
+  (send-time or later events) or 0.3% complaints pause the broadcast. An owner may resume it; that
+  sets `safety_override` and the check no longer applies to it.
+- **Persistence.** `mail_broadcasts.test_percent`, `test_wait_minutes`, `current_wave`,
+  `resume_at`, `safety_override`; `mail_broadcast_recipients.wave`.
+- **Deferred.** Warm-up schedules and per-provider throughput belong to the bulk-provider slice.

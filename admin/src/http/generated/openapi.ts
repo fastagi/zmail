@@ -388,8 +388,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel a scheduled or sending broadcast */
+        /**
+         * Cancel a scheduled, sending, or paused broadcast
+         * @description Only owners and admins may.
+         */
         post: operations["cancelMailBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-broadcasts/{broadcast_id}/pauses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause a broadcast
+         * @description Holds a sending broadcast, or one whose test wave is waiting, until an owner resumes it. Pending recipients stay pending. Only owners and admins may.
+         */
+        post: operations["pauseMailBroadcast"];
         delete?: never;
         options?: never;
         head?: never;
@@ -413,6 +436,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail-broadcasts/{broadcast_id}/resumptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume a paused broadcast
+         * @description Continues a paused broadcast. A waiting test wave continues with everyone. Resuming one that the health check paused sets `safety_override`, so it is not paused automatically again. Only owners and admins may.
+         */
+        post: operations["resumeMailBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mail-broadcasts/{broadcast_id}/sends": {
         parameters: {
             query?: never;
@@ -422,7 +465,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Send or schedule a draft broadcast */
+        /**
+         * Send or schedule a draft broadcast
+         * @description Only owners and admins may.
+         */
         post: operations["sendMailBroadcast"];
         delete?: never;
         options?: never;
@@ -2399,26 +2445,41 @@ export interface components {
             counts: components["schemas"]["MailBroadcastCounts"];
             /** Format: date-time */
             created_at: string;
+            /** @description 1 while only the test wave may be sent, 2 once everyone may. */
+            current_wave: number;
             /** Format: date-time */
             finished_at: string | null;
             id: components["schemas"]["PositiveID"];
             list_id: components["schemas"]["PositiveID"];
             mailbox_id: components["schemas"]["PositiveID"];
             name: string;
+            /**
+             * Format: date-time
+             * @description When a waiting test wave is checked and the rest continues.
+             */
+            resume_at: string | null;
+            /** @description An owner resumed the broadcast after the health check paused it; it is not paused automatically again. */
+            safety_override: boolean;
             /** Format: date-time */
             scheduled_at: string | null;
             /** Format: date-time */
             started_at: string | null;
             status: components["schemas"]["MailBroadcastStatus"];
-            /** @description `send_limit_reached` while the organization's 24-hour send limit holds the broadcast; empty otherwise. */
+            /** @description Why the broadcast is held. `send_limit_reached` while the organization's 24-hour send limit holds a sending broadcast; for a paused one `test_wave_complete` (waiting until `resume_at`), `bounce_rate_high` or `complaint_rate_high` (the health check stopped it), or `paused_by_owner`. Empty otherwise. */
             stop_reason: string;
             template_id: components["schemas"]["PositiveID"];
+            test_percent: number;
+            test_wait_minutes: number;
             unsubscribe_label: string;
             /** Format: date-time */
             updated_at: string;
         };
         MailBroadcastCounts: {
+            /** @description Sent or failed recipients whose message bounced or was rejected, at send time or later. */
+            bounced: number;
             canceled: number;
+            /** @description Sent recipients whose message was later reported as spam. */
+            complained: number;
             failed: number;
             pending: number;
             sent: number;
@@ -2460,6 +2521,10 @@ export interface components {
             mailbox_id: components["schemas"]["PositiveID"];
             name: string;
             template_id: components["schemas"]["PositiveID"];
+            /** @description Send to this share of the list first, picked at random (at least one recipient). The rest waits `test_wait_minutes` and is sent only if the test wave's bounce and complaint rates are acceptable. 0 or absent sends to everyone at once. */
+            test_percent?: number;
+            /** @description Minutes between the end of the test wave and the rest, 5 to 1440; 0 or absent means 30. */
+            test_wait_minutes?: number;
             /** @description Text of the unsubscribe link Zmail adds when the template does not use `{{unsubscribe_url}}`; `Unsubscribe` when empty. */
             unsubscribe_label?: string;
         };
@@ -2476,8 +2541,11 @@ export interface components {
              */
             scheduled_at?: string | null;
         };
-        /** @enum {string} */
-        MailBroadcastStatus: "draft" | "scheduled" | "sending" | "sent" | "canceled";
+        /**
+         * @description `paused` keeps the pending recipients without sending; `stop_reason` says why.
+         * @enum {string}
+         */
+        MailBroadcastStatus: "draft" | "scheduled" | "sending" | "paused" | "sent" | "canceled";
         MailContact: {
             /** Format: date-time */
             created_at: string;
@@ -5054,6 +5122,47 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    pauseMailBroadcast: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail broadcast identifier. */
+                broadcast_id: components["parameters"]["MailBroadcastID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The broadcast after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailBroadcastResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`). */
             409: {
@@ -5112,6 +5221,46 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    resumeMailBroadcast: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail broadcast identifier. */
+                broadcast_id: components["parameters"]["MailBroadcastID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The broadcast after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailBroadcastResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     sendMailBroadcast: {
         parameters: {
             query?: never;
@@ -5142,6 +5291,7 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`). */
             409: {

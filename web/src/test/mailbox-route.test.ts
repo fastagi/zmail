@@ -1487,6 +1487,123 @@ describe('mailbox browser route boundary', () => {
     }
   });
 
+  it('sends a test group first and lets only owners and admins control a broadcast', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const json = (path: string, body: unknown, method = 'POST') =>
+      request(path, { method, body: JSON.stringify(body) });
+
+    const mailbox = (await (await create(route, { local_part: 'launch' })).json()).data;
+    const template = (
+      await (
+        await route.createMailTemplateRoute(
+          json('/api/mail-templates', { name: 'Launch', subject: 'New', text: 'Hello' })
+        )
+      ).json()
+    ).data;
+    const list = (
+      await (
+        await route.saveMailContactListRoute(json('/api/mail-contact-lists', { name: 'All' }))
+      ).json()
+    ).data;
+    for (let index = 0; index < 10; index += 1) {
+      await route.createMailContactRoute(
+        json('/api/mail-contacts', { email: `user${index}@example.com`, list_ids: [list.id] })
+      );
+    }
+    const draft = (
+      await (
+        await route.saveMailBroadcastRoute(
+          json('/api/mail-broadcasts', {
+            name: 'Staged',
+            mailbox_id: mailbox.id,
+            template_id: template.id,
+            list_id: list.id,
+            test_percent: 20,
+            test_wait_minutes: 45,
+          })
+        )
+      ).json()
+    ).data;
+    expect(draft).toMatchObject({ test_percent: 20, test_wait_minutes: 45 });
+    await expectError(
+      await route.saveMailBroadcastRoute(
+        json('/api/mail-broadcasts', {
+          name: 'Too big',
+          mailbox_id: mailbox.id,
+          template_id: template.id,
+          list_id: list.id,
+          test_percent: 60,
+        })
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+
+    // A member drafts but never starts, pauses, resumes, or cancels.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    for (const action of ['pauses', 'resumptions', 'cancellations'] as const) {
+      await expectError(
+        await route.controlMailBroadcastRoute(
+          json(`/api/mail-broadcasts/${draft.id}/${action}`, {}),
+          String(draft.id),
+          action
+        ),
+        403,
+        'PERMISSION.DENIED'
+      );
+    }
+    await expectError(
+      await route.sendMailBroadcastRoute(
+        json(`/api/mail-broadcasts/${draft.id}/sends`, {}),
+        String(draft.id)
+      ),
+      403,
+      'PERMISSION.DENIED'
+    );
+
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const started = (
+      await (
+        await route.sendMailBroadcastRoute(
+          json(`/api/mail-broadcasts/${draft.id}/sends`, {}),
+          String(draft.id)
+        )
+      ).json()
+    ).data;
+    expect(started).toMatchObject({
+      status: 'paused',
+      stop_reason: 'test_wave_complete',
+      current_wave: 1,
+      counts: { total: 10, sent: 2, pending: 8 },
+    });
+    expect(started.resume_at).not.toBeNull();
+    const resumed = (
+      await (
+        await route.controlMailBroadcastRoute(
+          json(`/api/mail-broadcasts/${draft.id}/resumptions`, {}),
+          String(draft.id),
+          'resumptions'
+        )
+      ).json()
+    ).data;
+    expect(resumed).toMatchObject({
+      status: 'sent',
+      current_wave: 2,
+      counts: { sent: 10, pending: 0, bounced: 0 },
+    });
+    await expectError(
+      await route.controlMailBroadcastRoute(
+        json(`/api/mail-broadcasts/${draft.id}/pauses`, {}),
+        String(draft.id),
+        'pauses'
+      ),
+      409,
+      'MAILBOX.BROADCAST_NOT_EDITABLE'
+    );
+  });
+
   it('runs a broadcast in the mock and unsubscribes through its link', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockUser('demo-admin'));
@@ -1644,9 +1761,10 @@ describe('mailbox browser route boundary', () => {
       409,
       'MAILBOX.BROADCAST_NOT_EDITABLE'
     );
-    const canceled = await route.cancelMailBroadcastRoute(
+    const canceled = await route.controlMailBroadcastRoute(
       json(`/api/mail-broadcasts/${scheduled.id}/cancellations`, {}),
-      String(scheduled.id)
+      String(scheduled.id),
+      'cancellations'
     );
     expect((await canceled.json()).data).toMatchObject({
       status: 'canceled',
@@ -1682,9 +1800,20 @@ describe('mailbox browser route boundary', () => {
       }),
       '5'
     );
-    await route.cancelMailBroadcastRoute(
+    await route.controlMailBroadcastRoute(
       request('/api/mail-broadcasts/5/cancellations', { method: 'POST', body: '{}' }),
-      '5'
+      '5',
+      'cancellations'
+    );
+    await route.controlMailBroadcastRoute(
+      request('/api/mail-broadcasts/5/pauses', { method: 'POST' }),
+      '5',
+      'pauses'
+    );
+    await route.controlMailBroadcastRoute(
+      request('/api/mail-broadcasts/5/resumptions', { method: 'POST' }),
+      '5',
+      'resumptions'
     );
     await route.listMailBroadcastRecipientsRoute(
       request('/api/mail-broadcasts/5/recipients?status=failed'),
@@ -1713,6 +1842,8 @@ describe('mailbox browser route boundary', () => {
       'GET /v1/mail-broadcasts/5',
       'POST /v1/mail-broadcasts/5/sends',
       'POST /v1/mail-broadcasts/5/cancellations',
+      'POST /v1/mail-broadcasts/5/pauses',
+      'POST /v1/mail-broadcasts/5/resumptions',
       'GET /v1/mail-broadcasts/5/recipients?page=1&per_page=15&status=failed',
       'DELETE /v1/mail-broadcasts/5',
       `POST /v1/mail-unsubscribes/${token}`,
@@ -1721,7 +1852,7 @@ describe('mailbox browser route boundary', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body))).toEqual({
       scheduled_at: '2030-01-01T02:00:00.000Z',
     });
-    const publicHeaders = new Headers(fetchMock.mock.calls[8]?.[1]?.headers);
+    const publicHeaders = new Headers(fetchMock.mock.calls[10]?.[1]?.headers);
     expect(publicHeaders.get('authorization')).toBeNull();
     expect(publicHeaders.get('organization-id')).toBeNull();
   });

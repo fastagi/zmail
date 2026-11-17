@@ -45,6 +45,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_broadcasts.sends.store").WhereNumber("broadcast_id")
 		auth.POST("/mail-broadcasts/:broadcast_id/cancellations", h.CancelBroadcast).
 			Name("mail_broadcasts.cancellations.store").WhereNumber("broadcast_id")
+		auth.POST("/mail-broadcasts/:broadcast_id/pauses", h.PauseBroadcast).
+			Name("mail_broadcasts.pauses.store").WhereNumber("broadcast_id")
+		auth.POST("/mail-broadcasts/:broadcast_id/resumptions", h.ResumeBroadcast).
+			Name("mail_broadcasts.resumptions.store").WhereNumber("broadcast_id")
 		auth.GET("/mail-broadcasts/:broadcast_id/recipients", h.ListBroadcastRecipients).
 			Name("mail_broadcasts.recipients.index").WhereNumber("broadcast_id")
 

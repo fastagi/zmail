@@ -97,7 +97,7 @@ func TestFindZoneReportsAnUnreachableDomain(t *testing.T) {
 
 func TestEnsureSendingReusesAnExistingSendingDomain(t *testing.T) {
 	client, fake := newDomainsServer(t, map[string]string{
-		"GET /zones/zone-1/email/sending/subdomains": cfResult(`[{"tag":"t-1","name":"news.example.com","enabled":true}]`),
+		"GET /zones/zone-1/email/sending/subdomains": cfResult(`[{"id":"t-1","name":"news.example.com","enabled":true}]`),
 	})
 	tag, err := client.EnsureSending(context.Background(), "zone-1", "news.example.com")
 	if err != nil || tag != "t-1" || len(fake.calls) != 1 {

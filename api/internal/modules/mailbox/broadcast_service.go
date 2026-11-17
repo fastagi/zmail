@@ -19,13 +19,27 @@ import (
 )
 
 const (
-	maxBroadcastNameLength       = 100
-	maxUnsubscribeLabelLength    = 50
-	defaultUnsubscribeLabel      = "Unsubscribe"
-	maxBroadcastSchedule         = 365 * 24 * time.Hour
-	broadcastLease               = 5 * time.Minute
-	unsubscribeVariable          = "unsubscribe_url"
-	stopReasonSendLimit          = "send_limit_reached"
+	maxBroadcastNameLength    = 100
+	maxUnsubscribeLabelLength = 50
+	defaultUnsubscribeLabel   = "Unsubscribe"
+	maxBroadcastSchedule      = 365 * 24 * time.Hour
+	broadcastLease            = 5 * time.Minute
+	unsubscribeVariable       = "unsubscribe_url"
+	stopReasonSendLimit       = "send_limit_reached"
+	stopReasonTestWave        = "test_wave_complete"
+	stopReasonBounceRate      = "bounce_rate_high"
+	stopReasonComplaintRate   = "complaint_rate_high"
+	stopReasonOwner           = "paused_by_owner"
+	maxTestPercent            = 50
+	defaultTestWaitMinutes    = 30
+	minTestWaitMinutes        = 5
+	maxTestWaitMinutes        = 24 * 60
+	// The health check needs this many finished recipients before a rate means anything.
+	minHealthSample = 20
+	// A broadcast pauses at 5% bounces or 0.3% spam complaints, Gmail's limit for bulk senders.
+	maxBouncePerMille            = 50
+	maxComplaintPerMille         = 3
+	maxActiveBroadcasts          = 100
 	recipientSkippedUnsubscribed = "contact_not_subscribed"
 	recipientSkippedDeleted      = "contact_deleted"
 	recipientFailedVariables     = "template.variables_missing"
@@ -41,6 +55,10 @@ type BroadcastInput struct {
 	TemplateID       uint
 	ListID           uint
 	UnsubscribeLabel string
+	// TestPercent sends to this share of the list first; 0 sends to everyone at once.
+	TestPercent int
+	// TestWaitMinutes is the wait after the test wave; 0 means the default of 30 minutes.
+	TestWaitMinutes int
 }
 
 // BroadcastsEnabled reports whether broadcasts can run: unsubscribe links need the signing
@@ -99,6 +117,16 @@ func (s *service) buildBroadcast(ctx context.Context, organizationID uint, input
 	if utf8.RuneCountInString(label) > maxUnsubscribeLabelLength || strings.IndexFunc(label, unicode.IsControl) >= 0 {
 		return nil, fmt.Errorf("%w: unsubscribe_label", ErrMailBroadcastInvalid)
 	}
+	if input.TestPercent < 0 || input.TestPercent > maxTestPercent {
+		return nil, fmt.Errorf("%w: test_percent must be between 0 and %d", ErrMailBroadcastInvalid, maxTestPercent)
+	}
+	wait := input.TestWaitMinutes
+	if wait == 0 {
+		wait = defaultTestWaitMinutes
+	}
+	if wait < minTestWaitMinutes || wait > maxTestWaitMinutes {
+		return nil, fmt.Errorf("%w: test_wait_minutes must be between %d and %d", ErrMailBroadcastInvalid, minTestWaitMinutes, maxTestWaitMinutes)
+	}
 	if input.MailboxID == 0 || input.TemplateID == 0 || input.ListID == 0 {
 		return nil, fmt.Errorf("%w: mailbox_id, template_id, and list_id are required", ErrMailBroadcastInvalid)
 	}
@@ -126,6 +154,8 @@ func (s *service) buildBroadcast(ctx context.Context, organizationID uint, input
 		TemplateID:       input.TemplateID,
 		ListID:           input.ListID,
 		UnsubscribeLabel: label,
+		TestPercent:      input.TestPercent,
+		TestWaitMinutes:  wait,
 	}, nil
 }
 
@@ -176,6 +206,77 @@ func (s *service) CancelBroadcast(ctx context.Context, organizationID, id uint) 
 	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
 }
 
+// PauseBroadcast stops a sending broadcast until an owner resumes it. Pending recipients stay
+// pending; a message the worker is sending right now still finishes.
+func (s *service) PauseBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error) {
+	if err := s.broadcasts.PauseBroadcast(ctx, organizationID, id, stopReasonOwner); err != nil {
+		return nil, err
+	}
+	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
+}
+
+// ResumeBroadcast continues a paused broadcast. Resuming one that the health check paused is an
+// explicit decision: it is not paused automatically again.
+func (s *service) ResumeBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error) {
+	broadcast, err := s.broadcasts.FindBroadcast(ctx, organizationID, id)
+	if err != nil {
+		return nil, err
+	}
+	if broadcast.Status != domain.MailBroadcastPaused {
+		return nil, ErrMailBroadcastNotEditable
+	}
+	override := broadcast.StopReason == stopReasonBounceRate || broadcast.StopReason == stopReasonComplaintRate
+	if err := s.broadcasts.ResumeBroadcast(ctx, organizationID, id, override); err != nil {
+		return nil, err
+	}
+	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
+}
+
+// healthStop returns why a broadcast must pause, or "" while its rates are acceptable.
+func healthStop(counts domain.MailBroadcastCounts) string {
+	finished := counts.Sent + counts.Failed
+	if finished < minHealthSample {
+		return ""
+	}
+	switch {
+	case counts.Bounced*1000 >= finished*maxBouncePerMille:
+		return stopReasonBounceRate
+	case counts.Complained*1000 >= finished*maxComplaintPerMille:
+		return stopReasonComplaintRate
+	}
+	return ""
+}
+
+// checkBroadcastHealth pauses broadcasts whose bounce or complaint rate is too high, and lets a
+// waiting test wave continue once its wait is over and its rates are acceptable.
+func (s *service) checkBroadcastHealth(ctx context.Context, now time.Time) error {
+	active, err := s.broadcasts.ListActiveBroadcasts(ctx, maxActiveBroadcasts)
+	if err != nil {
+		return err
+	}
+	for _, broadcast := range active {
+		if !broadcast.SafetyOverride {
+			if reason := healthStop(broadcast.Counts); reason != "" {
+				slog.WarnContext(ctx, "mailbox broadcast paused by its health check",
+					slog.Uint64("broadcast_id", uint64(broadcast.ID)), slog.String("reason", reason),
+					slog.Int("bounced", broadcast.Counts.Bounced), slog.Int("complained", broadcast.Counts.Complained),
+					slog.Int("finished", broadcast.Counts.Sent+broadcast.Counts.Failed))
+				if err := s.broadcasts.PauseBroadcast(ctx, 0, broadcast.ID, reason); err != nil {
+					return err
+				}
+				continue
+			}
+		}
+		if broadcast.Status == domain.MailBroadcastPaused && broadcast.StopReason == stopReasonTestWave &&
+			broadcast.ResumeAt != nil && !broadcast.ResumeAt.After(now) {
+			if err := s.broadcasts.ResumeBroadcast(ctx, 0, broadcast.ID, false); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (s *service) ListBroadcastRecipients(
 	ctx context.Context,
 	organizationID, id uint,
@@ -199,6 +300,9 @@ func (s *service) DispatchBroadcasts(ctx context.Context, limit int) (int, error
 	if err := s.broadcasts.PromoteScheduled(ctx, now); err != nil {
 		return 0, err
 	}
+	if err := s.checkBroadcastHealth(ctx, now); err != nil {
+		return 0, err
+	}
 	recipients, err := s.broadcasts.LeasePending(ctx, now, now.Add(broadcastLease), limit)
 	if err != nil {
 		return 0, err
@@ -218,11 +322,16 @@ func (s *service) DispatchBroadcasts(ctx context.Context, limit int) (int, error
 		}
 	}
 	for id, prepared := range run.broadcasts {
-		if !run.paused[id] && prepared.broadcast.StopReason != "" {
+		// Only a broadcast that is still sending had a stop reason that no longer applies.
+		if !run.paused[id] && prepared.broadcast != nil && prepared.broadcast.Status == domain.MailBroadcastSending &&
+			prepared.broadcast.StopReason != "" {
 			if err := s.broadcasts.SetStopReason(ctx, id, ""); err != nil {
 				return processed, err
 			}
 		}
+	}
+	if err := s.broadcasts.CompleteTestWaves(ctx, s.now().UTC()); err != nil {
+		return processed, err
 	}
 	if _, err := s.broadcasts.FinishBroadcasts(ctx, s.now().UTC()); err != nil {
 		return processed, err

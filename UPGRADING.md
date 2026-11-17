@@ -20,6 +20,13 @@ Run migrations: `2026_11_17_150000_create_mail_domains` adds an empty `mail_doma
 needs `MAILBOX_CLOUDFLARE_EMAIL_WORKER` and a token with Zone Read, DNS Edit, Zone Settings Edit,
 Email Routing Rules Edit, and Email Sending Edit.
 
+### Medium — Broadcasts gain a paused status and owner-only controls
+
+Run migrations: `2026_11_17_160000_add_broadcast_safety` adds columns to `mail_broadcasts` and
+`mail_broadcast_recipients` and allows the status `paused`. Clients that list broadcast statuses
+add `paused`. Members can no longer send or cancel a broadcast (`403 PERMISSION.DENIED`); owners
+and admins can.
+
 ### Low — `GET /v1/mailbox-domains` items gain `kind` and `custom_domains_enabled`
 
 Clients that assumed exactly one item should take the item with `kind: "shared"` as the instance

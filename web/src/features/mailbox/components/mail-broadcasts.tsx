@@ -6,6 +6,8 @@ import {
   ArrowLeft,
   Clock,
   Megaphone,
+  Pause,
+  Play,
   Plus,
   Save,
   Send,
@@ -55,6 +57,8 @@ import {
   useMailBroadcast,
   useMailBroadcastRecipients,
   useMailBroadcasts,
+  usePauseMailBroadcast,
+  useResumeMailBroadcast,
   useSaveMailBroadcast,
   useSendMailBroadcast,
 } from '@/features/mailbox/hooks/use-mail-broadcasts';
@@ -65,6 +69,10 @@ import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-ma
 import {
   MAIL_BROADCAST_LABEL_MAX_LENGTH,
   MAIL_BROADCAST_NAME_MAX_LENGTH,
+  MAIL_BROADCAST_TEST_MAX_PERCENT,
+  MAIL_BROADCAST_TEST_WAIT_DEFAULT_MINUTES,
+  MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES,
+  MAIL_BROADCAST_TEST_WAIT_MIN_MINUTES,
 } from '@/features/mailbox/schemas';
 import type {
   MailBroadcast,
@@ -83,6 +91,7 @@ const statusKey = {
   draft: 'broadcasts.statusDraft',
   scheduled: 'broadcasts.statusScheduled',
   sending: 'broadcasts.statusSending',
+  paused: 'broadcasts.statusPaused',
   sent: 'broadcasts.statusSent',
   canceled: 'broadcasts.statusCanceled',
 } as const satisfies Record<MailBroadcastStatus, string>;
@@ -116,6 +125,23 @@ function knownReason(code: string): code is keyof typeof reasonKey {
   return Object.hasOwn(reasonKey, code);
 }
 
+/** Why a broadcast is paused, with readable copy. */
+const pauseKey = {
+  test_wave_complete: 'broadcasts.pausedTestWave',
+  bounce_rate_high: 'broadcasts.pausedBounces',
+  complaint_rate_high: 'broadcasts.pausedComplaints',
+  paused_by_owner: 'broadcasts.pausedByOwner',
+} as const;
+
+function knownPause(code: string): code is keyof typeof pauseKey {
+  return Object.hasOwn(pauseKey, code);
+}
+
+/** The domain part of an address, which groups mailboxes in the sender picker. */
+function domainOf(address: string): string {
+  return address.slice(address.lastIndexOf('@') + 1);
+}
+
 /**
  * Broadcasts console: drafts, sending, scheduling, progress, and per-recipient outcomes. The
  * worker sends in the background; running broadcasts refresh on their own.
@@ -131,7 +157,7 @@ export function MailBroadcasts() {
         scope={scope}
       />
       <MailOrganizationBoundary scope={scope}>
-        {() => <BroadcastWorkspace />}
+        {organization => <BroadcastWorkspace canManage={organization.canManage} />}
       </MailOrganizationBoundary>
     </div>
   );
@@ -139,7 +165,8 @@ export function MailBroadcasts() {
 
 type View = { kind: 'list' } | { kind: 'new' } | { kind: 'open'; broadcastId: number };
 
-function BroadcastWorkspace() {
+/** Members draft broadcasts; only owners and admins start, stop, pause, and resume them. */
+function BroadcastWorkspace({ canManage }: { canManage: boolean }) {
   const t = useT('mailbox');
   const domains = useMailboxDomains(useMailOrganizationId());
   const [view, setView] = useState<View>({ kind: 'list' });
@@ -159,11 +186,17 @@ function BroadcastWorkspace() {
         <BroadcastEditor
           broadcast={null}
           enabled={enabled}
+          canManage={canManage}
           onBack={back}
           onSaved={broadcastId => setView({ kind: 'open', broadcastId })}
         />
       ) : view.kind === 'open' ? (
-        <OpenBroadcast broadcastId={view.broadcastId} enabled={enabled} onBack={back} />
+        <OpenBroadcast
+          broadcastId={view.broadcastId}
+          enabled={enabled}
+          canManage={canManage}
+          onBack={back}
+        />
       ) : (
         <BroadcastList
           enabled={enabled}
@@ -178,7 +211,15 @@ function BroadcastWorkspace() {
 function StatusBadge({ status }: { status: MailBroadcastStatus }) {
   const t = useT('mailbox');
   return (
-    <Badge variant={status === 'sending' || status === 'scheduled' ? 'default' : 'secondary'}>
+    <Badge
+      variant={
+        status === 'sending' || status === 'scheduled'
+          ? 'default'
+          : status === 'paused'
+            ? 'outline'
+            : 'secondary'
+      }
+    >
       {t(statusKey[status])}
     </Badge>
   );
@@ -338,10 +379,12 @@ function BroadcastList({
 function OpenBroadcast({
   broadcastId,
   enabled,
+  canManage,
   onBack,
 }: {
   broadcastId: number;
   enabled: boolean;
+  canManage: boolean;
   onBack: () => void;
 }) {
   const t = useT('mailbox');
@@ -365,12 +408,13 @@ function OpenBroadcast({
         key={broadcast.data.id}
         broadcast={broadcast.data}
         enabled={enabled}
+        canManage={canManage}
         onBack={onBack}
         onSaved={() => undefined}
       />
     );
   }
-  return <BroadcastDetail broadcast={broadcast.data} onBack={onBack} />;
+  return <BroadcastDetail broadcast={broadcast.data} canManage={canManage} onBack={onBack} />;
 }
 
 function BackButton({ onBack }: { onBack: () => void }) {
@@ -399,11 +443,13 @@ function defaultScheduleValue(): string {
 function BroadcastEditor({
   broadcast,
   enabled,
+  canManage,
   onBack,
   onSaved,
 }: {
   broadcast: MailBroadcast | null;
   enabled: boolean;
+  canManage: boolean;
   onBack: () => void;
   onSaved: (broadcastId: number) => void;
 }) {
@@ -420,6 +466,11 @@ function BroadcastEditor({
   const [templateId, setTemplateId] = useState<number | null>(broadcast?.template_id ?? null);
   const [listId, setListId] = useState<number | null>(broadcast?.list_id ?? null);
   const [label, setLabel] = useState(broadcast?.unsubscribe_label ?? '');
+  const [testPercent, setTestPercent] = useState(broadcast?.test_percent ?? 0);
+  const [testWait, setTestWait] = useState(
+    broadcast?.test_wait_minutes || MAIL_BROADCAST_TEST_WAIT_DEFAULT_MINUTES
+  );
+  const [fromDomain, setFromDomain] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<number | null>(broadcast?.id ?? null);
   const [dirty, setDirty] = useState(broadcast === null);
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
@@ -433,7 +484,20 @@ function BroadcastEditor({
     label: useId(),
     labelHint: useId(),
     at: useId(),
+    domain: useId(),
+    staged: useId(),
+    percent: useId(),
+    wait: useId(),
+    stagedHint: useId(),
   };
+  // Senders are picked by domain first: the shared domain and every domain the organization uses.
+  const senderMailboxes = mailboxes.data ?? [];
+  const senderDomains = [...new Set(senderMailboxes.map(mailbox => domainOf(mailbox.address)))];
+  const currentDomain =
+    fromDomain ??
+    senderMailboxes.find(mailbox => mailbox.id === mailboxId)?.address.split('@')[1] ??
+    senderDomains[0] ??
+    null;
   const ready =
     (mailboxes.data?.length ?? 0) > 0 &&
     (templates.data?.length ?? 0) > 0 &&
@@ -463,6 +527,8 @@ function BroadcastEditor({
           template_id: templateId,
           list_id: listId,
           unsubscribe_label: label,
+          test_percent: testPercent,
+          test_wait_minutes: testWait,
         },
         ...(savedId === null ? {} : { broadcastId: savedId }),
       });
@@ -566,13 +632,41 @@ function BroadcastEditor({
             onChange={event => change(setName)(event.target.value)}
           />
         </div>
-        {select(
-          ids.from,
-          t('broadcasts.from'),
-          mailboxId,
-          change(setMailboxId),
-          (mailboxes.data ?? []).map(mailbox => ({ id: mailbox.id, label: mailbox.address }))
-        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor={ids.domain}>{t('broadcasts.fromDomain')}</Label>
+            <select
+              id={ids.domain}
+              className={cn(nativeSelectClassName, 'w-full')}
+              value={currentDomain ?? ''}
+              disabled={pending || senderDomains.length === 0}
+              onChange={event => {
+                const next = event.target.value;
+                change(setFromDomain)(next);
+                // Keep the sender only when it is on the chosen domain.
+                const current = senderMailboxes.find(mailbox => mailbox.id === mailboxId);
+                if (!current || domainOf(current.address) !== next) setMailboxId(null);
+              }}
+            >
+              {senderDomains.map(domain => (
+                <option key={domain} value={domain}>
+                  {domain}
+                </option>
+              ))}
+            </select>
+          </div>
+          {select(
+            ids.from,
+            t('broadcasts.from'),
+            mailboxId,
+            change(setMailboxId),
+            senderMailboxes
+              .filter(
+                mailbox => currentDomain === null || domainOf(mailbox.address) === currentDomain
+              )
+              .map(mailbox => ({ id: mailbox.id, label: mailbox.address }))
+          )}
+        </div>
         {select(
           ids.template,
           t('broadcasts.template'),
@@ -605,6 +699,69 @@ function BroadcastEditor({
             {t('broadcasts.labelHint')}
           </p>
         </div>
+        <fieldset className="space-y-3 rounded-md border p-3">
+          <div className="flex items-center gap-2">
+            <input
+              id={ids.staged}
+              type="checkbox"
+              className="size-4"
+              checked={testPercent > 0}
+              disabled={pending}
+              aria-describedby={ids.stagedHint}
+              onChange={event => change(setTestPercent)(event.target.checked ? 10 : 0)}
+            />
+            <Label htmlFor={ids.staged}>{t('broadcasts.staged')}</Label>
+          </div>
+          <p id={ids.stagedHint} className="text-xs text-muted-foreground">
+            {t('broadcasts.stagedHint')}
+          </p>
+          {testPercent > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor={ids.percent}>{t('broadcasts.testPercent')}</Label>
+                <Input
+                  id={ids.percent}
+                  type="number"
+                  min={1}
+                  max={MAIL_BROADCAST_TEST_MAX_PERCENT}
+                  value={testPercent}
+                  disabled={pending}
+                  onChange={event =>
+                    change(setTestPercent)(
+                      Math.min(
+                        MAIL_BROADCAST_TEST_MAX_PERCENT,
+                        Math.max(1, Number(event.target.value) || 1)
+                      )
+                    )
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={ids.wait}>{t('broadcasts.testWait')}</Label>
+                <Input
+                  id={ids.wait}
+                  type="number"
+                  min={MAIL_BROADCAST_TEST_WAIT_MIN_MINUTES}
+                  max={MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES}
+                  value={testWait}
+                  disabled={pending}
+                  onChange={event =>
+                    change(setTestWait)(
+                      Math.min(
+                        MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES,
+                        Math.max(
+                          MAIL_BROADCAST_TEST_WAIT_MIN_MINUTES,
+                          Number(event.target.value) || 0
+                        )
+                      )
+                    )
+                  }
+                />
+              </div>
+            </div>
+          ) : null}
+        </fieldset>
+        <p className="text-sm text-muted-foreground">{t('broadcasts.safetyHint')}</p>
         <p className="text-sm text-muted-foreground">{t('broadcasts.variablesHint')}</p>
         {errorKey ? (
           <Alert variant="destructive">
@@ -622,7 +779,7 @@ function BroadcastEditor({
           >
             {t('broadcasts.save')}
           </Button>
-          {savedId !== null ? (
+          {savedId !== null && canManage ? (
             <>
               <Button
                 type="button"
@@ -657,6 +814,9 @@ function BroadcastEditor({
             </>
           ) : null}
         </div>
+        {savedId !== null && !canManage ? (
+          <p className="text-sm text-muted-foreground">{t('broadcasts.managersSend')}</p>
+        ) : null}
       </form>
       {confirm === 'send' || confirm === 'schedule' ? (
         <ConfirmDialog
@@ -685,15 +845,51 @@ function BroadcastEditor({
   );
 }
 
-function BroadcastDetail({ broadcast, onBack }: { broadcast: MailBroadcast; onBack: () => void }) {
+function BroadcastDetail({
+  broadcast,
+  canManage,
+  onBack,
+}: {
+  broadcast: MailBroadcast;
+  canManage: boolean;
+  onBack: () => void;
+}) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
   const cancel = useCancelMailBroadcast(organizationId);
+  const pause = usePauseMailBroadcast(organizationId);
+  const resume = useResumeMailBroadcast(organizationId);
   const remove = useDeleteMailBroadcast(organizationId);
   const when = useWhen();
-  const [confirm, setConfirm] = useState<'cancel' | 'delete' | null>(null);
-  const running = broadcast.status === 'sending' || broadcast.status === 'scheduled';
+  const formatter = useDateTimeFormat();
+  const [confirm, setConfirm] = useState<'cancel' | 'delete' | 'resume' | null>(null);
+  const paused = broadcast.status === 'paused';
+  const running = broadcast.status === 'sending' || broadcast.status === 'scheduled' || paused;
+  const waiting = paused && broadcast.stop_reason === 'test_wave_complete';
+  const healthStop =
+    paused &&
+    (broadcast.stop_reason === 'bounce_rate_high' ||
+      broadcast.stop_reason === 'complaint_rate_high');
   const { counts } = broadcast;
+
+  const doPause = async () => {
+    try {
+      await pause.mutateAsync(broadcast.id);
+      toast.success(t('broadcasts.pausedToast'));
+    } catch (failure) {
+      toast.error(t(resolveMailboxErrorKey(failure)));
+    }
+  };
+
+  const doResume = async () => {
+    try {
+      await resume.mutateAsync(broadcast.id);
+      toast.success(t('broadcasts.resumedToast'));
+    } catch (failure) {
+      toast.error(t(resolveMailboxErrorKey(failure)));
+    }
+    setConfirm(null);
+  };
 
   const doCancel = async () => {
     try {
@@ -724,23 +920,50 @@ function BroadcastDetail({ broadcast, onBack }: { broadcast: MailBroadcast; onBa
     [t('broadcasts.skipped'), counts.skipped],
     [t('broadcasts.pending'), counts.pending],
     [t('broadcasts.canceledCount'), counts.canceled],
+    [t('broadcasts.bounced'), counts.bounced],
+    [t('broadcasts.complained'), counts.complained],
   ];
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <BackButton onBack={onBack} />
-        <div className="flex gap-2">
-          {running ? (
+        <div className="flex flex-wrap gap-2">
+          {running && canManage && (broadcast.status === 'sending' || waiting) ? (
             <Button
               type="button"
               size="sm"
               variant="outline"
-              icon={<XCircle className="size-4" />}
-              onClick={() => setConfirm('cancel')}
+              loading={pause.isPending}
+              icon={<Pause className="size-4" />}
+              onClick={() => void doPause()}
             >
-              {t('broadcasts.cancel')}
+              {t('broadcasts.pause')}
             </Button>
+          ) : null}
+          {paused && canManage ? (
+            <Button
+              type="button"
+              size="sm"
+              loading={resume.isPending}
+              icon={<Play className="size-4" />}
+              onClick={() => (healthStop ? setConfirm('resume') : void doResume())}
+            >
+              {t(waiting ? 'broadcasts.resumeNow' : 'broadcasts.resume')}
+            </Button>
+          ) : null}
+          {running ? (
+            canManage ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                icon={<XCircle className="size-4" />}
+                onClick={() => setConfirm('cancel')}
+              >
+                {t('broadcasts.cancel')}
+              </Button>
+            ) : null
           ) : (
             <Button
               type="button"
@@ -767,7 +990,37 @@ function BroadcastDetail({ broadcast, onBack }: { broadcast: MailBroadcast; onBa
           <AlertDescription>{t('broadcasts.limitPaused')}</AlertDescription>
         </Alert>
       ) : null}
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      {paused && knownPause(broadcast.stop_reason) ? (
+        <Alert variant={healthStop ? 'destructive' : 'default'} data-testid="broadcast-paused">
+          <AlertCircle className="size-4" aria-hidden="true" />
+          <AlertDescription>
+            {broadcast.stop_reason === 'test_wave_complete'
+              ? t('broadcasts.pausedTestWave', {
+                  time: broadcast.resume_at ? formatter.format(new Date(broadcast.resume_at)) : '',
+                })
+              : broadcast.stop_reason === 'bounce_rate_high'
+                ? t('broadcasts.pausedBounces', { bounced: counts.bounced })
+                : broadcast.stop_reason === 'complaint_rate_high'
+                  ? t('broadcasts.pausedComplaints', { complained: counts.complained })
+                  : t('broadcasts.pausedByOwner')}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {broadcast.test_percent > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {t('broadcasts.stagedSummary', {
+            percent: broadcast.test_percent,
+            minutes: broadcast.test_wait_minutes,
+          })}{' '}
+          {broadcast.status === 'sending'
+            ? t(broadcast.current_wave === 1 ? 'broadcasts.waveTest' : 'broadcasts.waveRest')
+            : null}
+        </p>
+      ) : null}
+      {broadcast.safety_override ? (
+        <p className="text-sm text-warning">{t('broadcasts.overrideNote')}</p>
+      ) : null}
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         {stats.map(([label, value]) => (
           <div key={label} className="rounded-md border px-3 py-2">
             <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -787,6 +1040,17 @@ function BroadcastDetail({ broadcast, onBack }: { broadcast: MailBroadcast; onBa
           pending={cancel.isPending}
           onCancel={() => setConfirm(null)}
           onConfirm={() => void doCancel()}
+        />
+      ) : null}
+      {confirm === 'resume' ? (
+        <ConfirmDialog
+          title={t('broadcasts.resumeTitle')}
+          description={t('broadcasts.resumeDescription')}
+          confirmLabel={t('broadcasts.resume')}
+          destructive
+          pending={resume.isPending}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => void doResume()}
         />
       ) : null}
       {confirm === 'delete' ? (

@@ -306,9 +306,18 @@ export const mailboxService = {
   },
 
   async cancelBroadcast(organizationId: number, broadcastId: number): Promise<MailBroadcast> {
+    return this.controlBroadcast(organizationId, broadcastId, 'cancellations');
+  },
+
+  /** Cancels, pauses, or resumes a broadcast; only owners and admins may. */
+  async controlBroadcast(
+    organizationId: number,
+    broadcastId: number,
+    action: 'cancellations' | 'pauses' | 'resumptions'
+  ): Promise<MailBroadcast> {
     validId(broadcastId);
     return parseBroadcast(
-      await request.post<unknown>(`/mail-broadcasts/${broadcastId}/cancellations`, undefined, {
+      await request.post<unknown>(`/mail-broadcasts/${broadcastId}/${action}`, undefined, {
         headers: organizationHeaders(organizationId),
       }),
       broadcastId
@@ -715,6 +724,12 @@ assertContract<Sends<MailBroadcastInput, ContractRequest<'updateMailBroadcast'>>
 assertContract<Sends<MailBroadcastSendInput, ContractRequest<'sendMailBroadcast'>>>();
 assertContract<
   Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'sendMailBroadcast', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'pauseMailBroadcast', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'resumeMailBroadcast', 200>>
 >();
 assertContract<
   Accepts<

@@ -48,6 +48,10 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	router.DELETE("/mailboxes/:mailbox_id", handler.DeleteMailbox)
 	router.POST("/mailboxes/:mailbox_id/messages", handler.SendMessage)
 	router.GET("/mail-messages", handler.ListLog)
+	router.POST("/mail-broadcasts/:broadcast_id/sends", handler.SendBroadcast)
+	router.POST("/mail-broadcasts/:broadcast_id/cancellations", handler.CancelBroadcast)
+	router.POST("/mail-broadcasts/:broadcast_id/pauses", handler.PauseBroadcast)
+	router.POST("/mail-broadcasts/:broadcast_id/resumptions", handler.ResumeBroadcast)
 	return &handlerFixture{router: router, service: svc, repo: repo}
 }
 
@@ -151,6 +155,19 @@ func TestMailboxRoutesRequireAnOrganizationContext(t *testing.T) {
 		recorder, body := fixture.do(request[0], request[1], `{}`)
 		if recorder.Code != http.StatusBadRequest || body["error_code"] != domain.CodeOrganizationContextRequired {
 			t.Fatalf("%s %s = %d %v; want 400 %s", request[0], request[1], recorder.Code, body, domain.CodeOrganizationContextRequired)
+		}
+	}
+}
+
+func TestOnlyOwnersAndAdminsControlBroadcasts(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	for _, path := range []string{
+		"/mail-broadcasts/3/sends", "/mail-broadcasts/3/cancellations",
+		"/mail-broadcasts/3/pauses", "/mail-broadcasts/3/resumptions",
+	} {
+		recorder, body := fixture.do(http.MethodPost, path, "{}")
+		if recorder.Code != http.StatusForbidden || body["error_code"] != domain.CodePermissionDenied {
+			t.Fatalf("member POST %s = %d %v; want 403", path, recorder.Code, body)
 		}
 	}
 }

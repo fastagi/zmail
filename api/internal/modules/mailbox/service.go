@@ -121,6 +121,8 @@ type Service interface {
 	DeleteBroadcast(ctx context.Context, organizationID, id uint) error
 	SendBroadcast(ctx context.Context, organizationID, id uint, scheduledAt *time.Time) (*domain.MailBroadcast, error)
 	CancelBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error)
+	PauseBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error)
+	ResumeBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error)
 	ListBroadcastRecipients(ctx context.Context, organizationID, id uint, status domain.MailRecipientStatus, page, perPage int) ([]*domain.MailBroadcastRecipient, int64, error)
 	Unsubscribe(ctx context.Context, token string) error
 	// GetAttachment returns one attachment of a message with its content.
