@@ -14,6 +14,7 @@ import {
   OrganizationLostState,
   useMailOrganizationId,
 } from '@/features/mailbox/components/mail-organization';
+import { ConnectedDomains } from '@/features/mailbox/components/mail-domains';
 import { EmptyState, ErrorAlert } from '@/features/mailbox/components/mail-shared';
 import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
@@ -47,12 +48,14 @@ export function MailDomainStatus() {
         description={t('domain.description')}
         scope={scope}
       />
-      <MailOrganizationBoundary scope={scope}>{() => <DomainStatus />}</MailOrganizationBoundary>
+      <MailOrganizationBoundary scope={scope}>
+        {organization => <DomainStatus canManage={organization.canManage} />}
+      </MailOrganizationBoundary>
     </div>
   );
 }
 
-function DomainStatus() {
+function DomainStatus({ canManage }: { canManage: boolean }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
   const domains = useMailboxDomains(organizationId);
@@ -76,7 +79,7 @@ function DomainStatus() {
       />
     );
   }
-  const domain = domains.data[0];
+  const domain = domains.data.find(item => item.kind === 'shared') ?? domains.data[0];
   if (!domain) {
     return (
       <EmptyState
@@ -98,6 +101,9 @@ function DomainStatus() {
           <h2 id="mail-domain-name" className="text-lg font-semibold break-all">
             {domain.domain}
           </h2>
+          <Badge variant="outline" className="font-normal text-muted-foreground">
+            {t('domain.sharedBadge')}
+          </Badge>
         </div>
         <dl className="grid gap-px bg-border sm:grid-cols-2">
           <Fact
@@ -126,6 +132,8 @@ function DomainStatus() {
           </Fact>
         </dl>
       </section>
+
+      <ConnectedDomains enabled={domain.custom_domains_enabled} canManage={canManage} />
 
       <SetupChecklist domain={domain} />
 

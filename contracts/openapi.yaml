@@ -3422,6 +3422,206 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-domains:
+    get:
+      operationId: listMailDomains
+      summary: List the domains the organization connected
+      description: Answers `404 MAILBOX.DOMAINS_DISABLED` unless the instance sets `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: Every connected domain by name, with the records of its last check.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: connectMailDomain
+      summary: Connect a domain and set it up
+      description: The domain must be a zone, or a subdomain of a zone, that the instance's Cloudflare token
+        can manage. Zmail enables Email Routing and Email Sending for it and adds the sending and DMARC
+        records the zone lacks; it never edits or deletes existing records. A provider failure during setup
+        still answers `201` with the domain pending and `last_error` set. Only owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailDomainRequest'
+      responses:
+        '201':
+          description: The connected domain after its first setup and check.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The domain is already connected by an organization, or is the shared domain (`MAILBOX.DOMAIN_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A field failed validation, the name is not a usable domain (`MAILBOX.DOMAIN_INVALID`), no
+            zone the token can manage contains it (`MAILBOX.DOMAIN_ZONE_NOT_FOUND`), or the organization has
+            10 domains (`MAILBOX.DOMAIN_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: The DNS provider refused the zone lookup (`MAILBOX.DOMAIN_PROVIDER_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-domains/{domain_id}:
+    get:
+      operationId: getMailDomain
+      summary: Get a connected domain
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDomainID'
+      responses:
+        '200':
+          description: The domain with the records of its last check.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailDomain
+      summary: Remove a connected domain
+      description: Allowed only when no mailbox uses the domain. Zmail forgets the domain and leaves its DNS
+        and Cloudflare settings as they are. Only owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDomainID'
+      responses:
+        '204':
+          description: The domain is removed.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: A mailbox still uses the domain (`MAILBOX.DOMAIN_IN_USE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-domains/{domain_id}/setups:
+    post:
+      operationId: setUpMailDomain
+      summary: Run the domain setup again
+      description: Safe to repeat. Adds only what is missing, then checks. Only owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDomainID'
+      responses:
+        '200':
+          description: The domain after the setup and check; `last_error` explains a step that failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-domains/{domain_id}/checks:
+    post:
+      operationId: checkMailDomain
+      summary: Check the domain's DNS records
+      description: Reads the zone and compares it with what receiving, sending, and DMARC need, without writing
+        DNS. The domain becomes verified when every record is present. Only owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDomainID'
+      responses:
+        '200':
+          description: The domain with the records of this check.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-broadcasts:
     get:
       operationId: listMailBroadcasts
@@ -4429,14 +4629,22 @@ paths:
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '422':
-          description: A field failed validation, or the local part is invalid (`MAILBOX.ADDRESS_INVALID`) or
-            reserved (`MAILBOX.ADDRESS_RESERVED`).
+          description: A field failed validation, the local part is invalid (`MAILBOX.ADDRESS_INVALID`) or
+            reserved (`MAILBOX.ADDRESS_RESERVED`), or the named domain is still pending
+            (`MAILBOX.DOMAIN_NOT_VERIFIED`). A domain the organization did not connect is `404
+            MAILBOX.DOMAIN_NOT_FOUND`.
           content:
             application/json:
               schema:
                 oneOf:
                   - $ref: '#/components/schemas/ValidationErrorResponse'
                   - $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Cloudflare refused the routing rule for an address on an organization domain (`MAILBOX.DOMAIN_PROVIDER_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}:
@@ -5303,6 +5511,13 @@ components:
       description: Positive mail contact list identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailDomainID:
+      name: domain_id
+      in: path
+      required: true
+      description: Positive connected mail domain identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     MailTemplateID:
       name: template_id
       in: path
@@ -5741,6 +5956,15 @@ components:
         - MAILBOX.BROADCAST_NO_RECIPIENTS
         - MAILBOX.BROADCAST_DISABLED
         - MAILBOX.UNSUBSCRIBE_INVALID
+        - MAILBOX.DOMAIN_NOT_FOUND
+        - MAILBOX.DOMAIN_INVALID
+        - MAILBOX.DOMAIN_TAKEN
+        - MAILBOX.DOMAIN_LIMIT_REACHED
+        - MAILBOX.DOMAIN_ZONE_NOT_FOUND
+        - MAILBOX.DOMAIN_IN_USE
+        - MAILBOX.DOMAIN_NOT_VERIFIED
+        - MAILBOX.DOMAINS_DISABLED
+        - MAILBOX.DOMAIN_PROVIDER_FAILED
     FieldErrors:
       type: object
       additionalProperties:
@@ -8360,16 +8584,25 @@ components:
       additionalProperties: false
       required:
         - domain
+        - kind
         - max_mailboxes
         - provider
         - inbound_enabled
         - daily_send_limit
         - broadcasts_enabled
+        - custom_domains_enabled
       properties:
         domain:
           type: string
           minLength: 1
           maxLength: 253
+        kind:
+          type: string
+          description: '`shared` is the instance domain every organization may use; `organization` is a verified
+            domain the organization connected.'
+          enum:
+            - shared
+            - organization
         max_mailboxes:
           type: integer
           minimum: 1
@@ -8389,6 +8622,9 @@ components:
         broadcasts_enabled:
           type: boolean
           description: Whether broadcasts can be sent. Unsubscribe links need `MAILBOX_INBOUND_SECRET` and `MAILBOX_PUBLIC_URL`.
+        custom_domains_enabled:
+          type: boolean
+          description: Whether owners and admins may connect their own domains. Instance-wide, repeated on every item.
     MailboxDomainListResponse:
       type: object
       additionalProperties: false
@@ -8403,7 +8639,9 @@ components:
           type: string
         data:
           type: array
-          maxItems: 1
+          description: The shared domain first, then the organization's verified domains.
+          minItems: 1
+          maxItems: 11
           items:
             $ref: '#/components/schemas/MailboxDomain'
     Mailbox:
@@ -8447,6 +8685,10 @@ components:
         display_name:
           type: string
           maxLength: 120
+        domain:
+          type: string
+          description: A verified domain of the organization. Empty or absent means the shared domain.
+          maxLength: 253
     MailboxResponse:
       type: object
       additionalProperties: false
@@ -9137,6 +9379,141 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MailContactImport'
+    MailDomainRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: The domain, such as `example.com` or `mail.example.com`. Case and a trailing dot are ignored.
+          minLength: 1
+          maxLength: 253
+    MailDomainRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - purpose
+        - type
+        - name
+        - content
+        - status
+      properties:
+        purpose:
+          type: string
+          enum:
+            - receiving
+            - sending
+            - dmarc
+        type:
+          type: string
+          description: DNS record type, such as `MX`, `TXT`, or `CNAME`.
+          maxLength: 10
+        name:
+          type: string
+          description: Fully qualified record name.
+          maxLength: 255
+        content:
+          type: string
+          description: The value the record needs. For DMARC, the existing record when one is present. Empty
+            for a sending record while Email Sending is not enabled yet.
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        status:
+          type: string
+          description: '`conflict` means another record of the same kind holds the name; Zmail never replaces it.'
+          enum:
+            - ok
+            - missing
+            - conflict
+        found:
+          type: string
+          description: The conflicting value, when `status` is `conflict`.
+    MailDomain:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - zone_name
+        - status
+        - records
+        - checked_at
+        - verified_at
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          maxLength: 253
+        zone_name:
+          type: string
+          description: The Cloudflare zone that contains the domain.
+          maxLength: 253
+        status:
+          type: string
+          description: '`verified` when the last check found every record; mailboxes can be created only then.'
+          enum:
+            - pending
+            - verified
+        records:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/MailDomainRecord'
+        last_error:
+          type: string
+          description: The provider's explanation of the last failed setup step, while the domain is pending.
+          maxLength: 500
+        checked_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        verified_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the domain first verified.
+        created_at:
+          type: string
+          format: date-time
+    MailDomainResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailDomain'
+    MailDomainListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/MailDomain'
     MailContactList:
       type: object
       additionalProperties: false

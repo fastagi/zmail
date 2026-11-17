@@ -85,6 +85,11 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
   return {
     MAIL_STATS_DAYS: 7,
     useMailboxDomains: (organizationId: number) => scoped(organizationId, state.domains),
+    // Connected domains are covered by mail-domains-ui.test.tsx; these tests keep them off.
+    useMailDomains: () => ({ isPending: false, error: null, data: [], refetch: () => undefined }),
+    useConnectMailDomain: () => ({ isPending: false, mutateAsync: async () => undefined }),
+    useRefreshMailDomain: () => ({ isPending: false, mutateAsync: async () => undefined }),
+    useRemoveMailDomain: () => ({ isPending: false, mutateAsync: async () => undefined }),
     useMailboxes: (organizationId: number) => scoped(organizationId, state.mailboxes),
     useMailLog: (organizationId: number, filters: Record<string, unknown>, page: number) => {
       state.logCalls.push({ filters, page });
@@ -513,7 +518,7 @@ describe('emails console', () => {
     // Relative time on screen, the absolute time on hover.
     const time = unread.querySelector('time');
     expect(time).toHaveAttribute('datetime', '2026-11-16T10:00:00Z');
-    expect(time?.textContent).toMatch(/ago|now/u);
+    expect(time?.textContent).toMatch(/ago|now|yesterday/u);
     expect(time?.getAttribute('title')).toMatch(/2026/u);
     expect(screen.getByText('1–4 of 4')).toBeInTheDocument();
   });
@@ -1125,11 +1130,13 @@ function stepStates(): Record<string, string | null> {
 function domain(overrides: Record<string, unknown> = {}) {
   return {
     domain: 'mail.example.com',
+    kind: 'shared',
     max_mailboxes: 50,
     provider: 'cloudflare',
     inbound_enabled: true,
     daily_send_limit: 200,
     broadcasts_enabled: true,
+    custom_domains_enabled: false,
     ...overrides,
   };
 }

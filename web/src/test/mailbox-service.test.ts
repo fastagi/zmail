@@ -445,11 +445,13 @@ describe('attachment limits', () => {
 function domain(overrides: Record<string, unknown> = {}) {
   return {
     domain: 'mail.example.com',
+    kind: 'shared',
     max_mailboxes: 50,
     provider: 'cloudflare',
     inbound_enabled: true,
     daily_send_limit: 200,
     broadcasts_enabled: true,
+    custom_domains_enabled: false,
     ...overrides,
   };
 }

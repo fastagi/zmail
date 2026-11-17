@@ -16,8 +16,10 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailTemplateRepository), new(*repository)),
 	wire.Bind(new(domain.MailContactRepository), new(*repository)),
 	wire.Bind(new(domain.MailBroadcastRepository), new(*repository)),
+	wire.Bind(new(domain.MailDomainRepository), new(*repository)),
 	wire.Bind(new(domain.MailBroadcastDispatcher), new(*service)),
 	mailtransport.New,
+	mailtransport.NewDomainProvider,
 	SettingsFromConfig,
 	// The product webhook catalog: the webhook starter's definitions plus the mail events.
 	NewWebhookCatalog,
@@ -44,6 +46,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_17_120000_create_mail_templates",
 			"2026_11_17_130000_create_mail_contacts",
 			"2026_11_17_140000_create_mail_broadcasts",
+			"2026_11_17_150000_create_mail_domains",
 		),
 	)
 }

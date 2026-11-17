@@ -58,6 +58,9 @@ x-api-environment: &api-environment
   MAILBOX_DAILY_SEND_LIMIT: ${MAILBOX_DAILY_SEND_LIMIT:-200}
   # Broadcast unsubscribe links point at the public console.
   MAILBOX_PUBLIC_URL: ${ZMAIL_PUBLIC_ORIGIN:?run ./init-env.sh <public origin> first}
+  # Organizations' own domains; off unless .env turns them on (see README).
+  MAILBOX_CUSTOM_DOMAINS_ENABLED: ${MAILBOX_CUSTOM_DOMAINS_ENABLED:-false}
+  MAILBOX_CLOUDFLARE_EMAIL_WORKER: ${MAILBOX_CLOUDFLARE_EMAIL_WORKER:-}
   WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:?missing in .env}
   AI_ENABLED: "false"
   LOG_LEVEL: ${ZMAIL_LOG_LEVEL:-info}

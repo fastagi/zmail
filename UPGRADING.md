@@ -11,6 +11,20 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Organization domains
+
+### Medium — New migration for connected domains
+
+Run migrations: `2026_11_17_150000_create_mail_domains` adds an empty `mail_domains` table and
+`mailboxes.routing_rule_id`. Nothing changes until `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, which also
+needs `MAILBOX_CLOUDFLARE_EMAIL_WORKER` and a token with Zone Read, DNS Edit, Zone Settings Edit,
+Email Routing Rules Edit, and Email Sending Edit.
+
+### Low — `GET /v1/mailbox-domains` items gain `kind` and `custom_domains_enabled`
+
+Clients that assumed exactly one item should take the item with `kind: "shared"` as the instance
+domain.
+
 ## v0.27.0 — Zmail campaigns and self-hosting
 
 ### Medium — Four new mailbox migrations

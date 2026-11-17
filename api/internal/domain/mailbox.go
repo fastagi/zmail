@@ -168,6 +168,9 @@ type Mailbox struct {
 	CreatedBy   uint
 	Address     string
 	DisplayName string
+	// RoutingRuleID names the provider rule that delivers mail for an address on an organization
+	// domain. It is empty on the shared domain, whose routing the operator manages.
+	RoutingRuleID string
 	// UnreadCount is the number of unread inbound messages. Only listings fill it.
 	UnreadCount int
 	CreatedAt   time.Time

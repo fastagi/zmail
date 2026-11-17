@@ -6,10 +6,12 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 )
 
-// CreateMailboxRequest asks for a new address on the configured domain.
+// CreateMailboxRequest asks for a new address on the shared domain, or on Domain when it names a
+// verified domain of the organization.
 type CreateMailboxRequest struct {
 	LocalPart   string `json:"local_part" binding:"required,max=64"`
 	DisplayName string `json:"display_name" binding:"max=120"`
+	Domain      string `json:"domain" binding:"max=253"`
 }
 
 // SendMailMessageRequest asks to send one message from a mailbox.
@@ -71,7 +73,10 @@ type UpdateMailMessageRequest struct {
 
 // MailboxDomainResponse describes where a user may create addresses.
 type MailboxDomainResponse struct {
-	Domain       string `json:"domain"`
+	Domain string `json:"domain"`
+	// Kind is "shared" for the instance's domain, usable by every organization, or
+	// "organization" for a verified domain the organization connected.
+	Kind         string `json:"kind"`
 	MaxMailboxes int    `json:"max_mailboxes"`
 	// Provider is the outbound transport: "cloudflare" delivers, "log" only records.
 	Provider string `json:"provider"`
@@ -81,6 +86,8 @@ type MailboxDomainResponse struct {
 	// BroadcastsEnabled tells whether broadcasts can be sent: unsubscribe links need the inbound
 	// secret and MAILBOX_PUBLIC_URL.
 	BroadcastsEnabled bool `json:"broadcasts_enabled"`
+	// CustomDomainsEnabled tells whether owners and admins may connect their own domains.
+	CustomDomainsEnabled bool `json:"custom_domains_enabled"`
 }
 
 // MailLogEntryResponse is one row of the cross-mailbox log.

@@ -250,7 +250,8 @@ provider call independently and composes with caller cancellation. See [`EMAIL.m
 
 The optional `mailbox` starter requires the `organization` starter and reads `MAILBOX_DOMAIN`, `MAILBOX_PROVIDER`,
 `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN`, `MAILBOX_REQUEST_TIMEOUT`,
-`MAILBOX_INBOUND_SECRET`, and `MAILBOX_DAILY_SEND_LIMIT` from the same typed snapshot. They are
+`MAILBOX_INBOUND_SECRET`, `MAILBOX_DAILY_SEND_LIMIT`, `MAILBOX_PUBLIC_URL`,
+`MAILBOX_CUSTOM_DOMAINS_ENABLED`, and `MAILBOX_CLOUDFLARE_EMAIL_WORKER` from the same typed snapshot. They are
 validated only when the starter is selected.
 
 | Key | Default | Rule |
@@ -261,6 +262,9 @@ validated only when the starter is selected.
 | `MAILBOX_REQUEST_TIMEOUT` | `15s` | Bounds one provider call; greater than 0 and at most `60s`. |
 | `MAILBOX_INBOUND_SECRET` | empty | Shared secret of at least 32 characters that signs deliveries from the mail edge. Empty keeps inbound mail disabled. |
 | `MAILBOX_DAILY_SEND_LIMIT` | `200` | Outbound messages one organization may attempt per rolling 24 hours; 1 to 100000. |
+| `MAILBOX_PUBLIC_URL` | empty | Public origin of the Web console that broadcast unsubscribe links point at. Empty keeps broadcasts off. |
+| `MAILBOX_CUSTOM_DOMAINS_ENABLED` | `false` | Lets owners and admins connect domains the Cloudflare token can manage. Requires the `cloudflare` provider. Any organization may claim any zone the token reaches, so scope the token to the zones organizations may use. The token then also needs Zone Read, DNS Edit, Zone Settings Edit, Email Routing Rules Edit, and Email Sending Edit. |
+| `MAILBOX_CLOUDFLARE_EMAIL_WORKER` | empty | The Email Worker that routing rules of connected domains deliver to; required when custom domains are enabled. |
 
 See [`../../contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md) for the HTTP behavior and
 [`../../deploy/cloudflare/email-worker/README.md`](../../deploy/cloudflare/email-worker/README.md)

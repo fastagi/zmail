@@ -288,11 +288,13 @@ describe('unsubscribe page', () => {
 function domain(broadcastsEnabled: boolean) {
   return {
     domain: 'mail.example.com',
+    kind: 'shared',
     max_mailboxes: 50,
     provider: 'cloudflare',
     inbound_enabled: true,
     daily_send_limit: 200,
     broadcasts_enabled: broadcastsEnabled,
+    custom_domains_enabled: false,
   };
 }
 

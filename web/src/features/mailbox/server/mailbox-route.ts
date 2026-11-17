@@ -28,6 +28,7 @@ import {
   MAIL_CONTACT_LIST_NAME_MAX_LENGTH,
   MAIL_CONTACT_MAX_LISTS,
   MAIL_CONTACT_MAX_PROPERTIES,
+  MAIL_DOMAIN_NAME_MAX_LENGTH,
   MAIL_ATTACHMENT_NAME_MAX_LENGTH,
   MAIL_ATTACHMENT_TYPE_MAX_LENGTH,
   MAIL_MAX_ATTACHMENTS,
@@ -54,6 +55,10 @@ import {
   type MockContactResult,
 } from '@/features/mailbox/server/mock-contact-store';
 import {
+  mockDomainStore,
+  type MockDomainResult,
+} from '@/features/mailbox/server/mock-domain-store';
+import {
   mockMailboxStore,
   type MockMailSendResult,
   type MockMailTemplateResult,
@@ -72,6 +77,7 @@ import type {
   MailContactImportInput,
   MailContactInput,
   MailContactStatus,
+  MailDomainInput,
   MailTemplateInput,
   MailTemplateTestInput,
   SendMailMessageInput,
@@ -160,7 +166,140 @@ export async function listMailboxDomainsRoute(request: Request): Promise<NextRes
       organizationId: String(target.organizationId),
     });
   }
-  return success(mockMailboxStore.domains());
+  return success(mockMailboxStore.domains(mockDomainStore.verifiedNames(target.organizationId)));
+}
+
+export async function listMailDomainsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mail-domains',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return success(mockDomainStore.list(target.organizationId));
+}
+
+export async function getMailDomainRoute(
+  request: Request,
+  rawDomainId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const domainId = parseRouteId(rawDomainId);
+  if (!domainId.ok) return domainId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mail-domains/${domainId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const domain = mockDomainStore.get(target.organizationId, domainId.value);
+  return domain ? success(domain) : mailDomainNotFound();
+}
+
+export async function connectMailDomainRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const input = await mailDomainBody(request);
+  if (!input.ok) return input.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'mail-domains',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: { name: 'name' },
+    });
+  }
+  return mockDomainResponse(mockDomainStore.connect(target.organizationId, input.value.name), 201);
+}
+
+/** Runs the setup again (`setups`) or re-reads DNS (`checks`); neither reads a body. */
+export async function refreshMailDomainRoute(
+  request: Request,
+  rawDomainId: string,
+  action: 'setups' | 'checks'
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const domainId = parseRouteId(rawDomainId);
+  if (!domainId.ok) return domainId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mail-domains/${domainId.value}/${action}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return mockDomainResponse(mockDomainStore.refresh(target.organizationId, domainId.value));
+}
+
+export async function deleteMailDomainRoute(
+  request: Request,
+  rawDomainId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const domainId = parseRouteId(rawDomainId);
+  if (!domainId.ok) return domainId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mail-domains/${domainId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const result = mockDomainStore.remove(target.organizationId, domainId.value);
+  if (result.ok) return apiNoContentResponse(privateMailboxHeaders());
+  return result.error === 'in_use'
+    ? failure(409, ApiErrorCode.MAILBOX_DOMAIN_IN_USE, 'Mail domain still has mailboxes')
+    : mailDomainNotFound();
+}
+
+function mockDomainResponse(result: MockDomainResult, status: 200 | 201 = 200): NextResponse {
+  if (result.ok) return success(result.domain, status);
+  switch (result.error) {
+    case 'not_found':
+      return mailDomainNotFound();
+    case 'taken':
+      return failure(409, ApiErrorCode.MAILBOX_DOMAIN_TAKEN, 'Mail domain is already connected');
+    case 'limit':
+      return failure(422, ApiErrorCode.MAILBOX_DOMAIN_LIMIT_REACHED, 'Mail domain limit reached');
+    case 'zone_not_found':
+      return failure(
+        422,
+        ApiErrorCode.MAILBOX_DOMAIN_ZONE_NOT_FOUND,
+        'No manageable DNS zone contains the mail domain'
+      );
+    default:
+      return failure(422, ApiErrorCode.MAILBOX_DOMAIN_INVALID, 'Mail domain name is invalid');
+  }
+}
+
+function mailDomainNotFound(): NextResponse {
+  return failure(404, ApiErrorCode.MAILBOX_DOMAIN_NOT_FOUND, 'Mail domain not found');
+}
+
+async function mailDomainBody(request: Request): Promise<Parsed<MailDomainInput>> {
+  const body = await jsonObject(request, maxMailboxBodyBytes);
+  if (!body.ok) return body;
+  const { name } = body.value;
+  if (!boundedString(name, MAIL_DOMAIN_NAME_MAX_LENGTH) || name.trim() === '') {
+    return { ok: false, response: validationFailed({ name: ['The name field is invalid'] }) };
+  }
+  return { ok: true, value: { name } };
 }
 
 export async function listMailboxesRoute(request: Request): Promise<NextResponse> {
@@ -192,13 +331,20 @@ export async function createMailboxRoute(request: Request): Promise<NextResponse
       accessToken: target.accessToken,
       organizationId: String(target.organizationId),
       body: input.value,
-      fieldMap: { local_part: 'local_part', display_name: 'display_name' },
+      fieldMap: { local_part: 'local_part', display_name: 'display_name', domain: 'domain' },
     });
+  }
+  const placement = mockDomainStore.resolve(target.organizationId, input.value.domain ?? '');
+  if (!placement.ok) {
+    return placement.error === 'not_verified'
+      ? failure(422, ApiErrorCode.MAILBOX_DOMAIN_NOT_VERIFIED, 'Mail domain is not verified')
+      : mailDomainNotFound();
   }
   const result = mockMailboxStore.create(
     target.organizationId,
     input.value.local_part,
-    input.value.display_name ?? ''
+    input.value.display_name ?? '',
+    placement.name
   );
   if (result.ok) return success(result.mailbox, 201);
   if (result.error === 'reserved') {
@@ -1420,8 +1566,11 @@ async function jsonObject(
 async function mailboxBody(request: Request): Promise<Parsed<CreateMailboxInput>> {
   const body = await jsonObject(request, maxMailboxBodyBytes);
   if (!body.ok) return body;
-  const { local_part: localPart, display_name: displayName } = body.value;
+  const { local_part: localPart, display_name: displayName, domain } = body.value;
   const errors: Record<string, string[]> = {};
+  if (domain !== undefined && !boundedString(domain, MAIL_DOMAIN_NAME_MAX_LENGTH)) {
+    errors.domain = ['The domain field is invalid'];
+  }
   if (!boundedString(localPart, MAILBOX_LOCAL_PART_MAX_LENGTH) || localPart === '') {
     errors.local_part = ['The local_part field is invalid'];
   }
@@ -1434,6 +1583,7 @@ async function mailboxBody(request: Request): Promise<Parsed<CreateMailboxInput>
     value: {
       local_part: localPart as string,
       ...(typeof displayName === 'string' ? { display_name: displayName } : {}),
+      ...(typeof domain === 'string' && domain !== '' ? { domain } : {}),
     },
   };
 }

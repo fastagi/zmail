@@ -10,6 +10,8 @@ import {
   mailMessagePageEnvelopeSchema,
   mailMessageSchema,
   mailboxDomainListSchema,
+  mailDomainListSchema,
+  mailDomainSchema,
   mailboxListSchema,
   mailboxSchema,
   mailTemplateListSchema,
@@ -52,6 +54,8 @@ import type {
   MailMessagePage,
   Mailbox,
   MailboxDomain,
+  MailDomain,
+  MailDomainInput,
   SendMailMessageInput,
   UpdateMailMessageInput,
 } from '@/features/mailbox/types';
@@ -90,6 +94,45 @@ export const mailboxService = {
     );
     if (!parsed.success) throw invalidResponse();
     return parsed.data;
+  },
+
+  /** Domains the organization connected, with the records of their last check. */
+  async mailDomains(organizationId: number): Promise<MailDomain[]> {
+    const parsed = mailDomainListSchema.safeParse(
+      await request.get<unknown>('/mail-domains', { headers: organizationHeaders(organizationId) })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  async connectMailDomain(organizationId: number, input: MailDomainInput): Promise<MailDomain> {
+    return parseMailDomain(
+      await request.post<unknown, MailDomainInput>('/mail-domains', input, {
+        headers: organizationHeaders(organizationId),
+      })
+    );
+  },
+
+  /** Runs the setup again (`setups`) or only re-reads DNS (`checks`). */
+  async refreshMailDomain(
+    organizationId: number,
+    domainId: number,
+    action: 'setups' | 'checks'
+  ): Promise<MailDomain> {
+    validId(domainId);
+    return parseMailDomain(
+      await request.post<unknown>(`/mail-domains/${domainId}/${action}`, undefined, {
+        headers: organizationHeaders(organizationId),
+      }),
+      domainId
+    );
+  },
+
+  async removeMailDomain(organizationId: number, domainId: number): Promise<void> {
+    validId(domainId);
+    await request.delete<void>(`/mail-domains/${domainId}`, {
+      headers: organizationHeaders(organizationId),
+    });
   },
 
   async list(organizationId: number): Promise<Mailbox[]> {
@@ -570,6 +613,14 @@ function parseBroadcast(value: unknown, expectedId?: number): MailBroadcast {
   return parsed.data;
 }
 
+function parseMailDomain(value: unknown, expectedId?: number): MailDomain {
+  const parsed = mailDomainSchema.safeParse(value);
+  if (!parsed.success || (expectedId !== undefined && parsed.data.id !== expectedId)) {
+    throw invalidResponse();
+  }
+  return parsed.data;
+}
+
 function organizationHeaders(organizationId: number): Record<string, string> {
   validId(organizationId);
   return { 'Organization-Id': String(organizationId) };
@@ -590,6 +641,13 @@ assertContract<
   Accepts<z.input<typeof mailboxDomainListSchema>, ContractData<'listMailboxDomains', 200>>
 >();
 assertContract<Accepts<z.input<typeof mailboxListSchema>, ContractData<'listMailboxes', 200>>>();
+assertContract<
+  Accepts<z.input<typeof mailDomainListSchema>, ContractData<'listMailDomains', 200>>
+>();
+assertContract<Accepts<z.input<typeof mailDomainSchema>, ContractData<'connectMailDomain', 201>>>();
+assertContract<Accepts<z.input<typeof mailDomainSchema>, ContractData<'setUpMailDomain', 200>>>();
+assertContract<Accepts<z.input<typeof mailDomainSchema>, ContractData<'checkMailDomain', 200>>>();
+assertContract<Sends<MailDomainInput, ContractRequest<'connectMailDomain'>>>();
 assertContract<Accepts<z.input<typeof mailboxSchema>, ContractData<'createMailbox', 201>>>();
 assertContract<Sends<CreateMailboxInput, ContractRequest<'createMailbox'>>>();
 assertContract<

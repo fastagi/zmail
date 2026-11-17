@@ -47,21 +47,38 @@ func (h *Handler) Name() string {
 	return config.StarterMailbox
 }
 
-// ListDomains returns the domains a user may create addresses on.
-// fastbuild:bounded-list max=1 reason=one configured mailbox domain per deployment
+// ListDomains returns the domains the organization may create addresses on: the shared domain
+// and its verified domains. The capability flags describe the instance and repeat on every item.
+// fastbuild:bounded-list max=11 reason=the shared domain plus at most domain.MaxMailDomainsPerOrganization organization domains
 func (h *Handler) ListDomains(c *gin.Context) {
-	if _, ok := organizationScope(c); !ok {
+	organizationID, ok := currentOrganizationID(c)
+	if !ok {
 		return
 	}
+	domains, err := h.service.MailboxDomains(c.Request.Context(), organizationID)
+	if err != nil {
+		response.HandleError(c, "Failed to list mailbox domains", err)
+		return
+	}
+	items := make([]MailboxDomainResponse, 0, len(domains))
+	for _, mailboxDomain := range domains {
+		kind := "organization"
+		if mailboxDomain.Shared {
+			kind = "shared"
+		}
+		items = append(items, MailboxDomainResponse{
+			Domain:               mailboxDomain.Name,
+			Kind:                 kind,
+			MaxMailboxes:         domain.MaxMailboxesPerOrganization,
+			Provider:             h.service.Provider(),
+			InboundEnabled:       h.service.InboundEnabled(),
+			DailySendLimit:       h.service.DailySendLimit(),
+			BroadcastsEnabled:    h.service.BroadcastsEnabled(),
+			CustomDomainsEnabled: h.service.CustomDomainsEnabled(),
+		})
+	}
 	privateResponse(c)
-	response.Success(c, []MailboxDomainResponse{{
-		Domain:            h.service.Domain(),
-		MaxMailboxes:      domain.MaxMailboxesPerOrganization,
-		Provider:          h.service.Provider(),
-		InboundEnabled:    h.service.InboundEnabled(),
-		DailySendLimit:    h.service.DailySendLimit(),
-		BroadcastsEnabled: h.service.BroadcastsEnabled(),
-	}})
+	response.Success(c, items)
 }
 
 // ListMailboxes returns the organization's mailboxes.
@@ -91,7 +108,7 @@ func (h *Handler) CreateMailbox(c *gin.Context) {
 		return
 	}
 	mailbox, err := h.service.CreateMailbox(
-		c.Request.Context(), organization.OrganizationID, organization.UserID, req.LocalPart, req.DisplayName)
+		c.Request.Context(), organization.OrganizationID, organization.UserID, req.LocalPart, req.DisplayName, req.Domain)
 	if err != nil {
 		response.HandleError(c, "Failed to create mailbox", err)
 		return

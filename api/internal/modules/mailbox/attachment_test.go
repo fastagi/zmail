@@ -241,7 +241,7 @@ func TestDownloadAttachmentIsAnOpaquePrivateDownload(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
 	fixture.router.GET("/mailboxes/:mailbox_id/messages/:message_id/attachments/:attachment_id",
 		NewHandler(fixture.service).DownloadAttachment)
-	mailbox, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "hello", "")
+	mailbox, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "hello", "", "")
 	if err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
