@@ -398,9 +398,30 @@ type CORSConfig struct {
 }
 
 type EmailConfig struct {
+	// Provider delivers system mail: "resend" (the default) or "cloudflare", which sends through
+	// Cloudflare Email Sending from a domain the account has enabled for sending.
+	Provider       string
 	From           string
 	ResendAPIKey   string
 	RequestTimeout time.Duration
+	// CloudflareAccountID and CloudflareAPIToken default to the mailbox starter's credentials.
+	CloudflareAccountID string
+	CloudflareAPIToken  string
+}
+
+// System mail providers.
+const (
+	EmailProviderResend     = "resend"
+	EmailProviderCloudflare = "cloudflare"
+)
+
+// ResolvedProvider is the provider name, "resend" when none is set.
+func (e EmailConfig) ResolvedProvider() string {
+	provider := strings.ToLower(strings.TrimSpace(e.Provider))
+	if provider == "" {
+		return EmailProviderResend
+	}
+	return provider
 }
 
 // Mailbox transport providers.
@@ -620,9 +641,12 @@ func Load() (*Config, error) {
 			AllowCredentials: env.GetBool("CORS_ALLOW_CREDENTIALS", true),
 		},
 		Email: EmailConfig{
-			From:           env.Get("MAIL_FROM", ""),
-			ResendAPIKey:   env.Get("RESEND_API_KEY", ""),
-			RequestTimeout: env.GetDuration("MAIL_REQUEST_TIMEOUT", DefaultEmailRequestTimeout),
+			Provider:            env.Get("MAIL_PROVIDER", ""),
+			From:                env.Get("MAIL_FROM", ""),
+			ResendAPIKey:        env.Get("RESEND_API_KEY", ""),
+			RequestTimeout:      env.GetDuration("MAIL_REQUEST_TIMEOUT", DefaultEmailRequestTimeout),
+			CloudflareAccountID: env.Get("MAIL_CLOUDFLARE_ACCOUNT_ID", env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", "")),
+			CloudflareAPIToken:  env.Get("MAIL_CLOUDFLARE_API_TOKEN", env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", "")),
 		},
 		Organization: OrganizationConfig{
 			InvitationTTL: env.GetDuration("ORGANIZATION_INVITATION_TTL", DefaultOrganizationInvitationTTL),
@@ -1383,9 +1407,21 @@ func validCookieName(name string) bool {
 
 func validateEmailConfig(emailConfig EmailConfig) error {
 	fromConfigured := strings.TrimSpace(emailConfig.From) != ""
-	apiKeyConfigured := strings.TrimSpace(emailConfig.ResendAPIKey) != ""
-	if fromConfigured != apiKeyConfigured {
-		return fmt.Errorf("MAIL_FROM and RESEND_API_KEY must be configured together")
+	switch emailConfig.ResolvedProvider() {
+	case EmailProviderResend:
+		apiKeyConfigured := strings.TrimSpace(emailConfig.ResendAPIKey) != ""
+		if fromConfigured != apiKeyConfigured {
+			return fmt.Errorf("MAIL_FROM and RESEND_API_KEY must be configured together")
+		}
+	case EmailProviderCloudflare:
+		// Without a sender the capability is off, as with Resend.
+		if fromConfigured && (strings.TrimSpace(emailConfig.CloudflareAccountID) == "" ||
+			strings.TrimSpace(emailConfig.CloudflareAPIToken) == "") {
+			return fmt.Errorf("MAIL_PROVIDER cloudflare with MAIL_FROM needs Cloudflare credentials " +
+				"(MAIL_CLOUDFLARE_ACCOUNT_ID and MAIL_CLOUDFLARE_API_TOKEN, or the MAILBOX_CLOUDFLARE_* values)")
+		}
+	default:
+		return fmt.Errorf("MAIL_PROVIDER must be %q or %q", EmailProviderResend, EmailProviderCloudflare)
 	}
 	if emailConfig.RequestTimeout < 0 {
 		return fmt.Errorf("MAIL_REQUEST_TIMEOUT must not be negative")

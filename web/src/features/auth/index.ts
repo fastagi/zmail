@@ -1,4 +1,5 @@
 export * from './components/auth-guard';
+export * from './components/forgot-password-form';
 export * from './components/login-form';
 export * from './components/register-form';
 export * from './hooks/use-auth';

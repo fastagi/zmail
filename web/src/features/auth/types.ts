@@ -16,12 +16,7 @@ export type AuthBootstrap =
   | { status: 'client-required' };
 
 export type AuthStatus =
-  | 'idle'
-  | 'loading'
-  | 'authenticated'
-  | 'unauthenticated'
-  | 'forbidden'
-  | 'unavailable';
+  'idle' | 'loading' | 'authenticated' | 'unauthenticated' | 'forbidden' | 'unavailable';
 
 export interface LoginRequest {
   email: string;

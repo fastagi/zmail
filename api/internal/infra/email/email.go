@@ -1,4 +1,5 @@
-// Package email provides the Resend-backed outbound email capability.
+// Package email provides the outbound system email capability, delivered through Resend or
+// Cloudflare Email Sending.
 package email
 
 import (
@@ -11,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/mail"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,6 +24,9 @@ const (
 	maxResendRecipients      = 50
 	maxProviderResponseBytes = 64 * 1024
 )
+
+// defaultCloudflareEndpoint is the Email Sending route; %s is the account ID.
+const defaultCloudflareEndpoint = "https://api.cloudflare.com/client/v4/accounts/%s/email/sending/send"
 
 var (
 	// ErrNotConfigured means the optional email capability has no complete provider configuration.
@@ -52,11 +57,31 @@ type httpDoer interface {
 
 // Service owns one reusable HTTP client and the provider delivery policy.
 type Service struct {
+	provider       string
 	from           string
 	apiKey         string
 	endpoint       string
 	requestTimeout time.Duration
 	client         httpDoer
+}
+
+type cloudflareSender struct {
+	Address string `json:"address"`
+	Name    string `json:"name,omitempty"`
+}
+
+type cloudflareSendRequest struct {
+	From    cloudflareSender `json:"from"`
+	To      []string         `json:"to"`
+	Subject string           `json:"subject"`
+	HTML    string           `json:"html"`
+}
+
+type cloudflareSendResponse struct {
+	Success bool `json:"success"`
+	Result  *struct {
+		MessageID string `json:"message_id"`
+	} `json:"result"`
 }
 
 type resendSendRequest struct {
@@ -77,10 +102,14 @@ func NewService(cfg *config.Config) *Service {
 		emailConfig = cfg.Email
 	}
 	timeout := normalizedTimeout(emailConfig.RequestTimeout)
+	endpoint := defaultResendEndpoint
+	if emailConfig.ResolvedProvider() == config.EmailProviderCloudflare {
+		endpoint = fmt.Sprintf(defaultCloudflareEndpoint, url.PathEscape(strings.TrimSpace(emailConfig.CloudflareAccountID)))
+	}
 	return newService(
 		emailConfig,
 		&http.Client{Timeout: timeout},
-		defaultResendEndpoint,
+		endpoint,
 	)
 }
 
@@ -93,9 +122,14 @@ func newService(cfg config.EmailConfig, client httpDoer, endpoint string) *Servi
 	if endpoint == "" {
 		endpoint = defaultResendEndpoint
 	}
+	apiKey := cfg.ResendAPIKey
+	if cfg.ResolvedProvider() == config.EmailProviderCloudflare {
+		apiKey = cfg.CloudflareAPIToken
+	}
 	return &Service{
+		provider:       cfg.ResolvedProvider(),
 		from:           strings.TrimSpace(cfg.From),
-		apiKey:         strings.TrimSpace(cfg.ResendAPIKey),
+		apiKey:         strings.TrimSpace(apiKey),
 		endpoint:       endpoint,
 		requestTimeout: timeout,
 		client:         client,
@@ -151,14 +185,9 @@ func (s *Service) sendEmail(
 		return err
 	}
 
-	payload, err := json.Marshal(resendSendRequest{
-		From:    s.from,
-		To:      to,
-		Subject: subject,
-		HTML:    htmlContent,
-	})
+	payload, err := s.encodeRequest(to, subject, htmlContent)
 	if err != nil {
-		return fmt.Errorf("encode email request: %w", err)
+		return err
 	}
 
 	requestContext, cancel := context.WithTimeout(ctx, s.requestTimeout)
@@ -195,6 +224,35 @@ func (s *Service) sendEmail(
 		return &ProviderError{StatusCode: response.StatusCode}
 	}
 
+	return s.checkResponse(body)
+}
+
+func (s *Service) encodeRequest(to []string, subject, htmlContent string) ([]byte, error) {
+	var request any = resendSendRequest{From: s.from, To: to, Subject: subject, HTML: htmlContent}
+	if s.provider == config.EmailProviderCloudflare {
+		sender := cloudflareSender{Address: s.from}
+		if parsed, err := mail.ParseAddress(s.from); err == nil {
+			sender = cloudflareSender{Address: parsed.Address, Name: parsed.Name}
+		}
+		request = cloudflareSendRequest{From: sender, To: to, Subject: subject, HTML: htmlContent}
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encode email request: %w", err)
+	}
+	return payload, nil
+}
+
+// checkResponse confirms a successful provider response names the message it accepted.
+func (s *Service) checkResponse(body []byte) error {
+	if s.provider == config.EmailProviderCloudflare {
+		var response cloudflareSendResponse
+		if err := json.Unmarshal(body, &response); err != nil || !response.Success || response.Result == nil ||
+			strings.TrimSpace(response.Result.MessageID) == "" {
+			return ErrInvalidProviderResponse
+		}
+		return nil
+	}
 	var providerResponse resendSendResponse
 	if err := json.Unmarshal(body, &providerResponse); err != nil || strings.TrimSpace(providerResponse.ID) == "" {
 		return ErrInvalidProviderResponse

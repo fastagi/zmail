@@ -5,10 +5,7 @@ import { AUTH_SESSION_MAX_AGE_SECONDS } from '@/config/auth-session';
 const OPAQUE_AUTHENTICATION_CREDENTIAL_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 export function isOpaqueAuthenticationCredential(value: unknown): value is string {
-  if (
-    typeof value !== 'string' ||
-    !OPAQUE_AUTHENTICATION_CREDENTIAL_PATTERN.test(value)
-  ) {
+  if (typeof value !== 'string' || !OPAQUE_AUTHENTICATION_CREDENTIAL_PATTERN.test(value)) {
     return false;
   }
 

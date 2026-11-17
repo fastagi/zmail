@@ -300,3 +300,47 @@ func TestServiceWelcomeEmailEscapesTemplateValues(t *testing.T) {
 		t.Fatalf("welcome HTML does not contain escaped username: %s", html)
 	}
 }
+
+func TestServiceSendsThroughCloudflareEmailSending(t *testing.T) {
+	var received map[string]any
+	var authorization, path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization, path = r.Header.Get("Authorization"), r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&received)
+		_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{"message_id":"<m1@mail.example.com>"}}`))
+	}))
+	defer server.Close()
+	service := newService(config.EmailConfig{
+		Provider:            config.EmailProviderCloudflare,
+		From:                "Zmail <noreply@mail.example.com>",
+		CloudflareAccountID: "acct",
+		CloudflareAPIToken:  "cf-token",
+		RequestTimeout:      time.Second,
+	}, server.Client(), server.URL+"/client/v4/accounts/acct/email/sending/send")
+
+	if !service.IsConfigured() {
+		t.Fatal("cloudflare service is not configured")
+	}
+	if err := service.SendEmail(context.Background(), []string{"ann@example.com"}, "Reset", "<p>token</p>"); err != nil {
+		t.Fatalf("SendEmail: %v", err)
+	}
+	from, _ := received["from"].(map[string]any)
+	if authorization != "Bearer cf-token" || path != "/client/v4/accounts/acct/email/sending/send" ||
+		from["address"] != "noreply@mail.example.com" || from["name"] != "Zmail" || received["subject"] != "Reset" {
+		t.Fatalf("request = %s %s %v", authorization, path, received)
+	}
+}
+
+func TestServiceReportsACloudflareRefusal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":false,"errors":[{"code":10202,"message":"email.sending.error.email.invalid"}]}`))
+	}))
+	defer server.Close()
+	service := newService(config.EmailConfig{
+		Provider: config.EmailProviderCloudflare, From: "noreply@mail.example.com",
+		CloudflareAccountID: "acct", CloudflareAPIToken: "cf-token", RequestTimeout: time.Second,
+	}, server.Client(), server.URL)
+	if err := service.SendEmail(context.Background(), []string{"ann@example.com"}, "Reset", "<p>x</p>"); err == nil {
+		t.Fatal("a refused send reported success")
+	}
+}

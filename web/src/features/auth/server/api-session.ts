@@ -16,10 +16,7 @@ export async function getApiSessionToken(): Promise<string | null> {
   return isOpaqueAuthenticationCredential(token) ? token : null;
 }
 
-export async function setApiSessionCookie(
-  token: string,
-  maxAgeSeconds: number
-): Promise<void> {
+export async function setApiSessionCookie(token: string, maxAgeSeconds: number): Promise<void> {
   if (!isOpaqueAuthenticationCredential(token)) {
     throw new Error('Refusing to store a malformed API access token');
   }

@@ -95,6 +95,9 @@ MAILBOX_DAILY_SEND_LIMIT=200
 # Organizations' own domains. Turning this on needs a token that also has Zone Read, DNS Edit,
 # Zone Settings Edit, Email Routing Rules Edit, and Email Sending Edit, and the Email Worker name.
 MAILBOX_CUSTOM_DOMAINS_ENABLED=false
+# System mail (password resets, invitations) through Cloudflare from an address on MAILBOX_DOMAIN.
+MAIL_PROVIDER=cloudflare
+MAIL_FROM=Zmail <noreply@mail.example.com>
 MAILBOX_CLOUDFLARE_EMAIL_WORKER=
 EOF
 chmod 0600 "$tmp_file"

@@ -14,9 +14,7 @@ interface AuthFailureLike {
 }
 
 function asAuthFailure(error: unknown): AuthFailureLike | undefined {
-  return typeof error === 'object' && error !== null
-    ? (error as AuthFailureLike)
-    : undefined;
+  return typeof error === 'object' && error !== null ? (error as AuthFailureLike) : undefined;
 }
 
 export function getAuthErrorCode(error: unknown): string | undefined {
@@ -29,9 +27,7 @@ export function getAuthErrorStatus(error: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined;
 }
 
-export function classifyAuthSessionFailure(
-  error: unknown
-): AuthSessionFailureStatus {
+export function classifyAuthSessionFailure(error: unknown): AuthSessionFailureStatus {
   const errorCode = getAuthErrorCode(error);
 
   if (
@@ -61,10 +57,7 @@ export function classifyAuthSessionFailure(
   return 'unavailable';
 }
 
-export function hasAuthFieldError(
-  error: unknown,
-  field: AuthField
-): boolean {
+export function hasAuthFieldError(error: unknown, field: AuthField): boolean {
   const fieldErrors = asAuthFailure(error)?.fieldErrors;
 
   if (typeof fieldErrors !== 'object' || fieldErrors === null) {
@@ -85,8 +78,5 @@ export function isUnauthenticatedAuthError(error: unknown): boolean {
     return false;
   }
 
-  return (
-    errorCode === ApiErrorCode.AUTH_UNAUTHORIZED ||
-    getAuthErrorStatus(error) === 401
-  );
+  return errorCode === ApiErrorCode.AUTH_UNAUTHORIZED || getAuthErrorStatus(error) === 401;
 }

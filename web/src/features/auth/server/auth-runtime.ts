@@ -4,10 +4,7 @@ import { env } from '@/config/env';
 import { isMockBffEnabled } from '@/config/mock-bff';
 import { serverEnv } from '@/config/server-env';
 
-export type AuthRuntimeMode =
-  | 'api-session'
-  | 'mock-session'
-  | 'client-session';
+export type AuthRuntimeMode = 'api-session' | 'mock-session' | 'client-session';
 
 interface AuthRuntimeEnvironment {
   apiUrl: string;
@@ -41,9 +38,7 @@ function targetsSameOriginApiRoute(apiUrl: string, appUrl: string): boolean {
  * the fixed production adapter. Other identity providers remain client-owned
  * unless a downstream app replaces this seam with its own server resolver.
  */
-export function resolveAuthRuntimeMode(
-  environment: AuthRuntimeEnvironment
-): AuthRuntimeMode {
+export function resolveAuthRuntimeMode(environment: AuthRuntimeEnvironment): AuthRuntimeMode {
   if (
     environment.apiAdapterEnabled &&
     targetsSameOriginApiRoute(environment.apiUrl, environment.appUrl)
@@ -56,8 +51,7 @@ export function resolveAuthRuntimeMode(
     enabled: environment.mockBffEnabled,
   });
 
-  return mockBffAvailable &&
-    targetsSameOriginApiRoute(environment.apiUrl, environment.appUrl)
+  return mockBffAvailable && targetsSameOriginApiRoute(environment.apiUrl, environment.appUrl)
     ? 'mock-session'
     : 'client-session';
 }

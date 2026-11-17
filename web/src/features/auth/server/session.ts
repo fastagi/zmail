@@ -72,9 +72,5 @@ function parseSession(payload: string | null): AuthUser | null {
 function isSessionPayload(value: unknown): value is SessionPayload {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Record<string, unknown>;
-  return (
-    isAuthUser(value) &&
-    typeof v.iat === 'number' &&
-    typeof v.exp === 'number'
-  );
+  return isAuthUser(value) && typeof v.iat === 'number' && typeof v.exp === 'number';
 }

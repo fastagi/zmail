@@ -5,7 +5,9 @@ import { resolveReturnUrl } from './return-url';
 
 describe('resolveReturnUrl', () => {
   it('keeps same-origin paths with query and hash', () => {
-    expect(resolveReturnUrl('/console/settings?tab=api#keys')).toBe('/console/settings?tab=api#keys');
+    expect(resolveReturnUrl('/console/settings?tab=api#keys')).toBe(
+      '/console/settings?tab=api#keys'
+    );
   });
 
   it('falls back for empty, absolute, and protocol-relative URLs', () => {

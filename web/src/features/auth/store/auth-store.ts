@@ -5,11 +5,7 @@ import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 
 import { authService } from '@/features/auth/services/auth-service';
-import type {
-  AuthBootstrap,
-  AuthStatus,
-  AuthUser,
-} from '@/features/auth/types';
+import type { AuthBootstrap, AuthStatus, AuthUser } from '@/features/auth/types';
 import { classifyAuthSessionFailure } from '@/features/auth/utils/auth-failure';
 import { isAuthResponse } from '@/features/auth/utils/auth-response';
 
@@ -24,9 +20,7 @@ export interface AuthState {
 type CurrentUserLoader = () => Promise<unknown>;
 export type AuthStore = StoreApi<AuthState>;
 
-function initialAuthState(
-  bootstrap: AuthBootstrap
-): Pick<AuthState, 'status' | 'user'> {
+function initialAuthState(bootstrap: AuthBootstrap): Pick<AuthState, 'status' | 'user'> {
   switch (bootstrap.status) {
     case 'authenticated':
       return { status: 'authenticated', user: bootstrap.user };
@@ -54,7 +48,7 @@ export function createAuthStore(
   return createStore<AuthState>()((set, get) => ({
     ...initialAuthState(bootstrap),
 
-    setUser: (user) =>
+    setUser: user =>
       set({
         status: user ? 'authenticated' : 'unauthenticated',
         user,
@@ -69,17 +63,13 @@ export function createAuthStore(
 
       const status = get().status;
 
-      if (
-        status !== 'idle' &&
-        status !== 'forbidden' &&
-        status !== 'unavailable'
-      ) {
+      if (status !== 'idle' && status !== 'forbidden' && status !== 'unavailable') {
         return Promise.resolve();
       }
 
       set({ status: 'loading', user: null });
       initialization = loadCurrentUser()
-        .then((response) => {
+        .then(response => {
           if (!isAuthResponse(response)) {
             set({ status: 'unavailable', user: null });
             return;
@@ -112,39 +102,35 @@ function useAuthStoreSelector<T>(selector: (state: AuthState) => T): T {
 }
 
 function useUser() {
-  return useAuthStoreSelector((state) => state.user);
+  return useAuthStoreSelector(state => state.user);
 }
 
 function useStatus() {
-  return useAuthStoreSelector((state) => state.status);
+  return useAuthStoreSelector(state => state.status);
 }
 
 function useAuthenticatedFlag() {
-  return useAuthStoreSelector((state) => state.status === 'authenticated');
+  return useAuthStoreSelector(state => state.status === 'authenticated');
 }
 
 function useIsLoading() {
-  return useAuthStoreSelector(
-    (state) => state.status === 'idle' || state.status === 'loading'
-  );
+  return useAuthStoreSelector(state => state.status === 'idle' || state.status === 'loading');
 }
 
 function useIsSystemReady() {
-  return useAuthStoreSelector(
-    (state) => state.status !== 'idle' && state.status !== 'loading'
-  );
+  return useAuthStoreSelector(state => state.status !== 'idle' && state.status !== 'loading');
 }
 
 function useSetUser() {
-  return useAuthStoreSelector((state) => state.setUser);
+  return useAuthStoreSelector(state => state.setUser);
 }
 
 function useReset() {
-  return useAuthStoreSelector((state) => state.reset);
+  return useAuthStoreSelector(state => state.reset);
 }
 
 function useInitializeAuth() {
-  return useAuthStoreSelector((state) => state.initializeAuth);
+  return useAuthStoreSelector(state => state.initializeAuth);
 }
 
 /**
