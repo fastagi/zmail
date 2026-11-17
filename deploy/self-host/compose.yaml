@@ -1,0 +1,270 @@
+# Zmail on one Linux server, behind a reverse proxy that terminates TLS.
+#
+#   ./init-env.sh https://zmail.example.com    # once: writes .env and the database TLS pair
+#   # then add MAILBOX_CLOUDFLARE_ACCOUNT_ID and MAILBOX_CLOUDFLARE_API_TOKEN to .env
+#   docker compose build && docker compose up -d --wait
+#   ./create-user.sh owner@example.com --organization "Acme"
+#
+# Every secret comes from .env; a missing one stops `docker compose` before any container starts.
+# The API and the console listen on 127.0.0.1 only. See README.md in this directory.
+#
+# Database roles (postgres-init/zmail-roles.psql): `zmail` is the image's bootstrap superuser, for
+# administration only; the `migrate` job connects as `zmail_owner`, which owns the schema; the API
+# and the workers connect as `zmail_app`, which owns nothing.
+name: zmail
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+# One configuration for the API, the workers, and the migration job: all must agree on the
+# starters. Each service adds its own database role (DB_USERNAME, DB_PASSWORD).
+x-api-environment: &api-environment
+  APP_NAME: Zmail
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: ${ZMAIL_PUBLIC_ORIGIN:?run ./init-env.sh <public origin> first}
+  SERVER_HOST: 0.0.0.0
+  SERVER_PORT: "8025"
+  # Forwarding headers are believed only from the host-side proxy (it reaches the published port
+  # through the network gateway) and from the console container.
+  SERVER_TRUSTED_PROXIES: ${ZMAIL_TRUSTED_PROXIES:-${ZMAIL_NETWORK_PREFIX:-10.213.78}.1,${ZMAIL_NETWORK_PREFIX:-10.213.78}.250}
+  CORS_ALLOW_ORIGINS: ${ZMAIL_PUBLIC_ORIGIN:?run ./init-env.sh <public origin> first}
+  OPTIONAL_STARTERS: organization,webhook,mailbox
+  DB_ENABLED: "true"
+  DB_DRIVER: postgres
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: zmail
+  DB_SSLMODE: require
+  DB_MAX_OPEN_CONNS: "20"
+  QUEUE_DRIVER: postgres
+  AUTH_REGISTRATION_ENABLED: ${AUTH_REGISTRATION_ENABLED:-false}
+  MIDDLEWARE_RATE_LIMIT_MAX: ${ZMAIL_RATE_LIMIT_MAX:-600}
+  # Mail: addresses on MAILBOX_DOMAIN, sent through Cloudflare Email Sending, received from the
+  # Cloudflare Email Worker, which signs with MAILBOX_INBOUND_SECRET.
+  MAILBOX_DOMAIN: ${MAILBOX_DOMAIN:?missing in .env}
+  MAILBOX_PROVIDER: cloudflare
+  MAILBOX_CLOUDFLARE_ACCOUNT_ID: ${MAILBOX_CLOUDFLARE_ACCOUNT_ID:?missing in .env}
+  MAILBOX_CLOUDFLARE_API_TOKEN: ${MAILBOX_CLOUDFLARE_API_TOKEN:?missing in .env}
+  MAILBOX_INBOUND_SECRET: ${MAILBOX_INBOUND_SECRET:?missing in .env}
+  MAILBOX_DAILY_SEND_LIMIT: ${MAILBOX_DAILY_SEND_LIMIT:-200}
+  # Broadcast unsubscribe links point at the public console.
+  MAILBOX_PUBLIC_URL: ${ZMAIL_PUBLIC_ORIGIN:?run ./init-env.sh <public origin> first}
+  WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:?missing in .env}
+  AI_ENABLED: "false"
+  LOG_LEVEL: ${ZMAIL_LOG_LEVEL:-info}
+  LOG_JSON: "true"
+  TZ: UTC
+
+# The API's runtime role, shared by the server and both workers.
+x-app-database: &app-database
+  DB_USERNAME: zmail_app
+  DB_PASSWORD: ${POSTGRES_APP_PASSWORD:?missing in .env}
+
+x-worker: &worker
+  image: zmail-api:selfhost
+  restart: unless-stopped
+  <<: *hardening
+  tmpfs:
+    - /tmp
+  depends_on:
+    postgres:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+  healthcheck:
+    disable: true
+  mem_limit: 256m
+  pids_limit: 128
+  stop_grace_period: 30s
+  logging: *logging
+
+services:
+  postgres:
+    image: postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    restart: unless-stopped
+    # Production mode requires TLS to the database. The key must belong to the postgres user, so
+    # the pair is copied out of the read-only secret mounts before the stock entrypoint runs.
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        for name in postgres_tls_cert postgres_tls_key; do
+          if [ ! -s "/run/secrets/$$name" ]; then
+            echo "missing /run/secrets/$$name: run ./init-env.sh, or restore postgres-tls/ from your backup" >&2
+            exit 1
+          fi
+        done
+        install -o postgres -g postgres -m 0644 /run/secrets/postgres_tls_cert /var/lib/postgresql/tls.crt
+        install -o postgres -g postgres -m 0600 /run/secrets/postgres_tls_key /var/lib/postgresql/tls.key
+        exec docker-entrypoint.sh "$$@"
+      - postgres-tls
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/var/lib/postgresql/tls.crt
+      - -c
+      - ssl_key_file=/var/lib/postgresql/tls.key
+    environment:
+      POSTGRES_DB: zmail
+      # The bootstrap superuser: administration only (pg_dump, pg_restore, psql by hand).
+      POSTGRES_USER: zmail
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing in .env}
+      # Read by postgres-init/10-zmail-roles.sh when the volume is first initialized.
+      POSTGRES_OWNER_PASSWORD: ${POSTGRES_OWNER_PASSWORD:?missing in .env}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?missing in .env}
+      TZ: UTC
+    secrets:
+      - postgres_tls_cert
+      - postgres_tls_key
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zmail -d zmail"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    shm_size: 128mb
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: ${ZMAIL_POSTGRES_MEMORY:-1g}
+    pids_limit: 512
+    stop_grace_period: 60s
+    logging: *logging
+
+  # Applies pending migrations, then exits. The API refuses `serve --migrate` in production, so
+  # this job runs before it on every `docker compose up`.
+  migrate:
+    image: zmail-api:selfhost
+    build:
+      context: ../../api
+    entrypoint: ["/app/fastbuild", "migrate", "--force"]
+    restart: "no"
+    environment:
+      <<: *api-environment
+      # Migrations create and alter tables: the schema owner, never the superuser.
+      DB_USERNAME: zmail_owner
+      DB_PASSWORD: ${POSTGRES_OWNER_PASSWORD:?missing in .env}
+    <<: *hardening
+    tmpfs:
+      - /tmp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    mem_limit: 256m
+    pids_limit: 128
+    logging: *logging
+
+  api:
+    image: zmail-api:selfhost
+    build:
+      context: ../../api
+    entrypoint: ["/app/fastbuild", "serve"]
+    restart: unless-stopped
+    environment:
+      <<: [*api-environment, *app-database]
+    <<: *hardening
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:${ZMAIL_API_PORT:-18991}:8025"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/fastbuild", "health:check", "--timeout=2s"]
+      interval: 15s
+      timeout: 3s
+      retries: 4
+      start_period: 20s
+    mem_limit: ${ZMAIL_API_MEMORY:-512m}
+    pids_limit: 256
+    stop_grace_period: 30s
+    logging: *logging
+
+  # Sends signed webhook deliveries to the organizations' endpoints.
+  webhook-worker:
+    <<: *worker
+    entrypoint: ["/app/fastbuild", "webhook:work", "--batch=25", "--poll=2s"]
+    environment:
+      <<: [*api-environment, *app-database]
+
+  # Sends the recipients of scheduled and running broadcasts.
+  broadcast-worker:
+    <<: *worker
+    entrypoint: ["/app/fastbuild", "mail:broadcast:work", "--batch=25", "--poll=2s"]
+    environment:
+      <<: [*api-environment, *app-database]
+
+  web:
+    image: zmail-web:selfhost
+    build:
+      context: ../../web
+      # NEXT_PUBLIC_* values are compiled into the bundle: the image is built for one origin.
+      args:
+        NEXT_PUBLIC_APP_URL: ${ZMAIL_PUBLIC_ORIGIN:?run ./init-env.sh <public origin> first}
+        NEXT_PUBLIC_API_URL: /api
+        NEXT_PUBLIC_OPTIONAL_FEATURES: organization,webhook,mailbox
+        NEXT_PUBLIC_DEFAULT_LOCALE: ${ZMAIL_DEFAULT_LOCALE:-zh-Hans}
+        NEXT_PUBLIC_LOCALE_SWITCHER_ENABLED: "true"
+    restart: unless-stopped
+    environment:
+      API_ADAPTER_ENABLED: "true"
+      API_UPSTREAM_URL: http://api:8025/v1
+      # The header the reverse proxy overwrites with the one real client address.
+      API_CLIENT_IP_HEADER: ${ZMAIL_CLIENT_IP_HEADER:-X-Real-IP}
+      # Large enough for an attachment download (4 MiB) passing through the console.
+      API_UPSTREAM_MAX_RESPONSE_BYTES: "6291456"
+      MOCK_BFF_ENABLED: "false"
+      SESSION_SECRET: ${SESSION_SECRET:?missing in .env}
+      TZ: UTC
+    <<: *hardening
+    tmpfs:
+      - /tmp
+      - /app/.next/cache:uid=1000,gid=1000
+    ports:
+      - "127.0.0.1:${ZMAIL_WEB_PORT:-18990}:3000"
+    networks:
+      default:
+        # Fixed so the API can trust exactly this container as a forwarding proxy.
+        ipv4_address: ${ZMAIL_NETWORK_PREFIX:-10.213.78}.250
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: ${ZMAIL_WEB_MEMORY:-768m}
+    pids_limit: 256
+    stop_grace_period: 15s
+    logging: *logging
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${ZMAIL_NETWORK_PREFIX:-10.213.78}.0/24
+          gateway: ${ZMAIL_NETWORK_PREFIX:-10.213.78}.1
+          # Containers without a fixed address stay below .128, away from the console's .250.
+          ip_range: ${ZMAIL_NETWORK_PREFIX:-10.213.78}.0/25
+
+volumes:
+  postgres-data:
+
+secrets:
+  postgres_tls_cert:
+    file: ./postgres-tls/server.crt
+  postgres_tls_key:
+    file: ./postgres-tls/server.key

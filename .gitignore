@@ -26,3 +26,7 @@ __pycache__/
 
 # make dev build output and local object storage
 .fastbuild-dev/
+
+# Self-hosting secrets: never committed.
+deploy/self-host/.env
+deploy/self-host/postgres-tls/

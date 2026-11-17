@@ -1,0 +1,28 @@
+# Reverse proxy for a self-hosted Zmail instance, for Caddy 2.6 or newer. Copy the block into your
+# Caddyfile (or a file it imports) and replace the host name. DNS points at this server directly,
+# and Caddy obtains and renews the certificate itself.
+#
+# One public origin serves two upstreams, both on loopback:
+#   /v1/*, /health/*  ->  the API      (127.0.0.1:18991): API keys, the mail edge, unsubscribe links
+#   everything else   ->  the console  (127.0.0.1:18990): browsers, through the console's own BFF
+#
+# Client addresses: the API believes X-Forwarded-For / X-Real-IP from this proxy, and the console
+# forwards the single address in X-Real-IP, so this proxy OVERWRITES both with the TCP peer.
+
+zmail.example.com {
+	@api path /v1/* /health/live /health/ready
+	handle @api {
+		reverse_proxy 127.0.0.1:18991 {
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy 127.0.0.1:18990 {
+			header_up X-Real-IP {remote_host}
+			header_up -X-Forwarded-For
+		}
+	}
+}
