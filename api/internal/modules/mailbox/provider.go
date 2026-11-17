@@ -47,6 +47,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_17_130000_create_mail_contacts",
 			"2026_11_17_140000_create_mail_broadcasts",
 			"2026_11_17_150000_create_mail_domains",
+			"2026_11_17_160000_add_broadcast_safety",
 		),
 	)
 }

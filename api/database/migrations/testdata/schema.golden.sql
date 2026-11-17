@@ -92,6 +92,7 @@ TABLE mail_broadcast_recipients
   COLUMN lease_until timestamp with time zone
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
+  COLUMN wave smallint NOT NULL DEFAULT 1
 
 TABLE mail_broadcasts
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_broadcasts_id_seq'::regclass)
@@ -112,6 +113,11 @@ TABLE mail_broadcasts
   COLUMN created_by bigint NOT NULL
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
+  COLUMN test_percent smallint NOT NULL DEFAULT 0
+  COLUMN test_wait_minutes integer NOT NULL DEFAULT 30
+  COLUMN current_wave smallint NOT NULL DEFAULT 1
+  COLUMN resume_at timestamp with time zone
+  COLUMN safety_override boolean NOT NULL DEFAULT false
 
 TABLE mail_contact_list_members
   COLUMN list_id bigint NOT NULL
@@ -505,7 +511,8 @@ CONSTRAINT mail_attachments.mail_attachments_pkey PRIMARY KEY (id)
 CONSTRAINT mail_broadcast_recipients.chk_mail_broadcast_recipients_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'sent'::character varying, 'failed'::character varying, 'skipped'::character varying, 'canceled'::character varying])::text[])))
 CONSTRAINT mail_broadcast_recipients.fk_mail_broadcast_recipients_broadcast FOREIGN KEY (broadcast_id) REFERENCES mail_broadcasts(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_broadcast_recipients.mail_broadcast_recipients_pkey PRIMARY KEY (id)
-CONSTRAINT mail_broadcasts.chk_mail_broadcasts_status CHECK (((status)::text = ANY ((ARRAY['draft'::character varying, 'scheduled'::character varying, 'sending'::character varying, 'sent'::character varying, 'canceled'::character varying])::text[])))
+CONSTRAINT mail_broadcasts.chk_mail_broadcasts_status CHECK (((status)::text = ANY ((ARRAY['draft'::character varying, 'scheduled'::character varying, 'sending'::character varying, 'paused'::character varying, 'sent'::character varying, 'canceled'::character varying])::text[])))
+CONSTRAINT mail_broadcasts.chk_mail_broadcasts_test_percent CHECK (((test_percent >= 0) AND (test_percent <= 50)))
 CONSTRAINT mail_broadcasts.fk_mail_broadcasts_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_broadcasts.mail_broadcasts_pkey PRIMARY KEY (id)
 CONSTRAINT mail_contact_list_members.fk_mail_contact_list_members_contact FOREIGN KEY (contact_id) REFERENCES mail_contacts(id) ON UPDATE CASCADE ON DELETE CASCADE

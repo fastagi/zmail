@@ -55,8 +55,31 @@ func fillCounts(tx *gorm.DB, broadcasts []*domain.MailBroadcast) error {
 			counts.Canceled += row.Count
 		}
 	}
+	// A recipient's message later reported bounced or complained; a send-time bounce counts too.
+	var health []struct {
+		BroadcastID uint
+		Bounced     int
+		Complained  int
+	}
+	err = tx.Raw(`SELECT r.broadcast_id,
+			COUNT(*) FILTER (WHERE m.last_event IN ('bounced', 'rejected') OR r.failure_code = ?) AS bounced,
+			COUNT(*) FILTER (WHERE m.last_event = 'complained') AS complained
+		FROM mail_broadcast_recipients r
+		LEFT JOIN mail_messages m ON m.id = r.message_id
+		WHERE r.broadcast_id IN ? AND r.status IN ('sent', 'failed')
+		GROUP BY r.broadcast_id`, failurePermanentBounce, ids).Scan(&health).Error
+	if err != nil {
+		return err
+	}
+	for _, row := range health {
+		counts := &byID[row.BroadcastID].Counts
+		counts.Bounced, counts.Complained = row.Bounced, row.Complained
+	}
 	return nil
 }
+
+// failurePermanentBounce is the failure code of a message the provider refused for good.
+const failurePermanentBounce = "transport.permanent_bounce"
 
 func (r *repository) ListBroadcasts(ctx context.Context, organizationID uint, page, perPage int) ([]*domain.MailBroadcast, int64, error) {
 	if r.db == nil {
@@ -128,6 +151,9 @@ func (r *repository) CreateBroadcast(ctx context.Context, broadcast *domain.Mail
 		ListID:           broadcast.ListID,
 		UnsubscribeLabel: broadcast.UnsubscribeLabel,
 		Status:           string(domain.MailBroadcastDraft),
+		TestPercent:      broadcast.TestPercent,
+		TestWaitMinutes:  broadcast.TestWaitMinutes,
+		CurrentWave:      1,
 		CreatedBy:        broadcast.CreatedBy,
 	}
 	if err := r.conn(ctx).Create(po).Error; err != nil {
@@ -149,6 +175,8 @@ func (r *repository) UpdateDraft(ctx context.Context, broadcast *domain.MailBroa
 			"template_id":       broadcast.TemplateID,
 			"list_id":           broadcast.ListID,
 			"unsubscribe_label": broadcast.UnsubscribeLabel,
+			"test_percent":      broadcast.TestPercent,
+			"test_wait_minutes": broadcast.TestWaitMinutes,
 			"updated_at":        gorm.Expr("now()"),
 		})
 	if result.Error != nil {
@@ -225,7 +253,21 @@ func (r *repository) StartBroadcast(ctx context.Context, broadcast *domain.MailB
 		if added == 0 {
 			return ErrMailBroadcastNoRecipients
 		}
+		if locked.TestPercent > 0 {
+			// A random test_percent of the recipients, at least one, form wave 1; the rest wait.
+			testSize := (added*locked.TestPercent + 99) / 100
+			if err := tx.Exec(`UPDATE mail_broadcast_recipients SET wave = 2 WHERE broadcast_id = ?`, broadcast.ID).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`UPDATE mail_broadcast_recipients SET wave = 1 WHERE id IN (
+					SELECT id FROM mail_broadcast_recipients WHERE broadcast_id = ? ORDER BY random() LIMIT ?)`,
+				broadcast.ID, testSize).Error; err != nil {
+				return err
+			}
+		}
 		return tx.Model(&MailBroadcastPO{}).Where("id = ?", broadcast.ID).Updates(map[string]any{
+			"current_wave": 1,
+			"resume_at":    nil,
 			"status":       string(broadcast.Status),
 			"subject":      broadcast.Subject,
 			"html_body":    broadcast.HTMLBody,
@@ -246,9 +288,10 @@ func (r *repository) CancelBroadcast(ctx context.Context, organizationID, id uin
 	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&MailBroadcastPO{}).
 			Where("id = ? AND organization_id = ? AND status IN ?", id, organizationID,
-				[]string{string(domain.MailBroadcastScheduled), string(domain.MailBroadcastSending)}).
+				[]string{string(domain.MailBroadcastScheduled), string(domain.MailBroadcastSending), string(domain.MailBroadcastPaused)}).
 			Updates(map[string]any{
 				"status":      string(domain.MailBroadcastCanceled),
+				"resume_at":   nil,
 				"finished_at": gorm.Expr("now()"),
 				"updated_at":  gorm.Expr("now()"),
 			})
@@ -318,7 +361,7 @@ func (r *repository) LeasePending(ctx context.Context, now, leaseUntil time.Time
 		WHERE id IN (
 			SELECT r.id FROM mail_broadcast_recipients r
 			JOIN mail_broadcasts b ON b.id = r.broadcast_id
-			WHERE b.status = 'sending' AND r.status = 'pending'
+			WHERE b.status = 'sending' AND r.status = 'pending' AND r.wave <= b.current_wave
 			  AND (r.lease_until IS NULL OR r.lease_until < ?)
 			ORDER BY r.id
 			LIMIT ?
@@ -377,6 +420,98 @@ func (r *repository) FinishBroadcasts(ctx context.Context, now time.Time) (int, 
 		WHERE b.status = 'sending'
 		  AND NOT EXISTS (SELECT 1 FROM mail_broadcast_recipients r WHERE r.broadcast_id = b.id AND r.status = 'pending')`, now)
 	return int(result.RowsAffected), result.Error
+}
+
+func (r *repository) PauseBroadcast(ctx context.Context, organizationID, id uint, reason string) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	query := r.conn(ctx).Model(&MailBroadcastPO{}).Where("id = ?", id)
+	if organizationID != 0 {
+		// An owner pauses a sending broadcast, or one whose test wave is waiting.
+		query = query.Where("organization_id = ? AND status IN ?", organizationID,
+			[]string{string(domain.MailBroadcastSending), string(domain.MailBroadcastPaused)})
+	} else {
+		query = query.Where("status IN ?", []string{string(domain.MailBroadcastSending), string(domain.MailBroadcastPaused)})
+	}
+	result := query.Updates(map[string]any{
+		"status":      string(domain.MailBroadcastPaused),
+		"stop_reason": reason,
+		"resume_at":   nil,
+		"updated_at":  gorm.Expr("now()"),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 && organizationID != 0 {
+		return r.notEditable(ctx, organizationID, id)
+	}
+	return nil
+}
+
+func (r *repository) ResumeBroadcast(ctx context.Context, organizationID, id uint, override bool) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	query := r.conn(ctx).Model(&MailBroadcastPO{}).Where("id = ? AND status = ?", id, string(domain.MailBroadcastPaused))
+	if organizationID != 0 {
+		query = query.Where("organization_id = ?", organizationID)
+	}
+	// A test wave that finished, or a broadcast the owner overrides, continues with everyone; one
+	// the owner paused by hand continues the wave it was in.
+	values := map[string]any{
+		"status":      string(domain.MailBroadcastSending),
+		"stop_reason": "",
+		"resume_at":   nil,
+		"current_wave": gorm.Expr("CASE WHEN stop_reason = ? OR ? THEN 2 ELSE current_wave END",
+			stopReasonTestWave, override),
+		"updated_at": gorm.Expr("now()"),
+	}
+	if override {
+		values["safety_override"] = true
+	}
+	result := query.Updates(values)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 && organizationID != 0 {
+		return r.notEditable(ctx, organizationID, id)
+	}
+	return nil
+}
+
+func (r *repository) CompleteTestWaves(ctx context.Context, now time.Time) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Exec(`UPDATE mail_broadcasts b
+		SET status = 'paused', stop_reason = ?, resume_at = CAST(? AS timestamptz) + b.test_wait_minutes * interval '1 minute', updated_at = now()
+		WHERE b.status = 'sending' AND b.current_wave = 1 AND b.test_percent > 0
+		  AND NOT EXISTS (SELECT 1 FROM mail_broadcast_recipients r WHERE r.broadcast_id = b.id AND r.status = 'pending' AND r.wave = 1)
+		  AND EXISTS (SELECT 1 FROM mail_broadcast_recipients r WHERE r.broadcast_id = b.id AND r.status = 'pending' AND r.wave = 2)`,
+		stopReasonTestWave, now).Error
+}
+
+func (r *repository) ListActiveBroadcasts(ctx context.Context, limit int) ([]*domain.MailBroadcast, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var rows []MailBroadcastPO
+	err := r.conn(ctx).Select("id, organization_id, status, stop_reason, test_percent, test_wait_minutes, current_wave, resume_at, safety_override").
+		Where("status = ? OR (status = ? AND stop_reason = ?)",
+			string(domain.MailBroadcastSending), string(domain.MailBroadcastPaused), stopReasonTestWave).
+		Order("id ASC").Limit(limit).Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	broadcasts := make([]*domain.MailBroadcast, 0, len(rows))
+	for i := range rows {
+		broadcasts = append(broadcasts, rows[i].toDomain())
+	}
+	if err := fillCounts(r.conn(ctx), broadcasts); err != nil {
+		return nil, err
+	}
+	return broadcasts, nil
 }
 
 func (r *repository) FindContactForBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailContact, error) {

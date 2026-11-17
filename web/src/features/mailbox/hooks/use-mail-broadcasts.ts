@@ -43,7 +43,12 @@ function validId(value: number): boolean {
 }
 
 function running(broadcast: MailBroadcast | undefined): boolean {
-  return broadcast?.status === 'sending' || broadcast?.status === 'scheduled';
+  // A waiting test wave continues on its own, so it is refreshed like a running broadcast.
+  return (
+    broadcast?.status === 'sending' ||
+    broadcast?.status === 'scheduled' ||
+    (broadcast?.status === 'paused' && broadcast.stop_reason === 'test_wave_complete')
+  );
 }
 
 export function useMailBroadcasts(organizationId: number, page: number) {
@@ -124,6 +129,18 @@ export function useSendMailBroadcast(organizationId: number) {
 export function useCancelMailBroadcast(organizationId: number) {
   return useBroadcastMutation(organizationId, (broadcastId: number) =>
     mailboxService.cancelBroadcast(organizationId, broadcastId)
+  );
+}
+
+export function usePauseMailBroadcast(organizationId: number) {
+  return useBroadcastMutation(organizationId, (broadcastId: number) =>
+    mailboxService.controlBroadcast(organizationId, broadcastId, 'pauses')
+  );
+}
+
+export function useResumeMailBroadcast(organizationId: number) {
+  return useBroadcastMutation(organizationId, (broadcastId: number) =>
+    mailboxService.controlBroadcast(organizationId, broadcastId, 'resumptions')
   );
 }
 

@@ -265,9 +265,21 @@ func (s *service) evaluate(ctx context.Context, mailDomain *domain.MailDomain) (
 			Purpose: domain.MailDomainRecordSending, Type: "TXT", Name: mailDomain.Name, Content: "",
 		})
 	}
-	required = append(required, domain.MailDomainRecord{
-		Purpose: domain.MailDomainRecordDMARC, Type: "TXT", Name: "_dmarc." + mailDomain.Name, Content: defaultDMARC,
-	})
+	// Cloudflare lists a DMARC record among the sending records; that one stands for DMARC, so the
+	// domain does not show two rows for the same record.
+	dmarcName := "_dmarc." + mailDomain.Name
+	hasDMARC := false
+	for i := range required {
+		if required[i].Type == "TXT" && strings.EqualFold(required[i].Name, dmarcName) {
+			required[i].Purpose = domain.MailDomainRecordDMARC
+			hasDMARC = true
+		}
+	}
+	if !hasDMARC {
+		required = append(required, domain.MailDomainRecord{
+			Purpose: domain.MailDomainRecordDMARC, Type: "TXT", Name: dmarcName, Content: defaultDMARC,
+		})
+	}
 
 	existing := map[string][]mailtransport.DNSRecord{}
 	for i := range required {

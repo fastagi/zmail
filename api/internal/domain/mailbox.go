@@ -349,6 +349,9 @@ const (
 	MailBroadcastScheduled MailBroadcastStatus = "scheduled"
 	// MailBroadcastSending broadcasts are being sent by the worker.
 	MailBroadcastSending MailBroadcastStatus = "sending"
+	// MailBroadcastPaused broadcasts keep their pending recipients but send nothing: the test wave
+	// is waiting, the health check stopped them, or an owner paused them. StopReason says which.
+	MailBroadcastPaused MailBroadcastStatus = "paused"
 	// MailBroadcastSent broadcasts have no pending recipient left.
 	MailBroadcastSent MailBroadcastStatus = "sent"
 	// MailBroadcastCanceled broadcasts were stopped; recipients not yet sent were not sent.
@@ -374,6 +377,10 @@ type MailBroadcastCounts struct {
 	Failed   int
 	Skipped  int
 	Canceled int
+	// Bounced and Complained count sent recipients whose message later bounced or was reported
+	// as spam; they drive the automatic pause.
+	Bounced    int
+	Complained int
 }
 
 // MailBroadcast sends one template from one mailbox to the subscribed contacts of one list.
@@ -396,10 +403,21 @@ type MailBroadcast struct {
 	FinishedAt  *time.Time
 	// StopReason is a short code when the worker paused or stopped, such as send_limit_reached.
 	StopReason string
-	Counts     MailBroadcastCounts
-	CreatedBy  uint
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// TestPercent of the recipients, picked at random, form a test wave sent first; 0 sends to
+	// everyone at once. TestWaitMinutes is how long the rest waits after the test wave.
+	TestPercent     int
+	TestWaitMinutes int
+	// CurrentWave is the last wave the worker may send: 1 during the test wave, then 2.
+	CurrentWave int
+	// ResumeAt is when a paused test wave is checked and the rest continues.
+	ResumeAt *time.Time
+	// SafetyOverride is set when an owner resumed a broadcast the health check paused; it is not
+	// paused automatically again.
+	SafetyOverride bool
+	Counts         MailBroadcastCounts
+	CreatedBy      uint
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // MailBroadcastRecipient is one contact of a broadcast, fixed when sending starts.
@@ -443,6 +461,17 @@ type MailBroadcastRepository interface {
 	ReleaseRecipient(ctx context.Context, id uint) error
 	// SetStopReason records why the worker paused a broadcast; empty clears it.
 	SetStopReason(ctx context.Context, id uint, reason string) error
+	// PauseBroadcast moves a sending broadcast, or a scheduled one when organizationID is not 0,
+	// to paused with the reason. organizationID 0 is the worker.
+	PauseBroadcast(ctx context.Context, organizationID, id uint, reason string) error
+	// ResumeBroadcast moves a paused broadcast back to sending: it opens wave 2 when the test wave
+	// was waiting, and sets the safety override when the health check had paused it.
+	ResumeBroadcast(ctx context.Context, organizationID, id uint, override bool) error
+	// CompleteTestWaves pauses sending broadcasts whose test wave is done until its wait is over.
+	CompleteTestWaves(ctx context.Context, now time.Time) error
+	// ListActiveBroadcasts lists sending broadcasts and paused ones waiting after their test wave,
+	// with counts, for the health check.
+	ListActiveBroadcasts(ctx context.Context, limit int) ([]*MailBroadcast, error)
 	// FinishBroadcasts marks sending broadcasts without pending recipients as sent.
 	FinishBroadcasts(ctx context.Context, now time.Time) (int, error)
 

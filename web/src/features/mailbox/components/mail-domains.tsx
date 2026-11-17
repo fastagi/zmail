@@ -332,7 +332,9 @@ function RecordTable({ records }: { records: MailDomainRecord[] }) {
             >
               <TableCell className="whitespace-nowrap">{t(purposeKey[record.purpose])}</TableCell>
               <TableCell className="font-mono text-xs">{record.type}</TableCell>
-              <TableCell className="max-w-56 min-w-40 font-mono text-xs whitespace-normal [overflow-wrap:anywhere]">{record.name}</TableCell>
+              <TableCell className="max-w-56 min-w-40 font-mono text-xs whitespace-normal [overflow-wrap:anywhere]">
+                {record.name}
+              </TableCell>
               <TableCell className="max-w-md min-w-48 font-mono text-xs break-all whitespace-normal">
                 {record.content === '' ? (
                   <span className="font-sans text-muted-foreground">

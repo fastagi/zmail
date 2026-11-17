@@ -426,6 +426,39 @@ const messages = {
     statusSending: 'Sending',
     statusSent: 'Sent',
     statusCanceled: 'Canceled',
+    statusPaused: 'Paused',
+    fromDomain: 'Sending domain',
+    staged: 'Send to a test group first',
+    stagedHint:
+      'A random share of the list gets the message first. The rest waits, and is sent only if few of the test messages bounced or were reported as spam.',
+    testPercent: 'Test group (% of the list)',
+    testWait: 'Wait before the rest (minutes)',
+    safetyHint:
+      'Every broadcast pauses on its own if 5% of its messages bounce or 0.3% are reported as spam.',
+    managersSend:
+      'Only owners and admins can send this broadcast. Ask one of them when it is ready.',
+    pausedTestWave:
+      'The test group got the message. Unless its bounces or spam reports are too high, everyone else gets it at {time}.',
+    pausedBounces:
+      'Paused automatically: {bounced} messages bounced, more than 5%. Check the list before you continue.',
+    pausedComplaints:
+      'Paused automatically: {complained} recipients reported the message as spam, more than 0.3%. Check the content and the list before you continue.',
+    pausedByOwner: 'Paused by an owner or admin. Nothing is sent until it is resumed.',
+    stagedSummary: 'Test group: {percent}% of the list, then a {minutes}-minute wait.',
+    waveTest: 'Now sending to the test group.',
+    waveRest: 'Now sending to everyone.',
+    overrideNote:
+      'Resumed after an automatic pause: this broadcast is no longer paused automatically.',
+    bounced: 'Bounced',
+    complained: 'Spam reports',
+    pause: 'Pause',
+    resume: 'Resume',
+    resumeNow: 'Send to everyone now',
+    resumeTitle: 'Resume despite the warning?',
+    resumeDescription:
+      'This broadcast was paused because too many messages bounced or were reported as spam. Sending more can hurt delivery for all mail from this domain. If you resume, it will not be paused automatically again.',
+    pausedToast: 'Broadcast paused',
+    resumedToast: 'Broadcast resumed',
     progressValue: '{sent} of {total} sent',
     scheduledFor: 'Scheduled for {time}',
     startedAt: 'Started {time}',

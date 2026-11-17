@@ -491,3 +491,24 @@ func TestRecordComparisonIgnoresHowTheProviderPrintsAValue(t *testing.T) {
 		t.Fatalf("SPF with an extra include = %+v", got)
 	}
 }
+
+func TestADMARCRecordAmongTheSendingRecordsIsShownOnce(t *testing.T) {
+	fixture := newDomainFixture(t)
+	fixture.zones.sendingDNS = append(fixture.zones.sendingDNS, mailtransport.DNSRecord{
+		Type: "TXT", Name: "_dmarc.news.example.com", Content: `"v=DMARC1; p=reject;"`,
+	})
+	mailDomain := fixture.connect(t, "news.example.com")
+
+	dmarc := 0
+	for _, record := range mailDomain.Records {
+		if record.Name == "_dmarc.news.example.com" {
+			dmarc++
+			if record.Purpose != domain.MailDomainRecordDMARC {
+				t.Fatalf("dmarc row purpose = %s", record.Purpose)
+			}
+		}
+	}
+	if dmarc != 1 || mailDomain.Status != domain.MailDomainStatusVerified {
+		t.Fatalf("dmarc rows = %d, status = %s: %+v", dmarc, mailDomain.Status, mailDomain.Records)
+	}
+}

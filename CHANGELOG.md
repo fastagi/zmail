@@ -14,6 +14,12 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
   reports each required record as in place, missing, or in conflict. Mailboxes can be created on a
   verified domain with the new `domain` field; each gets its own routing rule to the Email Worker.
   `GET /v1/mailbox-domains` now lists the shared domain and the verified organization domains.
+- **Broadcast safety.** Only owners and admins send, cancel, pause, and resume broadcasts. A
+  broadcast can go to a random test group first (`test_percent`, `test_wait_minutes`) and send to
+  everyone else only if the test group's bounce and complaint rates are acceptable. Every broadcast
+  pauses on its own at 5% bounces or 0.3% spam complaints, in the new `paused` status, and
+  `POST /v1/mail-broadcasts/{id}/pauses` and `/resumptions` control it by hand. Counts gain
+  `bounced` and `complained`. The console picks the sending domain before the mailbox.
 
 ## v0.27.0 — 2026-11-17
 

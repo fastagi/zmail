@@ -216,9 +216,18 @@ func (c *CloudflareDomains) EnableRouting(ctx context.Context, zoneID, name stri
 }
 
 type cloudflareSendingSubdomain struct {
+	// ID identifies the sending domain; older responses call it tag.
+	ID      string `json:"id"`
 	Tag     string `json:"tag"`
 	Name    string `json:"name"`
 	Enabled bool   `json:"enabled"`
+}
+
+func (s cloudflareSendingSubdomain) identifier() string {
+	if s.ID != "" {
+		return s.ID
+	}
+	return s.Tag
 }
 
 func (c *CloudflareDomains) EnsureSending(ctx context.Context, zoneID, name string) (string, error) {
@@ -228,18 +237,18 @@ func (c *CloudflareDomains) EnsureSending(ctx context.Context, zoneID, name stri
 		return "", err
 	}
 	for _, subdomain := range existing {
-		if strings.EqualFold(subdomain.Name, name) && subdomain.Tag != "" {
-			return subdomain.Tag, nil
+		if strings.EqualFold(subdomain.Name, name) && subdomain.identifier() != "" {
+			return subdomain.identifier(), nil
 		}
 	}
 	var created cloudflareSendingSubdomain
 	if err := c.call(ctx, "enable email sending", http.MethodPost, path, nil, map[string]string{"name": name}, &created); err != nil {
 		return "", err
 	}
-	if created.Tag == "" {
+	if created.identifier() == "" {
 		return "", &DomainError{Operation: "enable email sending", Message: "the provider returned no sending domain"}
 	}
-	return created.Tag, nil
+	return created.identifier(), nil
 }
 
 type cloudflareRecord struct {

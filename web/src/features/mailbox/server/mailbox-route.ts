@@ -24,6 +24,8 @@ import {
   MAIL_ATTACHMENTS_MAX_BYTES,
   MAIL_BROADCAST_LABEL_MAX_LENGTH,
   MAIL_BROADCAST_NAME_MAX_LENGTH,
+  MAIL_BROADCAST_TEST_MAX_PERCENT,
+  MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES,
   MAIL_CONTACT_IMPORT_MAX_BYTES,
   MAIL_CONTACT_LIST_NAME_MAX_LENGTH,
   MAIL_CONTACT_MAX_LISTS,
@@ -598,6 +600,8 @@ export async function saveMailBroadcastRoute(
         template_id: 'template_id',
         list_id: 'list_id',
         unsubscribe_label: 'unsubscribe_label',
+        test_percent: 'test_percent',
+        test_wait_minutes: 'test_wait_minutes',
       },
     });
   }
@@ -634,6 +638,8 @@ export async function sendMailBroadcastRoute(
 ): Promise<NextResponse> {
   const target = await resolveMailboxMutationRoute(request);
   if (!target.available) return target.response;
+  // Mail to a whole list: only owners and admins start it. With the API backend, the API decides.
+  if (!mayManageMailboxes(target)) return forbidden();
   const broadcastId = parseRouteId(rawBroadcastId);
   if (!broadcastId.ok) return broadcastId.response;
   const body = await jsonObject(request, maxContactBodyBytes);
@@ -667,23 +673,32 @@ export async function sendMailBroadcastRoute(
   );
 }
 
-export async function cancelMailBroadcastRoute(
+/** Cancels, pauses, or resumes a broadcast; only owners and admins may, and none reads a body. */
+export async function controlMailBroadcastRoute(
   request: Request,
-  rawBroadcastId: string
+  rawBroadcastId: string,
+  action: 'cancellations' | 'pauses' | 'resumptions'
 ): Promise<NextResponse> {
   const target = await resolveMailboxMutationRoute(request);
   if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
   const broadcastId = parseRouteId(rawBroadcastId);
   if (!broadcastId.ok) return broadcastId.response;
   if (target.backend === 'go-api') {
     return forwardAuthenticatedGoApi(request, {
       method: 'POST',
-      path: `mail-broadcasts/${broadcastId.value}/cancellations`,
+      path: `mail-broadcasts/${broadcastId.value}/${action}`,
       accessToken: target.accessToken,
       organizationId: String(target.organizationId),
     });
   }
-  return mockBroadcastResponse(mockBroadcastStore.cancel(target.organizationId, broadcastId.value));
+  const result =
+    action === 'cancellations'
+      ? mockBroadcastStore.cancel(target.organizationId, broadcastId.value)
+      : action === 'pauses'
+        ? mockBroadcastStore.pause(target.organizationId, broadcastId.value)
+        : mockBroadcastStore.resume(target.organizationId, broadcastId.value);
+  return mockBroadcastResponse(result);
 }
 
 export async function listMailBroadcastRecipientsRoute(
@@ -780,6 +795,8 @@ async function broadcastBody(request: Request): Promise<Parsed<MailBroadcastInpu
     template_id: templateId,
     list_id: listId,
     unsubscribe_label: label,
+    test_percent: testPercent,
+    test_wait_minutes: testWait,
     ...rest
   } = body.value;
   const errors: Record<string, string[]> = {};
@@ -795,6 +812,14 @@ async function broadcastBody(request: Request): Promise<Parsed<MailBroadcastInpu
   if (label !== undefined && !boundedString(label, MAIL_BROADCAST_LABEL_MAX_LENGTH * 4)) {
     errors.unsubscribe_label = ['The unsubscribe_label field is invalid'];
   }
+  const wholeNumber = (value: unknown, max: number): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= max;
+  if (testPercent !== undefined && !wholeNumber(testPercent, MAIL_BROADCAST_TEST_MAX_PERCENT)) {
+    errors.test_percent = ['The test_percent field is invalid'];
+  }
+  if (testWait !== undefined && !wholeNumber(testWait, MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES)) {
+    errors.test_wait_minutes = ['The test_wait_minutes field is invalid'];
+  }
   if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
   return {
     ok: true,
@@ -804,6 +829,8 @@ async function broadcastBody(request: Request): Promise<Parsed<MailBroadcastInpu
       template_id: templateId as number,
       list_id: listId as number,
       ...(typeof label === 'string' ? { unsubscribe_label: label } : {}),
+      ...(typeof testPercent === 'number' ? { test_percent: testPercent } : {}),
+      ...(typeof testWait === 'number' ? { test_wait_minutes: testWait } : {}),
     },
   };
 }

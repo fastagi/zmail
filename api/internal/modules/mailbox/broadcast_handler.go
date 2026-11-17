@@ -18,6 +18,10 @@ type MailBroadcastRequest struct {
 	TemplateID       uint   `json:"template_id" binding:"required,min=1"`
 	ListID           uint   `json:"list_id" binding:"required,min=1"`
 	UnsubscribeLabel string `json:"unsubscribe_label" binding:"max=200"`
+	// TestPercent sends to this share of the list first, 0 to 50; 0 sends to everyone at once.
+	TestPercent int `json:"test_percent" binding:"min=0,max=50"`
+	// TestWaitMinutes is the wait after the test wave, 5 to 1440; 0 means 30.
+	TestWaitMinutes int `json:"test_wait_minutes" binding:"min=0,max=1440"`
 }
 
 func (r MailBroadcastRequest) input() BroadcastInput {
@@ -37,6 +41,9 @@ type MailBroadcastCountsResponse struct {
 	Failed   int `json:"failed"`
 	Skipped  int `json:"skipped"`
 	Canceled int `json:"canceled"`
+	// Bounced and Complained are finished recipients whose message bounced or was reported as spam.
+	Bounced    int `json:"bounced"`
+	Complained int `json:"complained"`
 }
 
 // MailBroadcastResponse is the public shape of a broadcast.
@@ -52,6 +59,11 @@ type MailBroadcastResponse struct {
 	StartedAt        *time.Time                  `json:"started_at"`
 	FinishedAt       *time.Time                  `json:"finished_at"`
 	StopReason       string                      `json:"stop_reason"`
+	TestPercent      int                         `json:"test_percent"`
+	TestWaitMinutes  int                         `json:"test_wait_minutes"`
+	CurrentWave      int                         `json:"current_wave"`
+	ResumeAt         *time.Time                  `json:"resume_at"`
+	SafetyOverride   bool                        `json:"safety_override"`
 	Counts           MailBroadcastCountsResponse `json:"counts"`
 	CreatedAt        time.Time                   `json:"created_at"`
 	UpdatedAt        time.Time                   `json:"updated_at"`
@@ -81,6 +93,11 @@ func toMailBroadcastResponse(broadcast *domain.MailBroadcast) MailBroadcastRespo
 		StartedAt:        broadcast.StartedAt,
 		FinishedAt:       broadcast.FinishedAt,
 		StopReason:       broadcast.StopReason,
+		TestPercent:      broadcast.TestPercent,
+		TestWaitMinutes:  broadcast.TestWaitMinutes,
+		CurrentWave:      broadcast.CurrentWave,
+		ResumeAt:         broadcast.ResumeAt,
+		SafetyOverride:   broadcast.SafetyOverride,
 		Counts:           MailBroadcastCountsResponse(broadcast.Counts),
 		CreatedAt:        broadcast.CreatedAt,
 		UpdatedAt:        broadcast.UpdatedAt,
@@ -156,8 +173,20 @@ func (h *Handler) DeleteBroadcast(c *gin.Context) {
 	response.NoContent(c)
 }
 
+// managedBroadcast resolves a broadcast route that only owners and admins may use: starting,
+// stopping, pausing, or resuming mail to a whole list.
+func managedBroadcast(c *gin.Context) (organizationID, id uint, ok bool) {
+	organization, ok := managerScope(c)
+	if !ok {
+		return 0, 0, false
+	}
+	id, ok = httphandler.ParseID(c, "broadcast_id")
+	return organization.OrganizationID, id, ok
+}
+
+// SendBroadcast starts or schedules a draft. Only owners and admins may.
 func (h *Handler) SendBroadcast(c *gin.Context) {
-	organizationID, id, ok := idScope(c, "broadcast_id")
+	organizationID, id, ok := managedBroadcast(c)
 	if !ok {
 		return
 	}
@@ -169,12 +198,33 @@ func (h *Handler) SendBroadcast(c *gin.Context) {
 	respondBroadcast(c, broadcast, err, false)
 }
 
+// CancelBroadcast stops a broadcast for good. Only owners and admins may.
 func (h *Handler) CancelBroadcast(c *gin.Context) {
-	organizationID, id, ok := idScope(c, "broadcast_id")
+	organizationID, id, ok := managedBroadcast(c)
 	if !ok {
 		return
 	}
 	broadcast, err := h.service.CancelBroadcast(c.Request.Context(), organizationID, id)
+	respondBroadcast(c, broadcast, err, false)
+}
+
+// PauseBroadcast holds a sending broadcast. Only owners and admins may.
+func (h *Handler) PauseBroadcast(c *gin.Context) {
+	organizationID, id, ok := managedBroadcast(c)
+	if !ok {
+		return
+	}
+	broadcast, err := h.service.PauseBroadcast(c.Request.Context(), organizationID, id)
+	respondBroadcast(c, broadcast, err, false)
+}
+
+// ResumeBroadcast continues a paused broadcast. Only owners and admins may.
+func (h *Handler) ResumeBroadcast(c *gin.Context) {
+	organizationID, id, ok := managedBroadcast(c)
+	if !ok {
+		return
+	}
+	broadcast, err := h.service.ResumeBroadcast(c.Request.Context(), organizationID, id)
 	respondBroadcast(c, broadcast, err, false)
 }
 

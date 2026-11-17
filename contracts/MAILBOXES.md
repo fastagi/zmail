@@ -142,6 +142,8 @@ shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DI
 - The domain is `verified` when every record is `ok`, and `pending` otherwise. A later check can
   return it to `pending`; its mailboxes keep working, but new ones wait until it verifies again.
   `verified_at` keeps the first verification time.
+- Cloudflare can take a few minutes after a domain verifies before it accepts mail from it; a send
+  in that window fails with the provider's code and can be sent again.
 - Creating a mailbox on a verified domain also creates an Email Routing rule that delivers that one
   address to the Email Worker named by `MAILBOX_CLOUDFLARE_EMAIL_WORKER`. A rule Cloudflare refuses
   is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`, and no mailbox is created.
@@ -387,7 +389,9 @@ nothing in a cell is evaluated.
 ### Broadcasts
 
 A broadcast sends one template from one mailbox to the subscribed contacts of one list, one
-message per contact. Every member manages the organization's broadcasts.
+message per contact. Every member creates, edits, and reads the organization's broadcasts; only
+owners and admins send, cancel, pause, and resume them, and a member who tries is
+`403 PERMISSION.DENIED`.
 
 Broadcasts need unsubscribe links, so they are available only when the API has
 `MAILBOX_INBOUND_SECRET` (the links are signed with a key derived from it) and `MAILBOX_PUBLIC_URL`
@@ -399,11 +403,12 @@ without it, sending is `503 MAILBOX.BROADCAST_DISABLED`.
 | `draft` | Editable. Has no recipients. |
 | `scheduled` | Recipients are fixed; sending starts at `scheduled_at`. |
 | `sending` | The worker is sending its recipients. |
+| `paused` | Recipients stay pending and nothing is sent; `stop_reason` says why. |
 | `sent` | No recipient is pending. |
 | `canceled` | Stopped; recipients not yet sent became `canceled`. |
 
 `POST /v1/mail-broadcasts` creates a draft from `name`, `mailbox_id`, `template_id`, `list_id`,
-and an optional `unsubscribe_label`. Each must belong to the organization. `PUT` replaces a draft
+and the optional `unsubscribe_label`, `test_percent`, and `test_wait_minutes`. Each must belong to the organization. `PUT` replaces a draft
 and is `409 MAILBOX.BROADCAST_NOT_EDITABLE` in any other state.
 
 `POST /v1/mail-broadcasts/{id}/sends` with an optional `scheduled_at` starts a draft:
@@ -414,7 +419,24 @@ and is `409 MAILBOX.BROADCAST_NOT_EDITABLE` in any other state.
 - Without `scheduled_at`, or with a time in the past, the broadcast is `sending`; otherwise it is
   `scheduled`, at most a year ahead.
 
-`POST /v1/mail-broadcasts/{id}/cancellations` cancels a `scheduled` or `sending` broadcast. A
+`POST /v1/mail-broadcasts/{id}/cancellations` cancels a `scheduled`, `sending`, or `paused` broadcast.
+
+#### Staged Sending And Automatic Pause
+
+- With `test_percent` from 1 to 50, that share of the recipients, picked at random and at least
+  one, forms the test wave (`current_wave` 1). When it is done the broadcast is `paused` with
+  `stop_reason` `test_wave_complete` and `resume_at` set `test_wait_minutes` later (default 30, 5 to
+  1440). At `resume_at` the worker checks the rates below and sends everyone else
+  (`current_wave` 2).
+- Before every round the worker checks each sending broadcast, and each waiting test wave, once at
+  least 20 recipients are finished. At 5% bounces (`counts.bounced`, including send-time bounces) it
+  pauses with `bounce_rate_high`, and at 0.3% spam complaints (`counts.complained`, Gmail's limit
+  for bulk senders) with `complaint_rate_high`.
+- `POST /v1/mail-broadcasts/{id}/pauses` holds a sending broadcast, or a waiting test wave, with
+  `paused_by_owner`. `POST /v1/mail-broadcasts/{id}/resumptions` continues a paused one: a waiting
+  test wave continues with everyone, a broadcast paused by hand continues the wave it was in, and
+  one the health check paused continues with everyone and `safety_override` true, so it is not
+  paused automatically again. Either is `409 MAILBOX.BROADCAST_NOT_EDITABLE` in another state. A
 broadcast can be deleted when it is `draft`, `sent`, or `canceled`; messages already sent stay in
 the mailbox.
 

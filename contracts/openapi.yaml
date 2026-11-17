@@ -3789,6 +3789,7 @@ paths:
     post:
       operationId: sendMailBroadcast
       summary: Send or schedule a draft broadcast
+      description: Only owners and admins may.
       tags:
         - Mailboxes
       security:
@@ -3813,6 +3814,8 @@ paths:
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -3838,7 +3841,8 @@ paths:
   /v1/mail-broadcasts/{broadcast_id}/cancellations:
     post:
       operationId: cancelMailBroadcast
-      summary: Cancel a scheduled or sending broadcast
+      summary: Cancel a scheduled, sending, or paused broadcast
+      description: Only owners and admins may.
       tags:
         - Mailboxes
       security:
@@ -3857,6 +3861,78 @@ paths:
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-broadcasts/{broadcast_id}/pauses:
+    post:
+      operationId: pauseMailBroadcast
+      summary: Pause a broadcast
+      description: Holds a sending broadcast, or one whose test wave is waiting, until an owner resumes it. Pending recipients stay pending. Only owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailBroadcastID'
+      responses:
+        '200':
+          description: The broadcast after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailBroadcastResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The broadcast is not in a state that allows this (`MAILBOX.BROADCAST_NOT_EDITABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-broadcasts/{broadcast_id}/resumptions:
+    post:
+      operationId: resumeMailBroadcast
+      summary: Resume a paused broadcast
+      description: Continues a paused broadcast. A waiting test wave continues with everyone. Resuming one that the health check paused sets `safety_override`, so it is not paused automatically again. Only owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailBroadcastID'
+      responses:
+        '200':
+          description: The broadcast after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailBroadcastResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -8942,10 +9018,12 @@ components:
 
     MailBroadcastStatus:
       type: string
+      description: '`paused` keeps the pending recipients without sending; `stop_reason` says why.'
       enum:
         - draft
         - scheduled
         - sending
+        - paused
         - sent
         - canceled
     MailBroadcastRecipientStatus:
@@ -8980,6 +9058,18 @@ components:
           description: Text of the unsubscribe link Zmail adds when the template does not use `{{unsubscribe_url}}`;
             `Unsubscribe` when empty.
           maxLength: 200
+        test_percent:
+          type: integer
+          description: Send to this share of the list first, picked at random (at least one recipient).
+            The rest waits `test_wait_minutes` and is sent only if the test wave's bounce and complaint
+            rates are acceptable. 0 or absent sends to everyone at once.
+          minimum: 0
+          maximum: 50
+        test_wait_minutes:
+          type: integer
+          description: Minutes between the end of the test wave and the rest, 5 to 1440; 0 or absent means 30.
+          minimum: 0
+          maximum: 1440
     MailBroadcastSendRequest:
       type: object
       additionalProperties: false
@@ -9000,6 +9090,8 @@ components:
         - failed
         - skipped
         - canceled
+        - bounced
+        - complained
       properties:
         total:
           type: integer
@@ -9019,6 +9111,14 @@ components:
         canceled:
           type: integer
           minimum: 0
+        bounced:
+          type: integer
+          description: Sent or failed recipients whose message bounced or was rejected, at send time or later.
+          minimum: 0
+        complained:
+          type: integer
+          description: Sent recipients whose message was later reported as spam.
+          minimum: 0
     MailBroadcast:
       type: object
       additionalProperties: false
@@ -9034,6 +9134,11 @@ components:
         - started_at
         - finished_at
         - stop_reason
+        - test_percent
+        - test_wait_minutes
+        - current_wave
+        - resume_at
+        - safety_override
         - counts
         - created_at
         - updated_at
@@ -9071,8 +9176,34 @@ components:
           format: date-time
         stop_reason:
           type: string
-          description: '`send_limit_reached` while the organization''s 24-hour send limit holds the broadcast; empty otherwise.'
+          description: Why the broadcast is held. `send_limit_reached` while the organization's 24-hour send
+            limit holds a sending broadcast; for a paused one `test_wave_complete` (waiting until `resume_at`),
+            `bounce_rate_high` or `complaint_rate_high` (the health check stopped it), or `paused_by_owner`.
+            Empty otherwise.
           maxLength: 64
+        test_percent:
+          type: integer
+          minimum: 0
+          maximum: 50
+        test_wait_minutes:
+          type: integer
+          minimum: 5
+          maximum: 1440
+        current_wave:
+          type: integer
+          description: 1 while only the test wave may be sent, 2 once everyone may.
+          minimum: 1
+          maximum: 2
+        resume_at:
+          description: When a waiting test wave is checked and the rest continues.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        safety_override:
+          type: boolean
+          description: An owner resumed the broadcast after the health check paused it; it is not paused
+            automatically again.
         counts:
           $ref: '#/components/schemas/MailBroadcastCounts'
         created_at:

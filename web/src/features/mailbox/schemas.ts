@@ -50,6 +50,10 @@ export const MAIL_CONTACT_IMPORT_MAX_BYTES = 5 * 1_024 * 1_024;
 export const MAIL_CONTACT_IMPORT_MAX_ROWS = 10_000;
 /** Contact fields with a fixed meaning; they cannot be custom properties. */
 export const MAIL_BROADCAST_NAME_MAX_LENGTH = 100;
+export const MAIL_BROADCAST_TEST_MAX_PERCENT = 50;
+export const MAIL_BROADCAST_TEST_WAIT_DEFAULT_MINUTES = 30;
+export const MAIL_BROADCAST_TEST_WAIT_MIN_MINUTES = 5;
+export const MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES = 1_440;
 export const MAIL_BROADCAST_LABEL_MAX_LENGTH = 50;
 /** An unsubscribe token: organization id, contact id, and a 16-byte base64url signature. */
 export const MAIL_UNSUBSCRIBE_TOKEN_PATTERN = /^[1-9]\d{0,9}\.[1-9]\d{0,9}\.[A-Za-z0-9_-]{22}$/u;
@@ -418,6 +422,7 @@ export const mailBroadcastStatusSchema = union([
   literal('draft'),
   literal('scheduled'),
   literal('sending'),
+  literal('paused'),
   literal('sent'),
   literal('canceled'),
 ]);
@@ -442,6 +447,13 @@ export const mailBroadcastSchema = strictObject({
   started_at: nullable(timestampSchema),
   finished_at: nullable(timestampSchema),
   stop_reason: string(),
+  // Staged sending: test_percent of the recipients go first; the rest waits test_wait_minutes.
+  test_percent: nonnegativeIntegerSchema,
+  test_wait_minutes: nonnegativeIntegerSchema,
+  current_wave: positiveIntegerSchema,
+  resume_at: nullable(timestampSchema),
+  // An owner resumed the broadcast after the health check paused it.
+  safety_override: boolean(),
   counts: strictObject({
     total: nonnegativeIntegerSchema,
     pending: nonnegativeIntegerSchema,
@@ -449,6 +461,8 @@ export const mailBroadcastSchema = strictObject({
     failed: nonnegativeIntegerSchema,
     skipped: nonnegativeIntegerSchema,
     canceled: nonnegativeIntegerSchema,
+    bounced: nonnegativeIntegerSchema,
+    complained: nonnegativeIntegerSchema,
   }),
   created_at: timestampSchema,
   updated_at: timestampSchema,
@@ -486,6 +500,8 @@ export const mailBroadcastInputSchema = strictObject({
   template_id: safeIdSchema,
   list_id: safeIdSchema,
   unsubscribe_label: optional(string()),
+  test_percent: optional(nonnegativeIntegerSchema),
+  test_wait_minutes: optional(nonnegativeIntegerSchema),
 });
 
 export const mailBroadcastSendInputSchema = strictObject({

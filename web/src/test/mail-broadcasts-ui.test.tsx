@@ -30,6 +30,8 @@ const state = vi.hoisted(() => {
     save: mutation(),
     send: mutation(),
     cancel: mutation(),
+    pause: mutation(),
+    resume: mutation(),
     remove: mutation(),
   };
 });
@@ -69,6 +71,8 @@ vi.mock('@/features/mailbox/hooks/use-mail-broadcasts', () => ({
   useSaveMailBroadcast: () => state.save,
   useSendMailBroadcast: () => state.send,
   useCancelMailBroadcast: () => state.cancel,
+  usePauseMailBroadcast: () => state.pause,
+  useResumeMailBroadcast: () => state.resume,
   useDeleteMailBroadcast: () => state.remove,
 }));
 
@@ -167,6 +171,8 @@ describe('mail broadcasts console', () => {
           template_id: 3,
           list_id: 4,
           unsubscribe_label: '退订',
+          test_percent: 0,
+          test_wait_minutes: 30,
         },
       })
     );

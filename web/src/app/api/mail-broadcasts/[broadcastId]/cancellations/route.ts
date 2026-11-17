@@ -1,5 +1,5 @@
 import {
-  cancelMailBroadcastRoute,
+  controlMailBroadcastRoute,
   privateMailboxResponse,
 } from '@/features/mailbox/server/mailbox-route';
 
@@ -11,5 +11,7 @@ interface RouteContext {
 
 export async function POST(request: Request, context: RouteContext) {
   const { broadcastId } = await context.params;
-  return privateMailboxResponse(await cancelMailBroadcastRoute(request, broadcastId));
+  return privateMailboxResponse(
+    await controlMailBroadcastRoute(request, broadcastId, 'cancellations')
+  );
 }
