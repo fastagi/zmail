@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -19,6 +20,8 @@ type MailTemplateRequest struct {
 	HTML            string            `json:"html" binding:"max=262144"`
 	Text            string            `json:"text" binding:"max=262144"`
 	SampleVariables map[string]string `json:"sample_variables" binding:"omitempty,max=100"`
+	// Design is the visual editor's document; the console renders html and text from it.
+	Design json.RawMessage `json:"design"`
 }
 
 func (r MailTemplateRequest) input() TemplateInput {
@@ -62,6 +65,8 @@ type MailTemplateResponse struct {
 	HTMLBody        string            `json:"html_body"`
 	TextBody        string            `json:"text_body"`
 	SampleVariables map[string]string `json:"sample_variables"`
+	// Design is null for a template written in HTML.
+	Design json.RawMessage `json:"design"`
 }
 
 // MailTemplatePreviewResponse is a rendered template.
@@ -95,7 +100,15 @@ func toMailTemplateResponse(template *domain.MailTemplate) MailTemplateResponse 
 		HTMLBody:                    template.HTMLBody,
 		TextBody:                    template.TextBody,
 		SampleVariables:             samples,
+		Design:                      designJSON(template.Design),
 	}
+}
+
+func designJSON(design string) json.RawMessage {
+	if design == "" {
+		return json.RawMessage("null")
+	}
+	return json.RawMessage(design)
 }
 
 // ListTemplates returns every template of the organization by name, without bodies.

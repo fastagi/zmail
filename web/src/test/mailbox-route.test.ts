@@ -945,7 +945,21 @@ describe('mailbox browser route boundary', () => {
       name: 'Welcome email',
       variables: ['code', 'first_name'],
       sample_variables: { first_name: 'Ann', code: '1' },
+      design: null,
     });
+    const designed = await route.createMailTemplateRoute(
+      request('/api/mail-templates', {
+        method: 'POST',
+        body: JSON.stringify({ ...template, name: 'Designed', design: { version: 1, blocks: [] } }),
+      })
+    );
+    expect(designed.status).toBe(201);
+    const designedTemplate = (await designed.json()).data;
+    expect(designedTemplate.design).toEqual({ version: 1, blocks: [] });
+    await route.deleteMailTemplateRoute(
+      request(`/api/mail-templates/${designedTemplate.id}`, { method: 'DELETE' }),
+      String(designedTemplate.id)
+    );
     const duplicate = await route.createMailTemplateRoute(
       request('/api/mail-templates', { method: 'POST', body: JSON.stringify(template) })
     );
@@ -1053,6 +1067,10 @@ describe('mailbox browser route boundary', () => {
       { ...valid, sample_variables: { 'bad-name': 'x' } },
       { ...valid, sample_variables: { ok: 1 } },
       { ...valid, extra: true },
+      { ...valid, design: [1] },
+      { ...valid, design: { blocks: [] } },
+      { ...valid, design: { version: 0 } },
+      { ...valid, design: { version: 1, pad: 'x'.repeat(256 * 1_024) } },
     ]) {
       await expectError(
         await route.createMailTemplateRoute(

@@ -248,9 +248,12 @@ type MailTemplate struct {
 	TextBody       string
 	// SampleVariables are example values used by previews and test sends.
 	SampleVariables map[string]string
-	CreatedBy       uint
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// Design is the visual editor's JSON document the bodies were rendered from; empty when the
+	// template is written in HTML. The API stores it as given and never renders it.
+	Design    string
+	CreatedBy uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // MailContactStatus says whether a contact may receive broadcasts.

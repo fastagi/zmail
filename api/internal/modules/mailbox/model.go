@@ -242,9 +242,11 @@ type MailTemplatePO struct {
 	HTMLBody        string `gorm:"column:html_body;type:text;not null;default:''"`
 	TextBody        string `gorm:"type:text;not null;default:''"`
 	SampleVariables string `gorm:"type:jsonb;not null;default:'{}'"`
-	CreatedBy       uint   `gorm:"not null"`
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// Design is NULL for a template written in HTML.
+	Design    *string `gorm:"type:jsonb"`
+	CreatedBy uint    `gorm:"not null"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func (MailTemplatePO) TableName() string {
@@ -266,6 +268,7 @@ func (po *MailTemplatePO) toDomain() *domain.MailTemplate {
 		HTMLBody:        po.HTMLBody,
 		TextBody:        po.TextBody,
 		SampleVariables: samples,
+		Design:          stringOrEmpty(po.Design),
 		CreatedBy:       po.CreatedBy,
 		CreatedAt:       po.CreatedAt,
 		UpdatedAt:       po.UpdatedAt,
@@ -289,8 +292,23 @@ func newMailTemplatePO(template *domain.MailTemplate) *MailTemplatePO {
 		HTMLBody:        template.HTMLBody,
 		TextBody:        template.TextBody,
 		SampleVariables: string(encoded),
+		Design:          nullableString(template.Design),
 		CreatedBy:       template.CreatedBy,
 	}
+}
+
+func stringOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func nullableString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // MailContactPO is the persistent object for one contact.

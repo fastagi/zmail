@@ -1,7 +1,9 @@
 package mailbox
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +13,11 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 )
 
-const maxTemplateNameLength = 100
+const (
+	maxTemplateNameLength = 100
+	// maxTemplateDesignBytes bounds the visual editor's design document.
+	maxTemplateDesignBytes = 256 * 1024
+)
 
 // ErrMailTemplateVariablesMissing means a template was sent without values for variables that
 // have no fallback.
@@ -35,6 +41,8 @@ type TemplateInput struct {
 	HTML            string
 	Text            string
 	SampleVariables map[string]string
+	// Design is the visual editor's document; empty or JSON null when the template is HTML.
+	Design json.RawMessage
 }
 
 // TemplateSendInput sends a stored template with values for its variables.
@@ -214,12 +222,17 @@ func buildTemplate(input TemplateInput) (*domain.MailTemplate, *parsedTemplate, 
 	if !ok {
 		return nil, nil, fmt.Errorf("%w: sample_variables", ErrMailTemplateInvalid)
 	}
+	design, ok := cleanDesign(input.Design)
+	if !ok {
+		return nil, nil, fmt.Errorf("%w: design", ErrMailTemplateInvalid)
+	}
 	template := &domain.MailTemplate{
 		Name:            name,
 		Subject:         cleanText(subject),
 		HTMLBody:        html,
 		TextBody:        text,
 		SampleVariables: samples,
+		Design:          design,
 	}
 	parsed, err := parseStoredTemplate(template)
 	if err != nil {
@@ -246,4 +259,34 @@ func mergeValues(base, override map[string]string) map[string]string {
 		merged[name] = value
 	}
 	return merged
+}
+
+// cleanDesign checks the visual editor's document without interpreting it: a JSON object of at
+// most maxTemplateDesignBytes with a positive integer version. It returns the compact document,
+// or "" when there is none.
+func cleanDesign(raw json.RawMessage) (string, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return "", true
+	}
+	if len(trimmed) > maxTemplateDesignBytes || trimmed[0] != '{' {
+		return "", false
+	}
+	var head struct {
+		Version json.Number `json:"version"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.UseNumber()
+	if err := decoder.Decode(&head); err != nil {
+		return "", false
+	}
+	version, err := head.Version.Int64()
+	if err != nil || version < 1 {
+		return "", false
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, trimmed); err != nil {
+		return "", false
+	}
+	return compact.String(), true
 }

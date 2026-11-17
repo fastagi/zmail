@@ -1,4 +1,5 @@
 import type { MailTemplateInput } from '@/features/mailbox/types';
+import { emptyDesign, type TemplateDesign } from '@/features/mailbox/utils/template-design';
 
 /**
  * Starting points for the template editor. The layout and placeholders live here; the wording
@@ -152,6 +153,105 @@ export function starterContent(starter: TemplateStarter, phrases: StarterPhrases
           '{{intro}}',
           `${p.newsletterButton}: {{action_url}}`,
         ].join('\n\n'),
+        sample_variables: {
+          company: p.sampleCompany,
+          issue_title: p.sampleIssueTitle,
+          first_name: p.sampleFirstName,
+          intro: p.sampleIntro,
+          action_url: 'https://example.com/blog/november',
+        },
+      };
+  }
+}
+
+export interface StarterDesign {
+  subject: string;
+  design: TemplateDesign;
+  sample_variables: Record<string, string>;
+}
+
+/** The starter as a visual design; the same wording and placeholders as the HTML version. */
+export function starterDesign(starter: TemplateStarter, phrases: StarterPhrases): StarterDesign {
+  const p = phrases;
+  switch (starter) {
+    case 'blank':
+      return { subject: '', design: emptyDesign(), sample_variables: {} };
+    case 'welcome':
+      return {
+        subject: placeholders(p.welcomeSubject),
+        design: emptyDesign([
+          {
+            id: 'heading',
+            type: 'heading',
+            text: placeholders(p.welcomeHeading),
+            size: 'large',
+            align: 'left',
+          },
+          { id: 'body', type: 'text', text: placeholders(p.welcomeBody), align: 'left' },
+          {
+            id: 'action',
+            type: 'button',
+            label: p.welcomeButton,
+            url: '{{action_url}}',
+            align: 'left',
+          },
+          { id: 'rule', type: 'divider' },
+          { id: 'footer', type: 'footer', text: placeholders(p.welcomeFooter), align: 'left' },
+        ]),
+        sample_variables: {
+          first_name: p.sampleFirstName,
+          company: p.sampleCompany,
+          action_url: 'https://example.com/start',
+        },
+      };
+    case 'notification':
+      return {
+        subject: '{{title}}',
+        design: emptyDesign([
+          { id: 'heading', type: 'heading', text: '{{title}}', size: 'large', align: 'left' },
+          {
+            id: 'body',
+            type: 'text',
+            text: `${placeholders(p.greeting)}\n\n{{message}}`,
+            align: 'left',
+          },
+          {
+            id: 'action',
+            type: 'button',
+            label: p.notificationButton,
+            url: '{{action_url}}',
+            align: 'left',
+          },
+        ]),
+        sample_variables: {
+          title: p.sampleTitle,
+          first_name: p.sampleFirstName,
+          message: p.sampleMessage,
+          action_url: 'https://example.com/orders/1042',
+        },
+      };
+    case 'newsletter':
+      return {
+        subject: '{{issue_title}}',
+        design: emptyDesign([
+          { id: 'kicker', type: 'footer', text: placeholders(p.newsletterKicker), align: 'left' },
+          { id: 'heading', type: 'heading', text: '{{issue_title}}', size: 'large', align: 'left' },
+          {
+            id: 'body',
+            type: 'text',
+            text: `${placeholders(p.greeting)}\n\n{{intro}}`,
+            align: 'left',
+          },
+          {
+            id: 'action',
+            type: 'button',
+            label: p.newsletterButton,
+            url: '{{action_url}}',
+            align: 'left',
+          },
+          { id: 'rule', type: 'divider' },
+          { id: 'footer', type: 'footer', text: placeholders(p.newsletterFooter), align: 'center' },
+        ]),
         sample_variables: {
           company: p.sampleCompany,
           issue_title: p.sampleIssueTitle,

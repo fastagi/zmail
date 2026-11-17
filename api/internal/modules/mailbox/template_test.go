@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
@@ -120,14 +121,22 @@ func TestTemplatesAreKeptPerOrganization(t *testing.T) {
 func TestTemplateValidation(t *testing.T) {
 	fixture := newServiceFixture(t)
 	for name, change := range map[string]func(*TemplateInput){
-		"no name":          func(i *TemplateInput) { i.Name = "  " },
-		"long name":        func(i *TemplateInput) { i.Name = strings.Repeat("n", 101) },
-		"no subject":       func(i *TemplateInput) { i.Subject = " " },
-		"two-line subject": func(i *TemplateInput) { i.Subject = "a\nb" },
-		"no body":          func(i *TemplateInput) { i.HTML, i.Text = " ", "" },
-		"syntax":           func(i *TemplateInput) { i.HTML = "<p>{{first name}}</p>" },
-		"unclosed":         func(i *TemplateInput) { i.Text = "Hi {{first_name" },
-		"sample name":      func(i *TemplateInput) { i.SampleVariables = map[string]string{"bad-name": "x"} },
+		"no name":           func(i *TemplateInput) { i.Name = "  " },
+		"long name":         func(i *TemplateInput) { i.Name = strings.Repeat("n", 101) },
+		"no subject":        func(i *TemplateInput) { i.Subject = " " },
+		"two-line subject":  func(i *TemplateInput) { i.Subject = "a\nb" },
+		"no body":           func(i *TemplateInput) { i.HTML, i.Text = " ", "" },
+		"syntax":            func(i *TemplateInput) { i.HTML = "<p>{{first name}}</p>" },
+		"unclosed":          func(i *TemplateInput) { i.Text = "Hi {{first_name" },
+		"sample name":       func(i *TemplateInput) { i.SampleVariables = map[string]string{"bad-name": "x"} },
+		"design array":      func(i *TemplateInput) { i.Design = json.RawMessage(`[1]`) },
+		"design version":    func(i *TemplateInput) { i.Design = json.RawMessage(`{"version":0}`) },
+		"design no version": func(i *TemplateInput) { i.Design = json.RawMessage(`{"blocks":[]}`) },
+		"design fraction":   func(i *TemplateInput) { i.Design = json.RawMessage(`{"version":1.5}`) },
+		"design broken":     func(i *TemplateInput) { i.Design = json.RawMessage(`{"version":1,`) },
+		"design too large": func(i *TemplateInput) {
+			i.Design = json.RawMessage(`{"version":1,"pad":"` + strings.Repeat("x", maxTemplateDesignBytes) + `"}`)
+		},
 	} {
 		input := templateInput()
 		change(&input)
@@ -265,4 +274,29 @@ func TestSendRouteNamesMissingTemplateVariables(t *testing.T) {
 
 func itoa(value uint) string {
 	return strconv.FormatUint(uint64(value), 10)
+}
+
+func TestTemplatesKeepTheirVisualDesign(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+
+	input := templateInput()
+	input.Design = json.RawMessage("{ \"version\": 1,\n \"blocks\": [ {\"type\": \"text\"} ] }")
+	template, err := fixture.service.CreateTemplate(ctx, 1, testCreator, input)
+	if err != nil || template.Design != `{"version":1,"blocks":[{"type":"text"}]}` {
+		t.Fatalf("CreateTemplate design = %q, %v; want the compact document", template.Design, err)
+	}
+	response := toMailTemplateResponse(template)
+	if string(response.Design) != template.Design {
+		t.Fatalf("response design = %s", response.Design)
+	}
+
+	input.Design = json.RawMessage("null")
+	updated, err := fixture.service.UpdateTemplate(ctx, 1, template.ID, input)
+	if err != nil || updated.Design != "" {
+		t.Fatalf("UpdateTemplate with a null design = %q, %v; want none", updated.Design, err)
+	}
+	if encoded, _ := json.Marshal(toMailTemplateResponse(updated)); !strings.Contains(string(encoded), `"design":null`) {
+		t.Fatalf("response = %s; want design null", encoded)
+	}
 }

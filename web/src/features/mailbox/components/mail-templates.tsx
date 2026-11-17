@@ -1,7 +1,17 @@
 'use client';
 
 import { useId, useMemo, useState, type FormEvent } from 'react';
-import { AlertCircle, ArrowLeft, FileText, Plus, Save, Send, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowLeft,
+  Code2,
+  FileText,
+  LayoutTemplate,
+  Plus,
+  Save,
+  Send,
+  Trash2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -42,6 +52,7 @@ import {
   nativeSelectClassName,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import { TemplateVisualEditor } from '@/features/mailbox/components/template-visual-editor';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import { useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
 import {
@@ -64,9 +75,17 @@ import {
   resolveMailboxErrorKey,
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
+import {
+  emptyDesign,
+  readDesign,
+  renderDesignHtml,
+  renderDesignText,
+  type TemplateDesign,
+} from '@/features/mailbox/utils/template-design';
 import { renderTemplate, templateVariables } from '@/features/mailbox/utils/template-render';
 import {
   starterContent,
+  starterDesign,
   templateStarters,
   type StarterPhrases,
   type TemplateStarter,
@@ -267,16 +286,30 @@ interface Draft {
   html: string;
   text: string;
   samples: Record<string, string>;
+  /** The visual design the bodies are rendered from; null in the HTML editor. */
+  design: TemplateDesign | null;
 }
 
+/** A new template starts in the visual editor; a stored one opens the way it was written. */
 function draftOf(template: MailTemplate | null): Draft {
+  if (!template)
+    return withDesign(
+      { name: '', subject: '', html: '', text: '', samples: {}, design: null },
+      emptyDesign()
+    );
   return {
-    name: template?.name ?? '',
-    subject: template?.subject ?? '',
-    html: template?.html_body ?? '',
-    text: template?.text_body ?? '',
-    samples: { ...(template?.sample_variables ?? {}) },
+    name: template.name,
+    subject: template.subject,
+    html: template.html_body,
+    text: template.text_body,
+    samples: { ...template.sample_variables },
+    design: readDesign(template.design),
   };
+}
+
+/** The draft with the design and the bodies rendered from it. */
+function withDesign(draft: Draft, design: TemplateDesign): Draft {
+  return { ...draft, design, html: renderDesignHtml(design), text: renderDesignText(design) };
 }
 
 /** The input the API receives: sample values only for variables the template uses. */
@@ -292,6 +325,7 @@ function inputOf(draft: Draft, variables: readonly string[]): MailTemplateInput 
     html: draft.html,
     text: draft.text,
     sample_variables: samples,
+    design: draft.design,
   };
 }
 
@@ -343,7 +377,9 @@ function TemplateEditor({
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
   const [testing, setTesting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [switching, setSwitching] = useState<'visual' | 'html' | null>(null);
   const [tab, setTab] = useState<'html' | 'text'>('html');
+  const visual = draft.design !== null;
   const ids = { name: useId(), subject: useId(), html: useId(), text: useId(), textHint: useId() };
 
   const source = { subject: draft.subject, html: draft.html, text: draft.text };
@@ -364,7 +400,39 @@ function TemplateEditor({
     setDraft(current => ({ ...current, ...change }));
   };
 
+  const updateDesign = (design: TemplateDesign) => {
+    setErrorKey(null);
+    setDraft(current => withDesign(current, design));
+  };
+
+  /** Visual to HTML keeps the rendered HTML; HTML to visual starts a new design. */
+  const switchTo = (mode: 'visual' | 'html') => {
+    setSwitching(null);
+    setErrorKey(null);
+    setDraft(current =>
+      mode === 'html' ? { ...current, design: null } : withDesign(current, emptyDesign())
+    );
+  };
+
+  const requestMode = (mode: 'visual' | 'html') => {
+    if ((mode === 'visual') === visual) return;
+    const empty = draft.html.trim() === '' && draft.text.trim() === '';
+    if (mode === 'visual' && empty) switchTo('visual');
+    else setSwitching(mode);
+  };
+
   const applyStarter = (starter: TemplateStarter) => {
+    if (visual) {
+      const content = starterDesign(starter, phrases);
+      setErrorKey(null);
+      setDraft(current =>
+        withDesign(
+          { ...current, subject: content.subject, samples: { ...content.sample_variables } },
+          content.design
+        )
+      );
+      return;
+    }
     const content = starterContent(starter, phrases);
     update({
       subject: content.subject,
@@ -446,7 +514,7 @@ function TemplateEditor({
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <form onSubmit={submit} className="space-y-4">
+        <form onSubmit={submit} className="min-w-0 space-y-4">
           <div className="space-y-2">
             <Label htmlFor={ids.name}>{t('templates.name')}</Label>
             <Input
@@ -469,32 +537,74 @@ function TemplateEditor({
               onChange={event => update({ subject: event.target.value })}
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor={ids.html}>{t('templates.html')}</Label>
-            <Textarea
-              id={ids.html}
-              value={draft.html}
-              rows={14}
-              spellCheck={false}
-              className="font-mono text-xs"
+          <div
+            role="group"
+            aria-label={t('templates.visual.mode')}
+            className="inline-flex rounded-md border p-0.5"
+          >
+            <Button
+              type="button"
+              size="xs"
+              variant={visual ? 'secondary' : 'ghost'}
+              aria-pressed={visual}
+              icon={<LayoutTemplate className="size-3.5" />}
               disabled={save.isPending}
-              onChange={event => update({ html: event.target.value })}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor={ids.text}>{t('templates.text')}</Label>
-            <Textarea
-              id={ids.text}
-              value={draft.text}
-              rows={5}
-              aria-describedby={ids.textHint}
+              onClick={() => requestMode('visual')}
+            >
+              {t('templates.visual.modeVisual')}
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              variant={visual ? 'ghost' : 'secondary'}
+              aria-pressed={!visual}
+              icon={<Code2 className="size-3.5" />}
               disabled={save.isPending}
-              onChange={event => update({ text: event.target.value })}
-            />
-            <p id={ids.textHint} className="text-xs text-muted-foreground">
-              {t('templates.textHint')}
-            </p>
+              onClick={() => requestMode('html')}
+            >
+              {t('templates.visual.modeHtml')}
+            </Button>
           </div>
+          {draft.design ? (
+            <>
+              <TemplateVisualEditor
+                design={draft.design}
+                variables={variables ?? []}
+                disabled={save.isPending}
+                onChange={updateDesign}
+              />
+              <p className="text-xs text-muted-foreground">{t('templates.visual.textGenerated')}</p>
+            </>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor={ids.html}>{t('templates.html')}</Label>
+                <Textarea
+                  id={ids.html}
+                  value={draft.html}
+                  rows={14}
+                  spellCheck={false}
+                  className="font-mono text-xs"
+                  disabled={save.isPending}
+                  onChange={event => update({ html: event.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor={ids.text}>{t('templates.text')}</Label>
+                <Textarea
+                  id={ids.text}
+                  value={draft.text}
+                  rows={5}
+                  aria-describedby={ids.textHint}
+                  disabled={save.isPending}
+                  onChange={event => update({ text: event.target.value })}
+                />
+                <p id={ids.textHint} className="text-xs text-muted-foreground">
+                  {t('templates.textHint')}
+                </p>
+              </div>
+            </>
+          )}
 
           <section className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
             <h3 className="font-medium">{t('templates.syntaxTitle')}</h3>
@@ -535,7 +645,7 @@ function TemplateEditor({
 
         <section
           aria-label={t('templates.preview')}
-          className="space-y-3 lg:sticky lg:top-4 lg:self-start"
+          className="min-w-0 space-y-3 lg:sticky lg:top-4 lg:self-start"
         >
           <h3 className="text-sm font-medium">{t('templates.preview')}</h3>
           {rendered ? (
@@ -584,6 +694,13 @@ function TemplateEditor({
           templateId={savedId}
           unsaved={dirty}
           onClose={() => setTesting(false)}
+        />
+      ) : null}
+      {switching ? (
+        <SwitchModeDialog
+          mode={switching}
+          onConfirm={() => switchTo(switching)}
+          onClose={() => setSwitching(null)}
         />
       ) : null}
       {deleting && savedId !== null ? (
@@ -806,6 +923,43 @@ function DeleteTemplateDialog({
             onClick={() => void confirm()}
           >
             {t('actions.delete')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SwitchModeDialog({
+  mode,
+  onConfirm,
+  onClose,
+}: {
+  mode: 'visual' | 'html';
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const t = useT('mailbox');
+  const toHtml = mode === 'html';
+  return (
+    <Dialog open onOpenChange={open => !open && onClose()}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle>
+            {t(toHtml ? 'templates.visual.toHtmlTitle' : 'templates.visual.toVisualTitle')}
+          </DialogTitle>
+          <DialogDescription>
+            {t(
+              toHtml ? 'templates.visual.toHtmlDescription' : 'templates.visual.toVisualDescription'
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            {t('actions.cancel')}
+          </Button>
+          <Button type="button" onClick={onConfirm}>
+            {t(toHtml ? 'templates.visual.toHtmlConfirm' : 'templates.visual.toVisualConfirm')}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -636,6 +636,7 @@ function buildTemplate(
     text_body: text,
     sample_variables: samples,
     variables,
+    design: input.design ?? null,
   };
 }
 

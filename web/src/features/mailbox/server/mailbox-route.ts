@@ -35,6 +35,7 @@ import {
   MAIL_ATTACHMENT_TYPE_MAX_LENGTH,
   MAIL_MAX_ATTACHMENTS,
   MAIL_BODY_MAX_BYTES,
+  MAIL_TEMPLATE_DESIGN_MAX_BYTES,
   MAIL_LOG_QUERY_MAX_LENGTH,
   MAIL_MAX_RECIPIENTS,
   MAIL_MESSAGE_ID_MAX_LENGTH,
@@ -1689,7 +1690,7 @@ function variableMap(value: unknown): value is Record<string, string> {
 
 /** Shape checks only; names, placeholders, and bodies are judged by the API or the mock. */
 function templateFields(body: Record<string, unknown>): Parsed<MailTemplateInput> {
-  const { name, subject, html, text, sample_variables: samples, ...rest } = body;
+  const { name, subject, html, text, sample_variables: samples, design, ...rest } = body;
   const errors: Record<string, string[]> = {};
   if (Object.keys(rest).length > 0) errors.body = ['Unknown fields'];
   if (!boundedString(name, MAIL_TEMPLATE_NAME_MAX_LENGTH) || name === '') {
@@ -1707,6 +1708,9 @@ function templateFields(body: Record<string, unknown>): Parsed<MailTemplateInput
   if (samples !== undefined && !variableMap(samples)) {
     errors.sample_variables = ['The sample_variables field is invalid'];
   }
+  if (design !== undefined && design !== null && !templateDesign(design)) {
+    errors.design = ['The design field is invalid'];
+  }
   if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
   return {
     ok: true,
@@ -1716,8 +1720,17 @@ function templateFields(body: Record<string, unknown>): Parsed<MailTemplateInput
       ...(typeof html === 'string' ? { html } : {}),
       ...(typeof text === 'string' ? { text } : {}),
       ...(variableMap(samples) ? { sample_variables: samples } : {}),
+      ...(templateDesign(design) ? { design } : {}),
     },
   };
+}
+
+/** A design document as the contract describes it: an object with a positive integer version. */
+function templateDesign(value: unknown): value is { version: number; [key: string]: unknown } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const { version } = value as { version?: unknown };
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) return false;
+  return new TextEncoder().encode(JSON.stringify(value)).length <= MAIL_TEMPLATE_DESIGN_MAX_BYTES;
 }
 
 async function templateBody(request: Request): Promise<Parsed<MailTemplateInput>> {

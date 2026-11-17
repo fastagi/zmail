@@ -9759,6 +9759,23 @@ components:
           maxLength: 262144
         sample_variables:
           $ref: '#/components/schemas/MailTemplateVariables'
+        design:
+          $ref: '#/components/schemas/MailTemplateDesign'
+    MailTemplateDesign:
+      type:
+        - object
+        - 'null'
+      description: The visual editor's document that `html` and `text` were rendered from, stored
+        as given. The API checks only that it is an object of at most 256 KiB with a positive integer
+        `version`; sending always uses the bodies. Null or absent means the template is written in
+        HTML, and a replace without it clears the stored design.
+      required:
+        - version
+      properties:
+        version:
+          type: integer
+          minimum: 1
+      additionalProperties: true
     MailTemplateSummary:
       type: object
       additionalProperties: false
@@ -9802,6 +9819,7 @@ components:
         - html_body
         - text_body
         - sample_variables
+        - design
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -9829,6 +9847,8 @@ components:
           maxLength: 262144
         sample_variables:
           $ref: '#/components/schemas/MailTemplateVariables'
+        design:
+          $ref: '#/components/schemas/MailTemplateDesign'
     MailTemplateResponse:
       type: object
       additionalProperties: false

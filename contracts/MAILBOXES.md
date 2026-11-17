@@ -307,6 +307,12 @@ are.
 `sample_variables` holds example values for the editor. They are used by previews and test sends
 and never by a real send.
 
+`design` holds the visual editor's document, an object with a positive integer `version`, at most
+256 KiB. The console renders `html` and `text` from it before saving; the API stores it as given,
+never renders it, and always sends the bodies. A response has `design: null` for a template written
+in HTML, and a replace without `design` clears it. Anything else in `design` is
+`422 MAILBOX.TEMPLATE_INVALID`.
+
 | Route | Result |
 |---|---|
 | `GET /v1/mail-templates` | Every template by name, with `variables` and without bodies |
