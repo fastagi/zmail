@@ -23,7 +23,10 @@ broadcast workers, and the Web console. A reverse proxy on the host terminates T
    ```
 
    Every `up` runs the `migrate` job before the API starts.
-4. Add the site from `Caddyfile.example` to the host's Caddy and reload it.
+4. Add the site from `Caddyfile.example` to the host's Caddy, run `caddy validate`, and reload
+   it. Some older Caddy builds (2.6.2 among them) can crash during a reload and take every site
+   on the host down; if `systemctl reload caddy` fails, run `systemctl restart caddy` at once
+   and check the other sites.
 5. Create the first account and its organization. Public sign-up stays closed
    (`AUTH_REGISTRATION_ENABLED=false`):
 
