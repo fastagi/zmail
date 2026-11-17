@@ -6,6 +6,36 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ## Unreleased
 
+## v0.27.0 — 2026-11-17
+
+### Added
+
+- **Self-hosting bundle.** `deploy/self-host/` runs Zmail on one server with Docker Compose:
+  PostgreSQL with TLS and separate owner and runtime roles, a migration job, the API, the webhook
+  and broadcast workers, and the Web console behind the host's reverse proxy. `init-env.sh`
+  generates the secrets, `create-user.sh` creates accounts while sign-up is closed, and `smoke.sh`
+  checks a running instance.
+- **Closed registration.** `AUTH_REGISTRATION_ENABLED=false` makes `POST /v1/register` answer `403`;
+  login and existing accounts are unaffected. A production instance seeds no default account.
+- **Broadcasts.** `/v1/mail-broadcasts` sends one template to a contact list, now or at a scheduled
+  time, through the `mail:broadcast:work` worker. Each recipient is sent once with its own
+  idempotency key, the run pauses at the daily send limit and resumes later, and progress is
+  reported per recipient. Every message carries an unsubscribe link and `List-Unsubscribe`
+  headers; `POST /v1/mail-unsubscribes/{token}` and the public `/unsubscribe/[token]` page record
+  the choice. Bounces and complaints suppress the contact. Requires `MAILBOX_PUBLIC_URL`.
+- **Contacts and lists.** `/v1/mail-contacts` and `/v1/mail-contact-lists` keep one contact per
+  address per organization with a subscription status and custom properties.
+  `POST /v1/mail-contact-imports` imports CSV (up to 10,000 rows) and reports skipped lines.
+- **Templates.** `/v1/mail-templates` stores subject, HTML, and text with `{{name}}` and
+  `{{name|fallback}}` variables. Previews and test sends use sample values, and the send routes
+  accept a `template` with variables; a missing variable answers `422`
+  `MAILBOX.TEMPLATE_VARIABLES_MISSING`.
+- **Attachments.** Sent and received messages keep up to 10 attachments (4 MiB in total), and
+  `GET /v1/mailboxes/{id}/messages/{id}/attachments/{id}` downloads one.
+- **Mail webhooks.** With the `webhook` starter, organizations subscribe to
+  `mail.message.sent`, `failed`, `received`, `delivered`, `delivery_delayed`, `bounced`,
+  `complained`, and `suppressed` events, published through a transactional outbox.
+
 ### Added
 
 - **Delivery events.** A sent message now records what happened to it per recipient: `accepted`,

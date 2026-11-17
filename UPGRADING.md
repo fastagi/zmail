@@ -11,6 +11,26 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## v0.27.0 — Zmail campaigns and self-hosting
+
+### Medium — Four new mailbox migrations
+
+Run migrations: `2026_11_17_110000_create_mail_attachments`,
+`2026_11_17_120000_create_mail_templates`, `2026_11_17_130000_create_mail_contacts`, and
+`2026_11_17_140000_create_mail_broadcasts` add empty tables. Existing mail is unchanged.
+
+### Medium — Broadcasts need a public URL and a worker
+
+Set `MAILBOX_PUBLIC_URL` to the console's public origin (https in production) and run
+`mail:broadcast:work` next to the API, as `api/docs/DEPLOYMENT.md` describes. Without the URL and the
+inbound secret, `broadcasts_enabled` stays `false` and the broadcast routes refuse to send.
+
+### Low — Registration can be closed
+
+`AUTH_REGISTRATION_ENABLED` defaults to open. A deployment that should not accept sign-ups sets it
+to `false` and creates accounts with `deploy/self-host/create-user.sh` or an equivalent operator-only
+process.
+
 ## v0.26.0 — Admin deployment, route boundaries, and observability
 
 ### Medium — Web devtools routes are off in production
