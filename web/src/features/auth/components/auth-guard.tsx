@@ -25,10 +25,10 @@ interface AuthGuardProps {
 
 /**
  * AuthGuard - Client component that protects routes
- * 
+ *
  * Checks if user is authenticated and redirects to login if not.
  * Use this in layouts to protect entire route groups.
- * 
+ *
  * @example
  * ```tsx
  * // app/(protected)/layout.tsx
@@ -37,14 +37,14 @@ interface AuthGuardProps {
  * }
  * ```
  */
-export function AuthGuard({ 
-  children, 
+export function AuthGuard({
+  children,
   redirectTo = authConfig.routes.login,
   showLoading = true,
 }: AuthGuardProps) {
   const router = useRouter();
   const pathname = usePathname();
-  
+
   const status = useAuthStore.use.status();
   const initializeAuth = useAuthStore.use.initializeAuth();
   const t = useT();
@@ -52,7 +52,7 @@ export function AuthGuard({
   useEffect(() => {
     // Wait for system to be ready before checking auth
     if (status === 'idle' || status === 'loading') return;
-    
+
     // If not loading and not authenticated, redirect to login
     if (status === 'unauthenticated') {
       // Encode current path for redirect after login
@@ -65,10 +65,7 @@ export function AuthGuard({
   if (status === 'idle' || status === 'loading') {
     if (showLoading) {
       return (
-        <main
-          aria-busy="true"
-          className="flex min-h-screen items-center justify-center"
-        >
+        <main aria-busy="true" className="flex min-h-screen items-center justify-center">
           <div className="flex flex-col items-center space-y-4">
             <div
               aria-hidden="true"
@@ -87,10 +84,7 @@ export function AuthGuard({
 
     return (
       <main className="flex min-h-screen items-center justify-center px-6">
-        <div
-          role="alert"
-          className="flex max-w-md flex-col items-center text-center"
-        >
+        <div role="alert" className="flex max-w-md flex-col items-center text-center">
           <div className="mb-4 flex size-10 items-center justify-center rounded-full bg-destructive/10 text-error">
             <AlertTriangle aria-hidden="true" className="size-5" />
           </div>
@@ -99,9 +93,7 @@ export function AuthGuard({
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
             {t(
-              unavailable
-                ? 'errors.authUnavailableDescription'
-                : 'errors.authForbiddenDescription'
+              unavailable ? 'errors.authUnavailableDescription' : 'errors.authForbiddenDescription'
             )}
           </p>
           <Button

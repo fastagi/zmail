@@ -33,14 +33,8 @@ export function resolveMockLoginCredentials({
   return { ...mockLoginCredentials };
 }
 
-export function authenticateMockIdentity(
-  email: string,
-  password: string
-): AuthUser | null {
-  if (
-    email !== mockLoginCredentials.email ||
-    password !== mockLoginCredentials.password
-  ) {
+export function authenticateMockIdentity(email: string, password: string): AuthUser | null {
+  if (email !== mockLoginCredentials.email || password !== mockLoginCredentials.password) {
     return null;
   }
 

@@ -17,7 +17,5 @@ export async function resolveAuthBootstrap(): Promise<AuthBootstrap> {
 
   const user = await getSessionUser();
 
-  return user
-    ? { status: 'authenticated', user }
-    : { status: 'unauthenticated' };
+  return user ? { status: 'authenticated', user } : { status: 'unauthenticated' };
 }

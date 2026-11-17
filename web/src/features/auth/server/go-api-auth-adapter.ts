@@ -1,20 +1,12 @@
 import 'server-only';
 
-import type {
-  AuthResponse,
-  AuthUser,
-  LoginRequest,
-  RegisterRequest,
-} from '@/features/auth/types';
+import type { AuthResponse, AuthUser, LoginRequest, RegisterRequest } from '@/features/auth/types';
 import {
   authenticationSessionMaxAgeSeconds,
   isOpaqueAuthenticationCredential,
 } from '@/features/auth/server/auth-credential';
 import { ApiErrorCode, type ApiErrorCodeValue } from '@/http/codes';
-import {
-  GoApiClient,
-  type GoApiError,
-} from '@/server/api-adapter/go-api-client';
+import { GoApiClient, type GoApiError } from '@/server/api-adapter/go-api-client';
 
 export interface GoApiAuthAdapterConfig {
   apiUrl: string;
@@ -37,16 +29,15 @@ export interface AdapterError {
   responseHeaders?: Record<string, string>;
 }
 
-export type AdapterResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: AdapterError };
+export type AdapterResult<T> = { ok: true; data: T } | { ok: false; error: AdapterError };
 
 export interface AdapterSession extends AuthResponse {
   accessToken: string;
   maxAgeSeconds: number;
 }
 
-type AdapterOperation = 'login' | 'logout' | 'register' | 'session';
+type AdapterOperation =
+  'login' | 'logout' | 'register' | 'session' | 'password-reset' | 'password-reset-confirm';
 
 interface GoApiUser {
   id: number;
@@ -65,10 +56,7 @@ export class GoApiAuthAdapter {
   private readonly dependencies: AdapterDependencies;
   private readonly client: GoApiClient;
 
-  constructor(
-    config: GoApiAuthAdapterConfig,
-    dependencies: Partial<AdapterDependencies> = {}
-  ) {
+  constructor(config: GoApiAuthAdapterConfig, dependencies: Partial<AdapterDependencies> = {}) {
     this.dependencies = {
       fetch: dependencies.fetch ?? fetch,
       randomUUID: dependencies.randomUUID ?? (() => crypto.randomUUID()),
@@ -142,11 +130,7 @@ export class GoApiAuthAdapter {
       return adapterUnavailable(registration.data.requestId);
     }
 
-    return this.login(
-      { email: input.email, password: input.password },
-      incomingHeaders,
-      signal
-    );
+    return this.login({ email: input.email, password: input.password }, incomingHeaders, signal);
   }
 
   async profile(
@@ -210,10 +194,39 @@ export class GoApiAuthAdapter {
     return { ok: true, data: { success: true } };
   }
 
-  private sessionFromLoginData(
-    value: unknown,
-    requestId: string
-  ): AdapterResult<AdapterSession> {
+  /** Asks the API to email a reset token. The API answers the same whether the address exists. */
+  async requestPasswordReset(
+    email: string,
+    incomingHeaders: Headers,
+    signal?: AbortSignal
+  ): Promise<AdapterResult<{ success: true }>> {
+    const result = await this.request(
+      'password-reset',
+      'password/reset',
+      { method: 'POST', body: { email } },
+      incomingHeaders,
+      signal
+    );
+    return result.ok ? { ok: true, data: { success: true } } : result;
+  }
+
+  /** Consumes a reset token and sets the new password; every session of the account ends. */
+  async confirmPasswordReset(
+    input: { token: string; password: string },
+    incomingHeaders: Headers,
+    signal?: AbortSignal
+  ): Promise<AdapterResult<{ success: true }>> {
+    const result = await this.request(
+      'password-reset-confirm',
+      'password/reset/confirm',
+      { method: 'POST', body: { token: input.token, new_password: input.password } },
+      incomingHeaders,
+      signal
+    );
+    return result.ok ? { ok: true, data: { success: true } } : result;
+  }
+
+  private sessionFromLoginData(value: unknown, requestId: string): AdapterResult<AdapterSession> {
     if (!isRecord(value)) {
       return adapterUnavailable(requestId);
     }
@@ -281,7 +294,10 @@ export class GoApiAuthAdapter {
 }
 
 export function generatedUsername(randomId: string): string {
-  const suffix = randomId.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 32);
+  const suffix = randomId
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 32);
 
   if (suffix.length < 16) {
     throw new Error('Generated auth username requires at least 16 random characters');
@@ -322,25 +338,28 @@ function isActiveGoApiUser(value: unknown): boolean {
   return isGoApiUser(value) && value.status === 1;
 }
 
-function authFieldMap(
-  operation: AdapterOperation
-): Readonly<Record<string, string>> {
-  return operation === 'register'
-    ? { email: 'email', nickname: 'name', password: 'password' }
-    : operation === 'login'
-      ? { username: 'email', password: 'password' }
-      : {};
+function authFieldMap(operation: AdapterOperation): Readonly<Record<string, string>> {
+  switch (operation) {
+    case 'register':
+      return { email: 'email', nickname: 'name', password: 'password' };
+    case 'login':
+      return { username: 'email', password: 'password' };
+    case 'password-reset':
+      return { email: 'email' };
+    case 'password-reset-confirm':
+      return { token: 'token', new_password: 'password' };
+    default:
+      return {};
+  }
 }
 
-function authenticationError(
-  operation: AdapterOperation,
-  error: GoApiError
-): AdapterError {
-  const message = error.cause === 'timeout'
-    ? 'Authentication service timed out'
-    : error.cause === 'unavailable'
-      ? 'Authentication service unavailable'
-      : genericErrorMessage(operation, error.status);
+function authenticationError(operation: AdapterOperation, error: GoApiError): AdapterError {
+  const message =
+    error.cause === 'timeout'
+      ? 'Authentication service timed out'
+      : error.cause === 'unavailable'
+        ? 'Authentication service unavailable'
+        : genericErrorMessage(operation, error.status);
 
   return {
     status: error.status,

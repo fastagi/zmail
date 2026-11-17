@@ -237,9 +237,13 @@ CORS/lifecycle deployment responsibilities, and privacy rules.
 
 ## Email Provider Configuration
 
-The optional email capability reads `MAIL_FROM`, `RESEND_API_KEY`, and `MAIL_REQUEST_TIMEOUT` from
-the same typed snapshot. Sender and API key are an all-or-none pair; partial configuration fails
-startup instead of silently skipping delivery. When configured, the sender must be a valid mailbox
+The optional email capability reads `MAIL_PROVIDER`, `MAIL_FROM`, `RESEND_API_KEY`,
+`MAIL_CLOUDFLARE_ACCOUNT_ID`, `MAIL_CLOUDFLARE_API_TOKEN`, and `MAIL_REQUEST_TIMEOUT` from the same
+typed snapshot. `MAIL_PROVIDER` is `resend` (the default) or `cloudflare`. With Resend, sender and API
+key are an all-or-none pair; partial configuration fails startup instead of silently skipping
+delivery. With Cloudflare, `MAIL_FROM` is required and must be on a domain enabled for Cloudflare
+Email Sending, such as `Zmail <noreply@mail.example.com>`; the account ID and token default to the
+`MAILBOX_CLOUDFLARE_*` values. When configured, the sender must be a valid mailbox
 and the timeout must be positive. The default provider request timeout is 10 seconds.
 
 The timeout is a duration value such as `3s` or `500ms`, not a bare millisecond count. It bounds each

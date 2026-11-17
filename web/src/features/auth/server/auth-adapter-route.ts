@@ -6,21 +6,14 @@ import type { NextResponse } from 'next/server';
 import { apiErrorResponse } from '@/app/api/_shared/error-response';
 import { apiSuccessResponse } from '@/app/api/_shared/success-response';
 import { serverEnv } from '@/config/server-env';
-import type {
-  AuthBootstrap,
-  LoginRequest,
-  RegisterRequest,
-} from '@/features/auth/types';
+import type { AuthBootstrap, LoginRequest, RegisterRequest } from '@/features/auth/types';
 import {
   clearApiSessionCookie,
   getApiSessionToken,
   setApiSessionCookie,
 } from '@/features/auth/server/api-session';
 import { privateAuthResponse } from '@/features/auth/server/auth-response';
-import {
-  type AdapterError,
-  GoApiAuthAdapter,
-} from '@/features/auth/server/go-api-auth-adapter';
+import { type AdapterError, GoApiAuthAdapter } from '@/features/auth/server/go-api-auth-adapter';
 import { clearSessionCookie } from '@/features/auth/server/session';
 import { ApiErrorCode } from '@/http/codes';
 
@@ -53,56 +46,66 @@ function adapterErrorResponse(error: AdapterError): NextResponse {
   );
 }
 
-export async function loginWithGoApi(
-  request: Request,
-  input: LoginRequest
-): Promise<NextResponse> {
-  const result = await configuredAdapter().login(
-    input,
-    request.headers,
-    request.signal
-  );
+export async function loginWithGoApi(request: Request, input: LoginRequest): Promise<NextResponse> {
+  const result = await configuredAdapter().login(input, request.headers, request.signal);
 
   if (!result.ok) {
     return adapterErrorResponse(result.error);
   }
 
   await clearSessionCookie();
-  await setApiSessionCookie(
-    result.data.accessToken,
-    result.data.maxAgeSeconds
-  );
+  await setApiSessionCookie(result.data.accessToken, result.data.maxAgeSeconds);
 
   return privateAuthResponse(apiSuccessResponse({ user: result.data.user }));
+}
+
+export async function requestPasswordResetWithGoApi(
+  request: Request,
+  email: string
+): Promise<NextResponse> {
+  const result = await configuredAdapter().requestPasswordReset(
+    email,
+    request.headers,
+    request.signal
+  );
+  if (!result.ok) {
+    return adapterErrorResponse(result.error);
+  }
+  return privateAuthResponse(apiSuccessResponse({ success: true }));
+}
+
+export async function confirmPasswordResetWithGoApi(
+  request: Request,
+  input: { token: string; password: string }
+): Promise<NextResponse> {
+  const result = await configuredAdapter().confirmPasswordReset(
+    input,
+    request.headers,
+    request.signal
+  );
+  if (!result.ok) {
+    return adapterErrorResponse(result.error);
+  }
+  return privateAuthResponse(apiSuccessResponse({ success: true }));
 }
 
 export async function registerWithGoApi(
   request: Request,
   input: RegisterRequest
 ): Promise<NextResponse> {
-  const result = await configuredAdapter().register(
-    input,
-    request.headers,
-    request.signal
-  );
+  const result = await configuredAdapter().register(input, request.headers, request.signal);
 
   if (!result.ok) {
     return adapterErrorResponse(result.error);
   }
 
   await clearSessionCookie();
-  await setApiSessionCookie(
-    result.data.accessToken,
-    result.data.maxAgeSeconds
-  );
+  await setApiSessionCookie(result.data.accessToken, result.data.maxAgeSeconds);
 
   return privateAuthResponse(apiSuccessResponse({ user: result.data.user }));
 }
 
-export async function currentGoApiSession(
-  incomingHeaders: Headers,
-  signal?: AbortSignal
-) {
+export async function currentGoApiSession(incomingHeaders: Headers, signal?: AbortSignal) {
   const accessToken = await getApiSessionToken();
   if (!accessToken) {
     return {
@@ -118,9 +121,7 @@ export async function currentGoApiSession(
   return configuredAdapter().profile(accessToken, incomingHeaders, signal);
 }
 
-export async function getCurrentGoApiSession(
-  request: Request
-): Promise<NextResponse> {
+export async function getCurrentGoApiSession(request: Request): Promise<NextResponse> {
   const result = await currentGoApiSession(request.headers, request.signal);
 
   if (!result.ok) {
@@ -139,22 +140,14 @@ export async function logoutFromGoApi(request: Request): Promise<NextResponse> {
 
   try {
     if (accessToken) {
-      result = await configuredAdapter().logout(
-        accessToken,
-        request.headers,
-        request.signal
-      );
+      result = await configuredAdapter().logout(accessToken, request.headers, request.signal);
     }
   } finally {
     await clearApiSessionCookie();
     await clearSessionCookie();
   }
 
-  if (
-    result &&
-    !result.ok &&
-    result.error.status !== 401
-  ) {
+  if (result && !result.ok && result.error.status !== 401) {
     return adapterErrorResponse(result.error);
   }
 
@@ -175,10 +168,7 @@ export async function resolveGoApiAuthBootstrap(): Promise<AuthBootstrap> {
   ) {
     return { status: 'forbidden' };
   }
-  if (
-    result.error.errorCode === ApiErrorCode.AUTH_UNAUTHORIZED ||
-    result.error.status === 401
-  ) {
+  if (result.error.errorCode === ApiErrorCode.AUTH_UNAUTHORIZED || result.error.status === 401) {
     return { status: 'unauthenticated' };
   }
 

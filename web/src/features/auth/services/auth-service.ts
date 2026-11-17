@@ -51,6 +51,24 @@ export const authService = {
       isLogoutResponse,
       'logout'
     ),
+
+  /** Emails a reset token when the address has an account; the answer is the same either way. */
+  requestPasswordReset: (email: string) =>
+    validateResponse<LogoutResponse>(
+      request.post<unknown, { email: string }>('/auth/password-reset', { email }),
+      isLogoutResponse,
+      'password-reset'
+    ),
+
+  confirmPasswordReset: (token: string, password: string) =>
+    validateResponse<LogoutResponse>(
+      request.post<unknown, { token: string; password: string }>('/auth/password-reset/confirm', {
+        token,
+        password,
+      }),
+      isLogoutResponse,
+      'password-reset-confirm'
+    ),
 };
 
 export type AuthService = typeof authService;

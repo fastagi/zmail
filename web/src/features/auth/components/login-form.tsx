@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { authConfig } from '@/config/auth';
 import { useLogin } from '@/features/auth/hooks/use-auth';
 import { hasAuthFieldError, resolveAuthErrorKey } from '@/features/auth/utils/auth-error';
 import { useT } from '@/i18n';
@@ -85,10 +86,15 @@ export function LoginForm({ demoCredentials }: LoginFormProps) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="password">{t.auth('password')}</Label>
-              {demoCredentials && (
-                <span className="text-sm text-text-muted">
-                  {t.auth('demoCredentialsHint')}
-                </span>
+              {demoCredentials ? (
+                <span className="text-sm text-text-muted">{t.auth('demoCredentialsHint')}</span>
+              ) : (
+                <Link
+                  href={authConfig.routes.forgotPassword}
+                  className="text-sm font-medium text-primary hover:underline"
+                >
+                  {t.auth('forgotPassword')}
+                </Link>
               )}
             </div>
             <Input

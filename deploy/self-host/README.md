@@ -60,6 +60,29 @@ Then run `docker compose up -d --wait` again. Any owner or admin on the instance
 domain the token can reach, so scope the token to the zones organizations may use. See the Domains
 section of [`contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md).
 
+## Backups
+
+`backup.sh` writes a `pg_dump` archive of the database, checked with `pg_restore --list`, and a
+tarball of `.env` and `postgres-tls/` to `/opt/zmail/backups` (root only), and deletes files older
+than 14 days. Schedule it once a day:
+
+```sh
+(crontab -l 2>/dev/null; echo "30 19 * * * $PWD/backup.sh >> /var/log/zmail-backup.log 2>&1") | crontab -
+```
+
+`ZMAIL_BACKUP_DIR` and `ZMAIL_BACKUP_KEEP_DAYS` change the place and the retention. Copy the files
+off the server too: a backup on the same disk does not survive the disk.
+
+To restore, unpack the secrets archive into this directory, start only `postgres`, and load the
+dump:
+
+```sh
+tar -xzf /opt/zmail/backups/zmail-secrets-<time>.tar.gz
+docker compose up -d --wait postgres
+docker compose exec -T postgres pg_restore -U zmail -d zmail --clean --if-exists < /opt/zmail/backups/zmail-<time>.dump
+docker compose up -d --wait
+```
+
 ## Secrets
 
 `.env` and `postgres-tls/` cannot be regenerated: back them up together with the database. A new

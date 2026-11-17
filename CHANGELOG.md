@@ -8,6 +8,13 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **System mail through Cloudflare, and password reset in the console.** `MAIL_PROVIDER=cloudflare`
+  sends password resets, invitations, and notifications through Cloudflare Email Sending, reusing
+  the mailbox credentials. The console gains a forgot-password page (`/forgot-password`) backed by
+  `POST /api/auth/password-reset` and `/api/auth/password-reset/confirm`.
+- **Self-hosted backups.** `deploy/self-host/backup.sh` writes a checked database dump and the
+  secrets archive daily, keeping 14 days.
+
 - **Organization domains.** With `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, owners and admins connect
   their own domains through `/v1/mail-domains`. Zmail enables Email Routing and Email Sending in
   Cloudflare, adds the missing sending and DMARC records without touching existing ones, and

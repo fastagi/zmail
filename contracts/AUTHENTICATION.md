@@ -18,6 +18,8 @@ The Web feature service and development mock BFF use a browser-oriented, same-or
 | Register | `POST /api/auth/register` | `{ name, email, password }` | `{ user: { id, email, name } }` |
 | Current session | `GET /api/auth/me` | none | `{ user: { id, email, name } }` |
 | Logout | `POST /api/auth/logout` | none | `{ success: true }` |
+| Request a password reset | `POST /api/auth/password-reset` | `{ email }` | `{ success: true }`, whether or not the address has an account |
+| Reset the password | `POST /api/auth/password-reset/confirm` | `{ token, password }` (6 to 50 characters) | `{ success: true }`; an unknown or used token is `401 AUTH.PASSWORD_RESET_TOKEN_INVALID`, an expired one `401 AUTH.PASSWORD_RESET_TOKEN_EXPIRED` |
 
 The browser user view deliberately has no `role` or permission field. The optional permission
 starter is organization-scoped and resolves current grants through its own context endpoint;

@@ -11,9 +11,5 @@ export function isAuthUser(value: unknown): value is AuthUser {
 
   const user = value as Record<string, unknown>;
 
-  return (
-    isNonEmptyString(user.id) &&
-    isNonEmptyString(user.email) &&
-    isNonEmptyString(user.name)
-  );
+  return isNonEmptyString(user.id) && isNonEmptyString(user.email) && isNonEmptyString(user.name);
 }

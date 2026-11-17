@@ -1,14 +1,8 @@
 import type { AllTranslationKeys } from '@/i18n';
 import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
-import {
-  getAuthErrorCode,
-  getAuthErrorStatus,
-} from '@/features/auth/utils/auth-failure';
+import { getAuthErrorCode, getAuthErrorStatus } from '@/features/auth/utils/auth-failure';
 
-export {
-  hasAuthFieldError,
-  isUnauthenticatedAuthError,
-} from '@/features/auth/utils/auth-failure';
+export { hasAuthFieldError, isUnauthenticatedAuthError } from '@/features/auth/utils/auth-failure';
 
 export type AuthAction = 'login' | 'register' | 'logout';
 

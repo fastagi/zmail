@@ -451,6 +451,29 @@ func TestValidate_EmailConfigurationIsCompleteAndBounded(t *testing.T) {
 			},
 			wantErr: "MAIL_REQUEST_TIMEOUT",
 		},
+		{
+			name: "cloudflare configured",
+			config: EmailConfig{
+				Provider: EmailProviderCloudflare, From: "Zmail <noreply@mail.example.com>",
+				CloudflareAccountID: "acct", CloudflareAPIToken: "token", RequestTimeout: 10 * time.Second,
+			},
+		},
+		{
+			name:   "cloudflare without a sender is off",
+			config: EmailConfig{Provider: EmailProviderCloudflare, RequestTimeout: 10 * time.Second},
+		},
+		{
+			name: "cloudflare sender without credentials",
+			config: EmailConfig{
+				Provider: EmailProviderCloudflare, From: "noreply@mail.example.com", RequestTimeout: 10 * time.Second,
+			},
+			wantErr: "Cloudflare credentials",
+		},
+		{
+			name:    "unknown provider",
+			config:  EmailConfig{Provider: "smtp", RequestTimeout: 10 * time.Second},
+			wantErr: "MAIL_PROVIDER",
+		},
 	}
 
 	for _, tt := range tests {
