@@ -3854,11 +3854,13 @@ paths:
         - $ref: '#/components/parameters/MailBroadcastID'
       responses:
         '200':
-          description: The canceled broadcast. Recipients not yet sent are `canceled`.
+          description: The canceled broadcast. Recipients not yet sent are `canceled`. A caller who may not view the sender mailbox gets only `id` and `status`.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MailBroadcastResponse'
+                anyOf:
+                  - $ref: '#/components/schemas/MailBroadcastResponse'
+                  - $ref: '#/components/schemas/MailBroadcastStatusResponse'
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
@@ -3889,11 +3891,13 @@ paths:
         - $ref: '#/components/parameters/MailBroadcastID'
       responses:
         '200':
-          description: The broadcast after the change.
+          description: The broadcast after the change. A caller who may not view the sender mailbox gets only `id` and `status`.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MailBroadcastResponse'
+                anyOf:
+                  - $ref: '#/components/schemas/MailBroadcastResponse'
+                  - $ref: '#/components/schemas/MailBroadcastStatusResponse'
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
@@ -4654,7 +4658,8 @@ paths:
         - $ref: '#/components/parameters/OrganizationContext'
       responses:
         '200':
-          description: Every mailbox of the organization, oldest first.
+          description: The mailboxes the caller has any access to, oldest first. Owners and admins see every
+            mailbox's metadata.
           content:
             application/json:
               schema:
@@ -4708,8 +4713,9 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '422':
           description: A field failed validation, the local part is invalid (`MAILBOX.ADDRESS_INVALID`) or
-            reserved (`MAILBOX.ADDRESS_RESERVED`), or the named domain is still pending
-            (`MAILBOX.DOMAIN_NOT_VERIFIED`). A domain the organization did not connect is `404
+            reserved (`MAILBOX.ADDRESS_RESERVED`), the named domain is still pending
+            (`MAILBOX.DOMAIN_NOT_VERIFIED`), or the type, owner, or members are invalid
+            (`MAILBOX.ACCESS_INVALID`). A domain the organization did not connect is `404
             MAILBOX.DOMAIN_NOT_FOUND`.
           content:
             application/json:
@@ -4740,6 +4746,157 @@ paths:
       responses:
         '204':
           description: The mailbox and its messages are deleted.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/members:
+    get:
+      operationId: listMailboxMembers
+      summary: List the members of a shared mailbox
+      description: Needs `manage_members` on the mailbox.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      responses:
+        '200':
+          description: The members, ordered by user id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxMemberListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The mailbox is personal and has no members (`MAILBOX.ACCESS_CONFLICT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/members/{user_id}:
+    put:
+      operationId: setMailboxMember
+      summary: Add a member to a shared mailbox or change their permission
+      description: Needs `manage_members` on the mailbox. Owners and admins may add themselves; the change is
+        recorded in the access history.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailboxMemberUserID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMailboxMemberRequest'
+      responses:
+        '200':
+          description: The member after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxMemberResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The mailbox is personal and has no members (`MAILBOX.ACCESS_CONFLICT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the user is not a member of the organization, the
+            permission is unknown, or the mailbox already has 100 members (`MAILBOX.ACCESS_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: removeMailboxMember
+      summary: Remove a member from a shared mailbox
+      description: Needs `manage_members` on the mailbox. An absent member is `404 MAILBOX.NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailboxMemberUserID'
+      responses:
+        '204':
+          description: The member is removed.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The mailbox is personal and has no members (`MAILBOX.ACCESS_CONFLICT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/access-events:
+    get:
+      operationId: listMailboxAccessEvents
+      summary: List a mailbox's access history, newest first
+      description: Needs `see_history` on the mailbox.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated access events.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxAccessEventPageResponse'
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
@@ -5568,6 +5725,13 @@ components:
       description: Positive mailbox identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailboxMemberUserID:
+      name: user_id
+      in: path
+      required: true
+      description: Positive user identifier of the mailbox member.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     MailBroadcastID:
       name: broadcast_id
       in: path
@@ -6001,6 +6165,8 @@ components:
         - MAILBOX.ADDRESS_INVALID
         - MAILBOX.ADDRESS_RESERVED
         - MAILBOX.LIMIT_REACHED
+        - MAILBOX.ACCESS_INVALID
+        - MAILBOX.ACCESS_CONFLICT
         - MAILBOX.MESSAGE_NOT_FOUND
         - MAILBOX.MESSAGE_INVALID
         - MAILBOX.SEND_LIMIT_REACHED
@@ -8729,6 +8895,12 @@ components:
         - id
         - address
         - display_name
+        - type
+        - owner_user_id
+        - awaiting_handover
+        - sealed_before
+        - webhooks_enabled
+        - access
         - unread_count
         - created_at
       properties:
@@ -8741,9 +8913,29 @@ components:
         display_name:
           type: string
           maxLength: 120
+        type:
+          $ref: '#/components/schemas/MailboxType'
+        owner_user_id:
+          description: The owner of a personal mailbox; null for a shared one or a personal one whose owner left.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        awaiting_handover:
+          type: boolean
+          description: True when a personal mailbox's owner left the organization.
+        sealed_before:
+          description: Mail received before this instant is sealed; null when nothing is sealed.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        webhooks_enabled:
+          type: boolean
+        access:
+          $ref: '#/components/schemas/MailboxAccess'
         unread_count:
           type: integer
-          description: Number of unread inbound messages in the mailbox.
+          description: Number of unread inbound messages in the mailbox; 0 for a caller without `view`.
           minimum: 0
         created_at:
           type: string
@@ -8767,6 +8959,183 @@ components:
           type: string
           description: A verified domain of the organization. Empty or absent means the shared domain.
           maxLength: 253
+        type:
+          $ref: '#/components/schemas/MailboxType'
+        owner_user_id:
+          description: Required for a personal mailbox; must be absent for a shared one.
+          allOf:
+            - $ref: '#/components/schemas/PositiveID'
+        members:
+          type: array
+          description: Required for a shared mailbox, 1 to 100 distinct users; must be absent for a personal one.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailboxMemberRequest'
+    MailboxType:
+      type: string
+      enum:
+        - personal
+        - shared
+    MailboxPermission:
+      type: string
+      description: Each level includes the previous one.
+      enum:
+        - view
+        - send
+        - manage
+    MailboxAccess:
+      type: object
+      additionalProperties: false
+      description: What the caller may do with the mailbox.
+      required:
+        - view
+        - send
+        - manage_members
+        - administer
+        - see_history
+      properties:
+        view:
+          type: boolean
+        send:
+          type: boolean
+        manage_members:
+          type: boolean
+        administer:
+          type: boolean
+        see_history:
+          type: boolean
+    MailboxMemberRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - user_id
+        - permission
+      properties:
+        user_id:
+          $ref: '#/components/schemas/PositiveID'
+        permission:
+          $ref: '#/components/schemas/MailboxPermission'
+    SetMailboxMemberRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - permission
+      properties:
+        permission:
+          $ref: '#/components/schemas/MailboxPermission'
+    MailboxMember:
+      type: object
+      additionalProperties: false
+      required:
+        - user_id
+        - permission
+        - granted_by
+        - created_at
+      properties:
+        user_id:
+          $ref: '#/components/schemas/PositiveID'
+        permission:
+          $ref: '#/components/schemas/MailboxPermission'
+        granted_by:
+          $ref: '#/components/schemas/PositiveID'
+        created_at:
+          type: string
+          format: date-time
+    MailboxMemberResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailboxMember'
+    MailboxMemberListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailboxMember'
+    MailboxAccessEventType:
+      type: string
+      enum:
+        - created
+        - member_set
+        - member_removed
+        - owner_left
+        - owner_returned
+        - handed_over
+        - sealed_deleted
+        - webhooks_changed
+    MailboxAccessEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - actor_user_id
+        - subject_user_id
+        - detail
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        type:
+          $ref: '#/components/schemas/MailboxAccessEventType'
+        actor_user_id:
+          description: Null for a change Zmail made itself.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        subject_user_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        detail:
+          type: object
+          description: Ids, permissions, and counts only; never message content.
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+    MailboxAccessEventPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailboxAccessEvent'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
     MailboxResponse:
       type: object
       additionalProperties: false
@@ -9244,6 +9613,30 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MailBroadcast'
+    MailBroadcastStatusResponse:
+      type: object
+      additionalProperties: false
+      description: What a caller who may not view the sender mailbox learns after stopping a broadcast.
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - status
+          properties:
+            id:
+              $ref: '#/components/schemas/PositiveID'
+            status:
+              $ref: '#/components/schemas/MailBroadcastStatus'
     MailBroadcastPageResponse:
       type: object
       additionalProperties: false
