@@ -59,6 +59,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_18_100000_add_mail_broadcast_variables",
 			"2026_11_19_090000_add_mailbox_access",
 			"2026_11_19_100000_add_per_person_reads",
+			"2026_11_20_090000_add_send_queue",
 		),
 	)
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/fastagi/zmail/api/database/migrations"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
@@ -221,5 +222,16 @@ func TestConfiguredManifestsRequireOrganizationForMailbox(t *testing.T) {
 		"2026_11_17_090000_move_mailboxes_to_organizations",
 	} {
 		assert.Contains(t, migrations, name)
+	}
+}
+
+// A migration that no starter or core list owns is never applied by `migrate`, so every
+// registered migration must be selected when every optional starter is enabled.
+func TestEveryRegisteredMigrationHasAnOwner(t *testing.T) {
+	cfg := &config.Config{Starters: config.StarterConfig{Optional: config.StarterNames()[3:]}}
+	selected, err := ConfiguredMigrations(cfg)
+	require.NoError(t, err)
+	for _, name := range migrations.Names() {
+		assert.Contains(t, selected, name, "migration %s is registered but no starter owns it", name)
 	}
 }
