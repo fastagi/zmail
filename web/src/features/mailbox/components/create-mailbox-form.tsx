@@ -29,7 +29,7 @@ import type {
   MailboxPermission,
   MailboxType,
 } from '@/features/mailbox/types';
-import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
+import { isPermissionDenied, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -139,7 +139,10 @@ export function CreateMailboxForm({
       toast.success(t('messages.mailboxCreated'));
       onCreated(mailbox);
     } catch (failure) {
-      setError(t(resolveMailboxErrorKey(failure)));
+      // Creating is an organization role, not a mailbox permission, so a refusal says so.
+      setError(
+        t(isPermissionDenied(failure) ? 'errors.createDenied' : resolveMailboxErrorKey(failure))
+      );
     }
   };
 

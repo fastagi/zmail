@@ -26,13 +26,13 @@ import { useT } from '@/i18n';
  */
 export function MessageActions({
   message,
-  canSend = true,
+  canSend,
   onReply,
   onClose,
 }: {
   message: MailMessage;
   /** The mailbox's `access.send`; without it there is no reply or delete. */
-  canSend?: boolean;
+  canSend: boolean;
   onReply: (message: MailMessage) => void;
   onClose: () => void;
 }) {

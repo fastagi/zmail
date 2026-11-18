@@ -770,7 +770,9 @@ const messages = {
     messageNotFound: 'This message does not exist or was deleted.',
     organizationNotFound:
       'This organization does not exist or you are no longer a member of it. Choose another organization.',
-    permissionDenied: 'Only owners and admins of the organization can create or delete mailboxes.',
+    permissionDenied:
+      "You don't have permission for this mailbox. Refresh to see your current access.",
+    createDenied: 'Only owners and admins of the organization can create mailboxes.',
     sendLimitReached:
       'This organization has reached the 24-hour sending limit. Nothing was sent. Try again later.',
     senderNotConfigured:

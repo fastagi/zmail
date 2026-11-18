@@ -47,6 +47,7 @@ import type {
 } from '@/features/mailbox/types';
 import {
   isAccessConflict,
+  isPermissionDenied,
   resolveMailboxErrorKey,
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
@@ -58,14 +59,18 @@ export function hasAccessPanel(mailbox: Mailbox): boolean {
   return access.manage_members || access.see_history || access.administer;
 }
 
-type PanelError = { key: MailboxErrorKey; conflict: boolean } | null;
+/**
+ * A failed change. `stale` marks a concurrent change (`MAILBOX.ACCESS_CONFLICT`) or access lost
+ * meanwhile (`PERMISSION.DENIED`): the panel offers a refresh for both.
+ */
+type PanelError = { key: MailboxErrorKey; stale: boolean } | null;
 
 /**
  * Access of one mailbox: its type and owner or members, the members with their permissions
  * (`manage_members`), the webhook switch (shared, `manage_members`), handover of a personal
  * mailbox and deletion of sealed history (`administer`), and the access history (`see_history`).
  * Controls follow `mailbox.access`; the API remains the authority. A concurrent change answers
- * `MAILBOX.ACCESS_CONFLICT`, which asks for a refresh.
+ * `MAILBOX.ACCESS_CONFLICT` and lost access answers `PERMISSION.DENIED`; both ask for a refresh.
  */
 export function MailboxAccessPanel({
   mailbox,
@@ -102,7 +107,8 @@ function PanelBody({ mailbox, onRefresh }: { mailbox: Mailbox; onRefresh: () => 
   const shared = mailbox.type === 'shared';
   const people = useOrganizationPeople(organizationId, true);
   const nameOf = useUserNames(people.items);
-  const members = useMailboxMembers(organizationId, mailbox.id, shared && access.manage_members);
+  const showMembers = shared && access.manage_members;
+  const members = useMailboxMembers(organizationId, mailbox.id, showMembers);
   const [historyPage, setHistoryPage] = useState(1);
   const events = useMailboxAccessEvents(
     organizationId,
@@ -112,24 +118,29 @@ function PanelBody({ mailbox, onRefresh }: { mailbox: Mailbox; onRefresh: () => 
   );
   const [error, setError] = useState<PanelError>(null);
 
-  /** Runs one change; a failure is shown at the top of the panel. */
-  const run = async (change: () => Promise<unknown>, success?: string) => {
+  /** Runs one change; a failure is shown at the top of the panel and returned to the caller. */
+  const run: Run = async (change, success) => {
     setError(null);
     try {
       await change();
       if (success) toast.success(success);
-      return true;
+      return { ok: true };
     } catch (failure) {
-      setError({ key: resolveMailboxErrorKey(failure), conflict: isAccessConflict(failure) });
-      return false;
+      const failed = {
+        key: resolveMailboxErrorKey(failure),
+        stale: isAccessConflict(failure) || isPermissionDenied(failure),
+      };
+      setError(failed);
+      return { ok: false, ...failed };
     }
   };
 
+  // `refetch` ignores `enabled`, so only the sections this mailbox shows are refetched.
   const refresh = () => {
     setError(null);
     onRefresh();
-    void members.refetch();
-    void events.refetch();
+    if (showMembers) void members.refetch();
+    if (access.see_history) void events.refetch();
   };
 
   return (
@@ -138,8 +149,8 @@ function PanelBody({ mailbox, onRefresh }: { mailbox: Mailbox; onRefresh: () => 
         <Alert variant="destructive" role="alert">
           <AlertCircle className="size-4" aria-hidden="true" />
           <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-            <span>{t(error.conflict ? 'access.conflict' : error.key)}</span>
-            {error.conflict ? (
+            <span>{t(error.key === 'errors.accessConflict' ? 'access.conflict' : error.key)}</span>
+            {error.stale ? (
               <Button
                 type="button"
                 size="xs"
@@ -208,7 +219,8 @@ function PanelBody({ mailbox, onRefresh }: { mailbox: Mailbox; onRefresh: () => 
   );
 }
 
-type Run = (change: () => Promise<unknown>, success?: string) => Promise<boolean>;
+type RunResult = { ok: true } | { ok: false; key: MailboxErrorKey; stale: boolean };
+type Run = (change: () => Promise<unknown>, success?: string) => Promise<RunResult>;
 
 function MembersSection({
   mailbox,
@@ -242,7 +254,7 @@ function MembersSection({
       () => setMember.mutateAsync({ userId: Number(candidate), permission }),
       t('messages.memberSaved')
     );
-    if (added) setCandidate('');
+    if (added.ok) setCandidate('');
   };
 
   return (
@@ -435,7 +447,7 @@ function HandoverSection({
                   () => handOver.mutateAsync(Number(successor)),
                   t('messages.handedOver')
                 );
-                if (done) setConfirming(false);
+                if (done.ok) setConfirming(false);
               }}
             >
               {t('access.handover.confirm')}
@@ -463,25 +475,36 @@ function SealedSection({ mailbox, run }: { mailbox: Mailbox; run: Run }) {
   const inputId = useId();
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
+  const [failure, setFailure] = useState<MailboxErrorKey | null>(null);
   const matches = typed.trim().toLowerCase() === mailbox.address.toLowerCase();
   const sealedBefore = mailbox.sealed_before ?? '';
 
   const confirm = async () => {
     const address = typed.trim();
     let counts = { deleted_messages: 0, deleted_broadcasts: 0 };
-    const done = await run(async () => {
+    setFailure(null);
+    const result = await run(async () => {
       counts = await remove.mutateAsync(address);
     });
-    if (done) {
+    if (result.ok) {
       toast.success(
         t('messages.sealedDeleted', {
           messages: counts.deleted_messages,
           broadcasts: counts.deleted_broadcasts,
         })
       );
+    } else if (!result.stale) {
+      // A wrong address or a passing outage: the dialog stays open to correct or retry.
+      setFailure(result.key);
+      return;
     }
+    close();
+  };
+
+  const close = () => {
     setOpen(false);
     setTyped('');
+    setFailure(null);
   };
 
   return (
@@ -503,8 +526,7 @@ function SealedSection({ mailbox, run }: { mailbox: Mailbox; run: Run }) {
         open={open}
         onOpenChange={next => {
           if (next || remove.isPending) return;
-          setOpen(false);
-          setTyped('');
+          close();
         }}
       >
         <DialogContent size="sm" role="alertdialog">
@@ -526,17 +548,14 @@ function SealedSection({ mailbox, run }: { mailbox: Mailbox; run: Run }) {
               disabled={remove.isPending}
               onChange={event => setTyped(event.target.value)}
             />
+            {failure ? (
+              <p role="alert" className="text-sm text-error">
+                {t(failure)}
+              </p>
+            ) : null}
           </div>
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={remove.isPending}
-              onClick={() => {
-                setOpen(false);
-                setTyped('');
-              }}
-            >
+            <Button type="button" variant="outline" disabled={remove.isPending} onClick={close}>
               {t('actions.cancel')}
             </Button>
             <Button

@@ -455,6 +455,87 @@ describe('mailbox access in the console', () => {
     expect(toast.success).toHaveBeenCalledWith('Deleted 3 sealed messages and 1 broadcasts.');
   });
 
+  it('keeps the sealed-history confirmation open when the deletion fails', async () => {
+    state.deleteSealed.mutateAsync.mockRejectedValueOnce(
+      new ApiError('backend text', ApiErrorCode.MAILBOX_ACCESS_INVALID, 422)
+    );
+    state.mailboxes.data = [
+      mailbox(1, 'hello', { sealed_before: '2026-11-18T09:00:00Z', access: fullAccess }),
+    ];
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Access to hello@mail.example.com' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete sealed history' })
+    );
+    const confirm = screen.getByRole('alertdialog');
+    fireEvent.change(within(confirm).getByLabelText('Mailbox address'), {
+      target: { value: 'hello@mail.example.com' },
+    });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Delete for good' }));
+
+    expect(await within(confirm).findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('alertdialog')).toBe(confirm);
+    expect(within(confirm).getByLabelText('Mailbox address')).toHaveValue('hello@mail.example.com');
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('closes the sealed-history confirmation and asks for a refresh when access was lost', async () => {
+    state.deleteSealed.mutateAsync.mockRejectedValueOnce(
+      new ApiError('backend text', ApiErrorCode.PERMISSION_DENIED, 403)
+    );
+    state.mailboxes.data = [
+      mailbox(1, 'hello', { sealed_before: '2026-11-18T09:00:00Z', access: fullAccess }),
+    ];
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Access to hello@mail.example.com' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete sealed history' })
+    );
+    const confirm = screen.getByRole('alertdialog');
+    fireEvent.change(within(confirm).getByLabelText('Mailbox address'), {
+      target: { value: 'hello@mail.example.com' },
+    });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Delete for good' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    const panel = screen.getByRole('dialog');
+    expect(within(panel).getByRole('alert')).toHaveTextContent(
+      "You don't have permission for this mailbox. Refresh to see your current access."
+    );
+    expect(within(panel).getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+  });
+
+  it('offers a refresh on a refused change and refetches only the sections it shows', async () => {
+    state.handOver.mutateAsync.mockRejectedValue(
+      new ApiError('backend text', ApiErrorCode.PERMISSION_DENIED, 403)
+    );
+    state.mailboxes.data = [
+      mailbox(1, 'hello', {
+        type: 'personal',
+        owner_user_id: 5,
+        awaiting_handover: true,
+        access: { ...fullAccess, see_history: false },
+      }),
+    ];
+    state.members.refetch.mockReset();
+    state.events.refetch.mockReset();
+    state.mailboxes.refetch.mockReset();
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Access to hello@mail.example.com' }));
+    const panel = screen.getByRole('dialog');
+    fireEvent.change(within(panel).getByLabelText('Successor'), { target: { value: '9' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Hand over' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Confirm handover' }));
+
+    expect(await within(panel).findByRole('alert')).toHaveTextContent(
+      "You don't have permission for this mailbox. Refresh to see your current access."
+    );
+    fireEvent.click(within(panel).getByRole('button', { name: 'Refresh' }));
+    expect(state.mailboxes.refetch).toHaveBeenCalled();
+    expect(state.members.refetch).not.toHaveBeenCalled();
+    expect(state.events.refetch).not.toHaveBeenCalled();
+  });
+
   it('asks for a refresh when the access changed in the meantime', async () => {
     state.setMember.mutateAsync.mockRejectedValue(
       new ApiError('backend text', ApiErrorCode.MAILBOX_ACCESS_CONFLICT, 409)

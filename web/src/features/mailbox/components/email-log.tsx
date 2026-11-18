@@ -189,8 +189,10 @@ function EmailLogContent({
     const mailbox = senders.find(item => item.id === view.mailboxId) ?? senders[0];
     if (mailbox) setComposition({ draft: emptyDraft, mailbox, pickFrom: true });
   };
+  // Replying needs `send` on the opened message's mailbox; one not among the user's has none.
+  const openedCanSend = opened !== null && senders.some(item => item.id === opened.mailbox_id);
   const reply = (message: MailMessage) => {
-    if (!opened) return;
+    if (!opened || !openedCanSend) return;
     setComposition({
       draft: replyDraft(message, subject => t('compose.replySubject', { subject })),
       mailbox: { id: opened.mailbox_id, address: opened.mailbox_address },
@@ -224,6 +226,7 @@ function EmailLogContent({
           mailboxId={opened.mailbox_id}
           mailboxAddress={opened.mailbox_address}
           messageId={opened.id}
+          canSend={openedCanSend}
           onClose={() => setOpened(null)}
           onReply={reply}
         />

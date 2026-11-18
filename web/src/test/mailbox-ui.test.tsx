@@ -404,7 +404,10 @@ describe('mailbox workspace', () => {
       [ApiErrorCode.MAILBOX_ADDRESS_INVALID, /1 to 64 lowercase letters/u],
       [ApiErrorCode.MAILBOX_ADDRESS_RESERVED, /reserved for the mail administrator/u],
       [ApiErrorCode.MAILBOX_LIMIT_REACHED, /reached the mailbox limit/u],
-      [ApiErrorCode.PERMISSION_DENIED, /Only owners and admins of the organization/u],
+      [
+        ApiErrorCode.PERMISSION_DENIED,
+        /Only owners and admins of the organization can create mailboxes/u,
+      ],
     ] as const;
     fireEvent.change(address, { target: { value: 'hello' } });
     fireEvent.change(screen.getByLabelText('Member 1'), { target: { value: '5' } });
@@ -439,7 +442,7 @@ describe('mailbox workspace', () => {
     expect(toast.success).toHaveBeenCalledWith('Mailbox deleted');
   });
 
-  it('says only owners and admins delete when the API refuses a delete', async () => {
+  it('says the mailbox permission is missing when the API refuses a delete', async () => {
     state.deleteMailbox.mutateAsync.mockRejectedValue(
       new ApiError('backend text', ApiErrorCode.PERMISSION_DENIED, 403)
     );
@@ -450,7 +453,7 @@ describe('mailbox workspace', () => {
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
-        'Only owners and admins of the organization can create or delete mailboxes.'
+        "You don't have permission for this mailbox. Refresh to see your current access."
       )
     );
     expect(toast.success).not.toHaveBeenCalled();

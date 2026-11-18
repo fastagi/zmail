@@ -39,6 +39,7 @@ export type MailboxErrorKey =
   | 'errors.messageInvalid'
   | 'errors.messageNotFound'
   | 'errors.organizationNotFound'
+  | 'errors.createDenied'
   | 'errors.permissionDenied'
   | 'errors.sendLimitReached'
   | 'errors.senderNotConfigured'
@@ -111,6 +112,11 @@ export function resolveMailboxErrorKey(error: unknown): MailboxErrorKey {
 /** True when the mailbox's access changed since the console loaded it: a refresh shows it. */
 export function isAccessConflict(error: unknown): boolean {
   return error instanceof ApiError && error.errorCode === ApiErrorCode.MAILBOX_ACCESS_CONFLICT;
+}
+
+/** True when the caller lacks the capability, such as access lost since the page loaded. */
+export function isPermissionDenied(error: unknown): boolean {
+  return error instanceof ApiError && error.errorCode === ApiErrorCode.PERMISSION_DENIED;
 }
 
 /** True when the API no longer finds the organization for this member: access was lost. */
