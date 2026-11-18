@@ -337,3 +337,25 @@ func TestUnloadableAttachmentsLeaveTheMessageWaiting(t *testing.T) {
 		t.Fatalf("plain = %s; want sent despite the unloadable message before it", stored.Status)
 	}
 }
+
+// The organization's email log shows why a message waits, so the web can label it.
+func TestMailLogShowsWhyAMessageWaits(t *testing.T) {
+	f := newQueueFixture(t)
+	for i := 0; i < 5; i++ {
+		f.mustSend(t, "fill", false)
+	}
+	waiting := f.mustSend(t, "w1", true)
+	entries, _, err := f.service.ListLog(context.Background(), f.b, domain.MailLogFilter{})
+	if err != nil {
+		t.Fatalf("ListLog: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.ID == waiting.ID {
+			if entry.QueuedReason != domain.MailQueuedForSendLimit {
+				t.Fatalf("log entry queued_reason = %q; want %q", entry.QueuedReason, domain.MailQueuedForSendLimit)
+			}
+			return
+		}
+	}
+	t.Fatalf("the waiting message is not in the log")
+}
