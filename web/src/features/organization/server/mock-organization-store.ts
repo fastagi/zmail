@@ -117,10 +117,8 @@ export class MockOrganizationStore {
   }
 
   list(actor: AuthUser, page: number, perPage: number): OrganizationPage {
-    const memberships = this.memberships.filter(
-      (membership) => membership.userKey === actor.id
-    );
-    const items = memberships.flatMap((membership) => {
+    const memberships = this.memberships.filter(membership => membership.userKey === actor.id);
+    const items = memberships.flatMap(membership => {
       const organization = this.organizationRecord(membership.organizationId);
       return organization ? [this.organizationView(organization, membership.role)] : [];
     });
@@ -130,17 +128,12 @@ export class MockOrganizationStore {
   get(actor: AuthUser, organizationId: number): Organization | null {
     const membership = this.membershipForActor(actor, organizationId);
     const organization = this.organizationRecord(organizationId);
-    return membership && organization
-      ? this.organizationView(organization, membership.role)
-      : null;
+    return membership && organization ? this.organizationView(organization, membership.role) : null;
   }
 
-  create(
-    actor: AuthUser,
-    input: CreateOrganizationInput
-  ): Organization | 'slug_conflict' {
+  create(actor: AuthUser, input: CreateOrganizationInput): Organization | 'slug_conflict' {
     const slug = input.slug ?? this.generatedSlug();
-    if (this.organizations.some((organization) => organization.slug === slug)) {
+    if (this.organizations.some(organization => organization.slug === slug)) {
       return 'slug_conflict';
     }
 
@@ -156,13 +149,7 @@ export class MockOrganizationStore {
     this.organizations = [organization, ...this.organizations];
     this.memberships = [
       ...this.memberships,
-      mockMembership(
-        this.nextMembershipId++,
-        organization.id,
-        actor.id,
-        'owner',
-        timestamp
-      ),
+      mockMembership(this.nextMembershipId++, organization.id, actor.id, 'owner', timestamp),
     ];
     return this.organizationView(organization, 'owner');
   }
@@ -182,10 +169,7 @@ export class MockOrganizationStore {
     return this.organizationView(organization, membership.role);
   }
 
-  resolveContext(
-    actor: AuthUser,
-    organizationId: number
-  ): OrganizationContext | null {
+  resolveContext(actor: AuthUser, organizationId: number): OrganizationContext | null {
     const membership = this.membershipForActor(actor, organizationId);
     const organization = this.organizationRecord(organizationId);
     const user = this.userRecord(actor.id);
@@ -211,17 +195,33 @@ export class MockOrganizationStore {
       return 'organization_not_found';
     }
     const items = this.memberships
-      .filter((membership) => membership.organizationId === organizationId)
-      .flatMap((membership) => {
+      .filter(membership => membership.organizationId === organizationId)
+      .flatMap(membership => {
         const user = this.userRecord(membership.userKey);
         return user ? [memberView(membership, user)] : [];
       });
-    return paginated(
-      items,
-      page,
-      perPage,
-      `/api/organizations/${organizationId}/members`
+    return paginated(items, page, perPage, `/api/organizations/${organizationId}/members`);
+  }
+
+  /** User ids of the organization's current members, ascending; for features that grant access. */
+  memberUserIds(organizationId: number): number[] {
+    return this.memberships
+      .filter(membership => membership.organizationId === organizationId)
+      .flatMap(membership => {
+        const user = this.userRecord(membership.userKey);
+        return user ? [user.id] : [];
+      })
+      .sort((left, right) => left - right);
+  }
+
+  /** The membership id of a user in the organization, or null when they are not a member. */
+  membershipIdOf(organizationId: number, userId: number): number | null {
+    const membership = this.memberships.find(
+      candidate =>
+        candidate.organizationId === organizationId &&
+        this.userRecord(candidate.userKey)?.id === userId
     );
+    return membership?.id ?? null;
   }
 
   changeMemberRole(
@@ -263,9 +263,7 @@ export class MockOrganizationStore {
       return 'permission_denied';
     }
 
-    this.memberships = this.memberships.filter(
-      (membership) => membership.id !== target.id
-    );
+    this.memberships = this.memberships.filter(membership => membership.id !== target.id);
     return true;
   }
 
@@ -278,10 +276,7 @@ export class MockOrganizationStore {
     if (!previousOwner) return 'organization_not_found';
     if (previousOwner.role !== 'owner') return 'permission_denied';
 
-    const newOwner = this.membershipRecord(
-      organizationId,
-      input.new_owner_member_id
-    );
+    const newOwner = this.membershipRecord(organizationId, input.new_owner_member_id);
     if (!newOwner || newOwner.id === previousOwner.id || newOwner.role === 'owner') {
       return 'ownership_transfer_target_invalid';
     }
@@ -312,14 +307,9 @@ export class MockOrganizationStore {
     if (managerError) return managerError;
 
     const items = this.invitations
-      .filter((invitation) => invitation.organization_id === organizationId)
-      .map((invitation) => publicInvitation(invitation, this.dependencies.now()));
-    return paginated(
-      items,
-      page,
-      perPage,
-      `/api/organizations/${organizationId}/invitations`
-    );
+      .filter(invitation => invitation.organization_id === organizationId)
+      .map(invitation => publicInvitation(invitation, this.dependencies.now()));
+    return paginated(items, page, perPage, `/api/organizations/${organizationId}/invitations`);
   }
 
   invite(
@@ -329,7 +319,7 @@ export class MockOrganizationStore {
   ): OrganizationInvitationCreateResult | MockOrganizationStoreError {
     const managerError = this.managerError(actor, organizationId);
     if (managerError) return managerError;
-    const memberExists = this.memberships.some((membership) => {
+    const memberExists = this.memberships.some(membership => {
       if (membership.organizationId !== organizationId) return false;
       return this.userRecord(membership.userKey)?.email === input.email;
     });
@@ -337,7 +327,7 @@ export class MockOrganizationStore {
 
     const now = this.dependencies.now();
     const alreadyPending = this.invitations.some(
-      (invitation) =>
+      invitation =>
         invitation.organization_id === organizationId &&
         invitation.email === input.email &&
         invitationStatus(invitation, now) === 'pending'
@@ -371,9 +361,7 @@ export class MockOrganizationStore {
     const managerError = this.managerError(actor, organizationId);
     if (managerError) return managerError;
     const invitation = this.invitations.find(
-      (candidate) =>
-        candidate.organization_id === organizationId &&
-        candidate.id === invitationId
+      candidate => candidate.organization_id === organizationId && candidate.id === invitationId
     );
     if (!invitation || invitationStatus(invitation, this.dependencies.now()) !== 'pending') {
       return 'invitation_not_found';
@@ -387,9 +375,7 @@ export class MockOrganizationStore {
     actor: AuthUser,
     input: AcceptOrganizationInvitationInput
   ): Organization | MockOrganizationStoreError {
-    const invitation = this.invitations.find(
-      (candidate) => candidate.token === input.token
-    );
+    const invitation = this.invitations.find(candidate => candidate.token === input.token);
     if (!invitation) return 'invitation_invalid';
     const status = invitationStatus(invitation, this.dependencies.now());
     if (status === 'expired') return 'invitation_expired';
@@ -443,11 +429,11 @@ export class MockOrganizationStore {
   }
 
   private userRecord(key: string): MockUserRecord | undefined {
-    return this.users.find((user) => user.key === key);
+    return this.users.find(user => user.key === key);
   }
 
   private organizationRecord(id: number): MockOrganizationRecord | undefined {
-    return this.organizations.find((organization) => organization.id === id);
+    return this.organizations.find(organization => organization.id === id);
   }
 
   private membershipForActor(
@@ -455,9 +441,7 @@ export class MockOrganizationStore {
     organizationId: number
   ): MockMembershipRecord | undefined {
     return this.memberships.find(
-      (membership) =>
-        membership.organizationId === organizationId &&
-        membership.userKey === actor.id
+      membership => membership.organizationId === organizationId && membership.userKey === actor.id
     );
   }
 
@@ -466,8 +450,7 @@ export class MockOrganizationStore {
     memberId: number
   ): MockMembershipRecord | undefined {
     return this.memberships.find(
-      (membership) =>
-        membership.organizationId === organizationId && membership.id === memberId
+      membership => membership.organizationId === organizationId && membership.id === memberId
     );
   }
 
@@ -523,10 +506,7 @@ function mockMembership(
   };
 }
 
-function memberView(
-  membership: MockMembershipRecord,
-  user: MockUserRecord
-): OrganizationMember {
+function memberView(membership: MockMembershipRecord, user: MockUserRecord): OrganizationMember {
   return {
     id: membership.id,
     user_id: user.id,
@@ -539,10 +519,7 @@ function memberView(
   };
 }
 
-function publicInvitation(
-  invitation: MockInvitationRecord,
-  now: Date
-): OrganizationInvitation {
+function publicInvitation(invitation: MockInvitationRecord, now: Date): OrganizationInvitation {
   return {
     id: invitation.id,
     organization_id: invitation.organization_id,
@@ -562,19 +539,14 @@ function invitationStatus(
   if (invitation.status === 'accepted' || invitation.status === 'revoked') {
     return invitation.status;
   }
-  return now.getTime() >= Date.parse(invitation.expires_at)
-    ? 'expired'
-    : 'pending';
+  return now.getTime() >= Date.parse(invitation.expires_at) ? 'expired' : 'pending';
 }
 
 function canManageOrganization(role: OrganizationRole): boolean {
   return role === 'owner' || role === 'admin';
 }
 
-function canRemoveMember(
-  actorRole: OrganizationRole,
-  targetRole: OrganizationRole
-): boolean {
+function canRemoveMember(actorRole: OrganizationRole, targetRole: OrganizationRole): boolean {
   if (actorRole === 'owner') return targetRole !== 'owner';
   return actorRole === 'admin' && targetRole === 'member';
 }

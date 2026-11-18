@@ -21,14 +21,18 @@ import { useT } from '@/i18n';
 
 /**
  * Reply, mark unread, and delete for an open message. Reply and mark unread exist only for
- * inbound mail. Marking unread and deleting both leave the message, so they call `onClose`.
+ * inbound mail; reply and delete need `send` on the mailbox, marking unread only `view`. Marking
+ * unread and deleting both leave the message, so they call `onClose`.
  */
 export function MessageActions({
   message,
+  canSend = true,
   onReply,
   onClose,
 }: {
   message: MailMessage;
+  /** The mailbox's `access.send`; without it there is no reply or delete. */
+  canSend?: boolean;
   onReply: (message: MailMessage) => void;
   onClose: () => void;
 }) {
@@ -61,15 +65,17 @@ export function MessageActions({
     <div className="flex flex-wrap gap-2">
       {message.direction === 'inbound' ? (
         <>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            icon={<Reply className="size-4" />}
-            onClick={() => onReply(message)}
-          >
-            {t('actions.reply')}
-          </Button>
+          {canSend ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              icon={<Reply className="size-4" />}
+              onClick={() => onReply(message)}
+            >
+              {t('actions.reply')}
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"
@@ -82,15 +88,17 @@ export function MessageActions({
           </Button>
         </>
       ) : null}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        icon={<Trash2 className="size-4" />}
-        onClick={() => setConfirmDelete(true)}
-      >
-        {t('actions.delete')}
-      </Button>
+      {canSend ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          icon={<Trash2 className="size-4" />}
+          onClick={() => setConfirmDelete(true)}
+        >
+          {t('actions.delete')}
+        </Button>
+      ) : null}
 
       <Dialog
         open={confirmDelete}

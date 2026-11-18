@@ -71,6 +71,15 @@ vi.mock('next/navigation', async () => {
 });
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => state.organizations,
+  useOrganizationMembers: () => ({
+    data: page([
+      { id: 101, user_id: 1, username: 'admin', nickname: 'Admin User', role: 'owner' },
+      { id: 105, user_id: 5, username: 'riley', nickname: 'Riley Chen', role: 'member' },
+    ]),
+    isPending: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 const templateState = vi.hoisted(() => ({ data: [] as unknown[] }));
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
@@ -247,6 +256,17 @@ describe('mailbox workspace', () => {
     }
 
     state.organizations.data = organizations(organization(1, 'Acme', 'member'));
+    // A member working both mailboxes with `send` administers neither.
+    const memberAccess = {
+      view: true,
+      send: true,
+      manage_members: false,
+      administer: false,
+      see_history: false,
+    };
+    state.mailboxes.data = [mailbox(1, 'hello', 'Hello Team'), mailbox(2, 'sales', '')].map(
+      item => ({ ...item, access: memberAccess })
+    );
     renderWorkspace();
     expect(screen.queryByRole('button', { name: 'Create mailbox' })).toBeNull();
     expect(screen.queryByLabelText('Address')).toBeNull();
@@ -349,12 +369,15 @@ describe('mailbox workspace', () => {
     fireEvent.change(screen.getByLabelText('Display name (optional)'), {
       target: { value: ' Support   Team ' },
     });
+    fireEvent.change(screen.getByLabelText('Member 1'), { target: { value: '5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create mailbox' }));
 
     await waitFor(() =>
       expect(state.createMailbox.mutateAsync).toHaveBeenCalledWith({
         local_part: 'support-team',
         display_name: 'Support Team',
+        type: 'shared',
+        members: [{ user_id: 5, permission: 'send' }],
       })
     );
     expect(toast.success).toHaveBeenCalledWith('Mailbox created');
@@ -384,6 +407,7 @@ describe('mailbox workspace', () => {
       [ApiErrorCode.PERMISSION_DENIED, /Only owners and admins of the organization/u],
     ] as const;
     fireEvent.change(address, { target: { value: 'hello' } });
+    fireEvent.change(screen.getByLabelText('Member 1'), { target: { value: '5' } });
     for (const [code, copy] of cases) {
       state.createMailbox.mutateAsync.mockRejectedValueOnce(new ApiError('backend text', code));
       fireEvent.click(submit);
@@ -888,11 +912,18 @@ function organizations(...items: ReturnType<typeof organization>[]) {
   return page(items);
 }
 
+/** A shared mailbox the user works with `manage`, so every message control is shown. */
 function mailbox(id: number, localPart: string, displayName: string, unreadCount = 0) {
   return {
     id,
     address: `${localPart}@mail.example.com`,
     display_name: displayName,
+    type: 'shared',
+    owner_user_id: null,
+    awaiting_handover: false,
+    sealed_before: null,
+    webhooks_enabled: false,
+    access: { view: true, send: true, manage_members: true, administer: true, see_history: true },
     unread_count: unreadCount,
     created_at: now(),
   };

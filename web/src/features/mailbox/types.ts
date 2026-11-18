@@ -2,6 +2,15 @@ import type { infer as Infer } from 'zod/mini';
 
 import type {
   createMailboxSchema,
+  mailboxAccessEventPageEnvelopeSchema,
+  mailboxAccessEventSchema,
+  mailboxAccessEventTypeSchema,
+  mailboxAccessSchema,
+  mailboxMemberInputSchema,
+  mailboxMemberSchema,
+  mailboxPermissionSchema,
+  mailboxSealedDeletionSchema,
+  mailboxTypeSchema,
   mailDayStatsSchema,
   mailLogEntrySchema,
   mailLogPageEnvelopeSchema,
@@ -30,6 +39,7 @@ import type {
   mailBroadcastSchema,
   mailBroadcastSendInputSchema,
   mailBroadcastStatusSchema,
+  mailBroadcastStatusOnlySchema,
   mailRecipientStatusSchema,
   mailContactImportSchema,
   mailContactImportSkipReasonSchema,
@@ -49,6 +59,22 @@ export type MailDomain = Infer<typeof mailDomainSchema>;
 export type MailDomainRecord = Infer<typeof mailDomainRecordSchema>;
 export type MailDomainInput = Infer<typeof mailDomainInputSchema>;
 export type Mailbox = Infer<typeof mailboxSchema>;
+export type MailboxType = Infer<typeof mailboxTypeSchema>;
+export type MailboxPermission = Infer<typeof mailboxPermissionSchema>;
+export type MailboxAccess = Infer<typeof mailboxAccessSchema>;
+export type MailboxMember = Infer<typeof mailboxMemberSchema>;
+export type MailboxMemberInput = Infer<typeof mailboxMemberInputSchema>;
+export type MailboxAccessEventType = Infer<typeof mailboxAccessEventTypeSchema>;
+export type MailboxAccessEvent = Infer<typeof mailboxAccessEventSchema>;
+export type MailboxSealedDeletion = Infer<typeof mailboxSealedDeletionSchema>;
+
+type MailboxAccessEventPageEnvelope = Infer<typeof mailboxAccessEventPageEnvelopeSchema>;
+
+export interface MailboxAccessEventPage {
+  items: MailboxAccessEvent[];
+  meta: MailboxAccessEventPageEnvelope['meta'];
+  links: MailboxAccessEventPageEnvelope['links'];
+}
 export type MailDirection = Infer<typeof mailDirectionSchema>;
 export type MailStatus = Infer<typeof mailStatusSchema>;
 export type MailEventType = Infer<typeof mailEventTypeSchema>;
@@ -117,6 +143,7 @@ export interface MailLogFilters {
 export type MailBroadcastStatus = Infer<typeof mailBroadcastStatusSchema>;
 export type MailRecipientStatus = Infer<typeof mailRecipientStatusSchema>;
 export type MailBroadcast = Infer<typeof mailBroadcastSchema>;
+export type MailBroadcastStatusOnly = Infer<typeof mailBroadcastStatusOnlySchema>;
 export type MailBroadcastRecipient = Infer<typeof mailBroadcastRecipientSchema>;
 export type MailBroadcastInput = Infer<typeof mailBroadcastInputSchema>;
 export type MailBroadcastSendInput = Infer<typeof mailBroadcastSendInputSchema>;

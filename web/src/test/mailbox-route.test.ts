@@ -414,11 +414,12 @@ describe('mailbox browser route boundary', () => {
     getSessionUser.mockResolvedValue(mockUser('demo-member'));
     await expectError(await create(route, { local_part: 'member-box' }), 403, 'PERMISSION.DENIED');
     await expectError(await create(route, {}), 403, 'PERMISSION.DENIED');
+    // Deleting needs `administer`: a member with access is refused, an unknown mailbox is missing.
     await expectError(await remove(owned.id), 403, 'PERMISSION.DENIED');
-    await expectError(await remove(999), 403, 'PERMISSION.DENIED');
+    await expectError(await remove(999), 404, 'MAILBOX.NOT_FOUND');
     expect(await listed()).toEqual(['owner-box@mail.example.com', 'admin-box@mail.example.com']);
 
-    // The member still reads, sends, marks, and deletes messages in every mailbox.
+    // As a `manage` member the member still reads, sends, marks, and deletes messages.
     const path = `/api/mailboxes/${owned.id}/messages`;
     const inbox = await (
       await route.listMailMessagesRoute(request(`${path}?direction=inbound`), String(owned.id))
@@ -442,14 +443,14 @@ describe('mailbox browser route boundary', () => {
     );
     expect((await route.listMailboxDomainsRoute(request('/api/mailbox-domains'))).status).toBe(200);
 
-    // Read state is shared: what the member read is read for the owner too.
+    // Read state is per person: what the member read is still unread for the owner.
     getSessionUser.mockResolvedValue(mockUser('demo-admin'));
     const seen = await route.getMailMessageRoute(
       request(`${path}/${welcomeId}`),
       String(owned.id),
       welcomeId
     );
-    await expect(seen.json()).resolves.toMatchObject({ data: { read: true } });
+    await expect(seen.json()).resolves.toMatchObject({ data: { read: false } });
 
     getSessionUser.mockResolvedValue(mockUser('demo-member'));
     const removedMessage = await route.deleteMailMessageRoute(
@@ -2445,6 +2446,640 @@ describe('mailbox browser route boundary', () => {
     expect(body.error_code).toBe('MAILBOX.DELIVERY_FAILED');
     expect(body.message).not.toContain('provider said no');
   });
+  describe('mailbox access in the mock', () => {
+    // Seeded organization 1: user 1 demo-admin (owner), 2 demo-operator (admin), 3 demo-member.
+    const as = (user: 'demo-admin' | 'demo-operator' | 'demo-member') =>
+      getSessionUser.mockResolvedValue(mockUser(user));
+
+    beforeEach(() => {
+      process.env.MOCK_BFF_ENABLED = 'true';
+    });
+
+    const listed = async (route: MailboxRoute) =>
+      (await (await route.listMailboxesRoute(request('/api/mailboxes'))).json()).data as {
+        id: number;
+        address: string;
+        type: string;
+        owner_user_id: number | null;
+        awaiting_handover: boolean;
+        sealed_before: string | null;
+        webhooks_enabled: boolean;
+        unread_count: number;
+        access: Record<string, boolean>;
+      }[];
+    const inbox = (route: MailboxRoute, id: number) =>
+      route.listMailMessagesRoute(
+        request(`/api/mailboxes/${id}/messages?direction=inbound`),
+        String(id)
+      );
+    const members = (route: MailboxRoute, id: number) =>
+      route.listMailboxMembersRoute(request(`/api/mailboxes/${id}/members`), String(id));
+    const setMember = (route: MailboxRoute, id: number, userId: number, permission: unknown) =>
+      route.setMailboxMemberRoute(
+        request(`/api/mailboxes/${id}/members/${userId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ permission }),
+        }),
+        String(id),
+        String(userId)
+      );
+    const removeMember = (route: MailboxRoute, id: number, userId: number) =>
+      route.removeMailboxMemberRoute(
+        request(`/api/mailboxes/${id}/members/${userId}`, { method: 'DELETE' }),
+        String(id),
+        String(userId)
+      );
+    const events = (route: MailboxRoute, id: number, query = '') =>
+      route.listMailboxAccessEventsRoute(
+        request(`/api/mailboxes/${id}/access-events${query}`),
+        String(id)
+      );
+    const handOver = (route: MailboxRoute, id: number, successor: unknown) =>
+      route.handOverMailboxRoute(
+        request(`/api/mailboxes/${id}/handovers`, {
+          method: 'POST',
+          body: JSON.stringify({ successor_user_id: successor }),
+        }),
+        String(id)
+      );
+    const deleteSealed = (route: MailboxRoute, id: number, address: unknown) =>
+      route.deleteMailboxSealedMessagesRoute(
+        request(`/api/mailboxes/${id}/sealed-messages`, {
+          method: 'DELETE',
+          body: JSON.stringify({ confirm_address: address }),
+        }),
+        String(id)
+      );
+    const webhooks = (route: MailboxRoute, id: number, enabled: unknown) =>
+      route.setMailboxWebhookSettingRoute(
+        request(`/api/mailboxes/${id}/webhook-setting`, {
+          method: 'PUT',
+          body: JSON.stringify({ enabled }),
+        }),
+        String(id)
+      );
+    const personal = async (route: MailboxRoute, localPart: string, owner: number) =>
+      (
+        await (
+          await create(route, { local_part: localPart, type: 'personal', owner_user_id: owner })
+        ).json()
+      ).data as { id: number; address: string };
+    const shared = async (
+      route: MailboxRoute,
+      localPart: string,
+      list: { user_id: number; permission: string }[]
+    ) =>
+      (await (await create(route, { local_part: localPart, type: 'shared', members: list })).json())
+        .data as { id: number; address: string };
+
+    it('creates personal and shared mailboxes and rejects invalid access', async () => {
+      const route = await loadRoute();
+      as('demo-admin');
+
+      const own = await create(route, { local_part: 'riley', type: 'personal', owner_user_id: 3 });
+      expect(own.status).toBe(201);
+      await expect(own.json()).resolves.toMatchObject({
+        data: {
+          type: 'personal',
+          owner_user_id: 3,
+          awaiting_handover: false,
+          sealed_before: null,
+          webhooks_enabled: false,
+          unread_count: 0,
+          // An admin administers but does not read a personal mailbox.
+          access: {
+            view: false,
+            send: false,
+            manage_members: false,
+            administer: true,
+            see_history: true,
+          },
+        },
+      });
+      const team = await create(route, {
+        local_part: 'team',
+        type: 'shared',
+        members: [{ user_id: 3, permission: 'view' }],
+      });
+      expect(team.status).toBe(201);
+      await expect(team.json()).resolves.toMatchObject({
+        data: {
+          type: 'shared',
+          owner_user_id: null,
+          access: { view: false, send: false, manage_members: true, administer: true },
+        },
+      });
+
+      for (const body of [
+        // `type` is named so the helper adds no default access; JSON drops the undefined value.
+        { local_part: 'a1', type: undefined },
+        { local_part: 'a2', type: 'group', owner_user_id: 3 },
+        { local_part: 'a3', type: 'personal' },
+        { local_part: 'a4', type: 'personal', owner_user_id: 99 },
+        { local_part: 'a5', type: 'personal', owner_user_id: 3, members: [] },
+        { local_part: 'a6', type: 'shared', members: [] },
+        {
+          local_part: 'a7',
+          type: 'shared',
+          owner_user_id: 3,
+          members: [{ user_id: 3, permission: 'view' }],
+        },
+        {
+          local_part: 'a8',
+          type: 'shared',
+          members: [
+            { user_id: 3, permission: 'view' },
+            { user_id: 3, permission: 'send' },
+          ],
+        },
+        { local_part: 'a9', type: 'shared', members: [{ user_id: 3, permission: 'owner' }] },
+        { local_part: 'a10', type: 'shared', members: [{ user_id: 99, permission: 'view' }] },
+      ]) {
+        await expectError(await create(route, body), 422, 'MAILBOX.ACCESS_INVALID');
+      }
+      expect((await listed(route)).map(item => item.address)).toEqual([
+        'riley@mail.example.com',
+        'team@mail.example.com',
+      ]);
+
+      // A member may not create one, with or without access in the body.
+      as('demo-member');
+      await expectError(
+        await create(route, { local_part: 'mine', type: 'personal', owner_user_id: 3 }),
+        403,
+        'PERMISSION.DENIED'
+      );
+    });
+
+    it('answers 404 without any access and 403 without the needed one', async () => {
+      const route = await loadRoute();
+      as('demo-admin');
+      const rileyBox = await personal(route, 'riley', 3);
+      const viewBox = await shared(route, 'viewers', [{ user_id: 3, permission: 'view' }]);
+      const hidden = await shared(route, 'hidden', [{ user_id: 2, permission: 'send' }]);
+
+      // The member sees only what they may access, with what they may do there.
+      as('demo-member');
+      const seen = await listed(route);
+      expect(seen.map(item => [item.address, item.access])).toEqual([
+        [
+          rileyBox.address,
+          { view: true, send: true, manage_members: false, administer: false, see_history: true },
+        ],
+        [
+          viewBox.address,
+          { view: true, send: false, manage_members: false, administer: false, see_history: false },
+        ],
+      ]);
+      expect((await inbox(route, rileyBox.id)).status).toBe(200);
+      expect((await inbox(route, viewBox.id)).status).toBe(200);
+      await expectError(
+        await send(route, viewBox.id, { to: ['bob@example.com'], subject: 'Hi', text: 'Body' }),
+        403,
+        'PERMISSION.DENIED'
+      );
+      const viewInbox = await (await inbox(route, viewBox.id)).json();
+      const welcome = String(viewInbox.data[0].id);
+      await expectError(
+        await route.deleteMailMessageRoute(
+          request(`/api/mailboxes/${viewBox.id}/messages/${welcome}`, { method: 'DELETE' }),
+          String(viewBox.id),
+          welcome
+        ),
+        403,
+        'PERMISSION.DENIED'
+      );
+      // Marking read needs view only.
+      const marked = await route.updateMailMessageRoute(
+        request(`/api/mailboxes/${viewBox.id}/messages/${welcome}`, {
+          method: 'PUT',
+          body: JSON.stringify({ read: true }),
+        }),
+        String(viewBox.id),
+        welcome
+      );
+      expect(marked.status).toBe(200);
+      await expectError(await inbox(route, hidden.id), 404, 'MAILBOX.NOT_FOUND');
+      await expectError(await members(route, hidden.id), 404, 'MAILBOX.NOT_FOUND');
+      await expectError(await events(route, hidden.id), 404, 'MAILBOX.NOT_FOUND');
+      await expectError(await webhooks(route, hidden.id, true), 404, 'MAILBOX.NOT_FOUND');
+      await expectError(
+        await route.deleteMailboxRoute(
+          request(`/api/mailboxes/${hidden.id}`, { method: 'DELETE' }),
+          String(hidden.id)
+        ),
+        404,
+        'MAILBOX.NOT_FOUND'
+      );
+      await expectError(
+        await route.deleteMailboxRoute(
+          request(`/api/mailboxes/${viewBox.id}`, { method: 'DELETE' }),
+          String(viewBox.id)
+        ),
+        403,
+        'PERMISSION.DENIED'
+      );
+      await expectError(await members(route, viewBox.id), 403, 'PERMISSION.DENIED');
+      await expectError(await events(route, viewBox.id), 403, 'PERMISSION.DENIED');
+      // The personal owner reads its history but has no members to manage.
+      expect((await events(route, rileyBox.id)).status).toBe(200);
+      await expectError(await members(route, rileyBox.id), 409, 'MAILBOX.ACCESS_CONFLICT');
+
+      // An admin who is not a member sees every mailbox but reads none of them.
+      as('demo-operator');
+      expect((await listed(route)).map(item => item.address)).toEqual([
+        rileyBox.address,
+        viewBox.address,
+        hidden.address,
+      ]);
+      await expectError(await inbox(route, rileyBox.id), 403, 'PERMISSION.DENIED');
+      await expectError(await inbox(route, viewBox.id), 403, 'PERMISSION.DENIED');
+      expect((await inbox(route, hidden.id)).status).toBe(200);
+      // The log and statistics only cover mailboxes the caller reads.
+      const log = await (await route.listMailLogRoute(request('/api/mail-messages'))).json();
+      expect(
+        new Set(log.data.map((item: { mailbox_address: string }) => item.mailbox_address))
+      ).toEqual(new Set([hidden.address]));
+    });
+
+    it('keeps read state per person', async () => {
+      const route = await loadRoute();
+      as('demo-admin');
+      const box = await shared(route, 'desk', [
+        { user_id: 1, permission: 'send' },
+        { user_id: 3, permission: 'send' },
+      ]);
+      const unread = async () =>
+        (await listed(route)).find(item => item.id === box.id)?.unread_count;
+      expect(await unread()).toBe(1);
+
+      as('demo-member');
+      expect(await unread()).toBe(1);
+      const welcome = String((await (await inbox(route, box.id)).json()).data[0].id);
+      await route.updateMailMessageRoute(
+        request(`/api/mailboxes/${box.id}/messages/${welcome}`, {
+          method: 'PUT',
+          body: JSON.stringify({ read: true }),
+        }),
+        String(box.id),
+        welcome
+      );
+      expect(await unread()).toBe(0);
+      await expect((await inbox(route, box.id)).json()).resolves.toMatchObject({
+        data: [{ read: true }],
+      });
+
+      as('demo-admin');
+      expect(await unread()).toBe(1);
+      await expect((await inbox(route, box.id)).json()).resolves.toMatchObject({
+        data: [{ read: false }],
+      });
+      // Without view the count is 0.
+      as('demo-operator');
+      expect(await unread()).toBe(0);
+
+      // Outbound mail is read for everyone, and marking it unread changes nothing.
+      as('demo-member');
+      const sent = (
+        await (
+          await send(route, box.id, { to: ['bob@example.com'], subject: 'Out', text: 'Body' })
+        ).json()
+      ).data;
+      const unmarked = await route.updateMailMessageRoute(
+        request(`/api/mailboxes/${box.id}/messages/${sent.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ read: false }),
+        }),
+        String(box.id),
+        String(sent.id)
+      );
+      await expect(unmarked.json()).resolves.toMatchObject({ data: { read: true } });
+      as('demo-admin');
+      expect(await unread()).toBe(1);
+    });
+
+    it('lists, sets, and removes members and records the history', async () => {
+      const route = await loadRoute();
+      as('demo-admin');
+      const box = await shared(route, 'support-team', [{ user_id: 3, permission: 'manage' }]);
+
+      // A manage member runs the members, including granting manage.
+      as('demo-member');
+      const set = await setMember(route, box.id, 2, 'view');
+      expect(set.status).toBe(200);
+      await expect(set.json()).resolves.toMatchObject({
+        data: { user_id: 2, permission: 'view', granted_by: 3 },
+      });
+      expect((await setMember(route, box.id, 2, 'manage')).status).toBe(200);
+      await expectError(await setMember(route, box.id, 2, 'owner'), 422, 'MAILBOX.ACCESS_INVALID');
+      await expectError(await setMember(route, box.id, 99, 'view'), 422, 'MAILBOX.ACCESS_INVALID');
+      const listing = await (await members(route, box.id)).json();
+      expect(
+        listing.data.map((item: { user_id: number; permission: string }) => [
+          item.user_id,
+          item.permission,
+        ])
+      ).toEqual([
+        [2, 'manage'],
+        [3, 'manage'],
+      ]);
+      expect((await removeMember(route, box.id, 2)).status).toBe(204);
+      await expectError(await removeMember(route, box.id, 2), 404, 'MAILBOX.NOT_FOUND');
+
+      const history = await (await events(route, box.id, '?page=1&per_page=2')).json();
+      expect(history.meta).toMatchObject({ current_page: 1, per_page: 2, total: 5, last_page: 3 });
+      expect(history.data.map((item: { type: string }) => item.type)).toEqual([
+        'member_removed',
+        'member_set',
+      ]);
+      expect(history.data[0]).toMatchObject({ actor_user_id: 3, subject_user_id: 2, detail: {} });
+      expect(history.data[1]).toMatchObject({
+        subject_user_id: 2,
+        detail: { permission: 'manage' },
+      });
+      const oldest = await (await events(route, box.id, '?page=3&per_page=2')).json();
+      expect(oldest.data.map((item: { type: string }) => item.type)).toEqual(['created']);
+      expect(oldest.data[0]).toMatchObject({ actor_user_id: 1, detail: { type: 'shared' } });
+
+      // A personal mailbox has no members, for an admin too.
+      as('demo-admin');
+      const own = await personal(route, 'riley', 3);
+      for (const response of [
+        await members(route, own.id),
+        await setMember(route, own.id, 1, 'view'),
+        await removeMember(route, own.id, 3),
+        await webhooks(route, own.id, true),
+      ]) {
+        await expectError(response, 409, 'MAILBOX.ACCESS_CONFLICT');
+      }
+    });
+
+    it('hands a personal mailbox over and seals the earlier mail', async () => {
+      const route = await loadRoute();
+      as('demo-admin');
+      const box = await personal(route, 'riley', 3);
+
+      // The owner may not hand over their own mailbox.
+      as('demo-member');
+      await expectError(await handOver(route, box.id, 2), 403, 'PERMISSION.DENIED');
+      await expectError(await deleteSealed(route, box.id, box.address), 403, 'PERMISSION.DENIED');
+
+      as('demo-admin');
+      await expectError(await handOver(route, box.id, 99), 422, 'MAILBOX.ACCESS_INVALID');
+      await expectError(
+        await deleteSealed(route, box.id, box.address),
+        409,
+        'MAILBOX.ACCESS_CONFLICT'
+      );
+      const handed = await handOver(route, box.id, 2);
+      expect(handed.status).toBe(201);
+      const after = (await handed.json()).data;
+      expect(after).toMatchObject({
+        type: 'shared',
+        owner_user_id: null,
+        awaiting_handover: false,
+        access: { view: false, manage_members: true, administer: true },
+      });
+      expect(after.sealed_before).toEqual(expect.any(String));
+      await expectError(await handOver(route, box.id, 2), 409, 'MAILBOX.ACCESS_CONFLICT');
+
+      // The former owner keeps nothing.
+      as('demo-member');
+      expect((await listed(route)).map(item => item.id)).not.toContain(box.id);
+      await expectError(await inbox(route, box.id), 404, 'MAILBOX.NOT_FOUND');
+
+      // The successor sends from it but sees nothing from before the handover.
+      as('demo-operator');
+      const successorInbox = await (await inbox(route, box.id)).json();
+      expect(successorInbox.data).toEqual([]);
+      expect(
+        (await send(route, box.id, { to: ['bob@example.com'], subject: 'New', text: 'Body' }))
+          .status
+      ).toBe(201);
+      const listing = await (await members(route, box.id)).json();
+      expect(listing.data).toMatchObject([{ user_id: 2, permission: 'send', granted_by: 1 }]);
+      const history = await (await events(route, box.id)).json();
+      expect(history.data[0]).toMatchObject({
+        type: 'handed_over',
+        actor_user_id: 1,
+        subject_user_id: 2,
+        detail: { former_owner_user_id: 3, sealed_before: after.sealed_before },
+      });
+
+      // Deleting the sealed history needs the exact address, ignoring case.
+      await expectError(
+        await deleteSealed(route, box.id, 'someone@mail.example.com'),
+        422,
+        'MAILBOX.ACCESS_INVALID'
+      );
+      const deleted = await deleteSealed(route, box.id, box.address.toUpperCase());
+      expect(deleted.status).toBe(200);
+      await expect(deleted.json()).resolves.toMatchObject({
+        data: { deleted_messages: 1, deleted_broadcasts: 0 },
+      });
+      const latest = await (await events(route, box.id)).json();
+      expect(latest.data[0]).toMatchObject({
+        type: 'sealed_deleted',
+        subject_user_id: null,
+        detail: { deleted_messages: 1, deleted_broadcasts: 0 },
+      });
+      // The boundary stays and the new mail is untouched.
+      const sent = await (
+        await route.listMailMessagesRoute(
+          request(`/api/mailboxes/${box.id}/messages?direction=outbound`),
+          String(box.id)
+        )
+      ).json();
+      expect(sent.data).toHaveLength(1);
+      expect((await listed(route)).find(item => item.id === box.id)?.sealed_before).toBe(
+        after.sealed_before
+      );
+    });
+
+    it('shows a personal mailbox whose owner left as awaiting handover', async () => {
+      const route = await loadRoute();
+      as('demo-admin');
+      const box = await personal(route, 'riley', 3);
+      const { mockOrganizationStore } =
+        await import('@/features/organization/server/mock-organization-store');
+      expect(mockOrganizationStore.removeMember(mockUser('demo-admin'), 1, 3)).toBe(true);
+
+      const item = (await listed(route)).find(entry => entry.id === box.id);
+      expect(item).toMatchObject({ type: 'personal', awaiting_handover: true });
+      expect((await handOver(route, box.id, 2)).status).toBe(201);
+      expect((await listed(route)).find(entry => entry.id === box.id)?.awaiting_handover).toBe(
+        false
+      );
+    });
+
+    it('switches organization webhooks of a shared mailbox and records changes only', async () => {
+      const route = await loadRoute();
+      as('demo-admin');
+      const box = await shared(route, 'events', [
+        { user_id: 3, permission: 'send' },
+        { user_id: 2, permission: 'manage' },
+      ]);
+      expect((await listed(route))[0].webhooks_enabled).toBe(false);
+
+      as('demo-member');
+      await expectError(await webhooks(route, box.id, true), 403, 'PERMISSION.DENIED');
+      as('demo-operator');
+      const on = await webhooks(route, box.id, true);
+      expect(on.status).toBe(200);
+      await expect(on.json()).resolves.toMatchObject({ data: { webhooks_enabled: true } });
+      expect((await webhooks(route, box.id, true)).status).toBe(200);
+      await expectError(await webhooks(route, box.id, 'yes'), 422, 'COMMON.VALIDATION_FAILED');
+      const history = await (await events(route, box.id)).json();
+      expect(
+        history.data
+          .filter((item: { type: string }) => item.type === 'webhooks_changed')
+          .map((item: { actor_user_id: number; detail: unknown }) => [
+            item.actor_user_id,
+            item.detail,
+          ])
+      ).toEqual([[2, { enabled: true }]]);
+    });
+  });
+
+  it('forwards the access routes to the fixed API paths', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () => Response.json({ code: 0, message: 'ok', data: [] }));
+    const route = await loadRoute();
+
+    await route.listMailboxMembersRoute(request('/api/mailboxes/4/members'), '4');
+    await route.setMailboxMemberRoute(
+      request('/api/mailboxes/4/members/9', {
+        method: 'PUT',
+        body: JSON.stringify({ permission: 'view', extra: 1 }),
+      }),
+      '4',
+      '9'
+    );
+    await route.removeMailboxMemberRoute(
+      request('/api/mailboxes/4/members/9', { method: 'DELETE' }),
+      '4',
+      '9'
+    );
+    await route.listMailboxAccessEventsRoute(
+      request('/api/mailboxes/4/access-events?page=2&per_page=500&evil=1'),
+      '4'
+    );
+    await route.handOverMailboxRoute(
+      request('/api/mailboxes/4/handovers', {
+        method: 'POST',
+        body: JSON.stringify({ successor_user_id: 9 }),
+      }),
+      '4'
+    );
+    await route.deleteMailboxSealedMessagesRoute(
+      request('/api/mailboxes/4/sealed-messages', {
+        method: 'DELETE',
+        body: JSON.stringify({ confirm_address: 'a@mail.example.com' }),
+      }),
+      '4'
+    );
+    await route.setMailboxWebhookSettingRoute(
+      request('/api/mailboxes/4/webhook-setting', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: false }),
+      }),
+      '4'
+    );
+    await create(route, {
+      local_part: 'team',
+      type: 'shared',
+      members: [{ user_id: 9, permission: 'send' }],
+    });
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const parsed = new URL(String(url));
+      return `${init?.method} ${parsed.pathname}${parsed.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/mailboxes/4/members',
+      'PUT /v1/mailboxes/4/members/9',
+      'DELETE /v1/mailboxes/4/members/9',
+      'GET /v1/mailboxes/4/access-events?page=2&per_page=100',
+      'POST /v1/mailboxes/4/handovers',
+      'DELETE /v1/mailboxes/4/sealed-messages',
+      'PUT /v1/mailboxes/4/webhook-setting',
+      'POST /v1/mailboxes',
+    ]);
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      init?.body === undefined ? undefined : JSON.parse(String(init.body))
+    );
+    expect(bodies).toEqual([
+      undefined,
+      { permission: 'view' },
+      undefined,
+      undefined,
+      { successor_user_id: 9 },
+      { confirm_address: 'a@mail.example.com' },
+      { enabled: false },
+      { local_part: 'team', type: 'shared', members: [{ user_id: 9, permission: 'send' }] },
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('organization-id')).toBe('1');
+    }
+  });
+
+  it('rejects malformed access bodies and ids before they reach the API', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    const route = await loadRoute();
+
+    const put = (body: unknown, userId = '9') =>
+      route.setMailboxMemberRoute(
+        request(`/api/mailboxes/4/members/${userId}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        }),
+        '4',
+        userId
+      );
+    await expectError(await put({}), 422, 'COMMON.VALIDATION_FAILED');
+    await expectError(await put({ permission: 7 }), 422, 'COMMON.VALIDATION_FAILED');
+    await expectError(await put({ permission: 'view' }, 'abc'), 400, 'COMMON.INVALID_INPUT');
+    await expectError(
+      await route.handOverMailboxRoute(
+        request('/api/mailboxes/4/handovers', {
+          method: 'POST',
+          body: JSON.stringify({ successor_user_id: '9' }),
+        }),
+        '4'
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    await expectError(
+      await route.deleteMailboxSealedMessagesRoute(
+        request('/api/mailboxes/4/sealed-messages', { method: 'DELETE', body: JSON.stringify({}) }),
+        '4'
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    await expectError(
+      await route.setMailboxWebhookSettingRoute(
+        request('/api/mailboxes/4/webhook-setting', {
+          method: 'PUT',
+          body: JSON.stringify({ enabled: 'true' }),
+        }),
+        '4'
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    await expectError(
+      await create(route, { local_part: 'x', type: 'shared', members: 'everyone' }),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 async function loadRoute(): Promise<MailboxRoute> {
@@ -2458,9 +3093,22 @@ async function loadRoute(): Promise<MailboxRoute> {
   return route;
 }
 
-function create(route: MailboxRoute, body: Record<string, unknown>) {
+/**
+ * Creates a mailbox. In mock mode a body without `type` becomes a shared mailbox every current
+ * member of the active organization manages, so tests about other rules read and send as before.
+ */
+async function create(route: MailboxRoute, body: Record<string, unknown>) {
+  let payload = body;
+  if (process.env.API_ADAPTER_ENABLED !== 'true' && !('type' in body) && 'local_part' in body) {
+    const { mockOrganizationStore } =
+      await import('@/features/organization/server/mock-organization-store');
+    const members = mockOrganizationStore
+      .memberUserIds(Number(activeOrganization))
+      .map(userId => ({ user_id: userId, permission: 'manage' }));
+    payload = { ...body, type: 'shared', members };
+  }
   return route.createMailboxRoute(
-    request('/api/mailboxes', { method: 'POST', body: JSON.stringify(body) })
+    request('/api/mailboxes', { method: 'POST', body: JSON.stringify(payload) })
   );
 }
 
