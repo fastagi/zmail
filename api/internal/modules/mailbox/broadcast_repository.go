@@ -88,7 +88,8 @@ func (r *repository) ListBroadcasts(ctx context.Context, organizationID uint, ma
 	if len(mailboxIDs) == 0 {
 		return []*domain.MailBroadcast{}, 0, nil
 	}
-	query := r.conn(ctx).Model(&MailBroadcastPO{}).Where("organization_id = ? AND mailbox_id IN ?", organizationID, mailboxIDs)
+	query := r.conn(ctx).Model(&MailBroadcastPO{}).Where("organization_id = ? AND mailbox_id IN ?", organizationID, mailboxIDs).
+		Where(unsealedBroadcast)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err

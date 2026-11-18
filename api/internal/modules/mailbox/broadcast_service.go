@@ -103,6 +103,10 @@ func (s *service) authorizeBroadcast(
 	if err := s.checkAccess(ctx, viewer, mailbox, need, ErrMailBroadcastNotFound); err != nil {
 		return nil, err
 	}
+	// A broadcast created before the mailbox's seal boundary is sealed with its mail.
+	if sealedFor(mailbox, broadcast.CreatedAt) {
+		return nil, ErrMailBroadcastNotFound
+	}
 	return broadcast, nil
 }
 
@@ -287,7 +291,7 @@ func (s *service) stoppedBroadcast(ctx context.Context, viewer domain.Organizati
 	if err != nil {
 		return nil, false, err
 	}
-	return broadcast, access.View, nil
+	return broadcast, access.View && !sealedFor(mailbox, broadcast.CreatedAt), nil
 }
 
 // ResumeBroadcast continues a paused broadcast; it needs Send on the sender mailbox at this call.

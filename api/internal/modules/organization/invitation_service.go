@@ -193,5 +193,6 @@ func (s *service) AcceptInvitation(
 			"role":            membership.Role,
 		},
 	})
+	s.publish(ctx, domain.NewOrganizationMemberJoinedEvent(invitation.OrganizationID, userID, membership.ID, s.now()))
 	return membership, nil
 }

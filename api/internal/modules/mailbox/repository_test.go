@@ -582,12 +582,16 @@ func TestRepositoryStoresDeliveryEventsOnceAndSummarizesThem(t *testing.T) {
 		t.Fatalf("the log does not carry the summary: %+v, %v", listed, err)
 	}
 
-	found, err := repo.FindOutboundMessageByProviderID(ctx, "prov-9@mail.example")
+	found, foundMailbox, err := repo.FindOutboundMessageByProviderID(ctx, "prov-9@mail.example")
 	if err != nil || found.ID != message.ID || found.MailboxAddress != mailbox.Address || found.OrganizationID != 1 {
 		t.Fatalf("FindOutboundMessageByProviderID = %+v, %v", found, err)
 	}
+	if foundMailbox.ID != mailbox.ID || foundMailbox.OrganizationID != 1 || foundMailbox.Type != domain.MailboxTypeShared ||
+		foundMailbox.WebhooksEnabled || foundMailbox.SealedBefore != nil {
+		t.Fatalf("provider-id lookup mailbox = %+v", foundMailbox)
+	}
 	for _, missing := range []string{"", "unknown@mail.example"} {
-		if _, err := repo.FindOutboundMessageByProviderID(ctx, missing); !errors.Is(err, ErrMailMessageNotFound) {
+		if _, _, err := repo.FindOutboundMessageByProviderID(ctx, missing); !errors.Is(err, ErrMailMessageNotFound) {
 			t.Fatalf("provider id %q error = %v", missing, err)
 		}
 	}
@@ -599,7 +603,7 @@ func TestRepositoryStoresDeliveryEventsOnceAndSummarizesThem(t *testing.T) {
 	if _, err := repo.CreateMessage(ctx, inbound); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if _, err := repo.FindOutboundMessageByProviderID(ctx, "only-inbound@sender.test"); !errors.Is(err, ErrMailMessageNotFound) {
+	if _, _, err := repo.FindOutboundMessageByProviderID(ctx, "only-inbound@sender.test"); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("an inbound message matched a provider event: %v", err)
 	}
 	if _, _, err := repo.AddMessageEvents(ctx, 999999, []domain.MailEvent{{Type: domain.MailEventAccepted, OccurredAt: at(0)}}); !errors.Is(err, ErrMailMessageNotFound) {

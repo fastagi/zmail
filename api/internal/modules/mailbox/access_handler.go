@@ -86,3 +86,41 @@ func (h *Handler) ListMailboxAccessEvents(c *gin.Context) {
 	privateResponse(c)
 	response.Success(c, paginator)
 }
+
+// HandOverMailbox makes a personal mailbox shared with a successor and seals its history.
+func (h *Handler) HandOverMailbox(c *gin.Context) {
+	viewer, mailboxID, ok := mailboxScope(c)
+	if !ok {
+		return
+	}
+	var req HandOverMailboxRequest
+	if !httphandler.BindJSON(c, &req) {
+		return
+	}
+	mailbox, err := h.service.HandOverMailbox(c.Request.Context(), viewer, mailboxID, req.SuccessorUserID)
+	if err != nil {
+		response.HandleError(c, "Failed to hand over mailbox", err)
+		return
+	}
+	privateResponse(c)
+	response.Created(c, toMailboxResponse(mailbox))
+}
+
+// DeleteMailboxSealedMessages deletes a mailbox's sealed history for good.
+func (h *Handler) DeleteMailboxSealedMessages(c *gin.Context) {
+	viewer, mailboxID, ok := mailboxScope(c)
+	if !ok {
+		return
+	}
+	var req DeleteMailboxSealedMessagesRequest
+	if !httphandler.BindJSON(c, &req) {
+		return
+	}
+	deleted, err := h.service.DeleteSealedHistory(c.Request.Context(), viewer, mailboxID, req.ConfirmAddress)
+	if err != nil {
+		response.HandleError(c, "Failed to delete sealed history", err)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, MailboxSealedDeletionResponse{DeletedMessages: deleted.Messages, DeletedBroadcasts: deleted.Broadcasts})
+}

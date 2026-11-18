@@ -149,7 +149,7 @@ func (s *service) RecordDeliveryEvent(
 	if err != nil {
 		return nil, domain.MailEvent{}, false, err
 	}
-	message, err := s.repo.FindOutboundMessageByProviderID(ctx, providerMessageID)
+	message, mailbox, err := s.repo.FindOutboundMessageByProviderID(ctx, providerMessageID)
 	if err != nil {
 		return nil, domain.MailEvent{}, false, err
 	}
@@ -172,16 +172,15 @@ func (s *service) RecordDeliveryEvent(
 		if added == 0 || !publish {
 			return nil, nil
 		}
-		return []MailNotification{{
-			Type:           eventType,
-			OrganizationID: message.OrganizationID,
-			MailboxAddress: message.MailboxAddress,
-			Message:        message,
-			Recipient:      event.Recipient,
-			Reason:         event.Detail,
-			OccurredAt:     event.OccurredAt,
-			Key:            "event:" + event.ProviderEventID,
-		}}, nil
+		// A message sealed by a handover still records its events; the webhook guard keeps them
+		// from being published.
+		notification := mailNotificationFor(mailbox, message)
+		notification.Type = eventType
+		notification.Recipient = event.Recipient
+		notification.Reason = event.Detail
+		notification.OccurredAt = event.OccurredAt
+		notification.Key = "event:" + event.ProviderEventID
+		return []MailNotification{notification}, nil
 	})
 	if err != nil {
 		return nil, domain.MailEvent{}, false, err

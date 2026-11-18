@@ -43,6 +43,23 @@ func (r CreateMailboxRequest) input() CreateMailboxInput {
 }
 
 // SetMailboxMemberRequest sets one member's permission.
+// HandOverMailboxRequest names the successor of a personal mailbox.
+type HandOverMailboxRequest struct {
+	SuccessorUserID uint `json:"successor_user_id" binding:"required"`
+}
+
+// DeleteMailboxSealedMessagesRequest confirms deleting a mailbox's sealed history with its address.
+type DeleteMailboxSealedMessagesRequest struct {
+	ConfirmAddress string `json:"confirm_address" binding:"required,max=320"`
+}
+
+// MailboxSealedDeletionResponse counts what deleting the sealed history removed.
+type MailboxSealedDeletionResponse struct {
+	DeletedMessages   int64 `json:"deleted_messages"`
+	DeletedBroadcasts int64 `json:"deleted_broadcasts"`
+}
+
+// SetMailboxMemberRequest sets one member's permission.
 type SetMailboxMemberRequest struct {
 	Permission string `json:"permission" binding:"required,max=16"`
 }

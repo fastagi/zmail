@@ -104,6 +104,13 @@ type Service interface {
 	SetMailboxMember(ctx context.Context, viewer domain.OrganizationContext, mailboxID, userID uint, permission domain.MailboxPermission) (*domain.MailboxMember, error)
 	RemoveMailboxMember(ctx context.Context, viewer domain.OrganizationContext, mailboxID, userID uint) error
 	ListMailboxAccessEvents(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, page, size int) ([]*domain.MailboxAccessEvent, int64, error)
+	// HandOverMailbox makes a personal mailbox shared with a successor and seals its history.
+	HandOverMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID, successorUserID uint) (*domain.Mailbox, error)
+	// DeleteSealedHistory deletes the messages and broadcasts before the seal boundary.
+	DeleteSealedHistory(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, confirmAddress string) (*SealedDeletion, error)
+	// MemberRemoved and MemberJoined follow the organization starter's membership events.
+	MemberRemoved(ctx context.Context, event domain.OrganizationMemberRemovedEvent) error
+	MemberJoined(ctx context.Context, event domain.OrganizationMemberJoinedEvent) error
 	ListTemplates(ctx context.Context, organizationID uint) ([]*domain.MailTemplate, error)
 	GetTemplate(ctx context.Context, organizationID, id uint) (*domain.MailTemplate, error)
 	CreateTemplate(ctx context.Context, organizationID, createdBy uint, input TemplateInput) (*domain.MailTemplate, error)
@@ -541,7 +548,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	if message.IdempotencyKey != "" {
 		existing, findErr := s.repo.FindMessageByIdempotencyKey(ctx, mailbox.ID, message.IdempotencyKey)
 		if findErr == nil {
-			replayed, replayErr := replayOutbound(existing, message.IdempotencyFingerprint)
+			replayed, replayErr := replayOutbound(mailbox, existing, message.IdempotencyFingerprint)
 			return replayed, false, replayErr
 		}
 		if !errors.Is(findErr, ErrMailMessageNotFound) {
@@ -564,7 +571,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	}
 	if !created {
 		// A concurrent request with the same key stored its message first.
-		replayed, replayErr := replayOutbound(message, fingerprint)
+		replayed, replayErr := replayOutbound(mailbox, message, fingerprint)
 		return replayed, false, replayErr
 	}
 
@@ -628,12 +635,8 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 // sendNotifications lists what a finished send tells webhook endpoints: whether the provider
 // took the message, and anything it already said about a recipient.
 func sendNotifications(mailbox *domain.Mailbox, message *domain.MailMessage, events []domain.MailEvent, at time.Time) []MailNotification {
-	base := MailNotification{
-		OrganizationID: mailbox.OrganizationID,
-		MailboxAddress: mailbox.Address,
-		Message:        message,
-		OccurredAt:     at,
-	}
+	base := mailNotificationFor(mailbox, message)
+	base.OccurredAt = at
 	outcome := base
 	outcome.Type = WebhookMailSent
 	if message.Status == domain.MailStatusFailed {
@@ -654,6 +657,24 @@ func sendNotifications(mailbox *domain.Mailbox, message *domain.MailMessage, eve
 		notifications = append(notifications, notification)
 	}
 	return notifications
+}
+
+// mailNotificationFor starts a notification about a message of the mailbox, carrying what the
+// webhook guard needs to know about the mailbox.
+func mailNotificationFor(mailbox *domain.Mailbox, message *domain.MailMessage) MailNotification {
+	return MailNotification{
+		OrganizationID:  mailbox.OrganizationID,
+		MailboxAddress:  mailbox.Address,
+		MailboxType:     mailbox.Type,
+		WebhooksEnabled: mailbox.WebhooksEnabled,
+		SealedBefore:    mailbox.SealedBefore,
+		Message:         message,
+	}
+}
+
+// sealedFor reports whether a message or broadcast created at createdAt is sealed in the mailbox.
+func sealedFor(mailbox *domain.Mailbox, createdAt time.Time) bool {
+	return mailbox.SealedBefore != nil && createdAt.Before(*mailbox.SealedBefore)
 }
 
 // sendEvents turns what the provider said during the send call into delivery events.
@@ -678,9 +699,10 @@ func sendEvents(outcome mailtransport.Result, accepted bool, at time.Time) []dom
 }
 
 // replayOutbound answers a send whose idempotency key already names a message. The provider is
-// not called again: the caller gets the first attempt's outcome, whatever it was.
-func replayOutbound(existing *domain.MailMessage, fingerprint string) (*domain.MailMessage, error) {
-	if existing.IdempotencyFingerprint != fingerprint {
+// not called again: the caller gets the first attempt's outcome, whatever it was. A sealed
+// message is a conflict that reveals nothing of it.
+func replayOutbound(mailbox *domain.Mailbox, existing *domain.MailMessage, fingerprint string) (*domain.MailMessage, error) {
+	if sealedFor(mailbox, existing.CreatedAt) || existing.IdempotencyFingerprint != fingerprint {
 		return nil, ErrMailIdempotencyConflict
 	}
 	switch existing.Status {
@@ -829,13 +851,10 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		if created, createErr = s.repo.CreateInboundMessage(tx, message); createErr != nil || !created {
 			return nil, createErr
 		}
-		return []MailNotification{{
-			Type:           WebhookMailReceived,
-			OrganizationID: mailbox.OrganizationID,
-			MailboxAddress: mailbox.Address,
-			Message:        message,
-			OccurredAt:     s.now().UTC(),
-		}}, nil
+		notification := mailNotificationFor(mailbox, message)
+		notification.Type = WebhookMailReceived
+		notification.OccurredAt = s.now().UTC()
+		return []MailNotification{notification}, nil
 	})
 	if err != nil {
 		return nil, false, err

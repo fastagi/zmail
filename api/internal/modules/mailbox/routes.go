@@ -75,6 +75,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.members.destroy").WhereNumber("mailbox_id").WhereNumber("user_id")
 		auth.GET("/mailboxes/:mailbox_id/access-events", h.ListMailboxAccessEvents).
 			Name("mailboxes.access_events.index").WhereNumber("mailbox_id")
+		auth.POST("/mailboxes/:mailbox_id/handovers", h.HandOverMailbox).
+			Name("mailboxes.handovers.store").WhereNumber("mailbox_id")
+		auth.DELETE("/mailboxes/:mailbox_id/sealed-messages", h.DeleteMailboxSealedMessages).
+			Name("mailboxes.sealed_messages.destroy").WhereNumber("mailbox_id")
 
 		auth.GET("/mailboxes/:mailbox_id/messages", h.ListMessages).
 			Name("mailboxes.messages.index").WhereNumber("mailbox_id")

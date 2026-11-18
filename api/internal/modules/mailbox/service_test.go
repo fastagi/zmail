@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -46,14 +47,20 @@ func sharedInput(localPart, displayName, domainName string) CreateMailboxInput {
 // fakeMemberships treats every user as a member of every organization unless listed in absent.
 type fakeMemberships struct {
 	absent map[uint]bool
+	// ids overrides the membership id of a user, as a rejoin with a new membership does.
+	ids map[uint]uint
 }
 
 func (f *fakeMemberships) FindForUser(_ context.Context, organizationID, userID uint) (*domain.OrganizationMembership, error) {
 	if f.absent[userID] {
 		return nil, domain.ErrOrganizationNotFound
 	}
+	id := membershipIDOf(organizationID, userID)
+	if override, ok := f.ids[userID]; ok {
+		id = override
+	}
 	return &domain.OrganizationMembership{
-		ID: membershipIDOf(organizationID, userID), OrganizationID: organizationID, UserID: userID, Role: domain.OrganizationRoleMember,
+		ID: id, OrganizationID: organizationID, UserID: userID, Role: domain.OrganizationRoleMember,
 	}, nil
 }
 
@@ -400,7 +407,7 @@ func (r *fakeRepository) FindMessageByIdempotencyKey(_ context.Context, mailboxI
 
 func (r *fakeRepository) FindOutboundMessageForOrganization(_ context.Context, organizationID, id uint) (*domain.MailMessage, error) {
 	message, ok := r.messages[id]
-	if !ok || message.Direction != domain.MailDirectionOutbound {
+	if !ok || message.Direction != domain.MailDirectionOutbound || r.sealed(message) {
 		return nil, ErrMailMessageNotFound
 	}
 	mailbox, ok := r.mailboxes[message.MailboxID]
@@ -434,7 +441,7 @@ func (r *fakeRepository) UpdateMessageDelivery(_ context.Context, id uint, statu
 func (r *fakeRepository) ListMessages(_ context.Context, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error) {
 	var listed []*domain.MailMessage
 	for _, message := range r.messages {
-		if message.MailboxID == mailboxID && (filter.Direction == "" || message.Direction == filter.Direction) {
+		if message.MailboxID == mailboxID && !r.sealed(message) && (filter.Direction == "" || message.Direction == filter.Direction) {
 			listed = append(listed, message)
 		}
 	}
@@ -443,7 +450,7 @@ func (r *fakeRepository) ListMessages(_ context.Context, mailboxID uint, filter 
 
 func (r *fakeRepository) FindMessage(_ context.Context, mailboxID, id uint) (*domain.MailMessage, error) {
 	message, ok := r.messages[id]
-	if !ok || message.MailboxID != mailboxID {
+	if !ok || message.MailboxID != mailboxID || r.sealed(message) {
 		return nil, ErrMailMessageNotFound
 	}
 	copied := *message
@@ -461,7 +468,10 @@ func (r *fakeRepository) SetMessageRead(_ context.Context, mailboxID, id, member
 	if !ok || message.MailboxID != mailboxID || r.sealed(message) {
 		return ErrMailMessageNotFound
 	}
-	if message.Direction == domain.MailDirectionOutbound || membershipID == 0 {
+	if membershipID == 0 {
+		return domain.ErrInvalidInput
+	}
+	if message.Direction == domain.MailDirectionOutbound {
 		return nil
 	}
 	key := [2]uint{membershipID, id}
@@ -487,7 +497,7 @@ func (r *fakeRepository) ReadMessages(_ context.Context, membershipID uint, mess
 
 func (r *fakeRepository) DeleteMailboxReads(_ context.Context, mailboxID, membershipID uint) error {
 	for key := range r.reads {
-		if message, ok := r.messages[key[1]]; key[0] == membershipID && ok && message.MailboxID == mailboxID {
+		if message, ok := r.messages[key[1]]; (membershipID == 0 || key[0] == membershipID) && ok && message.MailboxID == mailboxID {
 			delete(r.reads, key)
 		}
 	}
@@ -496,7 +506,7 @@ func (r *fakeRepository) DeleteMailboxReads(_ context.Context, mailboxID, member
 
 func (r *fakeRepository) DeleteMessage(_ context.Context, mailboxID, id uint) error {
 	message, ok := r.messages[id]
-	if !ok || message.MailboxID != mailboxID {
+	if !ok || message.MailboxID != mailboxID || r.sealed(message) {
 		return ErrMailMessageNotFound
 	}
 	delete(r.messages, id)
@@ -520,7 +530,7 @@ func (r *fakeRepository) ListMessagesForOrganization(_ context.Context, organiza
 	var listed []*domain.MailMessage
 	for _, message := range r.messages {
 		if mailbox, ok := r.mailboxes[message.MailboxID]; ok && mailbox.OrganizationID == organizationID &&
-			slices.Contains(mailboxIDs, message.MailboxID) {
+			slices.Contains(mailboxIDs, message.MailboxID) && !r.sealed(message) {
 			listed = append(listed, message)
 		}
 	}
@@ -565,17 +575,98 @@ func (r *fakeRepository) ListMessageEvents(_ context.Context, messageID uint) ([
 	return append([]domain.MailEvent(nil), r.events[messageID]...), nil
 }
 
-func (r *fakeRepository) FindOutboundMessageByProviderID(_ context.Context, providerMessageID string) (*domain.MailMessage, error) {
+func (r *fakeRepository) FindOutboundMessageByProviderID(_ context.Context, providerMessageID string) (*domain.MailMessage, *domain.Mailbox, error) {
 	for _, message := range r.messages {
 		if message.Direction == domain.MailDirectionOutbound && message.MessageID == providerMessageID && providerMessageID != "" {
 			copied := *message
-			if mailbox, ok := r.mailboxes[message.MailboxID]; ok {
-				copied.MailboxAddress, copied.OrganizationID = mailbox.Address, mailbox.OrganizationID
+			mailbox := &domain.Mailbox{ID: message.MailboxID}
+			if stored, ok := r.mailboxes[message.MailboxID]; ok {
+				copied.MailboxAddress, copied.OrganizationID = stored.Address, stored.OrganizationID
+				boxCopy := *stored
+				mailbox = &boxCopy
 			}
-			return &copied, nil
+			return &copied, mailbox, nil
 		}
 	}
-	return nil, ErrMailMessageNotFound
+	return nil, nil, ErrMailMessageNotFound
+}
+
+func (r *fakeRepository) updateOwned(organizationID, userID uint, change func(*domain.Mailbox) bool) []*domain.Mailbox {
+	var changed []*domain.Mailbox
+	for _, mailbox := range r.mailboxes {
+		if mailbox.OrganizationID == organizationID && mailbox.Type == domain.MailboxTypePersonal &&
+			mailbox.OwnerUserID != nil && *mailbox.OwnerUserID == userID && change(mailbox) {
+			copied := *mailbox
+			changed = append(changed, &copied)
+		}
+	}
+	sort.Slice(changed, func(i, j int) bool { return changed[i].ID < changed[j].ID })
+	return changed
+}
+
+func (r *fakeRepository) MarkOwnerLeft(_ context.Context, organizationID, userID uint, at time.Time) ([]*domain.Mailbox, error) {
+	return r.updateOwned(organizationID, userID, func(mailbox *domain.Mailbox) bool {
+		left := at
+		mailbox.OwnerLeftAt = &left
+		return true
+	}), nil
+}
+
+func (r *fakeRepository) ClearOwnerLeft(_ context.Context, organizationID, userID uint) ([]*domain.Mailbox, error) {
+	return r.updateOwned(organizationID, userID, func(mailbox *domain.Mailbox) bool {
+		if mailbox.OwnerLeftAt == nil {
+			return false
+		}
+		mailbox.OwnerLeftAt = nil
+		return true
+	}), nil
+}
+
+func (r *fakeRepository) MailboxesGrantedTo(_ context.Context, organizationID, membershipID uint) ([]uint, error) {
+	latest := map[uint]domain.MailboxAccessEventType{}
+	for _, event := range r.accessEvents {
+		mailbox, ok := r.mailboxes[event.MailboxID]
+		if !ok || mailbox.Type != domain.MailboxTypeShared || event.OrganizationID != organizationID ||
+			fmt.Sprint(event.Detail["membership_id"]) != fmt.Sprint(membershipID) {
+			continue
+		}
+		switch event.Type {
+		case domain.MailboxAccessCreated, domain.MailboxAccessMemberSet, domain.MailboxAccessHandedOver, domain.MailboxAccessMemberRemoved:
+			latest[event.MailboxID] = event.Type
+		default:
+		}
+	}
+	var granted []uint
+	for id, eventType := range latest {
+		if eventType != domain.MailboxAccessMemberRemoved {
+			granted = append(granted, id)
+		}
+	}
+	slices.Sort(granted)
+	return granted, nil
+}
+
+func (r *fakeRepository) HandOverMailbox(_ context.Context, mailboxID uint, sealedBefore time.Time) (bool, error) {
+	mailbox, ok := r.mailboxes[mailboxID]
+	if !ok || mailbox.Type != domain.MailboxTypePersonal {
+		return false, nil
+	}
+	boundary := sealedBefore
+	mailbox.Type, mailbox.OwnerUserID, mailbox.OwnerLeftAt, mailbox.SealedBefore = domain.MailboxTypeShared, nil, nil, &boundary
+	return true, nil
+}
+
+func (r *fakeRepository) DeleteSealedHistory(_ context.Context, mailboxID uint, before time.Time) (int64, int64, error) {
+	var deleted int64
+	for id, message := range r.messages {
+		if message.MailboxID == mailboxID && message.CreatedAt.Before(before) {
+			delete(r.messages, id)
+			delete(r.attachments, id)
+			delete(r.events, id)
+			deleted++
+		}
+	}
+	return deleted, 0, nil
 }
 
 // fakeNotifier records the notifications the service publishes; failures makes that many

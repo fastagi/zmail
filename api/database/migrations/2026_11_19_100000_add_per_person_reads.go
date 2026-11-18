@@ -49,7 +49,7 @@ func (m *addPerPersonReads) Down(db *gorm.DB) error {
 		 FROM mail_message_reads reads, mailboxes, mailbox_members member
 		 WHERE reads.message_id = message.id AND mailboxes.id = message.mailbox_id
 		   AND member.mailbox_id = mailboxes.id AND member.user_id = mailboxes.created_by
-		   AND member.membership_id = reads.membership_id`,
+		   AND member.permission = 'manage' AND member.membership_id = reads.membership_id`,
 		`UPDATE mail_messages SET read_at = created_at WHERE direction = 'outbound' AND read_at IS NULL`,
 		`DROP TABLE IF EXISTS mail_message_reads`,
 	)

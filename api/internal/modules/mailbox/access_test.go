@@ -32,11 +32,12 @@ const (
 )
 
 type accessFixture struct {
-	service   *service
-	repo      domain.MailboxRepository
-	transport *fakeTransport
-	admin     domain.OrganizationContext
-	b, c, d   domain.OrganizationContext
+	service     *service
+	repo        domain.MailboxRepository
+	transport   *fakeTransport
+	memberships *fakeMemberships
+	admin       domain.OrganizationContext
+	b, c, d     domain.OrganizationContext
 	// personal is b@, B's personal mailbox; team is team@, shared with B (send) and C (view).
 	personal, team               *domain.Mailbox
 	personalMessage, teamMessage *domain.MailMessage
@@ -54,9 +55,10 @@ func newAccessFixture(t *testing.T) *accessFixture {
 	t.Helper()
 	repo := newFakeRepository()
 	transport := &fakeTransport{}
-	svc := NewService(repo, &fakeMemberships{absent: map[uint]bool{notMember: true}}, repo, newFakeContacts(), &stubBroadcasts{},
+	memberships := newAccessMemberships()
+	svc := NewService(repo, memberships, repo, newFakeContacts(), &stubBroadcasts{},
 		nil, nil, transport, &fakeNotifier{}, accessSettings())
-	return seedAccessFixture(t, svc, repo, transport)
+	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
 
 // newPostgresAccessFixture builds the same scenario on PostgreSQL, with broadcasts.
@@ -65,16 +67,21 @@ func newPostgresAccessFixture(t *testing.T) *accessFixture {
 	repo, db := openRepository(t)
 	createOwner(t, db, accessOrg)
 	transport := &fakeTransport{}
-	svc := NewService(repo, &fakeMemberships{absent: map[uint]bool{notMember: true}}, repo, repo, repo,
+	memberships := newAccessMemberships()
+	svc := NewService(repo, memberships, repo, repo, repo,
 		nil, nil, transport, &fakeNotifier{}, accessSettings())
-	return seedAccessFixture(t, svc, repo, transport)
+	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
 
-func seedAccessFixture(t *testing.T, svc *service, repo domain.MailboxRepository, transport *fakeTransport) *accessFixture {
+func newAccessMemberships() *fakeMemberships {
+	return &fakeMemberships{absent: map[uint]bool{notMember: true}, ids: map[uint]uint{}}
+}
+
+func seedAccessFixture(t *testing.T, svc *service, repo domain.MailboxRepository, transport *fakeTransport, memberships *fakeMemberships) *accessFixture {
 	t.Helper()
 	ctx := context.Background()
 	f := &accessFixture{
-		service: svc, repo: repo, transport: transport,
+		service: svc, repo: repo, transport: transport, memberships: memberships,
 		admin: viewerOf(accessOrg, accessAdmin, domain.OrganizationRoleAdmin),
 		b:     viewerOf(accessOrg, accessB, domain.OrganizationRoleMember),
 		c:     viewerOf(accessOrg, accessC, domain.OrganizationRoleMember),
@@ -170,6 +177,8 @@ func accessRouter(svc *service, viewer domain.OrganizationContext) *gin.Engine {
 	router.PUT("/mailboxes/:mailbox_id/members/:user_id", handler.SetMailboxMember)
 	router.DELETE("/mailboxes/:mailbox_id/members/:user_id", handler.RemoveMailboxMember)
 	router.GET("/mailboxes/:mailbox_id/access-events", handler.ListMailboxAccessEvents)
+	router.POST("/mailboxes/:mailbox_id/handovers", handler.HandOverMailbox)
+	router.DELETE("/mailboxes/:mailbox_id/sealed-messages", handler.DeleteMailboxSealedMessages)
 	router.POST("/mail-broadcasts/:broadcast_id/pauses", handler.PauseBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/cancellations", handler.CancelBroadcast)
 	return router

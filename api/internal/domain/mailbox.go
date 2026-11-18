@@ -594,7 +594,8 @@ type MailboxRepository interface {
 	SetMessageRead(ctx context.Context, mailboxID, id, membershipID uint, read bool, at time.Time) error
 	// ReadMessages reports which of the given messages the membership has read.
 	ReadMessages(ctx context.Context, membershipID uint, messageIDs []uint) (map[uint]bool, error)
-	// DeleteMailboxReads removes a membership's read rows of every message of a mailbox.
+	// DeleteMailboxReads removes a membership's read rows of every message of a mailbox; membership
+	// id 0 removes everyone's.
 	DeleteMailboxReads(ctx context.Context, mailboxID, membershipID uint) error
 	DeleteMessage(ctx context.Context, mailboxID, id uint) error
 	CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error)
@@ -610,8 +611,25 @@ type MailboxRepository interface {
 	ListMessageAttachments(ctx context.Context, messageID uint) ([]MailAttachment, error)
 	// FindMessageAttachment loads one attachment of a message with its content.
 	FindMessageAttachment(ctx context.Context, messageID, id uint) (*MailAttachment, error)
-	// FindOutboundMessageByProviderID finds the outbound message a provider event names.
-	FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*MailMessage, error)
+	// FindOutboundMessageByProviderID finds the outbound message a provider event names, sealed or
+	// not, with its mailbox's id, organization, address, type, webhook switch, and seal boundary.
+	FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*MailMessage, *Mailbox, error)
+
+	// MarkOwnerLeft records that the user left the organization on each of their live personal
+	// mailboxes there and returns those mailboxes.
+	MarkOwnerLeft(ctx context.Context, organizationID, userID uint, at time.Time) ([]*Mailbox, error)
+	// ClearOwnerLeft clears the departure of the user's live personal mailboxes awaiting handover
+	// and returns those mailboxes.
+	ClearOwnerLeft(ctx context.Context, organizationID, userID uint) ([]*Mailbox, error)
+	// MailboxesGrantedTo lists the live shared mailboxes whose access history last granted the
+	// membership access rather than removed it.
+	MailboxesGrantedTo(ctx context.Context, organizationID, membershipID uint) ([]uint, error)
+	// HandOverMailbox makes a personal mailbox shared, without owner, sealed before the boundary.
+	// It reports false when the mailbox is not personal any more.
+	HandOverMailbox(ctx context.Context, mailboxID uint, sealedBefore time.Time) (bool, error)
+	// DeleteSealedHistory cancels and deletes the mailbox's broadcasts created before the boundary
+	// and deletes its messages created before it, with their dependants.
+	DeleteSealedHistory(ctx context.Context, mailboxID uint, before time.Time) (messages, broadcasts int64, err error)
 	// ListMessagesForOrganization lists messages across the given mailboxes of the organization,
 	// newest first, without bodies. No mailbox ids list nothing.
 	ListMessagesForOrganization(ctx context.Context, organizationID uint, mailboxIDs []uint, filter MailLogFilter) ([]*MailMessage, int64, error)

@@ -3,12 +3,14 @@ package organization
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/domain"
+	infraevents "github.com/fastagi/zmail/api/internal/infra/events"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 	"github.com/fastagi/zmail/api/internal/modules/user"
 )
@@ -30,12 +32,20 @@ type Service interface {
 	AcceptInvitation(ctx context.Context, userID uint, req *AcceptOrganizationInvitationRequest) (*domain.OrganizationMembership, error)
 }
 
+// MembershipEventPublisher publishes membership events after the change commits; the injected
+// events.EventBus implements it.
+type MembershipEventPublisher interface {
+	Publish(ctx context.Context, event infraevents.BasicEvent) error
+}
+
 type service struct {
 	repo             domain.OrganizationRepository
 	invitationRepo   domain.OrganizationInvitationRepository
 	invitationMailer InvitationMailer
 	invitationPolicy InvitationPolicy
-	now              func() time.Time
+	// events is nil when nothing listens, as in tests that do not need it.
+	events MembershipEventPublisher
+	now    func() time.Time
 }
 
 var (
@@ -49,6 +59,7 @@ func NewService(
 	invitationRepo domain.OrganizationInvitationRepository,
 	invitationMailer InvitationMailer,
 	invitationPolicy InvitationPolicy,
+	events MembershipEventPublisher,
 ) *service {
 	if invitationPolicy.TTL <= 0 {
 		invitationPolicy = NewInvitationPolicy(nil)
@@ -58,6 +69,7 @@ func NewService(
 		invitationRepo:   invitationRepo,
 		invitationMailer: invitationMailer,
 		invitationPolicy: invitationPolicy,
+		events:           events,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -108,7 +120,20 @@ func (s *service) Create(ctx context.Context, userID uint, req *CreateOrganizati
 			"role": domain.OrganizationRoleOwner,
 		},
 	})
+	s.publish(ctx, domain.NewOrganizationMemberJoinedEvent(owner.OrganizationID, owner.UserID, owner.ID, s.now()))
 	return owner, nil
+}
+
+// publish tells subscribers about a committed membership change. A subscriber's failure is
+// logged and never undoes or fails the change.
+func (s *service) publish(ctx context.Context, event infraevents.BasicEvent) {
+	if s.events == nil {
+		return
+	}
+	if err := s.events.Publish(ctx, event); err != nil {
+		slog.ErrorContext(ctx, "organization membership event publication failed",
+			slog.String("event", event.EventName()), slog.String("error", err.Error()))
+	}
 }
 
 func (s *service) List(ctx context.Context, userID uint, page, pageSize int) ([]*domain.OrganizationMembership, int64, error) {
