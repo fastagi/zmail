@@ -9467,6 +9467,7 @@ components:
         failure_code:
           type: string
           description: Stable provider or transport reason when `status` is `failed`; empty otherwise.
+          maxLength: 120
         queued_reason:
           type:
             - string
@@ -9475,7 +9476,6 @@ components:
             - send_limit
             - null
           description: '`send_limit` while a queued message waits for room in the organization''s send limit; otherwise null.'
-          maxLength: 120
         last_event:
           $ref: '#/components/schemas/MailEventSummary'
         attachment_count:
