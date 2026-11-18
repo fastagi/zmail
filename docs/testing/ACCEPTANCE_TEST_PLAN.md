@@ -201,7 +201,11 @@ holding `view`, `send` (reply, includes view), or `manage` (change members, incl
 and admins manage mailboxes but read no mail by role alone. The rules come from
 `docs/MAILBOX_ACCESS_PRD.zh-CN.md`; the API side of every case is
 automated in [`api/tests/kest/mailbox_access.flow.md`](../../api/tests/kest/mailbox_access.flow.md),
-whose header lists the environment it needs.
+whose header lists the environment it needs. Run it with `kest run ... --var run_id=<unique>
+--var scheduled_at=<UTC time about one day ahead>` against an API started with the mailbox,
+organization, and webhook starters and `WEBHOOK_ALLOW_PRIVATE_TARGETS=true`; `run_local.sh`
+passes only `run_id` and cannot run it as is. The flow needs no public DNS and captures nothing
+from exec steps, which kest 0.7.2 does not support.
 
 **Setup.** Organization O with admin A and members B and C. A creates the personal mailbox `b@`
 for B, the personal mailbox `c@` for C, and the shared mailbox `team@` with B on `send` and C on

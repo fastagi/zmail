@@ -12,11 +12,10 @@ with `view`. Every mailbox receives one inbound message with an attachment durin
 
 ## How To Run
 
-`run_local.sh` starts the API with `APP_ENV=test` and only the default starters. The API process
-inherits the caller's environment, so export these before running this flow:
+Start the API with `APP_ENV=test`, the starters below, and a disposable PostgreSQL database, then
+run kest from a directory whose `.kest/config.yaml` points the `local` environment at the API:
 
 ```bash
-cd api
 export FASTBUILD_TEST_POSTGRES_DSN=postgres://...      # disposable database (also used by helpers)
 export OPTIONAL_STARTERS=organization,mailbox,webhook
 export MAILBOX_DOMAIN=mail.localhost
@@ -24,28 +23,45 @@ export MAILBOX_PROVIDER=log                            # nothing leaves the mach
 export MAILBOX_INBOUND_SECRET=kest-inbound-secret-change-me
 export MAILBOX_PUBLIC_URL=http://localhost:3000        # enables broadcasts
 export WEBHOOK_ENCRYPTION_KEY=kest-webhook-key-at-least-32-characters
-./tests/kest/run_local.sh tests/kest/mailbox_access.flow.md
+export WEBHOOK_ALLOW_PRIVATE_TARGETS=true              # AC-9 subscribes a loopback endpoint
+# ... migrate and start the API with these variables, then:
+kest run tests/kest/mailbox_access.flow.md -e local --fail-fast \
+  --var "run_id=$(date +%s)" \
+  --var "scheduled_at=$(date -u -v+1d +%Y-%m-%dT%H:%M:%SZ)"   # GNU date: -d '+1 day'
 ```
 
-The helper steps need `sh`, `curl`, `openssl`, `awk`, and `psql` on `PATH`.
+The flow needs two variables: `run_id` (unique per run) and `scheduled_at` (an RFC 3339 UTC time
+roughly one day ahead, used by AC-13). `run_local.sh` passes only `run_id`, so it cannot run this
+flow as is. kest 0.7.2 drops values captured by `@type exec` steps and does not substitute
+`{{variables}}` inside an assertion's or capture's JSON path, so this flow never captures from an
+exec step and selects list items by literal queries (`#(display_name="B")`,
+`#(subject%"b-private-*")`), then compares ids on the right-hand side.
+
+The helper steps need `sh`, `curl`, `openssl`, `awk`, `sed`, and `psql` on `PATH`.
 
 ## Helpers For Steps That Plain HTTP Steps Cannot Express
 
-The first step (`install-helpers`, an exec step) writes two scripts under `tmp/kest/`:
+The first step (`install-helpers`, an exec step) writes three scripts under
+`tmp/kest/mailbox-access-<run_id>/` (relative to where kest runs; later steps use that path
+directly):
 
 - `inbound.sh <recipient> <subject>` builds a multipart RFC 5322 message with one attachment,
   signs it as the mail edge does (`X-Mailbox-Signature`, HMAC-SHA256 over
   `<t>.<recipient>.<raw body>` with `MAILBOX_INBOUND_SECRET`, see `contracts/MAILBOXES.md`), posts
-  it to `POST /v1/inbound-mail-messages`, fails unless the answer is `201`, and prints the
-  response envelope. It reads the API base URL from `.kest/config.yaml` (written by
-  `run_local.sh`) unless `KEST_API_BASE_URL` is set. Used by setup, AC-5, AC-9, AC-10, and
-  AC-11.
-- `invite-token.sh <invitation_id>` makes an invitation acceptable without reading mail. The API
-  never returns invitation tokens and the test environment has no mail transport, so the helper
-  generates a fresh token and stores its SHA-256 hash on the invitation row in
-  `FASTBUILD_TEST_POSTGRES_DSN`. The acceptance itself still goes through
+  it to `POST /v1/inbound-mail-messages`, fails unless the answer is `201` with a message id, and
+  stores that id in `ids/<subject>`. It reads the API base URL from `.kest/config.yaml` unless
+  `KEST_API_BASE_URL` is set. Used by setup, AC-5, AC-9, AC-10, and AC-11. Later HTTP steps find
+  each message by its unique subject in a listing of someone who may read it.
+- `invite-token.sh <invitation_id> <token>` makes an invitation acceptable without reading mail.
+  The API never returns invitation tokens and the test environment has no mail transport, so the
+  helper stores the SHA-256 hash of the given token (`kest-invite-<run_id>-<invitation_id>`) on
+  the invitation row in `FASTBUILD_TEST_POSTGRES_DSN`. The acceptance itself still goes through
   `POST /v1/organization-invitations/accept`, so the membership-joined event fires as in
   production. Used to add B and C, and for B's rejoins (AC-16, AC-17).
+- `read-message.sh <bearer> <organization_id> <mailbox_id> <subject> <status> <error_code>` opens
+  the message stored under `ids/<subject>` and fails unless the answer has that status and
+  `error_code`. AC-10 uses it because nobody may list `b@` while it awaits handover, so no HTTP
+  step can learn the new message's id.
 
 No delivery-event (bounce) step is included: events match outbound messages by the provider's
 message id, and the development `log` provider stores none, so sealed delivery events are left to
@@ -53,13 +69,13 @@ the API test `TestEventsOfSealedMessagesStayHidden`.
 
 ## Known Limits Of This Flow
 
-- AC-9 counts webhook deliveries queued for one endpoint subscribed only to
-  `mail.message.received`; delivery to the endpoint's URL is not part of the proof.
-- AC-11 statistics compare C's `received` count for today before and after handover; a run that
-  crosses midnight UTC between those two steps fails spuriously.
-- AC-13 schedules the broadcast a day ahead and proves that it stays `scheduled` after A loses
-  `send`, and that A can still cancel it. Running it to completion needs the broadcast worker and
-  is covered by the API tests.
+- AC-9 counts webhook deliveries queued for one endpoint (`https://127.0.0.1:9/...`) subscribed
+  only to `mail.message.received`; delivery to the endpoint's URL is not part of the proof.
+- AC-11 statistics expect C's `received` count for today to be 5 before handover (`c@` 1, `team@`
+  4) and 6 after; a run that crosses midnight UTC fails spuriously.
+- AC-13 schedules the broadcast at `scheduled_at` and proves that it stays `scheduled` after A
+  loses `send`, and that A can still cancel it. Running it to completion needs the broadcast worker
+  and is covered by the API tests.
 - The deny paths for broadcasts (AC-15) assert `404` only: the design fixes the status, not the
   broadcast route's `error_code`.
 
@@ -105,16 +121,21 @@ if [ "$code" != "201" ]; then
   echo "inbound delivery to $rcpt returned $code: $(cat "$work/body.json")" >&2
   exit 1
 fi
+id=$(sed -n 's/.*"data":{[^}]*"id":\([0-9][0-9]*\).*/\1/p' "$work/body.json")
+case "$id" in ''|*[!0-9]*) echo "inbound delivery to $rcpt returned no message id: $(cat "$work/body.json")" >&2; exit 1 ;; esac
+mkdir -p "$(dirname "$0")/ids"
+printf '%s\n' "$id" > "$(dirname "$0")/ids/$subject"
 cat "$work/body.json"
 SH
 cat > "$dir/invite-token.sh" <<'SH'
 #!/bin/sh
-# usage: invite-token.sh <invitation_id>
+# usage: invite-token.sh <invitation_id> <token>
 set -eu
 id=$1
+token=$2
 case "$id" in ''|*[!0-9]*) echo "invitation id must be numeric" >&2; exit 1 ;; esac
+case "$token" in ''|*[!A-Za-z0-9-]*) echo "token must be non-empty [A-Za-z0-9-]" >&2; exit 1 ;; esac
 : "${FASTBUILD_TEST_POSTGRES_DSN:?export FASTBUILD_TEST_POSTGRES_DSN (the disposable test database)}"
-token=$(openssl rand -hex 32)
 hash=$(printf '%s' "$token" | openssl dgst -sha256 | awk '{print $NF}')
 updated=$(psql "$FASTBUILD_TEST_POSTGRES_DSN" -v ON_ERROR_STOP=1 -qtAc \
   "UPDATE organization_invitations SET token_hash = '$hash' WHERE id = $id RETURNING id" | head -n 1)
@@ -122,13 +143,33 @@ if [ "$updated" != "$id" ]; then
   echo "invitation $id not found" >&2
   exit 1
 fi
-printf '{"token":"%s"}\n' "$token"
+echo "invitation $id accepts its token"
 SH
-chmod +x "$dir/inbound.sh" "$dir/invite-token.sh"
+cat > "$dir/read-message.sh" <<'SH'
+#!/bin/sh
+# usage: read-message.sh <bearer_token> <organization_id> <mailbox_id> <subject> <status> <error_code>
+set -eu
+token=$1 org=$2 box=$3 subject=$4 want_status=$5 want_code=$6
+base_url=${KEST_API_BASE_URL:-$(awk '/^  local:/{f=1} f && /base_url:/{print $2; exit}' .kest/config.yaml)}
+id=$(cat "$(dirname "$0")/ids/$subject")
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+code=$(curl -sS -o "$work/body.json" -w '%{http_code}' \
+  -H "Authorization: Bearer $token" -H "Organization-Id: $org" \
+  "$base_url/v1/mailboxes/$box/messages/$id")
+body=$(cat "$work/body.json")
+echo "GET /v1/mailboxes/$box/messages/$id -> $code $body"
+if [ "$code" != "$want_status" ]; then
+  echo "expected status $want_status, got $code" >&2
+  exit 1
+fi
+case "$body" in
+  *"\"error_code\":\"$want_code\""*) ;;
+  *) echo "expected error_code $want_code" >&2; exit 1 ;;
+esac
+SH
+chmod +x "$dir/inbound.sh" "$dir/invite-token.sh" "$dir/read-message.sh"
 echo "$dir"
-
-[Captures]
-helpers = $line.0
 ```
 
 ```step
@@ -309,10 +350,7 @@ body.data.invitation.id exists
 @name Make B's invitation acceptable
 @type exec
 
-sh {{helpers}}/invite-token.sh {{b_invitation_id}}
-
-[Captures]
-b_invite_token = token
+sh tmp/kest/mailbox-access-{{run_id}}/invite-token.sh {{b_invitation_id}} kest-invite-{{run_id}}-{{b_invitation_id}}
 ```
 
 ```step
@@ -324,7 +362,7 @@ Content-Type: application/json
 Authorization: Bearer {{b_token}}
 
 {
-  "token": "{{b_invite_token}}"
+  "token": "kest-invite-{{run_id}}-{{b_invitation_id}}"
 }
 
 [Asserts]
@@ -374,10 +412,7 @@ body.data.invitation.id exists
 @name Make C's invitation acceptable
 @type exec
 
-sh {{helpers}}/invite-token.sh {{c_invitation_id}}
-
-[Captures]
-c_invite_token = token
+sh tmp/kest/mailbox-access-{{run_id}}/invite-token.sh {{c_invitation_id}} kest-invite-{{run_id}}-{{c_invitation_id}}
 ```
 
 ```step
@@ -389,7 +424,7 @@ Content-Type: application/json
 Authorization: Bearer {{c_token}}
 
 {
-  "token": "{{c_invite_token}}"
+  "token": "kest-invite-{{run_id}}-{{c_invitation_id}}"
 }
 
 [Asserts]
@@ -497,10 +532,7 @@ body.data.webhooks_enabled == false
 @name Inbound message with attachment to b@
 @type exec
 
-sh {{helpers}}/inbound.sh "{{b_address}}" "b-private-{{run_id}}"
-
-[Captures]
-b_msg = data.id
+sh tmp/kest/mailbox-access-{{run_id}}/inbound.sh "{{b_address}}" "b-private-{{run_id}}"
 ```
 
 ```step
@@ -508,10 +540,7 @@ b_msg = data.id
 @name Inbound message with attachment to c@
 @type exec
 
-sh {{helpers}}/inbound.sh "{{c_address}}" "c-private-{{run_id}}"
-
-[Captures]
-c_msg = data.id
+sh tmp/kest/mailbox-access-{{run_id}}/inbound.sh "{{c_address}}" "c-private-{{run_id}}"
 ```
 
 ```step
@@ -519,10 +548,41 @@ c_msg = data.id
 @name Inbound message with attachment to team@
 @type exec
 
-sh {{helpers}}/inbound.sh "{{team_address}}" "team-first-{{run_id}}"
+sh tmp/kest/mailbox-access-{{run_id}}/inbound.sh "{{team_address}}" "team-first-{{run_id}}"
+```
+
+```step
+@id b-finds-own-message
+@name Control: B lists b@ and finds the setup message
+
+GET /v1/mailboxes/{{b_box}}/messages?direction=inbound
+Authorization: Bearer {{b_token}}
+Organization-Id: {{org_id}}
 
 [Captures]
-team_msg = data.id
+b_msg = data.#(subject%"b-private-*").id
+
+[Asserts]
+status == 200
+body.meta.total == 1
+body.data.0.subject == "b-private-{{run_id}}"
+```
+
+```step
+@id team-finds-message
+@name Control: B lists team@ and finds the setup message
+
+GET /v1/mailboxes/{{team_box}}/messages?direction=inbound
+Authorization: Bearer {{b_token}}
+Organization-Id: {{org_id}}
+
+[Captures]
+team_msg = data.#(subject%"team-first-*").id
+
+[Asserts]
+status == 200
+body.meta.total == 1
+body.data.0.subject == "team-first-{{run_id}}"
 ```
 
 ```step
@@ -555,9 +615,11 @@ Organization-Id: {{org_id}}
 [Asserts]
 status == 200
 body.data.# == 2
-body.data.#(id=={{c_box}}).access.send == true
-body.data.#(id=={{team_box}}).access.view == true
-body.data.#(id=={{team_box}}).access.send == false
+body.data.#(display_name="C").id == {{c_box}}
+body.data.#(display_name="C").access.send == true
+body.data.#(display_name="Team").id == {{team_box}}
+body.data.#(display_name="Team").access.view == true
+body.data.#(display_name="Team").access.send == false
 ```
 
 ```step
@@ -663,10 +725,11 @@ Organization-Id: {{org_id}}
 [Asserts]
 status == 200
 body.data.# == 3
-body.data.#(id=={{b_box}}).type == "personal"
-body.data.#(id=={{b_box}}).unread_count == 0
-body.data.#(id=={{b_box}}).access.view == false
-body.data.#(id=={{b_box}}).access.administer == true
+body.data.#(display_name="B").id == {{b_box}}
+body.data.#(display_name="B").type == "personal"
+body.data.#(display_name="B").unread_count == 0
+body.data.#(display_name="B").access.view == false
+body.data.#(display_name="B").access.administer == true
 ```
 
 ```step
@@ -805,10 +868,24 @@ body.meta.total == 0
 @name AC-5 a new message arrives in team@
 @type exec
 
-sh {{helpers}}/inbound.sh "{{team_address}}" "team-new-{{run_id}}"
+sh tmp/kest/mailbox-access-{{run_id}}/inbound.sh "{{team_address}}" "team-new-{{run_id}}"
+```
+
+```step
+@id ac5-find
+@name AC-5 C finds the new message in team@
+
+GET /v1/mailboxes/{{team_box}}/messages?direction=inbound
+Authorization: Bearer {{c_token}}
+Organization-Id: {{org_id}}
 
 [Captures]
-team_new_msg = data.id
+team_new_msg = data.#(subject%"team-new-*").id
+
+[Asserts]
+status == 200
+body.meta.total == 2
+body.data.#(subject%"team-new-*").subject == "team-new-{{run_id}}"
 ```
 
 ```step
@@ -821,7 +898,8 @@ Organization-Id: {{org_id}}
 
 [Asserts]
 status == 200
-body.data.#(id=={{team_box}}).unread_count == 2
+body.data.#(display_name="Team").id == {{team_box}}
+body.data.#(display_name="Team").unread_count == 2
 ```
 
 ```step
@@ -852,7 +930,8 @@ Organization-Id: {{org_id}}
 
 [Asserts]
 status == 200
-body.data.#(id=={{team_box}}).unread_count == 1
+body.data.#(display_name="Team").id == {{team_box}}
+body.data.#(display_name="Team").unread_count == 1
 ```
 
 ```step
@@ -865,7 +944,8 @@ Organization-Id: {{org_id}}
 
 [Asserts]
 status == 200
-body.data.#(id=={{team_box}}).unread_count == 2
+body.data.#(display_name="Team").id == {{team_box}}
+body.data.#(display_name="Team").unread_count == 2
 ```
 
 ```step
@@ -878,7 +958,8 @@ Organization-Id: {{org_id}}
 
 [Asserts]
 status == 200
-body.data.#(id=={{team_new_msg}}).read == false
+body.data.#(subject%"team-new-*").id == {{team_new_msg}}
+body.data.#(subject%"team-new-*").read == false
 ```
 
 ## AC-6: API keys follow their owner's access
@@ -1136,7 +1217,7 @@ Organization-Id: {{org_id}}
 
 {
   "name": "Mailbox access {{run_id}}",
-  "url": "https://example.com/zmail-kest-{{run_id}}",
+  "url": "https://127.0.0.1:9/zmail-kest-{{run_id}}",
   "event_types": ["mail.message.received"]
 }
 
@@ -1153,10 +1234,7 @@ body.data.endpoint.id exists
 @name AC-9 inbound to personal b@
 @type exec
 
-sh {{helpers}}/inbound.sh "{{b_address}}" "b-webhook-{{run_id}}"
-
-[Captures]
-b_webhook_msg = data.id
+sh tmp/kest/mailbox-access-{{run_id}}/inbound.sh "{{b_address}}" "b-webhook-{{run_id}}"
 ```
 
 ```step
@@ -1164,10 +1242,7 @@ b_webhook_msg = data.id
 @name AC-9 inbound to team@ with the switch off
 @type exec
 
-sh {{helpers}}/inbound.sh "{{team_address}}" "team-webhook-off-{{run_id}}"
-
-[Captures]
-team_off_msg = data.id
+sh tmp/kest/mailbox-access-{{run_id}}/inbound.sh "{{team_address}}" "team-webhook-off-{{run_id}}"
 ```
 
 ```step
@@ -1256,10 +1331,7 @@ body.data.0.actor_user_id == {{b_user_id}}
 @name AC-9 inbound to team@ with the switch on
 @type exec
 
-sh {{helpers}}/inbound.sh "{{team_address}}" "team-webhook-on-{{run_id}}"
-
-[Captures]
-team_on_msg = data.id
+sh tmp/kest/mailbox-access-{{run_id}}/inbound.sh "{{team_address}}" "team-webhook-on-{{run_id}}"
 ```
 
 ```step
@@ -1362,17 +1434,6 @@ team_broadcast = data.id
 [Asserts]
 status == 201
 body.data.status == "draft"
-```
-
-```step
-@id ac13-schedule-time
-@name AC-13 compute a send time one day ahead
-@type exec
-
-python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))'
-
-[Captures]
-scheduled_at = $line.0
 ```
 
 ```step
@@ -1680,10 +1741,7 @@ body.error_code == "ORGANIZATION.NOT_FOUND"
 @name AC-10 new mail to b@ is accepted
 @type exec
 
-sh {{helpers}}/inbound.sh "{{b_address}}" "b-while-away-{{run_id}}"
-
-[Captures]
-b_away_msg = data.id
+sh tmp/kest/mailbox-access-{{run_id}}/inbound.sh "{{b_address}}" "b-while-away-{{run_id}}"
 ```
 
 ```step
@@ -1696,35 +1754,26 @@ Organization-Id: {{org_id}}
 
 [Asserts]
 status == 200
-body.data.#(id=={{b_box}}).type == "personal"
-body.data.#(id=={{b_box}}).awaiting_handover == true
-body.data.#(id=={{b_box}}).unread_count == 0
+body.data.#(display_name="B").id == {{b_box}}
+body.data.#(display_name="B").type == "personal"
+body.data.#(display_name="B").awaiting_handover == true
+body.data.#(display_name="B").unread_count == 0
 ```
 
 ```step
 @id ac10-a-cannot-read
-@name AC-10 A cannot read the new mail
+@name AC-10 A cannot read the new mail (GET .../messages/<id>, expect 403 PERMISSION.DENIED)
+@type exec
 
-GET /v1/mailboxes/{{b_box}}/messages/{{b_away_msg}}
-Authorization: Bearer {{a_token}}
-Organization-Id: {{org_id}}
-
-[Asserts]
-status == 403
-body.error_code == "PERMISSION.DENIED"
+sh tmp/kest/mailbox-access-{{run_id}}/read-message.sh "{{a_token}}" {{org_id}} {{b_box}} "b-while-away-{{run_id}}" 403 PERMISSION.DENIED
 ```
 
 ```step
 @id ac10-c-cannot-read
-@name AC-10 C cannot read the new mail
+@name AC-10 C cannot read the new mail (GET .../messages/<id>, expect 404 MAILBOX.NOT_FOUND)
+@type exec
 
-GET /v1/mailboxes/{{b_box}}/messages/{{b_away_msg}}
-Authorization: Bearer {{c_token}}
-Organization-Id: {{org_id}}
-
-[Asserts]
-status == 404
-body.error_code == "MAILBOX.NOT_FOUND"
+sh tmp/kest/mailbox-access-{{run_id}}/read-message.sh "{{c_token}}" {{org_id}} {{b_box}} "b-while-away-{{run_id}}" 404 MAILBOX.NOT_FOUND
 ```
 
 ```step
@@ -1797,10 +1846,7 @@ status == 201
 @name AC-16 make the invitation acceptable
 @type exec
 
-sh {{helpers}}/invite-token.sh {{b_invitation_2}}
-
-[Captures]
-b_invite_token_2 = token
+sh tmp/kest/mailbox-access-{{run_id}}/invite-token.sh {{b_invitation_2}} kest-invite-{{run_id}}-{{b_invitation_2}}
 ```
 
 ```step
@@ -1812,7 +1858,7 @@ Content-Type: application/json
 Authorization: Bearer {{b_token}}
 
 {
-  "token": "{{b_invite_token_2}}"
+  "token": "kest-invite-{{run_id}}-{{b_invitation_2}}"
 }
 
 [Asserts]
@@ -1859,11 +1905,15 @@ GET /v1/mailboxes/{{b_box}}/messages?direction=inbound
 Authorization: Bearer {{b_token}}
 Organization-Id: {{org_id}}
 
+[Captures]
+b_away_msg = data.#(subject%"b-while-away-*").id
+
 [Asserts]
 status == 200
 body.meta.total == 3
-body.data.#(id=={{b_away_msg}}).subject == "b-while-away-{{run_id}}"
-body.data.#(id=={{b_msg}}).subject == "b-private-{{run_id}}"
+body.data.#(subject%"b-while-away-*").subject == "b-while-away-{{run_id}}"
+body.data.#(subject%"b-private-*").id == {{b_msg}}
+body.data.#(subject%"b-webhook-*").subject == "b-webhook-{{run_id}}"
 ```
 
 ```step
@@ -1911,10 +1961,7 @@ status == 204
 @name AC-11 setup: mail arrives after the departure
 @type exec
 
-sh {{helpers}}/inbound.sh "{{b_address}}" "b-after-leave-{{run_id}}"
-
-[Captures]
-b_after_msg = data.id
+sh tmp/kest/mailbox-access-{{run_id}}/inbound.sh "{{b_address}}" "b-after-leave-{{run_id}}"
 ```
 
 ```step
@@ -1925,22 +1972,9 @@ GET /v1/mail-message-stats?days=1
 Authorization: Bearer {{c_token}}
 Organization-Id: {{org_id}}
 
-[Captures]
-c_received_before = data.0.received
-
 [Asserts]
 status == 200
-```
-
-```step
-@id ac11-c-stats-expected
-@name AC-11 expected count after handover (one more message)
-@type exec
-
-echo $(( {{c_received_before}} + 1 ))
-
-[Captures]
-c_received_expected = $line.0
+body.data.0.received == 5
 ```
 
 ```step
@@ -2004,10 +2038,13 @@ GET /v1/mailboxes/{{b_box}}/messages?direction=inbound
 Authorization: Bearer {{c_token}}
 Organization-Id: {{org_id}}
 
+[Captures]
+b_after_msg = data.0.id
+
 [Asserts]
 status == 200
 body.meta.total == 1
-body.data.0.id == {{b_after_msg}}
+body.data.0.subject == "b-after-leave-{{run_id}}"
 ```
 
 ```step
@@ -2020,7 +2057,8 @@ Organization-Id: {{org_id}}
 
 [Asserts]
 status == 200
-body.data.#(id=={{b_box}}).unread_count == 1
+body.data.#(display_name="B").id == {{b_box}}
+body.data.#(display_name="B").unread_count == 1
 ```
 
 ```step
@@ -2098,7 +2136,7 @@ Organization-Id: {{org_id}}
 
 [Asserts]
 status == 200
-body.data.0.received == {{c_received_expected}}
+body.data.0.received == 6
 ```
 
 ```step
@@ -2197,10 +2235,7 @@ status == 201
 @name AC-17 make the invitation acceptable
 @type exec
 
-sh {{helpers}}/invite-token.sh {{b_invitation_3}}
-
-[Captures]
-b_invite_token_3 = token
+sh tmp/kest/mailbox-access-{{run_id}}/invite-token.sh {{b_invitation_3}} kest-invite-{{run_id}}-{{b_invitation_3}}
 ```
 
 ```step
@@ -2212,7 +2247,7 @@ Content-Type: application/json
 Authorization: Bearer {{b_token}}
 
 {
-  "token": "{{b_invite_token_3}}"
+  "token": "kest-invite-{{run_id}}-{{b_invitation_3}}"
 }
 
 [Asserts]
@@ -2539,6 +2574,18 @@ Steps run in document order; these edges make the chain explicit.
 
 ```edge
 @from deliver-team-setup
+@to b-finds-own-message
+@on success
+```
+
+```edge
+@from b-finds-own-message
+@to team-finds-message
+@on success
+```
+
+```edge
+@from team-finds-message
 @to b-reads-own-message
 @on success
 ```
@@ -2653,6 +2700,12 @@ Steps run in document order; these edges make the chain explicit.
 
 ```edge
 @from ac5-deliver
+@to ac5-find
+@on success
+```
+
+```edge
+@from ac5-find
 @to ac5-b-before
 @on success
 ```
@@ -2851,12 +2904,6 @@ Steps run in document order; these edges make the chain explicit.
 
 ```edge
 @from ac13-b-draft
-@to ac13-schedule-time
-@on success
-```
-
-```edge
-@from ac13-schedule-time
 @to ac13-a-start-denied
 @on success
 ```
@@ -3079,12 +3126,6 @@ Steps run in document order; these edges make the chain explicit.
 
 ```edge
 @from ac11-c-stats-before
-@to ac11-c-stats-expected
-@on success
-```
-
-```edge
-@from ac11-c-stats-expected
 @to ac11-handover
 @on success
 ```
