@@ -208,6 +208,25 @@ TABLE mail_templates
   COLUMN updated_at timestamp with time zone
   COLUMN design jsonb
 
+TABLE mailbox_access_events
+  COLUMN id bigint NOT NULL DEFAULT nextval('mailbox_access_events_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN type character varying(32) NOT NULL
+  COLUMN actor_user_id bigint
+  COLUMN subject_user_id bigint
+  COLUMN detail jsonb NOT NULL DEFAULT '{}'::jsonb
+  COLUMN created_at timestamp with time zone NOT NULL
+
+TABLE mailbox_members
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN membership_id bigint NOT NULL
+  COLUMN user_id bigint NOT NULL
+  COLUMN permission character varying(16) NOT NULL
+  COLUMN granted_by bigint NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mailboxes
   COLUMN id bigint NOT NULL DEFAULT nextval('mailboxes_id_seq'::regclass)
   COLUMN created_by bigint NOT NULL
@@ -218,6 +237,11 @@ TABLE mailboxes
   COLUMN deleted_at timestamp with time zone
   COLUMN organization_id bigint
   COLUMN routing_rule_id character varying(64) NOT NULL DEFAULT ''::character varying
+  COLUMN type character varying(16) NOT NULL DEFAULT 'shared'::character varying
+  COLUMN owner_user_id bigint
+  COLUMN owner_left_at timestamp with time zone
+  COLUMN sealed_before timestamp with time zone
+  COLUMN webhooks_enabled boolean NOT NULL DEFAULT false
 
 TABLE migrations
   COLUMN id integer NOT NULL DEFAULT nextval('migrations_id_seq'::regclass)
@@ -537,7 +561,17 @@ CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFER
 CONSTRAINT mail_messages.mail_messages_pkey PRIMARY KEY (id)
 CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_templates.mail_templates_pkey PRIMARY KEY (id)
+CONSTRAINT mailbox_access_events.mailbox_access_events_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mailbox_access_events.mailbox_access_events_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mailbox_access_events.mailbox_access_events_pkey PRIMARY KEY (id)
+CONSTRAINT mailbox_members.mailbox_members_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mailbox_members.mailbox_members_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
+CONSTRAINT mailbox_members.mailbox_members_permission_check CHECK (((permission)::text = ANY ((ARRAY['view'::character varying, 'send'::character varying, 'manage'::character varying])::text[])))
+CONSTRAINT mailbox_members.mailbox_members_pkey PRIMARY KEY (mailbox_id, membership_id)
+CONSTRAINT mailboxes.chk_mailboxes_personal_webhooks CHECK ((((type)::text = 'shared'::text) OR (NOT webhooks_enabled)))
+CONSTRAINT mailboxes.chk_mailboxes_type CHECK (((type)::text = ANY ((ARRAY['personal'::character varying, 'shared'::character varying])::text[])))
 CONSTRAINT mailboxes.fk_mailboxes_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT migrations.migrations_pkey PRIMARY KEY (id)
 CONSTRAINT notification_deliveries.fk_notifications_deliveries FOREIGN KEY (notification_id) REFERENCES notifications(id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -699,8 +733,13 @@ INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (m
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
 INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
+INDEX CREATE INDEX idx_mailbox_access_events_mailbox ON mailbox_access_events USING btree (mailbox_id, id DESC)
+INDEX CREATE UNIQUE INDEX mailbox_access_events_pkey ON mailbox_access_events USING btree (id)
+INDEX CREATE INDEX idx_mailbox_members_membership ON mailbox_members USING btree (membership_id, mailbox_id)
+INDEX CREATE UNIQUE INDEX mailbox_members_pkey ON mailbox_members USING btree (mailbox_id, membership_id)
 INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address)
 INDEX CREATE INDEX idx_mailboxes_organization ON mailboxes USING btree (organization_id, id) WHERE (deleted_at IS NULL)
+INDEX CREATE INDEX idx_mailboxes_owner ON mailboxes USING btree (organization_id, owner_user_id) WHERE ((deleted_at IS NULL) AND ((type)::text = 'personal'::text))
 INDEX CREATE UNIQUE INDEX mailboxes_pkey ON mailboxes USING btree (id)
 INDEX CREATE UNIQUE INDEX migrations_pkey ON migrations USING btree (id)
 INDEX CREATE INDEX idx_notification_deliveries_leased ON notification_deliveries USING btree (channel, status, lease_expires_at)
