@@ -14,8 +14,8 @@ the room the window has, and sends them through the same provider-and-record ste
 
 **Tech Stack:** Go (Gin, GORM, PostgreSQL, Wire), Next.js 16 / React 19 Web console, OpenAPI.
 
-**Spec:** [docs/MAILBOX_ACCESS_PRD.zh-CN.md](../MAILBOX_ACCESS_PRD.zh-CN.md) §3.7, row "组织发送额度用量":
-members blocked by the limit see only "额度已满，排队中". The user chose real queueing over a copy
+**Spec:** [docs/MAILBOX_ACCESS_PRD.zh-CN.md](../MAILBOX_ACCESS_PRD.zh-CN.md) §3.7, the organization send-quota row:
+members blocked by the limit see only a "limit full, queued" notice. The user chose real queueing over a copy
 change (2026-11-18). Builds on [mailbox-access.md](mailbox-access.md). Written to
 [BUSINESS_IMPLEMENTATION_PLAN_STANDARD.md](../BUSINESS_IMPLEMENTATION_PLAN_STANDARD.md).
 
@@ -203,7 +203,7 @@ started (`send_attempted_at` set) is never leased again.
 ## 12. Browser-Surface Plan
 
 Compose, reply and template test send show an informational notice "Daily send limit reached —
-your message is queued and will be sent automatically" (zh-Hans "额度已满，排队中，系统会自动发送")
+your message is queued and will be sent automatically" (with the matching zh-Hans locale copy)
 on `202`, and close as on success. Message list and detail show status `queued` with the label
 "Queued — waiting for the send limit". The mock store and Zod schemas accept `queued_reason`.
 

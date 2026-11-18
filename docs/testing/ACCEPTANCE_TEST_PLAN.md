@@ -117,7 +117,7 @@ lists its environment(s). Record pass, fail, or blocked for each one, with evide
 | C4 | P1 | L, P | Reply to a received message | The reply is sent to the original sender with `Re:`; note that quoting is a known gap |
 | C5 | P1 | L | Send with an attachment; receive one | Attachment can be downloaded and opens; oversized files are refused with a clear message |
 | C6 | P1 | L | Send to an invalid address; send with no subject | Clear validation errors before sending |
-| C7 | P1 | L | Set `MAILBOX_DAILY_SEND_LIMIT=1`; send twice, open the outbox, delete the waiting message, then send twice more (API side automated in [`api/tests/kest/mail_send_queue.flow.md`](../../api/tests/kest/mail_send_queue.flow.md)) | The first send goes out; the second is accepted and labelled "Queued: send limit full" (zh-Hans: 额度已满，排队中) with no usage numbers; a deleted waiting message is never sent; once as many messages wait as the limit, the next send stops with a clear limit message and nothing is stored |
+| C7 | P1 | L | Set `MAILBOX_DAILY_SEND_LIMIT=1`; send twice, open the outbox, delete the waiting message, then send twice more (API side automated in [`api/tests/kest/mail_send_queue.flow.md`](../../api/tests/kest/mail_send_queue.flow.md)) | The first send goes out; the second is accepted and labelled "Queued: send limit full" (and its zh-Hans translation) with no usage numbers; a deleted waiting message is never sent; once as many messages wait as the limit, the next send stops with a clear limit message and nothing is stored |
 | C8 | P1 | L | Pagination, search, read/unread in a mailbox with 50+ messages | Lists stay correct and responsive |
 | C9 | P2 | L | Delete a mailbox | It disappears; mail to it is no longer accepted |
 
