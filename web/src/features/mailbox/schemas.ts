@@ -178,7 +178,7 @@ export const mailboxSchema = strictObject({
   address: string(),
   display_name: string(),
   type: mailboxTypeSchema,
-  // Null for a shared mailbox, or a personal one whose owner left.
+  // Null for a shared mailbox or after the owner account is deleted; kept while a personal mailbox awaits handover.
   owner_user_id: nullable(safeIdSchema),
   awaiting_handover: boolean(),
   // Mail created before this instant is sealed; set once at handover.
