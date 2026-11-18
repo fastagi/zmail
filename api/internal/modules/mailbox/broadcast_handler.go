@@ -224,20 +224,15 @@ func (h *Handler) PauseBroadcast(c *gin.Context) {
 	respondStoppedBroadcast(c, broadcast, visible, err)
 }
 
-// MailBroadcastStatusResponse is what a viewer who may not read the sender mailbox learns after
-// stopping a broadcast.
-type MailBroadcastStatusResponse struct {
-	ID     uint   `json:"id"`
-	Status string `json:"status"`
-}
-
+// respondStoppedBroadcast answers a pause or cancellation. A caller who may not view the sender
+// mailbox learns nothing about the broadcast, so the answer has no body: 204.
 func respondStoppedBroadcast(c *gin.Context, broadcast *domain.MailBroadcast, visible bool, err error) {
 	if err != nil || visible {
 		respondBroadcast(c, broadcast, err, false)
 		return
 	}
 	privateResponse(c)
-	response.Success(c, MailBroadcastStatusResponse{ID: broadcast.ID, Status: string(broadcast.Status)})
+	response.NoContent(c)
 }
 
 // ResumeBroadcast continues a paused broadcast. Only owners and admins may.

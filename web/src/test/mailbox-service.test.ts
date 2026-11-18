@@ -714,3 +714,24 @@ function accessEvent(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe('stopping a broadcast without view on its sender', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('reports the new status when the API answers 204 with no body', async () => {
+    vi.spyOn(request, 'post').mockResolvedValue('');
+    await expect(mailboxService.controlBroadcast(3, 9, 'pauses')).resolves.toEqual({
+      id: 9,
+      status: 'paused',
+    });
+    await expect(mailboxService.controlBroadcast(3, 9, 'cancellations')).resolves.toEqual({
+      id: 9,
+      status: 'canceled',
+    });
+  });
+
+  it('still requires a full broadcast when resuming', async () => {
+    vi.spyOn(request, 'post').mockResolvedValue('');
+    await expect(mailboxService.controlBroadcast(3, 9, 'resumptions')).rejects.toThrow();
+  });
+});

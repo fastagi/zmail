@@ -674,17 +674,18 @@ func TestBroadcastNeedsSendOnSender(t *testing.T) {
 	}
 
 	router := accessRouter(f.service, f.admin)
-	recorder, body := serve(router, http.MethodPost, fmt.Sprintf("/mail-broadcasts/%d/pauses", draft.ID), "")
-	data, _ := body["data"].(map[string]any)
-	if recorder.Code != http.StatusOK || len(data) != 2 || data["status"] != string(domain.MailBroadcastPaused) || data["id"] != float64(draft.ID) {
-		t.Fatalf("admin without access pauses = %d %v; want only id and status", recorder.Code, body)
+	recorder, _ := serve(router, http.MethodPost, fmt.Sprintf("/mail-broadcasts/%d/pauses", draft.ID), "")
+	if recorder.Code != http.StatusNoContent || recorder.Body.Len() != 0 {
+		t.Fatalf("admin without access pauses = %d %q; want 204 with no body", recorder.Code, recorder.Body.String())
+	}
+	if paused, _ := f.service.GetBroadcast(ctx, f.b, draft.ID); paused == nil || paused.Status != domain.MailBroadcastPaused {
+		t.Fatalf("broadcast after the pause = %+v; want paused", paused)
 	}
 	_, err = f.service.ResumeBroadcast(ctx, f.admin, draft.ID)
 	expectError(t, "admin without access resumes", err, domain.ErrPermissionDenied)
-	recorder, body = serve(router, http.MethodPost, fmt.Sprintf("/mail-broadcasts/%d/cancellations", draft.ID), "")
-	data, _ = body["data"].(map[string]any)
-	if recorder.Code != http.StatusOK || len(data) != 2 || data["status"] != string(domain.MailBroadcastCanceled) {
-		t.Fatalf("admin without access cancels = %d %v; want only id and status", recorder.Code, body)
+	recorder, _ = serve(router, http.MethodPost, fmt.Sprintf("/mail-broadcasts/%d/cancellations", draft.ID), "")
+	if recorder.Code != http.StatusNoContent || recorder.Body.Len() != 0 {
+		t.Fatalf("admin without access cancels = %d %q; want 204 with no body", recorder.Code, recorder.Body.String())
 	}
 
 	// An admin who may read the sender gets the full broadcast back.

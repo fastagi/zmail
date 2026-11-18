@@ -1542,8 +1542,19 @@ Organization-Id: {{org_id}}
 {}
 
 [Asserts]
+status == 204
+```
+
+```step
+@id ac13-canceled
+@name AC-13 B, who may view team@, sees the broadcast canceled
+
+GET /v1/mail-broadcasts/{{team_broadcast}}
+Authorization: Bearer {{b_token}}
+Organization-Id: {{org_id}}
+
+[Asserts]
 status == 200
-body.data.id == {{team_broadcast}}
 body.data.status == "canceled"
 ```
 

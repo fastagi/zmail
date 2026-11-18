@@ -622,7 +622,8 @@ message per contact. Access follows the sender mailbox:
   `403 PERMISSION.DENIED`. Sending and resuming also need `send` on the sender mailbox at that
   call; the worker does not check access again, so a broadcast already sending keeps sending when
   that access is later removed. Cancelling and pausing need no access to the sender mailbox, so an
-  admin can always stop mail; without `view` on it the answer is only `{ "id", "status" }`.
+  admin can always stop mail; without `view` on it (or for a sealed broadcast) the answer is
+  `204` with no body, so nothing about the broadcast is revealed.
 
 Broadcasts need unsubscribe links, so they are available only when the API has
 `MAILBOX_INBOUND_SECRET` (the links are signed with a key derived from it) and `MAILBOX_PUBLIC_URL`
