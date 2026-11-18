@@ -532,8 +532,8 @@ export const mailRecipientStatusSchema = union([
 ]);
 
 /**
- * What pausing or cancelling answers to a caller without `view` on the sender mailbox, or for a
- * sealed broadcast: only the new status.
+ * What a caller without `view` on the sender mailbox, or of a sealed broadcast, knows after pausing
+ * or cancelling: the API answers 204, so only the new status.
  */
 export const mailBroadcastStatusOnlySchema = strictObject({
   id: safeIdSchema,

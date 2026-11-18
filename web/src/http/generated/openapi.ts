@@ -2768,16 +2768,6 @@ export interface components {
          * @enum {string}
          */
         MailBroadcastStatus: "draft" | "scheduled" | "sending" | "paused" | "sent" | "canceled";
-        /** @description What a caller who may not view the sender mailbox learns after stopping a broadcast. */
-        MailBroadcastStatusResponse: {
-            /** @constant */
-            code: 0;
-            data: {
-                id: components["schemas"]["PositiveID"];
-                status: components["schemas"]["MailBroadcastStatus"];
-            };
-            message: string;
-        };
         /** @description Template values shared by every recipient, at most 100. A contact's properties override a value of the same name. `email`, `first_name`, `last_name`, and `unsubscribe_url` come from each contact and cannot be set here. Absent means none. */
         MailBroadcastVariables: {
             [key: string]: string;
@@ -5367,14 +5357,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The canceled broadcast. Recipients not yet sent are `canceled`. A caller who may not view the sender mailbox gets only `id` and `status`. */
+            /** @description The canceled broadcast. Recipients not yet sent are `canceled`. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MailBroadcastResponse"] | components["schemas"]["MailBroadcastStatusResponse"];
+                    "application/json": components["schemas"]["MailBroadcastResponse"];
                 };
+            };
+            /** @description Done, for a caller who may not view the sender mailbox (or for a sealed broadcast); no body, so nothing about the broadcast is revealed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
@@ -5407,14 +5404,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The broadcast after the change. A caller who may not view the sender mailbox gets only `id` and `status`. */
+            /** @description The broadcast after the change. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MailBroadcastResponse"] | components["schemas"]["MailBroadcastStatusResponse"];
+                    "application/json": components["schemas"]["MailBroadcastResponse"];
                 };
+            };
+            /** @description Done, for a caller who may not view the sender mailbox (or for a sealed broadcast); no body, so nothing about the broadcast is revealed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];

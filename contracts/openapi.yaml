@@ -3854,13 +3854,13 @@ paths:
         - $ref: '#/components/parameters/MailBroadcastID'
       responses:
         '200':
-          description: The canceled broadcast. Recipients not yet sent are `canceled`. A caller who may not view the sender mailbox gets only `id` and `status`.
+          description: The canceled broadcast. Recipients not yet sent are `canceled`.
           content:
             application/json:
               schema:
-                anyOf:
-                  - $ref: '#/components/schemas/MailBroadcastResponse'
-                  - $ref: '#/components/schemas/MailBroadcastStatusResponse'
+                $ref: '#/components/schemas/MailBroadcastResponse'
+        '204':
+          description: Done, for a caller who may not view the sender mailbox (or for a sealed broadcast); no body, so nothing about the broadcast is revealed.
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
@@ -3891,13 +3891,13 @@ paths:
         - $ref: '#/components/parameters/MailBroadcastID'
       responses:
         '200':
-          description: The broadcast after the change. A caller who may not view the sender mailbox gets only `id` and `status`.
+          description: The broadcast after the change.
           content:
             application/json:
               schema:
-                anyOf:
-                  - $ref: '#/components/schemas/MailBroadcastResponse'
-                  - $ref: '#/components/schemas/MailBroadcastStatusResponse'
+                $ref: '#/components/schemas/MailBroadcastResponse'
+        '204':
+          description: Done, for a caller who may not view the sender mailbox (or for a sealed broadcast); no body, so nothing about the broadcast is revealed.
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
@@ -9833,30 +9833,6 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MailBroadcast'
-    MailBroadcastStatusResponse:
-      type: object
-      additionalProperties: false
-      description: What a caller who may not view the sender mailbox learns after stopping a broadcast.
-      required:
-        - code
-        - message
-        - data
-      properties:
-        code:
-          const: 0
-        message:
-          type: string
-        data:
-          type: object
-          additionalProperties: false
-          required:
-            - id
-            - status
-          properties:
-            id:
-              $ref: '#/components/schemas/PositiveID'
-            status:
-              $ref: '#/components/schemas/MailBroadcastStatus'
     MailBroadcastPageResponse:
       type: object
       additionalProperties: false

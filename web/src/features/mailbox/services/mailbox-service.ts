@@ -443,7 +443,8 @@ export const mailboxService = {
 
   /**
    * Cancels, pauses, or resumes a broadcast; only owners and admins may. Pausing and cancelling
-   * need no access to the sender mailbox, so without `view` on it the answer is only the status.
+   * need no access to the sender mailbox; without `view` on it the API answers 204 and only the
+   * new status is known.
    */
   async controlBroadcast(
     organizationId: number,
@@ -456,12 +457,12 @@ export const mailboxService = {
       undefined,
       { headers: organizationHeaders(organizationId) }
     );
-    if (action !== 'resumptions') {
-      const statusOnly = mailBroadcastStatusOnlySchema.safeParse(value);
-      if (statusOnly.success) {
-        if (statusOnly.data.id !== broadcastId) throw invalidResponse();
-        return statusOnly.data;
-      }
+    // Without `view` on the sender mailbox, pausing and cancelling answer 204 with no body.
+    if (action !== 'resumptions' && (value === '' || value === undefined || value === null)) {
+      return mailBroadcastStatusOnlySchema.parse({
+        id: broadcastId,
+        status: action === 'pauses' ? 'paused' : 'canceled',
+      });
     }
     return parseBroadcast(value, broadcastId);
   },
@@ -896,16 +897,10 @@ assertContract<
   Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'sendMailBroadcast', 200>>
 >();
 assertContract<
-  Accepts<
-    z.input<typeof mailBroadcastSchema> | z.input<typeof mailBroadcastStatusOnlySchema>,
-    ContractData<'pauseMailBroadcast', 200>
-  >
+  Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'pauseMailBroadcast', 200>>
 >();
 assertContract<
-  Accepts<
-    z.input<typeof mailBroadcastSchema> | z.input<typeof mailBroadcastStatusOnlySchema>,
-    ContractData<'cancelMailBroadcast', 200>
-  >
+  Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'cancelMailBroadcast', 200>>
 >();
 assertContract<
   Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'resumeMailBroadcast', 200>>
