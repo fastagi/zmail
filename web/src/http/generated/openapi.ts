@@ -3006,6 +3006,11 @@ export interface components {
             /** @description Address of the mailbox the message belongs to. */
             mailbox_address: string;
             mailbox_id: components["schemas"]["PositiveID"];
+            /**
+             * @description `send_limit` while a queued message waits for room in the organization's send limit; otherwise null.
+             * @enum {string|null}
+             */
+            queued_reason: "send_limit" | null;
             read: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
@@ -3042,6 +3047,11 @@ export interface components {
             mailbox_id: components["schemas"]["PositiveID"];
             /** @description RFC 5322 Message-ID without angle brackets; empty when unknown. */
             message_id: string;
+            /**
+             * @description `send_limit` while a queued message waits for room in the organization's send limit; otherwise null.
+             * @enum {string|null}
+             */
+            queued_reason: "send_limit" | null;
             /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
             status: components["schemas"]["MailStatus"];

@@ -9505,6 +9505,7 @@ components:
         - subject
         - read
         - failure_code
+        - queued_reason
         - last_event
         - attachment_count
         - template_id
@@ -9547,6 +9548,14 @@ components:
         failure_code:
           type: string
           maxLength: 120
+        queued_reason:
+          type:
+            - string
+            - 'null'
+          enum:
+            - send_limit
+            - null
+          description: '`send_limit` while a queued message waits for room in the organization''s send limit; otherwise null.'
         last_event:
           $ref: '#/components/schemas/MailEventSummary'
         attachment_count:
@@ -10784,6 +10793,7 @@ components:
         - subject
         - read
         - failure_code
+        - queued_reason
         - last_event
         - attachment_count
         - template_id
@@ -10823,6 +10833,14 @@ components:
         failure_code:
           type: string
           maxLength: 120
+        queued_reason:
+          type:
+            - string
+            - 'null'
+          enum:
+            - send_limit
+            - null
+          description: '`send_limit` while a queued message waits for room in the organization''s send limit; otherwise null.'
         last_event:
           $ref: '#/components/schemas/MailEventSummary'
         attachment_count:

@@ -634,6 +634,7 @@ describe('mailbox browser route boundary', () => {
       subject: 'First',
       read: true,
       failure_code: '',
+      queued_reason: null,
       in_reply_to: welcome.message_id,
       last_event: 'delivered',
     });

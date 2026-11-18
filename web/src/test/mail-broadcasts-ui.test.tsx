@@ -379,6 +379,7 @@ function recipient(overrides: Record<string, unknown> = {}) {
     status: 'sent',
     message_id: null,
     failure_code: '',
+    queued_reason: null,
     updated_at: now(),
     ...overrides,
   };

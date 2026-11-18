@@ -136,13 +136,14 @@ export function ComposeDialog({
           content: await fileToBase64(file),
         }))
       );
-      await send.mutateAsync({
+      const stored = await send.mutateAsync({
         to: recipients.to,
         ...(recipients.cc.length > 0 ? { cc: recipients.cc } : {}),
         template: { id: template.id, variables },
         ...(attachments.length > 0 ? { attachments } : {}),
       });
-      toast.success(t('messages.sent'));
+      // At the send limit the message waits; nobody is shown how much of the limit is used.
+      toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       onStored();
       onClose();
     } catch (failure) {
@@ -181,7 +182,7 @@ export function ComposeDialog({
           content: await fileToBase64(file),
         }))
       );
-      await send.mutateAsync({
+      const stored = await send.mutateAsync({
         to: normalized.to,
         ...(normalized.cc.length > 0 ? { cc: normalized.cc } : {}),
         subject: normalized.subject,
@@ -189,7 +190,8 @@ export function ComposeDialog({
         ...(normalized.in_reply_to === '' ? {} : { in_reply_to: normalized.in_reply_to }),
         ...(attachments.length > 0 ? { attachments } : {}),
       });
-      toast.success(t('messages.sent'));
+      // At the send limit the message waits; nobody is shown how much of the limit is used.
+      toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       onStored();
       onClose();
     } catch (failure) {

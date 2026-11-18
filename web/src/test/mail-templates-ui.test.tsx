@@ -287,6 +287,22 @@ describe('mail templates console', () => {
     expect(toast.success).toHaveBeenCalledWith('Test sent');
   });
 
+  it('says a test send at the limit is queued', async () => {
+    state.test.mutateAsync.mockResolvedValue({ status: 'queued', queued_reason: 'send_limit' });
+    renderTemplates();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Welcome' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'qa@example.com' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send test' }));
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        'Send limit reached. Your message is queued and will be sent automatically.'
+      )
+    );
+    expect(toast.success).not.toHaveBeenCalledWith('Test sent');
+  });
+
   it('deletes a template after confirmation and returns to the list', async () => {
     state.remove.mutateAsync.mockResolvedValue(undefined);
     renderTemplates();
