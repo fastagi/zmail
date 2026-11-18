@@ -25,6 +25,9 @@ const (
 	deliveryRecordTimeout = 5 * time.Second
 	failureNotConfigured  = "transport.not_configured"
 	failureUnknown        = "transport.failed"
+	// failureSendCanceled marks a waiting message that will never be sent: its mailbox was
+	// deleted or a handover sealed it.
+	failureSendCanceled = "send.canceled"
 )
 
 // Settings is the resolved policy the service runs with.
@@ -571,6 +574,16 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		}
 		return s.queueForSendLimit(ctx, mailbox, message)
 	}
+	if queueAtLimit {
+		// Older messages still wait: a new one queues behind them instead of overtaking them.
+		waiting, countErr := s.repo.CountWaitingSends(ctx, mailbox.OrganizationID)
+		if countErr != nil {
+			return nil, false, countErr
+		}
+		if waiting > 0 {
+			return s.queueForSendLimit(ctx, mailbox, message)
+		}
+	}
 
 	attemptedAt := s.now().UTC()
 	message.SendAttemptedAt = &attemptedAt
@@ -595,6 +608,19 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		// The stored copy is the record; the response carries metadata only.
 		message.Attachments[i].Content = nil
 	}
+	return s.deliver(ctx, mailbox, message, files, input.Headers)
+}
+
+// deliver calls the provider for a stored message whose attempt has started and records the
+// outcome, its delivery events, and the webhooks they publish. A direct send and the worker that
+// sends waiting messages share it, so both record a send the same way.
+func (s *service) deliver(
+	ctx context.Context,
+	mailbox *domain.Mailbox,
+	message *domain.MailMessage,
+	files []mailtransport.Attachment,
+	headers map[string]string,
+) (*domain.MailMessage, bool, error) {
 	outcome, sendErr := s.transport.Send(ctx, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,
@@ -605,7 +631,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		HTMLBody:    message.HTMLBody,
 		InReplyTo:   message.InReplyTo,
 		Attachments: files,
-		Headers:     input.Headers,
+		Headers:     headers,
 	})
 
 	message.Status = domain.MailStatusSent
@@ -622,7 +648,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	defer cancel()
 	occurredAt := s.now().UTC()
 	events := sendEvents(outcome, sendErr == nil, occurredAt)
-	err = s.apply(recordContext, func(tx context.Context) ([]MailNotification, error) {
+	err := s.apply(recordContext, func(tx context.Context) ([]MailNotification, error) {
 		if updateErr := s.repo.UpdateMessageDelivery(tx, message.ID, message.Status, message.MessageID, message.FailureCode); updateErr != nil {
 			return nil, updateErr
 		}

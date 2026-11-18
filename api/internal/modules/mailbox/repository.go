@@ -529,6 +529,95 @@ func (r *repository) CountWaitingSends(ctx context.Context, organizationID uint)
 	return count, err
 }
 
+// WaitingSendOrganizations lists the organizations that have messages waiting for the send limit.
+func (r *repository) WaitingSendOrganizations(ctx context.Context) ([]uint, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var organizations []uint
+	err := r.conn(ctx).Model(&MailMessagePO{}).
+		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
+		Where("mail_messages.queued_reason IS NOT NULL").
+		Distinct().Order("mailboxes.organization_id").
+		Pluck("mailboxes.organization_id", &organizations).Error
+	return organizations, err
+}
+
+// LeaseWaitingSends leases the organization's oldest free waiting messages to one worker.
+func (r *repository) LeaseWaitingSends(
+	ctx context.Context,
+	organizationID uint,
+	now, leaseUntil time.Time,
+	limit int,
+) ([]*domain.MailMessage, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+	var rows []MailMessagePO
+	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Raw(`SELECT mail_messages.* FROM mail_messages
+			JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id
+			WHERE mailboxes.organization_id = ? AND mail_messages.queued_reason IS NOT NULL
+			  AND (mail_messages.send_lease_until IS NULL OR mail_messages.send_lease_until <= ?)
+			ORDER BY mail_messages.id
+			LIMIT ?
+			FOR UPDATE OF mail_messages SKIP LOCKED`, organizationID, now, limit).Scan(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		ids := make([]uint, 0, len(rows))
+		for i := range rows {
+			ids = append(ids, rows[i].ID)
+		}
+		return tx.Model(&MailMessagePO{}).Where("id IN ?", ids).Update("send_lease_until", leaseUntil).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]*domain.MailMessage, 0, len(rows))
+	for i := range rows {
+		messages = append(messages, rows[i].toDomain())
+	}
+	return messages, nil
+}
+
+// StartWaitingSend turns a waiting message into a started attempt.
+func (r *repository) StartWaitingSend(ctx context.Context, id uint, attemptedAt time.Time) (bool, error) {
+	if r.db == nil {
+		return false, domain.ErrServiceUnavailable
+	}
+	result := r.conn(ctx).Model(&MailMessagePO{}).
+		Where("id = ? AND queued_reason IS NOT NULL", id).
+		Updates(map[string]any{
+			"queued_reason":     nil,
+			"send_lease_until":  nil,
+			"send_attempted_at": attemptedAt,
+			"updated_at":        time.Now().UTC(),
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+// CancelWaitingSend marks a waiting message failed, never to be sent.
+func (r *repository) CancelWaitingSend(ctx context.Context, id uint, failureCode string) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Model(&MailMessagePO{}).
+		Where("id = ? AND queued_reason IS NOT NULL", id).
+		Updates(map[string]any{
+			"status":           string(domain.MailStatusFailed),
+			"failure_code":     failureCode,
+			"queued_reason":    nil,
+			"send_lease_until": nil,
+			"updated_at":       time.Now().UTC(),
+		}).Error
+}
+
 type mailLogRow struct {
 	MailMessagePO
 	MailboxAddress string

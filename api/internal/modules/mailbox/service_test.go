@@ -525,6 +525,25 @@ func (r *fakeRepository) CountOutboundSince(_ context.Context, organizationID ui
 	return count, nil
 }
 
+// The in-memory repository keeps waiting messages but never dispatches them: the queue worker
+// is tested against PostgreSQL, where leases and SKIP LOCKED are real.
+func (r *fakeRepository) WaitingSendOrganizations(context.Context) ([]uint, error) { return nil, nil }
+
+func (r *fakeRepository) LeaseWaitingSends(context.Context, uint, time.Time, time.Time, int) ([]*domain.MailMessage, error) {
+	return nil, nil
+}
+
+func (r *fakeRepository) StartWaitingSend(context.Context, uint, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeRepository) CancelWaitingSend(_ context.Context, id uint, failureCode string) error {
+	if message, ok := r.messages[id]; ok && message.QueuedReason != "" {
+		message.Status, message.FailureCode, message.QueuedReason = domain.MailStatusFailed, failureCode, ""
+	}
+	return nil
+}
+
 func (r *fakeRepository) CountWaitingSends(_ context.Context, organizationID uint) (int64, error) {
 	var count int64
 	for _, message := range r.messages {

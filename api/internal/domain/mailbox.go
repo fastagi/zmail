@@ -521,6 +521,8 @@ type MailBroadcastRepository interface {
 // MailBroadcastDispatcher sends due broadcast recipients outside request paths.
 type MailBroadcastDispatcher interface {
 	DispatchBroadcasts(ctx context.Context, limit int) (int, error)
+	// DispatchQueuedSends sends up to limit messages that waited for room in the send limit.
+	DispatchQueuedSends(ctx context.Context, limit int) (int, error)
 }
 
 // MailTemplateRepository stores templates. Every lookup is scoped to an organization.
@@ -611,6 +613,16 @@ type MailboxRepository interface {
 	CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error)
 	// CountWaitingSends counts the organization's messages waiting for room in the send limit.
 	CountWaitingSends(ctx context.Context, organizationID uint) (int64, error)
+	// WaitingSendOrganizations lists the organizations that have messages waiting for the send limit.
+	WaitingSendOrganizations(ctx context.Context) ([]uint, error)
+	// LeaseWaitingSends leases up to limit of the organization's oldest waiting messages whose
+	// lease is free at now, until leaseUntil, skipping rows another worker holds.
+	LeaseWaitingSends(ctx context.Context, organizationID uint, now, leaseUntil time.Time, limit int) ([]*MailMessage, error)
+	// StartWaitingSend turns a leased waiting message into an attempt started at attemptedAt. It
+	// reports false when the message is gone or no longer waiting.
+	StartWaitingSend(ctx context.Context, id uint, attemptedAt time.Time) (bool, error)
+	// CancelWaitingSend marks a waiting message failed with the given code, never to be sent.
+	CancelWaitingSend(ctx context.Context, id uint, failureCode string) error
 	// InTransaction runs fn in one database transaction. Repository calls made with the context
 	// fn receives, and cooperating repositories of other modules, join it.
 	InTransaction(ctx context.Context, fn func(ctx context.Context) error) error

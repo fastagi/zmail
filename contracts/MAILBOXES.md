@@ -445,8 +445,8 @@ everyone the same thing: the limit is full and the message is queued. The `mail:
 worker sends waiting messages oldest first, per organization, as the rolling window gains room,
 and records each outcome exactly like a direct send (`sent`, or `failed` with its `failure_code`,
 and the same webhooks). No webhook is published when a message starts waiting. A waiting message
-can be deleted like any message, and then it is never sent. One whose mailbox is deleted, or which
-a handover seals, is not sent: it becomes `failed` with `failure_code` `send.canceled`. Broadcasts
+can be deleted like any message, and then it is never sent; deleting its mailbox deletes it too. One
+that a handover seals is not sent: it becomes `failed` with `failure_code` `send.canceled`. Broadcasts
 never wait this way; they pause as described in [Broadcasts](#broadcasts). This applies to both
 send routes and to template test sends. The limit is a soft bound: concurrent requests may exceed it by the number of
 requests in flight. There is no automatic retry. A client that retries a `502` without an

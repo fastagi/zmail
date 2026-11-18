@@ -274,7 +274,7 @@ None.
 `operatorcommands/mail_broadcast.go`, docs.
 
 - [ ] Failing tests: `TestDispatchQueuedSendsWithinRoom`, `TestDispatchQueuedSendsSkipLocked`,
-  `TestDispatchCancelsDeletedMailboxAndSealed`, `TestHandoverCancelsWaitingSends`,
+  `TestWaitingMessagesOfADeletedMailboxAreNeverSent`, `TestHandoverCancelsWaitingSends`,
   `TestDeletedWaitingMessageIsNeverSent`, `TestDispatchPublishesSentWebhook`.
 - [ ] Implement; wire the worker. Run tests. Commit.
 

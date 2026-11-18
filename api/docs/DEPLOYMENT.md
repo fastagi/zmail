@@ -14,7 +14,7 @@ cloud, registry, rollout controller, secret store, or migration orchestrator for
 | `.github/workflows/container.yml` | CI | Runs the same container verifier when API or container sources change. |
 | `fastbuild notification:work` | Optional notification starter | Processes durable email deliveries with bounded database leases. |
 | `fastbuild webhook:work` | Optional webhook starter | Processes signed outbound deliveries with bounded network calls and database leases. |
-| `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit. |
+| `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends direct sends that waited for room in the organization's send limit, oldest first, then the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit. Run it wherever the API sends mail. |
 | [`deploy/kubernetes`](../../deploy/kubernetes/README.md) | Example | Hardened kustomize reference for the API, workers, retention jobs, migration job, and Web. |
 | Production deployment manifests | Downstream app | Own secrets, network policy, replicas, migrations, rollout, and rollback. |
 
