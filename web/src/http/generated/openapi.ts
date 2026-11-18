@@ -877,6 +877,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mailboxes/{mailbox_id}/handovers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hand a personal mailbox over to a successor
+         * @description Owners and admins only. The mailbox becomes shared, the successor becomes a `send` member, the former owner keeps no access or read records, and `sealed_before` is set to the time the owner left the organization when they are gone, otherwise to now. Messages and broadcasts created before it are sealed. Writes a `handed_over` access event.
+         */
+        post: operations["handOverMailbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mailboxes/{mailbox_id}/members": {
         parameters: {
             query?: never;
@@ -951,7 +971,10 @@ export interface paths {
         };
         /** Get a message with its bodies */
         get: operations["getMailMessage"];
-        /** Mark a message read or unread */
+        /**
+         * Mark a message read or unread
+         * @description Changes only the caller's own read state and needs `view`. Outbound messages are always read. A sealed message is not found.
+         */
         put: operations["updateMailMessage"];
         post?: never;
         /** Delete a message */
@@ -974,6 +997,46 @@ export interface paths {
          */
         get: operations["downloadMailAttachment"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/sealed-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a mailbox's sealed history
+         * @description Owners and admins only. Sealed broadcasts still scheduled, sending, or paused are cancelled first; then sealed broadcasts with their recipients and sealed messages with their events and attachments are deleted. The seal boundary stays. Writes a `sealed_deleted` access event.
+         */
+        delete: operations["deleteMailboxSealedMessages"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/webhook-setting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Turn mail webhooks for a shared mailbox on or off
+         * @description Needs `manage_members` on the mailbox. A change writes a `webhooks_changed` access event; setting the current value writes nothing.
+         */
+        put: operations["setMailboxWebhookSetting"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2383,6 +2446,10 @@ export interface components {
             next_cursor: string | null;
             per_page: number;
         };
+        DeleteMailboxSealedMessagesRequest: {
+            /** @description The mailbox address, compared ignoring case. */
+            confirm_address: string;
+        };
         /**
          * @description Stable dotted code used for client behavior.
          * @enum {string}
@@ -2397,6 +2464,9 @@ export interface components {
         };
         FieldErrors: {
             [key: string]: string[];
+        };
+        HandOverMailboxRequest: {
+            successor_user_id: components["schemas"]["PositiveID"];
         };
         HealthCheckResult: {
             details?: {
@@ -2463,7 +2533,7 @@ export interface components {
         Mailbox: {
             access: components["schemas"]["MailboxAccess"];
             address: string;
-            /** @description True when a personal mailbox's owner left the organization. */
+            /** @description True while a personal mailbox's owner has left the organization and nobody has taken it over. */
             awaiting_handover: boolean;
             /** Format: date-time */
             created_at: string;
@@ -2471,11 +2541,12 @@ export interface components {
             id: components["schemas"]["PositiveID"];
             /** @description The owner of a personal mailbox; null for a shared one or a personal one whose owner left. */
             owner_user_id: components["schemas"]["PositiveID"] | null;
-            /** @description Mail received before this instant is sealed; null when nothing is sealed. */
+            /** @description Messages and broadcasts created before this instant are sealed and invisible on every surface; set once at handover, null when nothing is sealed. */
             sealed_before: string | null;
             type: components["schemas"]["MailboxType"];
-            /** @description Number of unread inbound messages in the mailbox; 0 for a caller without `view`. */
+            /** @description Number of inbound messages after the seal boundary that the caller has not read; 0 for a caller without `view`. */
             unread_count: number;
+            /** @description Whether mail webhooks are published for this mailbox; always false for a personal one. */
             webhooks_enabled: boolean;
         };
         /** @description What the caller may do with the mailbox. */
@@ -2491,7 +2562,7 @@ export interface components {
             actor_user_id: components["schemas"]["PositiveID"] | null;
             /** Format: date-time */
             created_at: string;
-            /** @description Ids, permissions, and counts only; never message content. */
+            /** @description Ids, permissions, timestamps, and counts only; never message content. A departure sets `reason` to `left_organization` on `owner_left` and `member_removed`. */
             detail: {
                 [key: string]: unknown;
             };
@@ -2576,6 +2647,16 @@ export interface components {
             /** @constant */
             code: 0;
             data: components["schemas"]["Mailbox"];
+            message: string;
+        };
+        MailboxSealedDeletion: {
+            deleted_broadcasts: number;
+            deleted_messages: number;
+        };
+        MailboxSealedDeletionResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailboxSealedDeletion"];
             message: string;
         };
         /** @enum {string} */
@@ -2961,6 +3042,7 @@ export interface components {
             mailbox_id: components["schemas"]["PositiveID"];
             /** @description RFC 5322 Message-ID without angle brackets; empty when unknown. */
             message_id: string;
+            /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
@@ -2996,6 +3078,7 @@ export interface components {
             id: components["schemas"]["PositiveID"];
             last_event: components["schemas"]["MailEventSummary"];
             mailbox_id: components["schemas"]["PositiveID"];
+            /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
@@ -3583,6 +3666,9 @@ export interface components {
         };
         SetMailboxMemberRequest: {
             permission: components["schemas"]["MailboxPermission"];
+        };
+        SetMailboxWebhookSettingRequest: {
+            enabled: boolean;
         };
         Setting: {
             key: string;
@@ -6751,6 +6837,60 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    handOverMailbox: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HandOverMailboxRequest"];
+            };
+        };
+        responses: {
+            /** @description The mailbox after the handover, as the caller sees it. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The mailbox is already shared (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation, or the successor is not a member of the organization (`MAILBOX.ACCESS_INVALID`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listMailboxMembers: {
         parameters: {
             query?: never;
@@ -6966,7 +7106,7 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description The `Idempotency-Key` was used with different content (`MAILBOX.IDEMPOTENCY_CONFLICT`), or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`). */
+            /** @description The `Idempotency-Key` was used with different content or matches a sealed message (`MAILBOX.IDEMPOTENCY_CONFLICT`, with no message data), or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7141,6 +7281,106 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailboxSealedMessages: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteMailboxSealedMessagesRequest"];
+            };
+        };
+        responses: {
+            /** @description How many messages and broadcasts were deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxSealedDeletionResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The mailbox has no seal boundary (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation, or `confirm_address` is not the mailbox address (`MAILBOX.ACCESS_INVALID`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    setMailboxWebhookSetting: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMailboxWebhookSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description The mailbox after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The mailbox is personal (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -8731,7 +8971,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The `Idempotency-Key` was used with different content (`MAILBOX.IDEMPOTENCY_CONFLICT`), or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`). */
+            /** @description The `Idempotency-Key` was used with different content or matches a sealed message (`MAILBOX.IDEMPOTENCY_CONFLICT`, with no message data), or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`). */
             409: {
                 headers: {
                     [name: string]: unknown;

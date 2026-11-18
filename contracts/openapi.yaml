@@ -4907,6 +4907,161 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/handovers:
+    post:
+      operationId: handOverMailbox
+      summary: Hand a personal mailbox over to a successor
+      description: Owners and admins only. The mailbox becomes shared, the successor becomes a `send` member,
+        the former owner keeps no access or read records, and `sealed_before` is set to the time the owner
+        left the organization when they are gone, otherwise to now. Messages and broadcasts created before
+        it are sealed. Writes a `handed_over` access event.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HandOverMailboxRequest'
+      responses:
+        '201':
+          description: The mailbox after the handover, as the caller sees it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The mailbox is already shared (`MAILBOX.ACCESS_CONFLICT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the successor is not a member of the organization
+            (`MAILBOX.ACCESS_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/sealed-messages:
+    delete:
+      operationId: deleteMailboxSealedMessages
+      summary: Delete a mailbox's sealed history
+      description: Owners and admins only. Sealed broadcasts still scheduled, sending, or paused are cancelled
+        first; then sealed broadcasts with their recipients and sealed messages with their events and
+        attachments are deleted. The seal boundary stays. Writes a `sealed_deleted` access event.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteMailboxSealedMessagesRequest'
+      responses:
+        '200':
+          description: How many messages and broadcasts were deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxSealedDeletionResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The mailbox has no seal boundary (`MAILBOX.ACCESS_CONFLICT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or `confirm_address` is not the mailbox address
+            (`MAILBOX.ACCESS_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/webhook-setting:
+    put:
+      operationId: setMailboxWebhookSetting
+      summary: Turn mail webhooks for a shared mailbox on or off
+      description: Needs `manage_members` on the mailbox. A change writes a `webhooks_changed` access event;
+        setting the current value writes nothing.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMailboxWebhookSettingRequest'
+      responses:
+        '200':
+          description: The mailbox after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The mailbox is personal (`MAILBOX.ACCESS_CONFLICT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/messages:
     get:
       operationId: listMailMessages
@@ -4981,8 +5136,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The `Idempotency-Key` was used with different content (`MAILBOX.IDEMPOTENCY_CONFLICT`),
-            or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`).
+          description: The `Idempotency-Key` was used with different content or matches a sealed message
+            (`MAILBOX.IDEMPOTENCY_CONFLICT`, with no message data), or its first attempt has not finished
+            (`MAILBOX.SEND_IN_PROGRESS`).
           content:
             application/json:
               schema:
@@ -5043,6 +5199,8 @@ paths:
     put:
       operationId: updateMailMessage
       summary: Mark a message read or unread
+      description: Changes only the caller's own read state and needs `view`. Outbound messages are always
+        read. A sealed message is not found.
       tags:
         - Mailboxes
       security:
@@ -5266,8 +5424,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: The `Idempotency-Key` was used with different content (`MAILBOX.IDEMPOTENCY_CONFLICT`),
-            or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`).
+          description: The `Idempotency-Key` was used with different content or matches a sealed message
+            (`MAILBOX.IDEMPOTENCY_CONFLICT`, with no message data), or its first attempt has not finished
+            (`MAILBOX.SEND_IN_PROGRESS`).
           content:
             application/json:
               schema:
@@ -8922,20 +9081,24 @@ components:
             - type: 'null'
         awaiting_handover:
           type: boolean
-          description: True when a personal mailbox's owner left the organization.
+          description: True while a personal mailbox's owner has left the organization and nobody has taken
+            it over.
         sealed_before:
-          description: Mail received before this instant is sealed; null when nothing is sealed.
+          description: Messages and broadcasts created before this instant are sealed and invisible on every
+            surface; set once at handover, null when nothing is sealed.
           oneOf:
             - type: string
               format: date-time
             - type: 'null'
         webhooks_enabled:
           type: boolean
+          description: Whether mail webhooks are published for this mailbox; always false for a personal one.
         access:
           $ref: '#/components/schemas/MailboxAccess'
         unread_count:
           type: integer
-          description: Number of unread inbound messages in the mailbox; 0 for a caller without `view`.
+          description: Number of inbound messages after the seal boundary that the caller has not read; 0 for
+            a caller without `view`.
           minimum: 0
         created_at:
           type: string
@@ -9109,7 +9272,8 @@ components:
             - type: 'null'
         detail:
           type: object
-          description: Ids, permissions, and counts only; never message content.
+          description: Ids, permissions, timestamps, and counts only; never message content. A departure sets
+            `reason` to `left_organization` on `owner_left` and `member_removed`.
           additionalProperties: true
         created_at:
           type: string
@@ -9136,6 +9300,60 @@ components:
           $ref: '#/components/schemas/PaginationMeta'
         links:
           $ref: '#/components/schemas/PaginationLinks'
+    HandOverMailboxRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - successor_user_id
+      properties:
+        successor_user_id:
+          $ref: '#/components/schemas/PositiveID'
+    DeleteMailboxSealedMessagesRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - confirm_address
+      properties:
+        confirm_address:
+          type: string
+          description: The mailbox address, compared ignoring case.
+          minLength: 1
+          maxLength: 320
+    MailboxSealedDeletion:
+      type: object
+      additionalProperties: false
+      required:
+        - deleted_messages
+        - deleted_broadcasts
+      properties:
+        deleted_messages:
+          type: integer
+          minimum: 0
+        deleted_broadcasts:
+          type: integer
+          minimum: 0
+    MailboxSealedDeletionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailboxSealedDeletion'
+    SetMailboxWebhookSettingRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
     MailboxResponse:
       type: object
       additionalProperties: false
@@ -9226,6 +9444,7 @@ components:
           maxLength: 998
         read:
           type: boolean
+          description: Whether the caller has read the message; per person. Outbound messages are always read.
         failure_code:
           type: string
           description: Stable provider or transport reason when `status` is `failed`; empty otherwise.
@@ -9297,6 +9516,7 @@ components:
           maxLength: 998
         read:
           type: boolean
+          description: Whether the caller has read the message; per person. Outbound messages are always read.
         failure_code:
           type: string
           maxLength: 120
