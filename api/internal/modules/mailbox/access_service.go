@@ -368,6 +368,32 @@ func (s *service) memberMailbox(ctx context.Context, viewer domain.OrganizationC
 	return mailbox, nil
 }
 
+// SetMailboxWebhooks turns mail webhooks of a shared mailbox on or off with the same checks as a
+// member change. A change is recorded; setting the current value writes nothing.
+func (s *service) SetMailboxWebhooks(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, enabled bool) (*domain.Mailbox, error) {
+	mailbox, err := s.authorizeMailbox(ctx, viewer, mailboxID, nil)
+	if err != nil {
+		return nil, err
+	}
+	if mailbox.Type != domain.MailboxTypeShared {
+		return nil, fmt.Errorf("%w: a personal mailbox never publishes webhooks", ErrMailboxAccessConflict)
+	}
+	if !canManageMembers(mailbox.Access) {
+		return nil, domain.ErrPermissionDenied
+	}
+	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+		changed, setErr := s.repo.SetMailboxWebhooks(tx, mailbox.ID, enabled)
+		if setErr != nil || !changed {
+			return setErr
+		}
+		return s.recordAccess(tx, mailbox, domain.MailboxAccessWebhooksChanged, viewer.UserID, 0, map[string]any{"enabled": enabled})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.authorizeMailbox(ctx, viewer, mailbox.ID, nil)
+}
+
 func (s *service) ListMailboxMembers(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) ([]*domain.MailboxMember, error) {
 	if _, err := s.memberMailbox(ctx, viewer, mailboxID); err != nil {
 		return nil, err

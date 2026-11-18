@@ -106,6 +106,8 @@ type Service interface {
 	ListMailboxAccessEvents(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, page, size int) ([]*domain.MailboxAccessEvent, int64, error)
 	// HandOverMailbox makes a personal mailbox shared with a successor and seals its history.
 	HandOverMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID, successorUserID uint) (*domain.Mailbox, error)
+	// SetMailboxWebhooks turns mail webhooks of a shared mailbox on or off.
+	SetMailboxWebhooks(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, enabled bool) (*domain.Mailbox, error)
 	// DeleteSealedHistory deletes the messages and broadcasts before the seal boundary.
 	DeleteSealedHistory(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, confirmAddress string) (*SealedDeletion, error)
 	// MemberRemoved and MemberJoined follow the organization starter's membership events.

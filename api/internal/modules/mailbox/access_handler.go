@@ -106,6 +106,25 @@ func (h *Handler) HandOverMailbox(c *gin.Context) {
 	response.Created(c, toMailboxResponse(mailbox))
 }
 
+// SetMailboxWebhookSetting turns a shared mailbox's mail webhooks on or off.
+func (h *Handler) SetMailboxWebhookSetting(c *gin.Context) {
+	viewer, mailboxID, ok := mailboxScope(c)
+	if !ok {
+		return
+	}
+	var req SetMailboxWebhookSettingRequest
+	if !httphandler.BindJSON(c, &req) {
+		return
+	}
+	mailbox, err := h.service.SetMailboxWebhooks(c.Request.Context(), viewer, mailboxID, *req.Enabled)
+	if err != nil {
+		response.HandleError(c, "Failed to change the webhook switch", err)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, toMailboxResponse(mailbox))
+}
+
 // DeleteMailboxSealedMessages deletes a mailbox's sealed history for good.
 func (h *Handler) DeleteMailboxSealedMessages(c *gin.Context) {
 	viewer, mailboxID, ok := mailboxScope(c)

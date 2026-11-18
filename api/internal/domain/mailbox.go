@@ -627,6 +627,9 @@ type MailboxRepository interface {
 	// HandOverMailbox makes a personal mailbox shared, without owner, sealed before the boundary.
 	// It reports false when the mailbox is not personal any more.
 	HandOverMailbox(ctx context.Context, mailboxID uint, sealedBefore time.Time) (bool, error)
+	// SetMailboxWebhooks sets the webhook switch of a live shared mailbox. It reports whether the
+	// value changed.
+	SetMailboxWebhooks(ctx context.Context, mailboxID uint, enabled bool) (bool, error)
 	// DeleteSealedHistory cancels and deletes the mailbox's broadcasts created before the boundary
 	// and deletes its messages created before it, with their dependants.
 	DeleteSealedHistory(ctx context.Context, mailboxID uint, before time.Time) (messages, broadcasts int64, err error)

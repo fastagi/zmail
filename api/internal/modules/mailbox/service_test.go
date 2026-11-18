@@ -656,6 +656,15 @@ func (r *fakeRepository) HandOverMailbox(_ context.Context, mailboxID uint, seal
 	return true, nil
 }
 
+func (r *fakeRepository) SetMailboxWebhooks(_ context.Context, mailboxID uint, enabled bool) (bool, error) {
+	mailbox, ok := r.mailboxes[mailboxID]
+	if !ok || mailbox.Type != domain.MailboxTypeShared || mailbox.WebhooksEnabled == enabled {
+		return false, nil
+	}
+	mailbox.WebhooksEnabled = enabled
+	return true, nil
+}
+
 func (r *fakeRepository) DeleteSealedHistory(_ context.Context, mailboxID uint, before time.Time) (int64, int64, error) {
 	var deleted int64
 	for id, message := range r.messages {

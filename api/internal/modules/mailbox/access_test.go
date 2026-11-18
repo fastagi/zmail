@@ -179,6 +179,7 @@ func accessRouter(svc *service, viewer domain.OrganizationContext) *gin.Engine {
 	router.GET("/mailboxes/:mailbox_id/access-events", handler.ListMailboxAccessEvents)
 	router.POST("/mailboxes/:mailbox_id/handovers", handler.HandOverMailbox)
 	router.DELETE("/mailboxes/:mailbox_id/sealed-messages", handler.DeleteMailboxSealedMessages)
+	router.PUT("/mailboxes/:mailbox_id/webhook-setting", handler.SetMailboxWebhookSetting)
 	router.POST("/mail-broadcasts/:broadcast_id/pauses", handler.PauseBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/cancellations", handler.CancelBroadcast)
 	return router

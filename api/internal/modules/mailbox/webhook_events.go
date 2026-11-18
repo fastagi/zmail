@@ -164,6 +164,11 @@ func (n *webhookNotifier) Notify(ctx context.Context, notification MailNotificat
 		return nil
 	}
 	message := notification.Message
+	// Only a shared mailbox with its switch on publishes, and never about a sealed message.
+	if notification.MailboxType != domain.MailboxTypeShared || !notification.WebhooksEnabled ||
+		(notification.SealedBefore != nil && message.CreatedAt.Before(*notification.SealedBefore)) {
+		return nil
+	}
 	to := message.To
 	if to == nil {
 		to = []string{}

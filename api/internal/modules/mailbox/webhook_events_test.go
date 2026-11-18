@@ -77,6 +77,7 @@ func TestWebhookNotifierPublishesAValidEventWithoutMailContent(t *testing.T) {
 	}
 	notification := MailNotification{
 		Type: WebhookMailBounced, OrganizationID: 3, MailboxAddress: "hello@mail.example", Message: message,
+		MailboxType: domain.MailboxTypeShared, WebhooksEnabled: true,
 		Recipient: "bob@example.com", Reason: "permanent_failure", OccurredAt: now.Add(-time.Minute), Key: "event:abc/+=",
 	}
 	if err := notifier.Notify(context.Background(), notification); err != nil {
@@ -126,11 +127,15 @@ func TestWebhookNotifierIsSilentWithoutTheStarterOrAnOrganization(t *testing.T) 
 	message := &domain.MailMessage{ID: 1, MailboxID: 1, Direction: domain.MailDirectionInbound, FromAddress: "a@b.test"}
 	publisher := &recordingPublisher{}
 	off := NewWebhookNotifier(webhookConfig(false), publisher)
-	if err := off.Notify(context.Background(), MailNotification{Type: WebhookMailReceived, OrganizationID: 1, Message: message}); err != nil {
+	if err := off.Notify(context.Background(), MailNotification{
+		Type: WebhookMailReceived, OrganizationID: 1, Message: message, MailboxType: domain.MailboxTypeShared, WebhooksEnabled: true,
+	}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	on := NewWebhookNotifier(webhookConfig(true), publisher)
-	if err := on.Notify(context.Background(), MailNotification{Type: WebhookMailReceived, Message: message}); err != nil {
+	if err := on.Notify(context.Background(), MailNotification{
+		Type: WebhookMailReceived, Message: message, MailboxType: domain.MailboxTypeShared, WebhooksEnabled: true,
+	}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if len(publisher.events) != 0 {

@@ -94,6 +94,20 @@ func (r *repository) HandOverMailbox(ctx context.Context, mailboxID uint, sealed
 	return result.RowsAffected == 1, nil
 }
 
+// SetMailboxWebhooks updates the switch only when it changes, so a repeated value reports false.
+func (r *repository) SetMailboxWebhooks(ctx context.Context, mailboxID uint, enabled bool) (bool, error) {
+	if r.db == nil {
+		return false, domain.ErrServiceUnavailable
+	}
+	result := r.conn(ctx).Model(&MailboxPO{}).
+		Where("id = ? AND type = ? AND webhooks_enabled <> ?", mailboxID, string(domain.MailboxTypeShared), enabled).
+		Updates(map[string]any{"webhooks_enabled": enabled, "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 // DeleteSealedHistory cancels the mailbox's sealed broadcasts still running, then deletes its
 // sealed broadcasts with their recipients and its sealed messages with their attachments,
 // events, and read rows. The boundary stays.

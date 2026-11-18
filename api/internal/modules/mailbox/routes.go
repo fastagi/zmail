@@ -79,6 +79,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.handovers.store").WhereNumber("mailbox_id")
 		auth.DELETE("/mailboxes/:mailbox_id/sealed-messages", h.DeleteMailboxSealedMessages).
 			Name("mailboxes.sealed_messages.destroy").WhereNumber("mailbox_id")
+		auth.PUT("/mailboxes/:mailbox_id/webhook-setting", h.SetMailboxWebhookSetting).
+			Name("mailboxes.webhook_setting.update").WhereNumber("mailbox_id")
 
 		auth.GET("/mailboxes/:mailbox_id/messages", h.ListMessages).
 			Name("mailboxes.messages.index").WhereNumber("mailbox_id")
