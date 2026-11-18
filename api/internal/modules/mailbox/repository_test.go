@@ -983,3 +983,70 @@ func sameJSON(a, b string) bool {
 	}
 	return reflect.DeepEqual(left, right)
 }
+
+// A message deleted between SetMessageRead's lookup and its insert hits the read row's foreign
+// key; that answers not found, as the lookup would have.
+func TestRepositorySetMessageReadOnAMessageDeletedAtInsert(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	// The schema migration's foreign key; AutoMigrate does not create it.
+	if err := db.Exec(`ALTER TABLE mail_message_reads ADD CONSTRAINT mail_message_reads_message_fk
+		FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE`).Error; err != nil {
+		t.Fatalf("add foreign key: %v", err)
+	}
+	mailbox := createMailbox(t, repo, "hello@mail.example")
+	message := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
+		FromAddress: "alice@sender.test", To: []string{mailbox.Address}, Subject: "In", DedupeKey: "in",
+	}
+	if _, err := repo.CreateInboundMessage(ctx, message); err != nil {
+		t.Fatalf("CreateInboundMessage: %v", err)
+	}
+	// Another request deletes the message right before the read row is inserted.
+	deleted := false
+	if err := db.Callback().Create().Before("gorm:create").Register("test:delete_message_first", func(tx *gorm.DB) {
+		if tx.Statement.Table != "mail_message_reads" || deleted {
+			return
+		}
+		deleted = true
+		if err := db.Exec(`DELETE FROM mail_messages WHERE id = ?`, message.ID).Error; err != nil {
+			t.Errorf("concurrent delete: %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+
+	err := repo.SetMessageRead(ctx, mailbox.ID, message.ID, as(1).MembershipID, true, time.Now().UTC())
+	if !deleted {
+		t.Fatal("the read row was never inserted")
+	}
+	if !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("SetMessageRead on a message deleted at insert = %v; want ErrMailMessageNotFound", err)
+	}
+}
+
+// Read state belongs to a membership: the repository refuses a read without one.
+func TestRepositorySetMessageReadNeedsAMembership(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	mailbox := createMailbox(t, repo, "hello@mail.example")
+	message := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
+		FromAddress: "alice@sender.test", To: []string{mailbox.Address}, Subject: "In", DedupeKey: "in",
+	}
+	if _, err := repo.CreateInboundMessage(ctx, message); err != nil {
+		t.Fatalf("CreateInboundMessage: %v", err)
+	}
+	for _, read := range []bool{true, false} {
+		if err := repo.SetMessageRead(ctx, mailbox.ID, message.ID, 0, read, time.Now().UTC()); !errors.Is(err, domain.ErrInvalidInput) {
+			t.Fatalf("SetMessageRead(read=%v) without a membership = %v; want ErrInvalidInput", read, err)
+		}
+	}
+	var rows int64
+	db.Model(&MailMessageReadPO{}).Count(&rows)
+	if rows != 0 {
+		t.Fatalf("stored %d read rows without a membership", rows)
+	}
+}

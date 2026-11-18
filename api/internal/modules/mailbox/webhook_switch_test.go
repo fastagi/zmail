@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
@@ -101,6 +102,45 @@ func TestWebhookOnlyForEnabledSharedMailbox(t *testing.T) {
 	recordBounce(t, f, "evt-team-off-again", "<prov-team-on@mail.example>")
 	if len(publisher.events) != 0 {
 		t.Fatalf("published %v after switching off; want nothing", publisher.publishedTypes())
+	}
+}
+
+// AC-9, inbound: one received message each for a personal mailbox, a shared mailbox with
+// webhooks off, and a shared mailbox with webhooks on publishes exactly one mail.message.received,
+// for the last.
+func TestInboundWebhookOnlyForEnabledSharedMailbox(t *testing.T) {
+	f := newPostgresAccessFixture(t)
+	ctx := context.Background()
+	publisher := &recordingPublisher{}
+	f.service.notifier = NewWebhookNotifier(webhookConfig(true), publisher)
+	f.service.now = time.Now
+	enabled, err := f.service.CreateMailbox(ctx, f.admin, CreateMailboxInput{
+		LocalPart: "ops", Type: domain.MailboxTypeShared,
+		Members: []MailboxMemberInput{{UserID: accessC, Permission: domain.MailboxPermissionView}},
+	})
+	if err != nil {
+		t.Fatalf("create ops@: %v", err)
+	}
+	if enabled, err = f.service.SetMailboxWebhooks(ctx, f.admin, enabled.ID, true); err != nil {
+		t.Fatalf("SetMailboxWebhooks: %v", err)
+	}
+	if f.team.WebhooksEnabled {
+		t.Fatal("team@ starts with webhooks on")
+	}
+
+	f.receiveSigned(t, f.personal, "in-personal@sender.test")
+	f.receiveSigned(t, f.team, "in-team-off@sender.test")
+	received := f.receiveSigned(t, enabled, "in-ops-on@sender.test")
+
+	if len(publisher.events) != 1 || publisher.events[0].Type != WebhookMailReceived {
+		t.Fatalf("published %v; want one %s", publisher.publishedTypes(), WebhookMailReceived)
+	}
+	var payload mailWebhookPayload
+	if err := json.Unmarshal(publisher.events[0].Data, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.MailboxID != enabled.ID || payload.MessageID != received.ID || payload.Direction != string(domain.MailDirectionInbound) {
+		t.Fatalf("payload = %+v; want message %d of ops@ (%d)", payload, received.ID, enabled.ID)
 	}
 }
 

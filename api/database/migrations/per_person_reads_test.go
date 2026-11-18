@@ -108,3 +108,41 @@ func TestReadsCascadeWithMembershipAndMessage(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT message_id, membership_id FROM mail_message_reads ORDER BY message_id, membership_id`).Scan(&reads).Error)
 	assert.Equal(t, []read{{MessageID: 11, MembershipID: 100}}, reads)
 }
+
+// TestAddPerPersonReadsDownFoldsOnlyTheManagingCreatorsReads: the shared read_at column comes back
+// only from the read rows of the creator while they manage the mailbox. A colleague's reads, and
+// the creator's reads on a mailbox they only view, are not folded back.
+func TestAddPerPersonReadsDownFoldsOnlyTheManagingCreatorsReads(t *testing.T) {
+	db, exec := perPersonReadsFixture(t)
+	require.NoError(t, (&addPerPersonReads{}).Up(db))
+	// Mailbox 3 was created by 903, who is only a view member of it.
+	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, created_at, updated_at) VALUES (3, 10, 903, 'viewed@mail.example', now(), now())`)
+	exec(`INSERT INTO mailbox_members (mailbox_id, membership_id, user_id, permission, granted_by, created_at, updated_at) VALUES (3, 103, 903, 'view', 901, now(), now())`)
+	for _, id := range []int{11, 12, 31} {
+		mailboxID := 1
+		if id == 31 {
+			mailboxID = 3
+		}
+		exec(`INSERT INTO mail_messages (id, mailbox_id, direction, status, from_address, created_at, updated_at)
+			VALUES (?, ?, 'inbound', 'received', 'a@b.test', now(), now())`, id, mailboxID)
+	}
+	readAt := time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)
+	exec(`INSERT INTO mail_message_reads (message_id, membership_id, read_at) VALUES
+		(11, 100, ?), -- the creator, who manages mailbox 1: folded back
+		(12, 103, ?), -- a colleague with view on mailbox 1: not folded
+		(31, 103, ?)  -- the creator of mailbox 3, who only views it: not folded`, readAt, readAt, readAt)
+
+	require.NoError(t, (&addPerPersonReads{}).Down(db))
+
+	type restored struct {
+		ID     int
+		ReadAt *time.Time
+	}
+	var rows []restored
+	require.NoError(t, db.Raw(`SELECT id, read_at FROM mail_messages ORDER BY id`).Scan(&rows).Error)
+	require.Len(t, rows, 3)
+	require.NotNil(t, rows[0].ReadAt, "the managing creator's read is folded back")
+	assert.True(t, readAt.Equal(*rows[0].ReadAt))
+	assert.Nil(t, rows[1].ReadAt, "a colleague's read is not folded back")
+	assert.Nil(t, rows[2].ReadAt, "a creator who only views the mailbox is not folded back")
+}

@@ -42,7 +42,6 @@ func (r CreateMailboxRequest) input() CreateMailboxInput {
 	}
 }
 
-// SetMailboxMemberRequest sets one member's permission.
 // SetMailboxWebhookSettingRequest turns a shared mailbox's mail webhooks on or off.
 type SetMailboxWebhookSettingRequest struct {
 	Enabled *bool `json:"enabled" binding:"required"`
