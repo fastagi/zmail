@@ -218,7 +218,9 @@ type MailMessage struct {
 	// IdempotencyFingerprint is a hash of the send request, so a reused key with a different
 	// request is refused instead of answered with an unrelated message.
 	IdempotencyFingerprint string
-	ReadAt                 *time.Time
+	// Read is whether the viewer has read the message. Read state is per person; outbound
+	// messages are always read.
+	Read bool
 	// MailboxAddress is the address of the owning mailbox. Only the cross-mailbox log and the
 	// provider-id lookup fill it.
 	MailboxAddress string
@@ -550,7 +552,9 @@ type MailDayStats struct {
 // MailboxRepository defines persistence for mailboxes and their messages.
 type MailboxRepository interface {
 	CreateMailbox(ctx context.Context, mailbox *Mailbox, limit int) error
-	ListMailboxes(ctx context.Context, organizationID uint) ([]*Mailbox, error)
+	// ListMailboxes lists the organization's mailboxes. UnreadCount is what readerMembershipID has
+	// not read of each mailbox's inbound mail after its seal boundary.
+	ListMailboxes(ctx context.Context, organizationID, readerMembershipID uint) ([]*Mailbox, error)
 	FindMailbox(ctx context.Context, organizationID, id uint) (*Mailbox, error)
 	FindMailboxByAddress(ctx context.Context, address string) (*Mailbox, error)
 	DeleteMailbox(ctx context.Context, organizationID, id uint) error
@@ -584,7 +588,14 @@ type MailboxRepository interface {
 	UpdateMessageDelivery(ctx context.Context, id uint, status MailStatus, messageID, failureCode string) error
 	ListMessages(ctx context.Context, mailboxID uint, filter MailMessageFilter) ([]*MailMessage, int64, error)
 	FindMessage(ctx context.Context, mailboxID, id uint) (*MailMessage, error)
-	SetMessageRead(ctx context.Context, mailboxID, id uint, readAt *time.Time) error
+	// SetMessageRead stores or deletes one membership's read row of a message of the mailbox. A
+	// sealed or missing message is ErrMailMessageNotFound; an outbound message is always read and
+	// stores nothing.
+	SetMessageRead(ctx context.Context, mailboxID, id, membershipID uint, read bool, at time.Time) error
+	// ReadMessages reports which of the given messages the membership has read.
+	ReadMessages(ctx context.Context, membershipID uint, messageIDs []uint) (map[uint]bool, error)
+	// DeleteMailboxReads removes a membership's read rows of every message of a mailbox.
+	DeleteMailboxReads(ctx context.Context, mailboxID, membershipID uint) error
 	DeleteMessage(ctx context.Context, mailboxID, id uint) error
 	CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error)
 	// InTransaction runs fn in one database transaction. Repository calls made with the context

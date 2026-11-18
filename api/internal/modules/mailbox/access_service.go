@@ -99,7 +99,7 @@ func (s *service) checkAccess(
 // visibleMailboxes lists the organization's mailboxes the viewer has any access to, each with the
 // viewer's access filled in.
 func (s *service) visibleMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error) {
-	mailboxes, err := s.repo.ListMailboxes(ctx, viewer.OrganizationID)
+	mailboxes, err := s.repo.ListMailboxes(ctx, viewer.OrganizationID, viewer.MembershipID)
 	if err != nil {
 		return nil, err
 	}
@@ -406,8 +406,9 @@ func (s *service) SetMailboxMember(
 	return member, nil
 }
 
-// RemoveMailboxMember deletes a member row and records it. The removed member's next request
-// finds no access.
+// RemoveMailboxMember deletes a member row and the member's read rows of the mailbox in one
+// transaction, and records it. The removed member's next request finds no access, and access
+// granted again starts with everything unread.
 func (s *service) RemoveMailboxMember(ctx context.Context, viewer domain.OrganizationContext, mailboxID, userID uint) error {
 	mailbox, err := s.memberMailbox(ctx, viewer, mailboxID)
 	if err != nil {
@@ -416,6 +417,9 @@ func (s *service) RemoveMailboxMember(ctx context.Context, viewer domain.Organiz
 	return s.repo.InTransaction(ctx, func(tx context.Context) error {
 		removed, err := s.repo.DeleteMailboxMember(tx, mailbox.ID, userID)
 		if err != nil {
+			return err
+		}
+		if err := s.repo.DeleteMailboxReads(tx, mailbox.ID, removed.MembershipID); err != nil {
 			return err
 		}
 		return s.recordAccess(tx, mailbox, domain.MailboxAccessMemberRemoved, viewer.UserID, removed.UserID, map[string]any{

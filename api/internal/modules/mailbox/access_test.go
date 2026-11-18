@@ -216,8 +216,8 @@ func TestPersonalMailboxIsInvisibleToColleagues(t *testing.T) {
 	if len(f.transport.sent) != 0 || f.outboundCount(t) != 0 {
 		t.Fatalf("a denied send reached the provider or stored a message")
 	}
-	if stored, _ := f.repo.FindMessage(ctx, box, message); stored == nil || stored.ReadAt != nil {
-		t.Fatalf("a denied read changed the message: %+v", stored)
+	if read, _ := f.repo.ReadMessages(ctx, f.c.MembershipID, []uint{message}); read[message] {
+		t.Fatalf("a denied read marked the message read")
 	}
 
 	recorder, body := serve(accessRouter(f.service, f.c), http.MethodGet, fmt.Sprintf("/mailboxes/%d/messages/%d", box, message), "")

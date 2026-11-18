@@ -63,8 +63,10 @@ type fakeRepository struct {
 	// members is keyed by mailbox id and membership id.
 	members      map[[2]uint]*domain.MailboxMember
 	accessEvents []*domain.MailboxAccessEvent
-	messages     map[uint]*domain.MailMessage
-	events       map[uint][]domain.MailEvent
+	// reads is keyed by membership id and message id.
+	reads    map[[2]uint]time.Time
+	messages map[uint]*domain.MailMessage
+	events   map[uint][]domain.MailEvent
 	// attachments holds the stored files of each message, with content.
 	attachments map[uint][]domain.MailAttachment
 	templates   map[uint]*domain.MailTemplate
@@ -154,6 +156,7 @@ func newFakeRepository() *fakeRepository {
 	return &fakeRepository{
 		mailboxes:   map[uint]*domain.Mailbox{},
 		members:     map[[2]uint]*domain.MailboxMember{},
+		reads:       map[[2]uint]time.Time{},
 		messages:    map[uint]*domain.MailMessage{},
 		events:      map[uint][]domain.MailEvent{},
 		attachments: map[uint][]domain.MailAttachment{},
@@ -209,14 +212,15 @@ func (r *fakeRepository) CreateMailbox(_ context.Context, mailbox *domain.Mailbo
 	return nil
 }
 
-func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID uint) ([]*domain.Mailbox, error) {
+func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID, readerMembershipID uint) ([]*domain.Mailbox, error) {
 	var owned []*domain.Mailbox
 	for _, mailbox := range r.mailboxes {
 		if mailbox.OrganizationID == organizationID {
 			copied := *mailbox
 			unread := 0
 			for _, message := range r.messages {
-				if message.MailboxID == mailbox.ID && message.Direction == domain.MailDirectionInbound && message.ReadAt == nil {
+				_, read := r.reads[[2]uint{readerMembershipID, message.ID}]
+				if message.MailboxID == mailbox.ID && message.Direction == domain.MailDirectionInbound && !read && !r.sealed(message) {
 					unread++
 				}
 			}
@@ -446,12 +450,47 @@ func (r *fakeRepository) FindMessage(_ context.Context, mailboxID, id uint) (*do
 	return &copied, nil
 }
 
-func (r *fakeRepository) SetMessageRead(_ context.Context, mailboxID, id uint, readAt *time.Time) error {
+// sealed reports whether a message was created before its mailbox's seal boundary.
+func (r *fakeRepository) sealed(message *domain.MailMessage) bool {
+	mailbox, ok := r.mailboxes[message.MailboxID]
+	return ok && mailbox.SealedBefore != nil && message.CreatedAt.Before(*mailbox.SealedBefore)
+}
+
+func (r *fakeRepository) SetMessageRead(_ context.Context, mailboxID, id, membershipID uint, read bool, at time.Time) error {
 	message, ok := r.messages[id]
-	if !ok || message.MailboxID != mailboxID {
+	if !ok || message.MailboxID != mailboxID || r.sealed(message) {
 		return ErrMailMessageNotFound
 	}
-	message.ReadAt = readAt
+	if message.Direction == domain.MailDirectionOutbound || membershipID == 0 {
+		return nil
+	}
+	key := [2]uint{membershipID, id}
+	if !read {
+		delete(r.reads, key)
+		return nil
+	}
+	if _, exists := r.reads[key]; !exists {
+		r.reads[key] = at
+	}
+	return nil
+}
+
+func (r *fakeRepository) ReadMessages(_ context.Context, membershipID uint, messageIDs []uint) (map[uint]bool, error) {
+	read := map[uint]bool{}
+	for _, id := range messageIDs {
+		if _, ok := r.reads[[2]uint{membershipID, id}]; ok {
+			read[id] = true
+		}
+	}
+	return read, nil
+}
+
+func (r *fakeRepository) DeleteMailboxReads(_ context.Context, mailboxID, membershipID uint) error {
+	for key := range r.reads {
+		if message, ok := r.messages[key[1]]; key[0] == membershipID && ok && message.MailboxID == mailboxID {
+			delete(r.reads, key)
+		}
+	}
 	return nil
 }
 
@@ -677,7 +716,7 @@ func TestSendMessageRecordsSentAndNormalizesRecipients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
-	if message.Status != domain.MailStatusSent || message.FailureCode != "" || message.ReadAt == nil {
+	if message.Status != domain.MailStatusSent || message.FailureCode != "" || !message.Read {
 		t.Fatalf("message = %+v", message)
 	}
 	if fixture.repo.messages[message.ID].Status != domain.MailStatusSent {
@@ -832,7 +871,7 @@ func TestReceiveInboundStoresOnceAndDeduplicatesRetries(t *testing.T) {
 		t.Fatalf("ReceiveInbound = %v, created %v", err, created)
 	}
 	if message.MailboxID != mailbox.ID || message.Direction != domain.MailDirectionInbound ||
-		message.Status != domain.MailStatusReceived || message.ReadAt != nil {
+		message.Status != domain.MailStatusReceived || message.Read {
 		t.Fatalf("message = %+v", message)
 	}
 	if message.FromAddress != "alice@sender.test" || message.Subject != "Inbound" || message.TextBody != "Hi from outside." {
@@ -894,11 +933,11 @@ func TestSetMessageReadTogglesState(t *testing.T) {
 	}
 
 	read, err := fixture.service.SetMessageRead(ctx, as(1), message.MailboxID, message.ID, true)
-	if err != nil || read.ReadAt == nil || !read.ReadAt.Equal(fixture.now) {
+	if err != nil || !read.Read || fixture.repo.reads[[2]uint{as(1).MembershipID, message.ID}] != fixture.now {
 		t.Fatalf("read = %+v, err %v", read, err)
 	}
 	unread, err := fixture.service.SetMessageRead(ctx, as(1), message.MailboxID, message.ID, false)
-	if err != nil || unread.ReadAt != nil {
+	if err != nil || unread.Read {
 		t.Fatalf("unread = %+v, err %v", unread, err)
 	}
 	if _, err := fixture.service.SetMessageRead(ctx, as(1), message.MailboxID, 999, true); !errors.Is(err, ErrMailMessageNotFound) {

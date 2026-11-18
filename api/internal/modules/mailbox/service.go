@@ -292,7 +292,38 @@ func (s *service) ListLog(ctx context.Context, viewer domain.OrganizationContext
 		// A mailbox filter the viewer may not read lists nothing, like a mailbox without mail.
 		readable = slices.DeleteFunc(readable, func(id uint) bool { return id != filter.MailboxID })
 	}
-	return s.repo.ListMessagesForOrganization(ctx, viewer.OrganizationID, readable, filter)
+	messages, total, err := s.repo.ListMessagesForOrganization(ctx, viewer.OrganizationID, readable, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.fillRead(ctx, viewer, messages...); err != nil {
+		return nil, 0, err
+	}
+	return messages, total, nil
+}
+
+// fillRead sets each inbound message's read state to the viewer's own. Outbound mail is always
+// read. Filling it never changes read state.
+func (s *service) fillRead(ctx context.Context, viewer domain.OrganizationContext, messages ...*domain.MailMessage) error {
+	ids := make([]uint, 0, len(messages))
+	for _, message := range messages {
+		if message.Direction == domain.MailDirectionInbound {
+			ids = append(ids, message.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	read, err := s.repo.ReadMessages(ctx, viewer.MembershipID, ids)
+	if err != nil {
+		return err
+	}
+	for _, message := range messages {
+		if message.Direction == domain.MailDirectionInbound {
+			message.Read = read[message.ID]
+		}
+	}
+	return nil
 }
 
 func (s *service) Stats(ctx context.Context, viewer domain.OrganizationContext, days int) ([]domain.MailDayStats, error) {
@@ -362,7 +393,14 @@ func (s *service) ListMessages(
 	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
 		return nil, 0, err
 	}
-	return s.repo.ListMessages(ctx, mailboxID, filter)
+	messages, total, err := s.repo.ListMessages(ctx, mailboxID, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.fillRead(ctx, viewer, messages...); err != nil {
+		return nil, 0, err
+	}
+	return messages, total, nil
 }
 
 func (s *service) GetMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) (*domain.MailMessage, error) {
@@ -371,6 +409,9 @@ func (s *service) GetMessage(ctx context.Context, viewer domain.OrganizationCont
 	}
 	message, err := s.repo.FindMessage(ctx, mailboxID, messageID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.fillRead(ctx, viewer, message); err != nil {
 		return nil, err
 	}
 	return s.withEvents(ctx, message)
@@ -403,21 +444,26 @@ func (s *service) withEvents(ctx context.Context, message *domain.MailMessage) (
 	return message, nil
 }
 
-// SetMessageRead changes the read state, shared by everyone who reads the mailbox until read
-// state becomes per person. It needs View.
+// SetMessageRead changes the viewer's own read state of a message; nobody else's changes. It
+// needs View. Marking an outbound message changes nothing: it is always read.
 func (s *service) SetMessageRead(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint, read bool) (*domain.MailMessage, error) {
 	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
 		return nil, err
 	}
-	var readAt *time.Time
-	if read {
-		now := s.now().UTC()
-		readAt = &now
-	}
-	if err := s.repo.SetMessageRead(ctx, mailboxID, messageID, readAt); err != nil {
+	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
+		return s.repo.SetMessageRead(tx, mailboxID, messageID, viewer.MembershipID, read, s.now().UTC())
+	})
+	if err != nil {
 		return nil, err
 	}
-	return s.repo.FindMessage(ctx, mailboxID, messageID)
+	message, err := s.repo.FindMessage(ctx, mailboxID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.fillRead(ctx, viewer, message); err != nil {
+		return nil, err
+	}
+	return message, nil
 }
 
 func (s *service) DeleteMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) error {
@@ -703,7 +749,6 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		fingerprint = sendFingerprint(to, cc, cleanText(subject), text, html, inReplyTo, attachmentDigest(attachments))
 	}
 
-	now := s.now().UTC()
 	return &domain.MailMessage{
 		IdempotencyKey:         idempotencyKey,
 		IdempotencyFingerprint: fingerprint,
@@ -720,8 +765,8 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		InReplyTo:              inReplyTo,
 		Attachments:            attachments,
 		AttachmentCount:        len(attachments),
-		// The owner wrote it, so it starts out read.
-		ReadAt: &now,
+		// Outbound mail is read for everyone.
+		Read: true,
 	}, nil
 }
 

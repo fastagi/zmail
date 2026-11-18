@@ -376,7 +376,7 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		To:              to,
 		Cc:              cc,
 		Subject:         message.Subject,
-		Read:            message.ReadAt != nil,
+		Read:            message.Read,
 		FailureCode:     message.FailureCode,
 		LastEvent:       string(message.LastEvent),
 		AttachmentCount: message.AttachmentCount,

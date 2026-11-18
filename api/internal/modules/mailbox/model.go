@@ -138,13 +138,24 @@ type MailMessagePO struct {
 	LastEvent              string  `gorm:"size:16;not null;default:''"`
 	AttachmentCount        int     `gorm:"not null;default:0"`
 	TemplateID             *uint
-	ReadAt                 *time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 }
 
 func (MailMessagePO) TableName() string {
 	return "mail_messages"
+}
+
+// MailMessageReadPO records that one organization membership has read one message. The schema
+// cascades it with the membership and the message.
+type MailMessageReadPO struct {
+	MembershipID uint `gorm:"primaryKey;autoIncrement:false"`
+	MessageID    uint `gorm:"primaryKey;autoIncrement:false"`
+	ReadAt       time.Time
+}
+
+func (MailMessageReadPO) TableName() string {
+	return "mail_message_reads"
 }
 
 func (po *MailMessagePO) toDomain() *domain.MailMessage {
@@ -166,9 +177,10 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 		MessageID:   po.MessageID,
 		InReplyTo:   po.InReplyTo,
 		FailureCode: po.FailureCode,
-		ReadAt:      po.ReadAt,
-		CreatedAt:   po.CreatedAt,
-		UpdatedAt:   po.UpdatedAt,
+		// Outbound mail is read for everyone; inbound read state is the viewer's, filled by the service.
+		Read:      po.Direction == string(domain.MailDirectionOutbound),
+		CreatedAt: po.CreatedAt,
+		UpdatedAt: po.UpdatedAt,
 	}
 	if po.DedupeKey != nil {
 		message.DedupeKey = *po.DedupeKey
@@ -201,7 +213,6 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		MessageID:   message.MessageID,
 		InReplyTo:   message.InReplyTo,
 		FailureCode: message.FailureCode,
-		ReadAt:      message.ReadAt,
 	}
 	if message.DedupeKey != "" {
 		key := message.DedupeKey
