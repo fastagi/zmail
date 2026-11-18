@@ -75,11 +75,11 @@ func membership(role domain.OrganizationRole) *domain.OrganizationContext {
 	return &viewer
 }
 
-// sharedWithHandlerUser is a shared mailbox whose one member is the handler user.
-func sharedWithHandlerUser(localPart string, permission domain.MailboxPermission) CreateMailboxInput {
+// sharedWithHandlerUser is a shared mailbox whose one member is the handler user, with send.
+func sharedWithHandlerUser(localPart string) CreateMailboxInput {
 	return CreateMailboxInput{
 		LocalPart: localPart, DisplayName: "Helpdesk", Type: domain.MailboxTypeShared,
-		Members: []MailboxMemberInput{{UserID: handlerUser, Permission: permission}},
+		Members: []MailboxMemberInput{{UserID: handlerUser, Permission: domain.MailboxPermissionSend}},
 	}
 }
 
@@ -124,7 +124,7 @@ func TestOnlyManagersCreateAndDeleteMailboxes(t *testing.T) {
 
 func TestMembersReadAndSendTheirMailboxes(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
-	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk", domain.MailboxPermissionSend)); err != nil {
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk")); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	if _, err := fixture.service.CreateMailbox(t.Context(), as(8), sharedInput("elsewhere", "", "")); err != nil {
@@ -158,7 +158,7 @@ func TestMembersReadAndSendTheirMailboxes(t *testing.T) {
 
 func TestSendAtTheLimitAnswers202Queued(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
-	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk", domain.MailboxPermissionSend)); err != nil {
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk")); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	send := `{"to":["bob@example.com"],"subject":"Hi","text":"Body"}`

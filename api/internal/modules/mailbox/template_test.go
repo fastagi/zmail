@@ -247,7 +247,7 @@ func TestTemplateTestSendUsesSampleValues(t *testing.T) {
 
 func TestSendRouteNamesMissingTemplateVariables(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
-	if _, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedWithHandlerUser("hello", domain.MailboxPermissionSend)); err != nil {
+	if _, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedWithHandlerUser("hello")); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	template, err := fixture.service.CreateTemplate(context.Background(), 7, testCreator, templateInput())

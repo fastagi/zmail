@@ -23,7 +23,10 @@ func (s *service) DispatchQueuedSends(ctx context.Context, limit int) (int, erro
 	}
 	processed := 0
 	for _, organizationID := range organizations {
-		if processed >= limit || ctx.Err() != nil {
+		if err := ctx.Err(); err != nil {
+			return processed, err
+		}
+		if processed >= limit {
 			break
 		}
 		finished, err := s.dispatchOrganizationQueue(ctx, organizationID, limit-processed)
