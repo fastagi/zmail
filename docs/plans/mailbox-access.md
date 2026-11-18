@@ -98,7 +98,10 @@ a personal mailbox.
 4. **Departure.** The organization module deletes the membership; the database cascades the
    member rows and read rows. After commit it publishes `organization.member.removed`; the mailbox
    module sets `owner_left_at` on the user's personal mailboxes in that organization and writes an
-   `owner_left` access event. If the handler fails, the mailbox simply stays personal for an owner
+   `owner_left` access event. For shared mailboxes it records the lost membership from its own
+   history: every `member_set` event stores `membership_id` in `detail`, so the handler finds the
+   mailboxes whose latest `member_set`/`member_removed` event for that membership is `member_set`
+   and writes `member_removed` with `detail.reason = "left_organization"`. If the handler fails, the mailbox simply stays personal for an owner
    who cannot sign in; handover then falls back to the handover time as the boundary (seals more,
    never less).
 5. **Handover.** Admin posts a successor (current member) for a personal mailbox, pending or not.
@@ -152,6 +155,10 @@ In `api/internal/domain/mailbox_access.go`:
   `OrganizationMemberJoinedEvent`, each with `OrganizationID, UserID, MembershipID uint; OccurredAt time.Time`,
   names `organization.member.removed` and `organization.member.joined`.
 
+Access is the **union** of the three rules above, not a first match: an admin who is also a
+member of a shared mailbox gets `Administer` and `ManageMembers` from the role plus whatever the
+member row grants (AC-7).
+
 Invariants: a personal mailbox has an owner user id unless the user was deleted; a personal
 mailbox has no member rows and `webhooks_enabled = false`; a message is visible only when its
 mailbox grants `View` and `sealed_before` is null or `message.created_at >= sealed_before`.
@@ -182,12 +189,6 @@ CREATE TABLE mailbox_members (
   PRIMARY KEY (mailbox_id, membership_id));
 CREATE INDEX idx_mailbox_members_membership ON mailbox_members (membership_id, mailbox_id);
 
-CREATE TABLE mail_message_reads (
-  message_id bigint NOT NULL REFERENCES mail_messages(id) ON DELETE CASCADE,
-  membership_id bigint NOT NULL REFERENCES organization_memberships(id) ON DELETE CASCADE,
-  read_at timestamptz NOT NULL,
-  PRIMARY KEY (membership_id, message_id));
-
 CREATE TABLE mailbox_access_events (
   id bigserial PRIMARY KEY,
   organization_id bigint NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -200,12 +201,26 @@ CREATE TABLE mailbox_access_events (
 CREATE INDEX idx_mailbox_access_events_mailbox ON mailbox_access_events (mailbox_id, id DESC);
 ```
 
-Backfill in the same migration: every existing mailbox stays `shared`; its creator's membership in
-the mailbox's organization becomes a `manage` member row (`granted_by` = creator) when it exists;
-every existing `mail_messages.read_at IS NOT NULL` inbound message gets a read row for that same
-membership; one `created` access event per mailbox. Then `ALTER TABLE mail_messages DROP COLUMN
-read_at`. Down recreates `read_at` from the creator's read rows, drops the three tables and the
-columns. Hard deletes of organization memberships (existing behavior) make the cascades fire.
+Backfill in the same migration, only for mailboxes with `organization_id IS NOT NULL` (the
+earlier ownership migration deliberately left orphans with NULL): every existing mailbox stays
+`shared`; its creator's membership in the mailbox's organization becomes a `manage` member row
+(`granted_by` = creator) when it exists; one `created` access event per mailbox. Down drops the two
+tables and the columns. Hard deletes of organization memberships (existing behavior) make the
+cascades fire.
+
+Migration `2026_11_19_100000_add_per_person_reads` (Task 2.1, one transaction):
+
+```sql
+CREATE TABLE mail_message_reads (
+  message_id bigint NOT NULL REFERENCES mail_messages(id) ON DELETE CASCADE,
+  membership_id bigint NOT NULL REFERENCES organization_memberships(id) ON DELETE CASCADE,
+  read_at timestamptz NOT NULL,
+  PRIMARY KEY (membership_id, message_id));
+```
+
+Backfill: every inbound message with `read_at IS NOT NULL` in a mailbox that has a `manage` member
+row from the creator gets a read row for that membership. Then `ALTER TABLE mail_messages DROP
+COLUMN read_at`. Down re-adds `read_at` and fills it from the creator's read rows.
 
 ## 7. State Machines
 
@@ -255,21 +270,25 @@ VALIDATE personal: owner_user_id set, members empty; shared: 1..100 members, uni
 AUTHORIZE viewer.Role.CanManageOrganization() ELSE PERMISSION.DENIED
 LOAD membership for owner and each member via FindForUser ELSE MAILBOX.ACCESS_INVALID
 BEGIN TRANSACTION mailbox
-  INSERT mailbox (existing limit and address rules), member rows, access event created
+  CREATE routing rule first (existing order)
+BEGIN TRANSACTION mailbox
+  INSERT mailbox with RoutingRuleID (existing limit and address rules), member rows, access event created
 COMMIT
-AFTER COMMIT existing routing-rule creation and compensation
+ON FAILURE remove the routing rule (existing compensation)
 RETURN 201 mailbox for viewer
 ```
 
 ```text
 COMMAND SetMailboxMember(viewer, mailbox_id, user_id, permission)
 LOAD mailbox in viewer organization ELSE MAILBOX.NOT_FOUND
-AUTHORIZE access.ManageMembers ELSE 404 when !access.Any() else PERMISSION.DENIED
-REQUIRE mailbox.type = shared ELSE MAILBOX.ACCESS_CONFLICT
+REQUIRE access.Any() ELSE MAILBOX.NOT_FOUND
+REQUIRE mailbox.type = shared ELSE MAILBOX.ACCESS_CONFLICT (checked before the capability, so admins and owners see 409)
+AUTHORIZE access.ManageMembers ELSE PERMISSION.DENIED
 VALIDATE permission valid; LOAD membership of user_id ELSE MAILBOX.ACCESS_INVALID
 BEGIN TRANSACTION mailbox
+  LOCK mailbox row FOR UPDATE
   REQUIRE member count < 100 when inserting ELSE MAILBOX.ACCESS_INVALID
-  UPSERT member row (granted_by = viewer.UserID); INSERT access event member_set
+  UPSERT member row (granted_by = viewer.UserID); INSERT access event member_set with detail.membership_id
 COMMIT
 RETURN 200 member
 ```
@@ -307,6 +326,7 @@ LOAD mailbox ELSE MAILBOX.NOT_FOUND
 REQUIRE sealed_before set ELSE MAILBOX.ACCESS_CONFLICT
 VALIDATE confirm_address equals mailbox address (case-insensitive) ELSE MAILBOX.ACCESS_INVALID
 BEGIN TRANSACTION mailbox
+  CANCEL broadcasts of the mailbox with created_at < sealed_before that are scheduled, sending, or paused (existing cancel transition)
   DELETE broadcasts of the mailbox with created_at < sealed_before (and recipients)
   DELETE messages of the mailbox with created_at < sealed_before (events, attachments, reads cascade)
   INSERT access event sealed_deleted with counts
@@ -348,6 +368,11 @@ CONTINUE with the existing start or resume transition
 RETURN existing response
 ```
 
+**Seal on every message lookup.** Every repository lookup of a message by id (find, delete,
+mark read, attachment, outbound GET, idempotency lookup) takes the mailbox's `sealed_before` and
+treats a sealed row as absent. In `send()`, an idempotency key that matches a sealed message
+returns `409 MAILBOX.IDEMPOTENCY_CONFLICT` with no message data and sends nothing.
+
 Queries: log and statistics take the viewer's visible mailbox ids and each mailbox's seal
 boundary; an empty set returns zero rows. Broadcast list/detail/recipients require `View` on the
 sender mailbox and hide broadcasts created before its seal boundary.
@@ -361,9 +386,11 @@ sender mailbox and hide broadcasts created before its seal boundary.
 | Delete mailbox | admin (`Administer`) |
 | Log and statistics | rows of `View` mailboxes after seal only |
 | Broadcast list, detail, recipients | `View` on sender mailbox, broadcast after seal |
-| Broadcast create, update (existing member rule) | `Send` on sender mailbox |
+| Broadcast create (existing member rule) | `Send` on sender mailbox |
+| Broadcast update (existing member rule) | `Send` on the stored and on the new sender mailbox |
 | Broadcast send, resume (existing admin rule) | `Send` on sender mailbox, checked at that call |
-| Broadcast pause, cancel (existing admin rule) | no mailbox access needed |
+| Broadcast pause, cancel (existing admin rule) | no mailbox access needed; without `View` on the sender mailbox (or for a sealed broadcast) the response is only `{id, status}` |
+| Broadcast delete (existing member rule) | `Send` on the stored sender mailbox |
 | Template test send | existing rule and `Send` |
 | API key send / get sent | key owner's `Send` / `View` |
 
@@ -396,8 +423,10 @@ None new. Existing broadcast worker unchanged except that it reads no access rul
 
 ## 13. Security, Privacy, and Audit
 
-- Webhooks: `Notify` publishes only when the mailbox is shared, `webhooks_enabled` is true, and the
-  message is not sealed.
+- Webhooks: `MailNotification` gains `MailboxType`, `WebhooksEnabled`, and `SealedBefore`, filled
+  in `sendNotifications`, `ReceiveInbound`, and by extending the `FindOutboundMessageByProviderID`
+  select. `Notify` publishes only when the type is shared, the switch is on, and
+  `Message.CreatedAt` is not before `SealedBefore`.
 - Access events store user ids and counts only, never message content.
 - Each mutation also writes the existing structured request audit.
 - 404 versus 403 never reveals a mailbox to someone without access.
@@ -463,8 +492,8 @@ checks, commit. Implementers read `api/AGENTS.md` or `web/AGENTS.md` first.
 Modify `api/internal/domain/mailbox.go`, `error_codes.go`, `api/database/migrations/testdata/schema.golden.sql`,
 mailbox `model.go`, `repository.go`, `service.go`, `broadcast_service.go`, `broadcast_handler.go`,
 `template_service.go`, `handler.go`, `dto.go`, `routes.go`, `errors.go`, `error_mappings.go`,
-`provider.go`, tests. This task's migration is the whole section 6 migration (all slices' tables)
-so later slices add no migrations; `mail_message_reads` is used from Task 2.1.
+`provider.go`, tests. This task's migration is `2026_11_19_090000_add_mailbox_access` (section 6, first block);
+`mail_messages.read_at` stays untouched until Task 2.1.
 
 **Interfaces produced:** section 5 types; repository `FindMailboxMember(ctx, mailboxID, membershipID uint) (*domain.MailboxMember, error)`,
 `ListMailboxMembers`, `UpsertMailboxMember`, `DeleteMailboxMember`, `AddMailboxAccessEvent`,
@@ -478,7 +507,10 @@ and `visibleMailboxes(ctx, viewer) ([]*domain.Mailbox, error)`. Service methods 
   `TestLogSkipsUnreadableMailboxes` and stats (AC-3), `TestViewMemberCannotSend` with no message
   stored and no quota used (AC-4), `TestApiKeyFollowsOwnerAccess` (AC-6),
   `TestAdminSelfGrantIsRecorded` (AC-7), `TestManageRequiredToChangeMembers` (AC-8),
-  `TestBroadcastNeedsSendOnSender` and pause without access (AC-13),
+  `TestBroadcastNeedsSendOnSender` and pause without access returning only `{id, status}` (AC-13),
+  `TestBroadcastDeleteAndUpdateNeedSend`, `TestAccessIsUnionOfRules` (admin who is also a member),
+  `TestPersonalMailboxMembersRouteIs409`, `TestMemberLimitUnderConcurrency` (PostgreSQL),
+  migration backfill skips mailboxes with NULL organization (PostgreSQL),
   `TestBroadcastsHiddenWithoutView` (AC-15), `TestCreateValidation` (AC-14),
   `TestRemovingMemberDeletesTheirReads`, `TestMembershipDeleteCascadesMembers` (PostgreSQL),
   migration backfill test (PostgreSQL).
@@ -506,7 +538,8 @@ creation component), `web/src/i18n/modules/mailbox/en-US.ts`, `zh-Hans.ts`; test
 
 ### Task 2.1: Per-person read state (API + Web)
 
-**Files:** mailbox `repository.go`, `service.go`, `dto.go`, tests; `contracts/MAILBOXES.md`;
+**Files:** `api/database/migrations/2026_11_19_100000_add_per_person_reads.go`, golden schema,
+mailbox `model.go` (drop `ReadAt`), `repository.go`, `service.go`, `dto.go`, tests; `contracts/MAILBOXES.md`;
 Web mock store and tests if the mock models read state.
 
 - [ ] Tests first (PostgreSQL where SQL): `TestReadIsPerPerson` (AC-5: B reads, C's unread
@@ -527,6 +560,8 @@ Web mock store and tests if the mock models read state.
   (AC-12, wrong confirmation 422, no boundary 409), `TestRejoinBeforeHandoverRestores` (AC-16),
   `TestRejoinAfterHandoverDoesNotRestore` (AC-17), `TestEventsOfSealedMessagesStayHidden`,
   `TestConcurrentHandoverHasOneWinner` (PostgreSQL), `TestBoundaryIsLatestDeparture`,
+  `TestSuccessorCannotDeleteOrReplaySealedMessages` (delete by id 404, reused idempotency key 409
+  without data), `TestDepartureRecordsSharedMemberRemoval`, `TestDeleteSealedHistoryCancelsRunningBroadcast`,
   `TestMissedDepartureEventSealsAtHandover`, organization tests that `RemoveMember` and invitation
   acceptance publish their events after commit.
 - [ ] Run red, implement workflows 4–7, run green, `make wire-check`, contract check.
@@ -542,7 +577,8 @@ Web mock store and tests if the mock models read state.
 ### Task 4.1: Webhook switch (API + Web)
 
 - [ ] Tests first: `TestWebhookOnlyForEnabledSharedMailbox` (AC-9: personal never, shared off by
-  default, on after switch, covers sent, delivered, bounced too); switch on personal 409; switch
+  default, on after switch, covers sent, delivered, bounced too; a late bounce for a sealed
+  message publishes nothing); switch on personal 409; switch
   writes history; Web toggle visible with `manage_members` only.
 - [ ] Run red, implement section 8 `SetMailboxWebhooks` and the `Notify` guard, run green, contract check, Web checks.
 - [ ] Commit `feat(mailbox): per-mailbox webhook switch`.
