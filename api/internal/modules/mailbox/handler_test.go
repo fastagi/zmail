@@ -156,6 +156,29 @@ func TestMembersReadAndSendTheirMailboxes(t *testing.T) {
 	}
 }
 
+func TestSendAtTheLimitAnswers202Queued(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk", domain.MailboxPermissionSend)); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	send := `{"to":["bob@example.com"],"subject":"Hi","text":"Body"}`
+	for i := 0; i < 5; i++ {
+		if sent, body := fixture.do(http.MethodPost, "/mailboxes/1/messages", send); sent.Code != http.StatusCreated {
+			t.Fatalf("send %d = %d %v", i+1, sent.Code, body)
+		}
+	}
+	queued, body := fixture.do(http.MethodPost, "/mailboxes/1/messages", send)
+	data, _ := body["data"].(map[string]any)
+	if queued.Code != http.StatusAccepted || data["status"] != "queued" || data["queued_reason"] != "send_limit" {
+		t.Fatalf("send at the limit = %d %v; want 202 with a message queued for the send limit", queued.Code, body)
+	}
+	for _, key := range []string{"daily_send_limit", "sent", "remaining"} {
+		if _, leaked := data[key]; leaked {
+			t.Fatalf("queued answer exposes %q: %v", key, data)
+		}
+	}
+}
+
 func TestMailboxRoutesRequireAnOrganizationContext(t *testing.T) {
 	fixture := newHandlerFixture(t, nil)
 	for _, request := range [][2]string{

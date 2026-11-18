@@ -510,8 +510,21 @@ func (r *repository) CountOutboundSince(ctx context.Context, organizationID uint
 	var count int64
 	err := r.conn(ctx).Model(&MailMessagePO{}).
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
-		Where("mailboxes.organization_id = ? AND mail_messages.direction = ? AND mail_messages.created_at >= ?",
+		Where("mailboxes.organization_id = ? AND mail_messages.direction = ? AND mail_messages.send_attempted_at >= ?",
 			organizationID, string(domain.MailDirectionOutbound), since).
+		Count(&count).Error
+	return count, err
+}
+
+// CountWaitingSends counts the organization's messages waiting for room in the send limit.
+func (r *repository) CountWaitingSends(ctx context.Context, organizationID uint) (int64, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	var count int64
+	err := r.conn(ctx).Model(&MailMessagePO{}).
+		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
+		Where("mailboxes.organization_id = ? AND mail_messages.queued_reason IS NOT NULL", organizationID).
 		Count(&count).Error
 	return count, err
 }

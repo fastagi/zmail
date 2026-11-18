@@ -4577,6 +4577,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MailMessageResponse'
+        '202':
+          description: The organization reached the rolling 24-hour send limit; the message is stored as queued with `queued_reason` `send_limit` and is sent when the limit has room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
@@ -4592,7 +4598,7 @@ paths:
                   - $ref: '#/components/schemas/ValidationErrorResponse'
                   - $ref: '#/components/schemas/ErrorResponse'
         '429':
-          description: The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
+          description: The send limit is full and as many messages already wait as the limit allows (`MAILBOX.SEND_LIMIT_REACHED`); nothing is stored.
           content:
             application/json:
               schema:
@@ -5129,6 +5135,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MailMessageResponse'
+        '202':
+          description: The organization reached the rolling 24-hour send limit; the message is stored as queued with `queued_reason` `send_limit` and is sent when the limit has room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
@@ -5156,7 +5168,7 @@ paths:
                   - $ref: '#/components/schemas/ValidationErrorResponse'
                   - $ref: '#/components/schemas/ErrorResponse'
         '429':
-          description: The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
+          description: The send limit is full and as many messages already wait as the limit allows (`MAILBOX.SEND_LIMIT_REACHED`); nothing is stored.
           content:
             application/json:
               schema:
@@ -5411,6 +5423,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MailMessageResponse'
+        '202':
+          description: The organization reached the rolling 24-hour send limit; the message is stored as queued with `queued_reason` `send_limit` and is sent when the limit has room.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
@@ -5443,7 +5461,7 @@ paths:
                   - $ref: '#/components/schemas/ValidationErrorResponse'
                   - $ref: '#/components/schemas/ErrorResponse'
         '429':
-          description: The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`).
+          description: The send limit is full and as many messages already wait as the limit allows (`MAILBOX.SEND_LIMIT_REACHED`); nothing is stored.
           content:
             application/json:
               schema:
@@ -9412,6 +9430,7 @@ components:
         - subject
         - read
         - failure_code
+        - queued_reason
         - last_event
         - attachment_count
         - template_id
@@ -9448,6 +9467,14 @@ components:
         failure_code:
           type: string
           description: Stable provider or transport reason when `status` is `failed`; empty otherwise.
+        queued_reason:
+          type:
+            - string
+            - 'null'
+          enum:
+            - send_limit
+            - null
+          description: '`send_limit` while a queued message waits for room in the organization''s send limit; otherwise null.'
           maxLength: 120
         last_event:
           $ref: '#/components/schemas/MailEventSummary'

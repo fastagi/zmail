@@ -308,6 +308,11 @@ func respondSent(c *gin.Context, message *domain.MailMessage, created bool, err 
 		return
 	}
 	privateResponse(c)
+	if message.QueuedReason != "" {
+		// Stored and waiting for room in the send limit: accepted, not yet sent.
+		response.Accepted(c, toMailMessageResponse(message))
+		return
+	}
 	if created {
 		response.Created(c, toMailMessageResponse(message))
 		return

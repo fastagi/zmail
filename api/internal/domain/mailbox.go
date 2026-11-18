@@ -47,6 +47,10 @@ func (d MailDirection) Valid() bool {
 }
 
 // MailStatus is the delivery state of one message.
+// MailQueuedForSendLimit is the QueuedReason of a message that waits until the organization's
+// rolling 24-hour send limit has room.
+const MailQueuedForSendLimit = "send_limit"
+
 type MailStatus string
 
 const (
@@ -212,6 +216,12 @@ type MailMessage struct {
 	// DedupeKey makes inbound delivery idempotent for one mailbox. Empty for outbound.
 	DedupeKey   string
 	FailureCode string
+	// QueuedReason is MailQueuedForSendLimit while a queued outbound message waits for room in
+	// the organization's send limit, and empty otherwise.
+	QueuedReason string
+	// SendAttemptedAt is when the provider call of an outbound message started; the send limit
+	// counts attempts by it. Nil while the message waits and for inbound mail.
+	SendAttemptedAt *time.Time
 	// IdempotencyKey names an outbound message chosen by the sender; a later send with the same
 	// key in the same mailbox finds this message instead of sending again. Empty when unused.
 	IdempotencyKey string
@@ -599,6 +609,8 @@ type MailboxRepository interface {
 	DeleteMailboxReads(ctx context.Context, mailboxID, membershipID uint) error
 	DeleteMessage(ctx context.Context, mailboxID, id uint) error
 	CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error)
+	// CountWaitingSends counts the organization's messages waiting for room in the send limit.
+	CountWaitingSends(ctx context.Context, organizationID uint) (int64, error)
 	// InTransaction runs fn in one database transaction. Repository calls made with the context
 	// fn receives, and cooperating repositories of other modules, join it.
 	InTransaction(ctx context.Context, fn func(ctx context.Context) error) error
