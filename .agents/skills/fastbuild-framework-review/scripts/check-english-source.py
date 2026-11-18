@@ -33,6 +33,12 @@ def is_localization_source(path: Path) -> bool:
     )
 
 
+def is_chinese_document(path: Path) -> bool:
+    """Product documents written for Chinese readers opt out with a .zh-CN.md name."""
+    relative = installed_path(path)
+    return path.name.endswith(".zh-CN.md") and relative.startswith(("docs/", "research/"))
+
+
 def is_test_source(path: Path) -> bool:
     relative = installed_path(path)
     return path.name.endswith("_test.go") or "/src/test/" in f"/{relative}"
@@ -73,6 +79,8 @@ def main() -> int:
         content = path.read_text(encoding="utf-8")
         relative = path.relative_to(ROOT).as_posix()
 
+        if is_chinese_document(path):
+            continue
         if path.suffix == ".md" or path.name == ".editorconfig":
             matcher = HAN
         elif is_localization_source(path):
@@ -91,7 +99,7 @@ def main() -> int:
             print(f"English source check failed: {failure}", file=sys.stderr)
         return 1
 
-    print("English source check passed (locales and Unicode test values preserved).")
+    print("English source check passed (locales, Unicode test values, and .zh-CN.md documents preserved).")
     return 0
 
 
