@@ -615,9 +615,12 @@ type MailboxRepository interface {
 	CountWaitingSends(ctx context.Context, organizationID uint) (int64, error)
 	// WaitingSendOrganizations lists the organizations that have messages waiting for the send limit.
 	WaitingSendOrganizations(ctx context.Context) ([]uint, error)
-	// LeaseWaitingSends leases up to limit of the organization's oldest waiting messages whose
-	// lease is free at now, until leaseUntil, skipping rows another worker holds.
-	LeaseWaitingSends(ctx context.Context, organizationID uint, now, leaseUntil time.Time, limit int) ([]*MailMessage, error)
+	// LeaseWaitingSends leases, until leaseUntil, the organization's oldest waiting messages whose
+	// lease has expired at now: at most limit of them, and no more than the room sendLimit leaves
+	// after the attempts since windowStart and the messages other workers still hold. Workers on
+	// the same organization lease one at a time, so together they never pass the limit.
+	LeaseWaitingSends(ctx context.Context, organizationID uint, now, leaseUntil, windowStart time.Time,
+		sendLimit, limit int) ([]*MailMessage, error)
 	// StartWaitingSend turns a leased waiting message into an attempt started at attemptedAt. It
 	// reports false when the message is gone or no longer waiting.
 	StartWaitingSend(ctx context.Context, id uint, attemptedAt time.Time) (bool, error)

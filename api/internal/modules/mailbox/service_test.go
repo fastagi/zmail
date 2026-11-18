@@ -529,7 +529,7 @@ func (r *fakeRepository) CountOutboundSince(_ context.Context, organizationID ui
 // is tested against PostgreSQL, where leases and SKIP LOCKED are real.
 func (r *fakeRepository) WaitingSendOrganizations(context.Context) ([]uint, error) { return nil, nil }
 
-func (r *fakeRepository) LeaseWaitingSends(context.Context, uint, time.Time, time.Time, int) ([]*domain.MailMessage, error) {
+func (r *fakeRepository) LeaseWaitingSends(context.Context, uint, time.Time, time.Time, time.Time, int, int) ([]*domain.MailMessage, error) {
 	return nil, nil
 }
 

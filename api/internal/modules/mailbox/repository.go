@@ -547,8 +547,8 @@ func (r *repository) WaitingSendOrganizations(ctx context.Context) ([]uint, erro
 func (r *repository) LeaseWaitingSends(
 	ctx context.Context,
 	organizationID uint,
-	now, leaseUntil time.Time,
-	limit int,
+	now, leaseUntil, windowStart time.Time,
+	sendLimit, limit int,
 ) ([]*domain.MailMessage, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
@@ -558,13 +558,37 @@ func (r *repository) LeaseWaitingSends(
 	}
 	var rows []MailMessagePO
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		// One worker at a time works out an organization's room; the lock ends with the transaction.
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('zmail.mail_send_queue'), ?::int)`,
+			organizationID).Error; err != nil {
+			return err
+		}
+		var attempts, held int64
+		if err := tx.Model(&MailMessagePO{}).
+			Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
+			Where("mailboxes.organization_id = ? AND mail_messages.direction = ? AND mail_messages.send_attempted_at >= ?",
+				organizationID, string(domain.MailDirectionOutbound), windowStart).
+			Count(&attempts).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&MailMessagePO{}).
+			Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
+			Where("mailboxes.organization_id = ? AND mail_messages.queued_reason IS NOT NULL AND mail_messages.send_lease_until > ?",
+				organizationID, now).
+			Count(&held).Error; err != nil {
+			return err
+		}
+		take := min(sendLimit-int(attempts)-int(held), limit)
+		if take <= 0 {
+			return nil
+		}
 		if err := tx.Raw(`SELECT mail_messages.* FROM mail_messages
 			JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id
 			WHERE mailboxes.organization_id = ? AND mail_messages.queued_reason IS NOT NULL
 			  AND (mail_messages.send_lease_until IS NULL OR mail_messages.send_lease_until <= ?)
 			ORDER BY mail_messages.id
 			LIMIT ?
-			FOR UPDATE OF mail_messages SKIP LOCKED`, organizationID, now, limit).Scan(&rows).Error; err != nil {
+			FOR UPDATE OF mail_messages SKIP LOCKED`, organizationID, now, take).Scan(&rows).Error; err != nil {
 			return err
 		}
 		if len(rows) == 0 {

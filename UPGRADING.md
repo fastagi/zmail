@@ -24,6 +24,9 @@ MAILBOX.SEND_LIMIT_REACHED` now means as many messages already wait as the limit
 `fastbuild mail:broadcast:work` wherever the API sends mail: it sends waiting messages too. Message
 responses gain `queued_reason`.
 
+Deploy the API before the web app: the web app requires `queued_reason` on every message and fails
+to read message lists from an API that does not send it yet.
+
 ## Unreleased — Organization domains
 
 ### Medium — New migration for connected domains

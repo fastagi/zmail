@@ -40,15 +40,8 @@ func (s *service) DispatchQueuedSends(ctx context.Context, limit int) (int, erro
 
 func (s *service) dispatchOrganizationQueue(ctx context.Context, organizationID uint, limit int) (int, error) {
 	now := s.now().UTC()
-	attempts, err := s.repo.CountOutboundSince(ctx, organizationID, now.Add(-sendLimitWindow))
-	if err != nil {
-		return 0, err
-	}
-	room := s.settings.DailySendLimit - int(attempts)
-	if room <= 0 {
-		return 0, nil
-	}
-	messages, err := s.repo.LeaseWaitingSends(ctx, organizationID, now, now.Add(queuedSendLease), min(room, limit))
+	messages, err := s.repo.LeaseWaitingSends(ctx, organizationID, now, now.Add(queuedSendLease),
+		now.Add(-sendLimitWindow), s.settings.DailySendLimit, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -80,6 +73,14 @@ func (s *service) sendWaiting(ctx context.Context, organizationID uint, message 
 	if err != nil {
 		return err
 	}
+	// Load the attachments before starting the attempt: a message that cannot be loaded stays
+	// waiting and is leased again when its lease expires, instead of being started and never sent.
+	files, err := s.storedFiles(ctx, message.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "mail_queued_send.attachments_unavailable",
+			slog.Uint64("message_id", uint64(message.ID)), slog.String("error", err.Error()))
+		return nil
+	}
 	attemptedAt := s.now().UTC()
 	started, err := s.repo.StartWaitingSend(ctx, message.ID, attemptedAt)
 	if err != nil || !started {
@@ -88,10 +89,6 @@ func (s *service) sendWaiting(ctx context.Context, organizationID uint, message 
 	}
 	message.QueuedReason = ""
 	message.SendAttemptedAt = &attemptedAt
-	files, err := s.storedFiles(ctx, message.ID)
-	if err != nil {
-		return err
-	}
 	// A provider refusal is recorded on the message; only a failure to record stops the worker.
 	_, _, err = s.deliver(ctx, mailbox, message, files, nil)
 	if err != nil && !isRecordedSendFailure(err) {

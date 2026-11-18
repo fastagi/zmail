@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -158,15 +159,15 @@ func TestDispatchLeaseKeepsAMessageToOneWorker(t *testing.T) {
 	waiting := f.mustSend(t, "w1", true)
 	repo := f.repo.(*repository)
 	now := f.clock
-	first, err := repo.LeaseWaitingSends(context.Background(), accessOrg, now, now.Add(time.Minute), 10)
+	first, err := repo.LeaseWaitingSends(context.Background(), accessOrg, now, now.Add(time.Minute), now.Add(-sendLimitWindow), 100, 10)
 	if err != nil || len(first) != 1 || first[0].ID != waiting.ID {
 		t.Fatalf("first lease = %v, %v; want w1", first, err)
 	}
-	second, err := repo.LeaseWaitingSends(context.Background(), accessOrg, now, now.Add(time.Minute), 10)
+	second, err := repo.LeaseWaitingSends(context.Background(), accessOrg, now, now.Add(time.Minute), now.Add(-sendLimitWindow), 100, 10)
 	if err != nil || len(second) != 0 {
 		t.Fatalf("second lease = %v, %v; want nothing while the first lease holds", second, err)
 	}
-	expired, err := repo.LeaseWaitingSends(context.Background(), accessOrg, now.Add(2*time.Minute), now.Add(3*time.Minute), 10)
+	expired, err := repo.LeaseWaitingSends(context.Background(), accessOrg, now.Add(2*time.Minute), now.Add(3*time.Minute), now.Add(-sendLimitWindow), 100, 10)
 	if err != nil || len(expired) != 1 {
 		t.Fatalf("lease after expiry = %v, %v; want w1 again", expired, err)
 	}
@@ -260,4 +261,79 @@ func TestDispatchPublishesSentWebhook(t *testing.T) {
 		}
 	}
 	t.Fatalf("no %s notification for the queued message after dispatch", WebhookMailSent)
+}
+
+// fillWindowWithRoomFor sends five messages so that, at the returned time, the window has room
+// for exactly room of them (room <= 3), then queues waiting messages w1..w5.
+func (f *queueFixture) fillWindowWithRoomFor(t *testing.T) time.Time {
+	t.Helper()
+	start := f.clock
+	for i := 0; i < 3; i++ {
+		f.mustSend(t, "early", false)
+	}
+	f.clock = start.Add(12 * time.Hour)
+	for i := 0; i < 2; i++ {
+		f.mustSend(t, "late", false)
+	}
+	for _, subject := range []string{"w1", "w2", "w3", "w4", "w5"} {
+		f.mustSend(t, subject, true)
+	}
+	// The three early attempts leave the window: room for three.
+	return start.Add(24*time.Hour + time.Second)
+}
+
+// Review Focus 3: a worker that leased messages but has not started them yet already holds that
+// part of the room, so a second worker must not lease past the limit.
+func TestAnotherWorkersLeaseHoldsTheRoom(t *testing.T) {
+	f := newQueueFixture(t)
+	f.clock = f.fillWindowWithRoomFor(t)
+	repo := f.repo.(*repository)
+	held, err := repo.LeaseWaitingSends(context.Background(), accessOrg, f.clock, f.clock.Add(time.Minute),
+		f.clock.Add(-sendLimitWindow), 5, 25)
+	if err != nil || len(held) != 3 {
+		t.Fatalf("first worker leased %d, %v; want the 3 the window has room for", len(held), err)
+	}
+	before := len(f.transport.sent)
+	if got := f.dispatch(t, 25); got != 0 || len(f.transport.sent) != before {
+		t.Fatalf("second worker processed %d and sent %d; want nothing while the first worker holds the room",
+			got, len(f.transport.sent)-before)
+	}
+}
+
+// failingAttachments is the PostgreSQL repository with attachment content that cannot be loaded.
+type failingAttachments struct {
+	domain.MailboxRepository
+}
+
+func (failingAttachments) FindMessageAttachment(context.Context, uint, uint) (*domain.MailAttachment, error) {
+	return nil, errors.New("storage unavailable")
+}
+
+// A waiting message whose attachments cannot be loaded stays waiting for the next tick instead
+// of being left started but never sent, and does not stop the rest of the batch.
+func TestUnloadableAttachmentsLeaveTheMessageWaiting(t *testing.T) {
+	f := newQueueFixture(t)
+	start := f.clock
+	for i := 0; i < 5; i++ {
+		f.mustSend(t, "fill", false)
+	}
+	withFile, _, err := f.service.SendMessage(context.Background(), f.b, f.team.ID, SendInput{
+		To: []string{"bob@example.com"}, Subject: "with-file", Text: "body",
+		Attachments: []AttachmentInput{{Filename: "a.txt", ContentType: "text/plain", Content: "aGVsbG8="}},
+	})
+	if err != nil || withFile.QueuedReason != domain.MailQueuedForSendLimit {
+		t.Fatalf("with-file = %+v, %v; want queued", withFile, err)
+	}
+	plain := f.mustSend(t, "plain", true)
+	f.service.repo = failingAttachments{f.service.repo}
+	f.clock = start.Add(25 * time.Hour)
+	if _, err := f.service.DispatchQueuedSends(context.Background(), 25); err != nil {
+		t.Fatalf("DispatchQueuedSends: %v; want the unloadable message skipped", err)
+	}
+	if stored := f.stored(t, withFile.ID); stored.QueuedReason == nil || stored.SendAttemptedAt != nil {
+		t.Fatalf("with-file = reason %v, attempted %v; want still waiting", stored.QueuedReason, stored.SendAttemptedAt)
+	}
+	if stored := f.stored(t, plain.ID); stored.Status != string(domain.MailStatusSent) {
+		t.Fatalf("plain = %s; want sent despite the unloadable message before it", stored.Status)
+	}
 }
