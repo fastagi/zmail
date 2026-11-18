@@ -624,8 +624,9 @@ type MailboxRepository interface {
 	// MailboxesGrantedTo lists the live shared mailboxes whose access history last granted the
 	// membership access rather than removed it.
 	MailboxesGrantedTo(ctx context.Context, organizationID, membershipID uint) ([]uint, error)
-	// HandOverMailbox makes a personal mailbox shared, without owner, sealed before the boundary.
-	// It reports false when the mailbox is not personal any more.
+	// HandOverMailbox makes a personal mailbox shared, without owner, sealed before the boundary,
+	// and cancels its broadcasts created before the boundary that are still running. It reports
+	// false, changing nothing, when the mailbox is not personal any more.
 	HandOverMailbox(ctx context.Context, mailboxID uint, sealedBefore time.Time) (bool, error)
 	// SetMailboxWebhooks sets the webhook switch of a live shared mailbox. It reports whether the
 	// value changed.

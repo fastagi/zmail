@@ -73,25 +73,52 @@ func (r *repository) MailboxesGrantedTo(ctx context.Context, organizationID, mem
 	return ids, err
 }
 
-// HandOverMailbox turns a personal mailbox into a shared one sealed before the boundary. Only one
-// of several concurrent calls finds the mailbox still personal; the others report false.
+// HandOverMailbox turns a personal mailbox into a shared one sealed before the boundary, and
+// cancels its sealed broadcasts still running, so they send no new mail the successor could read.
+// Only one of several concurrent calls finds the mailbox still personal; the others report false
+// and change nothing.
 func (r *repository) HandOverMailbox(ctx context.Context, mailboxID uint, sealedBefore time.Time) (bool, error) {
 	if r.db == nil {
 		return false, domain.ErrServiceUnavailable
 	}
-	result := r.conn(ctx).Model(&MailboxPO{}).
-		Where("id = ? AND type = ?", mailboxID, string(domain.MailboxTypePersonal)).
+	converted := false
+	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&MailboxPO{}).
+			Where("id = ? AND type = ?", mailboxID, string(domain.MailboxTypePersonal)).
+			Updates(map[string]any{
+				"type":          string(domain.MailboxTypeShared),
+				"owner_user_id": nil,
+				"owner_left_at": nil,
+				"sealed_before": sealedBefore,
+				"updated_at":    time.Now().UTC(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if converted = result.RowsAffected == 1; !converted {
+			return nil
+		}
+		return cancelSealedBroadcasts(tx, mailboxID, sealedBefore)
+	})
+	return converted, err
+}
+
+// cancelSealedBroadcasts cancels the mailbox's broadcasts created before the boundary that are
+// still scheduled, sending, or paused, with their pending recipients.
+func cancelSealedBroadcasts(tx *gorm.DB, mailboxID uint, before time.Time) error {
+	sealedBroadcasts := tx.Model(&MailBroadcastPO{}).Select("id").Where("mailbox_id = ? AND created_at < ?", mailboxID, before)
+	running := []string{string(domain.MailBroadcastScheduled), string(domain.MailBroadcastSending), string(domain.MailBroadcastPaused)}
+	if err := tx.Model(&MailBroadcastPO{}).
+		Where("mailbox_id = ? AND created_at < ? AND status IN ?", mailboxID, before, running).
 		Updates(map[string]any{
-			"type":          string(domain.MailboxTypeShared),
-			"owner_user_id": nil,
-			"owner_left_at": nil,
-			"sealed_before": sealedBefore,
-			"updated_at":    time.Now().UTC(),
-		})
-	if result.Error != nil {
-		return false, result.Error
+			"status": string(domain.MailBroadcastCanceled), "resume_at": nil,
+			"finished_at": gorm.Expr("now()"), "updated_at": gorm.Expr("now()"),
+		}).Error; err != nil {
+		return err
 	}
-	return result.RowsAffected == 1, nil
+	return tx.Model(&MailBroadcastRecipientPO{}).
+		Where("broadcast_id IN (?) AND status = ?", sealedBroadcasts, string(domain.MailRecipientPending)).
+		Updates(map[string]any{"status": string(domain.MailRecipientCanceled), "updated_at": gorm.Expr("now()")}).Error
 }
 
 // SetMailboxWebhooks updates the switch only when it changes, so a repeated value reports false.
@@ -117,21 +144,10 @@ func (r *repository) DeleteSealedHistory(ctx context.Context, mailboxID uint, be
 	}
 	var messages, broadcasts int64
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := cancelSealedBroadcasts(tx, mailboxID, before); err != nil {
+			return err
+		}
 		sealedBroadcasts := tx.Model(&MailBroadcastPO{}).Select("id").Where("mailbox_id = ? AND created_at < ?", mailboxID, before)
-		running := []string{string(domain.MailBroadcastScheduled), string(domain.MailBroadcastSending), string(domain.MailBroadcastPaused)}
-		if err := tx.Model(&MailBroadcastPO{}).
-			Where("mailbox_id = ? AND created_at < ? AND status IN ?", mailboxID, before, running).
-			Updates(map[string]any{
-				"status": string(domain.MailBroadcastCanceled), "resume_at": nil,
-				"finished_at": gorm.Expr("now()"), "updated_at": gorm.Expr("now()"),
-			}).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&MailBroadcastRecipientPO{}).
-			Where("broadcast_id IN (?) AND status = ?", sealedBroadcasts, string(domain.MailRecipientPending)).
-			Updates(map[string]any{"status": string(domain.MailRecipientCanceled), "updated_at": gorm.Expr("now()")}).Error; err != nil {
-			return err
-		}
 		if err := tx.Where("broadcast_id IN (?)", sealedBroadcasts).Delete(&MailBroadcastRecipientPO{}).Error; err != nil {
 			return err
 		}

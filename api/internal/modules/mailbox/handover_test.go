@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -451,9 +452,9 @@ func TestDeleteSealedHistoryCancelsRunningBroadcast(t *testing.T) {
 	if err != nil || total != 1 || len(listed) != 1 || listed[0].ID != later.ID {
 		t.Fatalf("successor broadcasts = %v (%d), %v; want only the later one", listed, total, err)
 	}
-	// Pausing a sealed broadcast reveals only its id and status.
-	if _, visible, pauseErr := f.service.PauseBroadcast(ctx, f.admin, running.ID); pauseErr != nil || visible {
-		t.Fatalf("pause sealed = visible %v, %v; want hidden", visible, pauseErr)
+	// The handover already canceled the sealed broadcast; pausing it reveals nothing.
+	if _, visible, pauseErr := f.service.PauseBroadcast(ctx, f.admin, running.ID); !errors.Is(pauseErr, ErrMailBroadcastNotEditable) || visible {
+		t.Fatalf("pause sealed = visible %v, %v; want not editable and hidden", visible, pauseErr)
 	}
 
 	counts, err := f.service.DeleteSealedHistory(ctx, f.admin, f.personal.ID, f.personal.Address)
@@ -644,4 +645,102 @@ type failingRepository struct {
 
 func (r *failingRepository) InTransaction(context.Context, func(context.Context) error) error {
 	return fmt.Errorf("database unavailable")
+}
+
+// Ruling R1: handover cancels the mailbox's broadcasts still running from before the boundary,
+// so a sealed broadcast never sends new mail the successor could read. A broadcast created after
+// the boundary keeps running.
+func TestHandoverCancelsSealedRunningBroadcasts(t *testing.T) {
+	f := newPostgresAccessFixture(t)
+	ctx := context.Background()
+	f.service.now = time.Now
+	f.transport.result = mailtransport.Result{Delivered: []string{"ann@example.com"}}
+	templateID, listID := broadcastScene(t, f)
+	input := BroadcastInput{Name: "Personal news", MailboxID: f.personal.ID, TemplateID: templateID, ListID: listID}
+	start := func(name string) *domain.MailBroadcast {
+		t.Helper()
+		input.Name = name
+		created, err := f.service.CreateBroadcast(ctx, f.b, input)
+		if err != nil {
+			t.Fatalf("CreateBroadcast %s: %v", name, err)
+		}
+		started, err := f.service.SendBroadcast(ctx, f.b, created.ID, nil)
+		if err != nil {
+			t.Fatalf("SendBroadcast %s: %v", name, err)
+		}
+		return started
+	}
+	sealed := start("sealed")
+	leftAt := tick()
+	// Created after the departure time the event carries, before the event arrived.
+	unsealed := start("unsealed")
+	f.leave(t, f.b, leftAt)
+
+	f.handOver(t, f.personal.ID)
+
+	db := f.repo.(*repository).db
+	var stored MailBroadcastPO
+	if err := db.First(&stored, sealed.ID).Error; err != nil {
+		t.Fatalf("load sealed broadcast: %v", err)
+	}
+	if stored.Status != string(domain.MailBroadcastCanceled) || stored.FinishedAt == nil {
+		t.Fatalf("sealed broadcast status = %s, finished %v; want canceled", stored.Status, stored.FinishedAt)
+	}
+	var pending int64
+	db.Model(&MailBroadcastRecipientPO{}).Where("broadcast_id = ? AND status = ?", sealed.ID, string(domain.MailRecipientPending)).Count(&pending)
+	if pending != 0 {
+		t.Fatalf("sealed broadcast keeps %d pending recipients", pending)
+	}
+	if running, err := f.service.GetBroadcast(ctx, f.c, unsealed.ID); err != nil || running.Status != domain.MailBroadcastSending {
+		t.Fatalf("unsealed broadcast = %+v, %v; want still sending", running, err)
+	}
+
+	// Dispatching sends only the unsealed broadcast's mail.
+	f.transport.sent = nil
+	if _, err := f.service.DispatchBroadcasts(ctx, 50); err != nil {
+		t.Fatalf("DispatchBroadcasts: %v", err)
+	}
+	if len(f.transport.sent) != 1 {
+		t.Fatalf("dispatch sent %d messages; want only the unsealed broadcast's one", len(f.transport.sent))
+	}
+	var sealedSent int64
+	db.Model(&MailBroadcastRecipientPO{}).Where("broadcast_id = ? AND status = ?", sealed.ID, string(domain.MailRecipientSent)).Count(&sealedSent)
+	if sealedSent != 0 {
+		t.Fatalf("sealed broadcast sent %d recipients after handover", sealedSent)
+	}
+	if done, err := f.service.GetBroadcast(ctx, f.c, unsealed.ID); err != nil || done.Counts.Sent != 1 {
+		t.Fatalf("unsealed broadcast = %+v, %v; want its recipient sent", done, err)
+	}
+}
+
+// rejoinAtTransaction lets the former owner rejoin the moment the handover transaction begins:
+// after every read the handover makes before it.
+type rejoinAtTransaction struct {
+	domain.MailboxRepository
+	rejoin func()
+}
+
+func (r *rejoinAtTransaction) InTransaction(ctx context.Context, fn func(context.Context) error) error {
+	if r.rejoin != nil {
+		r.rejoin()
+		r.rejoin = nil
+	}
+	return r.MailboxRepository.InTransaction(ctx, fn)
+}
+
+// Fix 4: the former owner's membership is read inside the handover transaction, so an owner who
+// rejoined before the handover commits is sealed at the handover, never at their old departure.
+func TestHandoverRereadsFormerOwnerInsideTransaction(t *testing.T) {
+	f := newPostgresAccessFixture(t)
+	f.service.now = time.Now
+	leftAt := tick()
+	f.leave(t, f.b, leftAt)
+	f.service.repo = &rejoinAtTransaction{MailboxRepository: f.service.repo, rejoin: func() { delete(f.memberships.absent, accessB) }}
+
+	before := time.Now().UTC().Truncate(time.Microsecond)
+	handed := f.handOver(t, f.personal.ID)
+	if handed.SealedBefore == nil || handed.SealedBefore.Before(before) {
+		t.Fatalf("sealed_before = %v; want the handover time (at or after %v), not the departure %v",
+			handed.SealedBefore, before, leftAt)
+	}
 }

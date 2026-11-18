@@ -260,7 +260,11 @@ a shared one:
 - The mailbox becomes `shared` with `owner_user_id: null` and `awaiting_handover: false`, and the
   former owner keeps no access and no read records.
 - The seal boundary `sealed_before` is the time the owner left when they are no longer in the
-  organization, otherwise the time of the handover. It is written once and never moves.
+  organization, otherwise the time of the handover. It is written once and never moves. An owner
+  who rejoins before the handover commits is sealed at the handover.
+- Broadcasts of the mailbox created before the boundary that are still `scheduled`, `sending`, or
+  `paused` are cancelled in the same transaction, with their pending recipients, so a sealed
+  broadcast sends no new mail the successor could read.
 - A shared mailbox, including one a concurrent handover already converted, is
   `409 MAILBOX.ACCESS_CONFLICT`.
 - `handed_over` is written, and the answer is `201` with the mailbox as the caller sees it.
@@ -274,6 +278,11 @@ and detail, mark read, delete, attachment download, the log, statistics, `unread
 left out of the broadcast list and are `404 MAILBOX.BROADCAST_NOT_FOUND` by id; their recipients
 are not listed. An `Idempotency-Key` that matches a sealed message is
 `409 MAILBOX.IDEMPOTENCY_CONFLICT` with no message data, and nothing is sent.
+
+Delivery events for a sealed message that arrive after the handover are stored but stay hidden,
+count nowhere, and publish no webhook. A permanent bounce or complaint among them still marks the
+contact `suppressed`: suppression protects the organization's sending reputation, so sealing does
+not exempt it.
 
 `DELETE /v1/mailboxes/:mailbox_id/sealed-messages` deletes the sealed history for good:
 

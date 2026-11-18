@@ -37,6 +37,9 @@ Written to [BUSINESS_IMPLEMENTATION_PLAN_STANDARD.md](../BUSINESS_IMPLEMENTATION
    `TestRemovingMemberDeletesTheirReads` (Task 1.1).
 2. A delivery event (bounce) arrives after handover for a message sent before the boundary → not
    visible, not counted, no webhook. Test: `TestEventsOfSealedMessagesStayHidden` (Task 3.1).
+   Decision: a permanent bounce or complaint for a sealed message still suppresses the contact.
+   Suppression is organization-wide deliverability hygiene, not mailbox history, so sealing does
+   not exempt it.
 3. Two admins hand over the same pending mailbox at once → exactly one succeeds, the other gets
    `409 MAILBOX.ACCESS_CONFLICT`. Test: `TestConcurrentHandoverHasOneWinner` (Task 3.1).
 4. An admin who is a shared member searches the log for a subject in another member's personal
@@ -105,11 +108,15 @@ a personal mailbox.
    who cannot sign in; handover then falls back to the handover time as the boundary (seals more,
    never less).
 5. **Handover.** Admin posts a successor (current member) for a personal mailbox, pending or not.
-   In one transaction guarded by `type = 'personal'`: type becomes `shared`, `sealed_before`
-   becomes `owner_left_at` when the owner is not a member and `owner_left_at` is set, otherwise
-   now; owner fields clear; the former owner's read rows on it are deleted; the successor gets a
-   `send` member row; a `handed_over` event is written. A second concurrent handover finds
-   `type = 'shared'`: `409 MAILBOX.ACCESS_CONFLICT`.
+   In one transaction guarded by `type = 'personal'`: the former owner's membership is read
+   inside the transaction, and `sealed_before` becomes `owner_left_at` when the owner is not a
+   member and `owner_left_at` is set, otherwise now (an owner who rejoined before the handover is
+   sealed at the handover); type becomes `shared`; owner fields clear; broadcasts of the mailbox
+   created before `sealed_before` that are still `scheduled`, `sending`, or `paused` are cancelled
+   with their pending recipients, so a sealed broadcast sends no new mail the successor could
+   read; the former owner's read rows on it are deleted; the successor gets a `send` member row; a
+   `handed_over` event is written. A second concurrent handover finds `type = 'shared'`:
+   `409 MAILBOX.ACCESS_CONFLICT`.
 6. **Rejoin.** The organization module publishes `organization.member.joined` after a membership is
    created. The mailbox module clears `owner_left_at` on that user's still-personal mailboxes and
    writes an `owner_returned` event. Access never depended on the flag, so a missed event only
@@ -395,6 +402,8 @@ sender mailbox and hide broadcasts created before its seal boundary.
 | API key send / get sent | key owner's `Send` / `View` |
 
 A broadcast already sending or scheduled is not re-checked by the worker; resume re-checks.
+Handover cancels the mailbox's broadcasts created before the seal boundary that are still
+`scheduled`, `sending`, or `paused`, so the worker never sends a sealed broadcast after handover.
 
 ## 10. Cross-Module Data Flow
 
@@ -562,7 +571,8 @@ Web mock store and tests if the mock models read state.
   `TestConcurrentHandoverHasOneWinner` (PostgreSQL), `TestBoundaryIsLatestDeparture`,
   `TestSuccessorCannotDeleteOrReplaySealedMessages` (delete by id 404, reused idempotency key 409
   without data), `TestDepartureRecordsSharedMemberRemoval`, `TestDeleteSealedHistoryCancelsRunningBroadcast`,
-  `TestMissedDepartureEventSealsAtHandover`, organization tests that `RemoveMember` and invitation
+  `TestMissedDepartureEventSealsAtHandover`, `TestHandoverCancelsSealedRunningBroadcasts`,
+  `TestHandoverRereadsFormerOwnerInsideTransaction`, organization tests that `RemoveMember` and invitation
   acceptance publish their events after commit.
 - [ ] Run red, implement workflows 4–7, run green, `make wire-check`, contract check.
 - [ ] Commit `feat(mailbox): hand over a departed member's mailbox and seal its history`.

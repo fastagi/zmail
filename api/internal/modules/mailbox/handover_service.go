@@ -35,23 +35,20 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 	if err != nil {
 		return nil, err
 	}
-	var formerUserID, formerMembershipID uint
+	var formerUserID uint
 	if mailbox.OwnerUserID != nil {
 		formerUserID = *mailbox.OwnerUserID
-		former, findErr := s.memberships.FindForUser(ctx, viewer.OrganizationID, formerUserID)
-		switch {
-		case findErr == nil && former != nil:
-			formerMembershipID = former.ID
-		case findErr != nil && !errors.Is(findErr, domain.ErrOrganizationNotFound):
-			return nil, findErr
-		}
-	}
-	boundary := s.now().UTC()
-	if formerMembershipID == 0 && mailbox.OwnerLeftAt != nil {
-		boundary = mailbox.OwnerLeftAt.UTC()
 	}
 
+	var boundary time.Time
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+		// The former owner is read inside the transaction: an owner who rejoined before the
+		// handover is sealed at the handover, never at their earlier departure.
+		var boundaryErr error
+		boundary, boundaryErr = s.sealBoundary(tx, viewer.OrganizationID, formerUserID, mailbox.OwnerLeftAt)
+		if boundaryErr != nil {
+			return boundaryErr
+		}
 		converted, handErr := s.repo.HandOverMailbox(tx, mailbox.ID, boundary)
 		if handErr != nil {
 			return handErr
@@ -85,6 +82,23 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 		return nil, err
 	}
 	return s.authorizeMailbox(ctx, viewer, mailbox.ID, nil)
+}
+
+// sealBoundary is the time the former owner left when they are gone and that time is known,
+// otherwise now.
+func (s *service) sealBoundary(ctx context.Context, organizationID, formerUserID uint, ownerLeftAt *time.Time) (time.Time, error) {
+	now := s.now().UTC()
+	if formerUserID == 0 || ownerLeftAt == nil {
+		return now, nil
+	}
+	former, err := s.memberships.FindForUser(ctx, organizationID, formerUserID)
+	switch {
+	case err == nil && former != nil:
+		return now, nil
+	case err != nil && !errors.Is(err, domain.ErrOrganizationNotFound):
+		return time.Time{}, err
+	}
+	return ownerLeftAt.UTC(), nil
 }
 
 // DeleteSealedHistory deletes for good the messages and broadcasts created before the mailbox's
