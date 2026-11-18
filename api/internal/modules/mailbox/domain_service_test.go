@@ -370,7 +370,7 @@ func TestDomainsAreUnavailableUntilEnabled(t *testing.T) {
 	if _, err := fixture.service.ListMailDomains(ctx, 7); !errors.Is(err, ErrMailDomainsDisabled) {
 		t.Fatalf("list = %v", err)
 	}
-	if _, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "hello", "", "news.example.com"); !errors.Is(err, ErrMailDomainNotFound) {
+	if _, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("hello", "", "news.example.com")); !errors.Is(err, ErrMailDomainNotFound) {
 		t.Fatalf("mailbox = %v", err)
 	}
 	domains, err := fixture.service.MailboxDomains(ctx, 7)
@@ -392,7 +392,7 @@ func TestMailboxesOnAnOrganizationDomainGetARoutingRule(t *testing.T) {
 		t.Fatalf("another organization sees %+v", others)
 	}
 
-	mailbox, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "Hello", "", "NEWS.example.com")
+	mailbox, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("Hello", "", "NEWS.example.com"))
 	if err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
@@ -401,26 +401,26 @@ func TestMailboxesOnAnOrganizationDomainGetARoutingRule(t *testing.T) {
 		t.Fatalf("mailbox = %+v, rules = %v", mailbox, fixture.zones.rules)
 	}
 	// Shared-domain mailboxes keep relying on the operator's routing.
-	shared, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "team", "", "")
+	shared, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("team", "", ""))
 	if err != nil || shared.RoutingRuleID != "" || shared.Address != "team@mail.example" {
 		t.Fatalf("shared mailbox = %+v, %v", shared, err)
 	}
 
 	// A taken address never gets a rule.
-	if _, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "hello", "", "news.example.com"); !errors.Is(err, ErrMailboxAddressTaken) {
+	if _, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("hello", "", "news.example.com")); !errors.Is(err, ErrMailboxAddressTaken) {
 		t.Fatalf("taken = %v", err)
 	}
 	if len(fixture.zones.rules) != 1 {
 		t.Fatalf("rules = %v", fixture.zones.rules)
 	}
-	if _, err := fixture.service.CreateMailbox(ctx, 8, testCreator, "x", "", "news.example.com"); !errors.Is(err, ErrMailDomainNotFound) {
+	if _, err := fixture.service.CreateMailbox(ctx, as(8), sharedInput("x", "", "news.example.com")); !errors.Is(err, ErrMailDomainNotFound) {
 		t.Fatalf("another organization's domain = %v", err)
 	}
 
 	if err := fixture.service.DeleteMailDomain(ctx, 7, mailDomain.ID); !errors.Is(err, ErrMailDomainInUse) {
 		t.Fatalf("delete domain in use = %v", err)
 	}
-	if err := fixture.service.DeleteMailbox(ctx, 7, mailbox.ID); err != nil {
+	if err := fixture.service.DeleteMailbox(ctx, as(7), mailbox.ID); err != nil {
 		t.Fatalf("DeleteMailbox: %v", err)
 	}
 	if len(fixture.zones.rules) != 0 {
@@ -435,7 +435,7 @@ func TestMailboxesWaitForAVerifiedDomain(t *testing.T) {
 	fixture := newDomainFixture(t)
 	fixture.zones.routingErr = errors.New("unavailable")
 	fixture.connect(t, "news.example.com")
-	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "hello", "", "news.example.com"); !errors.Is(err, ErrMailDomainNotVerified) {
+	if _, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedInput("hello", "", "news.example.com")); !errors.Is(err, ErrMailDomainNotVerified) {
 		t.Fatalf("pending domain = %v", err)
 	}
 	if len(fixture.zones.rules) != 0 {
@@ -449,7 +449,7 @@ func TestAMailboxThatCannotBeStoredLosesItsRoutingRule(t *testing.T) {
 	for i := 0; i < domain.MaxMailboxesPerOrganization; i++ {
 		fixture.mailbox(t, 7, fmt.Sprintf("box%d", i))
 	}
-	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "hello", "", "news.example.com"); !errors.Is(err, ErrMailboxLimitReached) {
+	if _, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedInput("hello", "", "news.example.com")); !errors.Is(err, ErrMailboxLimitReached) {
 		t.Fatalf("over the limit = %v", err)
 	}
 	if len(fixture.zones.rules) != 0 {
@@ -461,7 +461,7 @@ func TestARoutingRuleFailureCreatesNoMailbox(t *testing.T) {
 	fixture := newDomainFixture(t)
 	fixture.connect(t, "news.example.com")
 	fixture.zones.ruleErr = &mailtransport.DomainError{Operation: "create routing rule", Message: "rule limit"}
-	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "hello", "", "news.example.com"); !errors.Is(err, ErrMailDomainProviderFailed) {
+	if _, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedInput("hello", "", "news.example.com")); !errors.Is(err, ErrMailDomainProviderFailed) {
 		t.Fatalf("rule failure = %v", err)
 	}
 	if _, err := fixture.repo.FindMailboxByAddress(context.Background(), "hello@news.example.com"); !errors.Is(err, ErrMailboxNotFound) {

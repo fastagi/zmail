@@ -94,6 +94,8 @@ const (
 	CodeMailboxAddressInvalid        = "MAILBOX.ADDRESS_INVALID"
 	CodeMailboxAddressReserved       = "MAILBOX.ADDRESS_RESERVED"
 	CodeMailboxLimitReached          = "MAILBOX.LIMIT_REACHED"
+	CodeMailboxAccessInvalid         = "MAILBOX.ACCESS_INVALID"
+	CodeMailboxAccessConflict        = "MAILBOX.ACCESS_CONFLICT"
 	CodeMailMessageNotFound          = "MAILBOX.MESSAGE_NOT_FOUND"
 	CodeMailMessageInvalid           = "MAILBOX.MESSAGE_INVALID"
 	CodeMailSendLimitReached         = "MAILBOX.SEND_LIMIT_REACHED"

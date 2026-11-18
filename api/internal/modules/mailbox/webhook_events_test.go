@@ -145,7 +145,7 @@ func TestSendPublishesSentAndPerRecipientOutcomes(t *testing.T) {
 		MessageID: "prov-1@mail.example", Delivered: []string{"bob@example.com"},
 		Bounced: []string{"gone@example.net"}, Queued: []string{"later@example.org"},
 	}
-	message, _, err := fixture.service.SendMessage(context.Background(), 5, mailbox.ID, SendInput{
+	message, _, err := fixture.service.SendMessage(context.Background(), as(5), mailbox.ID, SendInput{
 		To: []string{"bob@example.com", "gone@example.net", "later@example.org"}, Subject: "s", Text: "b",
 	})
 	if err != nil {
@@ -168,7 +168,7 @@ func TestFailedSendPublishesFailed(t *testing.T) {
 	fixture := newServiceFixture(t)
 	mailbox := fixture.mailbox(t, 5, "hello")
 	fixture.transport.err = &mailtransport.Error{Code: "transport.unavailable"}
-	_, _, err := fixture.service.SendMessage(context.Background(), 5, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
+	_, _, err := fixture.service.SendMessage(context.Background(), as(5), mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
 	if !errors.Is(err, ErrMailDeliveryFailed) {
 		t.Fatalf("SendMessage error = %v", err)
 	}
@@ -197,7 +197,7 @@ func TestDeliveryEventPublishesOnceAcrossRedeliveries(t *testing.T) {
 	ctx := context.Background()
 	mailbox := fixture.mailbox(t, 5, "hello")
 	fixture.transport.result = mailtransport.Result{MessageID: "prov-9@mail.example", Queued: []string{"bob@example.com"}}
-	if _, _, err := fixture.service.SendMessage(ctx, 5, mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"}); err != nil {
+	if _, _, err := fixture.service.SendMessage(ctx, as(5), mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"}); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
 	fixture.notifier.sent = nil
@@ -225,7 +225,7 @@ func TestMailStateIsRecordedWhenPublishingFails(t *testing.T) {
 	fixture.transport.result = mailtransport.Result{MessageID: "prov-f@mail.example", Delivered: []string{"bob@example.com"}}
 	fixture.notifier.failures = 1
 
-	message, _, err := fixture.service.SendMessage(ctx, 5, mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"})
+	message, _, err := fixture.service.SendMessage(ctx, as(5), mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"})
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}

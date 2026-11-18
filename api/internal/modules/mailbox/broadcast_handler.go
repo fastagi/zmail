@@ -109,12 +109,12 @@ func toMailBroadcastResponse(broadcast *domain.MailBroadcast) MailBroadcastRespo
 }
 
 func (h *Handler) ListBroadcasts(c *gin.Context) {
-	organizationID, ok := currentOrganizationID(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
 	page := pagination.FromContext(c)
-	broadcasts, total, err := h.service.ListBroadcasts(c.Request.Context(), organizationID, page.GetPage(), page.GetPerPage())
+	broadcasts, total, err := h.service.ListBroadcasts(c.Request.Context(), viewer, page.GetPage(), page.GetPerPage())
 	if err != nil {
 		response.HandleError(c, "Failed to list mail broadcasts", err)
 		return
@@ -130,11 +130,11 @@ func (h *Handler) ListBroadcasts(c *gin.Context) {
 }
 
 func (h *Handler) GetBroadcast(c *gin.Context) {
-	organizationID, id, ok := idScope(c, "broadcast_id")
+	viewer, id, ok := viewerScope(c, "broadcast_id")
 	if !ok {
 		return
 	}
-	broadcast, err := h.service.GetBroadcast(c.Request.Context(), organizationID, id)
+	broadcast, err := h.service.GetBroadcast(c.Request.Context(), viewer, id)
 	respondBroadcast(c, broadcast, err, false)
 }
 
@@ -147,12 +147,12 @@ func (h *Handler) CreateBroadcast(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	broadcast, err := h.service.CreateBroadcast(c.Request.Context(), organization.OrganizationID, organization.UserID, req.input())
+	broadcast, err := h.service.CreateBroadcast(c.Request.Context(), organization, req.input())
 	respondBroadcast(c, broadcast, err, true)
 }
 
 func (h *Handler) UpdateBroadcast(c *gin.Context) {
-	organizationID, id, ok := idScope(c, "broadcast_id")
+	viewer, id, ok := viewerScope(c, "broadcast_id")
 	if !ok {
 		return
 	}
@@ -160,16 +160,16 @@ func (h *Handler) UpdateBroadcast(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	broadcast, err := h.service.UpdateBroadcast(c.Request.Context(), organizationID, id, req.input())
+	broadcast, err := h.service.UpdateBroadcast(c.Request.Context(), viewer, id, req.input())
 	respondBroadcast(c, broadcast, err, false)
 }
 
 func (h *Handler) DeleteBroadcast(c *gin.Context) {
-	organizationID, id, ok := idScope(c, "broadcast_id")
+	viewer, id, ok := viewerScope(c, "broadcast_id")
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteBroadcast(c.Request.Context(), organizationID, id); err != nil {
+	if err := h.service.DeleteBroadcast(c.Request.Context(), viewer, id); err != nil {
 		response.HandleError(c, "Failed to delete mail broadcast", err)
 		return
 	}
@@ -179,18 +179,18 @@ func (h *Handler) DeleteBroadcast(c *gin.Context) {
 
 // managedBroadcast resolves a broadcast route that only owners and admins may use: starting,
 // stopping, pausing, or resuming mail to a whole list.
-func managedBroadcast(c *gin.Context) (organizationID, id uint, ok bool) {
-	organization, ok := managerScope(c)
+func managedBroadcast(c *gin.Context) (viewer domain.OrganizationContext, id uint, ok bool) {
+	viewer, ok = managerScope(c)
 	if !ok {
-		return 0, 0, false
+		return domain.OrganizationContext{}, 0, false
 	}
 	id, ok = httphandler.ParseID(c, "broadcast_id")
-	return organization.OrganizationID, id, ok
+	return viewer, id, ok
 }
 
 // SendBroadcast starts or schedules a draft. Only owners and admins may.
 func (h *Handler) SendBroadcast(c *gin.Context) {
-	organizationID, id, ok := managedBroadcast(c)
+	viewer, id, ok := managedBroadcast(c)
 	if !ok {
 		return
 	}
@@ -198,47 +198,65 @@ func (h *Handler) SendBroadcast(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	broadcast, err := h.service.SendBroadcast(c.Request.Context(), organizationID, id, req.ScheduledAt)
+	broadcast, err := h.service.SendBroadcast(c.Request.Context(), viewer, id, req.ScheduledAt)
 	respondBroadcast(c, broadcast, err, false)
 }
 
-// CancelBroadcast stops a broadcast for good. Only owners and admins may.
+// CancelBroadcast stops a broadcast for good. Only owners and admins may; they need no access
+// to the sender mailbox, and without View they get only the id and the new status.
 func (h *Handler) CancelBroadcast(c *gin.Context) {
-	organizationID, id, ok := managedBroadcast(c)
+	viewer, id, ok := managedBroadcast(c)
 	if !ok {
 		return
 	}
-	broadcast, err := h.service.CancelBroadcast(c.Request.Context(), organizationID, id)
-	respondBroadcast(c, broadcast, err, false)
+	broadcast, visible, err := h.service.CancelBroadcast(c.Request.Context(), viewer, id)
+	respondStoppedBroadcast(c, broadcast, visible, err)
 }
 
-// PauseBroadcast holds a sending broadcast. Only owners and admins may.
+// PauseBroadcast holds a sending broadcast. Only owners and admins may; like cancel, it needs no
+// access to the sender mailbox.
 func (h *Handler) PauseBroadcast(c *gin.Context) {
-	organizationID, id, ok := managedBroadcast(c)
+	viewer, id, ok := managedBroadcast(c)
 	if !ok {
 		return
 	}
-	broadcast, err := h.service.PauseBroadcast(c.Request.Context(), organizationID, id)
-	respondBroadcast(c, broadcast, err, false)
+	broadcast, visible, err := h.service.PauseBroadcast(c.Request.Context(), viewer, id)
+	respondStoppedBroadcast(c, broadcast, visible, err)
+}
+
+// MailBroadcastStatusResponse is what a viewer who may not read the sender mailbox learns after
+// stopping a broadcast.
+type MailBroadcastStatusResponse struct {
+	ID     uint   `json:"id"`
+	Status string `json:"status"`
+}
+
+func respondStoppedBroadcast(c *gin.Context, broadcast *domain.MailBroadcast, visible bool, err error) {
+	if err != nil || visible {
+		respondBroadcast(c, broadcast, err, false)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, MailBroadcastStatusResponse{ID: broadcast.ID, Status: string(broadcast.Status)})
 }
 
 // ResumeBroadcast continues a paused broadcast. Only owners and admins may.
 func (h *Handler) ResumeBroadcast(c *gin.Context) {
-	organizationID, id, ok := managedBroadcast(c)
+	viewer, id, ok := managedBroadcast(c)
 	if !ok {
 		return
 	}
-	broadcast, err := h.service.ResumeBroadcast(c.Request.Context(), organizationID, id)
+	broadcast, err := h.service.ResumeBroadcast(c.Request.Context(), viewer, id)
 	respondBroadcast(c, broadcast, err, false)
 }
 
 func (h *Handler) ListBroadcastRecipients(c *gin.Context) {
-	organizationID, id, ok := idScope(c, "broadcast_id")
+	viewer, id, ok := viewerScope(c, "broadcast_id")
 	if !ok {
 		return
 	}
 	page := pagination.FromContext(c)
-	recipients, total, err := h.service.ListBroadcastRecipients(c.Request.Context(), organizationID, id,
+	recipients, total, err := h.service.ListBroadcastRecipients(c.Request.Context(), viewer, id,
 		domain.MailRecipientStatus(c.Query("status")), page.GetPage(), page.GetPerPage())
 	if err != nil {
 		response.HandleError(c, "Failed to list mail broadcast recipients", err)

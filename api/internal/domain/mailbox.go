@@ -159,8 +159,9 @@ func SummarizeMailEvents(events []MailEvent) MailEventType {
 	return summary
 }
 
-// Mailbox is one address an organization sends from and receives at. Every member of the
-// organization may read and send its mail.
+// Mailbox is one address an organization sends from and receives at. Who may read and send its
+// mail follows from its type: a personal mailbox's owner, or a shared mailbox's members. See
+// MailboxAccessFor.
 type Mailbox struct {
 	ID             uint
 	OrganizationID uint
@@ -168,10 +169,24 @@ type Mailbox struct {
 	CreatedBy   uint
 	Address     string
 	DisplayName string
+	Type        MailboxType
+	// OwnerUserID is the owner of a personal mailbox; nil for a shared one, or when the owner's
+	// account was deleted.
+	OwnerUserID *uint
+	// OwnerLeftAt is when the owner of a personal mailbox left the organization; nil while the
+	// owner is a member. The mailbox then awaits handover.
+	OwnerLeftAt *time.Time
+	// SealedBefore hides every message created before it, on every surface; nil when never sealed.
+	SealedBefore *time.Time
+	// WebhooksEnabled publishes the mailbox's mail to organization webhooks; only shared mailboxes.
+	WebhooksEnabled bool
+	// Access is what the requesting viewer may do; only filled for a viewer.
+	Access MailboxAccess
 	// RoutingRuleID names the provider rule that delivers mail for an address on an organization
 	// domain. It is empty on the shared domain, whose routing the operator manages.
 	RoutingRuleID string
-	// UnreadCount is the number of unread inbound messages. Only listings fill it.
+	// UnreadCount is the number of unread inbound messages. Only listings fill it, and only for a
+	// viewer who may read the mailbox.
 	UnreadCount int
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -442,7 +457,8 @@ type MailBroadcastRecipient struct {
 // MailBroadcastRepository stores broadcasts and their recipients. Every member call is scoped
 // to an organization; the worker calls are not.
 type MailBroadcastRepository interface {
-	ListBroadcasts(ctx context.Context, organizationID uint, page, perPage int) ([]*MailBroadcast, int64, error)
+	// ListBroadcasts lists the broadcasts sent from the given mailboxes. No mailbox ids list nothing.
+	ListBroadcasts(ctx context.Context, organizationID uint, mailboxIDs []uint, page, perPage int) ([]*MailBroadcast, int64, error)
 	FindBroadcast(ctx context.Context, organizationID, id uint) (*MailBroadcast, error)
 	CreateBroadcast(ctx context.Context, broadcast *MailBroadcast) error
 	// UpdateDraft replaces the editable fields of a draft broadcast.
@@ -512,7 +528,7 @@ type MailMessageFilter struct {
 	PerPage   int
 }
 
-// MailLogFilter narrows the log of every message in every mailbox of an organization.
+// MailLogFilter narrows the log of the messages in the mailboxes a viewer may read.
 type MailLogFilter struct {
 	Direction MailDirection
 	Status    MailStatus
@@ -538,6 +554,22 @@ type MailboxRepository interface {
 	FindMailbox(ctx context.Context, organizationID, id uint) (*Mailbox, error)
 	FindMailboxByAddress(ctx context.Context, address string) (*Mailbox, error)
 	DeleteMailbox(ctx context.Context, organizationID, id uint) error
+
+	// FindMailboxMember returns the member row of one membership on a mailbox, or nil without error
+	// when the membership has none.
+	FindMailboxMember(ctx context.Context, mailboxID, membershipID uint) (*MailboxMember, error)
+	// ListMailboxMembers lists a mailbox's members ordered by user id, at most MaxMailboxMembers.
+	ListMailboxMembers(ctx context.Context, mailboxID uint) ([]*MailboxMember, error)
+	// ListMembershipMailboxMembers lists every member row one membership holds.
+	ListMembershipMailboxMembers(ctx context.Context, membershipID uint) ([]*MailboxMember, error)
+	// UpsertMailboxMember sets the permission of a membership on a mailbox. It locks the mailbox
+	// row and refuses a new member once the mailbox has limit members. created reports an insert.
+	UpsertMailboxMember(ctx context.Context, member *MailboxMember, limit int) (created bool, err error)
+	// DeleteMailboxMember removes the member row of a user and returns it.
+	DeleteMailboxMember(ctx context.Context, mailboxID, userID uint) (*MailboxMember, error)
+	AddMailboxAccessEvent(ctx context.Context, event *MailboxAccessEvent) error
+	// ListMailboxAccessEvents lists a mailbox's access history, newest first.
+	ListMailboxAccessEvents(ctx context.Context, mailboxID uint, page, size int) ([]*MailboxAccessEvent, int64, error)
 
 	// CreateMessage stores a message with its attachments. With an idempotency key that the mailbox already used it
 	// reports created=false and fills message with the stored row.
@@ -568,9 +600,10 @@ type MailboxRepository interface {
 	FindMessageAttachment(ctx context.Context, messageID, id uint) (*MailAttachment, error)
 	// FindOutboundMessageByProviderID finds the outbound message a provider event names.
 	FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*MailMessage, error)
-	// ListMessagesForOrganization lists messages across every mailbox of the organization, newest first,
-	// without bodies.
-	ListMessagesForOrganization(ctx context.Context, organizationID uint, filter MailLogFilter) ([]*MailMessage, int64, error)
-	// StatsForOrganization counts messages per UTC day from since, for days that have any.
-	StatsForOrganization(ctx context.Context, organizationID uint, since time.Time) ([]MailDayStats, error)
+	// ListMessagesForOrganization lists messages across the given mailboxes of the organization,
+	// newest first, without bodies. No mailbox ids list nothing.
+	ListMessagesForOrganization(ctx context.Context, organizationID uint, mailboxIDs []uint, filter MailLogFilter) ([]*MailMessage, int64, error)
+	// StatsForOrganization counts messages of the given mailboxes per UTC day from since, for days
+	// that have any. No mailbox ids count nothing.
+	StatsForOrganization(ctx context.Context, organizationID uint, mailboxIDs []uint, since time.Time) ([]MailDayStats, error)
 }

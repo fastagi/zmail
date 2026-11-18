@@ -65,6 +65,11 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 			Address:        mailbox.Address,
 			DisplayName:    mailbox.DisplayName,
 			RoutingRuleID:  mailbox.RoutingRuleID,
+			Type:           string(mailbox.Type),
+			OwnerUserID:    mailbox.OwnerUserID,
+		}
+		if po.Type == "" {
+			po.Type = string(domain.MailboxTypeShared)
 		}
 		if err := tx.Create(po).Error; err != nil {
 			if isUniqueViolation(err) {
@@ -449,10 +454,14 @@ type mailLogRow struct {
 func (r *repository) ListMessagesForOrganization(
 	ctx context.Context,
 	organizationID uint,
+	mailboxIDs []uint,
 	filter domain.MailLogFilter,
 ) ([]*domain.MailMessage, int64, error) {
 	if r.db == nil {
 		return nil, 0, domain.ErrServiceUnavailable
+	}
+	if len(mailboxIDs) == 0 {
+		return []*domain.MailMessage{}, 0, nil
 	}
 	page, perPage := filter.Page, filter.PerPage
 	if page < 1 {
@@ -464,7 +473,7 @@ func (r *repository) ListMessagesForOrganization(
 
 	query := r.conn(ctx).Table("mail_messages").
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
-		Where("mailboxes.organization_id = ?", organizationID)
+		Where("mailboxes.organization_id = ? AND mail_messages.mailbox_id IN ?", organizationID, mailboxIDs)
 	if filter.Direction != "" {
 		query = query.Where("mail_messages.direction = ?", string(filter.Direction))
 	}
@@ -511,9 +520,12 @@ func (r *repository) ListMessagesForOrganization(
 	return messages, total, nil
 }
 
-func (r *repository) StatsForOrganization(ctx context.Context, organizationID uint, since time.Time) ([]domain.MailDayStats, error) {
+func (r *repository) StatsForOrganization(ctx context.Context, organizationID uint, mailboxIDs []uint, since time.Time) ([]domain.MailDayStats, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
+	}
+	if len(mailboxIDs) == 0 {
+		return []domain.MailDayStats{}, nil
 	}
 	var rows []struct {
 		Day      time.Time
@@ -527,7 +539,8 @@ func (r *repository) StatsForOrganization(ctx context.Context, organizationID ui
 			COUNT(*) FILTER (WHERE mail_messages.status = 'sent') AS sent,
 			COUNT(*) FILTER (WHERE mail_messages.status = 'failed') AS failed,
 			COUNT(*) FILTER (WHERE mail_messages.direction = 'inbound') AS received`).
-		Where("mailboxes.organization_id = ? AND mail_messages.created_at >= ?", organizationID, since).
+		Where("mailboxes.organization_id = ? AND mail_messages.mailbox_id IN ? AND mail_messages.created_at >= ?",
+			organizationID, mailboxIDs, since).
 		Group("day").
 		Order("day ASC").
 		Scan(&rows).Error

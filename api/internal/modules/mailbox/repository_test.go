@@ -25,7 +25,7 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{})
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailMessagePO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{})
 	return NewRepository(db), db
 }
 
@@ -38,11 +38,24 @@ func createOwner(t *testing.T, db *gorm.DB, id uint) {
 
 func createMailbox(t *testing.T, repo *repository, address string) *domain.Mailbox {
 	t.Helper()
-	mailbox := &domain.Mailbox{OrganizationID: 1, Address: address, DisplayName: "Owner"}
+	mailbox := &domain.Mailbox{OrganizationID: 1, Address: address, DisplayName: "Owner", Type: domain.MailboxTypeShared}
 	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MaxMailboxesPerOrganization); err != nil {
 		t.Fatalf("CreateMailbox(%q): %v", address, err)
 	}
+	// as(1) works the mailbox, like the creator a service-created mailbox gets as its manager.
+	addMember(t, repo, mailbox.ID, as(1), domain.MailboxPermissionManage)
 	return mailbox
+}
+
+// addMember gives viewer's membership a permission on a mailbox.
+func addMember(t *testing.T, repo *repository, mailboxID uint, viewer domain.OrganizationContext, permission domain.MailboxPermission) {
+	t.Helper()
+	member := &domain.MailboxMember{
+		MailboxID: mailboxID, MembershipID: viewer.MembershipID, UserID: viewer.UserID, Permission: permission, GrantedBy: viewer.UserID,
+	}
+	if _, err := repo.UpsertMailboxMember(context.Background(), member, domain.MaxMailboxMembers); err != nil {
+		t.Fatalf("UpsertMailboxMember: %v", err)
+	}
 }
 
 func TestRepositoryKeepsAReleasedAddressReserved(t *testing.T) {
@@ -408,7 +421,7 @@ func TestRepositoryListsTheLogAcrossAnOrganizationsMailboxes(t *testing.T) {
 
 	list := func(filter domain.MailLogFilter) []*domain.MailMessage {
 		t.Helper()
-		messages, total, err := repo.ListMessagesForOrganization(ctx, 1, filter)
+		messages, total, err := repo.ListMessagesForOrganization(ctx, 1, []uint{first.ID, second.ID, foreign.ID}, filter)
 		if err != nil || int(total) != len(messages) {
 			t.Fatalf("ListMessagesForOrganization(%+v) = %d rows, total %d, err %v", filter, len(messages), total, err)
 		}
@@ -451,9 +464,19 @@ func TestRepositoryListsTheLogAcrossAnOrganizationsMailboxes(t *testing.T) {
 		t.Fatalf("a lone _ matched %d rows; want 0", len(got))
 	}
 
-	page, total, err := repo.ListMessagesForOrganization(ctx, 1, domain.MailLogFilter{Page: 2, PerPage: 2})
+	page, total, err := repo.ListMessagesForOrganization(ctx, 1, []uint{first.ID, second.ID}, domain.MailLogFilter{Page: 2, PerPage: 2})
 	if err != nil || total != 3 || len(page) != 1 || page[0].Subject != "Invoice 100% due" {
 		t.Fatalf("page 2 = %+v, total %d, err %v", page, total, err)
+	}
+
+	// Only the given mailboxes are listed and counted; none lists nothing.
+	readable, total, err := repo.ListMessagesForOrganization(ctx, 1, []uint{second.ID}, domain.MailLogFilter{Query: "Invoice"})
+	if err != nil || total != 0 || len(readable) != 0 {
+		t.Fatalf("log of an unreadable mailbox's subject = %+v, total %d, err %v", readable, total, err)
+	}
+	none, total, err := repo.ListMessagesForOrganization(ctx, 1, nil, domain.MailLogFilter{})
+	if err != nil || total != 0 || len(none) != 0 {
+		t.Fatalf("log without mailboxes = %+v, total %d, err %v", none, total, err)
 	}
 }
 
@@ -486,7 +509,10 @@ func TestRepositoryCountsMailPerDay(t *testing.T) {
 	add(mailbox.ID, domain.MailDirectionInbound, domain.MailStatusReceived, time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))
 	add(foreign.ID, domain.MailDirectionInbound, domain.MailStatusReceived, day2)
 
-	stats, err := repo.StatsForOrganization(ctx, 1, time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC))
+	if empty, err := repo.StatsForOrganization(ctx, 1, nil, time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)); err != nil || len(empty) != 0 {
+		t.Fatalf("stats without mailboxes = %+v, %v", empty, err)
+	}
+	stats, err := repo.StatsForOrganization(ctx, 1, []uint{mailbox.ID, foreign.ID}, time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC))
 	if err != nil || len(stats) != 2 {
 		t.Fatalf("StatsForOrganization = %+v, %v; want 2 days", stats, err)
 	}
@@ -546,7 +572,7 @@ func TestRepositoryStoresDeliveryEventsOnceAndSummarizesThem(t *testing.T) {
 	if err != nil || stored.LastEvent != domain.MailEventBounced {
 		t.Fatalf("stored summary = %q, err %v", stored.LastEvent, err)
 	}
-	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, domain.MailLogFilter{})
+	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, []uint{mailbox.ID}, domain.MailLogFilter{})
 	if err != nil || len(listed) != 1 || listed[0].LastEvent != domain.MailEventBounced {
 		t.Fatalf("the log does not carry the summary: %+v, %v", listed, err)
 	}
@@ -662,7 +688,7 @@ func TestRepositoryStoresAttachmentsWithTheirMessage(t *testing.T) {
 	if err != nil || stored.AttachmentCount != 2 {
 		t.Fatalf("FindMessage = %+v, %v", stored, err)
 	}
-	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, domain.MailLogFilter{})
+	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, []uint{mailbox.ID}, domain.MailLogFilter{})
 	if err != nil || len(listed) != 1 || listed[0].AttachmentCount != 2 {
 		t.Fatalf("log = %+v, %v", listed, err)
 	}

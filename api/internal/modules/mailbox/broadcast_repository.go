@@ -81,11 +81,14 @@ func fillCounts(tx *gorm.DB, broadcasts []*domain.MailBroadcast) error {
 // failurePermanentBounce is the failure code of a message the provider refused for good.
 const failurePermanentBounce = "transport.permanent_bounce"
 
-func (r *repository) ListBroadcasts(ctx context.Context, organizationID uint, page, perPage int) ([]*domain.MailBroadcast, int64, error) {
+func (r *repository) ListBroadcasts(ctx context.Context, organizationID uint, mailboxIDs []uint, page, perPage int) ([]*domain.MailBroadcast, int64, error) {
 	if r.db == nil {
 		return nil, 0, domain.ErrServiceUnavailable
 	}
-	query := r.conn(ctx).Model(&MailBroadcastPO{}).Where("organization_id = ?", organizationID)
+	if len(mailboxIDs) == 0 {
+		return []*domain.MailBroadcast{}, 0, nil
+	}
+	query := r.conn(ctx).Model(&MailBroadcastPO{}).Where("organization_id = ? AND mailbox_id IN ?", organizationID, mailboxIDs)
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err

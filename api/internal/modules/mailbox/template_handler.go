@@ -225,7 +225,7 @@ func (h *Handler) PreviewTemplate(c *gin.Context) {
 }
 
 func (h *Handler) SendTemplateTest(c *gin.Context) {
-	organizationID, templateID, ok := templateScope(c)
+	viewer, templateID, ok := viewerScope(c, "template_id")
 	if !ok {
 		return
 	}
@@ -234,7 +234,7 @@ func (h *Handler) SendTemplateTest(c *gin.Context) {
 		return
 	}
 	message, err := h.service.SendTemplateTest(
-		c.Request.Context(), organizationID, templateID, req.MailboxID, req.To, req.Variables)
+		c.Request.Context(), viewer, templateID, req.MailboxID, req.To, req.Variables)
 	respondSent(c, message, err == nil, err)
 }
 

@@ -35,21 +35,21 @@ func TestBroadcastVariablesFillEveryRecipient(t *testing.T) {
 		Name: "Sale", MailboxID: fixture.mailbox.ID, TemplateID: template.ID, ListID: fixture.list.ID,
 		Variables: map[string]string{"code": "NOV20", "ends": "Friday", "plan": "everyone"},
 	}
-	broadcast, err := fixture.service.CreateBroadcast(ctx, 1, testCreator, input)
+	broadcast, err := fixture.service.CreateBroadcast(ctx, as(1), input)
 	if err != nil {
 		t.Fatalf("CreateBroadcast: %v", err)
 	}
-	stored, err := fixture.service.GetBroadcast(ctx, 1, broadcast.ID)
+	stored, err := fixture.service.GetBroadcast(ctx, as(1), broadcast.ID)
 	if err != nil || stored.Variables["code"] != "NOV20" || len(stored.Variables) != 3 {
 		t.Fatalf("stored = %+v, %v", stored, err)
 	}
 	input.Variables = map[string]string{"code": "NOV25", "ends": "Sunday"}
-	updated, err := fixture.service.UpdateBroadcast(ctx, 1, broadcast.ID, input)
+	updated, err := fixture.service.UpdateBroadcast(ctx, as(1), broadcast.ID, input)
 	if err != nil || updated.Variables["code"] != "NOV25" || len(updated.Variables) != 2 {
 		t.Fatalf("UpdateBroadcast = %+v, %v", updated, err)
 	}
 
-	if _, err = fixture.service.SendBroadcast(ctx, 1, broadcast.ID, nil); err != nil {
+	if _, err = fixture.service.SendBroadcast(ctx, as(1), broadcast.ID, nil); err != nil {
 		t.Fatalf("SendBroadcast: %v", err)
 	}
 	processed, err := fixture.service.DispatchBroadcasts(ctx, 10)
@@ -89,7 +89,7 @@ func TestBroadcastVariablesAreChecked(t *testing.T) {
 			Name: "Sale", MailboxID: fixture.mailbox.ID, TemplateID: fixture.template.ID, ListID: fixture.list.ID,
 			Variables: variables,
 		}
-		if _, err := fixture.service.CreateBroadcast(context.Background(), 1, testCreator, input); !errors.Is(err, ErrMailBroadcastInvalid) {
+		if _, err := fixture.service.CreateBroadcast(context.Background(), as(1), input); !errors.Is(err, ErrMailBroadcastInvalid) {
 			t.Fatalf("CreateBroadcast(%d variables) = %v; want invalid", len(variables), err)
 		}
 	}

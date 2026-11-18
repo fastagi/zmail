@@ -72,31 +72,63 @@ func (s *service) BroadcastsEnabled() bool {
 	return s.settings.InboundSecret != "" && s.settings.PublicURL != ""
 }
 
-func (s *service) ListBroadcasts(ctx context.Context, organizationID uint, page, perPage int) ([]*domain.MailBroadcast, int64, error) {
-	return s.broadcasts.ListBroadcasts(ctx, organizationID, page, perPage)
+func (s *service) ListBroadcasts(ctx context.Context, viewer domain.OrganizationContext, page, perPage int) ([]*domain.MailBroadcast, int64, error) {
+	readable, err := s.readableMailboxIDs(ctx, viewer)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.broadcasts.ListBroadcasts(ctx, viewer.OrganizationID, readable, page, perPage)
 }
 
-func (s *service) GetBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error) {
-	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
-}
-
-func (s *service) CreateBroadcast(ctx context.Context, organizationID, createdBy uint, input BroadcastInput) (*domain.MailBroadcast, error) {
-	broadcast, err := s.buildBroadcast(ctx, organizationID, input)
+// authorizeBroadcast loads a broadcast and checks the viewer's access to its sender mailbox. A
+// viewer without any access to that mailbox, or a mailbox that is gone, finds no broadcast; some
+// access but not the needed one is forbidden.
+func (s *service) authorizeBroadcast(
+	ctx context.Context,
+	viewer domain.OrganizationContext,
+	id uint,
+	need func(domain.MailboxAccess) bool,
+) (*domain.MailBroadcast, error) {
+	broadcast, err := s.broadcasts.FindBroadcast(ctx, viewer.OrganizationID, id)
 	if err != nil {
 		return nil, err
 	}
-	broadcast.CreatedBy = createdBy
+	mailbox, err := s.repo.FindMailbox(ctx, viewer.OrganizationID, broadcast.MailboxID)
+	if errors.Is(err, ErrMailboxNotFound) {
+		return nil, ErrMailBroadcastNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkAccess(ctx, viewer, mailbox, need, ErrMailBroadcastNotFound); err != nil {
+		return nil, err
+	}
+	return broadcast, nil
+}
+
+func (s *service) GetBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, error) {
+	return s.authorizeBroadcast(ctx, viewer, id, canView)
+}
+
+// CreateBroadcast needs Send on the sender mailbox.
+func (s *service) CreateBroadcast(ctx context.Context, viewer domain.OrganizationContext, input BroadcastInput) (*domain.MailBroadcast, error) {
+	broadcast, err := s.buildBroadcast(ctx, viewer, input)
+	if err != nil {
+		return nil, err
+	}
+	broadcast.CreatedBy = viewer.UserID
 	if err := s.broadcasts.CreateBroadcast(ctx, broadcast); err != nil {
 		return nil, err
 	}
 	return broadcast, nil
 }
 
-func (s *service) UpdateBroadcast(ctx context.Context, organizationID, id uint, input BroadcastInput) (*domain.MailBroadcast, error) {
-	if _, err := s.broadcasts.FindBroadcast(ctx, organizationID, id); err != nil {
+// UpdateBroadcast needs Send on the stored sender mailbox and on the new one.
+func (s *service) UpdateBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint, input BroadcastInput) (*domain.MailBroadcast, error) {
+	if _, err := s.authorizeBroadcast(ctx, viewer, id, canSend); err != nil {
 		return nil, err
 	}
-	broadcast, err := s.buildBroadcast(ctx, organizationID, input)
+	broadcast, err := s.buildBroadcast(ctx, viewer, input)
 	if err != nil {
 		return nil, err
 	}
@@ -107,13 +139,18 @@ func (s *service) UpdateBroadcast(ctx context.Context, organizationID, id uint, 
 	return broadcast, nil
 }
 
-func (s *service) DeleteBroadcast(ctx context.Context, organizationID, id uint) error {
-	return s.broadcasts.DeleteBroadcast(ctx, organizationID, id)
+// DeleteBroadcast needs Send on the stored sender mailbox.
+func (s *service) DeleteBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) error {
+	if _, err := s.authorizeBroadcast(ctx, viewer, id, canSend); err != nil {
+		return err
+	}
+	return s.broadcasts.DeleteBroadcast(ctx, viewer.OrganizationID, id)
 }
 
-// buildBroadcast validates the fields and confirms the mailbox, template, and list belong to the
-// organization.
-func (s *service) buildBroadcast(ctx context.Context, organizationID uint, input BroadcastInput) (*domain.MailBroadcast, error) {
+// buildBroadcast validates the fields, confirms the template and list belong to the organization,
+// and requires Send on the sender mailbox.
+func (s *service) buildBroadcast(ctx context.Context, viewer domain.OrganizationContext, input BroadcastInput) (*domain.MailBroadcast, error) {
+	organizationID := viewer.OrganizationID
 	name := strings.Join(strings.Fields(cleanText(input.Name)), " ")
 	if name == "" || utf8.RuneCountInString(name) > maxBroadcastNameLength || strings.IndexFunc(name, unicode.IsControl) >= 0 {
 		return nil, fmt.Errorf("%w: name", ErrMailBroadcastInvalid)
@@ -144,7 +181,7 @@ func (s *service) buildBroadcast(ctx context.Context, organizationID uint, input
 	if input.MailboxID == 0 || input.TemplateID == 0 || input.ListID == 0 {
 		return nil, fmt.Errorf("%w: mailbox_id, template_id, and list_id are required", ErrMailBroadcastInvalid)
 	}
-	if _, err := s.repo.FindMailbox(ctx, organizationID, input.MailboxID); err != nil {
+	if _, err := s.authorizeMailbox(ctx, viewer, input.MailboxID, canSend); err != nil {
 		return nil, err
 	}
 	if _, err := s.templates.FindTemplate(ctx, organizationID, input.TemplateID); err != nil {
@@ -175,20 +212,19 @@ func (s *service) buildBroadcast(ctx context.Context, organizationID uint, input
 }
 
 // SendBroadcast fixes the recipients and the template of a draft and hands it to the worker,
-// now or at scheduledAt.
-func (s *service) SendBroadcast(ctx context.Context, organizationID, id uint, scheduledAt *time.Time) (*domain.MailBroadcast, error) {
+// now or at scheduledAt. The viewer needs Send on the sender mailbox at this call; the worker
+// does not check it again.
+func (s *service) SendBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint, scheduledAt *time.Time) (*domain.MailBroadcast, error) {
 	if !s.BroadcastsEnabled() {
 		return nil, ErrMailBroadcastDisabled
 	}
-	broadcast, err := s.broadcasts.FindBroadcast(ctx, organizationID, id)
+	organizationID := viewer.OrganizationID
+	broadcast, err := s.authorizeBroadcast(ctx, viewer, id, canSend)
 	if err != nil {
 		return nil, err
 	}
 	if broadcast.Status != domain.MailBroadcastDraft {
 		return nil, ErrMailBroadcastNotEditable
-	}
-	if _, err = s.repo.FindMailbox(ctx, organizationID, broadcast.MailboxID); err != nil {
-		return nil, err
 	}
 	template, err := s.templates.FindTemplate(ctx, organizationID, broadcast.TemplateID)
 	if err != nil {
@@ -214,26 +250,52 @@ func (s *service) SendBroadcast(ctx context.Context, organizationID, id uint, sc
 	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
 }
 
-func (s *service) CancelBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error) {
-	if err := s.broadcasts.CancelBroadcast(ctx, organizationID, id); err != nil {
-		return nil, err
+// CancelBroadcast stops a broadcast for good. Stopping mail needs no access to the sender
+// mailbox, so an admin can always stop a broadcast; without View it only learns the new status.
+func (s *service) CancelBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, bool, error) {
+	if err := s.broadcasts.CancelBroadcast(ctx, viewer.OrganizationID, id); err != nil {
+		return nil, false, err
 	}
-	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
+	return s.stoppedBroadcast(ctx, viewer, id)
 }
 
 // PauseBroadcast stops a sending broadcast until an owner resumes it. Pending recipients stay
-// pending; a message the worker is sending right now still finishes.
-func (s *service) PauseBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error) {
-	if err := s.broadcasts.PauseBroadcast(ctx, organizationID, id, stopReasonOwner); err != nil {
-		return nil, err
+// pending; a message the worker is sending right now still finishes. Like cancel, it needs no
+// access to the sender mailbox.
+func (s *service) PauseBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, bool, error) {
+	if err := s.broadcasts.PauseBroadcast(ctx, viewer.OrganizationID, id, stopReasonOwner); err != nil {
+		return nil, false, err
 	}
-	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
+	return s.stoppedBroadcast(ctx, viewer, id)
 }
 
-// ResumeBroadcast continues a paused broadcast. Resuming one that the health check paused is an
-// explicit decision: it is not paused automatically again.
-func (s *service) ResumeBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error) {
-	broadcast, err := s.broadcasts.FindBroadcast(ctx, organizationID, id)
+// stoppedBroadcast reloads a broadcast after a stop and reports whether the viewer may read its
+// sender mailbox.
+func (s *service) stoppedBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, bool, error) {
+	broadcast, err := s.broadcasts.FindBroadcast(ctx, viewer.OrganizationID, id)
+	if err != nil {
+		return nil, false, err
+	}
+	mailbox, err := s.repo.FindMailbox(ctx, viewer.OrganizationID, broadcast.MailboxID)
+	if errors.Is(err, ErrMailboxNotFound) {
+		return broadcast, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	access, err := s.accessFor(ctx, viewer, mailbox)
+	if err != nil {
+		return nil, false, err
+	}
+	return broadcast, access.View, nil
+}
+
+// ResumeBroadcast continues a paused broadcast; it needs Send on the sender mailbox at this call.
+// Resuming one that the health check paused is an explicit decision: it is not paused
+// automatically again.
+func (s *service) ResumeBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, error) {
+	organizationID := viewer.OrganizationID
+	broadcast, err := s.authorizeBroadcast(ctx, viewer, id, canSend)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +356,8 @@ func (s *service) checkBroadcastHealth(ctx context.Context, now time.Time) error
 
 func (s *service) ListBroadcastRecipients(
 	ctx context.Context,
-	organizationID, id uint,
+	viewer domain.OrganizationContext,
+	id uint,
 	status domain.MailRecipientStatus,
 	page, perPage int,
 ) ([]*domain.MailBroadcastRecipient, int64, error) {
@@ -304,7 +367,10 @@ func (s *service) ListBroadcastRecipients(
 	default:
 		return nil, 0, domain.ErrInvalidInput
 	}
-	return s.broadcasts.ListRecipients(ctx, organizationID, id, status, page, perPage)
+	if _, err := s.authorizeBroadcast(ctx, viewer, id, canView); err != nil {
+		return nil, 0, err
+	}
+	return s.broadcasts.ListRecipients(ctx, viewer.OrganizationID, id, status, page, perPage)
 }
 
 // DispatchBroadcasts sends up to limit due recipients and returns how many it finished. A

@@ -6,8 +6,8 @@ import (
 )
 
 // RegisterRoutes registers HTTP routes for the mailbox starter. Member routes require a
-// signed-in user and an organization the user belongs to, and only ever touch that
-// organization's mailboxes. The inbound route is authenticated by the
+// signed-in user and an organization the user belongs to, only ever touch that organization's
+// mailboxes, and only the mailboxes the user's access allows. The inbound route is authenticated by the
 // mail edge's HMAC signature instead of a session.
 func (h *Handler) RegisterRoutes(r *router.Router) {
 	r.Group("", func(auth *router.Router) {
@@ -66,6 +66,15 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.GET("/mailboxes", h.ListMailboxes).Name("mailboxes.index")
 		auth.POST("/mailboxes", h.CreateMailbox).Name("mailboxes.store")
 		auth.DELETE("/mailboxes/:mailbox_id", h.DeleteMailbox).Name("mailboxes.destroy").WhereNumber("mailbox_id")
+
+		auth.GET("/mailboxes/:mailbox_id/members", h.ListMailboxMembers).
+			Name("mailboxes.members.index").WhereNumber("mailbox_id")
+		auth.PUT("/mailboxes/:mailbox_id/members/:user_id", h.SetMailboxMember).
+			Name("mailboxes.members.update").WhereNumber("mailbox_id").WhereNumber("user_id")
+		auth.DELETE("/mailboxes/:mailbox_id/members/:user_id", h.RemoveMailboxMember).
+			Name("mailboxes.members.destroy").WhereNumber("mailbox_id").WhereNumber("user_id")
+		auth.GET("/mailboxes/:mailbox_id/access-events", h.ListMailboxAccessEvents).
+			Name("mailboxes.access_events.index").WhereNumber("mailbox_id")
 
 		auth.GET("/mailboxes/:mailbox_id/messages", h.ListMessages).
 			Name("mailboxes.messages.index").WhereNumber("mailbox_id")

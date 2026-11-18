@@ -19,13 +19,13 @@ func (f *broadcastFixture) contacts(t *testing.T, count int, prefix string) {
 
 func (f *broadcastFixture) start(t *testing.T, testPercent int) *domain.MailBroadcast {
 	t.Helper()
-	broadcast, err := f.service.CreateBroadcast(context.Background(), 1, testCreator, BroadcastInput{
+	broadcast, err := f.service.CreateBroadcast(context.Background(), as(1), BroadcastInput{
 		Name: "Staged", MailboxID: f.mailbox.ID, TemplateID: f.template.ID, ListID: f.list.ID, TestPercent: testPercent,
 	})
 	if err != nil {
 		t.Fatalf("CreateBroadcast: %v", err)
 	}
-	started, err := f.service.SendBroadcast(context.Background(), 1, broadcast.ID, nil)
+	started, err := f.service.SendBroadcast(context.Background(), as(1), broadcast.ID, nil)
 	if err != nil {
 		t.Fatalf("SendBroadcast: %v", err)
 	}
@@ -34,7 +34,7 @@ func (f *broadcastFixture) start(t *testing.T, testPercent int) *domain.MailBroa
 
 func (f *broadcastFixture) load(t *testing.T, id uint) *domain.MailBroadcast {
 	t.Helper()
-	broadcast, err := f.service.GetBroadcast(context.Background(), 1, id)
+	broadcast, err := f.service.GetBroadcast(context.Background(), as(1), id)
 	if err != nil {
 		t.Fatalf("GetBroadcast: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestABroadcastPausesItselfWhenTooManyMessagesBounce(t *testing.T) {
 	}
 
 	// An owner decides to continue anyway: the check no longer stops this broadcast.
-	resumed, err := fixture.service.ResumeBroadcast(ctx, 1, broadcast.ID)
+	resumed, err := fixture.service.ResumeBroadcast(ctx, as(1), broadcast.ID)
 	if err != nil || resumed.Status != domain.MailBroadcastSending || !resumed.SafetyOverride {
 		t.Fatalf("resumed = %+v, %v", resumed, err)
 	}
@@ -135,27 +135,27 @@ func TestOwnersPauseResumeAndCancelABroadcast(t *testing.T) {
 	fixture.contacts(t, 6, "manual")
 	broadcast := fixture.start(t, 0)
 
-	paused, err := fixture.service.PauseBroadcast(ctx, 1, broadcast.ID)
+	paused, _, err := fixture.service.PauseBroadcast(ctx, as(1), broadcast.ID)
 	if err != nil || paused.Status != domain.MailBroadcastPaused || paused.StopReason != stopReasonOwner {
 		t.Fatalf("paused = %+v, %v", paused, err)
 	}
 	if processed, _ := fixture.service.DispatchBroadcasts(ctx, 50); processed != 0 {
 		t.Fatalf("a paused broadcast sent %d", processed)
 	}
-	if _, crossErr := fixture.service.PauseBroadcast(ctx, 2, broadcast.ID); !errors.Is(crossErr, ErrMailBroadcastNotFound) {
+	if _, _, crossErr := fixture.service.PauseBroadcast(ctx, as(2), broadcast.ID); !errors.Is(crossErr, ErrMailBroadcastNotFound) {
 		t.Fatalf("pause from another organization = %v", crossErr)
 	}
-	resumed, err := fixture.service.ResumeBroadcast(ctx, 1, broadcast.ID)
+	resumed, err := fixture.service.ResumeBroadcast(ctx, as(1), broadcast.ID)
 	if err != nil || resumed.Status != domain.MailBroadcastSending || resumed.SafetyOverride || resumed.StopReason != "" {
 		t.Fatalf("resumed = %+v, %v", resumed, err)
 	}
-	if _, resumeErr := fixture.service.ResumeBroadcast(ctx, 1, broadcast.ID); !errors.Is(resumeErr, ErrMailBroadcastNotEditable) {
+	if _, resumeErr := fixture.service.ResumeBroadcast(ctx, as(1), broadcast.ID); !errors.Is(resumeErr, ErrMailBroadcastNotEditable) {
 		t.Fatalf("resume a sending broadcast = %v", resumeErr)
 	}
-	if _, pauseErr := fixture.service.PauseBroadcast(ctx, 1, broadcast.ID); pauseErr != nil {
+	if _, _, pauseErr := fixture.service.PauseBroadcast(ctx, as(1), broadcast.ID); pauseErr != nil {
 		t.Fatalf("pause again: %v", pauseErr)
 	}
-	canceled, err := fixture.service.CancelBroadcast(ctx, 1, broadcast.ID)
+	canceled, _, err := fixture.service.CancelBroadcast(ctx, as(1), broadcast.ID)
 	if err != nil || canceled.Status != domain.MailBroadcastCanceled || canceled.Counts.Canceled != 6 {
 		t.Fatalf("canceled = %+v, %v", canceled, err)
 	}
@@ -165,7 +165,7 @@ func TestBroadcastTestSettingsAreValidated(t *testing.T) {
 	fixture := newBroadcastFixture(t, 1000)
 	for _, input := range []BroadcastInput{{TestPercent: 51}, {TestPercent: -1}, {TestPercent: 10, TestWaitMinutes: 4}, {TestWaitMinutes: 1441}} {
 		input.Name, input.MailboxID, input.TemplateID, input.ListID = "x", fixture.mailbox.ID, fixture.template.ID, fixture.list.ID
-		if _, err := fixture.service.CreateBroadcast(context.Background(), 1, testCreator, input); !errors.Is(err, ErrMailBroadcastInvalid) {
+		if _, err := fixture.service.CreateBroadcast(context.Background(), as(1), input); !errors.Is(err, ErrMailBroadcastInvalid) {
 			t.Fatalf("CreateBroadcast(%+v) = %v", input, err)
 		}
 	}

@@ -56,7 +56,7 @@ func newBroadcastFixture(t *testing.T, dailyLimit int) *broadcastFixture {
 		mailbox:   createMailbox(t, repo, "news@mail.example"),
 		now:       time.Now().UTC(),
 	}
-	fixture.service = NewService(repo, repo, repo, repo, nil, nil, fixture.transport, &fakeNotifier{}, Settings{
+	fixture.service = NewService(repo, &fakeMemberships{}, repo, repo, repo, nil, nil, fixture.transport, &fakeNotifier{}, Settings{
 		Domain:           "mail.example",
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,
@@ -104,7 +104,7 @@ func (f *broadcastFixture) contact(t *testing.T, email, firstName string, status
 
 func (f *broadcastFixture) draft(t *testing.T) *domain.MailBroadcast {
 	t.Helper()
-	broadcast, err := f.service.CreateBroadcast(context.Background(), 1, testCreator, BroadcastInput{
+	broadcast, err := f.service.CreateBroadcast(context.Background(), as(1), BroadcastInput{
 		Name: " November   news ", MailboxID: f.mailbox.ID, TemplateID: f.template.ID, ListID: f.list.ID,
 		UnsubscribeLabel: "Leave this list",
 	})
@@ -129,7 +129,7 @@ func TestBroadcastSendsToSubscribedListMembers(t *testing.T) {
 	if broadcast.Name != "November news" || broadcast.Status != domain.MailBroadcastDraft {
 		t.Fatalf("draft = %+v", broadcast)
 	}
-	started, err := fixture.service.SendBroadcast(ctx, 1, broadcast.ID, nil)
+	started, err := fixture.service.SendBroadcast(ctx, as(1), broadcast.ID, nil)
 	if err != nil {
 		t.Fatalf("SendBroadcast: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestBroadcastSendsToSubscribedListMembers(t *testing.T) {
 	if _, err = fixture.service.UpdateTemplate(ctx, 1, fixture.template.ID, changed); err != nil {
 		t.Fatalf("UpdateTemplate: %v", err)
 	}
-	if _, err = fixture.service.UpdateBroadcast(ctx, 1, broadcast.ID, BroadcastInput{Name: "x", MailboxID: fixture.mailbox.ID, TemplateID: fixture.template.ID, ListID: fixture.list.ID}); !errors.Is(err, ErrMailBroadcastNotEditable) {
+	if _, err = fixture.service.UpdateBroadcast(ctx, as(1), broadcast.ID, BroadcastInput{Name: "x", MailboxID: fixture.mailbox.ID, TemplateID: fixture.template.ID, ListID: fixture.list.ID}); !errors.Is(err, ErrMailBroadcastNotEditable) {
 		t.Fatalf("edit while sending error = %v", err)
 	}
 	// Dave unsubscribes through the link after the broadcast started.
@@ -170,12 +170,12 @@ func TestBroadcastSendsToSubscribedListMembers(t *testing.T) {
 		t.Fatalf("headers = %v", toAnn.Headers)
 	}
 
-	finished, err := fixture.service.GetBroadcast(ctx, 1, broadcast.ID)
+	finished, err := fixture.service.GetBroadcast(ctx, as(1), broadcast.ID)
 	if err != nil || finished.Status != domain.MailBroadcastSent || finished.FinishedAt == nil ||
 		finished.Counts.Sent != 1 || finished.Counts.Failed != 1 || finished.Counts.Skipped != 1 {
 		t.Fatalf("finished = %+v, %v", finished, err)
 	}
-	recipients, total, err := fixture.service.ListBroadcastRecipients(ctx, 1, broadcast.ID, domain.MailRecipientFailed, 1, 10)
+	recipients, total, err := fixture.service.ListBroadcastRecipients(ctx, as(1), broadcast.ID, domain.MailRecipientFailed, 1, 10)
 	if err != nil || total != 1 || recipients[0].Email != "erin@example.com" || recipients[0].MessageID == 0 ||
 		recipients[0].FailureCode != "transport.permanent_bounce" {
 		t.Fatalf("failed recipients = %+v (%d), %v", recipients, total, err)
@@ -200,7 +200,7 @@ func TestBroadcastSendsToSubscribedListMembers(t *testing.T) {
 	if processed, err := fixture.service.DispatchBroadcasts(ctx, 10); err != nil || processed != 0 {
 		t.Fatalf("second dispatch = %d, %v; want nothing left", processed, err)
 	}
-	if err := fixture.service.DeleteBroadcast(ctx, 1, broadcast.ID); err != nil {
+	if err := fixture.service.DeleteBroadcast(ctx, as(1), broadcast.ID); err != nil {
 		t.Fatalf("DeleteBroadcast after sending: %v", err)
 	}
 }
@@ -211,14 +211,14 @@ func TestBroadcastPausesAtTheSendLimitAndResumes(t *testing.T) {
 	fixture.contact(t, "a@example.com", "A", domain.MailContactSubscribed, true)
 	fixture.contact(t, "b@example.com", "B", domain.MailContactSubscribed, true)
 	broadcast := fixture.draft(t)
-	if _, err := fixture.service.SendBroadcast(ctx, 1, broadcast.ID, nil); err != nil {
+	if _, err := fixture.service.SendBroadcast(ctx, as(1), broadcast.ID, nil); err != nil {
 		t.Fatalf("SendBroadcast: %v", err)
 	}
 	processed, err := fixture.service.DispatchBroadcasts(ctx, 10)
 	if err != nil || processed != 1 {
 		t.Fatalf("DispatchBroadcasts = %d, %v; want 1 before the limit", processed, err)
 	}
-	paused, _ := fixture.service.GetBroadcast(ctx, 1, broadcast.ID)
+	paused, _ := fixture.service.GetBroadcast(ctx, as(1), broadcast.ID)
 	if paused.Status != domain.MailBroadcastSending || paused.StopReason != "send_limit_reached" || paused.Counts.Pending != 1 {
 		t.Fatalf("paused = %+v", paused)
 	}
@@ -228,7 +228,7 @@ func TestBroadcastPausesAtTheSendLimitAndResumes(t *testing.T) {
 	if processed, err := fixture.service.DispatchBroadcasts(ctx, 10); err != nil || processed != 1 {
 		t.Fatalf("resumed dispatch = %d, %v", processed, err)
 	}
-	done, _ := fixture.service.GetBroadcast(ctx, 1, broadcast.ID)
+	done, _ := fixture.service.GetBroadcast(ctx, as(1), broadcast.ID)
 	if done.Status != domain.MailBroadcastSent || done.StopReason != "" || done.Counts.Sent != 2 {
 		t.Fatalf("done = %+v", done)
 	}
@@ -241,17 +241,17 @@ func TestBroadcastScheduleCancelAndValidation(t *testing.T) {
 
 	scheduled := fixture.draft(t)
 	at := fixture.now.Add(time.Hour)
-	started, err := fixture.service.SendBroadcast(ctx, 1, scheduled.ID, &at)
+	started, err := fixture.service.SendBroadcast(ctx, as(1), scheduled.ID, &at)
 	if err != nil || started.Status != domain.MailBroadcastScheduled || started.ScheduledAt == nil {
 		t.Fatalf("scheduled = %+v, %v", started, err)
 	}
 	if processed, _ := fixture.service.DispatchBroadcasts(ctx, 10); processed != 0 {
 		t.Fatalf("a scheduled broadcast was sent early")
 	}
-	if err = fixture.service.DeleteBroadcast(ctx, 1, scheduled.ID); !errors.Is(err, ErrMailBroadcastNotEditable) {
+	if err = fixture.service.DeleteBroadcast(ctx, as(1), scheduled.ID); !errors.Is(err, ErrMailBroadcastNotEditable) {
 		t.Fatalf("delete while scheduled error = %v", err)
 	}
-	canceled, err := fixture.service.CancelBroadcast(ctx, 1, scheduled.ID)
+	canceled, _, err := fixture.service.CancelBroadcast(ctx, as(1), scheduled.ID)
 	if err != nil || canceled.Status != domain.MailBroadcastCanceled || canceled.Counts.Canceled != 1 {
 		t.Fatalf("canceled = %+v, %v", canceled, err)
 	}
@@ -259,25 +259,25 @@ func TestBroadcastScheduleCancelAndValidation(t *testing.T) {
 	if processed, _ := fixture.service.DispatchBroadcasts(ctx, 10); processed != 0 || len(fixture.transport.sent) != 0 {
 		t.Fatalf("a canceled broadcast was sent")
 	}
-	if _, err = fixture.service.CancelBroadcast(ctx, 1, scheduled.ID); !errors.Is(err, ErrMailBroadcastNotEditable) {
+	if _, _, err = fixture.service.CancelBroadcast(ctx, as(1), scheduled.ID); !errors.Is(err, ErrMailBroadcastNotEditable) {
 		t.Fatalf("second cancel error = %v", err)
 	}
 
 	far := fixture.now.Add(400 * 24 * time.Hour)
-	if _, err = fixture.service.SendBroadcast(ctx, 1, fixture.draft(t).ID, &far); !errors.Is(err, ErrMailBroadcastInvalid) {
+	if _, err = fixture.service.SendBroadcast(ctx, as(1), fixture.draft(t).ID, &far); !errors.Is(err, ErrMailBroadcastInvalid) {
 		t.Fatalf("far schedule error = %v", err)
 	}
 	empty, _ := fixture.service.CreateContactList(ctx, 1, "Empty")
-	noOne, err := fixture.service.CreateBroadcast(ctx, 1, testCreator, BroadcastInput{
+	noOne, err := fixture.service.CreateBroadcast(ctx, as(1), BroadcastInput{
 		Name: "Nobody", MailboxID: fixture.mailbox.ID, TemplateID: fixture.template.ID, ListID: empty.ID,
 	})
 	if err != nil {
 		t.Fatalf("CreateBroadcast: %v", err)
 	}
-	if _, err = fixture.service.SendBroadcast(ctx, 1, noOne.ID, nil); !errors.Is(err, ErrMailBroadcastNoRecipients) {
+	if _, err = fixture.service.SendBroadcast(ctx, as(1), noOne.ID, nil); !errors.Is(err, ErrMailBroadcastNoRecipients) {
 		t.Fatalf("empty list error = %v", err)
 	}
-	still, _ := fixture.service.GetBroadcast(ctx, 1, noOne.ID)
+	still, _ := fixture.service.GetBroadcast(ctx, as(1), noOne.ID)
 	if still.Status != domain.MailBroadcastDraft {
 		t.Fatalf("a refused send changed the draft: %+v", still)
 	}
@@ -287,19 +287,19 @@ func TestBroadcastScheduleCancelAndValidation(t *testing.T) {
 		"long label":    {Name: "x", MailboxID: fixture.mailbox.ID, TemplateID: fixture.template.ID, ListID: fixture.list.ID, UnsubscribeLabel: strings.Repeat("l", 51)},
 		"missing parts": {Name: "x"},
 	} {
-		if _, err = fixture.service.CreateBroadcast(ctx, 1, testCreator, input); !errors.Is(err, ErrMailBroadcastInvalid) {
+		if _, err = fixture.service.CreateBroadcast(ctx, as(1), input); !errors.Is(err, ErrMailBroadcastInvalid) {
 			t.Errorf("%s: error = %v", name, err)
 		}
 	}
-	if _, err = fixture.service.CreateBroadcast(ctx, 2, testCreator, BroadcastInput{
+	if _, err = fixture.service.CreateBroadcast(ctx, as(2), BroadcastInput{
 		Name: "x", MailboxID: fixture.mailbox.ID, TemplateID: fixture.template.ID, ListID: fixture.list.ID,
 	}); !errors.Is(err, ErrMailboxNotFound) {
 		t.Fatalf("another organization's mailbox error = %v", err)
 	}
-	if _, err = fixture.service.GetBroadcast(ctx, 2, scheduled.ID); !errors.Is(err, ErrMailBroadcastNotFound) {
+	if _, err = fixture.service.GetBroadcast(ctx, as(2), scheduled.ID); !errors.Is(err, ErrMailBroadcastNotFound) {
 		t.Fatalf("another organization's broadcast error = %v", err)
 	}
-	listed, total, err := fixture.service.ListBroadcasts(ctx, 1, 1, 10)
+	listed, total, err := fixture.service.ListBroadcasts(ctx, as(1), 1, 10)
 	if err != nil || total != 3 || listed[0].ID != noOne.ID || listed[0].HTMLBody != "" {
 		t.Fatalf("ListBroadcasts = %d, %v; want newest first without snapshots", total, err)
 	}
@@ -309,7 +309,7 @@ func TestBroadcastsNeedUnsubscribeSettings(t *testing.T) {
 	fixture := newBroadcastFixture(t, 100)
 	fixture.contact(t, "a@example.com", "A", domain.MailContactSubscribed, true)
 	fixture.service.settings.PublicURL = ""
-	if _, err := fixture.service.SendBroadcast(context.Background(), 1, fixture.draft(t).ID, nil); !errors.Is(err, ErrMailBroadcastDisabled) {
+	if _, err := fixture.service.SendBroadcast(context.Background(), as(1), fixture.draft(t).ID, nil); !errors.Is(err, ErrMailBroadcastDisabled) {
 		t.Fatalf("send without a public URL error = %v", err)
 	}
 }
