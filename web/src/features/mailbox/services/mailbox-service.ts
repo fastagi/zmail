@@ -1,6 +1,7 @@
 import type { z } from 'zod/mini';
 
 import {
+  MAILBOX_ACCESS_EVENTS_MAX_PAGE_SIZE,
   MAIL_LOG_QUERY_MAX_LENGTH,
   MAIL_PAGE_MAX_SIZE,
   MAIL_STATS_DEFAULT_DAYS,
@@ -12,13 +13,18 @@ import {
   mailboxDomainListSchema,
   mailDomainListSchema,
   mailDomainSchema,
+  mailboxAccessEventPageEnvelopeSchema,
   mailboxListSchema,
+  mailboxMemberListSchema,
+  mailboxMemberSchema,
   mailboxSchema,
+  mailboxSealedDeletionSchema,
   mailTemplateListSchema,
   mailContactImportSchema,
   mailBroadcastPageEnvelopeSchema,
   mailBroadcastRecipientPageEnvelopeSchema,
   mailBroadcastSchema,
+  mailBroadcastStatusOnlySchema,
   mailContactListListSchema,
   mailContactListSchema,
   mailContactPageEnvelopeSchema,
@@ -33,6 +39,7 @@ import type {
   MailBroadcastPage,
   MailBroadcastRecipientPage,
   MailBroadcastSendInput,
+  MailBroadcastStatusOnly,
   MailRecipientStatus,
   MailContact,
   MailContactFilters,
@@ -53,7 +60,11 @@ import type {
   MailMessage,
   MailMessagePage,
   Mailbox,
+  MailboxAccessEventPage,
   MailboxDomain,
+  MailboxMember,
+  MailboxPermission,
+  MailboxSealedDeletion,
   MailDomain,
   MailDomainInput,
   SendMailMessageInput,
@@ -157,6 +168,124 @@ export const mailboxService = {
     await request.delete<void>(`/mailboxes/${mailboxId}`, {
       headers: organizationHeaders(organizationId),
     });
+  },
+
+  /** Members of a shared mailbox, ordered by user id; needs `manage_members`. */
+  async members(organizationId: number, mailboxId: number): Promise<MailboxMember[]> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    const parsed = mailboxMemberListSchema.safeParse(
+      await request.get<unknown>(`/mailboxes/${mailboxId}/members`, { headers })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** Adds the user or changes their permission. */
+  async setMember(
+    organizationId: number,
+    mailboxId: number,
+    userId: number,
+    permission: MailboxPermission
+  ): Promise<MailboxMember> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    validId(userId);
+    const parsed = mailboxMemberSchema.safeParse(
+      await request.put<unknown, { permission: MailboxPermission }>(
+        `/mailboxes/${mailboxId}/members/${userId}`,
+        { permission },
+        { headers }
+      )
+    );
+    if (!parsed.success || parsed.data.user_id !== userId) throw invalidResponse();
+    return parsed.data;
+  },
+
+  async removeMember(organizationId: number, mailboxId: number, userId: number): Promise<void> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    validId(userId);
+    await request.delete<void>(`/mailboxes/${mailboxId}/members/${userId}`, { headers });
+  },
+
+  /** One page of the access history, newest first; needs `see_history`. */
+  async accessEvents(
+    organizationId: number,
+    mailboxId: number,
+    { page = 1, perPage = 20 }: { page?: number; perPage?: number } = {}
+  ): Promise<MailboxAccessEventPage> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    validId(page);
+    if (
+      !Number.isSafeInteger(perPage) ||
+      perPage < 1 ||
+      perPage > MAILBOX_ACCESS_EVENTS_MAX_PAGE_SIZE
+    ) {
+      throw invalidResponse();
+    }
+    const parsed = mailboxAccessEventPageEnvelopeSchema.safeParse(
+      await request.getEnvelope<unknown>(`/mailboxes/${mailboxId}/access-events`, {
+        headers,
+        params: { page, per_page: perPage },
+      })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return { items: parsed.data.data, meta: parsed.data.meta, links: parsed.data.links };
+  },
+
+  /** Turns a personal mailbox into a shared one the successor works; answers the mailbox. */
+  async handOver(
+    organizationId: number,
+    mailboxId: number,
+    successorUserId: number
+  ): Promise<Mailbox> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    validId(successorUserId);
+    const parsed = mailboxSchema.safeParse(
+      await request.post<unknown, { successor_user_id: number }>(
+        `/mailboxes/${mailboxId}/handovers`,
+        { successor_user_id: successorUserId },
+        { headers }
+      )
+    );
+    if (!parsed.success || parsed.data.id !== mailboxId) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** Deletes the sealed history for good; `confirmAddress` must be the mailbox address. */
+  async deleteSealedHistory(
+    organizationId: number,
+    mailboxId: number,
+    confirmAddress: string
+  ): Promise<MailboxSealedDeletion> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    const parsed = mailboxSealedDeletionSchema.safeParse(
+      await request.delete<unknown>(`/mailboxes/${mailboxId}/sealed-messages`, {
+        headers,
+        data: { confirm_address: confirmAddress },
+      })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** Turns organization webhooks for a shared mailbox on or off; answers the mailbox. */
+  async setWebhooks(organizationId: number, mailboxId: number, enabled: boolean): Promise<Mailbox> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    const parsed = mailboxSchema.safeParse(
+      await request.put<unknown, { enabled: boolean }>(
+        `/mailboxes/${mailboxId}/webhook-setting`,
+        { enabled },
+        { headers }
+      )
+    );
+    if (!parsed.success || parsed.data.id !== mailboxId) throw invalidResponse();
+    return parsed.data;
   },
 
   async messages(
@@ -305,23 +434,36 @@ export const mailboxService = {
     );
   },
 
-  async cancelBroadcast(organizationId: number, broadcastId: number): Promise<MailBroadcast> {
+  async cancelBroadcast(
+    organizationId: number,
+    broadcastId: number
+  ): Promise<MailBroadcast | MailBroadcastStatusOnly> {
     return this.controlBroadcast(organizationId, broadcastId, 'cancellations');
   },
 
-  /** Cancels, pauses, or resumes a broadcast; only owners and admins may. */
+  /**
+   * Cancels, pauses, or resumes a broadcast; only owners and admins may. Pausing and cancelling
+   * need no access to the sender mailbox, so without `view` on it the answer is only the status.
+   */
   async controlBroadcast(
     organizationId: number,
     broadcastId: number,
     action: 'cancellations' | 'pauses' | 'resumptions'
-  ): Promise<MailBroadcast> {
+  ): Promise<MailBroadcast | MailBroadcastStatusOnly> {
     validId(broadcastId);
-    return parseBroadcast(
-      await request.post<unknown>(`/mail-broadcasts/${broadcastId}/${action}`, undefined, {
-        headers: organizationHeaders(organizationId),
-      }),
-      broadcastId
+    const value = await request.post<unknown>(
+      `/mail-broadcasts/${broadcastId}/${action}`,
+      undefined,
+      { headers: organizationHeaders(organizationId) }
     );
+    if (action !== 'resumptions') {
+      const statusOnly = mailBroadcastStatusOnlySchema.safeParse(value);
+      if (statusOnly.success) {
+        if (statusOnly.data.id !== broadcastId) throw invalidResponse();
+        return statusOnly.data;
+      }
+    }
+    return parseBroadcast(value, broadcastId);
   },
 
   async broadcastRecipients(
@@ -660,6 +802,34 @@ assertContract<Sends<MailDomainInput, ContractRequest<'connectMailDomain'>>>();
 assertContract<Accepts<z.input<typeof mailboxSchema>, ContractData<'createMailbox', 201>>>();
 assertContract<Sends<CreateMailboxInput, ContractRequest<'createMailbox'>>>();
 assertContract<
+  Accepts<z.input<typeof mailboxMemberListSchema>, ContractData<'listMailboxMembers', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailboxMemberSchema>, ContractData<'setMailboxMember', 200>>
+>();
+assertContract<Sends<{ permission: MailboxPermission }, ContractRequest<'setMailboxMember'>>>();
+assertContract<
+  Accepts<
+    z.input<typeof mailboxAccessEventPageEnvelopeSchema>,
+    ContractResponse<'listMailboxAccessEvents', 200>
+  >
+>();
+assertContract<Accepts<z.input<typeof mailboxSchema>, ContractData<'handOverMailbox', 201>>>();
+assertContract<Sends<{ successor_user_id: number }, ContractRequest<'handOverMailbox'>>>();
+assertContract<
+  Accepts<
+    z.input<typeof mailboxSealedDeletionSchema>,
+    ContractData<'deleteMailboxSealedMessages', 200>
+  >
+>();
+assertContract<
+  Sends<{ confirm_address: string }, ContractRequest<'deleteMailboxSealedMessages'>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailboxSchema>, ContractData<'setMailboxWebhookSetting', 200>>
+>();
+assertContract<Sends<{ enabled: boolean }, ContractRequest<'setMailboxWebhookSetting'>>>();
+assertContract<
   Accepts<z.input<typeof mailMessagePageEnvelopeSchema>, ContractResponse<'listMailMessages', 200>>
 >();
 assertContract<Accepts<z.input<typeof mailMessageSchema>, ContractData<'getMailMessage', 200>>>();
@@ -726,7 +896,16 @@ assertContract<
   Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'sendMailBroadcast', 200>>
 >();
 assertContract<
-  Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'pauseMailBroadcast', 200>>
+  Accepts<
+    z.input<typeof mailBroadcastSchema> | z.input<typeof mailBroadcastStatusOnlySchema>,
+    ContractData<'pauseMailBroadcast', 200>
+  >
+>();
+assertContract<
+  Accepts<
+    z.input<typeof mailBroadcastSchema> | z.input<typeof mailBroadcastStatusOnlySchema>,
+    ContractData<'cancelMailBroadcast', 200>
+  >
 >();
 assertContract<
   Accepts<z.input<typeof mailBroadcastSchema>, ContractData<'resumeMailBroadcast', 200>>

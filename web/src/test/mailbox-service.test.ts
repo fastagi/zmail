@@ -9,8 +9,10 @@ import {
   mailMessagePageEnvelopeSchema,
   mailMessageSchema,
   mailMessageSummarySchema,
+  mailboxAccessEventSchema,
   mailboxDomainListSchema,
   mailboxListSchema,
+  mailboxMemberSchema,
   normalizeDisplayName,
   normalizeLocalPart,
   normalizeMailMessage,
@@ -19,6 +21,7 @@ import {
 } from '@/features/mailbox/schemas';
 import { mailboxService, parseMailMessage } from '@/features/mailbox/services/mailbox-service';
 import {
+  isAccessConflict,
   isOrganizationLost,
   isStoredSendFailure,
   resolveMailboxErrorKey,
@@ -39,13 +42,7 @@ describe('mailbox service boundary', () => {
       meta: { current_page: 1, per_page: 20, total: 0, last_page: 1, from: 0, to: 0 },
       links: { first: '/a', last: '/a', prev: null, next: null },
     };
-    const mailbox = {
-      id: 12,
-      address: 'hello@mail.example.com',
-      display_name: '',
-      unread_count: 0,
-      created_at: '2026-11-16T10:00:00Z',
-    };
+    const mailbox = accessMailbox();
     const get = vi.spyOn(request, 'get').mockImplementation(async url => {
       if (url === '/mail-message-stats') {
         return Array.from({ length: 7 }, (_, index) => ({
@@ -70,7 +67,7 @@ describe('mailbox service boundary', () => {
     await mailboxService.message(7, 12, 7);
     await mailboxService.messages(7, 12, { direction: 'inbound' });
     await mailboxService.listLog(7, { status: 'failed' });
-    await mailboxService.create(7, { local_part: 'hello' });
+    await mailboxService.create(7, { local_part: 'hello', type: 'personal', owner_user_id: 3 });
     await mailboxService.send(7, 12, { to: ['bob@example.com'], subject: 'Hi', text: 'Body' });
     await mailboxService.setRead(7, 12, 7, true);
     await mailboxService.remove(7, 12);
@@ -102,7 +99,11 @@ describe('mailbox service boundary', () => {
       page: 1,
       per_page: 20,
     });
-    expect(post.mock.calls[0][1]).toEqual({ local_part: 'hello' });
+    expect(post.mock.calls[0][1]).toEqual({
+      local_part: 'hello',
+      type: 'personal',
+      owner_user_id: 3,
+    });
   });
 
   it('refuses a call without a valid organization before any request', async () => {
@@ -122,7 +123,12 @@ describe('mailbox service boundary', () => {
         () => mailboxService.message(organizationId, 12, 7),
         () => mailboxService.messages(organizationId, 12, { direction: 'inbound' }),
         () => mailboxService.listLog(organizationId),
-        () => mailboxService.create(organizationId, { local_part: 'hello' }),
+        () =>
+          mailboxService.create(organizationId, {
+            local_part: 'hello',
+            type: 'personal',
+            owner_user_id: 3,
+          }),
         () => mailboxService.send(organizationId, 12, { to: ['bob@example.com'], subject: 'Hi' }),
         () => mailboxService.setRead(organizationId, 12, 7, true),
         () => mailboxService.remove(organizationId, 12),
@@ -224,28 +230,11 @@ describe('mailbox service boundary', () => {
     ]) {
       expect(mailboxDomainListSchema.safeParse([domain(drift)]).success).toBe(false);
     }
-    expect(
-      mailboxListSchema.safeParse([
-        {
-          id: 12,
-          address: 'hello@mail.example.com',
-          display_name: '',
-          unread_count: 3,
-          created_at: '2026-11-16T10:00:00Z',
-        },
-      ]).success
-    ).toBe(true);
+    expect(mailboxListSchema.safeParse([accessMailbox({ unread_count: 3 })]).success).toBe(true);
     // A mailbox without its unread count is not a valid API answer.
-    expect(
-      mailboxListSchema.safeParse([
-        {
-          id: 12,
-          address: 'hello@mail.example.com',
-          display_name: '',
-          created_at: '2026-11-16T10:00:00Z',
-        },
-      ]).success
-    ).toBe(false);
+    const withoutUnread: Record<string, unknown> = accessMailbox();
+    delete withoutUnread.unread_count;
+    expect(mailboxListSchema.safeParse([withoutUnread]).success).toBe(false);
     const page = (data: unknown[]) => ({
       code: 0,
       message: 'success',
@@ -503,5 +492,215 @@ function sentMessage() {
         occurred_at: '2026-11-16T10:00:05Z',
       },
     ],
+  };
+}
+
+describe('mailbox access service boundary', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('calls the member, history, handover, sealed-history, and webhook routes with the header', async () => {
+    const member = {
+      user_id: 9,
+      permission: 'send',
+      granted_by: 3,
+      created_at: '2026-11-19T10:00:00Z',
+    };
+    const eventPage = {
+      code: 0 as const,
+      message: 'success',
+      data: [accessEvent()],
+      meta: { current_page: 2, per_page: 10, total: 11, last_page: 2, from: 11, to: 11 },
+      links: { first: '/a', last: '/a', prev: '/a', next: null },
+    };
+    const get = vi.spyOn(request, 'get').mockResolvedValue([member]);
+    const getEnvelope = vi.spyOn(request, 'getEnvelope').mockResolvedValue(eventPage);
+    const put = vi
+      .spyOn(request, 'put')
+      .mockImplementation(async url =>
+        url.endsWith('/webhook-setting') ? accessMailbox({ webhooks_enabled: true }) : member
+      );
+    const post = vi.spyOn(request, 'post').mockResolvedValue(accessMailbox({ sealed_before: now }));
+    const remove = vi
+      .spyOn(request, 'delete')
+      .mockImplementation(async url =>
+        url.endsWith('/sealed-messages')
+          ? { deleted_messages: 3, deleted_broadcasts: 1 }
+          : undefined
+      );
+
+    await expect(mailboxService.members(7, 12)).resolves.toEqual([member]);
+    await expect(mailboxService.setMember(7, 12, 9, 'send')).resolves.toEqual(member);
+    await expect(mailboxService.removeMember(7, 12, 9)).resolves.toBeUndefined();
+    const events = await mailboxService.accessEvents(7, 12, { page: 2, perPage: 10 });
+    expect(events.items).toHaveLength(1);
+    expect(events.meta.current_page).toBe(2);
+    await expect(mailboxService.handOver(7, 12, 9)).resolves.toMatchObject({ sealed_before: now });
+    await expect(
+      mailboxService.deleteSealedHistory(7, 12, 'Alice@mail.example.com')
+    ).resolves.toEqual({ deleted_messages: 3, deleted_broadcasts: 1 });
+    await expect(mailboxService.setWebhooks(7, 12, true)).resolves.toMatchObject({
+      webhooks_enabled: true,
+    });
+
+    const header = { 'Organization-Id': '7' };
+    expect(get.mock.calls).toEqual([['/mailboxes/12/members', { headers: header }]]);
+    expect(getEnvelope.mock.calls).toEqual([
+      ['/mailboxes/12/access-events', { headers: header, params: { page: 2, per_page: 10 } }],
+    ]);
+    expect(put.mock.calls).toEqual([
+      ['/mailboxes/12/members/9', { permission: 'send' }, { headers: header }],
+      ['/mailboxes/12/webhook-setting', { enabled: true }, { headers: header }],
+    ]);
+    expect(post.mock.calls).toEqual([
+      ['/mailboxes/12/handovers', { successor_user_id: 9 }, { headers: header }],
+    ]);
+    expect(remove.mock.calls).toEqual([
+      ['/mailboxes/12/members/9', { headers: header }],
+      [
+        '/mailboxes/12/sealed-messages',
+        { headers: header, data: { confirm_address: 'Alice@mail.example.com' } },
+      ],
+    ]);
+  });
+
+  it('sends the access of a new mailbox with it', async () => {
+    const post = vi.spyOn(request, 'post').mockResolvedValue(accessMailbox());
+    await mailboxService.create(7, { local_part: 'me', type: 'personal', owner_user_id: 4 });
+    await mailboxService.create(7, {
+      local_part: 'team',
+      type: 'shared',
+      members: [
+        { user_id: 4, permission: 'manage' },
+        { user_id: 5, permission: 'view' },
+      ],
+    });
+    expect(post.mock.calls.map(call => call[1])).toEqual([
+      { local_part: 'me', type: 'personal', owner_user_id: 4 },
+      {
+        local_part: 'team',
+        type: 'shared',
+        members: [
+          { user_id: 4, permission: 'manage' },
+          { user_id: 5, permission: 'view' },
+        ],
+      },
+    ]);
+  });
+
+  it('refuses invalid ids before any request', async () => {
+    const spies = [
+      vi.spyOn(request, 'get'),
+      vi.spyOn(request, 'getEnvelope'),
+      vi.spyOn(request, 'post'),
+      vi.spyOn(request, 'put'),
+      vi.spyOn(request, 'delete'),
+    ];
+    const calls = [
+      () => mailboxService.members(0, 12),
+      () => mailboxService.members(7, 0),
+      () => mailboxService.setMember(7, 12, 0, 'view'),
+      () => mailboxService.removeMember(7, 12, 1.5),
+      () => mailboxService.accessEvents(7, 12, { page: 0 }),
+      () => mailboxService.accessEvents(7, 12, { perPage: 101 }),
+      () => mailboxService.handOver(7, 12, -1),
+      () => mailboxService.deleteSealedHistory(7, Number.NaN, 'a@b.c'),
+      () => mailboxService.setWebhooks(-7, 12, true),
+    ];
+    for (const call of calls) {
+      await expect(call()).rejects.toMatchObject({ errorCode: ClientErrorCode.INVALID_RESPONSE });
+    }
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('accepts contract-shaped access answers and rejects drift', () => {
+    expect(mailboxListSchema.safeParse([accessMailbox()]).success).toBe(true);
+    expect(
+      mailboxListSchema.safeParse([
+        accessMailbox({ type: 'personal', owner_user_id: 4, awaiting_handover: true }),
+      ]).success
+    ).toBe(true);
+    for (const field of [
+      'type',
+      'owner_user_id',
+      'awaiting_handover',
+      'sealed_before',
+      'webhooks_enabled',
+      'access',
+    ]) {
+      const partial: Record<string, unknown> = accessMailbox();
+      delete partial[field];
+      expect(mailboxListSchema.safeParse([partial]).success, field).toBe(false);
+    }
+    for (const drift of [
+      { type: 'group' },
+      { access: { view: true, send: true, manage_members: true, administer: true } },
+      { access: { ...accessMailbox().access, delete: true } },
+      { sealed_before: 'yesterday' },
+      { owner_user_id: 0 },
+    ]) {
+      expect(mailboxListSchema.safeParse([accessMailbox(drift)]).success).toBe(false);
+    }
+    expect(mailboxAccessEventSchema.safeParse(accessEvent()).success).toBe(true);
+    // Clients ignore detail keys they do not know, and Zmail's own changes have no actor.
+    expect(
+      mailboxAccessEventSchema.safeParse(
+        accessEvent({ actor_user_id: null, detail: { reason: 'left_organization', later: 1 } })
+      ).success
+    ).toBe(true);
+    expect(mailboxAccessEventSchema.safeParse(accessEvent({ type: 'opened' })).success).toBe(false);
+    expect(
+      mailboxMemberSchema.safeParse({
+        user_id: 9,
+        permission: 'admin',
+        granted_by: 3,
+        created_at: now,
+      }).success
+    ).toBe(false);
+  });
+
+  it('maps the access error codes to local copy', () => {
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_ACCESS_INVALID, 422))
+    ).toBe('errors.accessInvalid');
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_ACCESS_CONFLICT, 409))
+    ).toBe('errors.accessConflict');
+    expect(isAccessConflict(new ApiError('x', ApiErrorCode.MAILBOX_ACCESS_CONFLICT, 409))).toBe(
+      true
+    );
+    expect(isAccessConflict(new ApiError('x', ApiErrorCode.MAILBOX_NOT_FOUND, 404))).toBe(false);
+  });
+});
+
+const now = '2026-11-19T10:00:00Z';
+
+function accessMailbox(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 12,
+    address: 'hello@mail.example.com',
+    display_name: '',
+    type: 'shared',
+    owner_user_id: null,
+    awaiting_handover: false,
+    sealed_before: null,
+    webhooks_enabled: false,
+    access: { view: true, send: true, manage_members: true, administer: true, see_history: true },
+    unread_count: 0,
+    created_at: now,
+    ...overrides,
+  };
+}
+
+function accessEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 41,
+    type: 'member_set',
+    actor_user_id: 3,
+    subject_user_id: 9,
+    detail: { membership_id: 30, permission: 'view' },
+    created_at: now,
+    ...overrides,
   };
 }

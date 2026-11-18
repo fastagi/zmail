@@ -1,7 +1,20 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { AlertCircle, ArrowLeft, Inbox, Mail, PenLine, Plus, Send, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import {
+  AlertCircle,
+  ArrowLeft,
+  Inbox,
+  Lock,
+  Mail,
+  PenLine,
+  Send,
+  ShieldCheck,
+  Trash2,
+  User,
+  UserX,
+  Users,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -15,8 +28,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   ComposeDialog,
@@ -24,6 +35,11 @@ import {
   replyDraft,
   type ComposeDraft,
 } from '@/features/mailbox/components/compose-dialog';
+import { CreateMailboxForm } from '@/features/mailbox/components/create-mailbox-form';
+import {
+  hasAccessPanel,
+  MailboxAccessPanel,
+} from '@/features/mailbox/components/mailbox-access-panel';
 import {
   MailOrganizationBoundary,
   MailPageHeader,
@@ -36,7 +52,6 @@ import {
   MailHtmlFrame,
   MailStatusBadge,
   mailBadgeKey,
-  nativeSelectClassName,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import {
@@ -45,7 +60,6 @@ import {
 } from '@/features/mailbox/components/mail-attachments';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
 import {
-  useCreateMailbox,
   useDeleteMailbox,
   useMailMessage,
   useMailMessages,
@@ -54,28 +68,22 @@ import {
   useUpdateMailMessage,
 } from '@/features/mailbox/hooks/use-mailbox';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
-import {
-  MAILBOX_DISPLAY_NAME_MAX_LENGTH,
-  MAILBOX_LOCAL_PART_MAX_LENGTH,
-  normalizeDisplayName,
-  normalizeLocalPart,
-} from '@/features/mailbox/schemas';
 import type {
   MailDirection,
   MailMessage,
   MailMessageSummary,
   Mailbox,
-  MailboxDomain,
 } from '@/features/mailbox/types';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
 /**
- * Mailbox console: the addresses of the chosen organization on the configured domain, with the
- * inbox and sent folder of the selected one. Every member reads and sends; only owners and admins
- * see the controls that create and delete mailboxes. The API remains the authority for
- * membership, roles, address rules, and delivery; the checks here only save a round trip.
+ * Mailbox console: the mailboxes of the chosen organization the user has any access to, with the
+ * inbox and sent folder of the selected one. What a user may do follows each mailbox's `access`:
+ * without `view` the mailbox is locked, without `send` there is no compose, reply, or delete.
+ * Only owners and admins create mailboxes. The API remains the authority for membership, access,
+ * address rules, and delivery; the checks here only save a round trip.
  */
 export function MailboxWorkspace() {
   const t = useT('mailbox');
@@ -97,6 +105,7 @@ function Workspace({ canManage }: { canManage: boolean }) {
   const mailboxes = useMailboxes(organizationId);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Mailbox | null>(null);
+  const [accessTargetId, setAccessTargetId] = useState<number | null>(null);
 
   if (mailboxes.isPending || domains.isPending) return <WorkspaceSkeleton />;
   const loadError = mailboxes.error ?? domains.error;
@@ -117,6 +126,8 @@ function Workspace({ canManage }: { canManage: boolean }) {
   const items = mailboxes.data;
   const domain = domains.data.find(item => item.kind === 'shared') ?? domains.data[0] ?? null;
   const selected = items.find(item => item.id === selectedId) ?? items[0] ?? null;
+  // Looked up on every render, so the panel follows the list after a change.
+  const accessTarget = items.find(item => item.id === accessTargetId) ?? null;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
@@ -138,7 +149,7 @@ function Workspace({ canManage }: { canManage: boolean }) {
             description={t(canManage ? 'mailboxes.empty' : 'organization.readOnly')}
           />
         ) : (
-          <ul className="space-y-1">
+          <ul className="space-y-1" aria-labelledby="mailbox-list-title">
             {items.map(mailbox => (
               <li key={mailbox.id} className="flex items-center gap-1">
                 <button
@@ -154,7 +165,8 @@ function Workspace({ canManage }: { canManage: boolean }) {
                     <span className="min-w-0 flex-1 truncate text-sm font-medium">
                       {mailbox.address}
                     </span>
-                    {mailbox.unread_count > 0 ? (
+                    <MailboxMarks mailbox={mailbox} />
+                    {mailbox.access.view && mailbox.unread_count > 0 ? (
                       <span
                         className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground"
                         aria-label={t('mailboxes.unreadCount', { count: mailbox.unread_count })}
@@ -167,7 +179,7 @@ function Workspace({ canManage }: { canManage: boolean }) {
                     {mailbox.display_name || t('mailboxes.noDisplayName')}
                   </span>
                 </button>
-                {canManage ? (
+                {mailbox.access.administer ? (
                   <Button
                     type="button"
                     isIcon
@@ -199,145 +211,22 @@ function Workspace({ canManage }: { canManage: boolean }) {
       </section>
 
       <section className="min-w-0">
-        {selected ? <MailboxMessages key={selected.id} mailbox={selected} /> : null}
+        {selected ? (
+          <MailboxMessages
+            key={selected.id}
+            mailbox={selected}
+            onOpenAccess={() => setAccessTargetId(selected.id)}
+          />
+        ) : null}
       </section>
 
-      {canManage ? (
-        <DeleteMailboxDialog mailbox={deleteTarget} onClose={() => setDeleteTarget(null)} />
-      ) : null}
+      <DeleteMailboxDialog mailbox={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      <MailboxAccessPanel
+        mailbox={accessTarget}
+        onClose={() => setAccessTargetId(null)}
+        onRefresh={() => void mailboxes.refetch()}
+      />
     </div>
-  );
-}
-
-function CreateMailboxForm({
-  domain,
-  domains,
-  count,
-  onCreated,
-}: {
-  domain: MailboxDomain;
-  /** The shared domain and the organization's verified domains. */
-  domains: MailboxDomain[];
-  count: number;
-  onCreated: (mailbox: Mailbox) => void;
-}) {
-  const t = useT('mailbox');
-  const create = useCreateMailbox(useMailOrganizationId());
-  const [localPart, setLocalPart] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [addressDomain, setAddressDomain] = useState(domain.domain);
-  const [error, setError] = useState<string | null>(null);
-  const limitReached = count >= domain.max_mailboxes;
-  // A domain removed or unverified since the form opened falls back to the shared one.
-  const chosen = domains.find(item => item.domain === addressDomain) ?? domain;
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError(null);
-    const normalized = normalizeLocalPart(localPart);
-    if (!normalized.ok) {
-      setError(
-        t(normalized.reason === 'reserved' ? 'errors.addressReserved' : 'errors.addressInvalid')
-      );
-      return;
-    }
-    const name = normalizeDisplayName(displayName);
-    if (name === null) {
-      setError(t('create.displayNameInvalid'));
-      return;
-    }
-    try {
-      const mailbox = await create.mutateAsync({
-        local_part: normalized.value,
-        ...(name === '' ? {} : { display_name: name }),
-        ...(chosen.kind === 'organization' ? { domain: chosen.domain } : {}),
-      });
-      setLocalPart('');
-      setDisplayName('');
-      toast.success(t('messages.mailboxCreated'));
-      onCreated(mailbox);
-    } catch (failure) {
-      setError(t(resolveMailboxErrorKey(failure)));
-    }
-  };
-
-  return (
-    <form className="space-y-3 rounded-md border p-4" onSubmit={submit}>
-      <h3 className="text-sm font-semibold">{t('create.title')}</h3>
-      {limitReached ? (
-        <p className="text-sm text-muted-foreground">
-          {t('create.limitReached', { max: domain.max_mailboxes })}
-        </p>
-      ) : (
-        <>
-          <div className="space-y-2">
-            <Label htmlFor="mailbox-local-part">{t('create.localPart')}</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="mailbox-local-part"
-                value={localPart}
-                maxLength={MAILBOX_LOCAL_PART_MAX_LENGTH}
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                disabled={create.isPending}
-                placeholder={t('create.localPartPlaceholder')}
-                aria-describedby="mailbox-local-part-hint"
-                onChange={event => setLocalPart(event.target.value)}
-              />
-              {domains.length > 1 ? (
-                <span className="flex shrink-0 items-center gap-1 text-sm text-muted-foreground">
-                  @
-                  <select
-                    aria-label={t('create.domain')}
-                    className={cn(nativeSelectClassName, 'max-w-44')}
-                    value={chosen.domain}
-                    disabled={create.isPending}
-                    onChange={event => setAddressDomain(event.target.value)}
-                  >
-                    {domains.map(item => (
-                      <option key={item.domain} value={item.domain}>
-                        {item.domain}
-                      </option>
-                    ))}
-                  </select>
-                </span>
-              ) : (
-                <span className="shrink-0 text-sm text-muted-foreground">@{domain.domain}</span>
-              )}
-            </div>
-            <p id="mailbox-local-part-hint" className="text-xs text-muted-foreground">
-              {t('create.localPartHint')}
-            </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="mailbox-display-name">{t('create.displayName')}</Label>
-            <Input
-              id="mailbox-display-name"
-              value={displayName}
-              maxLength={MAILBOX_DISPLAY_NAME_MAX_LENGTH}
-              autoComplete="off"
-              disabled={create.isPending}
-              placeholder={t('create.displayNamePlaceholder')}
-              onChange={event => setDisplayName(event.target.value)}
-            />
-          </div>
-          {error ? (
-            <p role="alert" className="text-sm text-error">
-              {error}
-            </p>
-          ) : null}
-          <Button
-            type="submit"
-            size="sm"
-            loading={create.isPending}
-            icon={<Plus className="size-4" />}
-          >
-            {t('actions.create')}
-          </Button>
-        </>
-      )}
-    </form>
   );
 }
 
@@ -390,7 +279,40 @@ function DeleteMailboxDialog({
   );
 }
 
-function MailboxMessages({ mailbox }: { mailbox: Mailbox }) {
+/** Type, handover, and lock marks of a list item, with their names for assistive technology. */
+function MailboxMarks({ mailbox }: { mailbox: Mailbox }) {
+  const t = useT('mailbox');
+  const typeLabel = t(
+    mailbox.awaiting_handover
+      ? 'mailboxes.awaitingHandover'
+      : mailbox.type === 'personal'
+        ? 'mailboxes.personal'
+        : 'mailboxes.shared'
+  );
+  const TypeIcon = mailbox.awaiting_handover ? UserX : mailbox.type === 'personal' ? User : Users;
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+      <span title={typeLabel} className="flex items-center">
+        <TypeIcon className="size-3.5" aria-hidden="true" />
+        <span className="sr-only">{typeLabel}</span>
+      </span>
+      {mailbox.access.view ? null : (
+        <span title={t('mailboxes.locked')} className="flex items-center">
+          <Lock className="size-3.5" aria-hidden="true" />
+          <span className="sr-only">{t('mailboxes.locked')}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+function MailboxMessages({
+  mailbox,
+  onOpenAccess,
+}: {
+  mailbox: Mailbox;
+  onOpenAccess: () => void;
+}) {
   const t = useT('mailbox');
   const [direction, setDirection] = useState<MailDirection>('inbound');
   const [page, setPage] = useState(1);
@@ -425,16 +347,96 @@ function MailboxMessages({ mailbox }: { mailbox: Mailbox }) {
             <p className="truncate text-sm text-muted-foreground">{mailbox.display_name}</p>
           ) : null}
         </div>
-        <Button
-          type="button"
-          size="sm"
-          icon={<PenLine className="size-4" />}
-          onClick={() => setDraft(emptyDraft)}
-        >
-          {t('actions.compose')}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {hasAccessPanel(mailbox) ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              icon={<ShieldCheck className="size-4" />}
+              aria-label={t('access.openLabel', { address: mailbox.address })}
+              onClick={onOpenAccess}
+            >
+              {t('access.open')}
+            </Button>
+          ) : null}
+          {mailbox.access.send ? (
+            <Button
+              type="button"
+              size="sm"
+              icon={<PenLine className="size-4" />}
+              onClick={() => setDraft(emptyDraft)}
+            >
+              {t('actions.compose')}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
+      {mailbox.access.view ? (
+        <MailboxFolders
+          mailbox={mailbox}
+          direction={direction}
+          page={page}
+          openId={openId}
+          onShowFolder={showFolder}
+          onPageChange={setPage}
+          onOpen={open}
+          onClose={() => setOpenId(null)}
+          onReply={reply}
+        />
+      ) : (
+        <EmptyState
+          icon={<Lock className="size-5" aria-hidden="true" />}
+          title={t('mailboxes.lockedTitle')}
+          description={t(
+            mailbox.awaiting_handover
+              ? 'mailboxes.lockedAwaiting'
+              : mailbox.type === 'personal'
+                ? 'mailboxes.lockedPersonal'
+                : 'mailboxes.lockedShared'
+          )}
+        />
+      )}
+
+      {draft && mailbox.access.send ? (
+        <ComposeDialog
+          mailbox={mailbox}
+          draft={draft}
+          onClose={() => setDraft(null)}
+          onStored={() => showFolder('outbound')}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** The folders and messages of a mailbox the user reads. */
+function MailboxFolders({
+  mailbox,
+  direction,
+  page,
+  openId,
+  onShowFolder,
+  onPageChange,
+  onOpen,
+  onClose,
+  onReply,
+}: {
+  mailbox: Mailbox;
+  direction: MailDirection;
+  page: number;
+  openId: number | null;
+  onShowFolder: (direction: MailDirection) => void;
+  onPageChange: (page: number) => void;
+  onOpen: (message: MailMessageSummary) => void;
+  onClose: () => void;
+  onReply: (message: MailMessage) => void;
+}) {
+  const t = useT('mailbox');
+  const showFolder = onShowFolder;
+  return (
+    <>
       <div role="group" aria-label={t('folders.label')} className="flex gap-2">
         <Button
           type="button"
@@ -463,27 +465,19 @@ function MailboxMessages({ mailbox }: { mailbox: Mailbox }) {
           mailbox={mailbox}
           direction={direction}
           page={page}
-          onPageChange={setPage}
-          onOpen={open}
+          onPageChange={onPageChange}
+          onOpen={onOpen}
         />
       ) : (
         <MessageDetail
           mailboxId={mailbox.id}
           messageId={openId}
-          onClose={() => setOpenId(null)}
-          onReply={reply}
+          canSend={mailbox.access.send}
+          onClose={onClose}
+          onReply={onReply}
         />
       )}
-
-      {draft ? (
-        <ComposeDialog
-          mailbox={mailbox}
-          draft={draft}
-          onClose={() => setDraft(null)}
-          onStored={() => showFolder('outbound')}
-        />
-      ) : null}
-    </div>
+    </>
   );
 }
 
@@ -622,11 +616,13 @@ function MessageList({
 function MessageDetail({
   mailboxId,
   messageId,
+  canSend,
   onClose,
   onReply,
 }: {
   mailboxId: number;
   messageId: number;
+  canSend: boolean;
   onClose: () => void;
   onReply: (message: MailMessage) => void;
 }) {
@@ -677,7 +673,7 @@ function MessageDetail({
     <article className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {back}
-        <MessageActions message={message} onReply={onReply} onClose={onClose} />
+        <MessageActions message={message} canSend={canSend} onReply={onReply} onClose={onClose} />
       </div>
 
       <div className="space-y-3 rounded-md border p-4">
