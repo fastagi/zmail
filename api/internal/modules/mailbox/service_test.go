@@ -268,7 +268,7 @@ func (r *fakeRepository) ListMailboxMembers(_ context.Context, mailboxID uint) (
 	return listed, nil
 }
 
-func (r *fakeRepository) ListMembershipMailboxMembers(_ context.Context, membershipID uint) ([]*domain.MailboxMember, error) {
+func (r *fakeRepository) ListMembershipMailboxMembers(_ context.Context, _, membershipID uint) ([]*domain.MailboxMember, error) {
 	var listed []*domain.MailboxMember
 	for key, member := range r.members {
 		if key[1] == membershipID {
@@ -333,6 +333,11 @@ func (r *fakeRepository) DeleteMailbox(ctx context.Context, organizationID, id u
 		return err
 	}
 	delete(r.mailboxes, id)
+	for key := range r.members {
+		if key[0] == id {
+			delete(r.members, key)
+		}
+	}
 	return nil
 }
 

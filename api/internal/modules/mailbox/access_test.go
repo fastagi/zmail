@@ -846,3 +846,44 @@ func TestMemberLimitUnderConcurrency(t *testing.T) {
 		t.Fatalf("update at the limit = created %v, %v", created, err)
 	}
 }
+
+// TestDeletedMailboxesDoNotCrowdOutLiveOnes proves a member's rows on deleted mailboxes never push
+// a live mailbox out of what they see: the membership listing is capped at the mailbox limit.
+func TestDeletedMailboxesDoNotCrowdOutLiveOnes(t *testing.T) {
+	f := newPostgresAccessFixture(t)
+	ctx := context.Background()
+	for i := 0; i < domain.MaxMailboxesPerOrganization; i++ {
+		gone, err := f.service.CreateMailbox(ctx, f.admin, CreateMailboxInput{
+			LocalPart: fmt.Sprintf("gone%d", i), Type: domain.MailboxTypeShared,
+			Members: []MailboxMemberInput{{UserID: accessC, Permission: domain.MailboxPermissionView}},
+		})
+		if err != nil {
+			t.Fatalf("create mailbox %d: %v", i, err)
+		}
+		if err := f.service.DeleteMailbox(ctx, f.admin, gone.ID); err != nil {
+			t.Fatalf("delete mailbox %d: %v", i, err)
+		}
+	}
+	live, err := f.service.CreateMailbox(ctx, f.admin, CreateMailboxInput{
+		LocalPart: "live", Type: domain.MailboxTypeShared,
+		Members: []MailboxMemberInput{{UserID: accessC, Permission: domain.MailboxPermissionView}},
+	})
+	if err != nil {
+		t.Fatalf("create live mailbox: %v", err)
+	}
+	if got := listedMailbox(t, f.service, f.c, live.ID); got == nil || !got.Access.View {
+		t.Fatalf("C's list lacks the live mailbox after 50 deleted ones: %+v", got)
+	}
+}
+
+// TestSettingTheSamePermissionRecordsNothing keeps the access history to real changes.
+func TestSettingTheSamePermissionRecordsNothing(t *testing.T) {
+	f := newAccessFixture(t)
+	before := len(accessEvents(t, f, f.admin, f.team.ID))
+	if _, err := f.service.SetMailboxMember(context.Background(), f.admin, f.team.ID, accessC, domain.MailboxPermissionView); err != nil {
+		t.Fatalf("SetMailboxMember: %v", err)
+	}
+	if after := len(accessEvents(t, f, f.admin, f.team.ID)); after != before {
+		t.Fatalf("access events went from %d to %d for an unchanged permission", before, after)
+	}
+}

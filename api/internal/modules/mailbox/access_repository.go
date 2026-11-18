@@ -45,14 +45,18 @@ func (r *repository) ListMailboxMembers(ctx context.Context, mailboxID uint) ([]
 }
 
 // ListMembershipMailboxMembers is bounded by the organization's mailbox limit: a membership holds
-// at most one row per mailbox.
-func (r *repository) ListMembershipMailboxMembers(ctx context.Context, membershipID uint) ([]*domain.MailboxMember, error) {
+// at most one row per live mailbox of its organization. Rows of deleted mailboxes are skipped so
+// they never push a live mailbox past the bound.
+func (r *repository) ListMembershipMailboxMembers(ctx context.Context, organizationID, membershipID uint) ([]*domain.MailboxMember, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
 	var rows []MailboxMemberPO
-	err := r.conn(ctx).Where("membership_id = ?", membershipID).
-		Order("mailbox_id ASC").Limit(domain.MaxMailboxesPerOrganization).Find(&rows).Error
+	err := r.conn(ctx).Model(&MailboxMemberPO{}).Select("mailbox_members.*").
+		Joins("JOIN mailboxes ON mailboxes.id = mailbox_members.mailbox_id").
+		Where("mailbox_members.membership_id = ? AND mailboxes.organization_id = ? AND mailboxes.deleted_at IS NULL",
+			membershipID, organizationID).
+		Order("mailbox_members.mailbox_id ASC").Limit(domain.MaxMailboxesPerOrganization).Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}

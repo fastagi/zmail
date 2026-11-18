@@ -103,7 +103,7 @@ func (s *service) visibleMailboxes(ctx context.Context, viewer domain.Organizati
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.repo.ListMembershipMailboxMembers(ctx, viewer.MembershipID)
+	rows, err := s.repo.ListMembershipMailboxMembers(ctx, viewer.OrganizationID, viewer.MembershipID)
 	if err != nil {
 		return nil, err
 	}
@@ -233,8 +233,15 @@ func optionalID(id uint) *uint {
 }
 
 // setMember stores a member row and its member_set event. The event keeps the membership id so
-// a later departure can be traced to the mailboxes it held.
+// a later departure can be traced to the mailboxes it held. An unchanged permission writes nothing.
 func (s *service) setMember(ctx context.Context, viewer domain.OrganizationContext, mailbox *domain.Mailbox, member resolvedMember) (*domain.MailboxMember, error) {
+	existing, err := s.repo.FindMailboxMember(ctx, mailbox.ID, member.membershipID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil && existing.Permission == member.permission {
+		return existing, nil
+	}
 	row := &domain.MailboxMember{
 		MailboxID:    mailbox.ID,
 		MembershipID: member.membershipID,
@@ -242,10 +249,10 @@ func (s *service) setMember(ctx context.Context, viewer domain.OrganizationConte
 		Permission:   member.permission,
 		GrantedBy:    viewer.UserID,
 	}
-	if _, err := s.repo.UpsertMailboxMember(ctx, row, domain.MaxMailboxMembers); err != nil {
+	if _, err = s.repo.UpsertMailboxMember(ctx, row, domain.MaxMailboxMembers); err != nil {
 		return nil, err
 	}
-	err := s.recordAccess(ctx, mailbox, domain.MailboxAccessMemberSet, viewer.UserID, member.userID, map[string]any{
+	err = s.recordAccess(ctx, mailbox, domain.MailboxAccessMemberSet, viewer.UserID, member.userID, map[string]any{
 		"membership_id": member.membershipID,
 		"permission":    string(member.permission),
 	})

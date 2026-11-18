@@ -91,6 +91,21 @@ func TestAddMailboxAccessSkipsMailboxesWithoutOrganization(t *testing.T) {
 	assert.Zero(t, events)
 }
 
+// TestAddMailboxAccessSkipsDeletedMailboxes gives deleted mailboxes no members and no history, so
+// their rows never count against a member's live mailboxes.
+func TestAddMailboxAccessSkipsDeletedMailboxes(t *testing.T) {
+	db, exec := mailboxAccessFixture(t)
+	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, created_at, updated_at, deleted_at) VALUES (6, 10, 901, 'gone@mail.example', now(), now(), now())`)
+
+	require.NoError(t, (&addMailboxAccess{}).Up(db))
+
+	var members, events int64
+	require.NoError(t, db.Raw(`SELECT COUNT(*) FROM mailbox_members`).Scan(&members).Error)
+	require.NoError(t, db.Raw(`SELECT COUNT(*) FROM mailbox_access_events`).Scan(&events).Error)
+	assert.Zero(t, members)
+	assert.Zero(t, events)
+}
+
 // TestMembershipDeleteCascadesMembers proves leaving the organization removes the member rows of
 // that membership in the same statement, and that a rejoin with a new membership has none.
 func TestMembershipDeleteCascadesMembers(t *testing.T) {

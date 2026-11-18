@@ -560,8 +560,9 @@ type MailboxRepository interface {
 	FindMailboxMember(ctx context.Context, mailboxID, membershipID uint) (*MailboxMember, error)
 	// ListMailboxMembers lists a mailbox's members ordered by user id, at most MaxMailboxMembers.
 	ListMailboxMembers(ctx context.Context, mailboxID uint) ([]*MailboxMember, error)
-	// ListMembershipMailboxMembers lists every member row one membership holds.
-	ListMembershipMailboxMembers(ctx context.Context, membershipID uint) ([]*MailboxMember, error)
+	// ListMembershipMailboxMembers lists the member rows one membership holds on the live mailboxes
+	// of its organization.
+	ListMembershipMailboxMembers(ctx context.Context, organizationID, membershipID uint) ([]*MailboxMember, error)
 	// UpsertMailboxMember sets the permission of a membership on a mailbox. It locks the mailbox
 	// row and refuses a new member once the mailbox has limit members. created reports an insert.
 	UpsertMailboxMember(ctx context.Context, member *MailboxMember, limit int) (created bool, err error)

@@ -172,6 +172,9 @@ func (r *repository) DeleteMailbox(ctx context.Context, organizationID, id uint)
 		if result.RowsAffected == 0 {
 			return ErrMailboxNotFound
 		}
+		if err := tx.Where("mailbox_id = ?", id).Delete(&MailboxMemberPO{}).Error; err != nil {
+			return err
+		}
 		attached := tx.Model(&MailMessagePO{}).Select("id").Where("mailbox_id = ?", id)
 		if err := tx.Where("message_id IN (?)", attached).Delete(&MailAttachmentPO{}).Error; err != nil {
 			return err

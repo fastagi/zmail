@@ -59,7 +59,7 @@ func (m *addMailboxAccess) Up(db *gorm.DB) error {
 		 FROM mailboxes
 		 JOIN organization_memberships membership
 		   ON membership.organization_id = mailboxes.organization_id AND membership.user_id = mailboxes.created_by
-		 WHERE mailboxes.organization_id IS NOT NULL`,
+		 WHERE mailboxes.organization_id IS NOT NULL AND mailboxes.deleted_at IS NULL`,
 		`INSERT INTO mailbox_access_events (organization_id, mailbox_id, type, actor_user_id, subject_user_id, detail, created_at)
 		 SELECT mailboxes.organization_id, mailboxes.id, 'created', NULL, member.user_id,
 		   CASE WHEN member.membership_id IS NULL
@@ -70,7 +70,7 @@ func (m *addMailboxAccess) Up(db *gorm.DB) error {
 		   now()
 		 FROM mailboxes
 		 LEFT JOIN mailbox_members member ON member.mailbox_id = mailboxes.id
-		 WHERE mailboxes.organization_id IS NOT NULL`,
+		 WHERE mailboxes.organization_id IS NOT NULL AND mailboxes.deleted_at IS NULL`,
 	)
 }
 
