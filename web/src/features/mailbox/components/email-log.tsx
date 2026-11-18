@@ -182,9 +182,11 @@ function EmailLogContent({
     }
   };
 
-  const owned = mailboxes.data ?? [];
+  // The filter lists the mailboxes the user reads; compose offers those they send from.
+  const owned = (mailboxes.data ?? []).filter(item => item.access.view);
+  const senders = (mailboxes.data ?? []).filter(item => item.access.send);
   const compose = () => {
-    const mailbox = owned.find(item => item.id === view.mailboxId) ?? owned[0];
+    const mailbox = senders.find(item => item.id === view.mailboxId) ?? senders[0];
     if (mailbox) setComposition({ draft: emptyDraft, mailbox, pickFrom: true });
   };
   const reply = (message: MailMessage) => {
@@ -204,9 +206,9 @@ function EmailLogContent({
         <Button
           type="button"
           icon={<Send className="size-4" />}
-          disabled={owned.length === 0}
+          disabled={senders.length === 0}
           title={
-            mailboxes.isSuccess && owned.length === 0 ? t('emails.sendUnavailable') : undefined
+            mailboxes.isSuccess && senders.length === 0 ? t('emails.sendUnavailable') : undefined
           }
           onClick={compose}
         >
@@ -308,7 +310,7 @@ function EmailLogContent({
       {composition ? (
         <ComposeDialog
           mailbox={composition.mailbox}
-          fromOptions={composition.pickFrom ? owned : undefined}
+          fromOptions={composition.pickFrom ? senders : undefined}
           draft={composition.draft}
           onClose={() => setComposition(null)}
           onStored={() => setView(current => ({ ...current, page: 1 }))}

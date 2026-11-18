@@ -1150,6 +1150,12 @@ function mailbox(id: number, localPart: string) {
     id,
     address: `${localPart}@mail.example.com`,
     display_name: '',
+    type: 'shared',
+    owner_user_id: null,
+    awaiting_handover: false,
+    sealed_before: null,
+    webhooks_enabled: false,
+    access: { view: true, send: true, manage_members: true, administer: true, see_history: true },
     unread_count: 0,
     created_at: now(),
   };
