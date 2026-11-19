@@ -110,6 +110,29 @@ const messages = {
     noReadable:
       'You see the mailboxes of this organization to run them, not to read them. Open Manage mailboxes to change their access.',
   },
+  inbox: {
+    title: 'Inbox',
+    description: 'Mail from every mailbox you read, newest first.',
+    allMail: 'All mail',
+    mailboxesLabel: 'Mailboxes',
+    viewByMailbox: 'View by mailbox',
+    threadCount: '({count})',
+    loadingMore: 'Loading more…',
+    empty: {
+      noMailboxes: 'No mailbox to read yet',
+      noMailboxesManage: 'Create a mailbox, or give yourself access to one under Manage mailboxes.',
+      noMailboxesMember: 'An owner or admin of this organization can give you access to a mailbox.',
+      view: 'No mail yet',
+      viewHint: 'Mail that arrives in the mailboxes you read appears here.',
+    },
+    unavailable:
+      'This mail is no longer available to you. Access to its mailbox may have changed; the list is refreshed.',
+    actions: {
+      label: 'Conversation actions',
+      archive: 'Archive',
+      trash: 'Move to trash',
+    },
+  },
   manage: {
     title: 'Manage mailboxes',
     description: 'Create and delete the mailboxes of this organization, and open their access.',

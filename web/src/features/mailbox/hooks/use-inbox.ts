@@ -1,6 +1,12 @@
 'use client';
 
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from '@tanstack/react-query';
 
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import {
@@ -11,7 +17,12 @@ import {
   validId,
 } from '@/features/mailbox/hooks/use-mailbox';
 import { mailboxService } from '@/features/mailbox/services/mailbox-service';
-import type { InboxFilters, UpdateMailMessagesInput } from '@/features/mailbox/types';
+import type {
+  InboxFilters,
+  InboxItem,
+  InboxPage,
+  UpdateMailMessagesInput,
+} from '@/features/mailbox/types';
 
 /**
  * The unified inbox, one cursor page at a time: each next page continues after the last one's
@@ -44,4 +55,42 @@ export function useUpdateInboxMessages(organizationId: number) {
     onSettled: (_result, _error, { mailboxId }) =>
       invalidateMail(queryClient, organizationId, mailboxId),
   });
+}
+
+type InboxListing = InfiniteData<InboxPage, string | undefined>;
+
+/** A row as it reads once opened: an inbound message read, a thread with nothing unread. */
+function readRow(item: InboxItem): InboxItem {
+  return {
+    ...item,
+    read: item.direction === 'inbound' ? true : item.read,
+    thread: item.thread && { ...item.thread, unread: false },
+  };
+}
+
+/**
+ * Shows the row read in every cached unified inbox listing of the organization before the server
+ * answers. Answers the function that puts those listings back as they were, for a failed request.
+ */
+export function markInboxRowRead(
+  queryClient: QueryClient,
+  organizationId: number,
+  rowId: number
+): () => void {
+  const queryKey = mailboxKeys.inboxes(organizationId);
+  const snapshot = queryClient.getQueriesData<InboxListing>({ queryKey });
+  queryClient.setQueriesData<InboxListing>({ queryKey }, listing =>
+    listing?.pages
+      ? {
+          ...listing,
+          pages: listing.pages.map(page => ({
+            ...page,
+            items: page.items.map(item => (item.id === rowId ? readRow(item) : item)),
+          })),
+        }
+      : listing
+  );
+  return () => {
+    for (const [key, listing] of snapshot) queryClient.setQueryData(key, listing);
+  };
 }

@@ -106,6 +106,28 @@ const messages = {
     noReadable:
       '你能看到本组织的邮箱是为了管理它们，而不是阅读邮件。可在“管理邮箱”中调整访问权限。',
   },
+  inbox: {
+    title: '收件',
+    description: '你能阅读的所有邮箱的邮件，最新的在前。',
+    allMail: '全部收件',
+    mailboxesLabel: '邮箱',
+    viewByMailbox: '按邮箱查看',
+    threadCount: '（{count}）',
+    loadingMore: '正在加载更多…',
+    empty: {
+      noMailboxes: '你还没有可阅读的邮箱',
+      noMailboxesManage: '创建一个邮箱，或在“管理邮箱”中给自己访问权限。',
+      noMailboxesMember: '本组织的所有者或管理员可以给你邮箱的访问权限。',
+      view: '还没有邮件',
+      viewHint: '你能阅读的邮箱收到的邮件会出现在这里。',
+    },
+    unavailable: '你已无法查看这封邮件。它所在邮箱的访问权限可能已变更，列表已刷新。',
+    actions: {
+      label: '会话操作',
+      archive: '归档',
+      trash: '移入回收站',
+    },
+  },
   manage: {
     title: '管理邮箱',
     description: '新建或删除本组织的邮箱，并打开它们的访问权限设置。',

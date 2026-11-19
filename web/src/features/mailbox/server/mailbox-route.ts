@@ -59,6 +59,7 @@ import {
   MAIL_TEMPLATE_VALUE_MAX_LENGTH,
   MAIL_TEMPLATE_VARIABLE_PATTERN,
 } from '@/features/mailbox/schemas';
+import { decodeInboxCursor } from '@/features/mailbox/server/inbox-cursor';
 import {
   mockBroadcastStore,
   type MockBroadcastResult,
@@ -79,7 +80,6 @@ import {
   type MockDnsRecordResult,
 } from '@/features/mailbox/server/mock-zone-store';
 import {
-  decodeInboxCursor,
   mockMailboxStore,
   type MailboxViewer,
   type MockInboxQuery,
