@@ -240,11 +240,13 @@ at its registrar to the two in `name_servers`.
 - `GET /v1/mail-zones` lists the organization's zones by name; `GET /v1/mail-zones/:zone_id` reads
   one. A zone of another organization is `404 MAILBOX.ZONE_NOT_FOUND`.
 - `DELETE /v1/mail-zones/:zone_id` removes the zone from Zmail and from the Cloudflare account. A zone
-  any domain still lives in is `409 MAILBOX.ZONE_IN_USE`. For an active zone Zmail then reads the
-  apex's public name servers: while any is Cloudflare's (`*.ns.cloudflare.com`), or when they cannot
-  be read, the answer is `409 MAILBOX.ZONE_STILL_DELEGATED`, since removing the zone would take down
-  DNS the registrar still points at; the organization first changes the name servers back, such as
-  to `original_name_servers`. A pending zone skips that lookup. A Cloudflare refusal is
+  any domain still lives in is `409 MAILBOX.ZONE_IN_USE`. Zmail then reads the apex's public name
+  servers, for a pending zone as well as an active one: while any is Cloudflare's
+  (`*.ns.cloudflare.com`), or when they cannot be read, the answer is
+  `409 MAILBOX.ZONE_STILL_DELEGATED`, since removing the zone would take down DNS the registrar
+  points at, and a registrar may delegate to a zone before Cloudflare activates it; the organization
+  first changes the name servers back, such as to `original_name_servers`. Only for a pending zone
+  does a name that does not exist (`NXDOMAIN`) count as not delegated. A Cloudflare refusal is
   `502 MAILBOX.DOMAIN_PROVIDER_FAILED` and keeps the zone; a zone Cloudflare no longer has is
   removed.
 

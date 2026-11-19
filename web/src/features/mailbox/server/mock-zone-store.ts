@@ -17,7 +17,7 @@ import type {
  * Go API without reaching Cloudflare: a new zone is pending with two Cloudflare name servers and the
  * records Cloudflare "imported" for the apex, the first domain check finds the delegation, and a
  * record Zmail mail relies on is locked. The registrar is never read, so an active zone always
- * counts as still delegated and only a pending zone can be removed.
+ * counts as still delegated and a pending zone never does: only a pending zone can be removed.
  */
 
 export const MOCK_ZONE_NAME_SERVERS = ['ada.ns.cloudflare.com', 'bob.ns.cloudflare.com'];

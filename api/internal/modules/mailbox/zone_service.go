@@ -448,20 +448,19 @@ func (s *service) GetMailZone(ctx context.Context, organizationID, id uint) (*do
 	return s.zones.FindZone(ctx, organizationID, id)
 }
 
-// DeleteMailZone removes a managed zone no mail domain uses. An active zone goes only once the
-// public name servers of its apex are no longer Cloudflare's, so removing it never takes down DNS
-// the registrar still points at it; a failed lookup refuses as well. A pending zone was never
-// delegated and skips the lookup. The zone stays locked while this runs, and a provider refusal
-// keeps the row.
+// DeleteMailZone removes a managed zone no mail domain uses. A zone goes only once the public
+// name servers of its apex are no longer Cloudflare's, so removing it never takes down DNS the
+// registrar points at it; a failed lookup refuses as well. That holds for a pending zone too: the
+// registrar may already delegate to it before the provider activates it. Only for a pending zone
+// does a name that does not exist (NXDOMAIN) count as not delegated. The zone stays locked while
+// this runs, and a provider refusal keeps the row.
 func (s *service) DeleteMailZone(ctx context.Context, organizationID, id uint) error {
 	if err := s.requireDomains(); err != nil {
 		return err
 	}
 	err := s.zones.DeleteZone(ctx, organizationID, id, func(providerContext context.Context, zone *domain.MailZone) error {
-		if zone.Status != domain.MailZoneStatusPending {
-			if err := s.requireUndelegated(providerContext, zone.Name); err != nil {
-				return err
-			}
+		if err := s.requireUndelegated(providerContext, zone.Name, zone.Status == domain.MailZoneStatusPending); err != nil {
+			return err
 		}
 		if err := s.domainProvider.DeleteZone(providerContext, zone.CloudflareZoneID); err != nil && !providerZoneGone(err) {
 			return providerError(err)
@@ -476,12 +475,17 @@ func (s *service) DeleteMailZone(ctx context.Context, organizationID, id uint) e
 }
 
 // requireUndelegated refuses while any public name server of the apex is Cloudflare's, or when
-// the name servers cannot be read.
-func (s *service) requireUndelegated(ctx context.Context, apex string) error {
+// the name servers cannot be read. With nxdomainUndelegated, a name that does not exist counts
+// as not delegated instead of as a failed lookup.
+func (s *service) requireUndelegated(ctx context.Context, apex string, nxdomainUndelegated bool) error {
 	lookupContext, cancel := context.WithTimeout(ctx, publicLookupTimeout)
 	defer cancel()
 	servers, err := s.nsResolver.LookupNS(lookupContext, apex)
 	if err != nil {
+		var dnsErr *net.DNSError
+		if nxdomainUndelegated && errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			return nil
+		}
 		return fmt.Errorf("%w: its name servers could not be read", ErrMailZoneStillDelegated)
 	}
 	for _, server := range servers {

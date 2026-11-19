@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -410,22 +409,52 @@ func TestDeleteZoneToleratesAZoneGoneAtTheProvider(t *testing.T) {
 	}
 }
 
-func TestDeletePendingZoneSkipsNSCheck(t *testing.T) {
+// A pending zone is removed only once the registrar does not point at Cloudflare either: a
+// registrar may already delegate to a zone the provider has not activated yet. A name that does
+// not exist at all cannot be delegated, so NXDOMAIN lets a pending zone go.
+func TestDeletePendingZoneRequiresUndelegation(t *testing.T) {
 	fixture := newZoneHandlerFixture(t, membership(domain.OrganizationRoleOwner))
 	zone := fixture.mailZones.store(domain.MailZone{
 		OrganizationID: 7, Name: "example.org", CloudflareZoneID: "cf-pending", Status: domain.MailZoneStatusPending,
 	})
 	fixture.zones.zones["example.org"] = "cf-pending"
-	// Nobody delegates to a pending zone; the public answer does not matter.
-	fixture.resolver.nsErr = errors.New("lookup must not run")
+	path := fmt.Sprintf("/mail-zones/%d", zone.ID)
 
-	recorder, body := fixture.do(http.MethodDelete, fmt.Sprintf("/mail-zones/%d", zone.ID), "")
+	fixture.resolver.ns["example.org"] = []*net.NS{{Host: "ada.ns.cloudflare.com."}}
+	recorder, body := fixture.do(http.MethodDelete, path, "")
+	if recorder.Code != http.StatusConflict || body["error_code"] != domain.CodeMailZoneStillDelegated {
+		t.Fatalf("delete while delegated = %d %v", recorder.Code, body)
+	}
+	fixture.resolver.nsErr = &net.DNSError{Err: "server misbehaving", Name: "example.org", IsTemporary: true}
+	recorder, body = fixture.do(http.MethodDelete, path, "")
+	if recorder.Code != http.StatusConflict || body["error_code"] != domain.CodeMailZoneStillDelegated {
+		t.Fatalf("delete on a lookup error = %d %v", recorder.Code, body)
+	}
+	if len(fixture.zones.deletedZones) != 0 || fixture.mailZones.zones[zone.ID] == nil {
+		t.Fatalf("a possibly delegated pending zone was removed: deleted %v", fixture.zones.deletedZones)
+	}
+
+	fixture.resolver.nsErr = &net.DNSError{Err: "no such host", Name: "example.org", IsNotFound: true}
+	recorder, body = fixture.do(http.MethodDelete, path, "")
 	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("delete of an unregistered name = %d %v", recorder.Code, body)
+	}
+	if !slices.Equal(fixture.zones.deletedZones, []string{"cf-pending"}) || fixture.mailZones.zones[zone.ID] != nil {
+		t.Fatalf("deleted %v, stored %v", fixture.zones.deletedZones, fixture.mailZones.zones)
+	}
+}
+
+// NXDOMAIN lets only a pending zone go; an active zone serves its name, so the answer is wrong.
+func TestDeleteActiveZoneRefusesOnNXDOMAIN(t *testing.T) {
+	fixture := newZoneHandlerFixture(t, membership(domain.OrganizationRoleAdmin))
+	zone := fixture.activeZone("example.org", "cf-own")
+	fixture.resolver.nsErr = &net.DNSError{Err: "no such host", Name: "example.org", IsNotFound: true}
+	recorder, body := fixture.do(http.MethodDelete, fmt.Sprintf("/mail-zones/%d", zone.ID), "")
+	if recorder.Code != http.StatusConflict || body["error_code"] != domain.CodeMailZoneStillDelegated {
 		t.Fatalf("delete = %d %v", recorder.Code, body)
 	}
-	if len(fixture.resolver.nsCalls) != 0 || !slices.Equal(fixture.zones.deletedZones, []string{"cf-pending"}) ||
-		fixture.mailZones.zones[zone.ID] != nil {
-		t.Fatalf("ns lookups %v, deleted %v, stored %v", fixture.resolver.nsCalls, fixture.zones.deletedZones, fixture.mailZones.zones)
+	if len(fixture.zones.deletedZones) != 0 || fixture.mailZones.zones[zone.ID] == nil {
+		t.Fatalf("active zone removed: deleted %v", fixture.zones.deletedZones)
 	}
 }
 
