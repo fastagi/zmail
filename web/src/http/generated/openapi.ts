@@ -3215,6 +3215,11 @@ export interface components {
             /** @description Address of the mailbox the message belongs to. */
             mailbox_address: string;
             mailbox_id: components["schemas"]["PositiveID"];
+            /**
+             * @description `send_limit` while a queued message waits for room in the organization's send limit; otherwise null.
+             * @enum {string|null}
+             */
+            queued_reason: "send_limit" | null;
             read: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
@@ -3251,6 +3256,11 @@ export interface components {
             mailbox_id: components["schemas"]["PositiveID"];
             /** @description RFC 5322 Message-ID without angle brackets; empty when unknown. */
             message_id: string;
+            /**
+             * @description `send_limit` while a queued message waits for room in the organization's send limit; otherwise null.
+             * @enum {string|null}
+             */
+            queued_reason: "send_limit" | null;
             /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
             status: components["schemas"]["MailStatus"];
@@ -3287,6 +3297,11 @@ export interface components {
             id: components["schemas"]["PositiveID"];
             last_event: components["schemas"]["MailEventSummary"];
             mailbox_id: components["schemas"]["PositiveID"];
+            /**
+             * @description `send_limit` while a queued message waits for room in the organization's send limit; otherwise null.
+             * @enum {string|null}
+             */
+            queued_reason: "send_limit" | null;
             /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
             status: components["schemas"]["MailStatus"];
@@ -6961,6 +6976,15 @@ export interface operations {
                     "application/json": components["schemas"]["MailMessageResponse"];
                 };
             };
+            /** @description The organization reached the rolling 24-hour send limit; the message is stored as queued with `queued_reason` `send_limit` and is sent when the limit has room. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessageResponse"];
+                };
+            };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
@@ -6973,7 +6997,7 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`). */
+            /** @description The send limit is full and as many messages already wait as the limit allows (`MAILBOX.SEND_LIMIT_REACHED`); nothing is stored. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -7800,6 +7824,15 @@ export interface operations {
                     "application/json": components["schemas"]["MailMessageResponse"];
                 };
             };
+            /** @description The organization reached the rolling 24-hour send limit; the message is stored as queued with `queued_reason` `send_limit` and is sent when the limit has room. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessageResponse"];
+                };
+            };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
@@ -7822,7 +7855,7 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`). */
+            /** @description The send limit is full and as many messages already wait as the limit allows (`MAILBOX.SEND_LIMIT_REACHED`); nothing is stored. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -9656,6 +9689,15 @@ export interface operations {
                     "application/json": components["schemas"]["MailMessageResponse"];
                 };
             };
+            /** @description The organization reached the rolling 24-hour send limit; the message is stored as queued with `queued_reason` `send_limit` and is sent when the limit has room. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessageResponse"];
+                };
+            };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -9687,7 +9729,7 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The organization reached the rolling 24-hour send limit (`MAILBOX.SEND_LIMIT_REACHED`). */
+            /** @description The send limit is full and as many messages already wait as the limit allows (`MAILBOX.SEND_LIMIT_REACHED`); nothing is stored. */
             429: {
                 headers: {
                     [name: string]: unknown;

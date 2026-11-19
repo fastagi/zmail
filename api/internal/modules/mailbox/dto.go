@@ -276,6 +276,9 @@ type MailMessageSummaryResponse struct {
 	Subject     string              `json:"subject"`
 	Read        bool                `json:"read"`
 	FailureCode string              `json:"failure_code"`
+	// QueuedReason is "send_limit" while the message waits for room in the organization's send
+	// limit, and null otherwise.
+	QueuedReason *string `json:"queued_reason"`
 	// LastEvent summarizes the delivery events of an outbound message; empty when there are none.
 	LastEvent string `json:"last_event"`
 	// TemplateID names the template the message was rendered from; null when none was used.
@@ -399,11 +402,20 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		Subject:         message.Subject,
 		Read:            message.Read,
 		FailureCode:     message.FailureCode,
+		QueuedReason:    queuedReasonOf(message),
 		LastEvent:       string(message.LastEvent),
 		AttachmentCount: message.AttachmentCount,
 		TemplateID:      templateIDOf(message),
 		CreatedAt:       message.CreatedAt,
 	}
+}
+
+func queuedReasonOf(message *domain.MailMessage) *string {
+	if message.QueuedReason == "" {
+		return nil
+	}
+	reason := message.QueuedReason
+	return &reason
 }
 
 func toMailMessageSummaries(messages []*domain.MailMessage) []MailMessageSummaryResponse {

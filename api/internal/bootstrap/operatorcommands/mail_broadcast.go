@@ -19,7 +19,8 @@ import (
 
 var errMailBroadcastRuntimeUnavailable = errors.New("mail broadcast runtime is unavailable")
 
-// MailBroadcastWorkCommand sends the recipients of running broadcasts.
+// MailBroadcastWorkCommand sends the recipients of running broadcasts and the direct sends that
+// waited for room in the send limit.
 type MailBroadcastWorkCommand struct {
 	output *console.Output
 }
@@ -30,7 +31,7 @@ func NewMailBroadcastWorkCommand() *MailBroadcastWorkCommand {
 
 func (c *MailBroadcastWorkCommand) Name() string { return "mail:broadcast:work" }
 func (c *MailBroadcastWorkCommand) Description() string {
-	return "Send the recipients of scheduled and running mail broadcasts"
+	return "Send queued mail and the recipients of scheduled and running mail broadcasts"
 }
 func (c *MailBroadcastWorkCommand) Usage() string {
 	return "mail:broadcast:work [--batch=25] [--poll=2s] [--once]"
@@ -41,8 +42,15 @@ type mailBroadcastWorker struct {
 	dispatcher domain.MailBroadcastDispatcher
 }
 
+// DispatchWebhooks runs one tick: messages that waited for the send limit go first, then
+// broadcast recipients with the rest of the batch.
 func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (int, error) {
-	return w.dispatcher.DispatchBroadcasts(ctx, limit)
+	queued, err := w.dispatcher.DispatchQueuedSends(ctx, limit)
+	if err != nil || queued >= limit {
+		return queued, err
+	}
+	sent, err := w.dispatcher.DispatchBroadcasts(ctx, limit-queued)
+	return queued + sent, err
 }
 
 func (c *MailBroadcastWorkCommand) Run(args []string) error {
@@ -67,7 +75,7 @@ func (c *MailBroadcastWorkCommand) Run(args []string) error {
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
-	c.output.Success("Mail broadcast worker stopped after sending %d recipients", processed)
+	c.output.Success("Mail broadcast worker stopped after sending %d messages", processed)
 	return nil
 }
 

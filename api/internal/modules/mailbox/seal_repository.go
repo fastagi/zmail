@@ -98,6 +98,18 @@ func (r *repository) HandOverMailbox(ctx context.Context, mailboxID uint, sealed
 		if converted = result.RowsAffected == 1; !converted {
 			return nil
 		}
+		// Waiting messages from before the boundary are sealed: they must never be sent.
+		if err := tx.Model(&MailMessagePO{}).
+			Where("mailbox_id = ? AND queued_reason IS NOT NULL AND created_at < ?", mailboxID, sealedBefore).
+			Updates(map[string]any{
+				"status":           string(domain.MailStatusFailed),
+				"failure_code":     failureSendCanceled,
+				"queued_reason":    nil,
+				"send_lease_until": nil,
+				"updated_at":       time.Now().UTC(),
+			}).Error; err != nil {
+			return err
+		}
 		return cancelSealedBroadcasts(tx, mailboxID, sealedBefore)
 	})
 	return converted, err

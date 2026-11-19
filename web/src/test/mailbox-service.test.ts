@@ -149,6 +149,15 @@ describe('mailbox service boundary', () => {
     expect(() => parseMailMessage({ ...message(), html_body: undefined })).toThrow(ApiError);
   });
 
+  it('accepts a message waiting for the send limit and rejects other queue reasons', () => {
+    expect(
+      parseMailMessage({ ...message(), direction: 'outbound', status: 'queued', queued_reason: 'send_limit' })
+    ).toMatchObject({ status: 'queued', queued_reason: 'send_limit' });
+    expect(() => parseMailMessage({ ...message(), queued_reason: 'paused' })).toThrow(ApiError);
+    const { queued_reason: _omitted, ...withoutReason } = message();
+    expect(() => parseMailMessage(withoutReason)).toThrow(ApiError);
+  });
+
   it('requires the delivery summary and events and rejects unknown event types', () => {
     const sent = sentMessage();
     expect(parseMailMessage(sent, 7)).toMatchObject({
@@ -457,6 +466,7 @@ function summary() {
     subject: 'Hello',
     read: false,
     failure_code: '',
+    queued_reason: null,
     last_event: '',
     attachment_count: 0,
     template_id: null,

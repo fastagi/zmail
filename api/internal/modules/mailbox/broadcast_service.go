@@ -530,7 +530,7 @@ func (run *broadcastRun) send(ctx context.Context, recipient *domain.MailBroadca
 			"List-Unsubscribe":      "<" + s.settings.PublicURL + "/api/mail-unsubscribes/" + token + ">",
 			"List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
 		},
-	})
+	}, false)
 	switch {
 	case errors.Is(err, ErrMailSendLimitReached):
 		run.paused[broadcast.ID] = true

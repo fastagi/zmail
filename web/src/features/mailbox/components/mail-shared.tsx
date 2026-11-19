@@ -143,6 +143,7 @@ export const mailEventKey = {
 interface MailDeliveryState {
   status: MailStatus;
   last_event: MailEventSummary;
+  queued_reason?: 'send_limit' | null;
 }
 
 /**
@@ -157,7 +158,10 @@ export function shownMailEvent(message: MailDeliveryState): MailEventType | null
 /** Translation key of the label `MailStatusBadge` needs for a message. */
 export function mailBadgeKey(message: MailDeliveryState) {
   const event = shownMailEvent(message);
-  return event ? mailEventKey[event] : mailStatusKey[message.status];
+  if (event) return mailEventKey[event];
+  // Waiting for the send limit reads differently from a send whose provider call is in flight.
+  if (message.status === 'queued' && message.queued_reason === 'send_limit') return 'emails.statusWaiting';
+  return mailStatusKey[message.status];
 }
 
 const statusStyles: Record<MailStatus, string> = {

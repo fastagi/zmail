@@ -83,11 +83,11 @@ func membership(role domain.OrganizationRole) *domain.OrganizationContext {
 	return &viewer
 }
 
-// sharedWithHandlerUser is a shared mailbox whose one member is the handler user.
-func sharedWithHandlerUser(localPart string, permission domain.MailboxPermission) CreateMailboxInput {
+// sharedWithHandlerUser is a shared mailbox whose one member is the handler user, with send.
+func sharedWithHandlerUser(localPart string) CreateMailboxInput {
 	return CreateMailboxInput{
 		LocalPart: localPart, DisplayName: "Helpdesk", Type: domain.MailboxTypeShared,
-		Members: []MailboxMemberInput{{UserID: handlerUser, Permission: permission}},
+		Members: []MailboxMemberInput{{UserID: handlerUser, Permission: domain.MailboxPermissionSend}},
 	}
 }
 
@@ -132,7 +132,7 @@ func TestOnlyManagersCreateAndDeleteMailboxes(t *testing.T) {
 
 func TestMembersReadAndSendTheirMailboxes(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
-	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk", domain.MailboxPermissionSend)); err != nil {
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk")); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	if _, err := fixture.service.CreateMailbox(t.Context(), as(8), sharedInput("elsewhere", "", "")); err != nil {
@@ -161,6 +161,29 @@ func TestMembersReadAndSendTheirMailboxes(t *testing.T) {
 	log, body := fixture.do(http.MethodGet, "/mail-messages", "")
 	if entries, _ := body["data"].([]any); log.Code != http.StatusOK || len(entries) != 1 {
 		t.Fatalf("log = %d %v; want the one message of this organization", log.Code, body)
+	}
+}
+
+func TestSendAtTheLimitAnswers202Queued(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk")); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	send := `{"to":["bob@example.com"],"subject":"Hi","text":"Body"}`
+	for i := 0; i < 5; i++ {
+		if sent, body := fixture.do(http.MethodPost, "/mailboxes/1/messages", send); sent.Code != http.StatusCreated {
+			t.Fatalf("send %d = %d %v", i+1, sent.Code, body)
+		}
+	}
+	queued, body := fixture.do(http.MethodPost, "/mailboxes/1/messages", send)
+	data, _ := body["data"].(map[string]any)
+	if queued.Code != http.StatusAccepted || data["status"] != "queued" || data["queued_reason"] != "send_limit" {
+		t.Fatalf("send at the limit = %d %v; want 202 with a message queued for the send limit", queued.Code, body)
+	}
+	for _, key := range []string{"daily_send_limit", "sent", "remaining"} {
+		if _, leaked := data[key]; leaked {
+			t.Fatalf("queued answer exposes %q: %v", key, data)
+		}
 	}
 }
 

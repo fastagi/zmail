@@ -11,6 +11,22 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Queued sends at the send limit
+
+### High — A send at the limit answers `202` and waits instead of `429`
+
+Run migrations: `2026_11_20_090000_add_send_queue` adds `queued_reason`, `send_attempted_at`, and
+`send_lease_until` to `mail_messages` and backfills `send_attempted_at` for outbound mail. When the
+organization's rolling 24-hour limit is full, `POST /v1/mailboxes/:mailbox_id/messages`,
+`POST /v1/outbound-mail-messages`, and `POST /v1/mail-templates/:template_id/tests` store the
+message as `queued` with `queued_reason: "send_limit"` and answer `202`; `429
+MAILBOX.SEND_LIMIT_REACHED` now means as many messages already wait as the limit. Run
+`fastbuild mail:broadcast:work` wherever the API sends mail: it sends waiting messages too. Message
+responses gain `queued_reason`.
+
+Deploy the API before the web app: the web app requires `queued_reason` on every message and fails
+to read message lists from an API that does not send it yet.
+
 ## Unreleased — Managed zones
 
 ### Medium — Self-serve domains need a wider token and a zone worker

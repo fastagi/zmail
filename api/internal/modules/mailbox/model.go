@@ -138,8 +138,14 @@ type MailMessagePO struct {
 	LastEvent              string  `gorm:"size:16;not null;default:''"`
 	AttachmentCount        int     `gorm:"not null;default:0"`
 	TemplateID             *uint
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	// QueuedReason is set while a message waits for room in the send limit.
+	QueuedReason *string `gorm:"size:32"`
+	// SendAttemptedAt is when the provider call started; the send limit counts by it.
+	SendAttemptedAt *time.Time
+	// SendLeaseUntil keeps a waiting message to one worker while it is being sent.
+	SendLeaseUntil *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 func (MailMessagePO) TableName() string {
@@ -194,6 +200,10 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 	if po.TemplateID != nil {
 		message.TemplateID = *po.TemplateID
 	}
+	if po.QueuedReason != nil {
+		message.QueuedReason = *po.QueuedReason
+	}
+	message.SendAttemptedAt = po.SendAttemptedAt
 	return message
 }
 
@@ -228,6 +238,11 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		templateID := message.TemplateID
 		po.TemplateID = &templateID
 	}
+	if message.QueuedReason != "" {
+		reason := message.QueuedReason
+		po.QueuedReason = &reason
+	}
+	po.SendAttemptedAt = message.SendAttemptedAt
 	return po
 }
 
