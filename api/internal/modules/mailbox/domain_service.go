@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -107,26 +106,48 @@ func (s *service) present(ctx context.Context, mailDomain *domain.MailDomain) (*
 }
 
 func (s *service) markSettingUp(mailDomain *domain.MailDomain) *domain.MailDomain {
-	_, mailDomain.SettingUp = s.domainSetups.Load(mailDomain.ID)
+	mailDomain.SettingUp = s.setupRunning(mailDomain.ID)
 	return mailDomain
+}
+
+// setupRunning reports whether a setup of the domain runs in the background.
+func (s *service) setupRunning(id uint) bool {
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+	_, running := s.domainSetups[id]
+	return running
 }
 
 // domainSetupRun is one background setup of a domain. rerun is set when the domain changed, such
 // as its capability, while the run was in progress, so the run sets it up again before ending.
+// Both fields of the run and its place in domainSetups change only under setupMu.
 type domainSetupRun struct {
-	rerun atomic.Bool
+	rerun bool
 }
 
 // startSetUp runs the setup of a domain in the background, once at a time per domain, and returns
 // the domain as it is now. The setup makes several provider calls, which can outlast the request
 // and the proxies in front of it; a background run is never cut off by a client that stops waiting.
 // A call while a setup runs asks that run to set the domain up once more, from the domain as stored
-// then, so a change made meanwhile is never lost to a run that read the domain before it.
+// then, so a change made meanwhile is never lost to a run that read the domain before it. Asking
+// and ending happen under one lock, so a run either sees the request or has already ended and a
+// new run starts.
 func (s *service) startSetUp(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
-	run := &domainSetupRun{}
-	if existing, running := s.domainSetups.LoadOrStore(mailDomain.ID, run); running {
-		if current, ok := existing.(*domainSetupRun); ok {
-			current.rerun.Store(true)
+	s.setupMu.Lock()
+	run, running := s.domainSetups[mailDomain.ID]
+	if running {
+		run.rerun = true
+	} else {
+		if s.domainSetups == nil {
+			s.domainSetups = map[uint]*domainSetupRun{}
+		}
+		run = &domainSetupRun{}
+		s.domainSetups[mailDomain.ID] = run
+	}
+	s.setupMu.Unlock()
+	if running {
+		if s.setupClaimHook != nil {
+			s.setupClaimHook()
 		}
 	} else {
 		target := *mailDomain
@@ -144,25 +165,19 @@ func (s *service) startSetUp(ctx context.Context, mailDomain *domain.MailDomain)
 func (s *service) runSetUps(ctx context.Context, run *domainSetupRun, target *domain.MailDomain) {
 	for {
 		s.runSetUp(ctx, target)
-		if run.rerun.CompareAndSwap(true, false) {
-			if !s.reloadSetUpTarget(ctx, target) {
-				s.domainSetups.Delete(target.ID)
-				return
-			}
-			continue
-		}
-		s.domainSetups.Delete(target.ID)
-		// A rerun asked for between the check and the release would otherwise be lost. Take the
-		// domain back unless a new run already holds it.
-		if !run.rerun.Load() {
+		s.setupMu.Lock()
+		if !run.rerun {
+			delete(s.domainSetups, target.ID)
+			s.setupMu.Unlock()
 			return
 		}
-		if _, taken := s.domainSetups.LoadOrStore(target.ID, run); taken {
-			return
-		}
-		run.rerun.Store(false)
+		run.rerun = false
+		s.setupMu.Unlock()
 		if !s.reloadSetUpTarget(ctx, target) {
-			s.domainSetups.Delete(target.ID)
+			// The domain is gone; nothing is left to set up, whatever was asked meanwhile.
+			s.setupMu.Lock()
+			delete(s.domainSetups, target.ID)
+			s.setupMu.Unlock()
 			return
 		}
 	}
@@ -312,7 +327,7 @@ func (s *service) CheckMailDomain(ctx context.Context, organizationID, id uint) 
 	if pending != nil {
 		return s.checkDomainZone(ctx, mailDomain, pending)
 	}
-	if _, running := s.domainSetups.Load(id); running {
+	if s.setupRunning(id) {
 		// The running setup checks when it is done; a second check now would race it.
 		return s.present(ctx, mailDomain)
 	}

@@ -178,14 +178,18 @@ type service struct {
 	// mxResolver and nsResolver read public DNS for previews and zone removal; tests fake them.
 	mxResolver mxResolver
 	nsResolver nsResolver
-	// domainSetups holds the IDs of domains whose setup runs in the background.
-	domainSetups sync.Map
+	// setupMu guards domainSetups, the setups running in the background by domain ID.
+	setupMu      sync.Mutex
+	domainSetups map[uint]*domainSetupRun
 	// background runs domain setups off the request path; tests make it synchronous.
 	background func(func())
-	transport  mailtransport.Transport
-	notifier   mailNotifier
-	settings   Settings
-	now        func() time.Time
+	// setupClaimHook, when set, runs right after a request found a running setup of its domain;
+	// tests use it to end that setup at the worst moment.
+	setupClaimHook func()
+	transport      mailtransport.Transport
+	notifier       mailNotifier
+	settings       Settings
+	now            func() time.Time
 	// recordAudit enriches the request's audit entry; tests capture it.
 	recordAudit func(context.Context, auditstarter.Change)
 }

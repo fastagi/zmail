@@ -604,7 +604,7 @@ func TestReceivingDuringARunningSetupRunsTheSetupAgain(t *testing.T) {
 	close(release)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, running := fixture.service.domainSetups.Load(sendOnly.ID); !running {
+		if !fixture.service.setupRunning(sendOnly.ID) {
 			break
 		}
 		if time.Now().After(deadline) {
