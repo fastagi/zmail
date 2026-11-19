@@ -57,7 +57,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()
 	svc := NewService(repo, memberships, repo, newFakeContacts(), &stubBroadcasts{},
-		nil, nil, transport, &fakeNotifier{}, accessSettings())
+		nil, nil, nil, transport, &fakeNotifier{}, accessSettings())
 	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
 
@@ -69,7 +69,7 @@ func newPostgresAccessFixture(t *testing.T) *accessFixture {
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()
 	svc := NewService(repo, memberships, repo, repo, repo,
-		nil, nil, transport, &fakeNotifier{}, accessSettings())
+		nil, nil, nil, transport, &fakeNotifier{}, accessSettings())
 	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
 

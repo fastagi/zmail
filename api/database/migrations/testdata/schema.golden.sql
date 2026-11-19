@@ -159,6 +159,8 @@ TABLE mail_domains
   COLUMN created_by bigint NOT NULL
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
+  COLUMN mail_zone_id bigint
+  COLUMN capability character varying(20) NOT NULL DEFAULT 'send_receive'::character varying
 
 TABLE mail_message_events
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_message_events_id_seq'::regclass)
@@ -214,6 +216,20 @@ TABLE mail_templates
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
   COLUMN design jsonb
+
+TABLE mail_zones
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_zones_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN name character varying(253) NOT NULL
+  COLUMN cloudflare_zone_id character varying(64) NOT NULL
+  COLUMN status character varying(20) NOT NULL DEFAULT 'pending'::character varying
+  COLUMN name_servers jsonb NOT NULL DEFAULT '[]'::jsonb
+  COLUMN original_name_servers jsonb NOT NULL DEFAULT '[]'::jsonb
+  COLUMN activated_at timestamp with time zone
+  COLUMN last_checked_at timestamp with time zone
+  COLUMN created_by bigint NOT NULL
+  COLUMN created_at timestamp with time zone
+  COLUMN updated_at timestamp with time zone
 
 TABLE mailbox_access_events
   COLUMN id bigint NOT NULL DEFAULT nextval('mailbox_access_events_id_seq'::regclass)
@@ -556,7 +572,9 @@ CONSTRAINT mail_contact_lists.mail_contact_lists_pkey PRIMARY KEY (id)
 CONSTRAINT mail_contacts.chk_mail_contacts_status CHECK (((status)::text = ANY ((ARRAY['subscribed'::character varying, 'unsubscribed'::character varying, 'suppressed'::character varying])::text[])))
 CONSTRAINT mail_contacts.fk_mail_contacts_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_contacts.mail_contacts_pkey PRIMARY KEY (id)
+CONSTRAINT mail_domains.chk_mail_domains_capability CHECK (((capability)::text = ANY ((ARRAY['send_receive'::character varying, 'send_only'::character varying])::text[])))
 CONSTRAINT mail_domains.chk_mail_domains_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'verified'::character varying])::text[])))
+CONSTRAINT mail_domains.fk_mail_domains_mail_zone FOREIGN KEY (mail_zone_id) REFERENCES mail_zones(id)
 CONSTRAINT mail_domains.fk_mail_domains_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_domains.mail_domains_pkey PRIMARY KEY (id)
 CONSTRAINT mail_message_events.chk_mail_message_events_type CHECK (((type)::text = ANY ((ARRAY['accepted'::character varying, 'delivered'::character varying, 'deferred'::character varying, 'bounced'::character varying, 'failed'::character varying, 'rejected'::character varying, 'complained'::character varying])::text[])))
@@ -571,6 +589,9 @@ CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFER
 CONSTRAINT mail_messages.mail_messages_pkey PRIMARY KEY (id)
 CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_templates.mail_templates_pkey PRIMARY KEY (id)
+CONSTRAINT mail_zones.chk_mail_zones_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'active'::character varying])::text[])))
+CONSTRAINT mail_zones.fk_mail_zones_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_zones.mail_zones_pkey PRIMARY KEY (id)
 CONSTRAINT mailbox_access_events.mailbox_access_events_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT mailbox_access_events.mailbox_access_events_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT mailbox_access_events.mailbox_access_events_pkey PRIMARY KEY (id)
@@ -730,6 +751,7 @@ INDEX CREATE UNIQUE INDEX mail_contact_lists_pkey ON mail_contact_lists USING bt
 INDEX CREATE UNIQUE INDEX idx_mail_contacts_email ON mail_contacts USING btree (organization_id, email)
 INDEX CREATE INDEX idx_mail_contacts_listing ON mail_contacts USING btree (organization_id, id)
 INDEX CREATE UNIQUE INDEX mail_contacts_pkey ON mail_contacts USING btree (id)
+INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
 INDEX CREATE INDEX idx_mail_domains_organization ON mail_domains USING btree (organization_id)
 INDEX CREATE UNIQUE INDEX mail_domains_pkey ON mail_domains USING btree (id)
@@ -746,6 +768,10 @@ INDEX CREATE INDEX idx_mail_messages_waiting ON mail_messages USING btree (id) W
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
 INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_zones_cloudflare_zone ON mail_zones USING btree (cloudflare_zone_id)
+INDEX CREATE UNIQUE INDEX idx_mail_zones_name ON mail_zones USING btree (name)
+INDEX CREATE INDEX idx_mail_zones_organization ON mail_zones USING btree (organization_id)
+INDEX CREATE UNIQUE INDEX mail_zones_pkey ON mail_zones USING btree (id)
 INDEX CREATE INDEX idx_mailbox_access_events_mailbox ON mailbox_access_events USING btree (mailbox_id, id DESC)
 INDEX CREATE UNIQUE INDEX mailbox_access_events_pkey ON mailbox_access_events USING btree (id)
 INDEX CREATE INDEX idx_mailbox_members_membership ON mailbox_members USING btree (membership_id, mailbox_id)

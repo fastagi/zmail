@@ -31,6 +31,10 @@ export type MailboxErrorKey =
   | 'errors.domainTaken'
   | 'errors.domainZoneNotFound'
   | 'errors.domainsDisabled'
+  | 'errors.dnsRecordInvalid'
+  | 'errors.dnsRecordLocked'
+  | 'errors.dnsRecordNotFound'
+  | 'errors.dnsRecordRejected'
   | 'errors.generic'
   | 'errors.invalidInput'
   | 'errors.invalidResponse'
@@ -49,7 +53,12 @@ export type MailboxErrorKey =
   | 'errors.templateNotFound'
   | 'errors.templateVariablesMissing'
   | 'errors.tooLarge'
-  | 'errors.unavailable';
+  | 'errors.unavailable'
+  | 'errors.zoneInUse'
+  | 'errors.zoneLimitReached'
+  | 'errors.zoneNotFound'
+  | 'errors.zonePending'
+  | 'errors.zoneStillDelegated';
 
 const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ClientErrorCode.INVALID_RESPONSE]: 'errors.invalidResponse',
@@ -101,12 +110,34 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_DOMAIN_NOT_VERIFIED]: 'errors.domainNotVerified',
   [ApiErrorCode.MAILBOX_DOMAINS_DISABLED]: 'errors.domainsDisabled',
   [ApiErrorCode.MAILBOX_DOMAIN_PROVIDER_FAILED]: 'errors.domainProviderFailed',
+  [ApiErrorCode.MAILBOX_ZONE_NOT_FOUND]: 'errors.zoneNotFound',
+  [ApiErrorCode.MAILBOX_ZONE_PENDING]: 'errors.zonePending',
+  [ApiErrorCode.MAILBOX_ZONE_IN_USE]: 'errors.zoneInUse',
+  [ApiErrorCode.MAILBOX_ZONE_STILL_DELEGATED]: 'errors.zoneStillDelegated',
+  [ApiErrorCode.MAILBOX_ZONE_LIMIT_REACHED]: 'errors.zoneLimitReached',
+  [ApiErrorCode.MAILBOX_DNS_RECORD_NOT_FOUND]: 'errors.dnsRecordNotFound',
+  [ApiErrorCode.MAILBOX_DNS_RECORD_INVALID]: 'errors.dnsRecordInvalid',
+  [ApiErrorCode.MAILBOX_DNS_RECORD_LOCKED]: 'errors.dnsRecordLocked',
+  [ApiErrorCode.MAILBOX_DNS_RECORD_REJECTED]: 'errors.dnsRecordRejected',
 };
 
 /** Maps a failure to stable local copy; backend message text is never shown. */
 export function resolveMailboxErrorKey(error: unknown): MailboxErrorKey {
   if (!(error instanceof ApiError)) return 'errors.generic';
   return errorKeys[error.errorCode] ?? 'errors.generic';
+}
+
+/** The API's own prefix in front of Cloudflare's reason; the page has its own wording for it. */
+const rejectionPrefix = /^the dns provider rejected the record:\s*/iu;
+
+/**
+ * Cloudflare's reason for refusing a DNS record, the one backend text the page shows: the adapter
+ * forwards it for `MAILBOX.DNS_RECORD_REJECTED` only. Empty when there is none.
+ */
+export function dnsRecordRejectionReason(error: unknown): string {
+  if (!(error instanceof ApiError)) return '';
+  if (error.errorCode !== ApiErrorCode.MAILBOX_DNS_RECORD_REJECTED) return '';
+  return error.message.replace(rejectionPrefix, '').trim();
 }
 
 /** True when the mailbox's access changed since the console loaded it: a refresh shows it. */

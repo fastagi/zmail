@@ -312,11 +312,14 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 		} else if !errors.Is(findErr, ErrMailboxNotFound) {
 			return nil, findErr
 		}
-		ruleID, ruleErr := s.domainProvider.CreateRoutingRule(ctx, connected.ZoneID, mailbox.Address, s.settings.EmailWorker)
-		if ruleErr != nil {
-			return nil, providerError(ruleErr)
+		// A send-only domain receives elsewhere, so Email Routing is never used for its addresses.
+		if receives(connected) {
+			ruleID, ruleErr := s.domainProvider.CreateRoutingRule(ctx, connected.ZoneID, mailbox.Address, s.settings.EmailWorker)
+			if ruleErr != nil {
+				return nil, providerError(ruleErr)
+			}
+			mailbox.RoutingRuleID = ruleID
 		}
-		mailbox.RoutingRuleID = ruleID
 	}
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
 		if createErr := s.repo.CreateMailbox(tx, mailbox, domain.MaxMailboxesPerOrganization); createErr != nil {

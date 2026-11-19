@@ -20,6 +20,8 @@ type MailDomainPO struct {
 	Name           string `gorm:"size:253;not null;uniqueIndex:idx_mail_domains_name"`
 	ZoneID         string `gorm:"size:64;not null"`
 	ZoneName       string `gorm:"size:253;not null"`
+	MailZoneID     *uint  `gorm:"index:idx_mail_domains_mail_zone"`
+	Capability     string `gorm:"size:20;not null;default:'send_receive'"`
 	SendingTag     string `gorm:"size:64;not null;default:''"`
 	Status         string `gorm:"size:20;not null;default:'pending'"`
 	Records        string `gorm:"type:jsonb;not null;default:'[]'"`
@@ -42,6 +44,8 @@ func (po *MailDomainPO) toDomain() *domain.MailDomain {
 		Name:           po.Name,
 		ZoneID:         po.ZoneID,
 		ZoneName:       po.ZoneName,
+		MailZoneID:     po.MailZoneID,
+		Capability:     domain.MailDomainCapability(po.Capability),
 		SendingTag:     po.SendingTag,
 		Status:         domain.MailDomainStatus(po.Status),
 		LastError:      po.LastError,
@@ -76,12 +80,18 @@ func mailDomainPO(mailDomain *domain.MailDomain) (*MailDomainPO, error) {
 	if status == "" {
 		status = domain.MailDomainStatusPending
 	}
+	capability := mailDomain.Capability
+	if capability == "" {
+		capability = domain.MailDomainSendReceive
+	}
 	return &MailDomainPO{
 		ID:             mailDomain.ID,
 		OrganizationID: mailDomain.OrganizationID,
 		Name:           mailDomain.Name,
 		ZoneID:         mailDomain.ZoneID,
 		ZoneName:       mailDomain.ZoneName,
+		MailZoneID:     mailDomain.MailZoneID,
+		Capability:     string(capability),
 		SendingTag:     mailDomain.SendingTag,
 		Status:         string(status),
 		Records:        string(encoded),
@@ -235,4 +245,41 @@ func (r *repository) SetMailboxRoutingRule(ctx context.Context, mailboxID uint, 
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Model(&MailboxPO{}).Where("id = ?", mailboxID).Update("routing_rule_id", ruleID).Error
+}
+
+// SetDomainCapability changes whether a domain receives through Zmail, and nothing else.
+func (r *repository) SetDomainCapability(ctx context.Context, organizationID, id uint, capability domain.MailDomainCapability) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	result := r.conn(ctx).Model(&MailDomainPO{}).
+		Where("id = ? AND organization_id = ?", id, organizationID).
+		Updates(map[string]any{"capability": string(capability), "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrMailDomainNotFound
+	}
+	return nil
+}
+
+// ListMailboxesWithoutRoutingRule returns live mailboxes only; a deleted mailbox keeps its address
+// but receives nothing.
+// fastbuild:bounded-list max=50 reason=an organization owns at most domain.MaxMailboxesPerOrganization mailboxes
+func (r *repository) ListMailboxesWithoutRoutingRule(ctx context.Context, organizationID uint, domainName string) ([]*domain.Mailbox, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var rows []MailboxPO
+	if err := r.conn(ctx).
+		Where("organization_id = ? AND routing_rule_id = '' AND address LIKE ?", organizationID, "%@"+escapeLike(strings.ToLower(domainName))).
+		Order("id asc").Limit(domain.MaxMailboxesPerOrganization).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	mailboxes := make([]*domain.Mailbox, 0, len(rows))
+	for i := range rows {
+		mailboxes = append(mailboxes, rows[i].toDomain())
+	}
+	return mailboxes, nil
 }

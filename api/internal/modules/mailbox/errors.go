@@ -57,6 +57,16 @@ var (
 	ErrMailDomainNotVerified     = errors.New("mail domain is not verified")
 	ErrMailDomainsDisabled       = errors.New("organization mail domains are not enabled")
 	ErrMailDomainProviderFailed  = errors.New("the DNS provider rejected the request")
+	ErrMailZoneNotFound          = errors.New("mail zone not found")
+	ErrMailZoneLimitReached      = errors.New("mail zone limit reached")
+	ErrMailZoneInUse             = errors.New("mail zone still has mail domains")
+	ErrMailZoneStillDelegated    = errors.New("mail zone is still delegated to its assigned name servers")
+	ErrMailZonePending           = errors.New("mail zone is not active yet")
+	ErrMailZoneCheckLimited      = errors.New("mail zone was checked too recently")
+	ErrMailDNSRecordNotFound     = errors.New("DNS record not found")
+	ErrMailDNSRecordInvalid      = errors.New("DNS record is invalid")
+	ErrMailDNSRecordLocked       = errors.New("DNS record is used by Zmail mail")
+	ErrMailDNSRecordRejected     = errors.New("the DNS provider rejected the record")
 )
 
 // Access errors that answer with an existing public code.

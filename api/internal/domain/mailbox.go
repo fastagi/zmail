@@ -525,6 +525,17 @@ type MailBroadcastDispatcher interface {
 	DispatchQueuedSends(ctx context.Context, limit int) (int, error)
 }
 
+// MailZoneChecker checks pending managed zones outside request paths: it activates the zones the
+// provider now serves and removes the ones that waited too long. It returns how many it checked.
+type MailZoneChecker interface {
+	CheckPendingZones(ctx context.Context, limit int) (int, error)
+	// WaitForSetups waits until the domain setups an activation started have ended, or ctx ends.
+	WaitForSetups(ctx context.Context) error
+	// ReleasePendingZone removes the pending managed zone of an apex for the operator; force
+	// removes the zone's pending domains with it.
+	ReleasePendingZone(ctx context.Context, apex string, force bool) error
+}
+
 // MailTemplateRepository stores templates. Every lookup is scoped to an organization.
 type MailTemplateRepository interface {
 	// CreateTemplate stores a template unless the organization already has limit templates.

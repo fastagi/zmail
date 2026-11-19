@@ -43,4 +43,6 @@ type Application struct {
 	OperatorGrants         domain.OperatorGrantStore
 	// MailBroadcasts sends broadcast recipients; nil when the mailbox starter is not selected.
 	MailBroadcasts domain.MailBroadcastDispatcher
+	// MailZones checks pending managed zones; nil when the mailbox starter is not selected.
+	MailZones domain.MailZoneChecker
 }

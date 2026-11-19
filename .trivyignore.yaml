@@ -1,7 +1,28 @@
-# Container scan exceptions are deliberately empty. A future exception must
-# identify one exact finding and include a non-empty statement plus an
-# expired_at date. Never use wildcard IDs or a non-expiring suppression.
-vulnerabilities: []
+# Container scan exceptions. Each entry names one exact finding, says why it is not reachable, and
+# expires. Never use wildcard IDs or a non-expiring suppression.
+#
+# nginx 1.30.6 in the admin runtime: nginxinc/nginx-unprivileged has not published 1.30.7 yet. The
+# admin config listens on plain HTTP/1.1 port 8080 and uses no http2, http3/quic, ssl listen, mail
+# proxy, or resolver directive. Remove these entries when the base image moves to 1.30.7.
+vulnerabilities:
+  - id: CVE-2026-121810
+    statement: HTTP/3 use-after-free; the admin nginx does not enable http3 or quic.
+    expired_at: 2026-12-19
+  - id: CVE-2026-123007
+    statement: HTTP/2 flow control overflow; the admin nginx does not enable http2.
+    expired_at: 2026-12-19
+  - id: CVE-2026-123633
+    statement: HTTP/2 flaw; the admin nginx does not enable http2.
+    expired_at: 2026-12-19
+  - id: CVE-2026-113425
+    statement: Mail proxy flaw; the admin nginx has no mail block.
+    expired_at: 2026-12-19
+  - id: CVE-2026-118899
+    statement: Flaw with listen ssl; the admin nginx listens on plain HTTP behind the operator's TLS proxy.
+    expired_at: 2026-12-19
+  - id: CVE-2026-123634
+    statement: Use-after-free in the nginx resolver; the admin nginx sets no resolver directive.
+    expired_at: 2026-12-19
 secrets: []
 misconfigurations: []
 licenses: []

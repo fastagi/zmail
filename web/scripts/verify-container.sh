@@ -87,7 +87,7 @@ observed = {
 }
 expected = {
     "87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89",
-    "0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402",
+    "1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a",
 }
 if not expected.issubset(observed):
     raise SystemExit("build provenance does not contain every reviewed Web material digest")
@@ -98,7 +98,7 @@ PY
 assert_label "org.opencontainers.image.source" "${OCI_SOURCE}"
 assert_label "org.opencontainers.image.revision" "${OCI_REVISION}"
 assert_label "org.opencontainers.image.version" "${OCI_VERSION}"
-assert_label "org.opencontainers.image.base.digest" "sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402"
+assert_label "org.opencontainers.image.base.digest" "sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a"
 
 image_user="$(docker image inspect "${IMAGE_TAG}" --format '{{.Config.User}}')"
 case "${image_user}" in
@@ -109,7 +109,7 @@ healthcheck="$(docker image inspect "${IMAGE_TAG}" --format '{{json .Config.Heal
 [[ "${healthcheck}" != "null" ]] || fail "image has no HEALTHCHECK"
 
 node_version="$(docker run --rm --entrypoint node "${IMAGE_TAG}" --version)"
-[[ "${node_version}" == "v22.23.3" ]] || fail "runtime Node version is ${node_version}, expected v22.23.3"
+[[ "${node_version}" == "v22.23.5" ]] || fail "runtime Node version is ${node_version}, expected v22.23.5"
 
 docker run --rm --entrypoint node "${IMAGE_TAG}" -e '
   const fs = require("node:fs");
