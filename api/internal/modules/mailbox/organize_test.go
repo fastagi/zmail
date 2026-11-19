@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 )
@@ -837,5 +841,107 @@ func TestReplaceLabelsAndLabelDeleteDoNotDeadlock(t *testing.T) {
 	db.Model(&MailMessageLabelPO{}).Where("label_id = ?", doomed.ID).Count(&rows)
 	if rows != 0 {
 		t.Fatalf("%d rows of the deleted label remain", rows)
+	}
+}
+
+// Emptying a trash larger than PostgreSQL's 65,535 bind parameters still deletes every message
+// and leaves the rest of the mailbox alone. The limit applies to the extended protocol, which the
+// opt-in DB_QUERY_EXEC_MODE values (cache_statement, cache_describe, describe_exec) use, so the
+// repository here runs over a describe_exec connection to the fixture's schema.
+func TestPurgeTrashBeyondBindParameterLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("seeds 70,000 messages")
+	}
+	f := newOrganizeFixture(t)
+	ctx := context.Background()
+	db := f.repo.(*repository).db
+	kept := f.receive(t, f.team, "Kept")
+	const trashed = 70000
+	if err := db.Exec(`INSERT INTO mail_messages
+		(mailbox_id, direction, status, from_address, subject, placement, trashed_at, created_at, updated_at)
+		SELECT ?, 'inbound', 'received', 'bulk@example.com', 'Bulk ' || n, 'trash', now(), now(), now()
+		FROM generate_series(1, ?) AS n`, f.team.ID, trashed).Error; err != nil {
+		t.Fatalf("seed trash: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO mail_message_events (message_id, type, occurred_at, created_at)
+		SELECT id, 'delivered', now(), now() FROM mail_messages WHERE mailbox_id = ? AND placement = 'trash'`, f.team.ID).Error; err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+
+	extended := NewRepository(openExtendedProtocol(t, db))
+	purged, err := extended.DeleteTrashedMessages(ctx, f.team.ID, nil)
+	if err != nil || purged != trashed {
+		t.Fatalf("DeleteTrashedMessages(all) = %d, %v; want %d", purged, err, trashed)
+	}
+	var left, events int64
+	db.Model(&MailMessagePO{}).Where("mailbox_id = ? AND placement = 'trash'", f.team.ID).Count(&left)
+	db.Model(&MailMessageEventPO{}).Count(&events)
+	if left != 0 || events != 0 || !f.messageExists(t, kept.ID) {
+		t.Fatalf("after emptying the trash: %d trashed messages and %d events left, kept exists %v",
+			left, events, f.messageExists(t, kept.ID))
+	}
+}
+
+// openExtendedProtocol opens a second connection to db's schema that binds parameters with the
+// extended protocol instead of interpolating them.
+func openExtendedProtocol(t *testing.T, db *gorm.DB) *gorm.DB {
+	t.Helper()
+	dsn := os.Getenv("FASTBUILD_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("FASTBUILD_TEST_POSTGRES_DSN is not set")
+	}
+	var schema string
+	if err := db.Raw(`SELECT current_schema()`).Scan(&schema).Error; err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	scoped, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse DSN: %v", err)
+	}
+	query := scoped.Query()
+	query.Set("search_path", schema)
+	query.Set("timezone", "UTC")
+	query.Set("default_query_exec_mode", "describe_exec")
+	scoped.RawQuery = query.Encode()
+	extended, err := gorm.Open(postgres.New(postgres.Config{DSN: scoped.String()}),
+		&gorm.Config{TranslateError: true, Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open extended-protocol connection: %v", err)
+	}
+	t.Cleanup(func() {
+		if pool, err := extended.DB(); err == nil {
+			_ = pool.Close()
+		}
+	})
+	return extended
+}
+
+// Emptying the trash in batches smaller than the trash deletes every trashed message.
+func TestPurgeTrashInBatches(t *testing.T) {
+	f := newOrganizeFixture(t)
+	ctx := context.Background()
+	previous := trashDeleteBatchSize
+	trashDeleteBatchSize = 2
+	t.Cleanup(func() { trashDeleteBatchSize = previous })
+	kept := f.receive(t, f.team, "Kept")
+	var ids []uint
+	for i := 0; i < 5; i++ {
+		message := f.receive(t, f.team, fmt.Sprintf("Trashed %d", i))
+		if err := f.service.DeleteMessage(ctx, f.e, f.team.ID, message.ID); err != nil {
+			t.Fatalf("trash: %v", err)
+		}
+		ids = append(ids, message.ID)
+	}
+	purged, err := f.service.PurgeTrash(ctx, f.e, f.team.ID)
+	if err != nil || purged != len(ids) {
+		t.Fatalf("PurgeTrash = %d, %v; want %d", purged, err, len(ids))
+	}
+	for _, id := range ids {
+		if f.messageExists(t, id) {
+			t.Fatalf("message %d survived emptying the trash", id)
+		}
+	}
+	if !f.messageExists(t, kept.ID) {
+		t.Fatal("emptying the trash removed a message outside it")
 	}
 }

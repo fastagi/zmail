@@ -231,6 +231,14 @@ func (r *repository) MessageLabelIDs(ctx context.Context, messageIDs []uint) (ma
 	return labels, nil
 }
 
+// trashDeleteBatchSize bounds how many messages one delete statement names, well below
+// PostgreSQL's 65,535 bind parameters, and how many trashed rows one transaction locks.
+var trashDeleteBatchSize = 1000
+
+// DeleteTrashedMessages deletes the given trashed messages for good, or with nil ids every
+// message in the mailbox's trash. Emptying the whole trash runs in batches of
+// trashDeleteBatchSize, each in its own transaction, so no statement exceeds PostgreSQL's bind
+// parameter limit and no transaction locks the whole trash.
 func (r *repository) DeleteTrashedMessages(ctx context.Context, mailboxID uint, ids []uint) (int, error) {
 	if r.db == nil {
 		return 0, domain.ErrServiceUnavailable
@@ -238,6 +246,22 @@ func (r *repository) DeleteTrashedMessages(ctx context.Context, mailboxID uint, 
 	if ids != nil && len(ids) == 0 {
 		return 0, nil
 	}
+	if ids != nil {
+		return r.deleteTrashedBatch(ctx, mailboxID, ids, 0)
+	}
+	total := 0
+	for {
+		deleted, err := r.deleteTrashedBatch(ctx, mailboxID, nil, trashDeleteBatchSize)
+		total += deleted
+		if err != nil || deleted < trashDeleteBatchSize {
+			return total, err
+		}
+	}
+}
+
+// deleteTrashedBatch locks and deletes, in one transaction, the mailbox's trashed messages among
+// ids, or with nil ids up to limit of them in id order.
+func (r *repository) deleteTrashedBatch(ctx context.Context, mailboxID uint, ids []uint, limit int) (int, error) {
 	var deleted int
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx.Model(&MailMessagePO{}).
@@ -245,6 +269,9 @@ func (r *repository) DeleteTrashedMessages(ctx context.Context, mailboxID uint, 
 			Where(unsealedMessage)
 		if ids != nil {
 			query = query.Where("id IN ?", ids)
+		}
+		if limit > 0 {
+			query = query.Limit(limit)
 		}
 		var found []uint
 		if err := query.Clauses(clause.Locking{Strength: "UPDATE"}).Order("id").Pluck("id", &found).Error; err != nil {
@@ -286,6 +313,20 @@ func (r *repository) PurgeExpiredTrash(ctx context.Context, before time.Time, li
 // deleteMessages deletes the given messages for good with their files, events, and read, star,
 // and label rows. Broadcast recipients that point at one keep their row without the message.
 func deleteMessages(tx *gorm.DB, ids []uint) (int, error) {
+	deleted := 0
+	for start := 0; start < len(ids); start += trashDeleteBatchSize {
+		chunk := ids[start:min(start+trashDeleteBatchSize, len(ids))]
+		count, err := deleteMessageChunk(tx, chunk)
+		deleted += count
+		if err != nil {
+			return deleted, err
+		}
+	}
+	return deleted, nil
+}
+
+// deleteMessageChunk deletes up to trashDeleteBatchSize messages and their dependent rows.
+func deleteMessageChunk(tx *gorm.DB, ids []uint) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}

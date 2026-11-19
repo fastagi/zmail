@@ -27,6 +27,9 @@ var mailOrganizeTrigramColumns = []string{"subject", "from_address", "from_name"
 //
 // pg_trgm is created in the public schema when absent, so it is shared by every schema of the
 // database, and each trigram index names the operator class in whatever schema holds it.
+// The trigram indexes cover columns that already exist, so a large installation can build them
+// beforehand with CREATE INDEX CONCURRENTLY (see UPGRADING.md); IF NOT EXISTS then skips them
+// here instead of holding the write lock on mail_messages while they build.
 func (m *addMailOrganize) Up(db *gorm.DB) error {
 	statements := []string{
 		`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`,
@@ -73,7 +76,7 @@ func (m *addMailOrganize) Up(db *gorm.DB) error {
 	}
 	for _, column := range mailOrganizeTrigramColumns {
 		statements = append(statements,
-			`DO $$ BEGIN EXECUTE format('CREATE INDEX idx_mail_messages_trgm_`+column+` ON mail_messages USING gin (`+column+` %I.gin_trgm_ops)',
+			`DO $$ BEGIN EXECUTE format('CREATE INDEX IF NOT EXISTS idx_mail_messages_trgm_`+column+` ON mail_messages USING gin (`+column+` %I.gin_trgm_ops)',
 			   (SELECT extnamespace::regnamespace::text FROM pg_extension WHERE extname = 'pg_trgm')); END $$`)
 	}
 	return execStatements(db, statements...)

@@ -67,6 +67,23 @@ func TestMailOrganizeMigrationUpDown(t *testing.T) {
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 
+// TestMailOrganizeMigrationKeepsPrecreatedTrigramIndexes is the large-install path in
+// UPGRADING.md: an operator builds the trigram indexes CONCURRENTLY before migrating, and the
+// migration then skips them and still ends at the golden schema.
+func TestMailOrganizeMigrationKeepsPrecreatedTrigramIndexes(t *testing.T) {
+	db, exec := mailOrganizeFixture(t)
+	migrated := dumpSchema(t, db)
+	rollBackMailOrganize(t, db)
+
+	exec(`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`)
+	for _, column := range mailOrganizeTrigramColumns {
+		exec(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_trgm_` + column +
+			` ON mail_messages USING gin (` + column + ` public.gin_trgm_ops)`)
+	}
+	applyMailOrganize(t, db)
+	assert.Equal(t, migrated, dumpSchema(t, db), "pre-created indexes must leave the golden schema")
+}
+
 // TestThreadBackfillLinksInReplyTo threads existing mail by In-Reply-To within one mailbox only:
 // a reply joins its parent's thread, a reply to a reply joins the root, and a reply naming a
 // message of another mailbox starts its own thread. Every row ends with a thread.
