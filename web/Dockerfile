@@ -4,7 +4,7 @@ ARG OCI_REVISION=unknown
 ARG OCI_VERSION=dev
 
 # Keep native dependencies ABI-compatible between build and runtime.
-FROM docker.io/library/node:22.23.3-alpine3.24@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS base
+FROM docker.io/library/node:22.23.5-alpine3.24@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS base
 
 # Install dependencies only when needed
 FROM base AS deps
@@ -62,8 +62,8 @@ LABEL org.opencontainers.image.title="FastBuild Web" \
     org.opencontainers.image.source="${OCI_SOURCE}" \
     org.opencontainers.image.revision="${OCI_REVISION}" \
     org.opencontainers.image.version="${OCI_VERSION}" \
-    org.opencontainers.image.base.name="docker.io/library/node:22.23.3-alpine3.24" \
-    org.opencontainers.image.base.digest="sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402"
+    org.opencontainers.image.base.name="docker.io/library/node:22.23.5-alpine3.24" \
+    org.opencontainers.image.base.digest="sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a"
 
 COPY --from=runtime-root / /
 

@@ -4,7 +4,7 @@ ARG OCI_REVISION=unknown
 ARG OCI_VERSION=dev
 
 # Build the static console with the same reviewed Node base as the Web image.
-FROM docker.io/library/node:22.23.3-alpine3.24@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS builder
+FROM docker.io/library/node:22.23.5-alpine3.24@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS builder
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -28,7 +28,9 @@ RUN corepack enable pnpm && pnpm run build
 # scanners can still inventory the installed OS packages.
 FROM docker.io/nginxinc/nginx-unprivileged:1.30.6-alpine3.24-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6 AS runtime-root
 USER 0
-RUN rm -rf /sbin/apk /etc/apk /usr/share/apk /var/cache/apk \
+# The base tag lags Alpine security fixes for musl and zlib; take them before apk is removed.
+RUN apk upgrade --no-cache musl musl-utils zlib \
+    && rm -rf /sbin/apk /etc/apk /usr/share/apk /var/cache/apk \
         /etc/nginx/conf.d /usr/share/nginx/html/* \
         /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh \
     && chown -R 0:0 /etc/nginx /usr/share/nginx /docker-entrypoint.d \

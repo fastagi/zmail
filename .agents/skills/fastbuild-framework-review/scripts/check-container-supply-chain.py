@@ -26,8 +26,8 @@ API_RUNTIME = (
     "aef9602f8710ec12bde19d593fed1f76c708531bb7aba205110f1029786ead7b"
 )
 WEB_BASE = (
-    "docker.io/library/node:22.23.3-alpine3.24@sha256:"
-    "0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402"
+    "docker.io/library/node:22.23.5-alpine3.24@sha256:"
+    "1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a"
 )
 ADMIN_RUNTIME = (
     "docker.io/nginxinc/nginx-unprivileged:1.30.6-alpine3.24-slim@sha256:"
