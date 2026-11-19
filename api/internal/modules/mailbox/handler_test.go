@@ -567,3 +567,62 @@ func TestZoneWriteRequiresAdmin(t *testing.T) {
 		t.Fatalf("member list = %d %v", listed.Code, body)
 	}
 }
+
+func TestReceivingDuringARunningSetupRunsTheSetupAgain(t *testing.T) {
+	fixture := newZoneHandlerFixture(t, membership(domain.OrganizationRoleOwner))
+	ctx := context.Background()
+	sendOnly, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "news.example.com", domain.MailDomainSendOnly)
+	if err != nil || sendOnly.Status != domain.MailDomainStatusVerified {
+		t.Fatalf("send-only domain = %+v, %v", sendOnly, err)
+	}
+	mailbox, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "hello", "", "news.example.com")
+	if err != nil || mailbox.RoutingRuleID != "" {
+		t.Fatalf("mailbox = %+v, %v", mailbox, err)
+	}
+
+	// Setups run in the background again, and the next one stops inside the provider until released.
+	fixture.service.background = func(run func()) { go run() }
+	entered, release := make(chan struct{}), make(chan struct{})
+	var held bool
+	fixture.zones.ensureSendingHook = func() {
+		if !held {
+			held = true
+			close(entered)
+			<-release
+		}
+	}
+	if _, err := fixture.service.SetUpMailDomain(ctx, 7, sendOnly.ID); err != nil {
+		t.Fatalf("SetUpMailDomain: %v", err)
+	}
+	<-entered
+
+	// The running setup read the domain while it only sent.
+	recorder, body := fixture.do(http.MethodPost, fmt.Sprintf("/mail-domains/%d/receiving", sendOnly.ID), "")
+	if data, _ := body["data"].(map[string]any); recorder.Code != http.StatusOK || data["setting_up"] != true {
+		t.Fatalf("receiving = %d %v", recorder.Code, body)
+	}
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, running := fixture.service.domainSetups.Load(sendOnly.ID); !running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the setup did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if !slices.Equal(fixture.zones.routingFor, []string{"news.example.com"}) {
+		t.Fatalf("routing enabled for %v; want the domain once the setup ran again", fixture.zones.routingFor)
+	}
+	routed := fixture.repo.mailboxes[mailbox.ID]
+	if routed.RoutingRuleID == "" || fixture.zones.rules[routed.RoutingRuleID] != "hello@news.example.com" {
+		t.Fatalf("mailbox rule = %q, rules = %v", routed.RoutingRuleID, fixture.zones.rules)
+	}
+	stored := fixture.domains.domains[sendOnly.ID]
+	if stored.Capability != domain.MailDomainSendReceive || stored.Status != domain.MailDomainStatusVerified ||
+		recordStatus(stored, domain.MailDomainRecordReceiving, "MX", "news.example.com") != domain.MailDomainRecordOK {
+		t.Fatalf("stored domain = %+v; want verified with its receiving records", stored)
+	}
+}

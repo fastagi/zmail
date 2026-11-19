@@ -159,8 +159,9 @@ route is `404 MAILBOX.DOMAINS_DISABLED`.
   request: connecting answers at once with the domain `pending` and `setting_up` true, and clients
   read the domain again until `setting_up` is false. A step the provider refuses leaves the domain
   `pending` with `last_error`, and `POST /v1/mail-domains/:domain_id/setups` starts every step again
-  safely. One setup runs per domain at a time; a check while it runs returns the domain unchanged. A failed
-  zone lookup while connecting is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`.
+  safely. One setup runs per domain at a time; a check while it runs returns the domain unchanged,
+  and a setup or receiving request while it runs makes it run once more afterwards, from the domain
+  as stored then. A failed zone lookup while connecting is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`.
 - `POST /v1/mail-domains/:domain_id/checks` reads the zone and reports each required record with
   `purpose` (`receiving`, `sending`, `dmarc`), `type`, `name`, `content`, optional `priority`, and
   `status`: `ok`, `missing`, or `conflict` with the conflicting value in `found`. A `send_only`

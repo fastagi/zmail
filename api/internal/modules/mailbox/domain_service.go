@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -110,27 +111,84 @@ func (s *service) markSettingUp(mailDomain *domain.MailDomain) *domain.MailDomai
 	return mailDomain
 }
 
+// domainSetupRun is one background setup of a domain. rerun is set when the domain changed, such
+// as its capability, while the run was in progress, so the run sets it up again before ending.
+type domainSetupRun struct {
+	rerun atomic.Bool
+}
+
 // startSetUp runs the setup of a domain in the background, once at a time per domain, and returns
 // the domain as it is now. The setup makes several provider calls, which can outlast the request
 // and the proxies in front of it; a background run is never cut off by a client that stops waiting.
+// A call while a setup runs asks that run to set the domain up once more, from the domain as stored
+// then, so a change made meanwhile is never lost to a run that read the domain before it.
 func (s *service) startSetUp(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
-	if _, running := s.domainSetups.LoadOrStore(mailDomain.ID, struct{}{}); !running {
+	run := &domainSetupRun{}
+	if existing, running := s.domainSetups.LoadOrStore(mailDomain.ID, run); running {
+		if current, ok := existing.(*domainSetupRun); ok {
+			current.rerun.Store(true)
+		}
+	} else {
 		target := *mailDomain
-		s.background(func() {
-			defer s.domainSetups.Delete(target.ID)
-			setupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), domainSetupTimeout)
-			defer cancel()
-			if _, err := s.setUp(setupContext, &target); err != nil {
-				slog.WarnContext(setupContext, "mail domain setup could not be stored",
-					slog.String("domain", target.Name), slog.String("error", err.Error()))
-			}
-		})
+		s.background(func() { s.runSetUps(ctx, run, &target) })
 	}
 	current, err := s.domains.FindDomain(ctx, mailDomain.OrganizationID, mailDomain.ID)
 	if err != nil {
 		return nil, err
 	}
 	return s.present(ctx, current)
+}
+
+// runSetUps sets the domain up until no rerun is asked for, reading the stored domain again for
+// every run after the first, and then releases the domain.
+func (s *service) runSetUps(ctx context.Context, run *domainSetupRun, target *domain.MailDomain) {
+	for {
+		s.runSetUp(ctx, target)
+		if run.rerun.CompareAndSwap(true, false) {
+			if !s.reloadSetUpTarget(ctx, target) {
+				s.domainSetups.Delete(target.ID)
+				return
+			}
+			continue
+		}
+		s.domainSetups.Delete(target.ID)
+		// A rerun asked for between the check and the release would otherwise be lost. Take the
+		// domain back unless a new run already holds it.
+		if !run.rerun.Load() {
+			return
+		}
+		if _, taken := s.domainSetups.LoadOrStore(target.ID, run); taken {
+			return
+		}
+		run.rerun.Store(false)
+		if !s.reloadSetUpTarget(ctx, target) {
+			s.domainSetups.Delete(target.ID)
+			return
+		}
+	}
+}
+
+func (s *service) runSetUp(ctx context.Context, target *domain.MailDomain) {
+	setupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), domainSetupTimeout)
+	defer cancel()
+	if _, err := s.setUp(setupContext, target); err != nil {
+		slog.WarnContext(setupContext, "mail domain setup could not be stored",
+			slog.String("domain", target.Name), slog.String("error", err.Error()))
+	}
+}
+
+// reloadSetUpTarget replaces target with the stored domain and reports whether it still exists.
+func (s *service) reloadSetUpTarget(ctx context.Context, target *domain.MailDomain) bool {
+	current, err := s.domains.FindDomain(context.WithoutCancel(ctx), target.OrganizationID, target.ID)
+	if err != nil {
+		if !errors.Is(err, ErrMailDomainNotFound) {
+			slog.WarnContext(ctx, "mail domain setup was not repeated",
+				slog.String("domain", target.Name), slog.String("error", err.Error()))
+		}
+		return false
+	}
+	*target = *current
+	return true
 }
 
 // normalizeDomainName lowercases a typed domain and rejects what no mailbox may use, including

@@ -36,6 +36,9 @@ type fakeZones struct {
 	activationChecks []string
 	activationErr    error
 	deleteZoneErr    error
+	// ensureSendingHook, when set, runs at the start of every EnsureSending, such as to hold a
+	// setup open.
+	ensureSendingHook func()
 }
 
 func newFakeZones() *fakeZones {
@@ -81,6 +84,9 @@ func (z *fakeZones) EnableRouting(_ context.Context, _, name string) error {
 }
 
 func (z *fakeZones) EnsureSending(_ context.Context, _, name string) (string, error) {
+	if z.ensureSendingHook != nil {
+		z.ensureSendingHook()
+	}
 	if tag, ok := z.sending[name]; ok {
 		return tag, nil
 	}
@@ -247,11 +253,14 @@ func (d *fakeDomains) FindDomainByName(_ context.Context, name string) (*domain.
 	return nil, ErrMailDomainNotFound
 }
 
+// UpdateDomain keeps the stored capability and managed zone, as the repository does.
 func (d *fakeDomains) UpdateDomain(_ context.Context, mailDomain *domain.MailDomain) error {
-	if _, ok := d.domains[mailDomain.ID]; !ok {
+	existing, ok := d.domains[mailDomain.ID]
+	if !ok {
 		return ErrMailDomainNotFound
 	}
 	stored := *mailDomain
+	stored.Capability, stored.MailZoneID = existing.Capability, existing.MailZoneID
 	d.domains[mailDomain.ID] = &stored
 	return nil
 }
