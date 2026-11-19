@@ -543,6 +543,10 @@ func (s *service) sendTransactional(ctx context.Context, send *transactionalSend
 		slog.String("mode", string(message.Mode)),
 		slog.String("status", string(message.Status)))
 	message.Events = []domain.MailEvent{}
+	if message.Status == domain.TransactionalStatusSuppressed {
+		// Final at acceptance: counted here, once; a replay returns before this point.
+		metrics.RecordTransactionalMessage(string(message.Mode), string(message.Status))
+	}
 	if message.Status == domain.TransactionalStatusQueued && message.QueuedReason == nil {
 		id := message.ID
 		dispatchCtx := context.WithoutCancel(ctx)

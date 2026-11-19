@@ -249,6 +249,27 @@ func TestNoRetryWithoutHTTPStatus(t *testing.T) {
 	}
 }
 
+// A missing transport never reached the provider: the message fails with the code the personal
+// send path records for it, not as an unknown outcome.
+func TestNotConfiguredTransportFailsDeterministically(t *testing.T) {
+	f := newTxFixture(t, nil)
+	transport := &lockedTransport{errs: []error{mailtransport.ErrNotConfigured}}
+	f.service.transport = transport
+	message, _ := f.send(t, liveActor(), codeInput("k1", "lilei@example.com", "482913"))
+	f.clock = f.clock.Add(time.Hour)
+	f.dispatch(t)
+	if transport.calls() != 1 {
+		t.Fatalf("transport calls = %d; want 1", transport.calls())
+	}
+	assertFinal(t, f.row(t, message.ID), domain.TransactionalStatusFailed, domain.TransactionalFailureNotConfigured)
+	if domain.TransactionalFailureNotConfigured != failureNotConfigured {
+		t.Fatalf("transactional code %q differs from the personal path's %q", domain.TransactionalFailureNotConfigured, failureNotConfigured)
+	}
+	if got := f.notificationTypes(); !equalStrings(got, []string{WebhookEmailFailed}) {
+		t.Fatalf("notifications = %v", got)
+	}
+}
+
 func TestCrashAfterProviderCallIsNotResent(t *testing.T) {
 	f := newTxFixture(t, nil)
 	f.hold()

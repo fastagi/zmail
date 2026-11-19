@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"gorm.io/gorm"
 
 	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
@@ -457,9 +458,17 @@ func TestSuppressedRecipientStoredWithoutCiphertext(t *testing.T) {
 	}
 	filler, _ := f.send(t, liveActor(), codeInput("filler", "hanmei@example.com", "1"))
 	f.attempted(t, filler.ID)
+	before := transactionalOutcomeCount(t, "live", "suppressed")
 	message, created := f.send(t, liveActor(), codeInput("k1", "lilei@example.com", "482913"))
 	if !created || message.Status != domain.TransactionalStatusSuppressed || message.QueuedReason != nil {
 		t.Fatalf("message = %+v; want suppressed, ignoring the full lane", message)
+	}
+	// Counted once at acceptance; a replay of the same request is not counted again.
+	if _, replayed := f.send(t, liveActor(), codeInput("k1", "lilei@example.com", "482913")); replayed {
+		t.Fatal("the replay created a second message")
+	}
+	if got := transactionalOutcomeCount(t, "live", "suppressed") - before; got != 1 {
+		t.Fatalf("suppressed outcomes counted = %v; want 1", got)
 	}
 	stored := f.row(t, message.ID)
 	if stored.PayloadCiphertext != nil || stored.NextAttemptAt != nil || stored.SendAttemptedAt != nil {
@@ -620,4 +629,29 @@ func TestTransactionalTestSendGoesToTheCallersAccount(t *testing.T) {
 	if !errors.Is(err, ErrTransactionalRateLimited) {
 		t.Fatalf("sixth error = %v; want the test send limit", err)
 	}
+}
+
+// transactionalOutcomeCount reads zmail_transactional_messages_total for one mode and outcome from
+// the default registry the metrics package registers with.
+func transactionalOutcomeCount(t *testing.T, mode, outcome string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "zmail_transactional_messages_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, label := range metric.GetLabel() {
+				labels[label.GetName()] = label.GetValue()
+			}
+			if labels["mode"] == mode && labels["outcome"] == outcome {
+				return metric.GetCounter().GetValue()
+			}
+		}
+	}
+	return 0
 }

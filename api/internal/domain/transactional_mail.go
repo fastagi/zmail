@@ -52,6 +52,9 @@ const (
 	// TransactionalFailureUnknownOutcome: a provider call started but its result was never
 	// recorded; the provider may have accepted it, so it is never resent.
 	TransactionalFailureUnknownOutcome = "transport.unknown_outcome"
+	// TransactionalFailureNotConfigured: no outbound transport is configured; the provider was
+	// never called. It is the code the personal send path records for the same condition.
+	TransactionalFailureNotConfigured = "transport.not_configured"
 )
 
 const (
@@ -59,6 +62,11 @@ const (
 	TransactionalQueueTimeout = time.Hour
 	// TransactionalLease is how long one dispatcher holds a message.
 	TransactionalLease = 2 * time.Minute
+	// TransactionalLaneWait is how far a lease pushes back next_attempt_at of a live message it
+	// marks waiting for lane room, so an organization whose lane is full stops looking due and
+	// cannot crowd other organizations out of a dispatch pass. Expiry is keyed on created_at, so
+	// the wait never extends TransactionalQueueTimeout.
+	TransactionalLaneWait = 30 * time.Second
 	// TransactionalRetention is how long transactional messages and their events are kept.
 	TransactionalRetention = 30 * 24 * time.Hour
 )
@@ -205,10 +213,11 @@ type TransactionalMailRepository interface {
 	// LeaseTransactional leases due, free messages of an organization to one dispatcher until
 	// leaseUntil: the given ids, or the oldest due ones when ids is empty, at most limit. Live, real
 	// messages are leased only while the lane has room (laneLimit minus the attempts since
-	// windowStart and the leases not yet attempted); the rest are marked as waiting for room.
-	// Test and simulated messages always lease.
+	// windowStart and the leases not yet attempted); the rest are marked as waiting for room and
+	// their next attempt is pushed back by TransactionalLaneWait. Test and simulated messages always lease.
 	LeaseTransactional(ctx context.Context, organizationID uint, ids []uint, now, leaseUntil, windowStart time.Time, laneLimit, limit int) ([]*TransactionalMessage, error)
-	// TransactionalDueOrganizations lists organizations with due, free queued messages.
+	// TransactionalDueOrganizations lists organizations with due, free queued messages, the one
+	// whose earliest due message is oldest first.
 	TransactionalDueOrganizations(ctx context.Context, now time.Time, limit int) ([]uint, error)
 	// StartTransactionalAttempt records the start of a provider call by the lease holder.
 	StartTransactionalAttempt(ctx context.Context, id uint, lease, at time.Time) (bool, error)

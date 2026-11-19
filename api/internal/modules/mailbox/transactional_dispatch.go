@@ -367,6 +367,9 @@ func (s *service) sendTransactionalAttempt(ctx context.Context, message *domain.
 		return s.failTransactional(recordContext, message, lease, transportErr.Code, result, now)
 	case isTransportErr && transportErr.Permanent:
 		return s.failTransactional(recordContext, message, lease, transportErr.Code, result, now)
+	case errors.Is(sendErr, mailtransport.ErrNotConfigured):
+		// No transport: the provider was never called, so the outcome is known, not unknown.
+		return s.failTransactional(recordContext, message, lease, domain.TransactionalFailureNotConfigured, result, now)
 	default:
 		// No HTTP status came back: the provider may have accepted it, so it is never resent.
 		logTransactional(ctx, "transactional_message.unknown_outcome", message, slog.Int("attempts", message.Attempts))

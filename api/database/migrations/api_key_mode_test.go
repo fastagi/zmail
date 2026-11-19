@@ -9,7 +9,7 @@ import (
 )
 
 // TestAddAPIKeyModeMakesExistingKeysLive keeps every key issued before modes existed acting for
-// real, refuses unknown modes, and rolls back and forward cleanly.
+// real, refuses unknown modes, revokes test keys on rollback, and rolls back and forward cleanly.
 func TestAddAPIKeyModeMakesExistingKeysLive(t *testing.T) {
 	db := testplatform.OpenPostgres(t, nil)
 	migrateAll(t, db)
@@ -28,5 +28,12 @@ func TestAddAPIKeyModeMakesExistingKeysLive(t *testing.T) {
 		VALUES (7, 'bad', 'fastbuild_zz', 'hash-bad', '[]', 'staging', now(), now())`).Error)
 
 	require.NoError(t, (&addAPIKeyMode{}).Down(db))
+	// Down revokes the test key, so older code that treats every key as live cannot use it.
+	var revoked struct{ Test, Live bool }
+	require.NoError(t, db.Raw(`SELECT
+		(SELECT revoked_at IS NOT NULL FROM api_keys WHERE key_hash = 'hash-test') AS test,
+		(SELECT revoked_at IS NOT NULL FROM api_keys WHERE key_hash = 'hash-old') AS live`).Scan(&revoked).Error)
+	require.True(t, revoked.Test, "a test key survived the rollback unrevoked")
+	require.False(t, revoked.Live, "the rollback revoked a live key")
 	require.NoError(t, (&addAPIKeyMode{}).Up(db))
 }

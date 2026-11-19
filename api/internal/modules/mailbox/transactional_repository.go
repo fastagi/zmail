@@ -211,12 +211,12 @@ func (r *repository) LeaseTransactional(
 			}
 			return a.ID < b.ID
 		})
-		var leaseIDs, waitIDs []uint
+		var leaseIDs []uint
 		for i := range candidates {
 			candidate := &candidates[i]
 			countsInLane := candidate.Mode == string(domain.APIKeyModeLive) && !candidate.Simulated
 			if countsInLane && room <= 0 {
-				waitIDs = append(waitIDs, candidate.ID)
+				// Marked waiting below, with every other due live message of the organization.
 				continue
 			}
 			if len(leased) >= limit {
@@ -231,17 +231,30 @@ func (r *repository) LeaseTransactional(
 			leaseIDs = append(leaseIDs, candidate.ID)
 			leased = append(leased, *candidate)
 		}
-		if len(waitIDs) > 0 {
-			if err := tx.Model(&TransactionalMessagePO{}).Where("id IN ?", waitIDs).
-				Updates(map[string]any{"queued_reason": string(domain.TransactionalQueuedSendLimit), "updated_at": now}).Error; err != nil {
+		if len(leaseIDs) > 0 {
+			if err := tx.Model(&TransactionalMessagePO{}).Where("id IN ?", leaseIDs).
+				Updates(map[string]any{"lease_until": leaseUntil, "updated_at": now}).Error; err != nil {
 				return err
 			}
 		}
-		if len(leaseIDs) == 0 {
+		if room > 0 {
 			return nil
 		}
-		return tx.Model(&TransactionalMessagePO{}).Where("id IN ?", leaseIDs).
-			Updates(map[string]any{"lease_until": leaseUntil, "updated_at": now}).Error
+		// The lane is full: no due live message of the organization can lease, in this batch or
+		// beyond it. All are marked waiting and pushed back by TransactionalLaneWait, so the
+		// organization stops looking due and cannot hold the head of every dispatch pass.
+		waiting := tx.Model(&TransactionalMessagePO{}).Select("id").
+			Where(`organization_id = ? AND status = ? AND mode = ? AND NOT simulated AND next_attempt_at <= ?
+			  AND (lease_until IS NULL OR lease_until <= ?)`,
+				organizationID, string(domain.TransactionalStatusQueued), string(domain.APIKeyModeLive), now, now).
+			Where(notLostAttempt, leaseSeconds).
+			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+		return tx.Model(&TransactionalMessagePO{}).Where("id IN (?)", waiting).
+			Updates(map[string]any{
+				"queued_reason":   string(domain.TransactionalQueuedSendLimit),
+				"next_attempt_at": now.Add(domain.TransactionalLaneWait),
+				"updated_at":      now,
+			}).Error
 	})
 	if err != nil {
 		return nil, err
@@ -257,12 +270,14 @@ func (r *repository) TransactionalDueOrganizations(ctx context.Context, now time
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
+	// The organization due longest goes first, so no organization keeps the head of every pass;
+	// a lease pushes waiting messages back by TransactionalLaneWait, so a full lane stops looking due.
 	var organizations []uint
 	err := r.conn(ctx).Model(&TransactionalMessagePO{}).
 		Where(`status = ? AND next_attempt_at <= ? AND (lease_until IS NULL OR lease_until <= ?)`,
 			string(domain.TransactionalStatusQueued), now, now).
 		Where(notLostAttempt, leaseSeconds).
-		Distinct().Order("organization_id").Limit(limit).
+		Group("organization_id").Order("min(next_attempt_at), organization_id").Limit(limit).
 		Pluck("organization_id", &organizations).Error
 	return organizations, err
 }

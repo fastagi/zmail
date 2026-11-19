@@ -1687,7 +1687,8 @@ seconds, 2 minutes, and 10 minutes: at most 4 provider calls (`attempts`). Any f
 HTTP status, such as an unreachable provider or an unreadable answer, may have been accepted, so the
 message becomes `failed` with `failure_code` `transport.unknown_outcome` and is never sent again.
 Other `failure_code` values: a provider's permanent refusal code, `send.expired` (queued more than an
-hour), and `send.sender_unverified` (the sender domain lost verification before dispatch). To send
+hour), `send.sender_unverified` (the sender domain lost verification before dispatch), and
+`transport.not_configured` (the deployment has no outbound transport; the provider was never called). To send
 again on purpose, use a new `Idempotency-Key`.
 
 `last_event` follows [Delivery Events](#delivery-events): the most severe recorded event, null when

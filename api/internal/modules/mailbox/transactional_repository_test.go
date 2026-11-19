@@ -255,7 +255,8 @@ func TestLeaseRespectsLaneRoomAndSkipsLocked(t *testing.T) {
 	if ok, err := repo.StartTransactionalAttempt(ctx, due[0].ID, now.Add(domain.TransactionalLease), now); err != nil || !ok {
 		t.Fatalf("StartTransactionalAttempt = %v, %v", ok, err)
 	}
-	if again := leaseAll(t, repo, now, 3); len(again) != 1 {
+	// The waiting messages were pushed back by TransactionalLaneWait.
+	if again := leaseAll(t, repo, now.Add(domain.TransactionalLaneWait), 3); len(again) != 1 {
 		t.Fatalf("lease with one more room = %d messages, want 1", len(again))
 	}
 
@@ -321,6 +322,86 @@ func TestTransactionalDueOrganizations(t *testing.T) {
 	}
 }
 
+// Organizations whose lane is full must not hold every slot of a dispatch pass: their waiting
+// messages are pushed back by TransactionalLaneWait, and due organizations are ordered by their
+// earliest due message, so a higher-id organization's retry still leases.
+func TestFullLanesDoNotStarveOtherOrganizations(t *testing.T) {
+	repo, db := openTransactionalRepository(t)
+	ctx := context.Background()
+	if err := db.Exec(`INSERT INTO organizations (id, name, slug, created_by, created_at, updated_at) VALUES (12, 'Third', 'third', 901, now(), now())`).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	now := txBase.Add(10 * time.Minute)
+	for _, organizationID := range []uint{10, 11} {
+		for i := range 3 {
+			message := newTransactional(txBase.Add(time.Duration(i) * time.Second))
+			message.OrganizationID = organizationID
+			createTransactional(t, repo, message)
+		}
+	}
+	retry := newTransactional(txBase.Add(time.Minute))
+	retry.OrganizationID = 12
+	reason := domain.TransactionalQueuedRetry
+	retry.QueuedReason = &reason
+	retryAt := now.Add(-time.Second)
+	retry.NextAttemptAt = &retryAt
+	retry.Attempts = 1
+	createTransactional(t, repo, retry)
+
+	// laneLimit gives organizations 10 and 11 no room at all.
+	laneLimit := map[uint]int{10: 0, 11: 0, 12: 5}
+	pass := func(at time.Time) []uint {
+		organizations, err := repo.TransactionalDueOrganizations(ctx, at, 2)
+		if err != nil {
+			t.Fatalf("TransactionalDueOrganizations: %v", err)
+		}
+		for _, organizationID := range organizations {
+			if _, err := repo.LeaseTransactional(ctx, organizationID, nil, at, at.Add(domain.TransactionalLease),
+				at.Add(-24*time.Hour), laneLimit[organizationID], 2); err != nil {
+				t.Fatalf("LeaseTransactional(%d): %v", organizationID, err)
+			}
+		}
+		return organizations
+	}
+	// The first pass reaches the two oldest organizations, which only mark their messages waiting.
+	if first := pass(now); !slices.Equal(first, []uint{10, 11}) {
+		t.Fatalf("first pass organizations = %v; want [10 11]", first)
+	}
+	for _, organizationID := range []uint{10, 11} {
+		var pushed int64
+		if err := db.Raw(`SELECT count(*) FROM transactional_messages WHERE organization_id = ? AND queued_reason = 'send_limit' AND next_attempt_at = ?`,
+			organizationID, now.Add(domain.TransactionalLaneWait)).Scan(&pushed).Error; err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if pushed != 3 {
+			t.Fatalf("organization %d: %d waiting messages pushed back; want all 3, beyond the batch too", organizationID, pushed)
+		}
+	}
+	// The next pass reaches organization 12, whose retry leases.
+	second := pass(now.Add(time.Second))
+	if !slices.Contains(second, 12) || second[0] != 12 {
+		t.Fatalf("second pass organizations = %v; want organization 12 first", second)
+	}
+	got := findTransactional12(t, repo, retry.ID)
+	if got.LeaseUntil == nil {
+		t.Fatalf("organization 12's retry was not leased")
+	}
+	// Waiting messages expire by created_at, unaffected by the push.
+	expired, err := repo.ExpireTransactional(ctx, txBase.Add(domain.TransactionalQueueTimeout+time.Minute), 50)
+	if err != nil || len(expired) != 6 {
+		t.Fatalf("ExpireTransactional = %d, %v; want the 6 waiting messages", len(expired), err)
+	}
+}
+
+func findTransactional12(t *testing.T, repo *repository, id uint) *domain.TransactionalMessage {
+	t.Helper()
+	message, err := repo.FindTransactional(context.Background(), 12, id)
+	if err != nil {
+		t.Fatalf("FindTransactional(%d): %v", id, err)
+	}
+	return message
+}
+
 // A provider call that started inside a lease that then ran out may have been accepted: the
 // message is never leased again (D33), only failed by FailUnknownTransactional.
 func TestLostLeaseAttemptIsNeverLeasedAgain(t *testing.T) {
@@ -381,8 +462,8 @@ func TestLaneExemptMessagesLeaseDespiteWaitingLiveMessages(t *testing.T) {
 		t.Fatalf("leased = %v; want the test and simulated messages %d, %d", ids, test.ID, simulated.ID)
 	}
 	waiting, err := repo.CountTransactionalWaiting(context.Background(), 10)
-	if err != nil || waiting != 2 {
-		t.Fatalf("waiting = %d, %v; want the two oldest live messages marked", waiting, err)
+	if err != nil || waiting != 4 {
+		t.Fatalf("waiting = %d, %v; want every live message marked, beyond the batch too", waiting, err)
 	}
 }
 

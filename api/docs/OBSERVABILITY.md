@@ -112,13 +112,15 @@ the request context. Recipients, subjects, variables, and the encrypted payload 
 | `transactional_message.purged` | info | The worker deleted messages older than 30 days | `count` only |
 | `transactional_payload.decrypt_failed` | info | A queued payload could not be decrypted, usually after a key rotation; the message fails with `send.payload_unavailable` | none |
 
-A message suppressed when the request arrives logs only `accepted` with `status` `suppressed`.
+A message suppressed when the request arrives logs only `accepted` with `status` `suppressed`; it
+is counted once in `zmail_transactional_messages_total{outcome="suppressed"}` when it is stored
+(an idempotent replay is not counted again).
 
 When `METRICS_ENABLED=true`, the `mailbox` starter adds:
 
 | Series | Type | Labels | Meaning |
 |---|---|---|---|
-| `zmail_transactional_messages_total` | counter | `mode` (`live`, `test`), `outcome` (`sent`, `failed`, `suppressed`) | Messages that reached a final state through dispatch or the worker |
+| `zmail_transactional_messages_total` | counter | `mode` (`live`, `test`), `outcome` (`sent`, `failed`, `suppressed`) | Messages that reached a final state: through dispatch or the worker, or, for `suppressed`, also at acceptance |
 | `zmail_transactional_dispatch_seconds` | histogram | none | Time from storing a message to the provider accepting it (live, non-simulated) |
 | `zmail_transactional_queue_oldest_seconds` | gauge | none | Age of the oldest live message waiting to be sent, not counting `send_limit` waits; set by each worker pass |
 | `zmail_send_lane_attempts_total` | counter | `lane` (`personal`, `broadcast`, `transactional`) | Provider send attempts per send lane |

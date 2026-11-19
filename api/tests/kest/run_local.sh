@@ -123,6 +123,8 @@ COMMON_ENV=(
   "${POSTGRES_ENV[@]}"
   AI_ENABLED=false
   TRACING_ENABLED=false
+  # Never inherit a real mail provider from the caller's environment: Kest flows must not send mail.
+  MAILBOX_PROVIDER=log
 )
 
 cd "${ROOT_DIR}"
