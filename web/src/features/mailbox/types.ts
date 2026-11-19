@@ -16,9 +16,18 @@ import type {
   mailMessageSummarySchema,
   mailboxDomainSchema,
   mailboxSchema,
+  mailDomainCapabilitySchema,
   mailDomainInputSchema,
+  mailDomainPreviewInputSchema,
+  mailDomainPreviewSchema,
   mailDomainRecordSchema,
   mailDomainSchema,
+  mailDnsLockedReasonSchema,
+  mailDnsRecordInputSchema,
+  mailDnsRecordPatchSchema,
+  mailDnsRecordSchema,
+  mailDnsRecordTypeSchema,
+  mailZoneSchema,
   sendMailMessageSchema,
   updateMailMessageSchema,
   mailTemplateInputSchema,
@@ -48,6 +57,15 @@ export type MailboxDomain = Infer<typeof mailboxDomainSchema>;
 export type MailDomain = Infer<typeof mailDomainSchema>;
 export type MailDomainRecord = Infer<typeof mailDomainRecordSchema>;
 export type MailDomainInput = Infer<typeof mailDomainInputSchema>;
+export type MailDomainCapability = Infer<typeof mailDomainCapabilitySchema>;
+export type MailDomainPreviewInput = Infer<typeof mailDomainPreviewInputSchema>;
+export type MailDomainPreview = Infer<typeof mailDomainPreviewSchema>;
+export type MailZone = Infer<typeof mailZoneSchema>;
+export type MailDnsRecordType = Infer<typeof mailDnsRecordTypeSchema>;
+export type MailDnsLockedReason = Infer<typeof mailDnsLockedReasonSchema>;
+export type MailDnsRecord = Infer<typeof mailDnsRecordSchema>;
+export type MailDnsRecordInput = Infer<typeof mailDnsRecordInputSchema>;
+export type MailDnsRecordPatch = Infer<typeof mailDnsRecordPatchSchema>;
 export type Mailbox = Infer<typeof mailboxSchema>;
 export type MailDirection = Infer<typeof mailDirectionSchema>;
 export type MailStatus = Infer<typeof mailStatusSchema>;

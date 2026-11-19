@@ -97,7 +97,9 @@ describe('organization mail domains', () => {
     fireEvent.change(screen.getByLabelText('Domain'), { target: { value: '  example.org ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
 
-    await waitFor(() => expect(state.connect.mutateAsync).toHaveBeenCalledWith('example.org'));
+    await waitFor(() =>
+      expect(state.connect.mutateAsync).toHaveBeenCalledWith({ name: 'example.org' })
+    );
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Domain verified'));
   });
 

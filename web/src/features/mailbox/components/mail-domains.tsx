@@ -120,7 +120,7 @@ function ConnectDomainForm() {
       return;
     }
     try {
-      const domain = await connect.mutateAsync(value);
+      const domain = await connect.mutateAsync({ name: value });
       setName('');
       toast.success(
         t(

@@ -23,6 +23,12 @@ export const MAILBOX_DISPLAY_NAME_MAX_LENGTH = 120;
 export const MAILBOX_MAX_PER_ORGANIZATION = 50;
 export const MAIL_DOMAIN_NAME_MAX_LENGTH = 253;
 export const MAIL_DOMAIN_MAX_PER_ORGANIZATION = 10;
+export const MAIL_ZONE_MAX_PER_ORGANIZATION = 3;
+export const MAIL_DNS_RECORD_NAME_MAX_LENGTH = 253;
+export const MAIL_DNS_RECORD_CONTENT_MAX_LENGTH = 4_096;
+export const MAIL_DNS_TXT_CONTENT_MAX_LENGTH = 2_048;
+/** Cloudflare's DNS record identifier, as the record routes accept it. */
+export const MAIL_DNS_RECORD_ID_PATTERN = /^[A-Za-z0-9]{1,64}$/u;
 export const MAIL_MAX_RECIPIENTS = 50;
 export const MAIL_ADDRESS_MAX_LENGTH = 320;
 export const MAIL_SUBJECT_MAX_LENGTH = 998;
@@ -138,14 +144,36 @@ export const mailDomainRecordSchema = strictObject({
   found: optional(string()),
 });
 
+/** `send_only` leaves the domain's MX with another mail service. */
+export const mailDomainCapabilitySchema = union([literal('send_receive'), literal('send_only')]);
+
+/** A Cloudflare zone Zmail created for an organization's apex. */
+export const mailZoneSchema = strictObject({
+  id: safeIdSchema,
+  name: string(),
+  // `pending` until the registrar delegates the apex to `name_servers`.
+  status: union([literal('pending'), literal('active')]),
+  name_servers: array(string()),
+  original_name_servers: array(string()),
+  activated_at: nullable(timestampSchema),
+  last_checked_at: nullable(timestampSchema),
+  created_at: timestampSchema,
+});
+export const mailZoneListSchema = array(mailZoneSchema);
+
 export const mailDomainSchema = strictObject({
   id: safeIdSchema,
   name: string(),
   zone_name: string(),
+  capability: mailDomainCapabilitySchema,
+  // Null in a zone the operator manages.
+  zone: nullable(mailZoneSchema),
   status: union([literal('pending'), literal('verified')]),
   records: array(mailDomainRecordSchema),
   // A setup runs in the background; read the domain again until this is false.
   setting_up: boolean(),
+  // Cloudflare refused to look for the pending zone's name servers now; check again later.
+  zone_check_limited: boolean(),
   last_error: optional(string()),
   checked_at: nullable(timestampSchema),
   verified_at: nullable(timestampSchema),
@@ -153,7 +181,69 @@ export const mailDomainSchema = strictObject({
 });
 export const mailDomainListSchema = array(mailDomainSchema);
 
-export const mailDomainInputSchema = strictObject({ name: string() });
+export const mailDomainInputSchema = strictObject({
+  name: string(),
+  capability: optional(mailDomainCapabilitySchema),
+});
+
+export const mailDomainPreviewInputSchema = strictObject({ name: string() });
+/** What connecting a domain would find; changes nothing. */
+export const mailDomainPreviewSchema = strictObject({
+  name: string(),
+  apex: string(),
+  existing_mx: array(string()),
+  suggested_capability: mailDomainCapabilitySchema,
+});
+
+/** The record types the DNS editor writes. */
+export const mailDnsRecordTypeSchema = union([
+  literal('A'),
+  literal('AAAA'),
+  literal('CNAME'),
+  literal('TXT'),
+  literal('MX'),
+]);
+export const mailDnsLockedReasonSchema = union([
+  literal('mail_receiving'),
+  literal('mail_spf'),
+  literal('mail_dmarc'),
+  literal('mail_dkim'),
+  literal('mail_sending'),
+]);
+export const mailDnsRecordSchema = strictObject({
+  id: string(),
+  // A zone may hold types the editor does not write.
+  type: string(),
+  name: string(),
+  content: string(),
+  // `1` is automatic.
+  ttl: positiveIntegerSchema,
+  priority: optional(nonnegativeIntegerSchema),
+  proxied: boolean(),
+  // Zmail mail relies on the record, so it cannot be changed or deleted.
+  locked: boolean(),
+  locked_reason: optional(mailDnsLockedReasonSchema),
+});
+export const mailDnsRecordListSchema = array(mailDnsRecordSchema);
+
+export const mailDnsRecordInputSchema = strictObject({
+  type: mailDnsRecordTypeSchema,
+  name: string(),
+  content: string(),
+  ttl: optional(number()),
+  priority: optional(number()),
+  // The contract defaults it to false; the client always says.
+  proxied: boolean(),
+});
+/** Any field of a record; an omitted field keeps its current value. */
+export const mailDnsRecordPatchSchema = strictObject({
+  type: optional(mailDnsRecordTypeSchema),
+  name: optional(string()),
+  content: optional(string()),
+  ttl: optional(number()),
+  priority: optional(number()),
+  proxied: optional(boolean()),
+});
 
 export const mailboxSchema = strictObject({
   id: safeIdSchema,

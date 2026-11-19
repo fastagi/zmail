@@ -1311,14 +1311,25 @@ describe('mailbox browser route boundary', () => {
     const connected = await connect(' News.Example.org. ');
     expect(connected.status).toBe(201);
     const domain = (await connected.json()).data;
+    // example.org is no zone the operator manages: the domain waits for a new managed zone.
     expect(domain).toMatchObject({
       name: 'news.example.org',
       status: 'pending',
       zone_name: 'example.org',
+      capability: 'send_receive',
+      zone: { name: 'example.org', status: 'pending' },
+      zone_check_limited: false,
+      records: [],
     });
-    expect(domain.records.some((record: { status: string }) => record.status === 'missing')).toBe(
-      true
-    );
+    await expectError(await refresh(domain.id, 'setups'), 409, 'MAILBOX.ZONE_PENDING');
+
+    // In a zone the operator manages, the setup runs at once and sending records still propagate.
+    const operatorZone = (await (await connect('news.example.com')).json()).data;
+    expect(operatorZone).toMatchObject({ zone_name: 'example.com', zone: null, status: 'pending' });
+    expect(
+      operatorZone.records.some((record: { status: string }) => record.status === 'missing')
+    ).toBe(true);
+    expect((await removeDomain(operatorZone.id)).status).toBe(204);
 
     await expectError(await connect('news.example.org'), 409, 'MAILBOX.DOMAIN_TAKEN');
     await expectError(await connect('mail.example.com'), 409, 'MAILBOX.DOMAIN_TAKEN');
@@ -1338,8 +1349,12 @@ describe('mailbox browser route boundary', () => {
       'MAILBOX.DOMAIN_NOT_VERIFIED'
     );
 
+    // The first check finds the delegation, activates the zone, and runs the setup.
     const checked = await refresh(domain.id, 'checks');
-    expect((await checked.json()).data).toMatchObject({ status: 'verified' });
+    expect((await checked.json()).data).toMatchObject({
+      status: 'verified',
+      zone: { status: 'active' },
+    });
     expect(await offered()).toEqual(['shared:mail.example.com', 'organization:news.example.org']);
     const mailbox = await create(route, { local_part: 'hello', domain: 'news.example.org' });
     expect(mailbox.status).toBe(201);
@@ -1417,6 +1432,439 @@ describe('mailbox browser route boundary', () => {
       local_part: 'hello',
       domain: 'example.org',
     });
+  });
+
+  it('creates a pending managed zone for an unknown apex and activates it on the first check', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+
+    const connected = await connectDomain(route, { name: 'example.org' });
+    expect(connected.status).toBe(201);
+    const domain = (await connected.json()).data;
+    expect(domain.zone).toMatchObject({
+      name: 'example.org',
+      status: 'pending',
+      name_servers: ['ada.ns.cloudflare.com', 'bob.ns.cloudflare.com'],
+      activated_at: null,
+    });
+    const zoneId: number = domain.zone.id;
+
+    const zones = await route.listMailZonesRoute(request('/api/mail-zones'));
+    expect(zones.status).toBe(200);
+    expect((await zones.json()).data).toEqual([domain.zone]);
+    const zone = await route.getMailZoneRoute(request(`/api/mail-zones/${zoneId}`), String(zoneId));
+    expect((await zone.json()).data).toEqual(domain.zone);
+
+    // Cloudflare imported what it found for the apex; nothing is Zmail's yet.
+    const imported = (await (await listRecords(route, zoneId)).json()).data;
+    expect(
+      imported.map((record: Record<string, unknown>) => [
+        record.type,
+        record.name,
+        record.content,
+        record.locked,
+      ])
+    ).toEqual([
+      ['A', 'example.org', '192.0.2.10', false],
+      ['CNAME', 'www.example.org', 'example.com', false],
+    ]);
+
+    await expectError(await receiving(route, domain.id), 409, 'MAILBOX.ZONE_PENDING');
+
+    // A second domain under the apex joins the same zone.
+    const sibling = (await (await connectDomain(route, { name: 'mail.example.org' })).json()).data;
+    expect(sibling.zone.id).toBe(zoneId);
+    await expectError(await deleteZone(route, zoneId), 409, 'MAILBOX.ZONE_IN_USE');
+
+    const checked = (await (await checkDomain(route, domain.id)).json()).data;
+    expect(checked).toMatchObject({ status: 'verified', zone_check_limited: false });
+    expect(checked.zone).toMatchObject({ id: zoneId, status: 'active' });
+    expect(checked.zone.activated_at).not.toBeNull();
+
+    // The setup added the mail records, which are now locked.
+    const records = (await (await listRecords(route, zoneId)).json()).data as Array<{
+      type: string;
+      name: string;
+      locked: boolean;
+      locked_reason?: string;
+    }>;
+    expect(records.filter(record => record.type === 'MX' && record.name === 'example.org')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ locked: true, locked_reason: 'mail_receiving' }),
+      ])
+    );
+    expect(records.find(record => record.name === '_dmarc.example.org')).toMatchObject({
+      locked: true,
+      locked_reason: 'mail_dmarc',
+    });
+    expect(records.find(record => record.type === 'A')).toMatchObject({ locked: false });
+
+    // Another organization neither sees the zone nor takes its apex.
+    activeOrganization = await secondOrganization();
+    expect(
+      (await (await route.listMailZonesRoute(request('/api/mail-zones'))).json()).data
+    ).toEqual([]);
+    await expectError(
+      await route.getMailZoneRoute(request(`/api/mail-zones/${zoneId}`), String(zoneId)),
+      404,
+      'MAILBOX.ZONE_NOT_FOUND'
+    );
+    await expectError(await listRecords(route, zoneId), 404, 'MAILBOX.ZONE_NOT_FOUND');
+    await expectError(
+      await connectDomain(route, { name: 'shop.example.org' }),
+      409,
+      'MAILBOX.DOMAIN_TAKEN'
+    );
+  });
+
+  it('limits managed zones and removes a pending one once no domain lives in it', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+
+    const ids: Array<{ domain: number; zone: number }> = [];
+    for (const name of ['one.example', 'two.example', 'three.example']) {
+      const domain = (await (await connectDomain(route, { name })).json()).data;
+      ids.push({ domain: domain.id, zone: domain.zone.id });
+    }
+    await expectError(
+      await connectDomain(route, { name: 'four.example' }),
+      422,
+      'MAILBOX.ZONE_LIMIT_REACHED'
+    );
+
+    const [first, second] = ids;
+    await route.deleteMailDomainRoute(
+      request(`/api/mail-domains/${first.domain}`, { method: 'DELETE' }),
+      String(first.domain)
+    );
+    expect((await deleteZone(route, first.zone)).status).toBe(204);
+    await expectError(await deleteZone(route, first.zone), 404, 'MAILBOX.ZONE_NOT_FOUND');
+
+    // An active zone stays while the registrar may still delegate to Cloudflare.
+    await checkDomain(route, second.domain);
+    await route.deleteMailDomainRoute(
+      request(`/api/mail-domains/${second.domain}`, { method: 'DELETE' }),
+      String(second.domain)
+    );
+    await expectError(await deleteZone(route, second.zone), 409, 'MAILBOX.ZONE_STILL_DELEGATED');
+
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect((await route.listMailZonesRoute(request('/api/mail-zones'))).status).toBe(200);
+    await expectError(await deleteZone(route, second.zone), 403, 'PERMISSION.DENIED');
+  });
+
+  it('edits managed zone DNS records in the mock and keeps mail records locked', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const domain = (await (await connectDomain(route, { name: 'example.org' })).json()).data;
+    const zoneId: number = domain.zone.id;
+    await checkDomain(route, domain.id);
+
+    const created = await createRecord(route, zoneId, {
+      type: 'A',
+      name: 'app',
+      content: '192.0.2.20',
+      proxied: true,
+    });
+    expect(created.status).toBe(201);
+    const record = (await created.json()).data;
+    expect(record).toMatchObject({
+      type: 'A',
+      name: 'app.example.org',
+      content: '192.0.2.20',
+      ttl: 1,
+      proxied: true,
+      locked: false,
+    });
+    expect(record.id).toMatch(/^[A-Za-z0-9]{1,64}$/u);
+
+    const updated = await updateRecord(route, zoneId, record.id, {
+      content: '192.0.2.21',
+      ttl: 300,
+    });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).data).toMatchObject({
+      id: record.id,
+      content: '192.0.2.21',
+      ttl: 300,
+      proxied: true,
+    });
+
+    const invalid = await createRecord(route, zoneId, { type: 'A', name: 'bad', content: 'nope' });
+    expect(invalid.status).toBe(422);
+    await expect(invalid.json()).resolves.toMatchObject({
+      error_code: 'MAILBOX.DNS_RECORD_INVALID',
+      errors: { content: [expect.any(String)] },
+    });
+    await expectError(
+      await createRecord(route, zoneId, { type: 'MX', name: '@', content: 'mx.other.example' }),
+      422,
+      'MAILBOX.DNS_RECORD_INVALID'
+    );
+    // Email Routing owns the MX of a receiving domain, and DMARC belongs to Zmail mail.
+    await expectError(
+      await createRecord(route, zoneId, {
+        type: 'MX',
+        name: '@',
+        content: 'mx.other.example',
+        priority: 5,
+      }),
+      409,
+      'MAILBOX.DNS_RECORD_LOCKED'
+    );
+    await expectError(
+      await createRecord(route, zoneId, {
+        type: 'TXT',
+        name: '_dmarc',
+        content: 'v=DMARC1; p=reject',
+      }),
+      409,
+      'MAILBOX.DNS_RECORD_LOCKED'
+    );
+
+    const records = (await (await listRecords(route, zoneId)).json()).data as Array<{
+      id: string;
+      locked: boolean;
+    }>;
+    const locked = records.find(item => item.locked);
+    expect(locked).toBeDefined();
+    await expectError(
+      await updateRecord(route, zoneId, locked!.id, { ttl: 300 }),
+      409,
+      'MAILBOX.DNS_RECORD_LOCKED'
+    );
+    await expectError(
+      await deleteRecord(route, zoneId, locked!.id),
+      409,
+      'MAILBOX.DNS_RECORD_LOCKED'
+    );
+
+    expect((await deleteRecord(route, zoneId, record.id)).status).toBe(204);
+    await expectError(
+      await deleteRecord(route, zoneId, record.id),
+      404,
+      'MAILBOX.DNS_RECORD_NOT_FOUND'
+    );
+    await expectError(
+      await updateRecord(route, zoneId, 'missing1', { ttl: 300 }),
+      404,
+      'MAILBOX.DNS_RECORD_NOT_FOUND'
+    );
+
+    // Shape checks come before the store, and record IDs are Cloudflare's alphanumerics.
+    await expectError(
+      await createRecord(route, zoneId, { type: 'A', name: 'x', content: 1 }),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    await expectError(
+      await updateRecord(route, zoneId, record.id, { proxied: 'yes' }),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    await expectError(await deleteRecord(route, zoneId, 'bad-id'), 400, 'COMMON.INVALID_INPUT');
+
+    // Members read the records but never change them.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect((await listRecords(route, zoneId)).status).toBe(200);
+    await expectError(
+      await createRecord(route, zoneId, { type: 'A', name: 'x', content: '192.0.2.1' }),
+      403,
+      'PERMISSION.DENIED'
+    );
+  });
+
+  it('previews a domain and enables receiving on a send-only domain in the mock', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    const route = await loadRoute();
+
+    // An apex usually has mail elsewhere; a fresh subdomain has none. Members may preview.
+    const apex = await preview(route, { name: ' Example.ORG. ' });
+    expect(apex.status).toBe(200);
+    expect((await apex.json()).data).toEqual({
+      name: 'example.org',
+      apex: 'example.org',
+      existing_mx: ['mx1.provider.example', 'mx2.provider.example'],
+      suggested_capability: 'send_only',
+    });
+    expect((await (await preview(route, { name: 'mail.example.org' })).json()).data).toEqual({
+      name: 'mail.example.org',
+      apex: 'example.org',
+      existing_mx: [],
+      suggested_capability: 'send_receive',
+    });
+    await expectError(
+      await preview(route, { name: 'not a domain' }),
+      422,
+      'MAILBOX.DOMAIN_INVALID'
+    );
+    await expectError(
+      await preview(route, { name: 'mail.example.com' }),
+      409,
+      'MAILBOX.DOMAIN_TAKEN'
+    );
+    await expectError(await preview(route, { name: 7 }), 422, 'COMMON.VALIDATION_FAILED');
+
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    await expectError(
+      await connectDomain(route, { name: 'news.example.com', capability: 'receive_only' }),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    const sendOnly = (
+      await (
+        await connectDomain(route, { name: 'news.example.com', capability: 'send_only' })
+      ).json()
+    ).data;
+    expect(sendOnly.capability).toBe('send_only');
+    expect(sendOnly.records.some((item: { purpose: string }) => item.purpose === 'receiving')).toBe(
+      false
+    );
+
+    const enabled = await receiving(route, sendOnly.id);
+    expect(enabled.status).toBe(200);
+    const upgraded = (await enabled.json()).data;
+    expect(upgraded.capability).toBe('send_receive');
+    expect(upgraded.records.some((item: { purpose: string }) => item.purpose === 'receiving')).toBe(
+      true
+    );
+    // Already receiving: answered unchanged.
+    expect((await (await receiving(route, sendOnly.id)).json()).data).toMatchObject({
+      capability: 'send_receive',
+    });
+    await expectError(await receiving(route, 999), 404, 'MAILBOX.DOMAIN_NOT_FOUND');
+
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    await expectError(await receiving(route, sendOnly.id), 403, 'PERMISSION.DENIED');
+  });
+
+  it('forwards managed zone, preview, and receiving routes to the fixed API paths', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () => Response.json({ code: 0, message: 'ok', data: [] }));
+    const route = await loadRoute();
+
+    await preview(route, { name: 'example.org' });
+    await connectDomain(route, { name: 'example.org', capability: 'send_only' });
+    await receiving(route, 3);
+    await route.listMailZonesRoute(request('/api/mail-zones'));
+    await route.getMailZoneRoute(request('/api/mail-zones/4'), '4');
+    await deleteZone(route, 4);
+    await listRecords(route, 4);
+    await createRecord(route, 4, {
+      type: 'MX',
+      name: '@',
+      content: 'mx.example.net',
+      priority: 10,
+    });
+    await updateRecord(route, 4, 'abc123', { content: '192.0.2.2', proxied: false });
+    await deleteRecord(route, 4, 'abc123');
+
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => `${init?.method} ${new URL(String(url)).pathname}`)
+    ).toEqual([
+      'POST /v1/mail-domain-previews',
+      'POST /v1/mail-domains',
+      'POST /v1/mail-domains/3/receiving',
+      'GET /v1/mail-zones',
+      'GET /v1/mail-zones/4',
+      'DELETE /v1/mail-zones/4',
+      'GET /v1/mail-zones/4/dns-records',
+      'POST /v1/mail-zones/4/dns-records',
+      'PATCH /v1/mail-zones/4/dns-records/abc123',
+      'DELETE /v1/mail-zones/4/dns-records/abc123',
+    ]);
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      init?.body ? JSON.parse(String(init.body)) : undefined
+    );
+    expect(bodies[0]).toEqual({ name: 'example.org' });
+    expect(bodies[1]).toEqual({ name: 'example.org', capability: 'send_only' });
+    expect(bodies[2]).toBeUndefined();
+    expect(bodies[7]).toEqual({ type: 'MX', name: '@', content: 'mx.example.net', priority: 10 });
+    expect(bodies[8]).toEqual({ content: '192.0.2.2', proxied: false });
+
+    // Malformed input and IDs never reach the API.
+    fetchMock.mockClear();
+    await expectError(await deleteRecord(route, 4, 'a/b'), 400, 'COMMON.INVALID_INPUT');
+    await expectError(await listRecords(route, 0), 400, 'COMMON.INVALID_INPUT');
+    await expectError(
+      await createRecord(route, 4, { type: 'A', name: 'x', content: '192.0.2.1', ttl: '60' }),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    await expectError(await preview(route, {}), 422, 'COMMON.VALIDATION_FAILED');
+    const crossOrigin = await route.createMailDnsRecordRoute(
+      request('/api/mail-zones/4/dns-records', {
+        method: 'POST',
+        body: '{',
+        origin: 'https://evil.example',
+      }),
+      '4'
+    );
+    expect(crossOrigin.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('passes managed zone and DNS record failures from the API through unchanged', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    const upstream = (status: number, errorCode: string, extra: Record<string, unknown> = {}) =>
+      Response.json(
+        { code: status, error_code: errorCode, message: 'cloudflare said no', ...extra },
+        { status }
+      );
+    fetchMock
+      .mockResolvedValueOnce(upstream(409, 'MAILBOX.DNS_RECORD_LOCKED'))
+      .mockResolvedValueOnce(
+        upstream(422, 'MAILBOX.DNS_RECORD_INVALID', { errors: { content: ['not an IPv4'] } })
+      )
+      .mockResolvedValueOnce(upstream(422, 'MAILBOX.DNS_RECORD_REJECTED'))
+      .mockResolvedValueOnce(upstream(404, 'MAILBOX.DNS_RECORD_NOT_FOUND'))
+      .mockResolvedValueOnce(upstream(404, 'MAILBOX.ZONE_NOT_FOUND'))
+      .mockResolvedValueOnce(upstream(409, 'MAILBOX.ZONE_STILL_DELEGATED'))
+      .mockResolvedValueOnce(upstream(409, 'MAILBOX.ZONE_PENDING'))
+      .mockResolvedValueOnce(upstream(422, 'MAILBOX.ZONE_LIMIT_REACHED'))
+      .mockResolvedValueOnce(
+        Response.json({ code: 0, message: 'ok', data: { id: 3, zone_check_limited: true } })
+      );
+    const route = await loadRoute();
+
+    await expectError(
+      await updateRecord(route, 4, 'abc123', { ttl: 300 }),
+      409,
+      'MAILBOX.DNS_RECORD_LOCKED'
+    );
+    const invalid = await createRecord(route, 4, { type: 'A', name: 'x', content: 'nope' });
+    expect(invalid.status).toBe(422);
+    const invalidBody = await invalid.json();
+    expect(invalidBody).toMatchObject({
+      error_code: 'MAILBOX.DNS_RECORD_INVALID',
+      errors: { content: [expect.any(String)] },
+    });
+    const rejected = await createRecord(route, 4, { type: 'A', name: 'x', content: '192.0.2.1' });
+    expect(rejected.status).toBe(422);
+    const rejectedBody = await rejected.json();
+    expect(rejectedBody.error_code).toBe('MAILBOX.DNS_RECORD_REJECTED');
+    expect(JSON.stringify(rejectedBody)).not.toContain('cloudflare said no');
+    await expectError(await deleteRecord(route, 4, 'abc123'), 404, 'MAILBOX.DNS_RECORD_NOT_FOUND');
+    await expectError(await listRecords(route, 4), 404, 'MAILBOX.ZONE_NOT_FOUND');
+    await expectError(await deleteZone(route, 4), 409, 'MAILBOX.ZONE_STILL_DELEGATED');
+    await expectError(await receiving(route, 3), 409, 'MAILBOX.ZONE_PENDING');
+    await expectError(
+      await connectDomain(route, { name: 'example.org' }),
+      422,
+      'MAILBOX.ZONE_LIMIT_REACHED'
+    );
+    // A rate-limited zone check is a flag on the answer, not an error.
+    const limited = await checkDomain(route, 3);
+    expect(limited.status).toBe(200);
+    expect((await limited.json()).data).toMatchObject({ zone_check_limited: true });
   });
 
   it('forwards contact routes to the fixed API paths', async () => {
@@ -2468,6 +2916,83 @@ function send(route: MailboxRoute, mailboxId: number, body: Record<string, unkno
   return route.sendMailMessageRoute(
     request(`/api/mailboxes/${mailboxId}/messages`, { method: 'POST', body: JSON.stringify(body) }),
     String(mailboxId)
+  );
+}
+
+function connectDomain(route: MailboxRoute, body: Record<string, unknown>) {
+  return route.connectMailDomainRoute(
+    request('/api/mail-domains', { method: 'POST', body: JSON.stringify(body) })
+  );
+}
+
+function checkDomain(route: MailboxRoute, domainId: number) {
+  return route.refreshMailDomainRoute(
+    request(`/api/mail-domains/${domainId}/checks`, { method: 'POST' }),
+    String(domainId),
+    'checks'
+  );
+}
+
+function receiving(route: MailboxRoute, domainId: number) {
+  return route.enableMailDomainReceivingRoute(
+    request(`/api/mail-domains/${domainId}/receiving`, { method: 'POST' }),
+    String(domainId)
+  );
+}
+
+function preview(route: MailboxRoute, body: Record<string, unknown>) {
+  return route.previewMailDomainRoute(
+    request('/api/mail-domain-previews', { method: 'POST', body: JSON.stringify(body) })
+  );
+}
+
+function deleteZone(route: MailboxRoute, zoneId: number) {
+  return route.deleteMailZoneRoute(
+    request(`/api/mail-zones/${zoneId}`, { method: 'DELETE' }),
+    String(zoneId)
+  );
+}
+
+function listRecords(route: MailboxRoute, zoneId: number) {
+  return route.listMailDnsRecordsRoute(
+    request(`/api/mail-zones/${zoneId}/dns-records`),
+    String(zoneId)
+  );
+}
+
+function createRecord(route: MailboxRoute, zoneId: number, body: Record<string, unknown>) {
+  return route.createMailDnsRecordRoute(
+    request(`/api/mail-zones/${zoneId}/dns-records`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+    String(zoneId)
+  );
+}
+
+function updateRecord(
+  route: MailboxRoute,
+  zoneId: number,
+  recordId: string,
+  body: Record<string, unknown>
+) {
+  return route.updateMailDnsRecordRoute(
+    request(`/api/mail-zones/${zoneId}/dns-records/${recordId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+    String(zoneId),
+    recordId
+  );
+}
+
+function deleteRecord(route: MailboxRoute, zoneId: number, recordId: string) {
+  return route.deleteMailDnsRecordRoute(
+    request(`/api/mail-zones/${zoneId}/dns-records/${encodeURIComponent(recordId)}`, {
+      method: 'DELETE',
+    }),
+    String(zoneId),
+    recordId
   );
 }
 
