@@ -151,15 +151,16 @@ func (s *service) PreviewTemplate(ctx context.Context, organizationID uint, inpu
 // sends it from one of the organization's mailboxes like any other message.
 func (s *service) SendTemplateTest(
 	ctx context.Context,
-	organizationID, templateID, mailboxID uint,
+	viewer domain.OrganizationContext,
+	templateID, mailboxID uint,
 	to []string,
 	values map[string]string,
 ) (*domain.MailMessage, error) {
-	template, err := s.templates.FindTemplate(ctx, organizationID, templateID)
+	template, err := s.templates.FindTemplate(ctx, viewer.OrganizationID, templateID)
 	if err != nil {
 		return nil, err
 	}
-	mailbox, err := s.repo.FindMailbox(ctx, organizationID, mailboxID)
+	mailbox, err := s.authorizeMailbox(ctx, viewer, mailboxID, canSend)
 	if err != nil {
 		return nil, err
 	}

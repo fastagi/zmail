@@ -18,10 +18,11 @@ type fakeRepository struct {
 	listFn    func(context.Context, uint, int, int) ([]*domain.OrganizationMembership, int64, error)
 	updateFn  func(context.Context, *domain.Organization) error
 	countFn   func(context.Context, uint) (int64, int64, error)
+	removeFn  func(context.Context, uint, uint, uint) (*domain.OrganizationMembership, error)
 }
 
 func newOrganizationService(repo domain.OrganizationRepository) *service {
-	return NewService(repo, nil, nil, InvitationPolicy{TTL: 7 * 24 * time.Hour})
+	return NewService(repo, nil, nil, InvitationPolicy{TTL: 7 * 24 * time.Hour}, nil)
 }
 
 func (r *fakeRepository) CreateWithOwner(ctx context.Context, organization *domain.Organization, owner *domain.OrganizationMembership) error {
@@ -51,8 +52,11 @@ func (r *fakeRepository) ChangeMemberRole(context.Context, uint, uint, uint, dom
 	return nil, nil
 }
 
-func (r *fakeRepository) RemoveMember(context.Context, uint, uint, uint) (*domain.OrganizationMembership, error) {
-	return nil, nil
+func (r *fakeRepository) RemoveMember(ctx context.Context, organizationID, userID, memberID uint) (*domain.OrganizationMembership, error) {
+	if r.removeFn == nil {
+		return nil, nil
+	}
+	return r.removeFn(ctx, organizationID, userID, memberID)
 }
 
 func (r *fakeRepository) TransferOwnership(context.Context, uint, uint, uint, time.Time) (*domain.OrganizationOwnershipTransfer, error) {

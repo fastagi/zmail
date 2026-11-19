@@ -135,7 +135,7 @@ func TestServiceInvitePersistsHashedTokenBeforeEmail(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, repo, mailer, InvitationPolicy{TTL: 7 * 24 * time.Hour})
+	svc := NewService(repo, repo, mailer, InvitationPolicy{TTL: 7 * 24 * time.Hour}, nil)
 	svc.now = func() time.Time { return now }
 
 	result, err := svc.Invite(context.Background(), 17, 42, &CreateOrganizationInvitationRequest{
@@ -165,7 +165,7 @@ func TestServiceInviteKeepsInvitationWhenEmailFails(t *testing.T) {
 			return errors.New("provider unavailable")
 		},
 	}
-	svc := NewService(repo, repo, mailer, InvitationPolicy{TTL: 7 * 24 * time.Hour})
+	svc := NewService(repo, repo, mailer, InvitationPolicy{TTL: 7 * 24 * time.Hour}, nil)
 
 	result, err := svc.Invite(context.Background(), 17, 42, &CreateOrganizationInvitationRequest{
 		Email: "member@example.com",
@@ -188,7 +188,7 @@ func TestServiceInviteReportsUnconfiguredEmailAfterPersistence(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewService(repo, repo, &invitationMailerStub{}, InvitationPolicy{TTL: 7 * 24 * time.Hour})
+	svc := NewService(repo, repo, &invitationMailerStub{}, InvitationPolicy{TTL: 7 * 24 * time.Hour}, nil)
 
 	result, err := svc.Invite(context.Background(), 17, 42, &CreateOrganizationInvitationRequest{
 		Email: "member@example.com",
@@ -221,7 +221,7 @@ func TestServiceInviteRequiresManagerAndNonOwnerRole(t *testing.T) {
 					return nil
 				},
 			}
-			svc := NewService(repo, repo, &invitationMailerStub{}, InvitationPolicy{TTL: 7 * 24 * time.Hour})
+			svc := NewService(repo, repo, &invitationMailerStub{}, InvitationPolicy{TTL: 7 * 24 * time.Hour}, nil)
 
 			_, err := svc.Invite(context.Background(), 17, 42, &CreateOrganizationInvitationRequest{
 				Email: "member@example.com",
@@ -247,7 +247,7 @@ func TestServiceAcceptInvitationHashesToken(t *testing.T) {
 			}, &domain.OrganizationInvitation{ID: 73, OrganizationID: 42}, nil
 		},
 	}
-	svc := NewService(repo, repo, &invitationMailerStub{}, InvitationPolicy{TTL: 7 * 24 * time.Hour})
+	svc := NewService(repo, repo, &invitationMailerStub{}, InvitationPolicy{TTL: 7 * 24 * time.Hour}, nil)
 	svc.now = func() time.Time { return now }
 
 	membership, err := svc.AcceptInvitation(context.Background(), 29, &AcceptOrganizationInvitationRequest{Token: "oinv_test.secret"})

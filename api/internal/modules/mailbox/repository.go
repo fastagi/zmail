@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -65,6 +66,11 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 			Address:        mailbox.Address,
 			DisplayName:    mailbox.DisplayName,
 			RoutingRuleID:  mailbox.RoutingRuleID,
+			Type:           string(mailbox.Type),
+			OwnerUserID:    mailbox.OwnerUserID,
+		}
+		if po.Type == "" {
+			po.Type = string(domain.MailboxTypeShared)
 		}
 		if err := tx.Create(po).Error; err != nil {
 			if isUniqueViolation(err) {
@@ -79,7 +85,7 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 	})
 }
 
-func (r *repository) ListMailboxes(ctx context.Context, organizationID uint) ([]*domain.Mailbox, error) {
+func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMembershipID uint) ([]*domain.Mailbox, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
@@ -102,15 +108,20 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID uint) ([]
 		return mailboxes, nil
 	}
 
-	// One grouped query for every mailbox, served by the (mailbox_id, direction) index.
+	// One grouped query for every mailbox, served by the (mailbox_id, direction) index: inbound
+	// mail after the seal boundary without a read row of the reader.
 	var counts []struct {
 		MailboxID uint
 		Unread    int
 	}
-	err = r.conn(ctx).Model(&MailMessagePO{}).
-		Select("mailbox_id, COUNT(*) AS unread").
-		Where("mailbox_id IN ? AND direction = ? AND read_at IS NULL", ids, string(domain.MailDirectionInbound)).
-		Group("mailbox_id").
+	err = r.conn(ctx).Table("mail_messages").
+		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
+		Select("mail_messages.mailbox_id, COUNT(*) AS unread").
+		Where("mail_messages.mailbox_id IN ? AND mail_messages.direction = ?", ids, string(domain.MailDirectionInbound)).
+		Where(unsealedMessage).
+		Where("NOT EXISTS (SELECT 1 FROM mail_message_reads WHERE mail_message_reads.message_id = mail_messages.id AND mail_message_reads.membership_id = ?)",
+			readerMembershipID).
+		Group("mail_messages.mailbox_id").
 		Scan(&counts).Error
 	if err != nil {
 		return nil, err
@@ -167,8 +178,14 @@ func (r *repository) DeleteMailbox(ctx context.Context, organizationID, id uint)
 		if result.RowsAffected == 0 {
 			return ErrMailboxNotFound
 		}
+		if err := tx.Where("mailbox_id = ?", id).Delete(&MailboxMemberPO{}).Error; err != nil {
+			return err
+		}
 		attached := tx.Model(&MailMessagePO{}).Select("id").Where("mailbox_id = ?", id)
 		if err := tx.Where("message_id IN (?)", attached).Delete(&MailAttachmentPO{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("message_id IN (?)", attached).Delete(&MailMessageReadPO{}).Error; err != nil {
 			return err
 		}
 		return tx.Where("mailbox_id = ?", id).Delete(&MailMessagePO{}).Error
@@ -264,6 +281,7 @@ func (r *repository) FindOutboundMessageForOrganization(ctx context.Context, org
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
 		Where("mail_messages.id = ? AND mailboxes.organization_id = ? AND mail_messages.direction = ?",
 			id, organizationID, string(domain.MailDirectionOutbound)).
+		Where(unsealedMessage).
 		First(&po).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -352,7 +370,7 @@ func (r *repository) ListMessages(
 		perPage = 15
 	}
 
-	query := r.conn(ctx).Model(&MailMessagePO{}).Where("mailbox_id = ?", mailboxID)
+	query := r.conn(ctx).Model(&MailMessagePO{}).Where("mailbox_id = ?", mailboxID).Where(unsealedMessage)
 	if filter.Direction != "" {
 		query = query.Where("direction = ?", string(filter.Direction))
 	}
@@ -383,7 +401,7 @@ func (r *repository) FindMessage(ctx context.Context, mailboxID, id uint) (*doma
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailMessagePO
-	if err := r.conn(ctx).Where("id = ? AND mailbox_id = ?", id, mailboxID).First(&po).Error; err != nil {
+	if err := r.conn(ctx).Where("id = ? AND mailbox_id = ?", id, mailboxID).Where(unsealedMessage).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailMessageNotFound
 		}
@@ -392,20 +410,74 @@ func (r *repository) FindMessage(ctx context.Context, mailboxID, id uint) (*doma
 	return po.toDomain(), nil
 }
 
-func (r *repository) SetMessageRead(ctx context.Context, mailboxID, id uint, readAt *time.Time) error {
+func (r *repository) SetMessageRead(ctx context.Context, mailboxID, id, membershipID uint, read bool, at time.Time) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	result := r.conn(ctx).Model(&MailMessagePO{}).
-		Where("id = ? AND mailbox_id = ?", id, mailboxID).
-		Update("read_at", readAt)
-	if result.Error != nil {
-		return result.Error
+	message, err := r.FindMessage(ctx, mailboxID, id)
+	if err != nil {
+		return err
 	}
-	if result.RowsAffected == 0 {
+	if membershipID == 0 {
+		return fmt.Errorf("%w: read state needs a membership", domain.ErrInvalidInput)
+	}
+	if message.Direction == domain.MailDirectionOutbound {
+		return nil
+	}
+	if !read {
+		return r.conn(ctx).Where("membership_id = ? AND message_id = ?", membershipID, id).Delete(&MailMessageReadPO{}).Error
+	}
+	err = r.conn(ctx).Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&MailMessageReadPO{MembershipID: membershipID, MessageID: id, ReadAt: at}).Error
+	if isForeignKeyViolation(err) {
+		// The message was deleted after it was found.
 		return ErrMailMessageNotFound
 	}
-	return nil
+	return err
+}
+
+func isForeignKeyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrForeignKeyViolated) {
+		return true
+	}
+	var stateError interface{ SQLState() string }
+	return errors.As(err, &stateError) && stateError.SQLState() == "23503"
+}
+
+func (r *repository) ReadMessages(ctx context.Context, membershipID uint, messageIDs []uint) (map[uint]bool, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	read := make(map[uint]bool, len(messageIDs))
+	if membershipID == 0 || len(messageIDs) == 0 {
+		return read, nil
+	}
+	var ids []uint
+	err := r.conn(ctx).Model(&MailMessageReadPO{}).
+		Where("membership_id = ? AND message_id IN ?", membershipID, messageIDs).
+		Pluck("message_id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		read[id] = true
+	}
+	return read, nil
+}
+
+func (r *repository) DeleteMailboxReads(ctx context.Context, mailboxID, membershipID uint) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	messages := r.conn(ctx).Model(&MailMessagePO{}).Select("id").Where("mailbox_id = ?", mailboxID)
+	query := r.conn(ctx).Where("message_id IN (?)", messages)
+	if membershipID != 0 {
+		query = query.Where("membership_id = ?", membershipID)
+	}
+	return query.Delete(&MailMessageReadPO{}).Error
 }
 
 func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) error {
@@ -413,15 +485,18 @@ func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) erro
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ? AND mailbox_id = ?", id, mailboxID).Delete(&MailMessagePO{})
+		result := tx.Where("id = ? AND mailbox_id = ?", id, mailboxID).Where(unsealedMessage).Delete(&MailMessagePO{})
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
 			return ErrMailMessageNotFound
 		}
-		// The schema cascades too; deleting here keeps file content from outliving its message
-		// even where the foreign key is absent.
+		// The schema cascades too; deleting here keeps file content and read rows from outliving
+		// their message even where the foreign key is absent.
+		if err := tx.Where("message_id = ?", id).Delete(&MailMessageReadPO{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("message_id = ?", id).Delete(&MailAttachmentPO{}).Error
 	})
 }
@@ -449,10 +524,14 @@ type mailLogRow struct {
 func (r *repository) ListMessagesForOrganization(
 	ctx context.Context,
 	organizationID uint,
+	mailboxIDs []uint,
 	filter domain.MailLogFilter,
 ) ([]*domain.MailMessage, int64, error) {
 	if r.db == nil {
 		return nil, 0, domain.ErrServiceUnavailable
+	}
+	if len(mailboxIDs) == 0 {
+		return []*domain.MailMessage{}, 0, nil
 	}
 	page, perPage := filter.Page, filter.PerPage
 	if page < 1 {
@@ -464,7 +543,8 @@ func (r *repository) ListMessagesForOrganization(
 
 	query := r.conn(ctx).Table("mail_messages").
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
-		Where("mailboxes.organization_id = ?", organizationID)
+		Where("mailboxes.organization_id = ? AND mail_messages.mailbox_id IN ?", organizationID, mailboxIDs).
+		Where(unsealedMessage)
 	if filter.Direction != "" {
 		query = query.Where("mail_messages.direction = ?", string(filter.Direction))
 	}
@@ -493,7 +573,7 @@ func (r *repository) ListMessagesForOrganization(
 			mail_messages.from_address, mail_messages.from_name, mail_messages.to_addresses,
 			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
 			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
-			mail_messages.attachment_count, mail_messages.template_id, mail_messages.read_at,
+			mail_messages.attachment_count, mail_messages.template_id,
 			mail_messages.created_at, mail_messages.updated_at, mailboxes.address AS mailbox_address`).
 		Order("mail_messages.id DESC").
 		Offset((page - 1) * perPage).
@@ -511,9 +591,12 @@ func (r *repository) ListMessagesForOrganization(
 	return messages, total, nil
 }
 
-func (r *repository) StatsForOrganization(ctx context.Context, organizationID uint, since time.Time) ([]domain.MailDayStats, error) {
+func (r *repository) StatsForOrganization(ctx context.Context, organizationID uint, mailboxIDs []uint, since time.Time) ([]domain.MailDayStats, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
+	}
+	if len(mailboxIDs) == 0 {
+		return []domain.MailDayStats{}, nil
 	}
 	var rows []struct {
 		Day      time.Time
@@ -527,7 +610,9 @@ func (r *repository) StatsForOrganization(ctx context.Context, organizationID ui
 			COUNT(*) FILTER (WHERE mail_messages.status = 'sent') AS sent,
 			COUNT(*) FILTER (WHERE mail_messages.status = 'failed') AS failed,
 			COUNT(*) FILTER (WHERE mail_messages.direction = 'inbound') AS received`).
-		Where("mailboxes.organization_id = ? AND mail_messages.created_at >= ?", organizationID, since).
+		Where("mailboxes.organization_id = ? AND mail_messages.mailbox_id IN ? AND mail_messages.created_at >= ?",
+			organizationID, mailboxIDs, since).
+		Where(unsealedMessage).
 		Group("day").
 		Order("day ASC").
 		Scan(&rows).Error
@@ -654,17 +739,22 @@ func (r *repository) FindMessageAttachment(ctx context.Context, messageID, id ui
 	return &attachment, nil
 }
 
-func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*domain.MailMessage, error) {
+// FindOutboundMessageByProviderID finds the message whatever its seal: the event is still
+// recorded, and the returned mailbox lets the caller decide what may be published.
+func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*domain.MailMessage, *domain.Mailbox, error) {
 	if r.db == nil {
-		return nil, domain.ErrServiceUnavailable
+		return nil, nil, domain.ErrServiceUnavailable
 	}
 	if providerMessageID == "" {
-		return nil, ErrMailMessageNotFound
+		return nil, nil, ErrMailMessageNotFound
 	}
 	var row struct {
 		MailMessagePO
-		MailboxAddress string
-		OrganizationID *uint
+		MailboxAddress         string
+		OrganizationID         *uint
+		MailboxType            string
+		MailboxWebhooksEnabled bool
+		MailboxSealedBefore    *time.Time
 	}
 	err := r.conn(ctx).Table("mail_messages").
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id AND mailboxes.deleted_at IS NULL").
@@ -672,25 +762,32 @@ func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, provid
 			mail_messages.from_address, mail_messages.from_name, mail_messages.to_addresses,
 			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
 			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
-			mail_messages.attachment_count, mail_messages.template_id, mail_messages.read_at, mail_messages.created_at,
+			mail_messages.attachment_count, mail_messages.template_id, mail_messages.created_at,
 			mail_messages.updated_at,
-			mailboxes.address AS mailbox_address, mailboxes.organization_id AS organization_id`).
+			mailboxes.address AS mailbox_address, mailboxes.organization_id AS organization_id,
+			mailboxes.type AS mailbox_type, mailboxes.webhooks_enabled AS mailbox_webhooks_enabled,
+			mailboxes.sealed_before AS mailbox_sealed_before`).
 		Where("mail_messages.message_id = ? AND mail_messages.direction = ?", providerMessageID, string(domain.MailDirectionOutbound)).
 		Order("mail_messages.id DESC").
 		Limit(1).
 		Scan(&row).Error
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if row.ID == 0 {
-		return nil, ErrMailMessageNotFound
+		return nil, nil, ErrMailMessageNotFound
 	}
 	message := row.toDomain()
 	message.MailboxAddress = row.MailboxAddress
+	mailbox := &domain.Mailbox{
+		ID: row.MailboxID, Address: row.MailboxAddress, Type: domain.MailboxType(row.MailboxType),
+		WebhooksEnabled: row.MailboxWebhooksEnabled, SealedBefore: row.MailboxSealedBefore,
+	}
 	if row.OrganizationID != nil {
 		message.OrganizationID = *row.OrganizationID
+		mailbox.OrganizationID = *row.OrganizationID
 	}
-	return message, nil
+	return message, mailbox, nil
 }
 
 // escapeLike makes user text match literally inside a LIKE pattern.

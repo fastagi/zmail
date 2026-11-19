@@ -439,21 +439,21 @@ func TestSendOnlyMailboxesGetNoRoutingRule(t *testing.T) {
 	// Any call to Email Routing fails the test.
 	fixture.zones.ruleErr = errors.New("email routing called for a send-only domain")
 
-	mailbox, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "hello", "", "example.org")
+	mailbox, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("hello", "", "example.org"))
 	if err != nil || mailbox.Address != "hello@example.org" || mailbox.RoutingRuleID != "" {
 		t.Fatalf("mailbox = %+v, %v", mailbox, err)
 	}
 	if len(fixture.zones.rules) != 0 {
 		t.Fatalf("rules = %v", fixture.zones.rules)
 	}
-	if deleteErr := fixture.service.DeleteMailbox(ctx, 7, mailbox.ID); deleteErr != nil {
+	if deleteErr := fixture.service.DeleteMailbox(ctx, as(7), mailbox.ID); deleteErr != nil {
 		t.Fatalf("DeleteMailbox: %v", deleteErr)
 	}
 
 	// A domain that receives still routes each address to the Email Worker.
 	fixture.zones.ruleErr = nil
 	fixture.connect(t, "news.example.com")
-	routed, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "hello", "", "news.example.com")
+	routed, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("hello", "", "news.example.com"))
 	if err != nil || routed.RoutingRuleID == "" || fixture.zones.rules[routed.RoutingRuleID] != "hello@news.example.com" {
 		t.Fatalf("routed mailbox = %+v, %v, rules = %v", routed, err, fixture.zones.rules)
 	}

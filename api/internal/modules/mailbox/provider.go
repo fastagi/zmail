@@ -20,6 +20,8 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailZoneRepository), new(*repository)),
 	wire.Bind(new(domain.MailBroadcastDispatcher), new(*service)),
 	wire.Bind(new(domain.MailZoneChecker), new(*service)),
+	// Owners and members are validated against the organization starter's memberships.
+	NewMembershipDirectory,
 	mailtransport.New,
 	mailtransport.NewDomainProvider,
 	SettingsFromConfig,
@@ -31,6 +33,11 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(Service), new(*service)),
 	NewHandler,
 )
+
+// NewMembershipDirectory reads memberships through the organization starter's repository.
+func NewMembershipDirectory(organizations domain.OrganizationRepository) membershipDirectory {
+	return organizations
+}
 
 // NewStarterManifest describes the mailbox starter: its dependencies, routes, and migrations.
 func NewStarterManifest(handler *Handler) assembly.StarterManifest {
@@ -52,6 +59,8 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_17_160000_add_broadcast_safety",
 			"2026_11_18_090000_add_mail_template_design",
 			"2026_11_18_100000_add_mail_broadcast_variables",
+			"2026_11_19_090000_add_mailbox_access",
+			"2026_11_19_100000_add_per_person_reads",
 			"2026_11_19_100000_create_mail_zones",
 		),
 	)

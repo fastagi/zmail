@@ -776,7 +776,8 @@ function TemplateTestDialog({
   const [to, setTo] = useState('');
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
   const ids = { from: useId(), to: useId(), hint: useId() };
-  const options = mailboxes.data ?? [];
+  // A test send needs `send` on the mailbox it goes from.
+  const options = (mailboxes.data ?? []).filter(mailbox => mailbox.access.send);
   const from = mailboxId ?? options[0]?.id ?? null;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {

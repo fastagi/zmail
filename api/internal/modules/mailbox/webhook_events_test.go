@@ -77,6 +77,7 @@ func TestWebhookNotifierPublishesAValidEventWithoutMailContent(t *testing.T) {
 	}
 	notification := MailNotification{
 		Type: WebhookMailBounced, OrganizationID: 3, MailboxAddress: "hello@mail.example", Message: message,
+		MailboxType: domain.MailboxTypeShared, WebhooksEnabled: true,
 		Recipient: "bob@example.com", Reason: "permanent_failure", OccurredAt: now.Add(-time.Minute), Key: "event:abc/+=",
 	}
 	if err := notifier.Notify(context.Background(), notification); err != nil {
@@ -126,11 +127,15 @@ func TestWebhookNotifierIsSilentWithoutTheStarterOrAnOrganization(t *testing.T) 
 	message := &domain.MailMessage{ID: 1, MailboxID: 1, Direction: domain.MailDirectionInbound, FromAddress: "a@b.test"}
 	publisher := &recordingPublisher{}
 	off := NewWebhookNotifier(webhookConfig(false), publisher)
-	if err := off.Notify(context.Background(), MailNotification{Type: WebhookMailReceived, OrganizationID: 1, Message: message}); err != nil {
+	if err := off.Notify(context.Background(), MailNotification{
+		Type: WebhookMailReceived, OrganizationID: 1, Message: message, MailboxType: domain.MailboxTypeShared, WebhooksEnabled: true,
+	}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	on := NewWebhookNotifier(webhookConfig(true), publisher)
-	if err := on.Notify(context.Background(), MailNotification{Type: WebhookMailReceived, Message: message}); err != nil {
+	if err := on.Notify(context.Background(), MailNotification{
+		Type: WebhookMailReceived, Message: message, MailboxType: domain.MailboxTypeShared, WebhooksEnabled: true,
+	}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	if len(publisher.events) != 0 {
@@ -145,7 +150,7 @@ func TestSendPublishesSentAndPerRecipientOutcomes(t *testing.T) {
 		MessageID: "prov-1@mail.example", Delivered: []string{"bob@example.com"},
 		Bounced: []string{"gone@example.net"}, Queued: []string{"later@example.org"},
 	}
-	message, _, err := fixture.service.SendMessage(context.Background(), 5, mailbox.ID, SendInput{
+	message, _, err := fixture.service.SendMessage(context.Background(), as(5), mailbox.ID, SendInput{
 		To: []string{"bob@example.com", "gone@example.net", "later@example.org"}, Subject: "s", Text: "b",
 	})
 	if err != nil {
@@ -168,7 +173,7 @@ func TestFailedSendPublishesFailed(t *testing.T) {
 	fixture := newServiceFixture(t)
 	mailbox := fixture.mailbox(t, 5, "hello")
 	fixture.transport.err = &mailtransport.Error{Code: "transport.unavailable"}
-	_, _, err := fixture.service.SendMessage(context.Background(), 5, mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
+	_, _, err := fixture.service.SendMessage(context.Background(), as(5), mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
 	if !errors.Is(err, ErrMailDeliveryFailed) {
 		t.Fatalf("SendMessage error = %v", err)
 	}
@@ -197,7 +202,7 @@ func TestDeliveryEventPublishesOnceAcrossRedeliveries(t *testing.T) {
 	ctx := context.Background()
 	mailbox := fixture.mailbox(t, 5, "hello")
 	fixture.transport.result = mailtransport.Result{MessageID: "prov-9@mail.example", Queued: []string{"bob@example.com"}}
-	if _, _, err := fixture.service.SendMessage(ctx, 5, mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"}); err != nil {
+	if _, _, err := fixture.service.SendMessage(ctx, as(5), mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"}); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
 	fixture.notifier.sent = nil
@@ -225,7 +230,7 @@ func TestMailStateIsRecordedWhenPublishingFails(t *testing.T) {
 	fixture.transport.result = mailtransport.Result{MessageID: "prov-f@mail.example", Delivered: []string{"bob@example.com"}}
 	fixture.notifier.failures = 1
 
-	message, _, err := fixture.service.SendMessage(ctx, 5, mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"})
+	message, _, err := fixture.service.SendMessage(ctx, as(5), mailbox.ID, SendInput{To: []string{"bob@example.com"}, Subject: "s", Text: "b"})
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}

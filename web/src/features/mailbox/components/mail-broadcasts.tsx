@@ -501,7 +501,8 @@ function BroadcastEditor({
     stagedHint: useId(),
   };
   // Senders are picked by domain first: the shared domain and every domain the organization uses.
-  const senderMailboxes = mailboxes.data ?? [];
+  // A broadcast needs `send` on its sender mailbox.
+  const senderMailboxes = (mailboxes.data ?? []).filter(mailbox => mailbox.access.send);
   const senderDomains = [...new Set(senderMailboxes.map(mailbox => domainOf(mailbox.address)))];
   const currentDomain =
     fromDomain ??
@@ -509,7 +510,7 @@ function BroadcastEditor({
     senderDomains[0] ??
     null;
   const ready =
-    (mailboxes.data?.length ?? 0) > 0 &&
+    senderMailboxes.length > 0 &&
     (templates.data?.length ?? 0) > 0 &&
     (lists.data?.length ?? 0) > 0;
   const loading = mailboxes.isPending || templates.isPending || lists.isPending;

@@ -100,14 +100,6 @@ func decodeNameServers(encoded string) []string {
 	return nameServers
 }
 
-func isForeignKeyViolation(err error) bool {
-	if errors.Is(err, gorm.ErrForeignKeyViolated) {
-		return true
-	}
-	var stateError interface{ SQLState() string }
-	return errors.As(err, &stateError) && stateError.SQLState() == "23503"
-}
-
 // CreateZone inserts a zone while holding a per-organization advisory lock, so two concurrent
 // requests cannot both pass the limit. The unique indexes decide between organizations.
 func (r *repository) CreateZone(ctx context.Context, zone *domain.MailZone, limit int) error {

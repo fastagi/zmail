@@ -22,7 +22,7 @@ func TestSendStoresAttachmentsAndHandsThemToTheProvider(t *testing.T) {
 	ctx := context.Background()
 	mailbox := fixture.mailbox(t, 1, "hello")
 
-	message, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{
+	message, _, err := fixture.service.SendMessage(ctx, as(1), mailbox.ID, SendInput{
 		To: []string{"bob@example.com"}, Subject: "Files", Text: "See attached.",
 		Attachments: []AttachmentInput{
 			{Filename: "../../etc/report.pdf", ContentType: "application/pdf; name=x", Content: b64("%PDF-1.4")},
@@ -46,11 +46,11 @@ func TestSendStoresAttachmentsAndHandsThemToTheProvider(t *testing.T) {
 		t.Fatalf("provider attachments = %+v", sent)
 	}
 
-	detail, err := fixture.service.GetMessage(ctx, 1, mailbox.ID, message.ID)
+	detail, err := fixture.service.GetMessage(ctx, as(1), mailbox.ID, message.ID)
 	if err != nil || len(detail.Attachments) != 2 || detail.Attachments[0].Size != 8 || detail.Attachments[0].Content != nil {
 		t.Fatalf("detail attachments = %+v, %v", detail.Attachments, err)
 	}
-	file, err := fixture.service.GetAttachment(ctx, 1, mailbox.ID, message.ID, detail.Attachments[1].ID)
+	file, err := fixture.service.GetAttachment(ctx, as(1), mailbox.ID, message.ID, detail.Attachments[1].ID)
 	if err != nil || string(file.Content) != "hello" || file.Filename != "notes.txt" {
 		t.Fatalf("GetAttachment = %+v, %v", file, err)
 	}
@@ -65,23 +65,23 @@ func TestAttachmentsAreInvisibleOutsideTheirMessageAndOrganization(t *testing.T)
 		To: []string{"bob@example.com"}, Subject: "s", Text: "b",
 		Attachments: []AttachmentInput{{Filename: "a.txt", Content: b64("a")}},
 	}
-	first, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input)
+	first, _, err := fixture.service.SendMessage(ctx, as(1), mailbox.ID, input)
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
-	second, _, err := fixture.service.SendMessage(ctx, 1, other.ID, input)
+	second, _, err := fixture.service.SendMessage(ctx, as(1), other.ID, input)
 	if err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
 	attachmentID := first.Attachments[0].ID
 
-	if _, err := fixture.service.GetAttachment(ctx, 2, mailbox.ID, first.ID, attachmentID); !errors.Is(err, ErrMailboxNotFound) {
+	if _, err := fixture.service.GetAttachment(ctx, as(2), mailbox.ID, first.ID, attachmentID); !errors.Is(err, ErrMailboxNotFound) {
 		t.Fatalf("another organization error = %v", err)
 	}
-	if _, err := fixture.service.GetAttachment(ctx, 1, other.ID, first.ID, attachmentID); !errors.Is(err, ErrMailMessageNotFound) {
+	if _, err := fixture.service.GetAttachment(ctx, as(1), other.ID, first.ID, attachmentID); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("wrong mailbox error = %v", err)
 	}
-	if _, err := fixture.service.GetAttachment(ctx, 1, other.ID, second.ID, attachmentID); !errors.Is(err, ErrMailMessageNotFound) {
+	if _, err := fixture.service.GetAttachment(ctx, as(1), other.ID, second.ID, attachmentID); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("another message's attachment error = %v", err)
 	}
 }
@@ -102,7 +102,7 @@ func TestSendRejectsUnusableAttachments(t *testing.T) {
 		"control name":  {{Filename: "\x00\n", Content: b64("a")}},
 		"total too big": {{Filename: "a.bin", Content: half}, {Filename: "b.bin", Content: half}},
 	} {
-		_, _, err := fixture.service.SendMessage(context.Background(), 1, mailbox.ID, SendInput{
+		_, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, SendInput{
 			To: []string{"x@example.com"}, Subject: "s", Text: "b", Attachments: attachments,
 		})
 		if !errors.Is(err, ErrMailMessageInvalid) {
@@ -122,14 +122,14 @@ func TestIdempotencyKeyCoversAttachments(t *testing.T) {
 		To: []string{"x@example.com"}, Subject: "s", Text: "b", IdempotencyKey: "key-1",
 		Attachments: []AttachmentInput{{Filename: "a.txt", Content: b64("first")}},
 	}
-	if _, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input); err != nil {
+	if _, _, err := fixture.service.SendMessage(ctx, as(1), mailbox.ID, input); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
-	if _, created, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input); err != nil || created {
+	if _, created, err := fixture.service.SendMessage(ctx, as(1), mailbox.ID, input); err != nil || created {
 		t.Fatalf("replay = created %v, %v", created, err)
 	}
 	input.Attachments = []AttachmentInput{{Filename: "a.txt", Content: b64("second")}}
-	if _, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, input); !errors.Is(err, ErrMailIdempotencyConflict) {
+	if _, _, err := fixture.service.SendMessage(ctx, as(1), mailbox.ID, input); !errors.Is(err, ErrMailIdempotencyConflict) {
 		t.Fatalf("changed attachment error = %v; want a conflict", err)
 	}
 	if len(fixture.transport.sent) != 1 {
@@ -227,11 +227,11 @@ func TestInboundStoresAttachments(t *testing.T) {
 	if err != nil || !created || message.AttachmentCount != 3 {
 		t.Fatalf("ReceiveInbound = %+v, created %v, %v", message, created, err)
 	}
-	detail, err := fixture.service.GetMessage(ctx, 1, mailbox.ID, message.ID)
+	detail, err := fixture.service.GetMessage(ctx, as(1), mailbox.ID, message.ID)
 	if err != nil || len(detail.Attachments) != 3 {
 		t.Fatalf("detail = %+v, %v", detail, err)
 	}
-	file, err := fixture.service.GetAttachment(ctx, 1, mailbox.ID, message.ID, detail.Attachments[0].ID)
+	file, err := fixture.service.GetAttachment(ctx, as(1), mailbox.ID, message.ID, detail.Attachments[0].ID)
 	if err != nil || string(file.Content) != "%PDF-1.4" {
 		t.Fatalf("GetAttachment = %+v, %v", file, err)
 	}
@@ -241,7 +241,7 @@ func TestDownloadAttachmentIsAnOpaquePrivateDownload(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
 	fixture.router.GET("/mailboxes/:mailbox_id/messages/:message_id/attachments/:attachment_id",
 		NewHandler(fixture.service).DownloadAttachment)
-	mailbox, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "hello", "", "")
+	mailbox, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedWithHandlerUser("hello", domain.MailboxPermissionSend))
 	if err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}

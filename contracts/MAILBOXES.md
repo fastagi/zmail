@@ -4,8 +4,8 @@ This contract owns the optional `mailbox` starter across the Go API, the Web mai
 fixed production API adapter, the development mock BFF, and the Cloudflare Email Worker that
 delivers inbound mail. It defines mailboxes owned by an organization on the instance's shared
 domain or on a domain the organization connected, sending through a mail provider from a session or
-an API key, and signed inbound delivery. It does not define per-mailbox access rules or domains on
-DNS providers other than Cloudflare.
+an API key, per-mailbox access (personal and shared mailboxes with member permissions), and signed
+inbound delivery. It does not define domains on DNS providers other than Cloudflare.
 
 ## Activation
 
@@ -23,15 +23,18 @@ resolves the caller's membership of it on each request: a missing header is
 organization the caller does not belong to is `404 ORGANIZATION.NOT_FOUND`, exactly like one that
 does not exist. A mailbox or message of another organization is likewise reported as missing.
 
+Within the organization, what a caller may do with a mailbox follows from the mailbox's access
+(see [Access](#access)), not from the organization role alone:
+
 | Role | May |
 |---|---|
-| `member` | List domains, managed zones, their DNS records, and mailboxes; preview a domain; list, read, send, mark read or unread, and delete messages; read the log and statistics |
-| `owner`, `admin` | Everything a member may, create and delete mailboxes, connect, set up, check, enable receiving on, and remove domains, remove managed zones, and create, change, and delete their DNS records |
+| `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, and delete mail as their access allows; read the log and statistics of the mailboxes they may read |
+| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records |
 
-A member who creates or deletes a mailbox gets `403 PERMISSION.DENIED`. The user who created a
-mailbox is recorded but has no special rights to it; removing that user from the organization
-changes nothing about the mailbox. A removed member loses access on their next request. Read state
-is shared: a message one member reads is read for the whole organization.
+The owner and admin roles never grant reading or sending mail by themselves: an admin reads a
+mailbox only as a member of it, and the access history records how they became one. A member who
+creates or deletes a mailbox gets `403 PERMISSION.DENIED`. The user who created a mailbox is
+recorded but has no special rights to it. A removed member loses access on their next request.
 
 | Operation | Browser route | Go API route | Success |
 |---|---|---|---|
@@ -54,6 +57,13 @@ is shared: a message one member reads is read for the whole organization.
 | List mailboxes | `GET /api/mailboxes` | `GET /v1/mailboxes` | `200` envelope, at most 50 items |
 | Create mailbox | `POST /api/mailboxes` | `POST /v1/mailboxes` | `201` envelope |
 | Delete mailbox | `DELETE /api/mailboxes/:id` | `DELETE /v1/mailboxes/:mailbox_id` | `204` |
+| List members | `GET /api/mailboxes/:id/members` | `GET /v1/mailboxes/:mailbox_id/members` | `200` envelope, at most 100 items |
+| Set a member | `PUT /api/mailboxes/:id/members/:userId` | `PUT /v1/mailboxes/:mailbox_id/members/:user_id` | `200` envelope |
+| Remove a member | `DELETE /api/mailboxes/:id/members/:userId` | `DELETE /v1/mailboxes/:mailbox_id/members/:user_id` | `204` |
+| Access history | `GET /api/mailboxes/:id/access-events` | `GET /v1/mailboxes/:mailbox_id/access-events` | Paginated envelope |
+| Hand over a personal mailbox | `POST /api/mailboxes/:id/handovers` | `POST /v1/mailboxes/:mailbox_id/handovers` | `201` envelope |
+| Delete sealed history | `DELETE /api/mailboxes/:id/sealed-messages` | `DELETE /v1/mailboxes/:mailbox_id/sealed-messages` | `200` envelope |
+| Webhook switch | `PUT /api/mailboxes/:id/webhook-setting` | `PUT /v1/mailboxes/:mailbox_id/webhook-setting` | `200` envelope |
 | List messages | `GET /api/mailboxes/:id/messages` | `GET /v1/mailboxes/:mailbox_id/messages` | Paginated envelope |
 | Send message | `POST /api/mailboxes/:id/messages` | `POST /v1/mailboxes/:mailbox_id/messages` | `201` envelope |
 | Get message | `GET /api/mailboxes/:id/messages/:messageId` | `GET /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
@@ -76,8 +86,17 @@ has no browser route: only the mail edge calls it.
 `POST /v1/mailboxes`:
 
 ```json
-{ "local_part": "hello", "display_name": "Hello Team", "domain": "example.com" }
+{
+  "local_part": "hello",
+  "display_name": "Hello Team",
+  "domain": "example.com",
+  "type": "shared",
+  "members": [{ "user_id": 7, "permission": "send" }]
+}
 ```
+
+- `type` is required: `personal` with `owner_user_id`, or `shared` with `members`. See
+  [Access](#access) for what each grants and how invalid access answers.
 
 - `local_part` is trimmed and lowercased. It is 1 to 64 characters of lowercase ASCII letters and
   digits, with single inner `.`, `_`, or `-`. Anything else is `422 MAILBOX.ADDRESS_INVALID`.
@@ -108,14 +127,26 @@ has no browser route: only the mail edge calls it.
     "id": 12,
     "address": "hello@mail.example.com",
     "display_name": "Hello Team",
+    "type": "shared",
+    "owner_user_id": null,
+    "awaiting_handover": false,
+    "sealed_before": null,
+    "webhooks_enabled": false,
+    "access": { "view": false, "send": false, "manage_members": true, "administer": true, "see_history": true },
     "unread_count": 0,
     "created_at": "2026-11-16T10:00:00Z"
   }
 }
 ```
 
-`unread_count` is the number of unread inbound messages in the mailbox; sent messages never
-count.
+`unread_count` is the number of inbound messages after the seal boundary that the caller has not
+read (see [Read State](#read-state)); sent messages never count. It is `0` for a caller who may not
+read the mailbox. `access` is what the caller may do with the mailbox; clients show or hide
+controls from it. `awaiting_handover` is `true` while a personal mailbox's owner has left the
+organization and nobody has taken it over (see [Departure And Handover](#departure-and-handover)).
+`sealed_before` is the seal boundary set at handover, `null` when nothing is sealed.
+`webhooks_enabled` is the [webhook switch](#webhook-switch); it is always `false` on a personal
+mailbox.
 
 Deleting a mailbox deletes its messages in the same transaction; the address stays reserved and
 later mail for it is answered `404 MAILBOX.RECIPIENT_NOT_FOUND`. A mailbox on a connected domain
@@ -123,6 +154,174 @@ also loses its routing rule; if Cloudflare refuses to delete the rule, the delet
 and mail for the address is answered `404` as above. Deleting a user account does not
 touch mailboxes: the organization starter already refuses to delete an account that still belongs
 to an organization.
+
+## Access
+
+Every mailbox is one of two types:
+
+- **Personal** mailboxes belong to one member, the owner (`owner_user_id`). The owner reads,
+  sends, replies, and deletes; nobody else reads or sends, and a personal mailbox has no members.
+- **Shared** mailboxes are worked by named members, 1 to 100, each with one permission. Each level
+  includes the previous one:
+
+| Permission | Grants |
+|---|---|
+| `view` | Read messages, attachments, and the mailbox's broadcasts; mark messages read or unread |
+| `send` | Also send, reply, delete messages, and create, edit, and delete the mailbox's broadcasts |
+| `manage` | Also list, add, change, and remove members, and read the access history |
+
+A caller's access is the union of what the organization role, the personal ownership, and the
+member row grant. It is returned as `access`:
+
+| Flag | Who has it |
+|---|---|
+| `view`, `send` | The personal owner; shared members by permission |
+| `manage_members` | Owners and admins on shared mailboxes; `manage` members |
+| `administer` | Owners and admins: delete the mailbox, hand it over, delete its sealed history |
+| `see_history` | Owners and admins; the personal owner; `manage` members |
+
+A caller with no access at all to a mailbox gets `404 MAILBOX.NOT_FOUND` on every route of it,
+exactly like a mailbox that does not exist, and does not see it in `GET /v1/mailboxes`. A caller
+with some access but not the one a route needs gets `403 PERMISSION.DENIED`. So an admin who is not
+a member sees a mailbox listed but gets `403` when opening its mail.
+
+| Route | Needs |
+|---|---|
+| List, read, download attachments, mark read or unread | `view` |
+| Send, delete a message | `send` |
+| Delete the mailbox | `administer` |
+| List, set, remove members; webhook switch | `manage_members` |
+| Hand over; delete sealed history | `administer` |
+| Access history | `see_history` |
+
+### Read State
+
+Read state is per person. `read` on a message and `unread_count` on a mailbox are the caller's own:
+marking a message read or unread with `PUT .../messages/:message_id` needs `view` and changes it
+only for the caller. Outbound messages are always `read: true` for everyone, and marking one changes
+nothing. Reading mail with an API key never changes read state. A person who loses access to a
+mailbox (removed as a member, handed over as the former owner, or gone from the organization) loses
+their read records for it, so access granted again starts with everything unread.
+
+Only owners and admins create mailboxes. At creation, a personal mailbox needs `owner_user_id` and
+no `members`; a shared one needs 1 to 100 `members`, each a different `user_id` with `view`,
+`send`, or `manage`, and no `owner_user_id`. Every owner and member must be a current member of the
+organization. Anything else, including a missing or unknown `type`, is
+`422 MAILBOX.ACCESS_INVALID`, and nothing is created. A member who tries is `403 PERMISSION.DENIED`.
+
+`PUT /v1/mailboxes/:mailbox_id/members/:user_id` with `{ "permission": "send" }` adds the user or
+changes their permission and answers the member:
+
+```json
+{ "user_id": 7, "permission": "send", "granted_by": 3, "created_at": "2026-11-19T10:00:00Z" }
+```
+
+`GET .../members` lists members ordered by `user_id`. `DELETE .../members/:user_id` removes one;
+an absent member is `404 MAILBOX.NOT_FOUND`. A user who is not a member of the organization, or an
+unknown permission, is `422 MAILBOX.ACCESS_INVALID`; a 101st member is also
+`422 MAILBOX.ACCESS_INVALID`, also when two additions race. Every member route on a personal
+mailbox is `409 MAILBOX.ACCESS_CONFLICT` for anyone who may know the mailbox. Owners and admins may
+add themselves.
+
+`GET /v1/mailboxes/:mailbox_id/access-events` pages the access history, newest first, at most 100
+per page:
+
+```json
+{ "id": 41, "type": "member_set", "actor_user_id": 3, "subject_user_id": 3,
+  "detail": { "membership_id": 30, "permission": "view" }, "created_at": "2026-11-19T10:00:00Z" }
+```
+
+| `type` | Written when | `subject_user_id` | `detail` |
+|---|---|---|---|
+| `created` | The mailbox is created | The personal owner, or `null` | `{ "type" }` |
+| `member_set` | A member is added or their permission changes | The member | `{ "membership_id", "permission" }` |
+| `member_removed` | A member is removed, or leaves the organization | The member | `{}`, or `{ "reason": "left_organization" }` |
+| `owner_left` | A personal mailbox's owner leaves the organization | The owner | `{ "reason": "left_organization" }` |
+| `owner_returned` | That owner rejoins before a handover | The owner | `{}` |
+| `handed_over` | An admin hands the mailbox over | The successor | `{ "former_owner_user_id", "sealed_before" }` |
+| `sealed_deleted` | An admin deletes the sealed history | `null` | `{ "deleted_messages", "deleted_broadcasts" }` |
+| `webhooks_changed` | The webhook switch changes | `null` | `{ "enabled" }` |
+
+`actor_user_id` is `null` for a change Zmail made itself, such as `owner_left`, `owner_returned`,
+and `member_removed` for a departure. `detail` holds ids, permissions, timestamps, and counts only,
+never message content. Creating a shared mailbox writes `created` and one `member_set` per first
+member. Clients ignore `detail` keys they do not know.
+
+### Departure And Handover
+
+When a user leaves the organization, their access to its mailboxes ends at once and their read
+records go with it. Each personal mailbox they owned stays personal, with nobody able to read it,
+and shows `awaiting_handover: true`; an `owner_left` event is written. Their memberships of shared
+mailboxes are recorded as `member_removed` with `detail.reason = "left_organization"`. If they
+rejoin before a handover, their personal mailboxes are theirs again with all mail visible,
+`awaiting_handover` turns `false`, and `owner_returned` is written.
+
+`POST /v1/mailboxes/:mailbox_id/handovers` turns a personal mailbox, awaiting handover or not, into
+a shared one:
+
+```json
+{ "successor_user_id": 9 }
+```
+
+- Only owners and admins hand over; anyone else with access gets `403 PERMISSION.DENIED`.
+- The successor must be a current member of the organization, otherwise
+  `422 MAILBOX.ACCESS_INVALID`. They become a `send` member.
+- The mailbox becomes `shared` with `owner_user_id: null` and `awaiting_handover: false`, and the
+  former owner keeps no access and no read records.
+- The seal boundary `sealed_before` is the time the owner left when they are no longer in the
+  organization, otherwise the time of the handover. It is written once and never moves. An owner
+  who rejoins before the handover commits is sealed at the handover.
+- Broadcasts of the mailbox created before the boundary that are still `scheduled`, `sending`, or
+  `paused` are cancelled in the same transaction, with their pending recipients, so a sealed
+  broadcast sends no new mail the successor could read.
+- A shared mailbox, including one a concurrent handover already converted, is
+  `409 MAILBOX.ACCESS_CONFLICT`.
+- `handed_over` is written, and the answer is `201` with the mailbox as the caller sees it.
+
+### Sealed History
+
+Messages created before `sealed_before` are sealed: nobody sees them on any surface. Message list
+and detail, mark read, delete, attachment download, the log, statistics, `unread_count`, and
+`GET /v1/outbound-mail-messages/:message_id` treat a sealed message as absent
+(`404 MAILBOX.MESSAGE_NOT_FOUND` by id). Broadcasts of the mailbox created before the boundary are
+left out of the broadcast list and are `404 MAILBOX.BROADCAST_NOT_FOUND` by id; their recipients
+are not listed. An `Idempotency-Key` that matches a sealed message is
+`409 MAILBOX.IDEMPOTENCY_CONFLICT` with no message data, and nothing is sent.
+
+Delivery events for a sealed message that arrive after the handover are stored but stay hidden,
+count nowhere, and publish no webhook. A permanent bounce or complaint among them still marks the
+contact `suppressed`: suppression protects the organization's sending reputation, so sealing does
+not exempt it.
+
+`DELETE /v1/mailboxes/:mailbox_id/sealed-messages` deletes the sealed history for good:
+
+```json
+{ "confirm_address": "alice@mail.example.com" }
+```
+
+- Only owners and admins delete it; anyone else with access gets `403 PERMISSION.DENIED`.
+- A mailbox without a seal boundary is `409 MAILBOX.ACCESS_CONFLICT`.
+- `confirm_address` must equal the mailbox address, ignoring case, otherwise
+  `422 MAILBOX.ACCESS_INVALID` and nothing is deleted.
+- Sealed broadcasts still `scheduled`, `sending`, or `paused` are cancelled first; then the sealed
+  broadcasts and their recipients, and the sealed messages with their events and attachments, are
+  deleted in one transaction. The boundary stays.
+- `sealed_deleted` is written with the counts, and the answer is:
+
+```json
+{ "code": 0, "message": "success", "data": { "deleted_messages": 312, "deleted_broadcasts": 2 } }
+```
+
+### Webhook Switch
+
+`PUT /v1/mailboxes/:mailbox_id/webhook-setting` with `{ "enabled": true }` turns mail
+[webhooks](#webhooks) for a shared mailbox on or off and answers `200` with the mailbox. It needs
+`manage_members`; on a personal mailbox it is `409 MAILBOX.ACCESS_CONFLICT`. A change writes
+`webhooks_changed`; setting the current value writes nothing. Mailboxes start with the switch off.
+
+Mailboxes that existed before access rules are shared, with their creator as a `manage` member
+while the creator is still in the organization. A mailbox left without members is visible only to
+owners and admins, who add members to it.
 
 ## Domains
 
@@ -335,7 +534,7 @@ Listing returns summaries, newest first, without bodies. `direction=inbound` is 
 | `status` | `received` for inbound. Outbound is `queued` while the provider call is in flight, then `sent` or `failed`. |
 | `from` | `{ "address", "name" }` |
 | `to`, `cc` | Lowercase addresses |
-| `read` | Inbound messages start unread; outbound messages start read. |
+| `read` | Whether the caller has read the message; see [Read State](#read-state). Outbound messages are always read. |
 | `failure_code` | Stable provider or transport reason when `status` is `failed`, otherwise empty |
 | `last_event` | Summary of the delivery events of an outbound message; see [Delivery Events](#delivery-events). Empty when none are recorded. |
 | `attachment_count` | How many files the message has |
@@ -468,7 +667,7 @@ in HTML, and a replace without `design` clears it. Anything else in `design` is
 | `POST /v1/mail-templates` | `201` with the template |
 | `GET`, `PUT`, `DELETE /v1/mail-templates/{id}` | Read, replace, or delete one template |
 | `POST /v1/mail-template-previews` | Renders `template_id` or an unsaved `source`, with `variables` over the sample values; returns `subject`, `html_body`, `text_body`, `variables`, and `missing`. Sends nothing. |
-| `POST /v1/mail-templates/{id}/tests` | Renders with `variables` over the sample values and sends it from `mailbox_id` to 1 to 5 addresses in `to`, like any send |
+| `POST /v1/mail-templates/{id}/tests` | Renders with `variables` over the sample values and sends it from `mailbox_id` to 1 to 5 addresses in `to`, like any send; needs `send` on that mailbox |
 
 Sending with `template` renders the stored template with the given `variables` only. If a variable
 without a fallback has no value, the send is `422 MAILBOX.TEMPLATE_VARIABLES_MISSING` with one field
@@ -547,9 +746,19 @@ nothing in a cell is evaluated.
 ### Broadcasts
 
 A broadcast sends one template from one mailbox to the subscribed contacts of one list, one
-message per contact. Every member creates, edits, and reads the organization's broadcasts; only
-owners and admins send, cancel, pause, and resume them, and a member who tries is
-`403 PERMISSION.DENIED`.
+message per contact. Access follows the sender mailbox:
+
+- Listing shows only broadcasts whose sender mailbox the caller may `view`. Reading one and its
+  recipients needs `view`; without any access to the sender mailbox the broadcast is
+  `404 MAILBOX.BROADCAST_NOT_FOUND`, and with some access but not `view` it is `403`.
+- Creating, editing, and deleting need `send` on the sender mailbox; editing needs it on the stored
+  and on the new sender. A new sender without any access is `404 MAILBOX.NOT_FOUND`.
+- Only owners and admins send, cancel, pause, and resume broadcasts; a member who tries is
+  `403 PERMISSION.DENIED`. Sending and resuming also need `send` on the sender mailbox at that
+  call; the worker does not check access again, so a broadcast already sending keeps sending when
+  that access is later removed. Cancelling and pausing need no access to the sender mailbox, so an
+  admin can always stop mail; without `view` on it (or for a sealed broadcast) the answer is
+  `204` with no body, so nothing about the broadcast is revealed.
 
 Broadcasts need unsubscribe links, so they are available only when the API has
 `MAILBOX_INBOUND_SECRET` (the links are signed with a key derived from it) and `MAILBOX_PUBLIC_URL`
@@ -646,15 +855,16 @@ list, or draws a spam complaint becomes `suppressed`, with `status_reason` `boun
 
 ### Log And Statistics
 
-`GET /v1/mail-messages` lists messages across every mailbox of the organization, newest first, as
-summaries with the owning `mailbox_address` and without bodies. Read a message through
+`GET /v1/mail-messages` lists messages across the mailboxes of the organization the caller may
+`view`, newest first, as summaries with the owning `mailbox_address` and without bodies. Mail of
+other mailboxes is neither listed nor counted in `total`. Read a message through
 `GET /v1/mailboxes/:mailbox_id/messages/:message_id`.
 
 | Query | Meaning |
 |---|---|
 | `direction` | `inbound` or `outbound` |
 | `status` | `received`, `queued`, `sent`, or `failed` |
-| `mailbox_id` | One mailbox. Another organization's mailbox matches nothing. |
+| `mailbox_id` | One mailbox. A mailbox the caller may not read, or another organization's, matches nothing. |
 | `q` | Case-insensitive match on the subject, the sender address, or a recipient address; at most 200 characters. `%` and `_` match literally. |
 | `page`, `per_page` | Pagination |
 
@@ -669,7 +879,7 @@ today, oldest first, including days without mail. `N` defaults to 7 and is 1 to 
 ```
 
 `sent` and `failed` count outbound messages by their final status; a message still `queued` is in
-neither. `received` counts inbound messages.
+neither. `received` counts inbound messages. Only mailboxes the caller may `view` are counted.
 
 ### Idempotency
 
@@ -682,6 +892,9 @@ one mailbox. A later send in the same mailbox with the same key never calls the 
 | `sent` | `200` with the stored message | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
 | `failed` | The same error as the first attempt, with the stored message kept | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
 | Still `queued` | `409 MAILBOX.SEND_IN_PROGRESS` | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
+
+A key that matches a sealed message (see [Sealed History](#sealed-history)) is
+`409 MAILBOX.IDEMPOTENCY_CONFLICT` with no message data, whatever the content.
 
 Content is compared after normalization, so address case, duplicate recipients, and surrounding
 whitespace in the subject do not matter. A failed attempt is replayed rather than retried because
@@ -712,7 +925,10 @@ are not defined.
 ```
 
 `from` must be the bare address of a mailbox of that organization; any other address, including
-another organization's mailbox, is `404 MAILBOX.NOT_FOUND`. The remaining fields, limits, outcomes, and
+another organization's mailbox, is `404 MAILBOX.NOT_FOUND`. The key has exactly its owner's
+[access](#access): sending needs `send` on the `from` mailbox, and a mailbox the owner has no access
+to is `404 MAILBOX.NOT_FOUND`; reading a sent message needs `view` on its mailbox, and a message of
+a mailbox the owner has no access to is `404 MAILBOX.MESSAGE_NOT_FOUND`. The remaining fields, limits, outcomes, and
 `Idempotency-Key` behavior are those of [Send](#send). A key without the scope gets
 `403 PERMISSION.DENIED`. The read route returns only outbound messages, so a `mail:read` key cannot
 read mail that was received. Both routes are limited to the organization in the header.
@@ -749,7 +965,9 @@ and then delivered counts as `delivered`.
 ### Webhooks
 
 When the `webhook` starter is selected, an organization's webhook endpoints can subscribe to mail
-events. Endpoints, signing, retries, and delivery history are those of [WEBHOOKS.md](WEBHOOKS.md);
+events. Mail events are published only for messages of a shared mailbox whose
+[webhook switch](#webhook-switch) is on, and only for messages created at or after its seal
+boundary; personal mailboxes never publish. Endpoints, signing, retries, and delivery history are those of [WEBHOOKS.md](WEBHOOKS.md);
 this section defines only the mail events.
 
 | Event type | Published when |
@@ -848,6 +1066,8 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.MESSAGE_NOT_FOUND` | 404 |
 | `MAILBOX.ADDRESS_TAKEN` | 409 |
 | `MAILBOX.LIMIT_REACHED` | 409 |
+| `MAILBOX.ACCESS_CONFLICT` | 409 |
+| `MAILBOX.ACCESS_INVALID` | 422 |
 | `MAILBOX.ADDRESS_INVALID` | 422 |
 | `MAILBOX.ADDRESS_RESERVED` | 422 |
 | `MAILBOX.MESSAGE_INVALID` | 422 |

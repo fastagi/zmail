@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[4]
 HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 COMMENT_WITH_HAN = re.compile(r"(?://|#|/\*|\*)[^\n]*[\u3400-\u4dbf\u4e00-\u9fff]")
 SOURCE_SUFFIXES = {".css", ".go", ".js", ".mjs", ".py", ".sh", ".ts", ".tsx", ".yaml", ".yml"}
-IGNORED_PARTS = {".git", ".next", "coverage", "dist", "node_modules"}
+IGNORED_PARTS = {".git", ".next", ".superpowers", "coverage", "dist", "node_modules"}
 
 
 PLUGIN_FILES = re.compile(r"^registry/plugins/[^/]+/files/")

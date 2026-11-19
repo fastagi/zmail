@@ -194,6 +194,53 @@ lists its environment(s). Record pass, fail, or blocked for each one, with evide
 | J3 | P1 | L | Stop the API while the console is open | Clear error states, no blank pages or endless spinners |
 | J4 | P2 | L | Keyboard-only: sign in, send mail, create a broadcast | Reachable and labelled |
 
+### K. Mailbox Access
+
+Every mailbox is either one person's personal mailbox or a shared mailbox with named members, each
+holding `view`, `send` (reply, includes view), or `manage` (change members, includes send). Owners
+and admins manage mailboxes but read no mail by role alone. The rules come from
+`docs/MAILBOX_ACCESS_PRD.zh-CN.md`; the API side of every case is
+automated in [`api/tests/kest/mailbox_access.flow.md`](../../api/tests/kest/mailbox_access.flow.md),
+whose header lists the environment it needs. Run it with `kest run ... --var run_id=<unique>
+--var scheduled_at=<UTC time about one day ahead>` against an API started with the mailbox,
+organization, and webhook starters and `WEBHOOK_ALLOW_PRIVATE_TARGETS=true`; `run_local.sh`
+passes only `run_id` and cannot run it as is. The flow needs no public DNS and captures nothing
+from exec steps, which kest 0.7.2 does not support.
+
+**Setup.** Organization O with admin A and members B and C. A creates the personal mailbox `b@`
+for B, the personal mailbox `c@` for C, and the shared mailbox `team@` with B on `send` and C on
+`view`. Each mailbox receives one message with an attachment (inbound delivery on L). Use three
+browser profiles so A, B, and C stay signed in side by side.
+
+"Looks missing" means the mailbox, message, or broadcast behaves as if it did not exist (API `404`,
+no content, no hint that it exists). "Not allowed" means a clear permission error (API `403`).
+Every cross-access attempt in this section must fail; one success is a P0 bug.
+
+| ID | Pri | Env | Steps | Expected |
+|---|---|---|---|---|
+| AC-1 | P0 | L | As C, look for `b@` in the mailbox list; then, by direct URL or API, open its message list, a message, an attachment link, mark a message read, and send from it | `b@` is not in C's list; every other attempt looks missing and returns no content |
+| AC-2 | P0 | L | As A, open the mailbox list, then try to open `b@`'s messages | `b@` is listed (personal, locked) with no unread count; opening its mail is not allowed |
+| AC-3 | P0 | L | As A, search the mail log for the subject of `b@`'s message; open the daily statistics | Zero results; the statistics do not count `b@`'s mail (B finds the same subject, as a control) |
+| AC-4 | P0 | L | As C, read `team@`'s mail, then try to send from `team@` | Reading works; sending is not allowed, no compose button is shown, no message is stored, and the daily send count does not change |
+| AC-5 | P0 | L | Deliver a new message to `team@`; as B, open it | B's unread count for `team@` drops by one; C's count and the message's unread state for C do not change |
+| AC-6 | P0 | L | As C, create an API key with `mail:send`; send with it from `team@`, then from `b@` | `team@` is not allowed; `b@` looks missing; neither stores a message or uses send quota |
+| AC-7 | P0 | L | As A, add yourself to `team@` with `view`, then read its mail | Reading works; `team@`'s access history shows "A granted A view" with the time |
+| AC-8 | P0 | L | As B (`send`), try to add A to `team@`; as A, give B `manage`; as B, add A again | The first attempt is not allowed; after the upgrade B adds A and the history records it; A cannot add anyone to a personal mailbox |
+| AC-9 | P0 | L | As A, add an organization webhook for received mail. Deliver one message to `b@` and one to `team@`; as B (`manage`), turn on "Send to organization webhook" for `team@`; deliver one more to `team@` | Exactly one webhook delivery is queued, for the last message; the switch cannot be turned on for `b@` or by C; the history records the switch |
+| AC-10 | P0 | L | B leaves the organization; deliver a new message to `b@` | All of B's requests to O fail; `b@` shows as awaiting handover; the new message is accepted but nobody (A, C) can read it; B's `team@` membership is gone and recorded in its history |
+| AC-11 | P0 | L | As A, hand `b@` over to C (after B has left) | `b@` becomes shared with C on `send`; C sees only mail that arrived after B left, in the mailbox, search, statistics, and unread count; earlier mail and its attachments look missing to C, and to A even after A adds themself; a second handover is refused as a conflict |
+| AC-12 | P1 | L | As A, delete `b@`'s sealed history: first type a wrong address, then the right one | The wrong address is refused; the right one asks for confirmation, deletes the sealed messages and broadcasts, cannot be undone, and the history records the deletion and time; mail after the boundary stays; C cannot delete sealed history; a mailbox with no sealed history refuses |
+| AC-13 | P0 | L | As B, draft a broadcast from `team@`. As A (not a `team@` member), start it; add yourself with `send` and start it (scheduled); remove yourself while it is scheduled | The draft saves; the first start is not allowed; the second works and the self-grant is in the history; after A leaves `team@` the broadcast keeps its schedule (and, with the worker running, sends to the end), and A can still pause or cancel it |
+| AC-14 | P0 | L | As B, try to create a mailbox; as A, create a personal mailbox without an owner, then a shared mailbox without members | All three are refused with a reason (B: not allowed; A: the missing owner or members are named); nothing is created |
+| AC-15 | P0 | L | As B, draft a broadcast from `b@`; as C, open the broadcast list, that broadcast, and its recipients | C's list does not include it; its detail and recipients look missing |
+| AC-16 | P0 | L | After B leaves and before any handover, invite B back and accept | `b@` is B's personal mailbox again and B sees all of its mail, including mail that arrived while B was away; `team@` is not restored; the history records the return |
+| AC-17 | P0 | L | Let B leave, hand `b@` over to C, then invite B back | `b@` stays with C; B does not see `b@`; the sealed history stays unreadable to everyone |
+
+In the console, also check for each case that locked mailboxes cannot be opened, compose, reply,
+and delete are hidden without `send`, the access panel shows members, the webhook switch, and the
+history to those allowed, and the handover and sealed-history dialogs explain what they do in both
+languages.
+
 ## Report Template
 
 Copy this into `docs/testing/reports/<YYYY-MM-DD>-<agent>.md`.

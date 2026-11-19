@@ -118,10 +118,15 @@ type MailNotification struct {
 	Type           string
 	OrganizationID uint
 	MailboxAddress string
-	Message        *domain.MailMessage
-	Recipient      string
-	Reason         string
-	OccurredAt     time.Time
+	// MailboxType, WebhooksEnabled, and SealedBefore describe the mailbox when the change was
+	// stored; they decide whether the notification may be published at all.
+	MailboxType     domain.MailboxType
+	WebhooksEnabled bool
+	SealedBefore    *time.Time
+	Message         *domain.MailMessage
+	Recipient       string
+	Reason          string
+	OccurredAt      time.Time
 	// Key distinguishes several notifications of one type for one message, such as one per
 	// recipient or per provider event. Empty for a notification that happens once per message.
 	Key string
@@ -159,6 +164,11 @@ func (n *webhookNotifier) Notify(ctx context.Context, notification MailNotificat
 		return nil
 	}
 	message := notification.Message
+	// Only a shared mailbox with its switch on publishes, and never about a sealed message.
+	if notification.MailboxType != domain.MailboxTypeShared || !notification.WebhooksEnabled ||
+		(notification.SealedBefore != nil && message.CreatedAt.Before(*notification.SealedBefore)) {
+		return nil
+	}
 	to := message.To
 	if to == nil {
 		to = []string{}

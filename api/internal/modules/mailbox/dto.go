@@ -7,11 +7,111 @@ import (
 )
 
 // CreateMailboxRequest asks for a new address on the shared domain, or on Domain when it names a
-// verified domain of the organization.
+// verified domain of the organization. Type, owner, and members are validated by the service, so
+// every access mistake answers MAILBOX.ACCESS_INVALID.
 type CreateMailboxRequest struct {
 	LocalPart   string `json:"local_part" binding:"required,max=64"`
 	DisplayName string `json:"display_name" binding:"max=120"`
 	Domain      string `json:"domain" binding:"max=253"`
+	// Type is "personal" or "shared".
+	Type string `json:"type" binding:"max=16"`
+	// OwnerUserID is required for a personal mailbox and must be absent for a shared one.
+	OwnerUserID uint `json:"owner_user_id"`
+	// Members are required for a shared mailbox: 1 to 100, each user once.
+	Members []MailboxMemberRequest `json:"members" binding:"omitempty,dive"`
+}
+
+// MailboxMemberRequest names one member of a new shared mailbox.
+type MailboxMemberRequest struct {
+	UserID     uint   `json:"user_id"`
+	Permission string `json:"permission" binding:"max=16"`
+}
+
+func (r CreateMailboxRequest) input() CreateMailboxInput {
+	members := make([]MailboxMemberInput, 0, len(r.Members))
+	for _, member := range r.Members {
+		members = append(members, MailboxMemberInput{UserID: member.UserID, Permission: domain.MailboxPermission(member.Permission)})
+	}
+	return CreateMailboxInput{
+		LocalPart:   r.LocalPart,
+		DisplayName: r.DisplayName,
+		Domain:      r.Domain,
+		Type:        domain.MailboxType(r.Type),
+		OwnerUserID: r.OwnerUserID,
+		Members:     members,
+	}
+}
+
+// SetMailboxWebhookSettingRequest turns a shared mailbox's mail webhooks on or off.
+type SetMailboxWebhookSettingRequest struct {
+	Enabled *bool `json:"enabled" binding:"required"`
+}
+
+// HandOverMailboxRequest names the successor of a personal mailbox.
+type HandOverMailboxRequest struct {
+	SuccessorUserID uint `json:"successor_user_id" binding:"required"`
+}
+
+// DeleteMailboxSealedMessagesRequest confirms deleting a mailbox's sealed history with its address.
+type DeleteMailboxSealedMessagesRequest struct {
+	ConfirmAddress string `json:"confirm_address" binding:"required,max=320"`
+}
+
+// MailboxSealedDeletionResponse counts what deleting the sealed history removed.
+type MailboxSealedDeletionResponse struct {
+	DeletedMessages   int64 `json:"deleted_messages"`
+	DeletedBroadcasts int64 `json:"deleted_broadcasts"`
+}
+
+// SetMailboxMemberRequest sets one member's permission.
+type SetMailboxMemberRequest struct {
+	Permission string `json:"permission" binding:"required,max=16"`
+}
+
+// MailboxMemberResponse is one member of a shared mailbox.
+type MailboxMemberResponse struct {
+	UserID     uint      `json:"user_id"`
+	Permission string    `json:"permission"`
+	GrantedBy  uint      `json:"granted_by"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func toMailboxMemberResponse(member *domain.MailboxMember) MailboxMemberResponse {
+	return MailboxMemberResponse{
+		UserID:     member.UserID,
+		Permission: string(member.Permission),
+		GrantedBy:  member.GrantedBy,
+		CreatedAt:  member.CreatedAt,
+	}
+}
+
+// MailboxAccessEventResponse is one entry of a mailbox's access history.
+type MailboxAccessEventResponse struct {
+	ID            uint           `json:"id"`
+	Type          string         `json:"type"`
+	ActorUserID   *uint          `json:"actor_user_id"`
+	SubjectUserID *uint          `json:"subject_user_id"`
+	Detail        map[string]any `json:"detail"`
+	CreatedAt     time.Time      `json:"created_at"`
+}
+
+func toMailboxAccessEventResponses(events []*domain.MailboxAccessEvent) []MailboxAccessEventResponse {
+	items := make([]MailboxAccessEventResponse, 0, len(events))
+	for _, event := range events {
+		detail := event.Detail
+		if detail == nil {
+			detail = map[string]any{}
+		}
+		items = append(items, MailboxAccessEventResponse{
+			ID:            event.ID,
+			Type:          string(event.Type),
+			ActorUserID:   event.ActorUserID,
+			SubjectUserID: event.SubjectUserID,
+			Detail:        detail,
+			CreatedAt:     event.CreatedAt,
+		})
+	}
+	return items
 }
 
 // SendMailMessageRequest asks to send one message from a mailbox.
@@ -128,14 +228,34 @@ func toMailDayStats(stats []domain.MailDayStats) []MailDayStatsResponse {
 	return days
 }
 
-// MailboxResponse is the public shape of a mailbox.
+// MailboxResponse is the public shape of a mailbox, as the requesting viewer sees it.
 type MailboxResponse struct {
 	ID          uint   `json:"id"`
 	Address     string `json:"address"`
 	DisplayName string `json:"display_name"`
-	// UnreadCount counts unread inbound messages. A newly created mailbox reports 0.
+	// Type is "personal" or "shared".
+	Type string `json:"type"`
+	// OwnerUserID is the owner of a personal mailbox; null for a shared one.
+	OwnerUserID *uint `json:"owner_user_id"`
+	// AwaitingHandover is true when the owner of a personal mailbox left the organization.
+	AwaitingHandover bool `json:"awaiting_handover"`
+	// SealedBefore hides every message created before it; null when never sealed.
+	SealedBefore    *time.Time `json:"sealed_before"`
+	WebhooksEnabled bool       `json:"webhooks_enabled"`
+	// Access is what the viewer may do with the mailbox.
+	Access MailboxAccessResponse `json:"access"`
+	// UnreadCount counts unread inbound messages; 0 for a viewer who may not read the mailbox.
 	UnreadCount int       `json:"unread_count"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+// MailboxAccessResponse is the viewer's capabilities on one mailbox.
+type MailboxAccessResponse struct {
+	View          bool `json:"view"`
+	Send          bool `json:"send"`
+	ManageMembers bool `json:"manage_members"`
+	Administer    bool `json:"administer"`
+	SeeHistory    bool `json:"see_history"`
 }
 
 // MailAddressResponse is one sender with an optional display name.
@@ -238,11 +358,17 @@ func toMailboxResponse(mailbox *domain.Mailbox) *MailboxResponse {
 		return nil
 	}
 	return &MailboxResponse{
-		ID:          mailbox.ID,
-		Address:     mailbox.Address,
-		DisplayName: mailbox.DisplayName,
-		UnreadCount: mailbox.UnreadCount,
-		CreatedAt:   mailbox.CreatedAt,
+		ID:               mailbox.ID,
+		Address:          mailbox.Address,
+		DisplayName:      mailbox.DisplayName,
+		Type:             string(mailbox.Type),
+		OwnerUserID:      mailbox.OwnerUserID,
+		AwaitingHandover: mailbox.Type == domain.MailboxTypePersonal && mailbox.OwnerLeftAt != nil,
+		SealedBefore:     mailbox.SealedBefore,
+		WebhooksEnabled:  mailbox.WebhooksEnabled,
+		Access:           MailboxAccessResponse(mailbox.Access),
+		UnreadCount:      mailbox.UnreadCount,
+		CreatedAt:        mailbox.CreatedAt,
 	}
 }
 
@@ -271,7 +397,7 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		To:              to,
 		Cc:              cc,
 		Subject:         message.Subject,
-		Read:            message.ReadAt != nil,
+		Read:            message.Read,
 		FailureCode:     message.FailureCode,
 		LastEvent:       string(message.LastEvent),
 		AttachmentCount: message.AttachmentCount,

@@ -188,7 +188,7 @@ func TestSendByTemplateRendersAndRecordsTheTemplate(t *testing.T) {
 		t.Fatalf("CreateTemplate: %v", err)
 	}
 
-	message, _, err := fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{
+	message, _, err := fixture.service.SendMessage(ctx, as(1), mailbox.ID, SendInput{
 		To:       []string{"bob@example.com"},
 		Template: &TemplateSendInput{ID: template.ID, Variables: map[string]string{"code": "<42>"}},
 	})
@@ -205,18 +205,18 @@ func TestSendByTemplateRendersAndRecordsTheTemplate(t *testing.T) {
 	}
 
 	var missing *MissingVariablesError
-	_, _, err = fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{To: []string{"bob@example.com"}, Template: &TemplateSendInput{ID: template.ID}})
+	_, _, err = fixture.service.SendMessage(ctx, as(1), mailbox.ID, SendInput{To: []string{"bob@example.com"}, Template: &TemplateSendInput{ID: template.ID}})
 	if !errors.As(err, &missing) || !slices.Equal(missing.Names, []string{"code"}) || !errors.Is(err, ErrMailTemplateVariablesMissing) {
 		t.Fatalf("missing variables error = %v", err)
 	}
-	_, _, err = fixture.service.SendMessage(ctx, 1, mailbox.ID, SendInput{
+	_, _, err = fixture.service.SendMessage(ctx, as(1), mailbox.ID, SendInput{
 		To: []string{"bob@example.com"}, Subject: "both", Template: &TemplateSendInput{ID: template.ID},
 	})
 	if !errors.Is(err, ErrMailMessageInvalid) {
 		t.Fatalf("template with a subject error = %v", err)
 	}
 	other := fixture.mailbox(t, 2, "other")
-	_, _, err = fixture.service.SendMessage(ctx, 2, other.ID, SendInput{
+	_, _, err = fixture.service.SendMessage(ctx, as(2), other.ID, SendInput{
 		To: []string{"bob@example.com"}, Template: &TemplateSendInput{ID: template.ID, Variables: map[string]string{"code": "1"}},
 	})
 	if !errors.Is(err, ErrMailTemplateNotFound) {
@@ -235,19 +235,19 @@ func TestTemplateTestSendUsesSampleValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTemplate: %v", err)
 	}
-	message, err := fixture.service.SendTemplateTest(ctx, 1, template.ID, mailbox.ID, []string{"qa@example.com"}, map[string]string{"code": "77"})
+	message, err := fixture.service.SendTemplateTest(ctx, as(1), template.ID, mailbox.ID, []string{"qa@example.com"}, map[string]string{"code": "77"})
 	if err != nil || message.Subject != "Welcome, Ann" || message.TextBody != "Hi Ann, your code is 77." {
 		t.Fatalf("SendTemplateTest = %+v, %v", message, err)
 	}
 	stranger := fixture.mailbox(t, 2, "stranger")
-	if _, err = fixture.service.SendTemplateTest(ctx, 1, template.ID, stranger.ID, []string{"qa@example.com"}, nil); !errors.Is(err, ErrMailboxNotFound) {
+	if _, err = fixture.service.SendTemplateTest(ctx, as(1), template.ID, stranger.ID, []string{"qa@example.com"}, nil); !errors.Is(err, ErrMailboxNotFound) {
 		t.Fatalf("test from another organization's mailbox error = %v", err)
 	}
 }
 
 func TestSendRouteNamesMissingTemplateVariables(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
-	if _, err := fixture.service.CreateMailbox(context.Background(), 7, testCreator, "hello", "", ""); err != nil {
+	if _, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedWithHandlerUser("hello", domain.MailboxPermissionSend)); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	template, err := fixture.service.CreateTemplate(context.Background(), 7, testCreator, templateInput())

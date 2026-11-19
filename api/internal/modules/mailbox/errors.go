@@ -1,14 +1,21 @@
 package mailbox
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Domain errors owned by the mailbox starter.
 var (
-	ErrMailboxNotFound           = errors.New("mailbox not found")
-	ErrMailboxAddressTaken       = errors.New("mailbox address is already taken")
-	ErrMailboxAddressInvalid     = errors.New("mailbox address is invalid")
-	ErrMailboxAddressReserved    = errors.New("mailbox address is reserved")
-	ErrMailboxLimitReached       = errors.New("mailbox limit reached")
+	ErrMailboxNotFound        = errors.New("mailbox not found")
+	ErrMailboxAddressTaken    = errors.New("mailbox address is already taken")
+	ErrMailboxAddressInvalid  = errors.New("mailbox address is invalid")
+	ErrMailboxAddressReserved = errors.New("mailbox address is reserved")
+	ErrMailboxLimitReached    = errors.New("mailbox limit reached")
+	// ErrMailboxAccessInvalid rejects a mailbox type, owner, member, or permission that cannot be applied.
+	ErrMailboxAccessInvalid = errors.New("mailbox access is invalid")
+	// ErrMailboxAccessConflict rejects an access change the mailbox's current type does not allow.
+	ErrMailboxAccessConflict     = errors.New("mailbox access conflicts with its type")
 	ErrMailMessageNotFound       = errors.New("mail message not found")
 	ErrMailMessageInvalid        = errors.New("mail message is invalid")
 	ErrMailSendLimitReached      = errors.New("mail send limit reached")
@@ -60,4 +67,12 @@ var (
 	ErrMailDNSRecordInvalid      = errors.New("DNS record is invalid")
 	ErrMailDNSRecordLocked       = errors.New("DNS record is used by Zmail mail")
 	ErrMailDNSRecordRejected     = errors.New("the DNS provider rejected the record")
+)
+
+// Access errors that answer with an existing public code.
+var (
+	// ErrMailboxMemberNotFound is a member row that does not exist; it answers like a missing mailbox.
+	ErrMailboxMemberNotFound = fmt.Errorf("%w: member", ErrMailboxNotFound)
+	// ErrMailboxMemberLimit refuses a member beyond domain.MaxMailboxMembers.
+	ErrMailboxMemberLimit = fmt.Errorf("%w: a shared mailbox has at most 100 members", ErrMailboxAccessInvalid)
 )

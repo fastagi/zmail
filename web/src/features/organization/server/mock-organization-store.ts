@@ -224,6 +224,27 @@ export class MockOrganizationStore {
     );
   }
 
+  /** User ids of the organization's current members, ascending; for features that grant access. */
+  memberUserIds(organizationId: number): number[] {
+    return this.memberships
+      .filter((membership) => membership.organizationId === organizationId)
+      .flatMap((membership) => {
+        const user = this.userRecord(membership.userKey);
+        return user ? [user.id] : [];
+      })
+      .sort((left, right) => left - right);
+  }
+
+  /** The membership id of a user in the organization, or null when they are not a member. */
+  membershipIdOf(organizationId: number, userId: number): number | null {
+    const membership = this.memberships.find(
+      (candidate) =>
+        candidate.organizationId === organizationId &&
+        this.userRecord(candidate.userKey)?.id === userId
+    );
+    return membership?.id ?? null;
+  }
+
   changeMemberRole(
     actor: AuthUser,
     organizationId: number,

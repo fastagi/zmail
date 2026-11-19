@@ -109,6 +109,11 @@ run_step() {
     echo "  ❌ $label"
     echo "     Exit code: $status"
     echo "     Log: $log_file"
+    if [ -s "$log_file" ] && grep -qE '^[[:space:]]*--- FAIL|^panic:|test timed out' "$log_file"; then
+        # Go test failures sit far above the tail when a package logs heavily; show them first.
+        echo "     Go test failures:"
+        grep -nE -A25 '^[[:space:]]*--- FAIL|^panic:|test timed out' "$log_file" | head -n 300 | sed 's/^/       /'
+    fi
     if [ -s "$log_file" ]; then
         echo "     Last $LOG_TAIL_LINES lines:"
         tail -n "$LOG_TAIL_LINES" "$log_file" | sed 's/^/       /'
@@ -148,7 +153,9 @@ fi
 echo ""
 echo "Tier 1 — Local execution"
 if [ "$KIND" = "go" ]; then
-    run_step "go test ${SCOPE[*]}" go test "${SCOPE[@]}"
+    # GO_TEST_FLAGS adds flags such as "-timeout=30m -p=4" for a slow shared database.
+    # shellcheck disable=SC2086 # GO_TEST_FLAGS is a list of flags, split on spaces.
+    run_step "go test ${GO_TEST_FLAGS:-}${GO_TEST_FLAGS:+ }${SCOPE[*]}" go test ${GO_TEST_FLAGS:-} "${SCOPE[@]}"
 else
     run_step "pnpm test" "${PNPM[@]}" test -- --run
 fi
@@ -166,7 +173,8 @@ fi
 echo ""
 echo "Tier 2 — End-to-end"
 if [ "$KIND" = "go" ]; then
-    run_step "go test -race ${SCOPE[*]}" go test -race "${SCOPE[@]}"
+    # shellcheck disable=SC2086 # GO_TEST_FLAGS is a list of flags, split on spaces.
+    run_step "go test -race ${GO_TEST_FLAGS:-}${GO_TEST_FLAGS:+ }${SCOPE[*]}" go test -race ${GO_TEST_FLAGS:-} "${SCOPE[@]}"
 else
     run_step "pnpm build" "${PNPM[@]}" build
 fi

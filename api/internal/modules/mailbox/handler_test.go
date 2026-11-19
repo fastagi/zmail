@@ -31,7 +31,7 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := newFakeRepository()
-	svc := NewService(repo, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
+	svc := NewService(repo, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
 		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5,
 	})
 	handler := NewHandler(svc)
@@ -72,17 +72,27 @@ func (f *handlerFixture) do(method, path, body string) (*httptest.ResponseRecord
 	return recorder, decoded
 }
 
+// handlerUser is the user handler requests act as, in organization 7.
+const handlerUser = 700
+
 func membership(role domain.OrganizationRole) *domain.OrganizationContext {
-	return &domain.OrganizationContext{
-		OrganizationID: 7, OrganizationName: "Acme", OrganizationSlug: "acme",
-		MembershipID: 70, UserID: 700, Role: role,
+	viewer := viewerOf(7, handlerUser, role)
+	return &viewer
+}
+
+// sharedWithHandlerUser is a shared mailbox whose one member is the handler user.
+func sharedWithHandlerUser(localPart string, permission domain.MailboxPermission) CreateMailboxInput {
+	return CreateMailboxInput{
+		LocalPart: localPart, DisplayName: "Helpdesk", Type: domain.MailboxTypeShared,
+		Members: []MailboxMemberInput{{UserID: handlerUser, Permission: permission}},
 	}
 }
 
 func TestOnlyManagersCreateAndDeleteMailboxes(t *testing.T) {
 	for _, role := range []domain.OrganizationRole{domain.OrganizationRoleOwner, domain.OrganizationRoleAdmin} {
 		fixture := newHandlerFixture(t, membership(role))
-		created, body := fixture.do(http.MethodPost, "/mailboxes", `{"local_part":"helpdesk"}`)
+		created, body := fixture.do(http.MethodPost, "/mailboxes",
+			`{"local_part":"helpdesk","type":"shared","members":[{"user_id":700,"permission":"manage"}]}`)
 		if created.Code != http.StatusCreated {
 			t.Fatalf("%s create = %d %s", role, created.Code, created.Body.String())
 		}
@@ -100,10 +110,11 @@ func TestOnlyManagersCreateAndDeleteMailboxes(t *testing.T) {
 
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
 	// A manager of the same organization created this one.
-	if _, err := fixture.service.CreateMailbox(t.Context(), 7, 1, "helpdesk", "", ""); err != nil {
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedInput("helpdesk", "", "")); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
-	created, body := fixture.do(http.MethodPost, "/mailboxes", `{"local_part":"sales"}`)
+	created, body := fixture.do(http.MethodPost, "/mailboxes",
+		`{"local_part":"sales","type":"shared","members":[{"user_id":700,"permission":"manage"}]}`)
 	if created.Code != http.StatusForbidden || body["error_code"] != domain.CodePermissionDenied {
 		t.Fatalf("member create = %d %v; want 403 %s", created.Code, body, domain.CodePermissionDenied)
 	}
@@ -116,12 +127,12 @@ func TestOnlyManagersCreateAndDeleteMailboxes(t *testing.T) {
 	}
 }
 
-func TestMembersReadAndSendTheOrganizationsMail(t *testing.T) {
+func TestMembersReadAndSendTheirMailboxes(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
-	if _, err := fixture.service.CreateMailbox(t.Context(), 7, 1, "helpdesk", "Helpdesk", ""); err != nil {
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk", domain.MailboxPermissionSend)); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
-	if _, err := fixture.service.CreateMailbox(t.Context(), 8, 1, "elsewhere", "", ""); err != nil {
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(8), sharedInput("elsewhere", "", "")); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 
@@ -480,15 +491,15 @@ func TestReceivingUpgradesSendOnly(t *testing.T) {
 	if err != nil || sendOnly.Status != domain.MailDomainStatusVerified {
 		t.Fatalf("send-only domain = %+v, %v", sendOnly, err)
 	}
-	mailbox, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "hello", "", "news.example.com")
+	mailbox, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("hello", "", "news.example.com"))
 	if err != nil || mailbox.RoutingRuleID != "" {
 		t.Fatalf("mailbox = %+v, %v", mailbox, err)
 	}
-	removed, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "gone", "", "news.example.com")
+	removed, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("gone", "", "news.example.com"))
 	if err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
-	if err := fixture.service.DeleteMailbox(ctx, 7, removed.ID); err != nil {
+	if err := fixture.service.DeleteMailbox(ctx, as(7), removed.ID); err != nil {
 		t.Fatalf("DeleteMailbox: %v", err)
 	}
 	path := fmt.Sprintf("/mail-domains/%d/receiving", sendOnly.ID)
@@ -604,7 +615,7 @@ func TestReceivingDuringARunningSetupRunsTheSetupAgain(t *testing.T) {
 	if err != nil || sendOnly.Status != domain.MailDomainStatusVerified {
 		t.Fatalf("send-only domain = %+v, %v", sendOnly, err)
 	}
-	mailbox, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "hello", "", "news.example.com")
+	mailbox, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("hello", "", "news.example.com"))
 	if err != nil || mailbox.RoutingRuleID != "" {
 		t.Fatalf("mailbox = %+v, %v", mailbox, err)
 	}

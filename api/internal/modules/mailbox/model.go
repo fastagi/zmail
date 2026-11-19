@@ -17,9 +17,15 @@ type MailboxPO struct {
 	Address        string `gorm:"size:320;not null;uniqueIndex:idx_mailboxes_address"`
 	DisplayName    string `gorm:"size:120;not null;default:''"`
 	RoutingRuleID  string `gorm:"size:64;not null;default:''"`
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	DeletedAt      gorm.DeletedAt
+	// Type is "personal" or "shared".
+	Type            string `gorm:"size:16;not null;default:'shared'"`
+	OwnerUserID     *uint
+	OwnerLeftAt     *time.Time
+	SealedBefore    *time.Time
+	WebhooksEnabled bool `gorm:"not null;default:false"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       gorm.DeletedAt
 }
 
 func (MailboxPO) TableName() string {
@@ -37,8 +43,76 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 		Address:        po.Address,
 		DisplayName:    po.DisplayName,
 		RoutingRuleID:  po.RoutingRuleID,
+		Type:           domain.MailboxType(po.Type),
+		OwnerUserID:    po.OwnerUserID,
+		OwnerLeftAt:    po.OwnerLeftAt,
+		SealedBefore:   po.SealedBefore,
+		// WebhooksEnabled is only meaningful for shared mailboxes; the schema enforces it too.
+		WebhooksEnabled: po.WebhooksEnabled,
+		CreatedAt:       po.CreatedAt,
+		UpdatedAt:       po.UpdatedAt,
+	}
+}
+
+// MailboxMemberPO is one membership's permission on a shared mailbox.
+type MailboxMemberPO struct {
+	MailboxID    uint   `gorm:"primaryKey;autoIncrement:false"`
+	MembershipID uint   `gorm:"primaryKey;autoIncrement:false;index:idx_mailbox_members_membership,priority:1"`
+	UserID       uint   `gorm:"not null"`
+	Permission   string `gorm:"size:16;not null"`
+	GrantedBy    uint   `gorm:"not null"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+func (MailboxMemberPO) TableName() string {
+	return "mailbox_members"
+}
+
+func (po *MailboxMemberPO) toDomain() *domain.MailboxMember {
+	return &domain.MailboxMember{
+		MailboxID:    po.MailboxID,
+		MembershipID: po.MembershipID,
+		UserID:       po.UserID,
+		Permission:   domain.MailboxPermission(po.Permission),
+		GrantedBy:    po.GrantedBy,
+		CreatedAt:    po.CreatedAt,
+	}
+}
+
+// MailboxAccessEventPO is one entry of a mailbox's access history.
+type MailboxAccessEventPO struct {
+	ID             uint   `gorm:"primaryKey"`
+	OrganizationID uint   `gorm:"not null"`
+	MailboxID      uint   `gorm:"not null;index:idx_mailbox_access_events_mailbox,priority:1"`
+	Type           string `gorm:"size:32;not null"`
+	ActorUserID    *uint
+	SubjectUserID  *uint
+	Detail         string `gorm:"type:jsonb;not null;default:'{}'"`
+	CreatedAt      time.Time
+}
+
+func (MailboxAccessEventPO) TableName() string {
+	return "mailbox_access_events"
+}
+
+func (po *MailboxAccessEventPO) toDomain() *domain.MailboxAccessEvent {
+	detail := map[string]any{}
+	if po.Detail != "" {
+		// The column is jsonb written by this module; an unreadable value shows as empty detail.
+		if err := json.Unmarshal([]byte(po.Detail), &detail); err != nil {
+			detail = map[string]any{}
+		}
+	}
+	return &domain.MailboxAccessEvent{
+		ID:             po.ID,
+		OrganizationID: po.OrganizationID,
+		MailboxID:      po.MailboxID,
+		Type:           domain.MailboxAccessEventType(po.Type),
+		ActorUserID:    po.ActorUserID,
+		SubjectUserID:  po.SubjectUserID,
+		Detail:         detail,
 		CreatedAt:      po.CreatedAt,
-		UpdatedAt:      po.UpdatedAt,
 	}
 }
 
@@ -64,13 +138,24 @@ type MailMessagePO struct {
 	LastEvent              string  `gorm:"size:16;not null;default:''"`
 	AttachmentCount        int     `gorm:"not null;default:0"`
 	TemplateID             *uint
-	ReadAt                 *time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 }
 
 func (MailMessagePO) TableName() string {
 	return "mail_messages"
+}
+
+// MailMessageReadPO records that one organization membership has read one message. The schema
+// cascades it with the membership and the message.
+type MailMessageReadPO struct {
+	MembershipID uint `gorm:"primaryKey;autoIncrement:false"`
+	MessageID    uint `gorm:"primaryKey;autoIncrement:false"`
+	ReadAt       time.Time
+}
+
+func (MailMessageReadPO) TableName() string {
+	return "mail_message_reads"
 }
 
 func (po *MailMessagePO) toDomain() *domain.MailMessage {
@@ -92,9 +177,10 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 		MessageID:   po.MessageID,
 		InReplyTo:   po.InReplyTo,
 		FailureCode: po.FailureCode,
-		ReadAt:      po.ReadAt,
-		CreatedAt:   po.CreatedAt,
-		UpdatedAt:   po.UpdatedAt,
+		// Outbound mail is read for everyone; inbound read state is the viewer's, filled by the service.
+		Read:      po.Direction == string(domain.MailDirectionOutbound),
+		CreatedAt: po.CreatedAt,
+		UpdatedAt: po.UpdatedAt,
 	}
 	if po.DedupeKey != nil {
 		message.DedupeKey = *po.DedupeKey
@@ -127,7 +213,6 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		MessageID:   message.MessageID,
 		InReplyTo:   message.InReplyTo,
 		FailureCode: message.FailureCode,
-		ReadAt:      message.ReadAt,
 	}
 	if message.DedupeKey != "" {
 		key := message.DedupeKey

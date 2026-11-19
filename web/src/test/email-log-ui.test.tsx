@@ -881,6 +881,37 @@ describe('emails console', () => {
     await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
   });
 
+  it('offers no reply or delete on a message of a view-only mailbox', () => {
+    state.mailboxes.data = [
+      {
+        ...mailbox(1, 'hello'),
+        access: {
+          view: true,
+          send: false,
+          manage_members: false,
+          administer: false,
+          see_history: false,
+        },
+      },
+      mailbox(2, 'sales'),
+    ];
+    renderLog();
+    fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
+
+    expect(screen.getByRole('button', { name: 'Mark unread' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+  });
+
+  it('offers no reply or delete on a message of a mailbox the user no longer has', () => {
+    state.mailboxes.data = [mailbox(2, 'sales')];
+    renderLog();
+    fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
+
+    expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+  });
+
   it('replies from the mailbox that received the message, without a From picker', async () => {
     state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
     state.log.data = page([
@@ -1152,6 +1183,12 @@ function mailbox(id: number, localPart: string) {
     id,
     address: `${localPart}@mail.example.com`,
     display_name: '',
+    type: 'shared',
+    owner_user_id: null,
+    awaiting_handover: false,
+    sealed_before: null,
+    webhooks_enabled: false,
+    access: { view: true, send: true, manage_members: true, administer: true, see_history: true },
     unread_count: 0,
     created_at: now(),
   };

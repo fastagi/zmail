@@ -68,7 +68,8 @@ func InitApplication() (*app.Application, error) {
 	organizationRepository := organization.NewRepository(db)
 	invitationMailer := organization.NewInvitationMailer(service)
 	invitationPolicy := organization.NewInvitationPolicy(configConfig)
-	organizationService := organization.NewService(organizationRepository, organizationRepository, invitationMailer, invitationPolicy)
+	membershipEventPublisher := organization.NewMembershipEventPublisher(eventBus)
+	organizationService := organization.NewService(organizationRepository, organizationRepository, invitationMailer, invitationPolicy, membershipEventPublisher)
 	contextResolver := organization.NewContextResolver(organizationService)
 	organizationHandler := organization.NewHandler(organizationService, contextResolver, accountDeletionPolicy)
 	permissionRepository := permission.NewRepository(db)
@@ -136,11 +137,12 @@ func InitApplication() (*app.Application, error) {
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, configConfig, surfaces)
 	mailboxRepository := mailbox.NewRepository(db)
+	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
 	domainProvider := mailtransport.NewDomainProvider(configConfig)
 	transport := mailtransport.New(configConfig)
 	webhookNotifier := mailbox.NewWebhookNotifier(configConfig, webhookService)
 	settings := mailbox.SettingsFromConfig(configConfig)
-	mailboxService := mailbox.NewService(mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings)
+	mailboxService := mailbox.NewService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -225,7 +227,8 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	organizationRepository := organization.NewRepository(db)
 	invitationMailer := organization.NewInvitationMailer(service)
 	invitationPolicy := organization.NewInvitationPolicy(cfg)
-	organizationService := organization.NewService(organizationRepository, organizationRepository, invitationMailer, invitationPolicy)
+	membershipEventPublisher := organization.NewMembershipEventPublisher(eventBus)
+	organizationService := organization.NewService(organizationRepository, organizationRepository, invitationMailer, invitationPolicy, membershipEventPublisher)
 	contextResolver := organization.NewContextResolver(organizationService)
 	organizationHandler := organization.NewHandler(organizationService, contextResolver, accountDeletionPolicy)
 	permissionRepository := permission.NewRepository(db)
@@ -293,11 +296,12 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, cfg, surfaces)
 	mailboxRepository := mailbox.NewRepository(db)
+	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
 	domainProvider := mailtransport.NewDomainProvider(cfg)
 	transport := mailtransport.New(cfg)
 	webhookNotifier := mailbox.NewWebhookNotifier(cfg, webhookService)
 	settings := mailbox.SettingsFromConfig(cfg)
-	mailboxService := mailbox.NewService(mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings)
+	mailboxService := mailbox.NewService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,

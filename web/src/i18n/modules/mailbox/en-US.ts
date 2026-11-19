@@ -9,6 +9,17 @@ const messages = {
     unreadCount: '{count} unread',
     emptyTitle: 'No mailboxes yet',
     empty: 'Create an address to start receiving and sending mail.',
+    personal: 'Personal mailbox',
+    shared: 'Shared mailbox',
+    awaitingHandover: 'Awaiting handover',
+    locked: 'No access to mail',
+    lockedTitle: 'You cannot read this mailbox',
+    lockedPersonal:
+      'Only the owner reads a personal mailbox. Owners and admins see it listed to run it, not to read it.',
+    lockedShared:
+      'Only members of this shared mailbox read it. To read it, add yourself as a member under Access; the access history records it.',
+    lockedAwaiting:
+      'The owner has left the organization. Nobody reads this mailbox until it is handed over.',
   },
   create: {
     domain: 'Domain',
@@ -23,6 +34,21 @@ const messages = {
       'This organization has reached the limit of {max} mailboxes. Delete one to create another.',
     displayNameInvalid:
       'Use a display name of up to 120 characters without <, >, or quotation marks.',
+    type: 'Type',
+    personal: 'Personal',
+    personalHint: 'One member owns it. Nobody else reads or sends, including admins.',
+    shared: 'Shared',
+    sharedHint: 'Named members work it, each with a permission.',
+    owner: 'Owner',
+    member: 'Member {index}',
+    memberPermission: 'Permission of member {index}',
+    removeMember: 'Remove member {index}',
+    addMember: 'Add another member',
+    chooseMember: 'Choose a member',
+    membersLoading: 'Loading the organization members…',
+    membersFailed: 'The organization members could not be loaded.',
+    ownerRequired: 'Choose the owner of the personal mailbox.',
+    membersRequired: 'Add at least one member, each only once.',
   },
   deleteMailbox: {
     title: 'Delete mailbox',
@@ -382,6 +408,82 @@ const messages = {
     lostTitle: 'No access to this organization',
     readOnly: 'Owners and admins of this organization create and delete mailboxes.',
   },
+  access: {
+    open: 'Access',
+    openLabel: 'Access to {address}',
+    title: 'Access to {address}',
+    description: 'Who may use this mailbox, and how it changed.',
+    permissions: {
+      view: 'View',
+      send: 'Reply',
+      manage: 'Manage members',
+    },
+    permissionHint:
+      'View reads mail. Reply also sends, replies, and deletes. Manage members also changes members and reads this history.',
+    owner: 'Owner: {name}',
+    ownerLeft: 'Owner: left the organization',
+    unknownUser: 'User #{id}',
+    system: 'Zmail',
+    awaiting:
+      'The owner has left the organization. New mail still arrives, but nobody reads it until you hand the mailbox over.',
+    members: {
+      title: 'Members',
+      empty: 'No members yet. Only owners and admins see this mailbox until someone is added.',
+      permission: 'Permission of {name}',
+      remove: 'Remove {name}',
+      candidate: 'New member',
+      candidatePermission: 'Permission of the new member',
+      add: 'Add member',
+      noCandidates: 'Every organization member is already a member.',
+      loadFailed: 'The members could not be loaded.',
+    },
+    webhooks: {
+      label: 'Push to organization webhooks',
+      hint: 'Sends the mail events of this mailbox (received, sent, delivered, bounced) to the webhooks of the organization. Off by default, because those endpoints see subjects and addresses.',
+    },
+    handover: {
+      title: 'Hand over',
+      description:
+        'The mailbox becomes a shared mailbox that the successor works with the Reply permission. The former owner loses access at once.',
+      seal: 'Mail from before the owner left, or from before now if they are still here, is sealed: nobody sees it, including the successor and admins.',
+      successor: 'Successor',
+      submit: 'Hand over',
+      confirm: 'Confirm handover',
+      confirmHint:
+        'This cannot be undone: the mailbox stays shared and the earlier mail stays sealed.',
+    },
+    sealed: {
+      title: 'Sealed history',
+      description: 'Mail from before {date} is sealed. Nobody sees it on any surface.',
+      delete: 'Delete sealed history',
+      confirmTitle: 'Delete sealed history',
+      confirmDescription:
+        'This deletes every sealed message and broadcast of {address} for good. It cannot be undone. Type the mailbox address to confirm.',
+      confirmLabel: 'Mailbox address',
+      confirmAction: 'Delete for good',
+    },
+    history: {
+      title: 'Access history',
+      empty: 'No changes recorded yet.',
+      loadFailed: 'The access history could not be loaded.',
+      newer: 'Newer',
+      older: 'Older',
+      createdShared: '{actor} created the mailbox as a shared mailbox',
+      createdPersonal: '{actor} created the mailbox for {subject}',
+      memberSet: '{actor} set {subject} to {permission}',
+      memberRemoved: '{actor} removed {subject}',
+      memberLeft: '{subject} left the organization and lost access',
+      ownerLeft: '{subject} left the organization; the mailbox awaits handover',
+      ownerReturned: '{subject} rejoined the organization and owns the mailbox again',
+      handedOver: '{actor} handed the mailbox over to {subject}',
+      sealedDeleted:
+        '{actor} deleted the sealed history ({messages} messages, {broadcasts} broadcasts)',
+      webhooksOn: '{actor} turned organization webhooks on',
+      webhooksOff: '{actor} turned organization webhooks off',
+    },
+    conflict: 'This mailbox changed in the meantime. Refresh to see its current access.',
+    refresh: 'Refresh',
+  },
   actions: {
     create: 'Create mailbox',
     compose: 'Compose',
@@ -398,6 +500,12 @@ const messages = {
     mailboxDeleted: 'Mailbox deleted',
     sent: 'Message sent',
     messageDeleted: 'Message deleted',
+    memberSaved: 'Member saved',
+    memberRemoved: 'Member removed',
+    handedOver: 'Mailbox handed over',
+    sealedDeleted: 'Deleted {messages} sealed messages and {broadcasts} broadcasts.',
+    webhooksOn: 'Organization webhooks turned on',
+    webhooksOff: 'Organization webhooks turned off',
   },
   templates: {
     title: 'Templates',
@@ -759,6 +867,9 @@ const messages = {
     failed: 'Something went wrong. Try again in a moment.',
   },
   errors: {
+    accessInvalid:
+      'Choose current members of the organization, each only once, with View, Reply, or Manage members.',
+    accessConflict: 'This mailbox changed in the meantime. Refresh to see its current access.',
     broadcastNotFound: 'This broadcast does not exist or was deleted.',
     broadcastInvalid:
       'Check the broadcast: a name, a mailbox, a template, and a list are required.',
@@ -801,7 +912,9 @@ const messages = {
     messageNotFound: 'This message does not exist or was deleted.',
     organizationNotFound:
       'This organization does not exist or you are no longer a member of it. Choose another organization.',
-    permissionDenied: 'Only owners and admins of the organization can create or delete mailboxes.',
+    permissionDenied:
+      "You don't have permission for this mailbox. Refresh to see your current access.",
+    createDenied: 'Only owners and admins of the organization can create mailboxes.',
     sendLimitReached:
       'This organization has reached the 24-hour sending limit. Nothing was sent. Try again later.',
     senderNotConfigured:

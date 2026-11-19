@@ -81,14 +81,15 @@ func (h *Handler) ListDomains(c *gin.Context) {
 	response.Success(c, items)
 }
 
-// ListMailboxes returns the organization's mailboxes.
+// ListMailboxes returns the organization's mailboxes the caller has any access to, each with that
+// access. Admins see every mailbox's metadata; mail stays with its owner and members.
 // fastbuild:bounded-list max=50 reason=an organization owns at most domain.MaxMailboxesPerOrganization mailboxes
 func (h *Handler) ListMailboxes(c *gin.Context) {
-	organizationID, ok := currentOrganizationID(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
-	mailboxes, err := h.service.ListMailboxes(c.Request.Context(), organizationID)
+	mailboxes, err := h.service.ListMailboxes(c.Request.Context(), viewer)
 	if err != nil {
 		response.HandleError(c, "Failed to list mailboxes", err)
 		return
@@ -107,8 +108,7 @@ func (h *Handler) CreateMailbox(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	mailbox, err := h.service.CreateMailbox(
-		c.Request.Context(), organization.OrganizationID, organization.UserID, req.LocalPart, req.DisplayName, req.Domain)
+	mailbox, err := h.service.CreateMailbox(c.Request.Context(), organization, req.input())
 	if err != nil {
 		response.HandleError(c, "Failed to create mailbox", err)
 		return
@@ -127,7 +127,7 @@ func (h *Handler) DeleteMailbox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteMailbox(c.Request.Context(), organization.OrganizationID, mailboxID); err != nil {
+	if err := h.service.DeleteMailbox(c.Request.Context(), organization, mailboxID); err != nil {
 		response.HandleError(c, "Failed to delete mailbox", err)
 		return
 	}
@@ -135,7 +135,7 @@ func (h *Handler) DeleteMailbox(c *gin.Context) {
 }
 
 func (h *Handler) ListLog(c *gin.Context) {
-	organizationID, ok := currentOrganizationID(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
@@ -149,7 +149,7 @@ func (h *Handler) ListLog(c *gin.Context) {
 		mailboxID = uint(parsed)
 	}
 	page := pagination.FromContext(c)
-	messages, total, err := h.service.ListLog(c.Request.Context(), organizationID, domain.MailLogFilter{
+	messages, total, err := h.service.ListLog(c.Request.Context(), viewer, domain.MailLogFilter{
 		Direction: domain.MailDirection(c.Query("direction")),
 		Status:    domain.MailStatus(c.Query("status")),
 		MailboxID: mailboxID,
@@ -170,7 +170,7 @@ func (h *Handler) ListLog(c *gin.Context) {
 // ListStats returns per-day counts for the caller's mail.
 // fastbuild:bounded-list max=90 reason=one entry per day of a window capped at MaxStatsDays
 func (h *Handler) ListStats(c *gin.Context) {
-	organizationID, ok := currentOrganizationID(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
@@ -183,7 +183,7 @@ func (h *Handler) ListStats(c *gin.Context) {
 		}
 		days = parsed
 	}
-	stats, err := h.service.Stats(c.Request.Context(), organizationID, days)
+	stats, err := h.service.Stats(c.Request.Context(), viewer, days)
 	if err != nil {
 		response.HandleError(c, "Failed to load mail statistics", err)
 		return
@@ -193,12 +193,12 @@ func (h *Handler) ListStats(c *gin.Context) {
 }
 
 func (h *Handler) ListMessages(c *gin.Context) {
-	organizationID, mailboxID, ok := mailboxScope(c)
+	viewer, mailboxID, ok := mailboxScope(c)
 	if !ok {
 		return
 	}
 	page := pagination.FromContext(c)
-	messages, total, err := h.service.ListMessages(c.Request.Context(), organizationID, mailboxID, domain.MailMessageFilter{
+	messages, total, err := h.service.ListMessages(c.Request.Context(), viewer, mailboxID, domain.MailMessageFilter{
 		Direction: domain.MailDirection(c.Query("direction")),
 		Page:      page.GetPage(),
 		PerPage:   page.GetPerPage(),
@@ -214,11 +214,11 @@ func (h *Handler) ListMessages(c *gin.Context) {
 }
 
 func (h *Handler) GetMessage(c *gin.Context) {
-	organizationID, mailboxID, messageID, ok := messageScope(c)
+	viewer, mailboxID, messageID, ok := messageScope(c)
 	if !ok {
 		return
 	}
-	message, err := h.service.GetMessage(c.Request.Context(), organizationID, mailboxID, messageID)
+	message, err := h.service.GetMessage(c.Request.Context(), viewer, mailboxID, messageID)
 	if err != nil {
 		response.HandleError(c, "Failed to get mail message", err)
 		return
@@ -230,7 +230,7 @@ func (h *Handler) GetMessage(c *gin.Context) {
 // DownloadAttachment returns the bytes of one attached file. The declared media type is never
 // served: every file is an opaque download, so a browser cannot render or run it on this origin.
 func (h *Handler) DownloadAttachment(c *gin.Context) {
-	organizationID, mailboxID, messageID, ok := messageScope(c)
+	viewer, mailboxID, messageID, ok := messageScope(c)
 	if !ok {
 		return
 	}
@@ -238,7 +238,7 @@ func (h *Handler) DownloadAttachment(c *gin.Context) {
 	if !ok {
 		return
 	}
-	attachment, err := h.service.GetAttachment(c.Request.Context(), organizationID, mailboxID, messageID, attachmentID)
+	attachment, err := h.service.GetAttachment(c.Request.Context(), viewer, mailboxID, messageID, attachmentID)
 	if err != nil {
 		response.HandleError(c, "Failed to get mail attachment", err)
 		return
@@ -251,7 +251,7 @@ func (h *Handler) DownloadAttachment(c *gin.Context) {
 }
 
 func (h *Handler) SendMessage(c *gin.Context) {
-	organizationID, mailboxID, ok := mailboxScope(c)
+	viewer, mailboxID, ok := mailboxScope(c)
 	if !ok {
 		return
 	}
@@ -260,13 +260,13 @@ func (h *Handler) SendMessage(c *gin.Context) {
 		return
 	}
 	message, created, err := h.service.SendMessage(
-		c.Request.Context(), organizationID, mailboxID, req.input(c.GetHeader(IdempotencyKeyHeader)))
+		c.Request.Context(), viewer, mailboxID, req.input(c.GetHeader(IdempotencyKeyHeader)))
 	respondSent(c, message, created, err)
 }
 
 // SendOutbound sends one message with an API key that holds the mail:send scope.
 func (h *Handler) SendOutbound(c *gin.Context) {
-	organizationID, ok := currentOrganizationID(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
@@ -275,13 +275,13 @@ func (h *Handler) SendOutbound(c *gin.Context) {
 		return
 	}
 	message, created, err := h.service.SendFromAddress(
-		c.Request.Context(), organizationID, req.From, req.input(c.GetHeader(IdempotencyKeyHeader)))
+		c.Request.Context(), viewer, req.From, req.input(c.GetHeader(IdempotencyKeyHeader)))
 	respondSent(c, message, created, err)
 }
 
 // GetOutbound returns one message the API key owner sent, so a sender can check its outcome.
 func (h *Handler) GetOutbound(c *gin.Context) {
-	organizationID, ok := currentOrganizationID(c)
+	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
@@ -289,7 +289,7 @@ func (h *Handler) GetOutbound(c *gin.Context) {
 	if !ok {
 		return
 	}
-	message, err := h.service.GetOutboundMessage(c.Request.Context(), organizationID, messageID)
+	message, err := h.service.GetOutboundMessage(c.Request.Context(), viewer, messageID)
 	if err != nil {
 		response.HandleError(c, "Failed to get mail message", err)
 		return
@@ -316,7 +316,7 @@ func respondSent(c *gin.Context, message *domain.MailMessage, created bool, err 
 }
 
 func (h *Handler) UpdateMessage(c *gin.Context) {
-	organizationID, mailboxID, messageID, ok := messageScope(c)
+	viewer, mailboxID, messageID, ok := messageScope(c)
 	if !ok {
 		return
 	}
@@ -324,7 +324,7 @@ func (h *Handler) UpdateMessage(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	message, err := h.service.SetMessageRead(c.Request.Context(), organizationID, mailboxID, messageID, *req.Read)
+	message, err := h.service.SetMessageRead(c.Request.Context(), viewer, mailboxID, messageID, *req.Read)
 	if err != nil {
 		response.HandleError(c, "Failed to update mail message", err)
 		return
@@ -334,11 +334,11 @@ func (h *Handler) UpdateMessage(c *gin.Context) {
 }
 
 func (h *Handler) DeleteMessage(c *gin.Context) {
-	organizationID, mailboxID, messageID, ok := messageScope(c)
+	viewer, mailboxID, messageID, ok := messageScope(c)
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteMessage(c.Request.Context(), organizationID, mailboxID, messageID); err != nil {
+	if err := h.service.DeleteMessage(c.Request.Context(), viewer, mailboxID, messageID); err != nil {
 		response.HandleError(c, "Failed to delete mail message", err)
 		return
 	}
@@ -399,22 +399,27 @@ func (h *Handler) ReceiveDeliveryEvent(c *gin.Context) {
 	response.Success(c, body)
 }
 
-func mailboxScope(c *gin.Context) (organizationID, mailboxID uint, ok bool) {
-	organizationID, ok = currentOrganizationID(c)
-	if !ok {
-		return 0, 0, false
-	}
-	mailboxID, ok = httphandler.ParseID(c, "mailbox_id")
-	return organizationID, mailboxID, ok
+func mailboxScope(c *gin.Context) (viewer domain.OrganizationContext, mailboxID uint, ok bool) {
+	return viewerScope(c, "mailbox_id")
 }
 
-func messageScope(c *gin.Context) (organizationID, mailboxID, messageID uint, ok bool) {
-	organizationID, mailboxID, ok = mailboxScope(c)
+func messageScope(c *gin.Context) (viewer domain.OrganizationContext, mailboxID, messageID uint, ok bool) {
+	viewer, mailboxID, ok = mailboxScope(c)
 	if !ok {
-		return 0, 0, 0, false
+		return domain.OrganizationContext{}, 0, 0, false
 	}
 	messageID, ok = httphandler.ParseID(c, "message_id")
-	return organizationID, mailboxID, messageID, ok
+	return viewer, mailboxID, messageID, ok
+}
+
+// viewerScope returns the verified membership the request acts with and one numeric path id.
+func viewerScope(c *gin.Context, param string) (viewer domain.OrganizationContext, id uint, ok bool) {
+	viewer, ok = organizationScope(c)
+	if !ok {
+		return domain.OrganizationContext{}, 0, false
+	}
+	id, ok = httphandler.ParseID(c, param)
+	return viewer, id, ok
 }
 
 // organizationScope returns the organization the request acts in, resolved and verified by the

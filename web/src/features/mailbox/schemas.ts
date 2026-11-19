@@ -15,12 +15,16 @@ import {
   string,
   looseObject,
   union,
+  unknown,
 } from 'zod/mini';
 
 /** Limits from `contracts/MAILBOXES.md`. */
 export const MAILBOX_LOCAL_PART_MAX_LENGTH = 64;
 export const MAILBOX_DISPLAY_NAME_MAX_LENGTH = 120;
 export const MAILBOX_MAX_PER_ORGANIZATION = 50;
+/** Members of one shared mailbox. */
+export const MAILBOX_MAX_MEMBERS = 100;
+export const MAILBOX_ACCESS_EVENTS_MAX_PAGE_SIZE = 100;
 export const MAIL_DOMAIN_NAME_MAX_LENGTH = 253;
 export const MAIL_DOMAIN_MAX_PER_ORGANIZATION = 10;
 export const MAIL_ZONE_MAX_PER_ORGANIZATION = 3;
@@ -245,10 +249,33 @@ export const mailDnsRecordPatchSchema = strictObject({
   proxied: optional(boolean()),
 });
 
+export const mailboxTypeSchema = union([literal('personal'), literal('shared')]);
+/** Each level includes the previous one. */
+export const mailboxPermissionSchema = union([literal('view'), literal('send'), literal('manage')]);
+export const MAILBOX_PERMISSIONS = ['view', 'send', 'manage'] as const;
+
+/** What the caller may do with a mailbox; controls are shown or hidden from it. */
+export const mailboxAccessSchema = strictObject({
+  view: boolean(),
+  send: boolean(),
+  manage_members: boolean(),
+  administer: boolean(),
+  see_history: boolean(),
+});
+
 export const mailboxSchema = strictObject({
   id: safeIdSchema,
   address: string(),
   display_name: string(),
+  type: mailboxTypeSchema,
+  // Null for a shared mailbox or after the owner account is deleted; kept while a personal mailbox awaits handover.
+  owner_user_id: nullable(safeIdSchema),
+  awaiting_handover: boolean(),
+  // Mail created before this instant is sealed; set once at handover.
+  sealed_before: nullable(timestampSchema),
+  webhooks_enabled: boolean(),
+  access: mailboxAccessSchema,
+  // The caller's own unread count; 0 without `view`.
   unread_count: nonnegativeIntegerSchema,
   created_at: timestampSchema,
 });
@@ -348,11 +375,64 @@ export const mailDayStatsListSchema = array(mailDayStatsSchema);
 const templateVariablesSchema = record(string(), string());
 
 /** Request bodies. Field rules beyond the types are checked by the normalizers below. */
+export const mailboxMemberInputSchema = strictObject({
+  user_id: safeIdSchema,
+  permission: mailboxPermissionSchema,
+});
+
 export const createMailboxSchema = strictObject({
   local_part: string(),
   display_name: optional(string()),
   // A verified domain of the organization; absent means the shared domain.
   domain: optional(string()),
+  type: mailboxTypeSchema,
+  // Personal mailboxes only.
+  owner_user_id: optional(safeIdSchema),
+  // Shared mailboxes only: 1 to 100 different users.
+  members: optional(array(mailboxMemberInputSchema)),
+});
+
+export const mailboxMemberSchema = strictObject({
+  user_id: safeIdSchema,
+  permission: mailboxPermissionSchema,
+  granted_by: safeIdSchema,
+  created_at: timestampSchema,
+});
+export const mailboxMemberListSchema = array(mailboxMemberSchema);
+
+export const mailboxAccessEventTypeSchema = union([
+  literal('created'),
+  literal('member_set'),
+  literal('member_removed'),
+  literal('owner_left'),
+  literal('owner_returned'),
+  literal('handed_over'),
+  literal('sealed_deleted'),
+  literal('webhooks_changed'),
+]);
+
+export const mailboxAccessEventSchema = strictObject({
+  id: safeIdSchema,
+  type: mailboxAccessEventTypeSchema,
+  // Null for a change Zmail made itself.
+  actor_user_id: nullable(safeIdSchema),
+  subject_user_id: nullable(safeIdSchema),
+  // Ids, permissions, timestamps, and counts; clients ignore keys they do not know.
+  detail: record(string(), unknown()),
+  created_at: timestampSchema,
+});
+
+export const mailboxAccessEventPageEnvelopeSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: array(mailboxAccessEventSchema),
+  meta: pageMetaSchema,
+  links: pageLinksSchema,
+});
+
+export const mailboxSealedDeletionSchema = strictObject({
+  deleted_messages: nonnegativeIntegerSchema,
+  deleted_broadcasts: nonnegativeIntegerSchema,
 });
 
 export const sendMailMessageSchema = strictObject({
@@ -540,6 +620,15 @@ export const mailRecipientStatusSchema = union([
   literal('skipped'),
   literal('canceled'),
 ]);
+
+/**
+ * What a caller without `view` on the sender mailbox, or of a sealed broadcast, knows after pausing
+ * or cancelling: the API answers 204, so only the new status.
+ */
+export const mailBroadcastStatusOnlySchema = strictObject({
+  id: safeIdSchema,
+  status: mailBroadcastStatusSchema,
+});
 
 export const mailBroadcastSchema = strictObject({
   id: safeIdSchema,

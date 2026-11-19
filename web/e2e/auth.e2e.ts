@@ -14,7 +14,8 @@ test('a member signs in through the API adapter, sees live account data, and sig
   page,
 }) => {
   await signIn(page, member.password);
-  await expect(page).toHaveURL(/\/console$/);
+  // The dev server compiles the console on its first request, which can outlast the default wait.
+  await expect(page).toHaveURL(/\/console$/, { timeout: 20_000 });
 
   // The nickname comes from the Go API through the server-owned adapter, not from mock state.
   await page.getByRole('banner').getByRole('button', { name: 'Profile', exact: true }).click();

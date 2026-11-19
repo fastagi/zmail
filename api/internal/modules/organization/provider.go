@@ -5,6 +5,7 @@ import (
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/events"
 	"github.com/fastagi/zmail/api/internal/starter/assembly"
 )
 
@@ -15,6 +16,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.OrganizationInvitationRepository), new(*repository)),
 	NewInvitationPolicy,
 	NewInvitationMailer,
+	NewMembershipEventPublisher,
 	NewService,
 	wire.Bind(new(Service), new(*service)),
 	NewContextResolver,
@@ -33,4 +35,9 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_07_15_000000_create_organization_invitations_table",
 		),
 	)
+}
+
+// NewMembershipEventPublisher publishes membership events on the application's event bus.
+func NewMembershipEventPublisher(bus *events.EventBus) MembershipEventPublisher {
+	return bus
 }
