@@ -340,6 +340,20 @@ describe('unified inbox', () => {
     expect(state.mailboxes.refetch).toHaveBeenCalledTimes(1);
   });
 
+  it('a row whose mailbox the mailbox list already shows unreadable shows the notice and refetches the list once', () => {
+    state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales', { view: false })];
+    const { rerender } = renderRoute();
+
+    fireEvent.click(rowButton('Launch plan'));
+
+    expect(screen.getByText(/no longer available to you/u)).toBeInTheDocument();
+    expect(state.threadCalls).not.toContainEqual({ mailboxId: 2, threadId: 30 });
+    expect(state.inbox.refetch).toHaveBeenCalledTimes(1);
+
+    rerender(wrap(<MailboxesRoute />));
+    expect(state.inbox.refetch).toHaveBeenCalledTimes(1);
+  });
+
   it('scrolling to the end fetches the next page only while has_more', () => {
     // Links observe themselves for prefetching too; only the list's end matters here.
     const observers: {

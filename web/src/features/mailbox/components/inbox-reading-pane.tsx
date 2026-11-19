@@ -81,6 +81,8 @@ export function InboxReadingPane({
     readable && !item.thread ? item.id : null
   );
   const gone = isMailGone(item.thread ? thread.error : detail.error);
+  // Either the mailbox list already knows the view is gone, or the API just said so.
+  const unavailable = !readable || gone;
   const marked = useRef<number | null>(null);
   const reported = useRef<number | null>(null);
 
@@ -102,12 +104,12 @@ export function InboxReadingPane({
   }, [item, readable, queryClient, organizationId, markRead, updateInbox, t]);
 
   useEffect(() => {
-    if (!gone || reported.current === item.id) return;
+    if (!unavailable || reported.current === item.id) return;
     reported.current = item.id;
     onUnavailable();
-  }, [gone, item.id, onUnavailable]);
+  }, [unavailable, item.id, onUnavailable]);
 
-  if (!readable || gone) {
+  if (unavailable) {
     return (
       <div className="space-y-3">
         <Button
