@@ -11,57 +11,47 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
-## Unreleased — Transactional message storage
+## Unreleased — Transactional mail
 
-### Low — New tables for transactional messages and the suppression list
+Backend services can send one-off messages such as verification codes and password resets through
+`POST /v1/transactional-messages`, from transactional templates, with live and test API keys,
+simulator addresses, a suppression list, and a separate send lane. The feature is off until
+`MAILBOX_TRANSACTIONAL_ENABLED=true`. Contract: `contracts/MAILBOXES.md`, Transactional Mail.
 
-Run migrations: `2026_11_23_110000_create_transactional_messages` adds `transactional_messages`
-and `transactional_message_events`; `2026_11_23_120000_create_mail_suppressions` adds
-`mail_suppressions` and fills it from contacts suppressed with reason `bounced` or `complained`
-(lowercased, source `backfill`). Rolling back drops the tables: transactional records (kept 30
-days) and the suppression list are lost; contacts keep their own status. In Go, the mailbox
-repository implements the new `domain.TransactionalMailRepository`.
+### High — Five migrations, three with a rollback cost
 
-## Unreleased — API key modes
+Run migrations. They apply in this order; roll back in reverse:
 
-### Medium — API keys are live or test; scoped routes refuse test keys
+| Migration | Change | Rollback (Down) cost |
+|---|---|---|
+| `2026_11_23_080000_add_send_lanes` | Adds `mail_messages.send_lane`, marks every message a broadcast recipient points at as `broadcast`, and replaces `idx_mail_messages_send_attempted` with `idx_mail_messages_lane_attempted` | None: drops the column and restores the old index; older code counts one shared limit again |
+| `2026_11_23_090000_add_api_key_mode` (apikey starter) | Adds `api_keys.mode` (`varchar(8)`, default `live`, checked to `live` or `test`); existing keys become `live` | **Revoke every test key first.** Down drops the column and older code treats every key as live, so a surviving test key would send real mail |
+| `2026_11_23_100000_add_transactional_templates` | Adds `kind`, `template_key`, `from_address`, `from_name`, and `variable_definitions` to `mail_templates`, the unique index `mail_templates_key_idx`, and a check tying the fields to the kind; existing templates become `standard` | **Transactional templates are deleted**: Down runs `DELETE FROM mail_templates WHERE kind = 'transactional'` before dropping the columns |
+| `2026_11_23_110000_create_transactional_messages` | Adds `transactional_messages` and `transactional_message_events` | **Up to 30 days of transactional records are lost**: Down drops both tables |
+| `2026_11_23_120000_create_mail_suppressions` | Adds `mail_suppressions` and fills it from contacts suppressed with reason `bounced` or `complained` (lowercased, source `backfill`) | The suppression list is lost; contacts keep their own status |
 
-Every API key has an immutable `mode`: `live` (the default) or `test`. `POST /v1/api-keys`
-accepts an optional `mode`; key responses add `mode`, so clients that validate responses strictly
-must accept it. Test keys are issued with the `fastbuild_test_` prefix. `apikey.RequireScopes`
-now also answers `403 PERMISSION.DENIED` for a valid test key; a route that supports test keys
-declares it with `apikey.RequireScopesAllowingTest` and reads the mode with
-`apikey.APIKeyModeFromContext`. Fork routes that authenticate API keys without `RequireScopes`
-must check the mode themselves. `domain.APIKey` gains `Mode`.
+### High — New configuration; the encryption key needs its own handling
 
-Run migrations: `2026_11_23_090000_add_api_key_mode` adds `api_keys.mode` (`varchar(8)`, default
-`live`, checked to `live` or `test`); existing keys become `live`. **Revoke every test key before
-rolling this migration back**: Down drops the column, and the old code treats every key as live.
+| Variable | Default | Meaning |
+|---|---|---|
+| `MAILBOX_TRANSACTIONAL_ENABLED` | `false` | Accept transactional messages; when `false`, new requests answer `503 MAILBOX.TRANSACTIONAL_DISABLED` and the worker still sends stored ones |
+| `MAILBOX_SECRET_ENCRYPTION_KEY` | empty | At least 32 characters, required when enabled or startup fails. Encrypts content while a message waits and keys the idempotency fingerprints. Same value on every API replica and worker; keep it apart from database backups |
+| `MAILBOX_DAILY_BROADCAST_LIMIT`, `MAILBOX_DAILY_TRANSACTIONAL_LIMIT` | value of `MAILBOX_DAILY_SEND_LIMIT` | Per-organization 24-hour lane limits, 1 to 100000 (see the send lanes entry below) |
+| `MAILBOX_SIMULATOR_DOMAIN` | `test.zmail.im` | `delivered@`, `bounced@`, `soft-bounced@`, `complained@`, and `suppressed@` (optional `+tag`) on it are simulated, never sent |
+| `MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE` | `3` | Sends of one template to one recipient per organization and mode per minute (1 to 1000) |
+| `MAILBOX_TRANSACTIONAL_KEY_PER_SECOND` | `20` | Sends per API key per second (1 to 10000) |
 
-## Unreleased — Transactional templates
+The rate limits use the shared rate-limit store: with more than one API replica set
+`RATE_LIMIT_STORE=postgres`. Run `fastbuild mail:broadcast:work` wherever the API runs; it also
+retries, expires, and purges transactional messages.
 
-### Medium — Templates have a kind; template writes take the viewer
-
-Templates gain `kind` (`standard`, the default, or `transactional`). A transactional template has
-a `key` unique in its organization, a sender (`from_address` on a verified domain of the
-organization, or the instance `MAILBOX_DOMAIN` with the `log` provider, and an optional
-`from_name`), and `variable_definitions`. Only owners and admins write transactional templates.
-Mailbox sends, template tests, and broadcasts (create, update, send) refuse a transactional
-template with `422 MAILBOX.TEMPLATE_KIND_MISMATCH`; `DELETE /v1/mail-domains/{id}` answers
-`409 MAILBOX.DOMAIN_IN_USE` while a transactional template sends from the domain.
-`GET /v1/mail-templates` accepts `?kind=`. Template responses add `kind`, `key`, `from`, and
-`variable_definitions`; clients that validate responses strictly must accept them.
-
-Run migrations: `2026_11_23_100000_add_transactional_templates` adds `kind`, `template_key`,
-`from_address`, `from_name`, and `variable_definitions` to `mail_templates`, the unique index
-`mail_templates_key_idx`, and a check tying the fields to the kind. Existing templates become
-`standard`. Rolling back runs `DELETE FROM mail_templates WHERE kind = 'transactional'` before
-dropping the columns, so transactional templates are lost. In Go, `Service.CreateTemplate`,
-`UpdateTemplate`, and `DeleteTemplate` take a `domain.OrganizationContext` instead of IDs;
-`ListTemplates` and `domain.MailTemplateRepository.ListTemplates` take a `domain.MailTemplateKind`
-(empty lists all); the repository adds `FindTemplateByKey`.
-
-## Unreleased — Send lanes
+To rotate `MAILBOX_SECRET_ENCRYPTION_KEY`: (1) set `MAILBOX_TRANSACTIONAL_ENABLED=false` and roll out,
+keeping the old key so the worker can drain; (2) wait until
+`SELECT count(*) FROM transactional_messages WHERE status = 'queued'` is 0 (lane waits expire within
+an hour); (3) set the new key everywhere, re-enable, and roll out. A message still queued under the
+old key fails with `send.payload_unavailable`, and for 24 hours a request repeating an
+`Idempotency-Key` from before the rotation answers `409 MAILBOX.IDEMPOTENCY_CONFLICT`. Details:
+`api/docs/DEPLOYMENT.md`, Transactional Mail.
 
 ### Medium — The send limit is split into three lanes
 
@@ -73,21 +63,58 @@ rolling 24 hours by provider-call start, failed attempts included:
 - `broadcast` (`MAILBOX_DAILY_BROADCAST_LIMIT`): each broadcast recipient. Full → the broadcast
   pauses with `stop_reason` `send_limit_reached`, as before.
 - `transactional` (`MAILBOX_DAILY_TRANSACTIONAL_LIMIT`): live, non-simulated transactional
-  messages (added by a later change).
+  messages. Full → the message waits with `queued_reason` `send_limit`; once as many wait as the
+  lane allows, `429 MAILBOX.SEND_LIMIT_REACHED`; a message waiting more than 1 hour fails with
+  `send.expired`.
 
-The two new limits take the value of `MAILBOX_DAILY_SEND_LIMIT` when unset or `0`; each is 1 to
-100000. The defaults keep the personal and broadcast lanes at least as large as the shared limit
-was, so no organization gets less room. Because lanes no longer share the room, an organization's
-theoretical maximum per 24 hours is the sum of the three (triple the old limit with the defaults):
-set `MAILBOX_DAILY_BROADCAST_LIMIT` and `MAILBOX_DAILY_TRANSACTIONAL_LIMIT` so the total stays within
+The two new limits take the value of `MAILBOX_DAILY_SEND_LIMIT` when unset or `0`. The defaults
+keep the personal and broadcast lanes at least as large as the shared limit was, so no organization
+gets less room. Because lanes no longer share the room, an organization's theoretical maximum per
+24 hours is the sum of the three (triple the old limit with the defaults): set
+`MAILBOX_DAILY_BROADCAST_LIMIT` and `MAILBOX_DAILY_TRANSACTIONAL_LIMIT` so the total stays within
 the Cloudflare account's sending limit.
 
-Run migrations: `2026_11_23_080000_add_send_lanes` adds `mail_messages.send_lane`, marks every
-message a broadcast recipient points at as `broadcast`, and replaces
-`idx_mail_messages_send_attempted` with `idx_mail_messages_lane_attempted`. `GET
-/v1/mailbox-domains` adds `daily_broadcast_limit` and `daily_transactional_limit`;
+`GET /v1/mailbox-domains` adds `daily_broadcast_limit` and `daily_transactional_limit`;
 `daily_send_limit` now means the personal lane. In Go, `domain.MailboxRepository.CountOutboundSince`
 takes a `domain.SendLane`, and `LeaseWaitingSends` counts only personal attempts.
+
+### Medium — API keys are live or test; scoped routes refuse test keys
+
+Every API key has an immutable `mode`: `live` (the default) or `test`. `POST /v1/api-keys`
+accepts an optional `mode`; key responses add `mode`, so clients that validate responses strictly
+must accept it. Test keys are issued with the `fastbuild_test_` prefix and never send mail.
+`apikey.RequireScopes` now also answers `403 PERMISSION.DENIED` for a valid test key; a route that
+supports test keys declares it with `apikey.RequireScopesAllowingTest` and reads the mode with
+`apikey.APIKeyModeFromContext`. Fork routes that authenticate API keys without `RequireScopes`
+must check the mode themselves. `domain.APIKey` gains `Mode`. The new scope `mail:transactional`
+neither includes nor is included by `mail:send`; `*` grants both.
+
+### Medium — Templates have a kind; template writes take the viewer
+
+Templates gain `kind` (`standard`, the default, or `transactional`). A transactional template has
+a `key` unique in its organization, a sender (`from_address` on a verified domain of the
+organization, or the instance `MAILBOX_DOMAIN` with the `log` provider, and an optional
+`from_name`), and `variable_definitions`. Only owners and admins write transactional templates.
+Mailbox sends, template tests, and broadcasts (create, update, send) refuse a transactional
+template with `422 MAILBOX.TEMPLATE_KIND_MISMATCH`; `DELETE /v1/mail-domains/{id}` answers
+`409 MAILBOX.DOMAIN_IN_USE` while a transactional template sends from the domain.
+`GET /v1/mail-templates` accepts `?kind=`. Template responses add `kind`, `key`, `from`, and
+`variable_definitions`; clients that validate responses strictly must accept them. In Go,
+`Service.CreateTemplate`, `UpdateTemplate`, and `DeleteTemplate` take a
+`domain.OrganizationContext` instead of IDs; `ListTemplates` and
+`domain.MailTemplateRepository.ListTemplates` take a `domain.MailTemplateKind` (empty lists all);
+the repository adds `FindTemplateByKey`.
+
+### Low — New routes, webhook events, and repository seams
+
+New routes: `POST /v1/transactional-messages` and `GET /v1/transactional-messages/{id}` (API key,
+`mail:transactional`, test keys accepted), `GET /v1/transactional-mail-log`,
+`GET /v1/transactional-mail-log/{id}`, `POST /v1/transactional-test-sends`,
+`GET /v1/mail-send-lanes`, and `GET`/`DELETE /v1/mail-suppressions`. Webhook subscribers can receive
+the transactional `email.*` events listed in `contracts/MAILBOXES.md`. In Go, the mailbox repository
+implements the new `domain.TransactionalMailRepository`. Observability adds the
+`transactional_message.*` log events and `zmail_transactional_*` metrics listed in
+`api/docs/OBSERVABILITY.md`.
 
 ## Unreleased — Unified inbox
 

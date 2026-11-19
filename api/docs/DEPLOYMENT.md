@@ -14,7 +14,7 @@ cloud, registry, rollout controller, secret store, or migration orchestrator for
 | `.github/workflows/container.yml` | CI | Runs the same container verifier when API or container sources change. |
 | `fastbuild notification:work` | Optional notification starter | Processes durable email deliveries with bounded database leases. |
 | `fastbuild webhook:work` | Optional webhook starter | Processes signed outbound deliveries with bounded network calls and database leases. |
-| `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends direct sends that waited for room in the organization's send limit, oldest first, then the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit, and purges trash older than 30 days. Run it wherever the API runs. |
+| `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends direct sends that waited for room in the organization's send limit, oldest first, then the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit, and purges trash older than 30 days. It also retries, expires, and purges transactional messages. Run it wherever the API runs. |
 | `fastbuild mail:zone:work` | Optional mailbox starter | Activates managed mail zones once their registrar delegates them, sets their pending domains up, and removes zones still pending after 14 days. |
 | `fastbuild mail:zone:release` | Optional mailbox starter | One-off operator command that removes a pending managed mail zone from Cloudflare and Zmail, so another organization can claim its apex. |
 | [`deploy/kubernetes`](../../deploy/kubernetes/README.md) | Example | Hardened kustomize reference for the API, workers, retention jobs, migration job, and Web. |
@@ -144,6 +144,9 @@ A downstream production deployment must inject at least:
 - Asset deployments: `OBJECT_STORAGE_DRIVER=r2` plus the complete R2 secret group, exact provider
   CORS rules for browser PUT/GET, and a short lifecycle rule for `asset-uploads/`. Do not use a
   container filesystem as durable production storage.
+- Transactional mail: a strong `MAILBOX_SECRET_ENCRYPTION_KEY` kept apart from database backups,
+  and `RATE_LIMIT_STORE=postgres` with more than one API replica; see
+  [Transactional Mail](#transactional-mail).
 - Webhook deployments: a strong `WEBHOOK_ENCRYPTION_KEY`, dedicated worker replicas, restricted
   outbound egress, DNS/connection monitoring, and terminal-failure alerting. Never enable insecure
   HTTP or private targets in production.
@@ -223,6 +226,46 @@ when the window has room.
 The same worker sends direct messages that waited for the send limit and deletes for good mailbox
 trash older than 30 days. Run it wherever the API runs, even without broadcasts: without it, waiting
 messages are never sent and the trash is never purged.
+
+## Transactional Mail
+
+`MAILBOX_TRANSACTIONAL_ENABLED=true` turns on `POST /v1/transactional-messages` and the console's
+test sends. It requires `MAILBOX_SECRET_ENCRYPTION_KEY` (at least 32 characters), or the API and
+worker refuse to start. Give every API replica and every `mail:broadcast:work` worker the same
+value: the key encrypts message content while it waits to be sent and keys the idempotency
+fingerprints. The API sends each message right after the request commits; the
+`mail:broadcast:work` worker sends messages that waited for the transactional lane or a retry, fails
+messages that waited more than 1 hour (`send.expired`) or whose provider call outlived its lease
+(`transport.unknown_outcome`), and deletes messages older than 30 days. Without the worker, retries
+and lane waits never finish and old messages are never purged.
+
+- **Keep the key apart from database backups.** Store it in the secret store, never next to a dump
+  or snapshot: a backup together with the key exposes the content of every message that was still
+  waiting when the backup was taken. Content is wiped when a message reaches a final state, so a
+  backup without the key holds only ciphertext of waiting messages.
+- **Share the rate limits across replicas.** The per-key (`MAILBOX_TRANSACTIONAL_KEY_PER_SECOND`)
+  and per-recipient (`MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE`) limits use the shared rate-limit
+  store. With more than one API replica set `RATE_LIMIT_STORE=postgres`; with the default `memory`
+  store each replica enforces its own budget, so N replicas allow N times the limit.
+- **Size the lane.** `MAILBOX_DAILY_TRANSACTIONAL_LIMIT` (unset: the value of
+  `MAILBOX_DAILY_SEND_LIMIT`) counts live, non-simulated messages per organization over 24 hours,
+  separately from the personal and broadcast lanes. Keep the sum of the three lanes within the
+  provider account's sending limit.
+
+To rotate `MAILBOX_SECRET_ENCRYPTION_KEY`:
+
+1. Set `MAILBOX_TRANSACTIONAL_ENABLED=false` on every API replica and roll them out. New requests
+   answer `503 MAILBOX.TRANSACTIONAL_DISABLED`. Keep the old key set: the worker keeps sending
+   stored messages with it.
+2. Drain: wait until no transactional message is `queued`, for example
+   `SELECT count(*) FROM transactional_messages WHERE status = 'queued'` returns 0. Messages that
+   wait for the lane fail with `send.expired` within an hour at most.
+3. Set the new key on every API replica and worker, turn transactional mail back on, and roll out.
+
+A message still queued under the old key fails with `send.payload_unavailable` and logs
+`transactional_payload.decrypt_failed`. Within 24 hours after the rotation, repeating a request
+with an `Idempotency-Key` used before it answers `409 MAILBOX.IDEMPOTENCY_CONFLICT`, because the
+fingerprint changed; clients should use new keys after a rotation.
 
 ## Mail Zone Worker
 
