@@ -149,6 +149,9 @@ export const mailboxDomainSchema = strictObject({
   broadcasts_enabled: boolean(),
   // Instance-wide: whether owners and admins may connect their own domains.
   custom_domains_enabled: boolean(),
+  // Instance-wide: whether transactional mail is on. Optional until the API reports it; absent
+  // means off.
+  transactional_enabled: optional(boolean()),
 });
 export const mailboxDomainListSchema = array(mailboxDomainSchema);
 

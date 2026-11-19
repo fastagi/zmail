@@ -5,13 +5,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import { mailboxKeys } from '@/features/mailbox/hooks/use-mailbox';
 import { mailboxService } from '@/features/mailbox/services/mailbox-service';
-import type { MailTemplateInput, MailTemplateTestInput } from '@/features/mailbox/types';
+import type {
+  MailTemplateInput,
+  MailTemplateKind,
+  MailTemplateTestInput,
+} from '@/features/mailbox/types';
 
 /** Template keys live under the organization, like every other mailbox key. */
 export const mailTemplateKeys = {
   all: (organizationId: number) =>
     [...mailboxKeys.organization(organizationId), 'templates'] as const,
-  list: (organizationId: number) => [...mailTemplateKeys.all(organizationId), 'list'] as const,
+  lists: (organizationId: number) => [...mailTemplateKeys.all(organizationId), 'list'] as const,
+  list: (organizationId: number, kind?: MailTemplateKind) =>
+    [...mailTemplateKeys.lists(organizationId), kind ?? 'all'] as const,
   detail: (organizationId: number, templateId: number) =>
     [...mailTemplateKeys.all(organizationId), templateId] as const,
 };
@@ -20,10 +26,11 @@ function validId(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
 }
 
-export function useMailTemplates(organizationId: number) {
+/** The organization's templates; only those of `kind` when it is given. */
+export function useMailTemplates(organizationId: number, kind?: MailTemplateKind) {
   return useQuery({
-    queryKey: mailTemplateKeys.list(organizationId),
-    queryFn: () => mailboxService.templates(organizationId),
+    queryKey: mailTemplateKeys.list(organizationId, kind),
+    queryFn: () => mailboxService.templates(organizationId, kind),
     enabled: validId(organizationId),
     staleTime: 30_000,
     meta: LOCAL_ERROR_HANDLING_META,
@@ -50,7 +57,7 @@ export function useSaveMailTemplate(organizationId: number) {
       queryClient.setQueryData(mailTemplateKeys.detail(organizationId, template.id), template);
     },
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: mailTemplateKeys.list(organizationId) }),
+      queryClient.invalidateQueries({ queryKey: mailTemplateKeys.lists(organizationId) }),
   });
 }
 

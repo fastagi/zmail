@@ -146,7 +146,7 @@ function TemplateList({
   onOpen: (templateId: number) => void;
 }) {
   const t = useT('mailbox');
-  const templates = useMailTemplates(useMailOrganizationId());
+  const templates = useMailTemplates(useMailOrganizationId(), 'standard');
   const formatter = useDateTimeFormat();
 
   const create = (

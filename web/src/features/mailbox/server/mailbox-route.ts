@@ -109,6 +109,7 @@ import type {
   MailDnsRecordType,
   MailboxPermission,
   MailTemplateInput,
+  MailTemplateKind,
   MailTemplateTestInput,
   SendMailMessageInput,
 } from '@/features/mailbox/types';
@@ -1595,18 +1596,26 @@ async function contactListBody(request: Request): Promise<Parsed<{ name: string 
   return { ok: true, value: { name } };
 }
 
+const templateKinds: readonly MailTemplateKind[] = ['standard', 'transactional'];
+
 export async function listMailTemplatesRoute(request: Request): Promise<NextResponse> {
   const target = await resolveMailboxReadRoute(request);
   if (!target.available) return target.response;
+  const kind = new URL(request.url).searchParams.get('kind') ?? '';
+  if (kind !== '' && !isOneOf(templateKinds, kind)) return invalidInput('Invalid template kind');
   if (target.backend === 'go-api') {
     return forwardAuthenticatedGoApi(request, {
       method: 'GET',
       path: 'mail-templates',
       accessToken: target.accessToken,
       organizationId: String(target.organizationId),
+      // Only the kind filter reaches the API; anything else in the query is dropped.
+      ...(kind === '' ? {} : { searchParams: new URLSearchParams({ kind }) }),
     });
   }
-  return success(mockMailboxStore.listTemplates(target.organizationId));
+  return success(
+    mockMailboxStore.listTemplates(target.organizationId, kind === '' ? undefined : kind)
+  );
 }
 
 export async function createMailTemplateRoute(request: Request): Promise<NextResponse> {

@@ -57,6 +57,7 @@ import type {
   MailboxType,
   MailTemplate,
   MailTemplateInput,
+  MailTemplateKind,
   MailTemplateSummary,
   SendMailMessageInput,
 } from '@/features/mailbox/types';
@@ -287,6 +288,8 @@ export class MockMailboxStore {
       daily_transactional_limit: MOCK_DAILY_SEND_LIMIT,
       broadcasts_enabled: true,
       custom_domains_enabled: true,
+      // The mock keeps the developer console usable in development.
+      transactional_enabled: true,
     };
     return [
       { domain: MOCK_MAILBOX_DOMAIN, kind: 'shared', ...settings },
@@ -915,8 +918,10 @@ export class MockMailboxStore {
     return { ok: true, value: this.view(found.state, viewer) };
   }
 
-  listTemplates(organizationId: number): MailTemplateSummary[] {
+  /** Every template of the organization by name, or only those of `kind`. */
+  listTemplates(organizationId: number, kind?: MailTemplateKind): MailTemplateSummary[] {
     return [...this.templatesOf(organizationId).values()]
+      .filter(template => kind === undefined || template.kind === kind)
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id - b.id))
       .map(template => ({
         id: template.id,

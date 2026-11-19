@@ -1049,6 +1049,9 @@ const messages = {
       'Check the template: a name, a one-line subject, an HTML or text body, and well-formed placeholders are required.',
     templateLimitReached: 'This organization has 200 templates. Delete one to create another.',
     templateNameTaken: 'Another template already has this name.',
+    templateKeyTaken: 'Another template already uses this key.',
+    templateKindImmutable: 'A template cannot change between standard and transactional.',
+    templateKindMismatch: 'Transactional templates are sent only through the developer API.',
     templateNotFound: 'This template does not exist or was deleted.',
     templateVariablesMissing:
       'Some variables of the template have no value and no fallback. Fill them in and send again.',

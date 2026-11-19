@@ -23,6 +23,7 @@ const state = vi.hoisted(() => {
     templates: query(),
     template: query(),
     templateCalls: [] as (number | null)[],
+    templateKinds: [] as unknown[],
     save: mutation(),
     remove: mutation(),
     test: mutation(),
@@ -42,7 +43,10 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useMailboxes: () => state.mailboxes,
 }));
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
-  useMailTemplates: () => state.templates,
+  useMailTemplates: (_organizationId: number, kind?: string) => {
+    state.templateKinds.push(kind);
+    return state.templates;
+  },
   useMailTemplate: (_organizationId: number, templateId: number | null) => {
     state.templateCalls.push(templateId);
     return state.template;
@@ -83,6 +87,7 @@ describe('mail templates console', () => {
     state.templates.data = [summary()];
     state.template.data = template();
     state.templateCalls = [];
+    state.templateKinds = [];
     for (const mutation of [state.save, state.remove, state.test]) {
       mutation.isPending = false;
       mutation.mutateAsync.mockReset();
@@ -95,6 +100,12 @@ describe('mail templates console', () => {
     expect(screen.getByText('Welcome, {{first_name|friend}}')).toBeInTheDocument();
     expect(screen.getByText('code')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'New template' })).toBeInTheDocument();
+  });
+
+  it('templates page lists only standard templates', () => {
+    renderTemplates();
+    expect(state.templateKinds.length).toBeGreaterThan(0);
+    expect(state.templateKinds.every(kind => kind === 'standard')).toBe(true);
   });
 
   it('shows an empty state with a create action', () => {

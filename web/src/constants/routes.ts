@@ -31,6 +31,7 @@ export const ROUTES = {
     MAIL_TEMPLATES: '/console/mail-templates',
     MAIL_CONTACTS: '/console/mail-contacts',
     MAIL_BROADCASTS: '/console/mail-broadcasts',
+    DEVELOPERS: '/console/developers',
     // fastbuild:slot web.routes.console
   },
 

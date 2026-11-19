@@ -58,6 +58,7 @@ import type {
   mailContactPageEnvelopeSchema,
   mailContactSchema,
   mailContactStatusSchema,
+  mailTemplateKindSchema,
   mailTemplateSchema,
   mailTemplateSummarySchema,
   mailTemplateTestInputSchema,
@@ -145,6 +146,7 @@ export interface MailMessageFilters {
   q?: string;
   group?: 'thread';
 }
+export type MailTemplateKind = Infer<typeof mailTemplateKindSchema>;
 export type MailTemplateSummary = Infer<typeof mailTemplateSummarySchema>;
 export type MailTemplate = Infer<typeof mailTemplateSchema>;
 export type MailTemplateInput = Infer<typeof mailTemplateInputSchema>;

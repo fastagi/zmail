@@ -997,6 +997,28 @@ describe('mailbox browser route boundary', () => {
       })
     );
     expect(invalid.status).toBe(422);
+
+    // The list filters by kind like the API; without kind it lists every template.
+    await route.createMailTemplateRoute(
+      request('/api/mail-templates', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Newsletter', subject: 'News', text: 'Hello' }),
+      })
+    );
+    const names = async (path: string) =>
+      (
+        (await (await route.listMailTemplatesRoute(request(path))).json()).data as {
+          name: string;
+        }[]
+      ).map(item => item.name);
+    expect(await names('/api/mail-templates')).toEqual(['Newsletter', 'Signup code']);
+    expect(await names('/api/mail-templates?kind=transactional')).toEqual(['Signup code']);
+    expect(await names('/api/mail-templates?kind=standard')).toEqual(['Newsletter']);
+    await expectError(
+      await route.listMailTemplatesRoute(request('/api/mail-templates?kind=other')),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
   });
 
   it('keeps templates per organization in the mock and sends with them', async () => {
@@ -1190,6 +1212,7 @@ describe('mailbox browser route boundary', () => {
     const body = JSON.stringify({ name: 'A', subject: 'S', text: 'x' });
 
     await route.listMailTemplatesRoute(request('/api/mail-templates'));
+    await route.listMailTemplatesRoute(request('/api/mail-templates?kind=transactional&x=1'));
     await route.createMailTemplateRoute(request('/api/mail-templates', { method: 'POST', body }));
     await route.getMailTemplateRoute(request('/api/mail-templates/3'), '3');
     await route.updateMailTemplateRoute(
@@ -1212,12 +1235,16 @@ describe('mailbox browser route boundary', () => {
       fetchMock.mock.calls.map(([url, init]) => `${init?.method} ${new URL(String(url)).pathname}`)
     ).toEqual([
       'GET /v1/mail-templates',
+      'GET /v1/mail-templates',
       'POST /v1/mail-templates',
       'GET /v1/mail-templates/3',
       'PUT /v1/mail-templates/3',
       'DELETE /v1/mail-templates/3',
       'POST /v1/mail-templates/3/tests',
     ]);
+    // Only the documented kind filter reaches the API.
+    expect(new URL(String(fetchMock.mock.calls[0]?.[0])).search).toBe('');
+    expect(new URL(String(fetchMock.mock.calls[1]?.[0])).search).toBe('?kind=transactional');
     for (const [, init] of fetchMock.mock.calls) {
       expect(new Headers(init?.headers).get('organization-id')).toBe('1');
     }

@@ -49,6 +49,8 @@ describe('client i18n message boundaries', () => {
       usage: ['usage'],
       webhook: ['webhook'],
       i18nTest: ['test'],
+      // The developer console reuses the mailbox copy for template errors and shared states.
+      developer: ['developer', 'mailbox'],
     });
   });
 

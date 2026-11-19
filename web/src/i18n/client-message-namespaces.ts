@@ -15,5 +15,6 @@ export const CLIENT_MESSAGE_NAMESPACES = {
   webhook: ['webhook'],
   i18nTest: ['test'],
   mailbox: ['mailbox'],
+  developer: ['developer', 'mailbox'],
   // fastbuild:slot web.i18n.client-namespaces
 } as const satisfies Record<string, readonly ModuleName[]>;
