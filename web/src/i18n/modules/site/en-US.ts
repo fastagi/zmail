@@ -4,51 +4,61 @@ const messages = {
     console: 'Console',
   },
   footer: {
-    tagline: 'Full-stack scaffold for the AI era',
+    tagline: 'Team mailboxes and safe broadcasts on your own domain',
     copyright: '© {year} Zmail. All rights reserved.',
   },
   hero: {
-    eyebrow: 'Enterprise scaffold for AI-assisted teams',
-    titlePrefix: 'Build modern applications faster',
-    titleAccent: 'with clear architecture',
+    eyebrow: 'Team email on your own domain',
+    titlePrefix: 'Send, receive, and broadcast',
+    titleAccent: 'from domains you own',
     description:
-      'FastBuild keeps the Next.js Web and Go API independently deployable and aligned through explicit contracts, with authentication, internationalization, and engineering governance built in.',
-    primaryAction: 'Get started',
-    secondaryAction: 'View console',
+      'Zmail brings shared team mailboxes, visual email templates, contact lists, and staged broadcasts with automatic bounce and spam protection into one workspace.',
+    primaryAction: 'Open console',
+    secondaryAction: 'Sign in',
   },
   features: {
-    title: 'The foundations your business needs',
+    title: 'Built for daily mail and product updates',
     description:
-      'A replaceable, verifiable enterprise starting point with clear ownership boundaries.',
+      'Everything an organization needs to run team addresses and send announcements safely.',
     authentication: {
-      title: 'Authentication starter',
+      title: 'Your own mail domains',
       description:
-        'A complete example covering sign-in, registration, sessions, and protected routes.',
+        'Connect domains on Cloudflare with automated routing, sending, and DMARC checks.',
     },
     console: {
-      title: 'Replaceable console',
-      description: 'An authenticated workspace with settings and explicit devtool boundaries.',
+      title: 'Shared team mailboxes',
+      description:
+        'Create addresses for people and teams, read incoming mail, reply with attachments, and track delivery.',
     },
     i18n: {
-      title: 'Type-safe internationalization',
+      title: 'Visual templates & variables',
       description:
-        'Route-scoped messages with translation keys and scopes derived from the message tree.',
+        'Design responsive emails with blocks or HTML, contact fields, fallbacks, and campaign-wide values.',
     },
     ui: {
-      title: 'Semantic UI foundation',
-      description: 'Design tokens and accessible components that support continued growth.',
+      title: 'Staged, protected broadcasts',
+      description:
+        'Send to a random test wave first and pause automatically when bounces or spam reports spike.',
     },
   },
   techStack: {
-    title: 'Modern technology stack',
+    title: 'Ready for teams and backend services',
     description:
-      'Mature tools selected for runtime performance, type safety, and developer experience.',
+      'Operate from the web console or trigger idempotent transactional mail over HTTP.',
+    pills: {
+      domains: 'Multi-domain DNS checks',
+      templates: 'Visual block editor',
+      staged: 'Test-wave broadcasts',
+      unsubscribe: 'One-click unsubscribe',
+      organizations: 'Multi-organization roles',
+      api: 'Idempotent HTTP API',
+    },
   },
   cta: {
-    title: 'Ready to start building?',
+    title: 'Ready to manage your team mail?',
     description:
-      'Begin your next project with FastBuild contracts, authentication, and a replaceable console.',
-    primaryAction: 'Start for free',
+      'Sign in to your organization workspace to set up domains, mailboxes, templates, and broadcasts.',
+    primaryAction: 'Enter console',
     githubAction: 'View on GitHub',
   },
 } as const;

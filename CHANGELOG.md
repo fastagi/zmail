@@ -8,6 +8,16 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Message search and unread filter in a mailbox.** `GET /v1/mailboxes/{mailbox_id}/messages`
+  takes `q` (subject, sender, or recipient, like the mail log) and `unread`. Unread is the
+  caller's own read state: another member opening a message does not change it.
+- **Reply all, forward, and a reading pane.** An open message offers reply all and forward next to
+  reply, with the original quoted; all three need `send` on the mailbox. On wide screens the list
+  stays beside the open message, with previous and next buttons.
+- **Remembered organization and console polish.** The mail pages reopen the organization last
+  chosen in the session when the link names none, and the broadcast, contact, template, home, and
+  console pages were reworked (broadcast preview, schedule time zone, unsaved-change prompts, a
+  sample contact CSV).
 - **Broadcast variables.** A broadcast can fill template values shared by every recipient, such
   as a promotion code or an event date, in the new `variables` field
   (`mail_broadcasts.variables`, migration `2026_11_18_100000_add_mail_broadcast_variables`). A

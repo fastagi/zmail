@@ -1,7 +1,8 @@
 // Metadata translations - English (US)
 const messages = {
   title: 'Zmail',
-  description: 'Customer-facing web application built with Next.js, TypeScript, and Tailwind CSS',
+  description:
+    'Team mailboxes, visual email templates, and staged broadcasts on your own domain.',
 } as const;
 
 export default messages;

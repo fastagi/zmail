@@ -3,7 +3,13 @@ import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EmailLog } from '@/features/mailbox/components/email-log';
+import {
+  forwardDraft,
+  quotedReplyDraft,
+  replyAllDraft,
+} from '@/features/mailbox/components/compose-dialog';
 import { MailDomainStatus } from '@/features/mailbox/components/mail-domain-status';
+import type { MailMessage } from '@/features/mailbox/types';
 import {
   emailLogSearch,
   parseEmailLogView,
@@ -939,6 +945,195 @@ describe('emails console', () => {
     expect(state.sendCalls.at(-1)).toBe(2);
   });
 
+  it('quotes the original plain-text body when replying and hides Reply all for one recipient', async () => {
+    state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
+    state.detail.data = message({
+      text_body: 'First line\n\nSecond line',
+    });
+    renderLog();
+    fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
+
+    expect(screen.queryByRole('button', { name: 'Reply all' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Forward' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Reply' })).toBeInTheDocument();
+
+    const bodyField = within(dialog).getByLabelText('Message') as HTMLTextAreaElement;
+    expect(bodyField.value).toMatch(
+      /^\n\nOn .*, Bob <bob@example\.com> wrote:\n> First line\n>\n> Second line$/u
+    );
+
+    fireEvent.change(bodyField, { target: { value: `Sure thing!${bodyField.value}` } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() =>
+      expect(state.send.mutateAsync).toHaveBeenCalledWith({
+        to: ['bob@example.com'],
+        subject: 'Re: Unread question',
+        text: expect.stringMatching(
+          /^Sure thing!\n\nOn .*, Bob <bob@example\.com> wrote:\n> First line\n>\n> Second line$/u
+        ),
+        in_reply_to: 'question-1@example.com',
+      })
+    );
+  });
+
+  it('replies to all unique recipients while excluding the current mailbox case-insensitively', async () => {
+    state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
+    state.log.data = page([
+      entry({
+        id: 31,
+        mailbox_id: 1,
+        mailbox_address: 'hello@mail.example.com',
+        to: ['HELLO@mail.example.com', 'Carol@example.com'],
+        cc: ['dave@example.com', 'carol@example.com', 'bob@example.com'],
+        read: true,
+      }),
+    ]);
+    state.detail.data = message({
+      from: { address: 'Bob@example.com', name: 'Bob' },
+      to: ['HELLO@mail.example.com', 'Carol@example.com'],
+      cc: ['dave@example.com', 'carol@example.com', 'bob@example.com'],
+      subject: 'Re: Team sync',
+      text_body: 'Are we meeting today?',
+    });
+    renderLog();
+    fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reply all' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Reply' })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('To')).toHaveValue('bob@example.com');
+    expect(within(dialog).getByLabelText('Cc (optional)')).toHaveValue(
+      'carol@example.com, dave@example.com'
+    );
+    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Re: Team sync');
+
+    const bodyField = within(dialog).getByLabelText('Message') as HTMLTextAreaElement;
+    expect(bodyField.value).toContain('> Are we meeting today?');
+
+    fireEvent.change(bodyField, { target: { value: `Yes, at 3pm.${bodyField.value}` } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() =>
+      expect(state.send.mutateAsync).toHaveBeenCalledWith({
+        to: ['bob@example.com'],
+        cc: ['carol@example.com', 'dave@example.com'],
+        subject: 'Re: Team sync',
+        text: expect.stringContaining('Yes, at 3pm.'),
+        in_reply_to: 'question-1@example.com',
+      })
+    );
+  });
+
+  it('forwards inbound and outbound messages with a Fwd: subject and forwarded header block', async () => {
+    state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
+    state.detail.data = message({
+      id: 30,
+      mailbox_id: 2,
+      direction: 'outbound',
+      status: 'sent',
+      from: { address: 'sales@mail.example.com', name: 'Sales' },
+      to: ['carol@example.com', 'dave@example.com'],
+      cc: ['erin@example.com'],
+      subject: 'Bounced offer',
+      text_body: 'Special pricing inside.',
+    });
+    renderLog();
+    fireEvent.click(screen.getByRole('button', { name: /carol@example\.com/u }));
+
+    expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reply all' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Forward message' })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('To')).toHaveValue('');
+    expect(within(dialog).getByLabelText('Cc (optional)')).toHaveValue('');
+    expect(within(dialog).getByLabelText('Subject')).toHaveValue('Fwd: Bounced offer');
+
+    const bodyField = within(dialog).getByLabelText('Message') as HTMLTextAreaElement;
+    expect(bodyField.value).toContain('---------- Forwarded message ----------');
+    expect(bodyField.value).toContain('From: Sales <sales@mail.example.com>');
+    expect(bodyField.value).toContain('Subject: Bounced offer');
+    expect(bodyField.value).toContain('To: carol@example.com, dave@example.com');
+    expect(bodyField.value).toContain('Cc: erin@example.com');
+    expect(bodyField.value).toContain('\n\nSpecial pricing inside.');
+
+    fireEvent.change(within(dialog).getByLabelText('To'), {
+      target: { value: 'frank@example.com' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() =>
+      expect(state.send.mutateAsync).toHaveBeenCalledWith({
+        to: ['frank@example.com'],
+        subject: 'Fwd: Bounced offer',
+        text: expect.stringContaining('---------- Forwarded message ----------'),
+      })
+    );
+    expect(state.sendCalls.at(-1)).toBe(2);
+  });
+
+  it('builds quoted reply, reply-all, and forward drafts without duplicating prefixes', () => {
+    const sample = message({
+      from: { address: 'bob@example.com', name: '' },
+      to: ['Hello@Mail.Example.com', 'carol@example.com'],
+      cc: ['CAROL@example.com'],
+      subject: 'Fwd: Quarterly report',
+      text_body: 'Line 1\r\nLine 2',
+    });
+    const replyCopy = {
+      prefixSubject: (subject: string) => `Re: ${subject}`,
+      quotedHeader: ({ date, sender }: { date: string; sender: string }) =>
+        `On ${date}, ${sender} wrote:`,
+      formatDate: () => 'Nov 16, 2026',
+    };
+
+    const quoted = quotedReplyDraft(sample, replyCopy);
+    expect(quoted).toEqual({
+      to: 'bob@example.com',
+      cc: '',
+      subject: 'Re: Fwd: Quarterly report',
+      body: '\n\nOn Nov 16, 2026, bob@example.com wrote:\n> Line 1\n> Line 2',
+      inReplyTo: 'question-1@example.com',
+      reply: true,
+      mode: 'reply',
+    });
+
+    const all = replyAllDraft(sample, 'hello@mail.example.com', replyCopy);
+    expect(all.to).toBe('bob@example.com');
+    expect(all.cc).toBe('carol@example.com');
+
+    const forwarded = forwardDraft(sample, {
+      prefixSubject: subject => `Fwd: ${subject}`,
+      forwardedHeader: '---------- Forwarded message ----------',
+      formatDate: () => 'Nov 16, 2026',
+      labels: { from: 'From', date: 'Date', subject: 'Subject', to: 'To', cc: 'Cc' },
+    });
+    expect(forwarded.subject).toBe('Fwd: Quarterly report');
+    expect(forwarded.inReplyTo).toBe('');
+    expect(forwarded.reply).toBe(false);
+    expect(forwarded.mode).toBe('forward');
+    expect(forwarded.body).toBe(
+      [
+        '',
+        '',
+        '---------- Forwarded message ----------',
+        'From: bob@example.com',
+        'Date: Nov 16, 2026',
+        'Subject: Fwd: Quarterly report',
+        'To: Hello@Mail.Example.com, carol@example.com',
+        'Cc: CAROL@example.com',
+        '',
+        'Line 1',
+        'Line 2',
+      ].join('\n')
+    );
+  });
+
   it('opens the compose dialog with a From picker over every mailbox', async () => {
     state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
     renderLog({ page: 2 });
@@ -1214,11 +1409,14 @@ function entry(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function message(overrides: Record<string, unknown> = {}) {
-  const summary: Record<string, unknown> = entry();
-  delete summary.mailbox_address;
+function message(overrides: Partial<MailMessage> = {}): MailMessage {
+  const { mailbox_address: _unused, ...summary } = entry();
+  void _unused;
   return {
     ...summary,
+    direction: 'inbound',
+    status: 'received',
+    last_event: '',
     text_body: 'Plain question',
     html_body: '<p>Formatted question</p>',
     message_id: 'question-1@example.com',

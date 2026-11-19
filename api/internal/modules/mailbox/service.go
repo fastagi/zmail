@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
@@ -285,6 +287,14 @@ const (
 	MaxStatsDays = 90
 )
 
+func cleanSearchQuery(raw string) (string, bool) {
+	query := strings.TrimSpace(raw)
+	if !utf8.ValidString(query) || utf8.RuneCountInString(query) > maxLogQueryLength || strings.IndexFunc(query, unicode.IsControl) >= 0 {
+		return "", false
+	}
+	return query, true
+}
+
 func (s *service) ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error) {
 	if filter.Direction != "" && !filter.Direction.Valid() {
 		return nil, 0, domain.ErrInvalidInput
@@ -292,10 +302,11 @@ func (s *service) ListLog(ctx context.Context, viewer domain.OrganizationContext
 	if filter.Status != "" && !filter.Status.Valid() {
 		return nil, 0, domain.ErrInvalidInput
 	}
-	filter.Query = strings.TrimSpace(filter.Query)
-	if len(filter.Query) > maxLogQueryLength {
+	query, ok := cleanSearchQuery(filter.Query)
+	if !ok {
 		return nil, 0, domain.ErrInvalidInput
 	}
+	filter.Query = query
 	readable, err := s.readableMailboxIDs(ctx, viewer)
 	if err != nil {
 		return nil, 0, err
@@ -402,6 +413,13 @@ func (s *service) ListMessages(
 	if filter.Direction != "" && !filter.Direction.Valid() {
 		return nil, 0, domain.ErrInvalidInput
 	}
+	query, ok := cleanSearchQuery(filter.Query)
+	if !ok {
+		return nil, 0, domain.ErrInvalidInput
+	}
+	filter.Query = query
+	// Unread is the viewer's own read state.
+	filter.ReaderMembershipID = viewer.MembershipID
 	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
 		return nil, 0, err
 	}
