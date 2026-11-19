@@ -15,6 +15,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 const (
@@ -102,6 +103,12 @@ type Service interface {
 	// DeleteMailZone removes a managed zone no domain uses, once the registrar no longer
 	// delegates it, from Zmail and from the provider account.
 	DeleteMailZone(ctx context.Context, organizationID, id uint) error
+	// ListMailDNSRecords reads a managed zone's records from Cloudflare, marking the ones Zmail
+	// mail relies on.
+	ListMailDNSRecords(ctx context.Context, organizationID, zoneID uint) ([]MailDNSRecord, error)
+	CreateMailDNSRecord(ctx context.Context, organizationID, zoneID uint, input MailDNSRecordInput) (*MailDNSRecord, error)
+	UpdateMailDNSRecord(ctx context.Context, organizationID, zoneID uint, recordID string, patch MailDNSRecordPatch) (*MailDNSRecord, error)
+	DeleteMailDNSRecord(ctx context.Context, organizationID, zoneID uint, recordID string) error
 	ListMailboxes(ctx context.Context, organizationID uint) ([]*domain.Mailbox, error)
 	DeleteMailbox(ctx context.Context, organizationID, mailboxID uint) error
 	ListMessages(ctx context.Context, organizationID, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
@@ -179,6 +186,8 @@ type service struct {
 	notifier   mailNotifier
 	settings   Settings
 	now        func() time.Time
+	// recordAudit enriches the request's audit entry; tests capture it.
+	recordAudit func(context.Context, auditstarter.Change)
 }
 
 var _ Service = (*service)(nil)
@@ -201,6 +210,7 @@ func NewService(
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
+		recordAudit: auditstarter.RecordChange,
 	}
 }
 

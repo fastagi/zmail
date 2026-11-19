@@ -141,6 +141,10 @@ const (
 	CodeMailZoneInUse                = "MAILBOX.ZONE_IN_USE"
 	CodeMailZoneStillDelegated       = "MAILBOX.ZONE_STILL_DELEGATED"
 	CodeMailZoneLimitReached         = "MAILBOX.ZONE_LIMIT_REACHED"
+	CodeMailDNSRecordNotFound        = "MAILBOX.DNS_RECORD_NOT_FOUND"
+	CodeMailDNSRecordInvalid         = "MAILBOX.DNS_RECORD_INVALID"
+	CodeMailDNSRecordLocked          = "MAILBOX.DNS_RECORD_LOCKED"
+	CodeMailDNSRecordRejected        = "MAILBOX.DNS_RECORD_REJECTED"
 
 	CodeOperatorForbidden       = "OPERATOR.FORBIDDEN"
 	CodeOperatorOriginRejected  = "OPERATOR.ORIGIN_REJECTED"

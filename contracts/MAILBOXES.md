@@ -25,8 +25,8 @@ does not exist. A mailbox or message of another organization is likewise reporte
 
 | Role | May |
 |---|---|
-| `member` | List domains, managed zones, and mailboxes; preview a domain; list, read, send, mark read or unread, and delete messages; read the log and statistics |
-| `owner`, `admin` | Everything a member may, create and delete mailboxes, connect, set up, check, enable receiving on, and remove domains, and remove managed zones |
+| `member` | List domains, managed zones, their DNS records, and mailboxes; preview a domain; list, read, send, mark read or unread, and delete messages; read the log and statistics |
+| `owner`, `admin` | Everything a member may, create and delete mailboxes, connect, set up, check, enable receiving on, and remove domains, remove managed zones, and create, change, and delete their DNS records |
 
 A member who creates or deletes a mailbox gets `403 PERMISSION.DENIED`. The user who created a
 mailbox is recorded but has no special rights to it; removing that user from the organization
@@ -47,6 +47,10 @@ is shared: a message one member reads is read for the whole organization.
 | List managed zones | none yet | `GET /v1/mail-zones` | `200` envelope, at most 20 items |
 | Get a managed zone | none yet | `GET /v1/mail-zones/:zone_id` | `200` envelope |
 | Remove a managed zone | none yet | `DELETE /v1/mail-zones/:zone_id` | `204` |
+| List a zone's DNS records | none yet | `GET /v1/mail-zones/:zone_id/dns-records` | `200` envelope, at most 3500 items |
+| Create a DNS record | none yet | `POST /v1/mail-zones/:zone_id/dns-records` | `201` envelope |
+| Change a DNS record | none yet | `PATCH /v1/mail-zones/:zone_id/dns-records/:record_id` | `200` envelope |
+| Delete a DNS record | none yet | `DELETE /v1/mail-zones/:zone_id/dns-records/:record_id` | `204` |
 | List mailboxes | `GET /api/mailboxes` | `GET /v1/mailboxes` | `200` envelope, at most 50 items |
 | Create mailbox | `POST /api/mailboxes` | `POST /v1/mailboxes` | `201` envelope |
 | Delete mailbox | `DELETE /api/mailboxes/:id` | `DELETE /v1/mailboxes/:mailbox_id` | `204` |
@@ -257,6 +261,57 @@ at its registrar to the two in `name_servers`.
     "last_checked_at": "2026-11-17T10:10:00Z",
     "created_at": "2026-11-17T10:00:00Z"
   }
+}
+```
+
+### DNS Records
+
+An organization edits the records of its managed zones, `pending` or `active`, in Zmail. Zmail reads
+and writes them at Cloudflare on every request and keeps no copy. Members may list them; owners and
+admins may create, change, and delete them. A zone of another organization is
+`404 MAILBOX.ZONE_NOT_FOUND`, and a record the zone does not have is
+`404 MAILBOX.DNS_RECORD_NOT_FOUND`.
+
+- `GET /v1/mail-zones/:zone_id/dns-records` lists every record by name, then type: `id` (Cloudflare's
+  record ID), `type`, fully qualified `name`, `content`, `ttl` (`1` is automatic), `priority` for MX
+  only, `proxied`, `locked`, and `locked_reason` when `locked` is true. A zone holds at most 3500
+  records, Cloudflare's quota; a longer list is cut at 3500.
+- A record is locked when Zmail mail relies on it. For each mail domain `d` in the zone:
+  `mail_receiving` is an MX record at `d`; `mail_spf` a TXT record at `d` starting `v=spf1`;
+  `mail_dmarc` any record at `_dmarc.d`; `mail_dkim` any record under `._domainkey.d`; and
+  `mail_sending` a record matching, by type, name, and content, one of the sending records of `d`. A
+  locked record cannot be changed or deleted, and no record may be created or changed into one that
+  would be locked: both are `409 MAILBOX.DNS_RECORD_LOCKED`. To change one, first remove the mail
+  domain.
+- `POST /v1/mail-zones/:zone_id/dns-records` takes `type`, `name`, `content`, and optional `ttl`,
+  `priority`, and `proxied`, and answers `201` with the record. A `PATCH` of
+  `/v1/mail-zones/:zone_id/dns-records/:record_id` takes any of those fields; an omitted field keeps
+  its current value, and the merged record is validated and written whole. A `DELETE` of it answers
+  `204`; only records of the five types below can be changed or deleted, and another type is
+  `422 MAILBOX.DNS_RECORD_INVALID` on `type`.
+- Zmail validates before calling Cloudflare. A failure is `422 MAILBOX.DNS_RECORD_INVALID` with one
+  field error under the request field (`type`, `name`, `content`, `ttl`, `priority`, or `proxied`):
+  `type` is one of `A`, `AAAA`, `CNAME`, `TXT`, `MX`; `name` is `@` (the zone apex), a single label
+  (taken relative to the zone), or a name equal to or ending in `.` and the zone name; `A` content
+  is an IPv4 address and `AAAA` content an IPv6 address; `TXT` content is at most 2048 characters;
+  a `CNAME` is never at the apex and never shares its name with another record, nor another record
+  with a `CNAME`; `MX` needs a `priority` from 0 to 65535; `proxied` is allowed only on `A`, `AAAA`,
+  and `CNAME`; `ttl` is `1` (automatic, the default) or 60 to 86400. `priority` is ignored on other
+  types.
+- A write Cloudflare refuses is `422 MAILBOX.DNS_RECORD_REJECTED`, with Cloudflare's reason in
+  `error`. A failed read is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`.
+- Each write is recorded in the audit log as `create`, `update`, or `delete` of `mail_dns_records`,
+  targeting the Cloudflare record ID, with the zone, type, and name; record content is never
+  audited.
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    { "id": "8f2c6a0e4b1d4e6f9a3c2b1d0e9f8a7b", "type": "MX", "name": "example.org", "content": "route1.mx.cloudflare.net", "ttl": 1, "priority": 12, "proxied": false, "locked": true, "locked_reason": "mail_receiving" },
+    { "id": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d", "type": "A", "name": "www.example.org", "content": "192.0.2.1", "ttl": 1, "proxied": true, "locked": false }
+  ]
 }
 ```
 
@@ -832,3 +887,7 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.ZONE_IN_USE` | 409 |
 | `MAILBOX.ZONE_STILL_DELEGATED` | 409 |
 | `MAILBOX.ZONE_LIMIT_REACHED` | 422 |
+| `MAILBOX.DNS_RECORD_NOT_FOUND` | 404 |
+| `MAILBOX.DNS_RECORD_LOCKED` | 409 |
+| `MAILBOX.DNS_RECORD_INVALID` | 422 |
+| `MAILBOX.DNS_RECORD_REJECTED` | 422 |

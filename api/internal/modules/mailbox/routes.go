@@ -30,6 +30,14 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.GET("/mail-zones", h.ListMailZones).Name("mail_zones.index")
 		auth.GET("/mail-zones/:zone_id", h.GetMailZone).Name("mail_zones.show").WhereNumber("zone_id")
 		auth.DELETE("/mail-zones/:zone_id", h.DeleteMailZone).Name("mail_zones.destroy").WhereNumber("zone_id")
+		auth.GET("/mail-zones/:zone_id/dns-records", h.ListMailDNSRecords).
+			Name("mail_zones.dns_records.index").WhereNumber("zone_id")
+		auth.POST("/mail-zones/:zone_id/dns-records", h.CreateMailDNSRecord).
+			Name("mail_zones.dns_records.store").WhereNumber("zone_id")
+		auth.PATCH("/mail-zones/:zone_id/dns-records/:record_id", h.UpdateMailDNSRecord).
+			Name("mail_zones.dns_records.update").WhereNumber("zone_id").WhereAlphaNumeric("record_id")
+		auth.DELETE("/mail-zones/:zone_id/dns-records/:record_id", h.DeleteMailDNSRecord).
+			Name("mail_zones.dns_records.destroy").WhereNumber("zone_id").WhereAlphaNumeric("record_id")
 
 		auth.GET("/mail-messages", h.ListLog).Name("mail_messages.index")
 		auth.GET("/mail-message-stats", h.ListStats).Name("mail_message_stats.index")

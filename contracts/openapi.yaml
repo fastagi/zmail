@@ -3813,6 +3813,206 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-zones/{zone_id}/dns-records:
+    get:
+      operationId: listMailDNSRecords
+      summary: List a managed zone's DNS records
+      description: Reads the records from Cloudflare, by name then type, and marks those Zmail mail relies on as
+        locked. Answers `404 MAILBOX.DOMAINS_DISABLED` unless the instance sets `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailZoneID'
+      responses:
+        '200':
+          description: The zone's records, at most 3500.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDNSRecordListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          description: Cloudflare could not list the records (`MAILBOX.DOMAIN_PROVIDER_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailDNSRecord
+      summary: Create a DNS record in a managed zone
+      description: Validates the record, then writes it to Cloudflare. A record Zmail mail would rely on is
+        refused. Only owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailZoneID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMailDNSRecordRequest'
+      responses:
+        '201':
+          description: The record as written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDNSRecordResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Zmail mail would rely on the record (`MAILBOX.DNS_RECORD_LOCKED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A field failed validation (`COMMON.VALIDATION_FAILED` or `MAILBOX.DNS_RECORD_INVALID`, each
+            with field errors), or Cloudflare refused the record (`MAILBOX.DNS_RECORD_REJECTED`, with its reason in
+            `error`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/MailDNSRecordInvalidResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Cloudflare could not list the zone's records (`MAILBOX.DOMAIN_PROVIDER_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-zones/{zone_id}/dns-records/{record_id}:
+    patch:
+      operationId: updateMailDNSRecord
+      summary: Change a DNS record in a managed zone
+      description: Applies the given fields onto the record as Cloudflare has it, validates the result, and writes
+        the whole record. Neither the record nor the result may be one Zmail mail relies on. Only owners and admins
+        may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailZoneID'
+        - $ref: '#/components/parameters/MailDNSRecordID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailDNSRecordRequest'
+      responses:
+        '200':
+          description: The record as written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDNSRecordResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Zmail mail relies on the record or would rely on the result (`MAILBOX.DNS_RECORD_LOCKED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A field failed validation (`COMMON.VALIDATION_FAILED` or `MAILBOX.DNS_RECORD_INVALID`, each
+            with field errors), or Cloudflare refused the record (`MAILBOX.DNS_RECORD_REJECTED`, with its reason in
+            `error`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/MailDNSRecordInvalidResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Cloudflare could not list the zone's records (`MAILBOX.DOMAIN_PROVIDER_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailDNSRecord
+      summary: Delete a DNS record from a managed zone
+      description: Removes the record at Cloudflare unless Zmail mail relies on it. Only A, AAAA, CNAME, TXT, and
+        MX records can be deleted. Only owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailZoneID'
+        - $ref: '#/components/parameters/MailDNSRecordID'
+      responses:
+        '204':
+          description: The record is removed.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Zmail mail relies on the record (`MAILBOX.DNS_RECORD_LOCKED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The record is of a type the editor does not write (`MAILBOX.DNS_RECORD_INVALID` on `type`), or
+            Cloudflare refused to remove it (`MAILBOX.DNS_RECORD_REJECTED`, with its reason in `error`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/MailDNSRecordInvalidResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Cloudflare could not list the zone's records (`MAILBOX.DOMAIN_PROVIDER_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-broadcasts:
     get:
       operationId: listMailBroadcasts
@@ -5792,6 +5992,14 @@ components:
       description: Positive managed mail zone identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailDNSRecordID:
+      name: record_id
+      in: path
+      required: true
+      description: Cloudflare's identifier of a DNS record.
+      schema:
+        type: string
+        pattern: ^[A-Za-z0-9]{1,64}$
     MailTemplateID:
       name: template_id
       in: path
@@ -6244,6 +6452,10 @@ components:
         - MAILBOX.ZONE_IN_USE
         - MAILBOX.ZONE_STILL_DELEGATED
         - MAILBOX.ZONE_LIMIT_REACHED
+        - MAILBOX.DNS_RECORD_NOT_FOUND
+        - MAILBOX.DNS_RECORD_INVALID
+        - MAILBOX.DNS_RECORD_LOCKED
+        - MAILBOX.DNS_RECORD_REJECTED
     FieldErrors:
       type: object
       additionalProperties:
@@ -10026,6 +10238,168 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MailDomainPreview'
+    MailDNSRecordType:
+      type: string
+      enum:
+        - A
+        - AAAA
+        - CNAME
+        - TXT
+        - MX
+    MailDNSRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - name
+        - content
+        - ttl
+        - proxied
+        - locked
+      properties:
+        id:
+          type: string
+          description: Cloudflare's record identifier.
+          maxLength: 64
+        type:
+          type: string
+          description: The record type; a zone may hold types the editor does not write.
+          maxLength: 16
+        name:
+          type: string
+          description: The fully qualified name, without a trailing dot.
+          maxLength: 253
+        content:
+          type: string
+        ttl:
+          type: integer
+          description: '`1` is automatic.'
+          minimum: 1
+        priority:
+          type: integer
+          description: Present on MX records only.
+          minimum: 0
+          maximum: 65535
+        proxied:
+          type: boolean
+        locked:
+          type: boolean
+          description: True when Zmail mail relies on the record, so it cannot be changed or deleted.
+        locked_reason:
+          type: string
+          description: What Zmail mail uses the record for; present only when `locked` is true.
+          enum:
+            - mail_receiving
+            - mail_spf
+            - mail_dmarc
+            - mail_dkim
+            - mail_sending
+    MailDNSRecordResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailDNSRecord'
+    MailDNSRecordListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 3500
+          items:
+            $ref: '#/components/schemas/MailDNSRecord'
+    CreateMailDNSRecordRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - name
+        - content
+      properties:
+        type:
+          $ref: '#/components/schemas/MailDNSRecordType'
+        name:
+          type: string
+          description: '`@` for the zone apex, a single label relative to the zone, or a name equal to or ending in
+            `.` and the zone name.'
+          minLength: 1
+          maxLength: 253
+        content:
+          type: string
+          description: An IPv4 address for A, an IPv6 address for AAAA, a host for CNAME and MX, at most 2048
+            characters for TXT.
+          minLength: 1
+          maxLength: 4096
+        ttl:
+          type: integer
+          description: '`1` (automatic, the default) or 60 to 86400.'
+        priority:
+          type: integer
+          description: Required for MX, from 0 to 65535; ignored otherwise.
+        proxied:
+          type: boolean
+          description: Proxy through Cloudflare; only A, AAAA, and CNAME records.
+          default: false
+    UpdateMailDNSRecordRequest:
+      type: object
+      additionalProperties: false
+      description: Any field of a new record; an omitted field keeps its current value.
+      properties:
+        type:
+          $ref: '#/components/schemas/MailDNSRecordType'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+        content:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        ttl:
+          type: integer
+        priority:
+          type: integer
+        proxied:
+          type: boolean
+    MailDNSRecordInvalidResponse:
+      type: object
+      additionalProperties: false
+      description: A record that failed Zmail's validation, with one field error under the request field.
+      required:
+        - code
+        - error_code
+        - message
+        - errors
+      properties:
+        code:
+          const: 422
+        error_code:
+          const: MAILBOX.DNS_RECORD_INVALID
+        message:
+          type: string
+        errors:
+          $ref: '#/components/schemas/FieldErrors'
+        request_id:
+          type: string
+          minLength: 1
     MailContactList:
       type: object
       additionalProperties: false

@@ -56,4 +56,8 @@ var (
 	ErrMailZoneStillDelegated    = errors.New("mail zone is still delegated to its assigned name servers")
 	ErrMailZonePending           = errors.New("mail zone is not active yet")
 	ErrMailZoneCheckLimited      = errors.New("mail zone was checked too recently")
+	ErrMailDNSRecordNotFound     = errors.New("DNS record not found")
+	ErrMailDNSRecordInvalid      = errors.New("DNS record is invalid")
+	ErrMailDNSRecordLocked       = errors.New("DNS record is used by Zmail mail")
+	ErrMailDNSRecordRejected     = errors.New("the DNS provider rejected the record")
 )
