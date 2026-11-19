@@ -5121,7 +5121,8 @@ paths:
         - name: unread
           in: query
           required: false
-          description: Keep only messages the caller has not read (`true`) or has read (`false`).
+          description: '`true` keeps only inbound messages the caller has not read; outbound messages are
+            always read and never match. `false` keeps the others.'
           schema:
             type: boolean
         - name: has_attachments
@@ -5133,7 +5134,8 @@ paths:
         - name: q
           in: query
           required: false
-          description: Search. Case-insensitive substring match on the subject, the sender address and
+          description: Search, trimmed; empty after trimming or over 200 characters is
+            `400 COMMON.INVALID_INPUT`. Case-insensitive substring match on the subject, the sender address and
             name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches
             every placement except `trash`. A search the database cannot finish within 2 seconds is
             `422 MAILBOX.SEARCH_TOO_BROAD`.
@@ -5145,7 +5147,8 @@ paths:
           in: query
           required: false
           description: '`thread` lists one item per thread. Only with `placement` `default`, `archive`, or
-            `folder`, and without `label_id`, `starred`, `unread`, `has_attachments`, and `q`.'
+            `folder`, and without `label_id`, `starred`, `unread`, `has_attachments`, and `q`. With
+            `placement=default` it also needs `direction` (`inbound` is the Inbox, `outbound` is Sent).'
           schema:
             type: string
             enum:
@@ -5154,8 +5157,9 @@ paths:
         - $ref: '#/components/parameters/PerPage'
       responses:
         '200':
-          description: One page of message summaries without bodies, newest first. With `group=thread`, one
-            page of threads, each as its latest message in the view, newest first.
+          description: One page of message summaries without bodies, newest first by id; the trash is ordered
+            by `trashed_at`, newest first, then by id, highest first. With `group=thread`, one page of threads,
+            each as its latest message in the view, newest first.
           content:
             application/json:
               schema:
@@ -10090,15 +10094,16 @@ components:
             $ref: '#/components/schemas/PositiveID'
         starred:
           type: boolean
-          description: Whether the caller starred the message; per person.
+          description: Whether the caller starred the message; per person. Always false on the API-key
+            routes and in template test sends, which act for no viewing person.
         thread_id:
           description: The thread the message belongs to in this mailbox; the id of the message that started
-            it.
+            it. Set on every stored message, whichever route stored it.
           allOf:
             - $ref: '#/components/schemas/PositiveID'
         trashed_at:
-          description: When the message was moved to the trash; null outside the trash. A message is deleted
-            for good 30 days after this instant.
+          description: When the message was moved to the trash; null outside the trash. Moving a message
+            that is already in the trash keeps it. A message is deleted for good 30 days after this instant.
           oneOf:
             - type: string
               format: date-time
@@ -10207,15 +10212,16 @@ components:
             $ref: '#/components/schemas/PositiveID'
         starred:
           type: boolean
-          description: Whether the caller starred the message; per person.
+          description: Whether the caller starred the message; per person. Always false on the API-key
+            routes and in template test sends, which act for no viewing person.
         thread_id:
           description: The thread the message belongs to in this mailbox; the id of the message that started
-            it.
+            it. Set on every stored message, whichever route stored it.
           allOf:
             - $ref: '#/components/schemas/PositiveID'
         trashed_at:
-          description: When the message was moved to the trash; null outside the trash. A message is deleted
-            for good 30 days after this instant.
+          description: When the message was moved to the trash; null outside the trash. Moving a message
+            that is already in the trash keeps it. A message is deleted for good 30 days after this instant.
           oneOf:
             - type: string
               format: date-time
@@ -10280,6 +10286,7 @@ components:
         the latest of them.
       required:
         - message_count
+        - message_ids
         - unread
         - starred
         - label_ids
@@ -10288,6 +10295,15 @@ components:
           type: integer
           description: How many of the thread's messages are in the view.
           minimum: 1
+        message_ids:
+          type: array
+          description: The ids of the thread's messages in the view, ascending; at most the 100 newest. A row
+            action sends these ids. When `message_count` is more than 100 an action covers only these, and the
+            row stays in the view with the rest.
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PositiveID'
         unread:
           type: boolean
           description: Whether the caller has not read at least one of them.
@@ -11526,8 +11542,9 @@ components:
     UpdateMailMessageRequest:
       type: object
       additionalProperties: false
-      description: At least one field. `placement` `folder` needs `folder_id`, and `folder_id` is allowed
-        only with it. Moving out of `trash` clears `trashed_at`; restoring is `placement` `default`.
+      description: At least one field, otherwise a field error under `change`. `placement` `folder` needs
+        `folder_id`, and `folder_id` is allowed only with it; a violation is a field error under
+        `folder_id`. Moving out of `trash` clears `trashed_at`; restoring is `placement` `default`.
       minProperties: 1
       properties:
         read:
@@ -11550,8 +11567,9 @@ components:
     UpdateMailMessagesRequest:
       type: object
       additionalProperties: false
-      description: '`message_ids` and at least one change. `placement` `folder` needs `folder_id`, and
-        `folder_id` is allowed only with it. A label id may not be both added and removed.'
+      description: '`message_ids` and at least one change, otherwise a field error under `change`.
+        `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it (field error under
+        `folder_id`). A label id may not be both added and removed (field error under `add_label_ids`).'
       required:
         - message_ids
       minProperties: 2

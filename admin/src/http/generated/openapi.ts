@@ -3284,17 +3284,17 @@ export interface components {
             queued_reason: "send_limit" | null;
             /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
-            /** @description Whether the caller starred the message; per person. */
+            /** @description Whether the caller starred the message; per person. Always false on the API-key routes and in template test sends, which act for no viewing person. */
             starred: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
             /** @description The template the message was rendered from; null when none was used. */
             template_id: components["schemas"]["PositiveID"] | null;
             text_body: string;
-            /** @description The thread the message belongs to in this mailbox; the id of the message that started it. */
+            /** @description The thread the message belongs to in this mailbox; the id of the message that started it. Set on every stored message, whichever route stored it. */
             thread_id: components["schemas"]["PositiveID"];
             to: string[];
-            /** @description When the message was moved to the trash; null outside the trash. A message is deleted for good 30 days after this instant. */
+            /** @description When the message was moved to the trash; null outside the trash. Moving a message that is already in the trash keeps it. A message is deleted for good 30 days after this instant. */
             trashed_at: string | null;
         };
         MailMessageCounts: {
@@ -3359,7 +3359,7 @@ export interface components {
             queued_reason: "send_limit" | null;
             /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
-            /** @description Whether the caller starred the message; per person. */
+            /** @description Whether the caller starred the message; per person. Always false on the API-key routes and in template test sends, which act for no viewing person. */
             starred: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
@@ -3367,10 +3367,10 @@ export interface components {
             template_id: components["schemas"]["PositiveID"] | null;
             /** @description Present only with `group=thread`; summarizes the message's thread in the view. */
             thread?: components["schemas"]["MailThreadSummary"];
-            /** @description The thread the message belongs to in this mailbox; the id of the message that started it. */
+            /** @description The thread the message belongs to in this mailbox; the id of the message that started it. Set on every stored message, whichever route stored it. */
             thread_id: components["schemas"]["PositiveID"];
             to: string[];
-            /** @description When the message was moved to the trash; null outside the trash. A message is deleted for good 30 days after this instant. */
+            /** @description When the message was moved to the trash; null outside the trash. Moving a message that is already in the trash keeps it. A message is deleted for good 30 days after this instant. */
             trashed_at: string | null;
         };
         MailMessageUpdatesResponse: {
@@ -3493,6 +3493,8 @@ export interface components {
             label_ids: components["schemas"]["PositiveID"][];
             /** @description How many of the thread's messages are in the view. */
             message_count: number;
+            /** @description The ids of the thread's messages in the view, ascending; at most the 100 newest. A row action sends these ids. When `message_count` is more than 100 an action covers only these, and the row stays in the view with the rest. */
+            message_ids: components["schemas"]["PositiveID"][];
             /** @description Whether the caller starred at least one of them. */
             starred: boolean;
             /** @description Whether the caller has not read at least one of them. */
@@ -4037,7 +4039,7 @@ export interface components {
         };
         /** @enum {string} */
         SettingVisibility: "public" | "private";
-        /** @description At least one field. `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it. Moving out of `trash` clears `trashed_at`; restoring is `placement` `default`. */
+        /** @description At least one field, otherwise a field error under `change`. `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it; a violation is a field error under `folder_id`. Moving out of `trash` clears `trashed_at`; restoring is `placement` `default`. */
         UpdateMailMessageRequest: {
             folder_id?: components["schemas"]["PositiveID"];
             /** @description The complete set of the message's labels, replacing the current one; needs `send`. */
@@ -4048,7 +4050,7 @@ export interface components {
             /** @description The caller's own star; needs `view`. */
             starred?: boolean;
         };
-        /** @description `message_ids` and at least one change. `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it. A label id may not be both added and removed. */
+        /** @description `message_ids` and at least one change, otherwise a field error under `change`. `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it (field error under `folder_id`). A label id may not be both added and removed (field error under `add_label_ids`). */
         UpdateMailMessagesRequest: {
             /** @description Labels added to every named message; needs `send`. */
             add_label_ids?: components["schemas"]["PositiveID"][];
@@ -7849,7 +7851,7 @@ export interface operations {
                 direction?: components["schemas"]["MailDirection"];
                 /** @description The folder to list; only with `placement=folder`, which requires it. A folder that is not the mailbox's is `404 MAILBOX.FOLDER_NOT_FOUND`. */
                 folder_id?: components["schemas"]["PositiveID"];
-                /** @description `thread` lists one item per thread. Only with `placement` `default`, `archive`, or `folder`, and without `label_id`, `starred`, `unread`, `has_attachments`, and `q`. */
+                /** @description `thread` lists one item per thread. Only with `placement` `default`, `archive`, or `folder`, and without `label_id`, `starred`, `unread`, `has_attachments`, and `q`. With `placement=default` it also needs `direction` (`inbound` is the Inbox, `outbound` is Sent). */
                 group?: "thread";
                 /** @description Keep only messages with (`true`) or without (`false`) attached files. */
                 has_attachments?: boolean;
@@ -7861,11 +7863,11 @@ export interface operations {
                 per_page?: components["parameters"]["PerPage"];
                 /** @description Keep only one placement. Without it every placement except `trash` is listed. `folder` needs `folder_id`. */
                 placement?: components["schemas"]["MailPlacement"];
-                /** @description Search. Case-insensitive substring match on the subject, the sender address and name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches every placement except `trash`. A search the database cannot finish within 2 seconds is `422 MAILBOX.SEARCH_TOO_BROAD`. */
+                /** @description Search, trimmed; empty after trimming or over 200 characters is `400 COMMON.INVALID_INPUT`. Case-insensitive substring match on the subject, the sender address and name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches every placement except `trash`. A search the database cannot finish within 2 seconds is `422 MAILBOX.SEARCH_TOO_BROAD`. */
                 q?: string;
                 /** @description Keep only messages the caller starred (`true`) or did not star (`false`). */
                 starred?: boolean;
-                /** @description Keep only messages the caller has not read (`true`) or has read (`false`). */
+                /** @description `true` keeps only inbound messages the caller has not read; outbound messages are always read and never match. `false` keeps the others. */
                 unread?: boolean;
             };
             header: {
@@ -7880,7 +7882,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description One page of message summaries without bodies, newest first. With `group=thread`, one page of threads, each as its latest message in the view, newest first. */
+            /** @description One page of message summaries without bodies, newest first by id; the trash is ordered by `trashed_at`, newest first, then by id, highest first. With `group=thread`, one page of threads, each as its latest message in the view, newest first. */
             200: {
                 headers: {
                     [name: string]: unknown;

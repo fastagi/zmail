@@ -419,10 +419,10 @@ they existed. See [Listing And Search](#listing-and-search) for the filters.
 | `placement` | `default`, `archive`, `folder`, or `trash`; see [Placements](#placements). Shared by everyone. |
 | `folder_id` | The folder that holds the message when `placement` is `folder`, otherwise `null` |
 | `label_ids` | The ids of the mailbox labels on the message, ascending. Shared by everyone. |
-| `starred` | Whether the caller starred the message; per person, see [Read State](#read-state) |
+| `starred` | Whether the caller starred the message; per person, see [Read State](#read-state). Always `false` on API-key routes and template test sends. |
 | `thread_id` | The thread of the message in this mailbox; see [Threads](#threads) |
 | `trashed_at` | When the message moved to the trash, `null` outside it |
-| `thread` | Only with `group=thread`: `{ "message_count", "unread", "starred", "label_ids" }` for the thread in the listed view |
+| `thread` | Only with `group=thread`: `{ "message_count", "message_ids", "unread", "starred", "label_ids" }` for the thread in the listed view |
 
 The detail response adds `text_body`, `html_body`, `message_id`, `in_reply_to`, `events` (the
 delivery history of an outbound message), and `attachments` (see [Attachments](#attachments)). `html_body` is
@@ -523,13 +523,32 @@ change to several messages:
   visible message of the mailbox (`404 MAILBOX.MESSAGE_NOT_FOUND`), or the folder or a label is not
   found, nothing changes.
 - It answers `{ "updated": 3 }`, the number of named messages.
-- A client that acts on a thread row sends the ids of that thread's messages in the current view.
+- A client that acts on a thread row sends that row's `thread.message_ids`; see
+  [Listing And Search](#listing-and-search).
 
 On both routes, `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it;
-`placement` `trash` sets `trashed_at` like `DELETE`. Breaking these rules, or an empty change, is
-`422 COMMON.VALIDATION_FAILED`. A caller who may `view` but asks for a shared change gets
-`403 PERMISSION.DENIED`, and nothing changes. Outbound messages are always read; marking them
-changes nothing.
+`placement` `trash` sets `trashed_at` like `DELETE`, and a message already in the trash keeps its
+`trashed_at`. Breaking these rules is `422 COMMON.VALIDATION_FAILED` with field errors under these
+keys:
+
+| Rule | Key in `errors` |
+|---|---|
+| No change field at all | `change` |
+| A label both added and removed | `add_label_ids` |
+| `folder_id` missing with `placement` `folder`, or present without it | `folder_id` |
+
+Outbound messages are always read; marking them changes nothing.
+
+Every message route of a mailbox answers in this order, and the first failing check decides:
+
+1. The mailbox exists for the caller, otherwise `404 MAILBOX.NOT_FOUND`.
+2. The caller has the permission the request needs, otherwise `403 PERMISSION.DENIED`. A caller who
+   may `view` but asks for a shared change is refused here, and nothing changes.
+3. Every message, folder, and label the request names exists in the mailbox, otherwise
+   `404 MAILBOX.MESSAGE_NOT_FOUND`, `404 MAILBOX.FOLDER_NOT_FOUND`, or `404 MAILBOX.LABEL_NOT_FOUND`.
+4. The body is valid, otherwise `422 COMMON.VALIDATION_FAILED`.
+
+A malformed path, query, or JSON body is `400 COMMON.INVALID_INPUT` before any of these.
 
 ### Threads
 
@@ -546,6 +565,9 @@ A thread is a conversation within one mailbox, linked by RFC 5322 `Message-ID`, 
   message's thread; otherwise it starts a thread, and `thread_id` is its own id.
 - Messages sent before this existed have no Zmail `Message-ID`, so replies to them start a new
   thread. Messages stored before threads existed were grouped once by `in_reply_to`.
+- `thread_id` is set on every stored message, whichever route stored it: inbound delivery, a send
+  from a mailbox, a message waiting for the send limit, an API-key send, a broadcast message, and a
+  template test send.
 
 `GET /v1/mailboxes/:mailbox_id/threads/:thread_id` needs `view` and lists the thread's messages in
 every placement except the trash, inbound and outbound, oldest first, with their bodies, as the
@@ -564,25 +586,38 @@ replies in Sent.
 | `folder_id` | The folder; required with `placement=folder` and allowed only with it |
 | `label_id` | Messages with this label |
 | `starred` | `true` for messages the caller starred, `false` for the others |
-| `unread` | `true` for messages the caller has not read, `false` for the others |
+| `unread` | `true` for inbound messages the caller has not read (outbound messages are always read, so never match), `false` for the others |
 | `has_attachments` | `true` for messages with files, `false` for the others |
-| `q` | Search, 1 to 200 characters |
+| `q` | Search; trimmed, then 1 to 200 characters |
 | `group` | `thread` lists one row per thread |
 | `page`, `per_page` | Pagination |
 
 An unknown value, `folder_id` without `placement=folder`, `placement=folder` without `folder_id`,
-`q` with `placement=trash`, or `group` outside the rules below is `400 COMMON.INVALID_INPUT`. An
-unknown folder or label is `404 MAILBOX.FOLDER_NOT_FOUND` or `404 MAILBOX.LABEL_NOT_FOUND`.
+`q` with `placement=trash`, a `q` that is empty after trimming or longer than 200 characters (as on
+the log route), or `group` outside the rules below is `400 COMMON.INVALID_INPUT`. An unknown folder
+or label is `404 MAILBOX.FOLDER_NOT_FOUND` or `404 MAILBOX.LABEL_NOT_FOUND`.
+
+The trash (`placement=trash`) is ordered by `trashed_at`, newest first, then by id, highest first.
+Every other list is newest first by id.
 
 `group=thread` is for placement views only: it needs `placement` `default`, `archive`, or `folder`,
-and cannot be combined with `label_id`, `starred`, `unread`, `has_attachments`, or `q`. The view is
-the placement (with its folder and `direction`). Each row is the newest message of one thread in
-the view and carries `thread`: `message_count` is how many of the thread's messages are in the
-view, `unread` and `starred` say whether the caller has not read or has starred at least one of
-them, and `label_ids` is every label on at least one of them. Rows are ordered by their newest
-message, newest first, and `meta` counts threads. Acting on a row acts on the thread's messages in
-the view. The starred, label, unread, and attachment filters, search, and the trash list single
-messages.
+and cannot be combined with `label_id`, `starred`, `unread`, `has_attachments`, or `q`. With
+`placement=default` it also needs `direction`, because Inbox and Sent are separate views:
+`placement=default&direction=inbound` is the Inbox and `placement=default&direction=outbound` is
+Sent. Archive and folder views may group with or without `direction`. The view is the placement
+(with its folder and `direction`). Each row is the newest message of one thread in the view and
+carries `thread`:
+
+- `message_count` is how many of the thread's messages are in the view.
+- `message_ids` are the ids of the thread's messages in the view, ascending, at most the 100
+  newest.
+- `unread` and `starred` say whether the caller has not read or has starred at least one of them.
+- `label_ids` is every label on at least one of them.
+
+Rows are ordered by their newest message, newest first, and `meta` counts threads. Acting on a row
+sends its `message_ids` to `POST .../message-updates`. When `message_count` is more than 100, the
+action covers only the listed ids, and after a refresh the row stays in the view with the rest. The
+starred, label, unread, and attachment filters, search, and the trash list single messages.
 
 `q` searches case-insensitively for the text anywhere in the subject, the sender address and name,
 the `to` and `cc` addresses, and the text body; `%` and `_` match literally. It searches every
@@ -1014,7 +1049,10 @@ are not defined.
 another organization's mailbox, is `404 MAILBOX.NOT_FOUND`. The key has exactly its owner's
 [access](#access): sending needs `send` on the `from` mailbox, and a mailbox the owner has no access
 to is `404 MAILBOX.NOT_FOUND`; reading a sent message needs `view` on its mailbox, and a message of
-a mailbox the owner has no access to is `404 MAILBOX.MESSAGE_NOT_FOUND`. The remaining fields, limits, outcomes, and
+a mailbox the owner has no access to is `404 MAILBOX.MESSAGE_NOT_FOUND`. A message these routes
+return, and one a template test send returns, has `starred` always `false`, because a star belongs
+to a person viewing the mailbox. `placement`, `folder_id`, `label_ids`, `trashed_at`, and
+`thread_id` are reported as stored. The remaining fields, limits, outcomes, and
 `Idempotency-Key` behavior are those of [Send](#send). A key without the scope gets
 `403 PERMISSION.DENIED`. The read route returns only outbound messages, so a `mail:read` key cannot
 read mail that was received. Both routes are limited to the organization in the header.
