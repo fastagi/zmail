@@ -979,7 +979,7 @@ func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, provid
 			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
 			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
 			mail_messages.attachment_count, mail_messages.template_id, mail_messages.created_at,
-			mail_messages.updated_at,
+			mail_messages.updated_at, mail_messages.send_lane,
 			mailboxes.address AS mailbox_address, mailboxes.organization_id AS organization_id,
 			mailboxes.type AS mailbox_type, mailboxes.webhooks_enabled AS mailbox_webhooks_enabled,
 			mailboxes.sealed_before AS mailbox_sealed_before`).

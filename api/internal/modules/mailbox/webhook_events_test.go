@@ -208,7 +208,7 @@ func TestDeliveryEventPublishesOnceAcrossRedeliveries(t *testing.T) {
 	fixture.notifier.sent = nil
 	raw := deliveryEventBody("bounced", "evt-9", "prov-9@mail.example", "bob@example.com")
 	for range 2 {
-		if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw)); err != nil {
+		if _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw)); err != nil {
 			t.Fatalf("RecordDeliveryEvent: %v", err)
 		}
 	}

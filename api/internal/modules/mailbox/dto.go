@@ -564,9 +564,11 @@ type MailEventResponse struct {
 
 // DeliveryEventResponse acknowledges one provider event from the mail edge.
 type DeliveryEventResponse struct {
-	MessageID uint   `json:"message_id"`
-	Type      string `json:"type"`
-	Duplicate bool   `json:"duplicate"`
+	MessageID uint `json:"message_id"`
+	// MessageKind is mailbox or transactional: the table MessageID belongs to.
+	MessageKind string `json:"message_kind"`
+	Type        string `json:"type"`
+	Duplicate   bool   `json:"duplicate"`
 }
 
 func toMailEventResponses(events []domain.MailEvent) []MailEventResponse {

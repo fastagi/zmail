@@ -259,9 +259,9 @@ type Service interface {
 	ListTransactionalLog(ctx context.Context, organizationID uint, filter domain.TransactionalLogFilter) (TransactionalLogPage, error)
 	// GetTransactionalLogEntry reads one transactional message of the organization, of either mode.
 	GetTransactionalLogEntry(ctx context.Context, organizationID, id uint) (*domain.TransactionalMessage, error)
-	// RecordDeliveryEvent stores one signed provider event about an outbound message. It
-	// reports recorded=false when the event was already stored.
-	RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (message *domain.MailMessage, event domain.MailEvent, recorded bool, err error)
+	// RecordDeliveryEvent stores one signed provider event about an outbound mailbox message or a
+	// transactional message. Its Recorded is false when the event was already stored.
+	RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (DeliveryEventResult, error)
 	ReceiveInbound(ctx context.Context, delivery InboundDelivery) (message *domain.MailMessage, created bool, err error)
 }
 

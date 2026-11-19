@@ -187,10 +187,10 @@ func TestBroadcastSendsToSubscribedListMembers(t *testing.T) {
 
 	// A later complaint from the provider about ann's message suppresses ann.
 	raw := deliveryEventBody("complained", "evt-complaint", "m-ann@example.com", "ann@example.com")
-	if _, _, recorded, err := fixture.service.RecordDeliveryEvent(ctx, DeliveryEvent{
+	if result, err := fixture.service.RecordDeliveryEvent(ctx, DeliveryEvent{
 		Raw: raw, Signature: signedHeader(time.Now(), deliveryEventScope, raw),
-	}); err != nil || !recorded {
-		t.Fatalf("RecordDeliveryEvent = %v, %v", recorded, err)
+	}); err != nil || !result.Recorded {
+		t.Fatalf("RecordDeliveryEvent = %+v, %v", result, err)
 	}
 	annNow, _ := fixture.repo.FindContact(ctx, 1, ann.ID)
 	if annNow.Status != domain.MailContactSuppressed || annNow.StatusReason != "complained" {

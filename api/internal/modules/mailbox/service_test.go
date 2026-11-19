@@ -1641,13 +1641,17 @@ func TestRecordDeliveryEventUpdatesTheMessageOnce(t *testing.T) {
 	}
 
 	raw := deliveryEventBody("bounced", "evt-1", "<prov-2@mail.example>", "Bob@Example.com")
-	message, event, recorded, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw))
-	if err != nil || !recorded {
-		t.Fatalf("RecordDeliveryEvent = recorded %v, err %v", recorded, err)
+	result, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw))
+	if err != nil || !result.Recorded {
+		t.Fatalf("RecordDeliveryEvent = %+v, err %v", result, err)
 	}
-	if message.ID != sent.ID || message.LastEvent != domain.MailEventBounced {
+	if result.Kind != DeliveryEventKindMailbox || result.MessageID != sent.ID {
+		t.Fatalf("result = %+v; want mailbox message %d", result, sent.ID)
+	}
+	if message, _ := fixture.service.GetMessage(ctx, as(1), mailbox.ID, sent.ID); message == nil || message.LastEvent != domain.MailEventBounced {
 		t.Fatalf("message = %+v; want message %d summarized as bounced", message, sent.ID)
 	}
+	event := result.Event
 	if event.Type != domain.MailEventBounced || event.Recipient != "bob@example.com" {
 		t.Fatalf("event = %+v", event)
 	}
@@ -1660,9 +1664,9 @@ func TestRecordDeliveryEventUpdatesTheMessageOnce(t *testing.T) {
 		t.Fatalf("occurred at %v; want the provider's timestamp", event.OccurredAt)
 	}
 
-	_, _, recorded, err = fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw))
-	if err != nil || recorded {
-		t.Fatalf("redelivery = recorded %v, err %v; want an acknowledged duplicate", recorded, err)
+	result, err = fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw))
+	if err != nil || result.Recorded {
+		t.Fatalf("redelivery = recorded %v, err %v; want an acknowledged duplicate", result.Recorded, err)
 	}
 	if len(fixture.repo.events[sent.ID]) != 2 {
 		t.Fatalf("events = %d; want accepted + bounced", len(fixture.repo.events[sent.ID]))
@@ -1680,12 +1684,12 @@ func TestRecordDeliveryEventRejectsUntrustedOrUnusableEvents(t *testing.T) {
 	valid := deliveryEventBody("delivered", "evt-2", "prov-3@mail.example", "bob@example.com")
 
 	unsigned := DeliveryEvent{Raw: valid, Signature: "t=1,v1=00"}
-	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, unsigned); !errors.Is(err, ErrMailInboundSignature) {
+	if _, err := fixture.service.RecordDeliveryEvent(ctx, unsigned); !errors.Is(err, ErrMailInboundSignature) {
 		t.Fatalf("unsigned error = %v", err)
 	}
 	// A signature made for inbound mail must not be accepted for an event with the same bytes.
 	crossed := DeliveryEvent{Raw: valid, Signature: signedHeader(fixture.now, "hello@mail.example", valid)}
-	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, crossed); !errors.Is(err, ErrMailInboundSignature) {
+	if _, err := fixture.service.RecordDeliveryEvent(ctx, crossed); !errors.Is(err, ErrMailInboundSignature) {
 		t.Fatalf("inbound signature reused for an event: error = %v", err)
 	}
 
@@ -1698,22 +1702,22 @@ func TestRecordDeliveryEventRejectsUntrustedOrUnusableEvents(t *testing.T) {
 		"invalid recipient": deliveryEventBody("delivered", "evt-5", "prov-3@mail.example", "not-an-address"),
 	}
 	for name, raw := range invalid {
-		if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw)); !errors.Is(err, ErrMailDeliveryEventInvalid) {
+		if _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw)); !errors.Is(err, ErrMailDeliveryEventInvalid) {
 			t.Fatalf("%s: error = %v; want ErrMailDeliveryEventInvalid", name, err)
 		}
 	}
 	oversized := make([]byte, MaxDeliveryEventBytes+1)
-	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(oversized)); !errors.Is(err, ErrMailDeliveryEventInvalid) {
+	if _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(oversized)); !errors.Is(err, ErrMailDeliveryEventInvalid) {
 		t.Fatalf("oversized error = %v", err)
 	}
 
 	unknown := deliveryEventBody("delivered", "evt-6", "someone-elses@other.example", "bob@example.com")
-	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(unknown)); !errors.Is(err, ErrMailMessageNotFound) {
+	if _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(unknown)); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("unknown message error = %v; want ErrMailMessageNotFound", err)
 	}
 
 	fixture.service.settings.InboundSecret = ""
-	if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(valid)); !errors.Is(err, ErrMailInboundDisabled) {
+	if _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(valid)); !errors.Is(err, ErrMailInboundDisabled) {
 		t.Fatalf("disabled error = %v", err)
 	}
 }

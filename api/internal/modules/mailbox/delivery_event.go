@@ -3,6 +3,8 @@ package mailbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -130,28 +132,45 @@ func isDetailToken(token string) bool {
 	return true
 }
 
+// Kinds of message a delivery event can match.
+const (
+	DeliveryEventKindMailbox       = "mailbox"
+	DeliveryEventKindTransactional = "transactional"
+)
+
+// DeliveryEventResult says which message a provider event matched and whether it was new.
+type DeliveryEventResult struct {
+	// Kind is DeliveryEventKindMailbox or DeliveryEventKindTransactional.
+	Kind string
+	// MessageID is the id of the matched message in the table Kind names.
+	MessageID uint
+	Event     domain.MailEvent
+	// Recorded is false when the event was already stored.
+	Recorded bool
+}
+
 // RecordDeliveryEvent verifies and stores one provider event. The signature is checked before
-// anything is parsed or looked up.
-func (s *service) RecordDeliveryEvent(
-	ctx context.Context,
-	delivery DeliveryEvent,
-) (*domain.MailMessage, domain.MailEvent, bool, error) {
+// anything is parsed or looked up. Mailbox messages are searched first, then transactional ones.
+func (s *service) RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (DeliveryEventResult, error) {
 	if s.settings.InboundSecret == "" {
-		return nil, domain.MailEvent{}, false, ErrMailInboundDisabled
+		return DeliveryEventResult{}, ErrMailInboundDisabled
 	}
 	if len(delivery.Raw) == 0 || len(delivery.Raw) > MaxDeliveryEventBytes {
-		return nil, domain.MailEvent{}, false, ErrMailDeliveryEventInvalid
+		return DeliveryEventResult{}, ErrMailDeliveryEventInvalid
 	}
 	if !verifyInbound(s.settings.InboundSecret, delivery.Signature, deliveryEventScope, delivery.Raw, s.now(), s.settings.InboundTolerance) {
-		return nil, domain.MailEvent{}, false, ErrMailInboundSignature
+		return DeliveryEventResult{}, ErrMailInboundSignature
 	}
 	providerMessageID, event, err := parseProviderEvent(delivery.Raw, s.now())
 	if err != nil {
-		return nil, domain.MailEvent{}, false, err
+		return DeliveryEventResult{}, err
 	}
 	message, mailbox, err := s.repo.FindOutboundMessageByProviderID(ctx, providerMessageID)
+	if errors.Is(err, ErrMailMessageNotFound) && s.transactional != nil {
+		return s.recordTransactionalDeliveryEvent(ctx, providerMessageID, event)
+	}
 	if err != nil {
-		return nil, domain.MailEvent{}, false, err
+		return DeliveryEventResult{}, err
 	}
 	event.MessageID = message.ID
 	added := 0
@@ -162,10 +181,20 @@ func (s *service) RecordDeliveryEvent(
 			return nil, addErr
 		}
 		message.LastEvent = summary
-		// A permanent bounce or a complaint from a broadcast recipient suppresses that contact.
-		if added > 0 && (event.Type == domain.MailEventBounced || event.Type == domain.MailEventComplained) {
+		if added > 0 && suppressesAddress(event.Type) {
+			// A permanent bounce or a complaint from a broadcast recipient suppresses that contact.
 			if suppressErr := s.broadcasts.SuppressContactForMessage(tx, message.ID, string(event.Type)); suppressErr != nil {
 				return nil, suppressErr
+			}
+			// It also puts the address on the organization's suppression list, which leaves the
+			// contact's status to the rule above.
+			if message.SendLane == domain.SendLaneBroadcast && message.OrganizationID != 0 && s.transactional != nil {
+				if suppressErr := s.transactional.AddSuppression(tx, domain.MailSuppression{
+					OrganizationID: message.OrganizationID, Email: event.Recipient, Reason: string(event.Type),
+					Source: domain.MailSuppressionSourceBroadcast, CreatedAt: s.now().UTC(),
+				}); suppressErr != nil {
+					return nil, suppressErr
+				}
 			}
 		}
 		eventType, publish := webhookTypeForEvent(event.Type)
@@ -183,7 +212,88 @@ func (s *service) RecordDeliveryEvent(
 		return []MailNotification{notification}, nil
 	})
 	if err != nil {
-		return nil, domain.MailEvent{}, false, err
+		return DeliveryEventResult{}, err
 	}
-	return message, event, added > 0, nil
+	return DeliveryEventResult{Kind: DeliveryEventKindMailbox, MessageID: message.ID, Event: event, Recorded: added > 0}, nil
+}
+
+// suppressesAddress reports whether an event puts its recipient on the suppression list: a
+// permanent bounce or a complaint. A rejection by the provider's own list never does (D35).
+func suppressesAddress(eventType domain.MailEventType) bool {
+	return eventType == domain.MailEventBounced || eventType == domain.MailEventComplained
+}
+
+// recordTransactionalDeliveryEvent stores a provider event about a transactional message, updates
+// its last_event, suppresses the address after a permanent bounce or a complaint, and publishes
+// the matching webhook, all in one transaction and only for a new event.
+func (s *service) recordTransactionalDeliveryEvent(ctx context.Context, providerMessageID string, event domain.MailEvent) (DeliveryEventResult, error) {
+	message, err := s.transactional.FindTransactionalByProviderID(ctx, providerMessageID)
+	if errors.Is(err, ErrTransactionalMessageNotFound) {
+		return DeliveryEventResult{}, ErrMailMessageNotFound
+	}
+	if err != nil {
+		return DeliveryEventResult{}, err
+	}
+	event.MessageID = message.ID
+	added := 0
+	err = s.applyTransactional(ctx, func(tx context.Context) ([]TransactionalNotification, error) {
+		var summary domain.MailEventType
+		var addErr error
+		if added, summary, addErr = s.transactional.AddTransactionalEvents(tx, message.ID, []domain.MailEvent{event}); addErr != nil {
+			return nil, addErr
+		}
+		if added == 0 {
+			return nil, nil
+		}
+		// Only mail that reached the provider can teach anything about the address; simulated and
+		// test-mode messages never write the list.
+		if suppressesAddress(event.Type) && message.CountsInLane() {
+			if suppressErr := s.transactional.AddSuppression(tx, domain.MailSuppression{
+				OrganizationID: message.OrganizationID, Email: message.ToAddress, Reason: string(event.Type),
+				Source: domain.MailSuppressionSourceTransactional, CreatedAt: s.now().UTC(),
+			}); suppressErr != nil {
+				return nil, suppressErr
+			}
+		}
+		notification, publish := transactionalNotificationForEvent(event)
+		if !publish {
+			return nil, nil
+		}
+		final := *message
+		final.LastEvent = summary
+		notification.Message = &final
+		return []TransactionalNotification{notification}, nil
+	})
+	if err != nil {
+		return DeliveryEventResult{}, err
+	}
+	if added > 0 {
+		logTransactional(ctx, "transactional_message.event_recorded", message, slog.String("event", string(event.Type)))
+	}
+	return DeliveryEventResult{Kind: DeliveryEventKindTransactional, MessageID: message.ID, Event: event, Recorded: added > 0}, nil
+}
+
+// transactionalNotificationForEvent maps a provider event to its transactional webhook (spec
+// §9.16): a deferral is a temporary bounce and a rejection is email.suppressed.
+func transactionalNotificationForEvent(event domain.MailEvent) (TransactionalNotification, bool) {
+	notification := TransactionalNotification{
+		Reason: event.Detail, Key: "event:" + event.ProviderEventID, OccurredAt: event.OccurredAt,
+	}
+	switch event.Type {
+	case domain.MailEventDelivered:
+		notification.Type = WebhookEmailDelivered
+	case domain.MailEventBounced:
+		notification.Type, notification.BounceType = WebhookEmailBounced, bounceTypePermanent
+	case domain.MailEventDeferred:
+		notification.Type, notification.BounceType = WebhookEmailBounced, bounceTypeTemporary
+	case domain.MailEventComplained:
+		notification.Type = WebhookEmailComplained
+	case domain.MailEventRejected:
+		notification.Type = TransactionalSuppressedEvent
+	case domain.MailEventFailed:
+		notification.Type = WebhookEmailFailed
+	default:
+		return TransactionalNotification{}, false
+	}
+	return notification, true
 }

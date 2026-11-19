@@ -491,9 +491,9 @@ func TestEventsOfSealedMessagesStayHidden(t *testing.T) {
 
 	raw := deliveryEventBody("bounced", "evt-sealed", "<prov-sealed@mail.example>", "x@example.com")
 	now := f.service.now()
-	_, _, recorded, err := f.service.RecordDeliveryEvent(ctx, DeliveryEvent{Raw: raw, Signature: signedHeader(now, deliveryEventScope, raw)})
-	if err != nil || !recorded {
-		t.Fatalf("RecordDeliveryEvent = %v, recorded %v", err, recorded)
+	result, err := f.service.RecordDeliveryEvent(ctx, DeliveryEvent{Raw: raw, Signature: signedHeader(now, deliveryEventScope, raw)})
+	if err != nil || !result.Recorded {
+		t.Fatalf("RecordDeliveryEvent = %v, recorded %v", err, result.Recorded)
 	}
 
 	_, err = f.service.GetMessage(ctx, f.c, f.personal.ID, sent.ID)

@@ -495,7 +495,7 @@ func (h *Handler) ReceiveDeliveryEvent(c *gin.Context) {
 		response.HandleError(c, "Delivery event is invalid", ErrMailDeliveryEventInvalid)
 		return
 	}
-	message, event, recorded, err := h.service.RecordDeliveryEvent(c.Request.Context(), DeliveryEvent{
+	result, err := h.service.RecordDeliveryEvent(c.Request.Context(), DeliveryEvent{
 		Signature: c.GetHeader(InboundSignatureHeader),
 		Raw:       raw,
 	})
@@ -503,8 +503,10 @@ func (h *Handler) ReceiveDeliveryEvent(c *gin.Context) {
 		response.HandleError(c, "Failed to record delivery event", err)
 		return
 	}
-	body := DeliveryEventResponse{MessageID: message.ID, Type: string(event.Type), Duplicate: !recorded}
-	if recorded {
+	body := DeliveryEventResponse{
+		MessageID: result.MessageID, MessageKind: result.Kind, Type: string(result.Event.Type), Duplicate: !result.Recorded,
+	}
+	if result.Recorded {
 		response.Created(c, body)
 		return
 	}

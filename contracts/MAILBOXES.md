@@ -1238,7 +1238,9 @@ webhooks apply to it.
 - Every message carries `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`,
   so mail clients can offer one-click unsubscribe.
 - A contact that is no longer `subscribed` when its turn comes is `skipped`
-  (`contact_not_subscribed`); a deleted contact is `skipped` (`contact_deleted`).
+  (`contact_not_subscribed`); a deleted contact is `skipped` (`contact_deleted`); a contact whose
+  address is on the organization's suppression list (see [Transactional Mail](#transactional-mail))
+  is `skipped` (`contact_suppressed`) and keeps its status.
 - Each recipient is sent with an idempotency key of its broadcast and contact, so a worker that stops
   after the provider call never sends that contact a second message.
 - When the broadcast lane limit (`daily_broadcast_limit`) is reached, the broadcast keeps `sending`
@@ -1264,7 +1266,8 @@ which the Web console forwards to this route for mail clients.
 
 A broadcast recipient whose message bounces permanently, is refused by the provider's suppression
 list, or draws a spam complaint becomes `suppressed`, with `status_reason` `bounced`, `rejected`, or
-`complained`. Later broadcasts skip it.
+`complained`. Later broadcasts skip it. A `bounced` or `complained` delivery event for a broadcast
+message also adds the address to the organization's suppression list.
 
 ### Log And Statistics
 
