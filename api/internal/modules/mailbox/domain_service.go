@@ -51,7 +51,7 @@ func (s *service) MailboxDomains(ctx context.Context, organizationID uint) ([]Ma
 		return nil, err
 	}
 	for _, mailDomain := range connected {
-		if mailDomain.Status == domain.MailDomainStatusVerified {
+		if mailDomain.Status == domain.MailDomainStatusVerified && mailDomain.Name != s.settings.Domain {
 			domains = append(domains, MailboxDomain{Name: mailDomain.Name})
 		}
 	}
@@ -613,10 +613,23 @@ func spfIncludes(have, want string) bool {
 }
 
 // mailboxDomainFor resolves where a new address goes: the shared domain, or a verified domain of
-// the organization. It returns the connected domain, or nil for the shared one.
+// the organization. A shared domain promoted from a connected domain reuses its
+// verified routing configuration without granting callers domain-management access.
 func (s *service) mailboxDomainFor(ctx context.Context, organizationID uint, name string) (string, *domain.MailDomain, error) {
 	name = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
 	if name == "" || name == s.settings.Domain {
+		if s.settings.CustomDomainsEnabled && s.domains != nil && s.domainProvider != nil {
+			connected, err := s.domains.FindDomainByName(ctx, s.settings.Domain)
+			if err == nil {
+				if connected.Status != domain.MailDomainStatusVerified {
+					return "", nil, ErrMailDomainNotVerified
+				}
+				return s.settings.Domain, connected, nil
+			}
+			if !errors.Is(err, ErrMailDomainNotFound) {
+				return "", nil, err
+			}
+		}
 		return s.settings.Domain, nil, nil
 	}
 	if err := s.requireDomains(); err != nil {
