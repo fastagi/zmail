@@ -901,3 +901,44 @@ func TestCheckPendingZonesReleasesAnAbandonedReservation(t *testing.T) {
 		t.Fatalf("deleted at the provider = %v", fixture.zones.deletedZones)
 	}
 }
+
+// An operator releases an apex a pending zone holds, such as one squatted by an organization that
+// never delegates it: the zone goes from Cloudflare and Zmail, its pending domains only on --force.
+func TestReleasePendingZone(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	squatted := fixture.connect(t, "mail.example.org")
+	zone := fixture.pendingZoneOf(t, squatted)
+
+	if err := fixture.service.ReleasePendingZone(ctx, "missing.org", false); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("release of an unknown zone = %v", err)
+	}
+	if err := fixture.service.ReleasePendingZone(ctx, "Example.org.", false); !errors.Is(err, ErrMailZoneInUse) {
+		t.Fatalf("release with a domain = %v", err)
+	}
+	if fixture.mailZones.zones[zone.ID] == nil || len(fixture.zones.deletedZones) != 0 {
+		t.Fatal("a zone with domains was released without --force")
+	}
+	if err := fixture.service.ReleasePendingZone(ctx, "example.org", true); err != nil {
+		t.Fatalf("forced release = %v", err)
+	}
+	if fixture.mailZones.zones[zone.ID] != nil || fixture.domains.domains[squatted.ID] != nil ||
+		!slices.Equal(fixture.zones.deletedZones, []string{zone.CloudflareZoneID}) {
+		t.Fatalf("zones %v, domains %v, deleted %v", fixture.mailZones.zones, fixture.domains.domains, fixture.zones.deletedZones)
+	}
+	// The apex is free again, for any organization.
+	if _, err := fixture.service.ConnectMailDomain(ctx, 8, testCreator, "mail.example.org", ""); err != nil {
+		t.Fatalf("connect after the release = %v", err)
+	}
+
+	// An active zone serves DNS the registrar points at; it is never released.
+	active := fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.net", CloudflareZoneID: "cf-net", Status: domain.MailZoneStatusActive,
+	})
+	if err := fixture.service.ReleasePendingZone(ctx, "example.net", true); !errors.Is(err, errZoneNoLongerPending) {
+		t.Fatalf("release of an active zone = %v", err)
+	}
+	if fixture.mailZones.zones[active.ID] == nil {
+		t.Fatal("an active zone was released")
+	}
+}

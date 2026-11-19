@@ -501,6 +501,9 @@ type MailZoneChecker interface {
 	CheckPendingZones(ctx context.Context, limit int) (int, error)
 	// WaitForSetups waits until the domain setups an activation started have ended, or ctx ends.
 	WaitForSetups(ctx context.Context) error
+	// ReleasePendingZone removes the pending managed zone of an apex for the operator; force
+	// removes the zone's pending domains with it.
+	ReleasePendingZone(ctx context.Context, apex string, force bool) error
 }
 
 // MailTemplateRepository stores templates. Every lookup is scoped to an organization.

@@ -106,3 +106,47 @@ func TestFormatPollLimit(t *testing.T) {
 		assert.Equal(t, want, formatPollLimit(limit), limit.String())
 	}
 }
+
+type recordingZoneReleaser struct {
+	zone  string
+	force bool
+	err   error
+}
+
+func (r *recordingZoneReleaser) ReleasePendingZone(_ context.Context, zone string, force bool) error {
+	r.zone, r.force = zone, force
+	return r.err
+}
+
+func TestMailZoneReleaseCommandRegistered(t *testing.T) {
+	application := console.New("fastbuild", "test")
+	infracommands.RegisterManifest(application, Manifest())
+	assert.True(t, application.HasCommand("mail:zone:release"))
+}
+
+func TestMailZoneReleaseArguments(t *testing.T) {
+	zone, force, err := parseMailZoneReleaseArgs([]string{"example.org"})
+	require.NoError(t, err)
+	assert.Equal(t, "example.org", zone)
+	assert.False(t, force)
+
+	zone, force, err = parseMailZoneReleaseArgs([]string{"--force", "example.org"})
+	require.NoError(t, err)
+	assert.Equal(t, "example.org", zone)
+	assert.True(t, force)
+
+	for _, args := range [][]string{nil, {"--force"}, {"a.org", "b.org"}, {"--fast", "a.org"}} {
+		_, _, err = parseMailZoneReleaseArgs(args)
+		assert.Error(t, err, "%v", args)
+	}
+}
+
+func TestMailZoneReleaseRunsTheRelease(t *testing.T) {
+	releaser := &recordingZoneReleaser{}
+	require.NoError(t, runMailZoneRelease(context.Background(), releaser, "example.org", true))
+	assert.Equal(t, "example.org", releaser.zone)
+	assert.True(t, releaser.force)
+
+	releaser.err = assert.AnError
+	require.ErrorIs(t, runMailZoneRelease(context.Background(), releaser, "example.org", false), assert.AnError)
+}

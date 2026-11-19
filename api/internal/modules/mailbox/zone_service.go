@@ -552,6 +552,57 @@ func (s *service) requireUndelegated(ctx context.Context, apex string, nxdomainU
 	return nil
 }
 
+// ReleasePendingZone removes the pending managed zone of apex from Cloudflare and from Zmail, for
+// an operator freeing an apex that an organization holds without delegating it. An active zone
+// serves DNS the registrar points at and is never released. A zone with domains is released only
+// with force, which removes its domains too; they are pending while the zone is.
+func (s *service) ReleasePendingZone(ctx context.Context, apex string, force bool) error {
+	if !s.domainsEnabled() {
+		return ErrMailDomainsDisabled
+	}
+	apex = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(apex)), ".")
+	zone, err := s.zones.FindZoneByName(ctx, apex)
+	if err != nil {
+		return err
+	}
+	if zone.Status != domain.MailZoneStatusPending {
+		return errZoneNoLongerPending
+	}
+	removeAtProvider := func(providerContext context.Context, locked *domain.MailZone) error {
+		if locked.Status != domain.MailZoneStatusPending {
+			return errZoneNoLongerPending
+		}
+		if isZoneReservation(locked) {
+			// The provider zone of a reservation was never stored.
+			return nil
+		}
+		if err := s.domainProvider.DeleteZone(providerContext, locked.CloudflareZoneID); err != nil && !providerZoneGone(err) {
+			return providerError(err)
+		}
+		return nil
+	}
+	if force {
+		// DeletePendingZone keeps the row locked as pending and removes its domains with it.
+		err = s.zones.DeletePendingZone(ctx, zone.ID, func(providerContext context.Context) error {
+			return removeAtProvider(providerContext, zone)
+		})
+		if errors.Is(err, ErrMailZoneNotFound) {
+			// The zone became active, or went, after it was read.
+			return errZoneNoLongerPending
+		}
+	} else {
+		err = s.zones.DeleteZone(ctx, zone.OrganizationID, zone.ID, removeAtProvider)
+	}
+	if err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "pending mail zone released by the operator",
+		slog.String("zone", zone.Name), slog.Uint64("zone_id", uint64(zone.ID)),
+		slog.Uint64("organization_id", uint64(zone.OrganizationID)),
+		slog.String("cloudflare_zone_id", zone.CloudflareZoneID), slog.Bool("force", force))
+	return nil
+}
+
 // EnableMailDomainReceiving makes a send-only domain receive through Zmail and starts its setup,
 // which enables Email Routing and routes the mailboxes the domain already has. A domain that
 // already receives is returned unchanged. The domain's zone must be active.
