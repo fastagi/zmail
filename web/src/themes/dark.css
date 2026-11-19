@@ -1,91 +1,99 @@
 /**
- * Design Tokens: Dark Theme
+ * Design Tokens: Dark Theme (v2)
  * Semantic tokens mapped to primitives (dark mode overrides).
  */
 
 .dark {
   /* --- Legacy Mapping (Shadcn/UI compatible) --- */
-  --background: var(--neutral-900);
-  --foreground: var(--neutral-50);
-  
-  --card: var(--neutral-800);
-  --card-foreground: var(--neutral-50);
-  
-  --popover: var(--neutral-800);
-  --popover-foreground: var(--neutral-50);
-  
-  --primary: var(--neutral-200);
-  --primary-foreground: var(--neutral-900);
-  
-  --secondary: var(--neutral-800);
-  --secondary-foreground: var(--neutral-50);
-  
-  --muted: var(--neutral-800);
-  --muted-foreground: var(--neutral-400);
-  
-  --accent: var(--neutral-800);
-  --accent-foreground: var(--neutral-50);
-  
+  --background: var(--bg-canvas);
+  --foreground: var(--text-main);
+
+  --card: var(--bg-surface);
+  --card-foreground: var(--text-main);
+
+  --popover: var(--bg-surface);
+  --popover-foreground: var(--text-main);
+
+  --primary: var(--text-main);
+  --primary-foreground: var(--night-950);
+
+  --secondary: var(--nav-selected);
+  --secondary-foreground: var(--text-main);
+
+  --muted: var(--bg-subtle);
+  --muted-foreground: var(--text-muted);
+
+  --accent: var(--brand-subtle);
+  --accent-foreground: var(--text-main);
+
   --destructive: var(--red-500);
   --destructive-foreground: var(--neutral-0);
-  
-  --border: var(--neutral-700);
-  --input: var(--neutral-700);
-  --ring: var(--neutral-500);
+
+  --border: var(--border-main);
+  --input: var(--border-main);
+  --ring: var(--brand-main);
 
   /* --- Semantic Design Tokens --- */
-  
+
   /* Surfaces & Backgrounds (Dark Mode mapping) */
-  --bg-canvas: var(--neutral-950);
-  --bg-surface: var(--neutral-900);
-  --bg-subtle: var(--neutral-800);
-  
+  --bg-canvas: var(--night-950);
+  --bg-surface: var(--night-900);
+  --bg-subtle: var(--night-850);
+
   --surface-1: var(--bg-canvas);
   --surface-2: var(--bg-surface);
   --surface-3: var(--bg-subtle);
 
+  /* Interactive rows, navigation, avatars */
+  --row-hover: var(--night-850);
+  --row-selected: var(--night-800);
+  --nav-hover: var(--night-850);
+  --nav-selected: var(--night-750);
+  --avatar-bg: var(--night-800);
+
   /* Text & Foregrounds */
-  --text-main: var(--neutral-50);
-  --text-subtle: var(--neutral-300);
-  --text-muted: var(--neutral-400);
-  --text-on-brand: var(--neutral-0);
+  --text-main: var(--night-100);
+  --text-subtle: var(--night-300);
+  --text-muted: var(--night-400);
+  --text-faint: var(--night-500);
+  --text-on-brand: var(--paper-0);
 
   /* Borders & Dividers */
-  --border-main: var(--neutral-700);
-  --border-subtle: oklch(from var(--border-main) l c h / 0.5);
-  --border-strong: var(--neutral-500);
+  --border-main: var(--night-750);
+  --border-subtle: var(--night-825);
+  --border-strong: var(--night-600);
 
   /* Brand / Primary */
-  --brand-main: var(--blue-400);
-  --brand-subtle: oklch(from var(--brand-main) l c h / 0.15);
-  --brand-strong: var(--blue-200);
-  
+  --brand-main: var(--indigo-400);
+  --brand-subtle: var(--indigo-950);
+  --brand-strong: var(--indigo-300);
+
   /* State Colors */
   --success: var(--green-500);
   --success-subtle: oklch(from var(--success) l c h / 0.15);
-  
-  --warning: var(--yellow-500);
+
+  --warning: var(--rust-400);
   --warning-subtle: oklch(from var(--warning) l c h / 0.15);
-  
+
   --error: var(--red-400);
   --error-subtle: oklch(from var(--error) l c h / 0.15);
-  
+
   --info: var(--sky-500);
   --info-subtle: oklch(from var(--info) l c h / 0.15);
 
-  --highlight: var(--blue-400);
+  --highlight: var(--brand-main);
   --highlight-subtle: oklch(from var(--highlight) l c h / 0.2);
 
   /* Others */
   --shadow-color: oklch(0 0 0);
-  
+
   /* Legacy semantics maintained for compatibility */
   --primary-subtle: var(--brand-subtle);
   --primary-strong: var(--brand-strong);
-  --primary-deeper: var(--blue-100);
-  
+  --primary-deeper: var(--indigo-300);
+
   --secondary-subtle: oklch(from var(--secondary) l c h / 0.15);
-  --secondary-deeper: var(--neutral-700);
-  
+  --secondary-deeper: var(--border-main);
+
   --background-subtle: var(--bg-surface);
 }

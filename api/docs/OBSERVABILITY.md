@@ -132,6 +132,22 @@ have the message. HTTP spans cover the request until it commits; the worker
 (`mail:broadcast:work`) traces its process like the other workers, and no per-message dispatch span
 exists yet.
 
+## Alerts
+
+HTTP series label the route template in `path`, so each route can carry its own budget. With
+`METRICS_ENABLED=true`, alert on the unified inbox (`docs/plans/unified-inbox.zh-CN.md` §13.2):
+
+| Alert | Expression | For |
+|---|---|---|
+| Unified inbox list slow | `histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{method="GET",path="/v1/inbox-messages"}[5m]))) > 0.5` | 15m |
+| Unified inbox counts slow | `histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{method="GET",path="/v1/inbox-message-counts"}[5m]))) > 0.5` | 15m |
+| Unified inbox searches too broad | `sum(rate(http_requests_total{method="GET",path="/v1/inbox-messages",status="422"}[1h])) / sum(rate(http_requests_total{method="GET",path="/v1/inbox-messages"}[1h])) > 0.2` | 1h |
+
+The route answers `422` only with `MAILBOX.SEARCH_TOO_BROAD`, and only a search can time out, so
+the third ratio is measured against every list request: it fires later than a search-only ratio
+would, never earlier. A sustained rise usually means the trigram index is missing or the data is
+skewed toward one mailbox.
+
 ## Audit Records
 
 Audit records intentionally persist actor, target, action, result, request correlation, and reviewed

@@ -37,31 +37,65 @@ export interface ReaderProps {
 }
 
 /**
+ * How a reader lays out: `card` in a mailbox's workspace (its own back and previous/next bar, each
+ * message framed with its actions), `article` in the unified inbox (§11.0: the pane owns the
+ * toolbar; a 640px column with `kicker` above a serif subject, each message under its sender's
+ * avatar with only its star and mark-unread actions, replies and moves living in the toolbar).
+ */
+export interface ReaderLayout {
+  variant?: 'card' | 'article';
+  /** The line above the subject in the `article` layout. */
+  kicker?: string;
+}
+
+/** The subject of an open message or thread, sized for the layout. */
+function ReaderSubject({ subject, layout }: { subject: string; layout: ReaderLayout }) {
+  const t = useT('mailbox');
+  if (layout.variant !== 'article') {
+    return <h3 className="text-lg font-semibold break-words">{subject || t('list.noSubject')}</h3>;
+  }
+  return (
+    <header>
+      {layout.kicker ? <p className="text-xs text-text-muted">{layout.kicker}</p> : null}
+      <h2 className="mt-2 mb-[18px] font-serif text-[30px] leading-[1.25] font-semibold tracking-[-0.01em] break-words">
+        {subject || t('list.noSubject')}
+      </h2>
+    </header>
+  );
+}
+
+const articleClassName = 'mx-auto w-full max-w-[640px] space-y-4 px-5 sm:px-7';
+
+/**
  * A thread opened from a placement view: every message of it outside the trash, oldest first, so
  * the replies in Sent show beside the mail they answer. The newest message is open; the others
  * open on request. The thread is polled with the list, so a new reply appears on its own.
  */
-export function ThreadView({ threadId, ...reader }: ReaderProps & { threadId: number }) {
+export function ThreadView({
+  threadId,
+  variant = 'card',
+  kicker,
+  ...reader
+}: ReaderProps & ReaderLayout & { threadId: number }) {
   const t = useT('mailbox');
   const query = useMailThread(useMailOrganizationId(), reader.mailboxId, threadId);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
+  const layout = { variant, kicker };
 
   return (
-    <ReaderState query={query} reader={reader}>
+    <ReaderState query={query} reader={reader} layout={layout}>
       {(messages: MailMessage[]) => {
         const newest = messages.at(-1);
         if (!newest) return null;
         return (
-          <article className="space-y-4">
-            <ReaderToolbar reader={reader} />
-            <h3 className="text-lg font-semibold break-words">
-              {newest.subject || t('list.noSubject')}
-            </h3>
+          <article className={variant === 'article' ? articleClassName : 'space-y-4'}>
+            {variant === 'article' ? null : <ReaderToolbar reader={reader} />}
+            <ReaderSubject subject={newest.subject} layout={layout} />
             <ol aria-label={t('thread.label')} className="space-y-3">
               {messages.map(message => (
                 <li key={message.id}>
                   {message.id === newest.id || expanded.has(message.id) ? (
-                    <MessageCard message={message} reader={reader} />
+                    <MessageCard message={message} reader={reader} variant={variant} />
                   ) : (
                     <CollapsedMessage
                       message={message}
@@ -79,18 +113,21 @@ export function ThreadView({ threadId, ...reader }: ReaderProps & { threadId: nu
 }
 
 /** One message opened from a view that lists single messages: stars, labels, search, the trash. */
-export function MessageDetail({ messageId, ...reader }: ReaderProps & { messageId: number }) {
-  const t = useT('mailbox');
+export function MessageDetail({
+  messageId,
+  variant = 'card',
+  kicker,
+  ...reader
+}: ReaderProps & ReaderLayout & { messageId: number }) {
   const query = useMailMessage(useMailOrganizationId(), reader.mailboxId, messageId);
+  const layout = { variant, kicker };
   return (
-    <ReaderState query={query} reader={reader}>
+    <ReaderState query={query} reader={reader} layout={layout}>
       {(message: MailMessage) => (
-        <article className="space-y-4">
-          <ReaderToolbar reader={reader} />
-          <h3 className="text-lg font-semibold break-words">
-            {message.subject || t('list.noSubject')}
-          </h3>
-          <MessageCard key={message.id} message={message} reader={reader} />
+        <article className={variant === 'article' ? articleClassName : 'space-y-4'}>
+          {variant === 'article' ? null : <ReaderToolbar reader={reader} />}
+          <ReaderSubject subject={message.subject} layout={layout} />
+          <MessageCard key={message.id} message={message} reader={reader} variant={variant} />
         </article>
       )}
     </ReaderState>
@@ -100,17 +137,20 @@ export function MessageDetail({ messageId, ...reader }: ReaderProps & { messageI
 function ReaderState<T>({
   query,
   reader,
+  layout,
   children,
 }: {
   query: { isPending: boolean; error: unknown; data: T | undefined; refetch: () => unknown };
   reader: ReaderProps;
+  layout: ReaderLayout;
   children: (data: T) => ReactNode;
 }) {
   const t = useT('mailbox');
+  const article = layout.variant === 'article';
   if (query.isPending) {
     return (
-      <div className="space-y-3">
-        <ReaderToolbar reader={reader} />
+      <div className={article ? articleClassName : 'space-y-3'}>
+        {article ? null : <ReaderToolbar reader={reader} />}
         <Skeleton className="h-48 w-full" />
       </div>
     );
@@ -118,8 +158,8 @@ function ReaderState<T>({
   // A failed poll keeps the open message on screen; only one that never loaded is an error.
   if (query.data === undefined) {
     return (
-      <div className="space-y-3">
-        <ReaderToolbar reader={reader} />
+      <div className={article ? articleClassName : 'space-y-3'}>
+        {article ? null : <ReaderToolbar reader={reader} />}
         <ErrorAlert
           message={t(resolveMailboxErrorKey(query.error))}
           retryLabel={t('actions.retry')}
@@ -224,56 +264,38 @@ function CollapsedMessage({ message, onExpand }: { message: MailMessage; onExpan
 }
 
 /** An open message: its headers, its actions, its files, and its content. */
-function MessageCard({ message, reader }: { message: MailMessage; reader: ReaderProps }) {
+function MessageCard({
+  message,
+  reader,
+  variant,
+}: {
+  message: MailMessage;
+  reader: ReaderProps;
+  variant: NonNullable<ReaderLayout['variant']>;
+}) {
   const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
   const [plainText, setPlainText] = useState(false);
   const hasHtml = message.html_body !== '';
   const hasText = message.text_body !== '';
   const showHtml = hasHtml && !(plainText && hasText);
+  const article = variant === 'article';
 
   return (
     <div
       className={cn(
-        'space-y-3 rounded-md border p-4',
-        message.direction === 'outbound' && 'border-l-2 border-l-primary/60'
+        article ? 'space-y-4' : 'space-y-3 rounded-md border p-4',
+        message.direction === 'outbound' && 'border-l-2 border-l-primary/60',
+        message.direction === 'outbound' && article && 'pl-4'
       )}
     >
-      {message.direction === 'outbound' ? <SentMark /> : null}
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <dl className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
-          <dt className="text-muted-foreground">{t('message.from')}</dt>
-          <dd className="break-words">
-            {message.from.name
-              ? `${message.from.name} <${message.from.address}>`
-              : message.from.address}
-          </dd>
-          <dt className="text-muted-foreground">{t('message.to')}</dt>
-          <dd className="break-words">{message.to.join(', ')}</dd>
-          {message.cc.length > 0 ? (
-            <>
-              <dt className="text-muted-foreground">{t('message.cc')}</dt>
-              <dd className="break-words">{message.cc.join(', ')}</dd>
-            </>
-          ) : null}
-          <dt className="text-muted-foreground">{t('message.date')}</dt>
-          <dd>
-            <time dateTime={message.created_at}>
-              {formatter.format(new Date(message.created_at))}
-            </time>
-          </dd>
-        </dl>
-        <MessageActions
-          message={message}
-          mailboxAddress={reader.mailboxAddress}
-          canSend={reader.canSend}
-          canOrganize={reader.canOrganize}
-          onReply={reader.onReply}
-          onReplyAll={reader.onReplyAll}
-          onForward={reader.onForward}
-          onClose={reader.onClose}
-        />
-      </div>
+      {article ? (
+        <SenderLine message={message} reader={reader} />
+      ) : (
+        <>
+          {message.direction === 'outbound' ? <SentMark /> : null}
+          <MessageHeaders message={message} reader={reader} />
+        </>
+      )}
 
       {message.status === 'failed' ? (
         <Alert variant="destructive">
@@ -314,10 +336,97 @@ function MessageCard({ message, reader }: { message: MailMessage; reader: Reader
       {showHtml ? (
         <MailHtmlFrame html={message.html_body} title={t('message.htmlTitle')} />
       ) : hasText ? (
-        <pre className="font-sans text-sm break-words whitespace-pre-wrap">{message.text_body}</pre>
+        <pre
+          className={cn(
+            'font-sans break-words whitespace-pre-wrap',
+            article ? 'text-[15.5px] leading-[1.8] text-text-subtle' : 'text-sm'
+          )}
+        >
+          {message.text_body}
+        </pre>
       ) : (
         <p className="text-sm text-muted-foreground">{t('message.emptyBody')}</p>
       )}
+    </div>
+  );
+}
+
+/** A message's addresses and date, with every action on it: the workspace's card header. */
+function MessageHeaders({ message, reader }: { message: MailMessage; reader: ReaderProps }) {
+  const t = useT('mailbox');
+  const formatter = useDateTimeFormat();
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <dl className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+        <dt className="text-muted-foreground">{t('message.from')}</dt>
+        <dd className="break-words">
+          {message.from.name
+            ? `${message.from.name} <${message.from.address}>`
+            : message.from.address}
+        </dd>
+        <dt className="text-muted-foreground">{t('message.to')}</dt>
+        <dd className="break-words">{message.to.join(', ')}</dd>
+        {message.cc.length > 0 ? (
+          <>
+            <dt className="text-muted-foreground">{t('message.cc')}</dt>
+            <dd className="break-words">{message.cc.join(', ')}</dd>
+          </>
+        ) : null}
+        <dt className="text-muted-foreground">{t('message.date')}</dt>
+        <dd>
+          <time dateTime={message.created_at}>
+            {formatter.format(new Date(message.created_at))}
+          </time>
+        </dd>
+      </dl>
+      <MessageActions
+        message={message}
+        mailboxAddress={reader.mailboxAddress}
+        canSend={reader.canSend}
+        canOrganize={reader.canOrganize}
+        onReply={reader.onReply}
+        onReplyAll={reader.onReplyAll}
+        onForward={reader.onForward}
+        onClose={reader.onClose}
+      />
+    </div>
+  );
+}
+
+/**
+ * The sender above a message in the article layout: a 34px avatar with the initial, the name and
+ * address, the time, then the actions that stay with one message (star, mark unread). Replying
+ * and moving belong to the pane's toolbar, so `send` is not passed on.
+ */
+function SenderLine({ message, reader }: { message: MailMessage; reader: ReaderProps }) {
+  const formatter = useDateTimeFormat();
+  const name = senderName(message);
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <span
+        aria-hidden="true"
+        className="flex size-[34px] shrink-0 items-center justify-center rounded-full bg-avatar-bg font-semibold text-text-subtle"
+      >
+        {Array.from(name)[0]?.toUpperCase() ?? ''}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-semibold">{name}</span>
+          {message.direction === 'outbound' ? <SentMark /> : null}
+        </p>
+        <p className="truncate text-xs text-text-muted">{message.from.address}</p>
+      </div>
+      <time dateTime={message.created_at} className="shrink-0 text-xs text-text-faint">
+        {formatter.format(new Date(message.created_at))}
+      </time>
+      <MessageActions
+        message={message}
+        mailboxAddress={reader.mailboxAddress}
+        canSend={false}
+        canOrganize={reader.canOrganize}
+        onReply={reader.onReply}
+        onClose={reader.onClose}
+      />
     </div>
   );
 }
