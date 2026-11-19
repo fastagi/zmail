@@ -31,9 +31,11 @@ const state = vi.hoisted(() => {
       isFetchingNextPage: false,
       fetchNextPage: vi.fn(),
     },
-    /** What the inbox answers for a `tz` the server does not know; null answers every zone. */
-    rejectedZone: null as string | null,
+    /** The error the inbox answers for these filters; null answers them. */
+    reject: null as ((filters: InboxFilters) => ApiError | null) | null,
     inboxCalls: [] as InboxFilters[],
+    counts: query(),
+    countsCalls: [] as string[],
     thread: query(),
     detail: query(),
     threadCalls: [] as { mailboxId: number; threadId: number | null }[],
@@ -104,19 +106,18 @@ vi.mock('@/features/mailbox/hooks/use-inbox', async importOriginal => ({
   ...(await importOriginal<typeof import('@/features/mailbox/hooks/use-inbox')>()),
   useInboxMessages: (_organizationId: number, filters: InboxFilters) => {
     state.inboxCalls.push(filters);
-    if (state.rejectedZone !== null && filters.tz === state.rejectedZone) {
-      return {
-        ...state.inbox,
-        data: undefined,
-        error: new ApiError('bad zone', ApiErrorCode.COMMON_INVALID_INPUT, 400),
-      };
-    }
-    return state.inbox;
+    const error = state.reject?.(filters) ?? null;
+    return error ? { ...state.inbox, data: undefined, error } : state.inbox;
+  },
+  useInboxCounts: (_organizationId: number, tz: string) => {
+    state.countsCalls.push(tz);
+    return state.counts;
   },
   useUpdateInboxMessages: () => state.updateInbox,
 }));
 
 let queryClient: QueryClient;
+const originalResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
 
 describe('unified inbox', () => {
   beforeEach(() => {
@@ -126,11 +127,15 @@ describe('unified inbox', () => {
     navigation.replace.mockClear();
     window.localStorage.clear();
     window.history.replaceState(null, '', '/console/mailboxes');
+    // Every test runs in UTC unless it names another zone, whatever the machine's zone.
+    browserZone('UTC');
     state.organizations.data = page([organization('owner')]);
     state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales')];
     state.domains.data = [domain()];
     state.inbox.data = listing([[threadRow(), singleRow()]]);
-    state.rejectedZone = null;
+    state.reject = null;
+    state.counts.data = counts();
+    state.countsCalls = [];
     state.thread.data = [message({ id: 29, thread_id: 30 }), message({ id: 31, thread_id: 30 })];
     state.detail.data = message({ id: 12, mailbox_id: 1 });
     for (const query of [
@@ -138,6 +143,7 @@ describe('unified inbox', () => {
       state.mailboxes,
       state.domains,
       state.inbox,
+      state.counts,
       state.thread,
       state.detail,
     ]) {
@@ -187,11 +193,12 @@ describe('unified inbox', () => {
     expect(rowButton('Launch plan')).toHaveTextContent('Bob');
     expect(rowButton('Launch plan')).toHaveTextContent('(3)');
     expect(rowButton('Launch plan')).toHaveTextContent('Are we ready');
-    // Each readable mailbox is a way into its own workspace.
-    expect(screen.getByRole('link', { name: 'sales@mail.example.com' })).toHaveAttribute(
-      'href',
-      '/console/mailboxes?org=1&mailbox=2'
-    );
+    // The sidebar lists the views and the readable mailboxes with the caller's counts.
+    expect(viewButton(/^All mail/u)).toHaveAccessibleName('All mail: 4 unread');
+    expect(viewButton(/^All mail/u)).toHaveAttribute('aria-current', 'page');
+    expect(viewButton(/^Today/u)).toHaveAccessibleName('Today: 5');
+    expect(viewButton(/^Pending/u)).toHaveAccessibleName('Pending: 1');
+    expect(mailboxButton(/^sales@/u)).toHaveAccessibleName('sales@mail.example.com: 3 unread');
     unmount();
 
     window.history.replaceState(null, '', '/console/mailboxes?mailbox=2');
@@ -416,19 +423,141 @@ describe('unified inbox', () => {
   });
 
   it('retries with tz=UTC when the server does not know the browser zone', () => {
-    const resolved = Intl.DateTimeFormat.prototype.resolvedOptions;
-    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (
-      this: Intl.DateTimeFormat
-    ) {
-      return { ...resolved.call(this), timeZone: 'Mars/Olympus_Mons' };
-    });
-    state.rejectedZone = 'Mars/Olympus_Mons';
+    browserZone('Mars/Olympus_Mons');
+    state.reject = filters =>
+      filters.tz === 'Mars/Olympus_Mons'
+        ? new ApiError('bad zone', ApiErrorCode.COMMON_INVALID_INPUT, 400)
+        : null;
     renderRoute();
 
     expect(state.inboxCalls[0]).toMatchObject({ tz: 'Mars/Olympus_Mons' });
     expect(state.inboxCalls.at(-1)).toMatchObject({ view: 'all', group: 'thread', tz: 'UTC' });
     expect(rowButton('Launch plan')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+  it('Today requests view=today with the inbox timezone', () => {
+    browserZone('Asia/Shanghai');
+    renderRoute();
+
+    expect(state.countsCalls.at(-1)).toBe('Asia/Shanghai');
+    fireEvent.click(viewButton(/^Today/u));
+
+    expect(new URLSearchParams(window.location.search).get('view')).toBe('today');
+    expect(state.inboxCalls.at(-1)).toEqual({ view: 'today', tz: 'Asia/Shanghai' });
+    expect(viewButton(/^Today/u)).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('heading', { level: 2, name: 'Today' })).toBeInTheDocument();
+  });
+
+  it('Sent shows the queued badge when sent_waiting is positive', () => {
+    const { unmount } = renderRoute();
+    expect(viewButton(/^Sent/u)).toHaveAccessibleName('Sent');
+    unmount();
+
+    state.counts.data = counts({ sent_waiting: 2 });
+    renderRoute();
+    expect(within(viewButton(/^Sent/u)).getByText('Queued')).toBeInTheDocument();
+    expect(viewButton(/^Sent/u)).toHaveAccessibleName('Sent: mail is queued');
+  });
+
+  it('Unread tab requests unread=true without grouping', () => {
+    renderRoute();
+
+    expect(screen.getByRole('tab', { name: /^All/u })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: /^Unread/u }));
+
+    expect(new URLSearchParams(window.location.search).get('tab')).toBe('unread');
+    expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', unread: true, tz: 'UTC' });
+    expect(screen.getByRole('tab', { name: /^Unread/u })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('search requests view=all with q and shows the too-broad notice on 422', () => {
+    window.history.replaceState(null, '', '/console/mailboxes?view=today');
+    state.reject = filters =>
+      filters.q === 'x' ? new ApiError('broad', ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 422) : null;
+    renderRoute();
+
+    const search = screen.getByRole('searchbox', { name: 'Search all mail' });
+    fireEvent.change(search, { target: { value: '  x ' } });
+    fireEvent.submit(search);
+
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get('q')).toBe('x');
+    expect(params.get('view')).toBeNull();
+    expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', q: 'x', tz: 'UTC' });
+    expect(
+      screen.getByText('This search is too broad. Enter a longer keyword.')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    // The too-broad answer is the search's, not a broken query: the URL keeps it.
+    expect(new URLSearchParams(window.location.search).get('q')).toBe('x');
+
+    // Clearing the field lists the view again.
+    fireEvent.change(search, { target: { value: '' } });
+    expect(new URLSearchParams(window.location.search).get('q')).toBeNull();
+  });
+
+  it('box narrowing links to the mailbox workspace', () => {
+    renderRoute();
+
+    fireEvent.click(mailboxButton(/^sales@/u));
+
+    expect(new URLSearchParams(window.location.search).get('box')).toBe('2');
+    expect(state.inboxCalls.at(-1)).toEqual({
+      view: 'all',
+      mailboxId: 2,
+      group: 'thread',
+      tz: 'UTC',
+    });
+    expect(mailboxButton(/^sales@/u)).toHaveAttribute('aria-current', 'page');
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'sales@mail.example.com' })
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open in mailbox' })).toHaveAttribute(
+      'href',
+      '/console/mailboxes?org=1&mailbox=2'
+    );
+
+    // A view keeps the narrowing; clearing it lists every mailbox again.
+    fireEvent.click(viewButton(/^Sent/u));
+    expect(state.inboxCalls.at(-1)).toEqual({
+      view: 'sent',
+      mailboxId: 2,
+      group: 'thread',
+      tz: 'UTC',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Show all mailboxes' }));
+    expect(new URLSearchParams(window.location.search).get('box')).toBeNull();
+    expect(state.inboxCalls.at(-1)).toEqual({ view: 'sent', group: 'thread', tz: 'UTC' });
+  });
+
+  it('an invalid view falls back to all', () => {
+    window.history.replaceState(null, '', '/console/mailboxes?view=spam&tab=bogus&box=0&q=%20%20');
+    renderRoute();
+
+    expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', group: 'thread', tz: 'UTC' });
+    expect(viewButton(/^All mail/u)).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: /^All/u })).toHaveAttribute('aria-selected', 'true');
+    expect(rowButton('Launch plan')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('a 400 resets the URL to view=all', () => {
+    browserZone('Asia/Shanghai');
+    window.history.replaceState(null, '', '/console/mailboxes?view=today&box=2&tab=unread&open=31');
+    state.reject = filters =>
+      filters.view === 'today' ? new ApiError('bad', ApiErrorCode.COMMON_INVALID_INPUT, 400) : null;
+    renderRoute();
+
+    const params = new URLSearchParams(window.location.search);
+    for (const name of ['view', 'box', 'tab', 'q']) expect(params.get(name)).toBeNull();
+    expect(state.inboxCalls.at(-1)).toEqual({
+      view: 'all',
+      group: 'thread',
+      tz: 'Asia/Shanghai',
+    });
+    // A bad filter is not the zone's fault: the inbox never retries with UTC.
+    expect(state.inboxCalls.some(filters => filters.tz === 'UTC')).toBe(false);
+    expect(rowButton('Launch plan')).toBeInTheDocument();
   });
 });
 
@@ -459,6 +588,39 @@ describe('markInboxRowRead', () => {
     expect(items(other)?.find(item => item.id === 12)?.read).toBe(false);
   });
 });
+
+function viewButton(name: RegExp) {
+  const views = screen.getByRole('navigation', { name: 'Inbox views' });
+  return within(views).getByRole('button', { name });
+}
+
+function mailboxButton(name: RegExp) {
+  const mailboxes = screen.getByRole('navigation', { name: 'Mailboxes' });
+  return within(mailboxes).getByRole('button', { name });
+}
+
+/** Makes the browser report `zone` as its time zone. */
+function browserZone(zone: string) {
+  vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (
+    this: Intl.DateTimeFormat
+  ) {
+    return { ...originalResolvedOptions.call(this), timeZone: zone };
+  });
+}
+
+function counts(views: Record<string, number> = {}) {
+  return {
+    views: { all_unread: 4, today: 5, today_unread: 2, pending: 1, sent_waiting: 0, ...views },
+    roles: [],
+    ungrouped_unread: 4,
+    mailboxes: [
+      { mailbox_id: 1, unread: 1 },
+      { mailbox_id: 2, unread: 3 },
+    ],
+    today_starts_at: '2026-11-16T00:00:00Z',
+    today_ends_at: '2026-11-17T00:00:00Z',
+  };
+}
 
 function rowButton(subject: string) {
   return screen.getByRole('button', { name: new RegExp(subject, 'u') });

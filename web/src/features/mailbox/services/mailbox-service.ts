@@ -4,6 +4,7 @@ import {
   INBOX_CURSOR_MAX_LENGTH,
   INBOX_TIME_ZONE_MAX_LENGTH,
   INBOX_VIEWS,
+  inboxCountsSchema,
   inboxPageEnvelopeSchema,
   MAILBOX_ACCESS_EVENTS_MAX_PAGE_SIZE,
   MAIL_LOG_QUERY_MAX_LENGTH,
@@ -53,6 +54,7 @@ import {
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
+  InboxCounts,
   InboxFilters,
   InboxPage,
   MailAttachment,
@@ -524,6 +526,20 @@ export const mailboxService = {
     const parsed = inboxPageEnvelopeSchema.safeParse(value);
     if (!parsed.success) throw invalidResponse();
     return { items: parsed.data.data, meta: parsed.data.meta };
+  },
+
+  /**
+   * The caller's own unified inbox counts: the views, each mail role, the mailboxes without one,
+   * and each readable mailbox. `tz` is the IANA zone whose day `today` counts.
+   */
+  async inboxCounts(organizationId: number, tz: string): Promise<InboxCounts> {
+    const headers = organizationHeaders(organizationId);
+    if (tz === '' || tz.length > INBOX_TIME_ZONE_MAX_LENGTH) throw invalidResponse();
+    const parsed = inboxCountsSchema.safeParse(
+      await request.get<unknown>('/inbox-message-counts', { headers, params: { tz } })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
   },
 
   /** One entry per UTC day for the last `days` days, oldest first, empty days included. */
@@ -1290,6 +1306,9 @@ assertContract<
 >();
 assertContract<
   Accepts<z.input<typeof inboxPageEnvelopeSchema>, ContractResponse<'listInboxMessages', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof inboxCountsSchema>, ContractData<'getInboxMessageCounts', 200>>
 >();
 assertContract<
   Accepts<z.input<typeof mailDayStatsListSchema>, ContractData<'listMailMessageStats', 200>>

@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useLocale } from 'next-intl';
+import { ExternalLink, Search, X } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { rowUnread } from '@/features/mailbox/components/message-list';
+import { MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
 import type { InboxItem, InboxPage } from '@/features/mailbox/types';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -11,23 +16,162 @@ import { cn } from '@/utils';
 /** How far below the visible rows the next page starts loading. */
 const loadAheadMargin = '240px';
 
+/** `zone` when this browser knows it, else undefined (the browser's own zone). */
+function knownZone(zone: string): string | undefined {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return zone;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * The time of a row: the clock time for today, the day for this year, the full date before that,
- * all in the browser's zone.
+ * The time of a row in the inbox's zone: `HH:mm` for today, the month and day for this year, the
+ * full date before that.
  */
-function useRowTime(): (iso: string) => string {
+function useRowTime(zone: string): (iso: string) => string {
   const locale = useLocale();
   return useMemo(() => {
-    const time = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' });
-    const day = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' });
-    const date = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' });
+    const timeZone = knownZone(zone);
+    const time = new Intl.DateTimeFormat(locale, {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone,
+    });
+    const day = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone });
+    const date = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone });
+    // `YYYY-MM-DD` of the zone's calendar, to compare days and years.
+    const calendar = new Intl.DateTimeFormat('en-CA', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      timeZone,
+    });
     return (iso: string) => {
       const then = new Date(iso);
-      const now = new Date();
-      if (then.toDateString() === now.toDateString()) return time.format(then);
-      return then.getFullYear() === now.getFullYear() ? day.format(then) : date.format(then);
+      const thenDay = calendar.format(then);
+      const today = calendar.format(new Date());
+      if (thenDay === today) return time.format(then);
+      return thenDay.slice(0, 4) === today.slice(0, 4) ? day.format(then) : date.format(then);
     };
-  }, [locale]);
+  }, [locale, zone]);
+}
+
+/**
+ * The head of the unified inbox list: its title, a way out of a mailbox narrowing (back to every
+ * mailbox, or into that mailbox's own workspace), the All / Unread tabs, and the search field.
+ * `unreadCount` is shown on the Unread tab when the counts know it for this listing.
+ */
+export function InboxListHeader({
+  title,
+  unread,
+  unreadCount,
+  onUnreadChange,
+  q,
+  onSearch,
+  mailboxHref = null,
+  onClearMailbox,
+}: {
+  title: string;
+  unread: boolean;
+  unreadCount?: number;
+  onUnreadChange: (unread: boolean) => void;
+  q: string;
+  onSearch: (q: string) => void;
+  mailboxHref?: string | null;
+  onClearMailbox?: () => void;
+}) {
+  const t = useT('mailbox');
+  const [search, setSearch] = useState(q);
+  const [committed, setCommitted] = useState(q);
+  // A search changed from outside (a reset URL, another view) shows in the field.
+  if (committed !== q) {
+    setCommitted(q);
+    setSearch(q);
+  }
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    onSearch(search.trim());
+  };
+  const change = (value: string) => {
+    setSearch(value);
+    if (value.trim() === '' && q !== '') onSearch('');
+  };
+  const tab = (value: boolean, label: string, count?: number) => (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={unread === value}
+      className={cn(
+        '-mb-px border-b-2 px-1 pb-2 text-sm transition-colors focus-ring',
+        unread === value
+          ? 'border-foreground font-semibold text-foreground'
+          : 'border-transparent text-muted-foreground hover:text-foreground'
+      )}
+      onClick={() => onUnreadChange(value)}
+    >
+      {label}
+      {count ? (
+        <>
+          {' '}
+          <span className="text-xs font-normal text-muted-foreground tabular-nums">{count}</span>
+        </>
+      ) : null}
+    </button>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex min-h-9 flex-wrap items-center gap-2">
+        <h2 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h2>
+        {mailboxHref ? (
+          <Button asChild size="xs" variant="ghost" icon={<ExternalLink className="size-3.5" />}>
+            <Link href={mailboxHref}>{t('inbox.openInMailbox')}</Link>
+          </Button>
+        ) : null}
+        {onClearMailbox ? (
+          <Button
+            type="button"
+            isIcon
+            size="sm"
+            variant="ghost"
+            aria-label={t('inbox.clearMailbox')}
+            title={t('inbox.clearMailbox')}
+            onClick={onClearMailbox}
+          >
+            <X className="size-4" />
+          </Button>
+        ) : null}
+      </div>
+      <div role="tablist" aria-label={t('inbox.tabs.label')} className="flex gap-4 border-b">
+        {tab(false, t('inbox.tabs.all'))}
+        {tab(true, t('inbox.tabs.unread'), unreadCount)}
+      </div>
+      <form
+        role="search"
+        aria-label={t('inbox.search.label')}
+        onSubmit={submit}
+        className="relative"
+      >
+        <Search
+          className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          type="search"
+          value={search}
+          maxLength={MAIL_SEARCH_MAX_LENGTH}
+          aria-label={t('inbox.search.label')}
+          placeholder={t('inbox.search.placeholder')}
+          className="pl-9"
+          onChange={event => change(event.target.value)}
+        />
+      </form>
+    </div>
+  );
 }
 
 /**
@@ -38,6 +182,7 @@ function useRowTime(): (iso: string) => string {
  */
 export function InboxList({
   pages,
+  timeZone,
   selectedId,
   onOpen,
   onLoadMore,
@@ -45,6 +190,8 @@ export function InboxList({
   loadingMore = false,
 }: {
   pages: readonly InboxPage[];
+  /** The inbox's zone, in which each row's time is shown. */
+  timeZone: string;
   selectedId: number | null;
   onOpen: (item: InboxItem) => void;
   onLoadMore: () => void;
@@ -52,7 +199,7 @@ export function InboxList({
   loadingMore?: boolean;
 }) {
   const t = useT('mailbox');
-  const rowTime = useRowTime();
+  const rowTime = useRowTime(timeZone);
   const sentinel = useRef<HTMLLIElement | null>(null);
   const pageCount = pages.length;
 

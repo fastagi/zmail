@@ -118,6 +118,11 @@ export const mailboxKeys = {
       filters.group ?? '',
       filters.tz,
     ] as const,
+  /** Every unified inbox count of the organization, whatever the zone. */
+  allInboxCounts: (organizationId: number) =>
+    [...mailboxKeys.organization(organizationId), 'inbox-counts'] as const,
+  inboxCounts: (organizationId: number, tz: string) =>
+    [...mailboxKeys.allInboxCounts(organizationId), tz] as const,
   log: (organizationId: number) => [...mailboxKeys.organization(organizationId), 'log'] as const,
   logPage: (organizationId: number, filters: MailLogFilters, page: number) =>
     [
@@ -146,8 +151,8 @@ function invalidateLog(queryClient: QueryClient, organizationId: number, withSta
 
 /**
  * Every change to a mailbox's mail: its listings, threads, and details, the caller's counts, the
- * unread count in the mailbox list, the unified inbox, and the log. Statistics only move when mail
- * is deleted.
+ * unread count in the mailbox list, the unified inbox and its counts, and the log. Statistics only
+ * move when mail is deleted.
  */
 export function invalidateMail(
   queryClient: QueryClient,
@@ -164,6 +169,7 @@ export function invalidateMail(
     queryClient.invalidateQueries({ queryKey: mailboxKeys.counts(organizationId, mailboxId) }),
     queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
     queryClient.invalidateQueries({ queryKey: mailboxKeys.inboxes(organizationId) }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.allInboxCounts(organizationId) }),
     invalidateLog(queryClient, organizationId, withStats),
   ]);
 }

@@ -880,7 +880,34 @@ export async function listInboxMessagesRoute(request: Request): Promise<NextResp
     viewerOf(target),
     query.value.mock
   );
-  return apiCursorPageResponse(page.items, page.meta, privateMailboxHeaders());
+  if (!page.ok) return organizeFailure(page);
+  return apiCursorPageResponse(page.value.items, page.value.meta, privateMailboxHeaders());
+}
+
+/**
+ * The caller's own unified inbox counts. Only `tz` reaches the API, checked as the inbox checks
+ * it; other parameters are dropped.
+ */
+export async function getInboxMessageCountsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const zones = new URL(request.url).searchParams.getAll('tz');
+  if (zones.length > 1) return invalidInput('Repeated time zone');
+  const [tz] = zones;
+  if (tz !== undefined && !isTimeZone(tz)) return invalidInput('Invalid time zone');
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'inbox-message-counts',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: new URLSearchParams(tz === undefined ? {} : { tz }),
+    });
+  }
+  return success(
+    mockMailboxStore.inboxCounts(target.organizationId, viewerOf(target), tz ?? 'UTC')
+  );
 }
 
 /** Per-day counts for the last `days` UTC days; the window defaults to a week. */

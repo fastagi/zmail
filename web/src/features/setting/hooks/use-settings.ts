@@ -19,11 +19,13 @@ export const settingKeys = {
     [...settingKeys.all, 'organization', organizationId] as const,
 };
 
-export function useUserSettings() {
+/** The signed-in user's settings; `enabled: false` leaves them unread. */
+export function useUserSettings({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: settingKeys.user(),
     queryFn: () => settingService.user(),
     staleTime: 30_000,
+    enabled,
   });
 }
 

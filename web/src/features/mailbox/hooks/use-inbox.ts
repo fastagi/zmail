@@ -3,11 +3,13 @@
 import {
   useInfiniteQuery,
   useMutation,
+  useQuery,
   useQueryClient,
   type InfiniteData,
   type QueryClient,
 } from '@tanstack/react-query';
 
+import { isWebFeatureEnabled } from '@/config/features';
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import {
   invalidateMail,
@@ -17,6 +19,7 @@ import {
   validId,
 } from '@/features/mailbox/hooks/use-mailbox';
 import { mailboxService } from '@/features/mailbox/services/mailbox-service';
+import { useUserSettings } from '@/features/setting/hooks/use-settings';
 import type {
   InboxFilters,
   InboxItem,
@@ -40,6 +43,47 @@ export function useInboxMessages(organizationId: number, filters: InboxFilters) 
     ...liveRefresh,
     meta: LOCAL_ERROR_HANDLING_META,
   });
+}
+
+/**
+ * The caller's own counts of the unified inbox, with `tz` deciding today; fresh while the tab is
+ * visible, like the list.
+ */
+export function useInboxCounts(organizationId: number, tz: string) {
+  return useQuery({
+    queryKey: mailboxKeys.inboxCounts(organizationId, tz),
+    queryFn: () => mailboxService.inboxCounts(organizationId, tz),
+    enabled: validId(organizationId),
+    staleTime: 15_000,
+    ...liveRefresh,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+const fallbackTimeZone = 'UTC';
+const userTimeZoneKey = 'localization.timezone';
+
+/** The browser's IANA zone; UTC when it reports none. */
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || fallbackTimeZone;
+  } catch {
+    return fallbackTimeZone;
+  }
+}
+
+/**
+ * The zone whose day `today` is: the user's `localization.timezone` setting where the setting
+ * feature runs, else (and until the settings load) the browser's zone.
+ */
+export function useInboxTimezone(): string {
+  const settingsEnabled = isWebFeatureEnabled('setting');
+  const settings = useUserSettings({ enabled: settingsEnabled });
+  const setting = settingsEnabled
+    ? settings.data?.find(item => item.key === userTimeZoneKey)
+    : undefined;
+  const zone = typeof setting?.value === 'string' ? setting.value : '';
+  return zone || browserTimeZone();
 }
 
 /**

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Inbox, Mail, MailOpen, Settings2 } from 'lucide-react';
+import { AlertCircle, Inbox, Mail, MailOpen, Settings2 } from 'lucide-react';
+
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,11 +16,12 @@ import {
   replyAllDraft,
   type ComposeDraft,
 } from '@/features/mailbox/components/compose-dialog';
-import { InboxList } from '@/features/mailbox/components/inbox-list';
+import { InboxList, InboxListHeader } from '@/features/mailbox/components/inbox-list';
 import {
   InboxReadingPane,
   type InboxReaderNavigation,
 } from '@/features/mailbox/components/inbox-reading-pane';
+import { InboxSidebar } from '@/features/mailbox/components/inbox-sidebar';
 import { MailboxAccessPanel } from '@/features/mailbox/components/mailbox-access-panel';
 import { MAILBOX_PARAM } from '@/features/mailbox/components/mailbox-workspace';
 import { ManageMailboxesDialog } from '@/features/mailbox/components/manage-mailboxes-dialog';
@@ -34,10 +37,22 @@ import {
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import { ListSkeleton } from '@/features/mailbox/components/message-list';
-import { useInboxMessages } from '@/features/mailbox/hooks/use-inbox';
+import {
+  useInboxCounts,
+  useInboxMessages,
+  useInboxTimezone,
+} from '@/features/mailbox/hooks/use-inbox';
 import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
-import type { InboxFilters, InboxItem, MailMessage, Mailbox } from '@/features/mailbox/types';
+import { INBOX_VIEWS, MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
+import type {
+  InboxCounts,
+  InboxFilters,
+  InboxItem,
+  InboxView,
+  MailMessage,
+  Mailbox,
+} from '@/features/mailbox/types';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -46,25 +61,86 @@ import { cn } from '@/utils';
 
 /** Query parameter naming the open row of the unified inbox, so a reload keeps it open. */
 export const OPEN_PARAM = 'open';
+/** The URL state of the unified inbox (D20): the view, one mailbox, the search, the Unread tab. */
+const VIEW_PARAM = 'view';
+const BOX_PARAM = 'box';
+const SEARCH_PARAM = 'q';
+const TAB_PARAM = 'tab';
+const UNREAD_TAB = 'unread';
+const filterParams = [VIEW_PARAM, BOX_PARAM, SEARCH_PARAM, TAB_PARAM] as const;
 const rowIdPattern = /^[1-9]\d{0,15}$/u;
 const fallbackTimeZone = 'UTC';
 
-/** The browser's IANA zone, which decides where "today" starts; UTC when it has none. */
-function browserTimeZone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || fallbackTimeZone;
-  } catch {
-    return fallbackTimeZone;
-  }
+/** What the URL asks the inbox to list. */
+interface InboxUrlState {
+  view: InboxView;
+  box: number | null;
+  q: string;
+  unread: boolean;
 }
 
-/** The inbox refused the query; with fixed filters only the browser's zone can be the cause. */
+/**
+ * The inbox's URL state; a value it cannot use falls back to the default without a word. A
+ * search lists `all`, the only view it combines with.
+ */
+function readInboxUrl(params: URLSearchParams): InboxUrlState {
+  const rawSearch = params.get(SEARCH_PARAM) ?? '';
+  const q =
+    Array.from(rawSearch).length <= MAIL_SEARCH_MAX_LENGTH && !/\p{Cc}/u.test(rawSearch)
+      ? rawSearch.trim()
+      : '';
+  const rawView = params.get(VIEW_PARAM) ?? '';
+  const view =
+    q === '' && (INBOX_VIEWS as readonly string[]).includes(rawView)
+      ? (rawView as InboxView)
+      : 'all';
+  const rawBox = params.get(BOX_PARAM) ?? '';
+  return {
+    view,
+    box: rowIdPattern.test(rawBox) ? Number(rawBox) : null,
+    q,
+    unread: params.get(TAB_PARAM) === UNREAD_TAB,
+  };
+}
+
+/**
+ * The list query for the URL state. `all` and `sent` group by thread, except for the Unread tab
+ * and a search, which list single messages.
+ */
+function inboxFilters({ view, box, q, unread }: InboxUrlState, tz: string): InboxFilters {
+  const grouped = !unread && q === '' && (view === 'all' || view === 'sent');
+  return {
+    view,
+    ...(box === null ? {} : { mailboxId: box }),
+    ...(unread ? { unread: true } : {}),
+    ...(q === '' ? {} : { q }),
+    ...(grouped ? { group: 'thread' as const } : {}),
+    tz,
+  };
+}
+
+/** The unread number the counts hold for this listing, where they hold one. */
+function listingUnread(counts: InboxCounts | undefined, state: InboxUrlState): number | undefined {
+  if (!counts || state.q !== '') return undefined;
+  if (state.box !== null) {
+    if (state.view !== 'all') return undefined;
+    return counts.mailboxes.find(item => item.mailbox_id === state.box)?.unread;
+  }
+  if (state.view === 'all') return counts.views.all_unread;
+  return state.view === 'today' ? counts.views.today_unread : undefined;
+}
+
+/** The inbox refused the query: a filter of the URL, or else the zone, is not one it takes. */
 function isRejectedQuery(error: unknown): boolean {
   return (
     error instanceof ApiError &&
     error.status === 400 &&
     error.errorCode === ApiErrorCode.COMMON_INVALID_INPUT
   );
+}
+
+function isSearchTooBroad(error: unknown): boolean {
+  return error instanceof ApiError && error.errorCode === ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD;
 }
 
 /**
@@ -92,18 +168,52 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const mailboxes = useMailboxes(organizationId, { live: true });
-  const [timeZone, setTimeZone] = useState(browserTimeZone);
-  const filters: InboxFilters = { view: 'all', group: 'thread', tz: timeZone };
+  const inboxZone = useInboxTimezone();
+  const [zoneRefused, setZoneRefused] = useState(false);
+  const timeZone = zoneRefused ? fallbackTimeZone : inboxZone;
+  const urlState = readInboxUrl(searchParams);
+  const filters = inboxFilters(urlState, timeZone);
   const inbox = useInboxMessages(organizationId, filters);
+  const counts = useInboxCounts(organizationId, timeZone);
   const [held, setHeld] = useState<InboxItem | null>(null);
   const [draft, setDraft] = useState<{ mailbox: Mailbox; draft: ComposeDraft } | null>(null);
   const formatter = useDateTimeFormat();
 
-  // A zone the server does not know would leave the inbox blank; UTC is always known.
-  const zoneRejected = timeZone !== fallbackTimeZone && isRejectedQuery(inbox.error);
+  /** Changes the URL state in place; every change of what is listed closes the open row. */
+  const replaceParams = useCallback(
+    (change: (next: URLSearchParams) => void) => {
+      const next = new URLSearchParams(window.location.search);
+      change(next);
+      const query = next.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router]
+  );
+  const setListing = (changes: Partial<Record<(typeof filterParams)[number], string | null>>) =>
+    replaceParams(next => {
+      next.delete(OPEN_PARAM);
+      for (const [name, value] of Object.entries(changes)) {
+        if (value === null) next.delete(name);
+        else next.set(name, value);
+      }
+    });
+
+  // A 400 means the inbox refused the query (§11.3). With filters in the URL they are the cause,
+  // so the URL goes back to `view=all`; without any, only the zone can be, and UTC is always known.
+  // A listing already on screen keeps its URL when a later page fails.
+  const rejected = !inbox.data && isRejectedQuery(inbox.error);
+  const filtered = filterParams.some(name => searchParams.has(name));
+  const resetting = rejected && (filtered || timeZone !== fallbackTimeZone);
   useEffect(() => {
-    if (zoneRejected) setTimeZone(fallbackTimeZone);
-  }, [zoneRejected]);
+    if (!rejected) return;
+    if (filtered) {
+      replaceParams(next => {
+        for (const name of filterParams) next.delete(name);
+      });
+    } else if (timeZone !== fallbackTimeZone) {
+      setZoneRefused(true);
+    }
+  }, [rejected, filtered, timeZone, replaceParams]);
 
   const { refetch: refetchInbox, hasNextPage, isFetchingNextPage, fetchNextPage } = inbox;
   const refetchMailboxes = mailboxes.refetch;
@@ -124,16 +234,14 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
   if (listed && listed !== held) setHeld(listed);
   const openItem = listed ?? (held !== null && held.id === openId ? held : null);
 
-  const setOpenParam = (id: number | null) => {
-    const next = new URLSearchParams(window.location.search);
-    if (id === null) next.delete(OPEN_PARAM);
-    else next.set(OPEN_PARAM, String(id));
-    const query = next.toString();
-    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
-  };
+  const setOpenParam = (id: number | null) =>
+    replaceParams(next => {
+      if (id === null) next.delete(OPEN_PARAM);
+      else next.set(OPEN_PARAM, String(id));
+    });
   const mailboxHref = (mailboxId: number) => {
     const next = new URLSearchParams(searchParams.toString());
-    next.delete(OPEN_PARAM);
+    for (const name of [OPEN_PARAM, ...filterParams]) next.delete(name);
     next.set(MAILBOX_PARAM, String(mailboxId));
     return `${pathname}?${next.toString()}`;
   };
@@ -212,9 +320,31 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
       ),
   };
 
+  const narrowedTo =
+    urlState.box === null ? null : (readable.find(mailbox => mailbox.id === urlState.box) ?? null);
+  let title: string;
+  if (urlState.box !== null) title = narrowedTo?.address ?? t('inbox.views.all');
+  else if (urlState.q !== '') title = t('inbox.search.results', { q: urlState.q });
+  else title = t(`inbox.views.${urlState.view}`);
+  const emptyTitle =
+    urlState.q !== ''
+      ? t('inbox.empty.search')
+      : urlState.unread
+        ? t('inbox.empty.unread')
+        : urlState.view === 'all'
+          ? t('inbox.empty.view')
+          : t(`inbox.empty.${urlState.view}`);
+
   let list: React.ReactNode;
-  if (inbox.isPending || zoneRejected) {
+  if (inbox.isPending || resetting) {
     list = <ListSkeleton />;
+  } else if (!inbox.data && isSearchTooBroad(inbox.error)) {
+    list = (
+      <Alert>
+        <AlertCircle className="size-4" aria-hidden="true" />
+        <AlertDescription>{t(resolveMailboxErrorKey(inbox.error))}</AlertDescription>
+      </Alert>
+    );
   } else if (!inbox.data) {
     list = (
       <div className="space-y-3">
@@ -232,8 +362,12 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
     list = (
       <EmptyState
         icon={<Inbox className="size-5" aria-hidden="true" />}
-        title={t('inbox.empty.view')}
-        description={t('inbox.empty.viewHint')}
+        title={emptyTitle}
+        description={
+          urlState.view === 'all' && urlState.q === '' && !urlState.unread
+            ? t('inbox.empty.viewHint')
+            : undefined
+        }
       />
     );
   } else {
@@ -241,6 +375,7 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
     list = (
       <InboxList
         pages={pages}
+        timeZone={timeZone}
         selectedId={openItem?.id ?? null}
         onOpen={row => setOpenParam(row.id)}
         onLoadMore={loadMore}
@@ -253,41 +388,39 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
   return (
     <div className="grid gap-4 lg:h-[calc(100dvh-12rem)] lg:min-h-[36rem] lg:grid-cols-[14rem_minmax(0,1fr)]">
       <aside className="flex min-h-0 flex-col gap-3 lg:overflow-y-auto lg:border-r lg:pr-4">
-        <nav aria-label={t('views.label')} className="space-y-1">
-          <span
-            aria-current="page"
-            className="flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-medium"
-          >
-            <Inbox className="size-4" aria-hidden="true" />
-            {t('inbox.allMail')}
-          </span>
-        </nav>
-        <nav aria-label={t('inbox.mailboxesLabel')} className="space-y-1">
-          <p className="px-3 text-xs font-medium text-muted-foreground">
-            {t('inbox.mailboxesLabel')}
-          </p>
-          {readable.map(mailbox => (
-            <Link
-              key={mailbox.id}
-              href={mailboxHref(mailbox.id)}
-              className="block truncate rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors focus-ring hover:bg-accent/70 hover:text-foreground"
-            >
-              {mailbox.address}
-            </Link>
-          ))}
-        </nav>
+        <InboxSidebar
+          counts={counts.data}
+          mailboxes={readable}
+          view={urlState.view}
+          box={urlState.box}
+          onView={view =>
+            setListing({ [VIEW_PARAM]: view === 'all' ? null : view, [SEARCH_PARAM]: null })
+          }
+          onBox={mailboxId => setListing({ [BOX_PARAM]: String(mailboxId) })}
+        />
       </aside>
 
       <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(20rem,28rem)_minmax(0,1fr)]">
         <section
           data-scroll-pane
-          aria-label={t('inbox.allMail')}
+          aria-label={title}
           className={cn(
             'min-h-0 min-w-0 space-y-3 lg:overflow-y-auto lg:pr-1',
             openItem && 'hidden xl:block'
           )}
         >
-          <h2 className="text-base font-semibold">{t('inbox.allMail')}</h2>
+          <InboxListHeader
+            title={title}
+            unread={urlState.unread}
+            unreadCount={listingUnread(counts.data, urlState)}
+            onUnreadChange={unread => setListing({ [TAB_PARAM]: unread ? UNREAD_TAB : null })}
+            q={urlState.q}
+            onSearch={q => setListing({ [SEARCH_PARAM]: q === '' ? null : q, [VIEW_PARAM]: null })}
+            mailboxHref={urlState.box === null ? null : mailboxHref(urlState.box)}
+            onClearMailbox={
+              urlState.box === null ? undefined : () => setListing({ [BOX_PARAM]: null })
+            }
+          />
           {list}
         </section>
         <section

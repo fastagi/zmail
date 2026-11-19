@@ -3125,6 +3125,203 @@ describe('mailbox browser route boundary', () => {
     expect(await ids(`?mailbox_id=${mine.id}`)).toEqual([]);
   });
 
+  it('mock inbox lists today by the zone, pending, unread, and search outside the trash', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      process.env.MOCK_BFF_ENABLED = 'true';
+      getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+      const route = await loadRoute();
+      const inbox = async (query: string) => {
+        const response = await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`));
+        expect(response.status).toBe(200);
+        return (await response.json()).data.map((item: { id: number }) => item.id) as number[];
+      };
+      const update = (mailboxId: number, messageId: number, body: unknown) =>
+        route.updateMailMessageRoute(
+          request(`/api/mailboxes/${mailboxId}/messages/${messageId}`, {
+            method: 'PUT',
+            body: JSON.stringify(body),
+          }),
+          String(mailboxId),
+          String(messageId)
+        );
+
+      // 23:30 on the 18th in Shanghai: desk@ gets its welcome message.
+      vi.setSystemTime(new Date('2026-11-18T15:30:00Z'));
+      const desk = (await (await create(route, { local_part: 'desk' })).json()).data;
+      // 00:30 on the 19th in Shanghai, still the 18th in UTC: sales@ gets one, desk@ sends one.
+      vi.setSystemTime(new Date('2026-11-18T16:30:00Z'));
+      const sales = (await (await create(route, { local_part: 'sales' })).json()).data;
+      const sent = (
+        await (
+          await send(route, desk.id, {
+            to: ['bob@example.com'],
+            subject: 'Quarterly Invoice',
+            text: 'Body',
+          })
+        ).json()
+      ).data;
+      vi.setSystemTime(new Date('2026-11-18T17:00:00Z'));
+      const [salesWelcome, deskWelcome] = await inbox('');
+
+      expect(await inbox('?view=today')).toEqual([salesWelcome, deskWelcome]);
+      expect(await inbox('?view=today&tz=Asia%2FShanghai')).toEqual([salesWelcome]);
+      expect(await inbox('?view=today&tz=America%2FLos_Angeles')).toEqual([
+        salesWelcome,
+        deskWelcome,
+      ]);
+
+      // Pending is the viewer's stars in both directions; unread leaves read mail out.
+      expect((await update(desk.id, deskWelcome, { starred: true, read: true })).status).toBe(200);
+      expect((await update(desk.id, sent.id, { starred: true })).status).toBe(200);
+      expect(await inbox('?view=pending')).toEqual([sent.id, deskWelcome]);
+      expect(await inbox('?unread=true')).toEqual([salesWelcome]);
+      expect(await inbox('?unread=false')).toEqual([deskWelcome]);
+
+      // Search ignores case, spans both directions, and narrows with the other filters.
+      expect(await inbox('?q=INVOICE')).toEqual([sent.id]);
+      expect(await inbox('?q=desk%40')).toEqual([sent.id, deskWelcome]);
+      expect(await inbox(`?q=desk%40&mailbox_id=${sales.id}`)).toEqual([]);
+      expect(await inbox('?q=welcome&unread=true')).toEqual([salesWelcome]);
+      await expectError(
+        await route.listInboxMessagesRoute(request('/api/inbox-messages?q=%20x%20')),
+        422,
+        'MAILBOX.SEARCH_TOO_BROAD'
+      );
+
+      // The trash is in no view and no search; archived mail leaves pending but stays today.
+      expect((await update(desk.id, deskWelcome, { placement: 'archive' })).status).toBe(200);
+      expect(await inbox('?view=pending')).toEqual([sent.id]);
+      expect(await inbox('?view=today')).toEqual([salesWelcome, deskWelcome]);
+      expect((await update(desk.id, deskWelcome, { placement: 'trash' })).status).toBe(200);
+      expect(await inbox('?view=today')).toEqual([salesWelcome]);
+      expect(await inbox('?q=desk%40')).toEqual([sent.id]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('counts forward only tz', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () =>
+      Response.json({ code: 0, message: 'success', data: {} })
+    );
+    const route = await loadRoute();
+    activeOrganization = '7';
+    const counts = (query: string) =>
+      route.getInboxMessageCountsRoute(request(`/api/inbox-message-counts${query}`));
+
+    const first = await counts('?tz=Asia%2FShanghai&view=today&mailbox_id=3&page=2');
+    expect(first.status).toBe(200);
+    expect(first.headers.get('cache-control')).toBe('private, no-store');
+    await counts('');
+    for (const query of ['?tz=', '?tz=Local', '?tz=Mars%2FOlympus', '?tz=UTC&tz=UTC']) {
+      await expectError(await counts(query), 400, 'COMMON.INVALID_INPUT');
+    }
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const target = new URL(String(url));
+      return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/inbox-message-counts?tz=Asia%2FShanghai',
+      'GET /v1/inbox-message-counts',
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('organization-id')).toBe('7');
+    }
+  });
+
+  it('mock counts satisfy all_unread equal to the sum over mailboxes', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      process.env.MOCK_BFF_ENABLED = 'true';
+      getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+      const route = await loadRoute();
+      const counts = async (query = '') => {
+        const response = await route.getInboxMessageCountsRoute(
+          request(`/api/inbox-message-counts${query}`)
+        );
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('private, no-store');
+        expect(response.headers.get('vary')).toContain('Organization-Id');
+        return (await response.json()).data;
+      };
+      vi.setSystemTime(new Date('2026-11-18T15:30:00Z'));
+      expect(await counts()).toEqual({
+        views: { all_unread: 0, today: 0, today_unread: 0, pending: 0, sent_waiting: 0 },
+        roles: [],
+        ungrouped_unread: 0,
+        mailboxes: [],
+        today_starts_at: '2026-11-18T00:00:00Z',
+        today_ends_at: '2026-11-19T00:00:00Z',
+      });
+
+      const created = async (body: Record<string, unknown>) =>
+        (await (await create(route, body)).json()).data as { id: number };
+      // riley@ is readable only by demo-member; demo-admin reads the other three.
+      const riley = await created({ local_part: 'riley', type: 'personal', owner_user_id: 3 });
+      const hello = await created({ local_part: 'hello' });
+      vi.setSystemTime(new Date('2026-11-18T16:30:00Z'));
+      const sales = await created({ local_part: 'sales' });
+      const ops = await created({ local_part: 'ops' });
+      const welcome = async (mailboxId: number) =>
+        (
+          await (
+            await route.listMailMessagesRoute(
+              request(`/api/mailboxes/${mailboxId}/messages?direction=inbound`),
+              String(mailboxId)
+            )
+          ).json()
+        ).data[0].id as number;
+      await route.updateMailMessageRoute(
+        request(`/api/mailboxes/${ops.id}/messages/${await welcome(ops.id)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ read: true, starred: true }),
+        }),
+        String(ops.id),
+        String(await welcome(ops.id))
+      );
+
+      const shanghai = await counts('?tz=Asia%2FShanghai');
+      expect(shanghai).toEqual({
+        views: { all_unread: 2, today: 2, today_unread: 1, pending: 1, sent_waiting: 0 },
+        roles: [],
+        ungrouped_unread: 2,
+        mailboxes: [
+          { mailbox_id: hello.id, unread: 1 },
+          { mailbox_id: sales.id, unread: 1 },
+          { mailbox_id: ops.id, unread: 0 },
+        ],
+        today_starts_at: '2026-11-18T16:00:00Z',
+        today_ends_at: '2026-11-19T16:00:00Z',
+      });
+      // Each mailbox's count is its unread_count in the mailbox list.
+      const listed = (await (await route.listMailboxesRoute(request('/api/mailboxes'))).json())
+        .data as { id: number; unread_count: number; access: { view: boolean } }[];
+      expect(
+        listed
+          .filter(mailbox => mailbox.access.view)
+          .map(mailbox => ({ mailbox_id: mailbox.id, unread: mailbox.unread_count }))
+          .sort((left, right) => left.mailbox_id - right.mailbox_id)
+      ).toEqual(shanghai.mailboxes);
+      expect(shanghai.views.all_unread).toBe(
+        shanghai.mailboxes.reduce((sum: number, item: { unread: number }) => sum + item.unread, 0)
+      );
+      expect(listed.map(mailbox => mailbox.id)).toContain(riley.id);
+      expect((await counts()).views).toMatchObject({ today: 3, today_unread: 2 });
+
+      getSessionUser.mockResolvedValue(mockUser('demo-member'));
+      expect(
+        (await counts()).mailboxes.map((item: { mailbox_id: number }) => item.mailbox_id)
+      ).toEqual([riley.id, hello.id, sales.id, ops.id]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects an invalid log or statistics query before it reaches the API', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';

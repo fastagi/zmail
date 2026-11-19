@@ -204,6 +204,22 @@ export async function runServiceParity(context: { organizationId: number }): Pro
     [other.address, 'inbound'],
   ]);
 
+  const today = await mailboxService.listInbox(organizationId, { view: 'today', tz: 'UTC' });
+  expect(today.items.map(item => item.direction)).toEqual(['inbound', 'inbound']);
+  const searched = await mailboxService.listInbox(organizationId, {
+    view: 'all',
+    q: 'FIRST',
+    unread: false,
+    tz: 'UTC',
+  });
+  expect(searched.items.map(item => item.id)).toEqual([first.id]);
+  const counts = await mailboxService.inboxCounts(organizationId, 'Asia/Shanghai');
+  expect(counts.views.all_unread).toBe(
+    counts.mailboxes.reduce((sum, item) => sum + item.unread, 0)
+  );
+  expect(counts.mailboxes.map(item => item.mailbox_id)).toEqual([mailbox.id, other.id]);
+  expect(counts.views.today).toBe(2);
+
   const week = await mailboxService.stats(organizationId);
   expect(week).toHaveLength(7);
   const totals = week.reduce(

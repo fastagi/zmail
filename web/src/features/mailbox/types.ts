@@ -2,6 +2,7 @@ import type { infer as Infer } from 'zod/mini';
 
 import type {
   createMailboxSchema,
+  inboxCountsSchema,
   inboxItemSchema,
   inboxPageEnvelopeSchema,
   mailboxAccessEventPageEnvelopeSchema,
@@ -217,6 +218,7 @@ export interface InboxFilters {
 }
 
 export type InboxItem = Infer<typeof inboxItemSchema>;
+export type InboxCounts = Infer<typeof inboxCountsSchema>;
 
 export interface InboxPage {
   items: InboxItem[];

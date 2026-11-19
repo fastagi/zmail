@@ -1062,6 +1062,47 @@ describe('mailbox organize service boundary', () => {
     ]);
   });
 
+  it('inboxCounts sends only tz and parses the counts', async () => {
+    const counts = {
+      views: { all_unread: 4, today: 5, today_unread: 2, pending: 1, sent_waiting: 3 },
+      roles: [{ role_id: 3, unread: 3 }],
+      ungrouped_unread: 1,
+      mailboxes: [
+        { mailbox_id: 12, unread: 3 },
+        { mailbox_id: 14, unread: 1 },
+      ],
+      today_starts_at: '2026-11-18T16:00:00Z',
+      today_ends_at: '2026-11-19T16:00:00Z',
+    };
+    const get = vi.spyOn(request, 'get').mockResolvedValue(counts);
+
+    expect(await mailboxService.inboxCounts(7, 'Asia/Shanghai')).toEqual(counts);
+    expect(get).toHaveBeenCalledWith('/inbox-message-counts', {
+      headers: { 'Organization-Id': '7' },
+      params: { tz: 'Asia/Shanghai' },
+    });
+
+    for (const value of [
+      { ...counts, views: { ...counts.views, today: -1 } },
+      { ...counts, roles: [{ role_id: 0, unread: 1 }] },
+      { ...counts, mailboxes: [{ mailbox_id: 12 }] },
+      { ...counts, today_ends_at: 'tomorrow' },
+      { ...counts, extra: true },
+    ]) {
+      get.mockResolvedValueOnce(value);
+      await expect(mailboxService.inboxCounts(7, 'UTC')).rejects.toMatchObject({
+        errorCode: ClientErrorCode.INVALID_RESPONSE,
+      });
+    }
+    get.mockClear();
+    for (const zone of ['', 'A'.repeat(65)]) {
+      await expect(mailboxService.inboxCounts(7, zone)).rejects.toMatchObject({
+        errorCode: ClientErrorCode.INVALID_RESPONSE,
+      });
+    }
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('rejects an item without mailbox_address', async () => {
     const getEnvelope = vi.spyOn(request, 'getEnvelope');
     const page = (

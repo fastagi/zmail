@@ -468,6 +468,25 @@ export const inboxPageEnvelopeSchema = strictObject({
   meta: cursorPageMetaSchema,
 });
 
+/**
+ * The caller's own unified inbox counts over the mailboxes they read; `today` runs from
+ * `today_starts_at` (inclusive) to `today_ends_at` (exclusive) in the requested zone.
+ */
+export const inboxCountsSchema = strictObject({
+  views: strictObject({
+    all_unread: nonnegativeIntegerSchema,
+    today: nonnegativeIntegerSchema,
+    today_unread: nonnegativeIntegerSchema,
+    pending: nonnegativeIntegerSchema,
+    sent_waiting: nonnegativeIntegerSchema,
+  }),
+  roles: array(strictObject({ role_id: safeIdSchema, unread: nonnegativeIntegerSchema })),
+  ungrouped_unread: nonnegativeIntegerSchema,
+  mailboxes: array(strictObject({ mailbox_id: safeIdSchema, unread: nonnegativeIntegerSchema })),
+  today_starts_at: timestampSchema,
+  today_ends_at: timestampSchema,
+});
+
 /** A thread's messages outside the trash, oldest first, with their bodies. */
 export const mailThreadSchema = array(mailMessageSchema);
 

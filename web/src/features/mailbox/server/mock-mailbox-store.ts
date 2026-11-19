@@ -28,6 +28,7 @@ import {
 import { encodeInboxCursor, type InboxPosition } from '@/features/mailbox/server/inbox-cursor';
 import type {
   CreateMailboxInput,
+  InboxCounts,
   InboxFilters,
   InboxItem,
   InboxPage,
@@ -466,22 +467,30 @@ export class MockMailboxStore {
 
   /**
    * One cursor page of the unified inbox over the mailboxes the viewer reads, newest first by
-   * `(created_at, id)`. `all` is inbound mail in `default`, `sent` outbound mail in `default`, and
-   * `pending` the viewer's stars outside the archive and the trash. Mock mailboxes have no mail
-   * role, so a role id matches nothing and `none` matches every mailbox. `today` and `q` answer an
-   * empty page until the mock learns them; an unreadable or foreign mailbox matches nothing.
+   * `(created_at, id)`. `all` is inbound mail in `default`, `sent` outbound mail in `default`,
+   * `today` inbound mail outside the trash that arrived during the viewer's day in `tz`, and
+   * `pending` the viewer's stars outside the archive and the trash. `q` searches both directions
+   * outside the trash, as the mailbox search does, and a one-character search is too broad. Mock
+   * mailboxes have no mail role, so a role id matches nothing and `none` matches every mailbox;
+   * an unreadable or foreign mailbox matches nothing.
    */
-  listInbox(organizationId: number, viewer: MailboxViewer, query: MockInboxQuery): InboxPage {
-    const unsupported = query.view === 'today' || query.q !== undefined;
+  listInbox(
+    organizationId: number,
+    viewer: MailboxViewer,
+    query: MockInboxQuery
+  ): MockOrganizeResult<InboxPage> {
+    const needle = query.q?.trim().toLowerCase();
+    if (needle !== undefined && Array.from(needle).length === 1) {
+      return { ok: false, error: 'search_too_broad' };
+    }
     const roleMatches = query.roleId === undefined || query.roleId === 'none';
+    const day = viewerDay(this.dependencies.now(), query.tz);
     const rows: { item: InboxItem; createdAt: bigint }[] = [];
-    for (const state of unsupported || !roleMatches
-      ? []
-      : this.readableStates(organizationId, viewer)) {
+    for (const state of roleMatches ? this.readableStates(organizationId, viewer) : []) {
       if (query.mailboxId !== undefined && state.mailbox.id !== query.mailboxId) continue;
       const matching = this.visibleMessages(state)
         .map(message => this.forViewer(state, message, viewer))
-        .filter(message => inInboxView(message, query));
+        .filter(message => inInboxView(message, query, needle, day));
       const summaries = query.group === 'thread' ? threadRows(matching) : matching.map(summaryOf);
       for (const summary of summaries) {
         rows.push({
@@ -513,15 +522,56 @@ export class MockMailboxStore {
     const items = page.slice(0, query.perPage);
     const last = items[items.length - 1];
     return {
-      items: items.map(row => row.item),
-      meta: {
-        per_page: query.perPage,
-        has_more: hasMore,
-        next_cursor:
-          hasMore && last
-            ? encodeInboxCursor({ createdAt: last.createdAt, id: BigInt(last.item.id) })
-            : null,
+      ok: true,
+      value: {
+        items: items.map(row => row.item),
+        meta: {
+          per_page: query.perPage,
+          has_more: hasMore,
+          next_cursor:
+            hasMore && last
+              ? encodeInboxCursor({ createdAt: last.createdAt, id: BigInt(last.item.id) })
+              : null,
+        },
       },
+    };
+  }
+
+  /**
+   * The viewer's own unified inbox counts over the mailboxes they read, by mailbox id; the views
+   * and the per-mailbox unread counts use the same rules as `listInbox` and the mailbox list.
+   * Mock mailboxes have no mail role, so every unread message is ungrouped.
+   */
+  inboxCounts(organizationId: number, viewer: MailboxViewer, tz: string): InboxCounts {
+    const day = viewerDay(this.dependencies.now(), tz);
+    const views = { all_unread: 0, today: 0, today_unread: 0, pending: 0, sent_waiting: 0 };
+    const mailboxes: InboxCounts['mailboxes'] = [];
+    const states = this.readableStates(organizationId, viewer).sort(
+      (left, right) => left.mailbox.id - right.mailbox.id
+    );
+    for (const state of states) {
+      let unread = 0;
+      for (const stored of this.visibleMessages(state)) {
+        const message = this.forViewer(state, stored, viewer);
+        const isUnread = !message.read;
+        if (inInboxView(message, { view: 'all' }) && isUnread) unread += 1;
+        if (inInboxView(message, { view: 'today' }, undefined, day)) {
+          views.today += 1;
+          if (isUnread) views.today_unread += 1;
+        }
+        if (inInboxView(message, { view: 'pending' })) views.pending += 1;
+        if (message.queued_reason === 'send_limit') views.sent_waiting += 1;
+      }
+      views.all_unread += unread;
+      mailboxes.push({ mailbox_id: state.mailbox.id, unread });
+    }
+    return {
+      views,
+      roles: [],
+      ungrouped_unread: views.all_unread,
+      mailboxes,
+      today_starts_at: apiTimestamp(day.start),
+      today_ends_at: apiTimestamp(day.end),
     };
   }
 
@@ -1645,20 +1695,106 @@ function threadRows(messages: MailMessage[]): MailMessageSummary[] {
     .sort((left, right) => right.id - left.id);
 }
 
-/** `message` is as the viewer sees it; see `listInbox` for the views. */
-function inInboxView(message: MailMessage, query: MockInboxQuery): boolean {
+/** The viewer's day in a zone, as UTC milliseconds: `start` inclusive, `end` exclusive. */
+interface ViewerDay {
+  start: number;
+  end: number;
+}
+
+/**
+ * `message` is as the viewer sees it; see `listInbox` for the views. `needle` is the lowercased
+ * search, which replaces the view; `day` is needed for `today` only.
+ */
+function inInboxView(
+  message: MailMessage,
+  query: Pick<MockInboxQuery, 'view' | 'unread'>,
+  needle?: string,
+  day?: ViewerDay
+): boolean {
   const unread = message.direction === 'inbound' && !message.read;
   if (query.unread !== undefined && unread !== query.unread) return false;
+  if (needle !== undefined) {
+    return message.placement !== 'trash' && matchesSearch(message, needle);
+  }
   switch (query.view) {
     case 'all':
       return message.direction === 'inbound' && message.placement === 'default';
     case 'sent':
       return message.direction === 'outbound' && message.placement === 'default';
+    case 'today': {
+      const at = Date.parse(message.created_at);
+      return (
+        day !== undefined &&
+        message.direction === 'inbound' &&
+        message.placement !== 'trash' &&
+        at >= day.start &&
+        at < day.end
+      );
+    }
     case 'pending':
       return message.starred && message.placement !== 'archive' && message.placement !== 'trash';
     default:
       return false;
   }
+}
+
+/**
+ * The day `now` falls on in `zone`, from its midnight to the next one. Like the API, a day can be
+ * 23 or 25 hours long where the clocks change.
+ */
+function viewerDay(now: Date, zone: string): ViewerDay {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(now);
+  const part = (type: 'year' | 'month' | 'day') =>
+    Number(parts.find(item => item.type === type)?.value);
+  const [year, month, day] = [part('year'), part('month'), part('day')];
+  return {
+    start: zonedMidnight(year, month, day, zone),
+    end: zonedMidnight(year, month, day + 1, zone),
+  };
+}
+
+/** The UTC instant of 00:00 on a calendar day in `zone`; `day` may overflow into the next month. */
+function zonedMidnight(year: number, month: number, day: number, zone: string): number {
+  const local = Date.UTC(year, month - 1, day);
+  // Two rounds settle the zone's offset at that midnight, also next to a clock change.
+  let instant = local - zoneOffset(local, zone);
+  instant = local - zoneOffset(instant, zone);
+  return instant;
+}
+
+/** How far `zone`'s wall clock is ahead of UTC at `instant`, in milliseconds. */
+function zoneOffset(instant: number, zone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: zone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(new Date(instant));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find(item => item.type === type)?.value);
+  const wall = Date.UTC(
+    part('year'),
+    part('month') - 1,
+    part('day'),
+    part('hour'),
+    part('minute'),
+    part('second')
+  );
+  return wall - Math.floor(instant / 1_000) * 1_000;
+}
+
+/** A UTC instant as the API writes it: seconds, then `Z`. */
+function apiTimestamp(milliseconds: number): string {
+  return new Date(milliseconds).toISOString().replace(/\.\d{3}Z$/u, 'Z');
 }
 
 /**
