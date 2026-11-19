@@ -12,6 +12,7 @@ import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import type {
   CreateMailboxInput,
+  InboxFilters,
   MailDnsRecordInput,
   MailDnsRecordPatch,
   MailDomain,
@@ -38,7 +39,7 @@ export const MAIL_REFRESH_MS = 15_000;
  * window regains focus (the global client turns focus refetches off). A refetch keeps the data on
  * screen, so it neither resets the selection nor moves the scroll position or the focus.
  */
-const liveRefresh = {
+export const liveRefresh = {
   refetchInterval: MAIL_REFRESH_MS,
   refetchIntervalInBackground: false,
   refetchOnWindowFocus: true,
@@ -103,6 +104,20 @@ export const mailboxKeys = {
     [...mailboxKeys.mailbox(organizationId, mailboxId), 'access-events'] as const,
   accessEventPage: (organizationId: number, mailboxId: number, page: number) =>
     [...mailboxKeys.accessEvents(organizationId, mailboxId), page] as const,
+  /** Every unified inbox listing of the organization. */
+  inboxes: (organizationId: number) =>
+    [...mailboxKeys.organization(organizationId), 'inbox'] as const,
+  inbox: (organizationId: number, filters: InboxFilters) =>
+    [
+      ...mailboxKeys.inboxes(organizationId),
+      filters.view,
+      filters.roleId ?? '',
+      filters.mailboxId ?? 0,
+      filters.unread ?? '',
+      filters.q ?? '',
+      filters.group ?? '',
+      filters.tz,
+    ] as const,
   log: (organizationId: number) => [...mailboxKeys.organization(organizationId), 'log'] as const,
   logPage: (organizationId: number, filters: MailLogFilters, page: number) =>
     [
@@ -131,9 +146,10 @@ function invalidateLog(queryClient: QueryClient, organizationId: number, withSta
 
 /**
  * Every change to a mailbox's mail: its listings, threads, and details, the caller's counts, the
- * unread count in the mailbox list, and the log. Statistics only move when mail is deleted.
+ * unread count in the mailbox list, the unified inbox, and the log. Statistics only move when mail
+ * is deleted.
  */
-function invalidateMail(
+export function invalidateMail(
   queryClient: QueryClient,
   organizationId: number,
   mailboxId: number,
@@ -147,11 +163,12 @@ function invalidateMail(
     queryClient.invalidateQueries({ queryKey: mailboxKeys.threads(organizationId, mailboxId) }),
     queryClient.invalidateQueries({ queryKey: mailboxKeys.counts(organizationId, mailboxId) }),
     queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.inboxes(organizationId) }),
     invalidateLog(queryClient, organizationId, withStats),
   ]);
 }
 
-function validId(value: number): boolean {
+export function validId(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
 }
 

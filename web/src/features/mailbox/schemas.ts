@@ -437,6 +437,37 @@ export const mailLogPageEnvelopeSchema = strictObject({
   links: pageLinksSchema,
 });
 
+export const INBOX_VIEWS = ['all', 'today', 'pending', 'sent'] as const;
+/** The longest `tz` the unified inbox accepts. */
+export const INBOX_TIME_ZONE_MAX_LENGTH = 64;
+/** The longest cursor the API writes is about 56 characters; anything past this is not one. */
+export const INBOX_CURSOR_MAX_LENGTH = 128;
+
+/**
+ * A unified inbox row: a listing summary with the owning mailbox's address, the mailbox's mail
+ * role now (null without one), and a short text snippet. `thread` only with `group=thread`.
+ */
+export const inboxItemSchema = strictObject({
+  ...summaryShape,
+  mailbox_address: string(),
+  role_id: nullable(safeIdSchema),
+  snippet: string(),
+  thread: optional(mailThreadSummarySchema),
+});
+
+const cursorPageMetaSchema = strictObject({
+  per_page: positiveIntegerSchema,
+  has_more: boolean(),
+  next_cursor: nullable(string()),
+});
+
+export const inboxPageEnvelopeSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: array(inboxItemSchema),
+  meta: cursorPageMetaSchema,
+});
+
 /** A thread's messages outside the trash, oldest first, with their bodies. */
 export const mailThreadSchema = array(mailMessageSchema);
 

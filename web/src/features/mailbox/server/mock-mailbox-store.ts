@@ -1,6 +1,7 @@
 import 'server-only';
 
 import {
+  INBOX_CURSOR_MAX_LENGTH,
   MAILBOX_MAX_MEMBERS,
   MAIL_FOLDERS_MAX_PER_MAILBOX,
   MAIL_FOLDER_NAME_MAX_LENGTH,
@@ -27,6 +28,9 @@ import {
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
+  InboxFilters,
+  InboxItem,
+  InboxPage,
   MailAttachment,
   MailDayStats,
   MailEvent,
@@ -255,6 +259,46 @@ function isPermission(value: unknown): value is MailboxPermission {
   return (MAILBOX_PERMISSIONS as readonly unknown[]).includes(value);
 }
 
+/** Where an inbox page ends, in `(created_at DESC, id DESC)` order. */
+export interface InboxPosition {
+  /** `created_at` in Unix nanoseconds. */
+  createdAt: bigint;
+  id: bigint;
+}
+
+/** One unified inbox page as the route validated it. */
+export interface MockInboxQuery extends InboxFilters {
+  after?: InboxPosition;
+  perPage: number;
+}
+
+const int64Max = BigInt('9223372036854775807');
+const int64Min = BigInt('-9223372036854775808');
+const uint64Max = BigInt('18446744073709551615');
+const nanosecondsPerMillisecond = BigInt(1_000_000);
+const cursorPattern = /^[A-Za-z0-9_-]+$/u;
+const cursorBodyPattern = /^(0|-?[1-9]\d*)\.([1-9]\d*)$/u;
+
+/** The cursor the API writes: base64url of `<unix nanoseconds>.<id>` without padding. */
+export function encodeInboxCursor(position: InboxPosition): string {
+  return Buffer.from(`${position.createdAt}.${position.id}`).toString('base64url');
+}
+
+/**
+ * Reads a cursor from `encodeInboxCursor`. Like the API, only the exact spelling it writes is a
+ * cursor: no padding, sign, leading zero, or id 0, and both numbers within the API's integers.
+ */
+export function decodeInboxCursor(token: string): InboxPosition | null {
+  if (token.length > INBOX_CURSOR_MAX_LENGTH || !cursorPattern.test(token)) return null;
+  const match = cursorBodyPattern.exec(Buffer.from(token, 'base64url').toString('latin1'));
+  if (!match) return null;
+  const createdAt = BigInt(match[1]);
+  const id = BigInt(match[2]);
+  if (createdAt > int64Max || createdAt < int64Min || id > uint64Max) return null;
+  const position = { createdAt, id };
+  return encodeInboxCursor(position) === token ? position : null;
+}
+
 export class MockMailboxStore {
   private nextMailboxId = 1;
   private nextMessageId = 1;
@@ -450,6 +494,67 @@ export class MockMailboxStore {
     if (needle !== '') query.set('q', filters.q?.trim() ?? '');
     const prefix = query.size > 0 ? `${query.toString()}&` : '';
     return paginated(entries, page, perPage, `/api/mail-messages?${prefix}`);
+  }
+
+  /**
+   * One cursor page of the unified inbox over the mailboxes the viewer reads, newest first by
+   * `(created_at, id)`. `all` is inbound mail in `default`, `sent` outbound mail in `default`, and
+   * `pending` the viewer's stars outside the archive and the trash. Mock mailboxes have no mail
+   * role, so a role id matches nothing and `none` matches every mailbox. `today` and `q` answer an
+   * empty page until the mock learns them; an unreadable or foreign mailbox matches nothing.
+   */
+  listInbox(organizationId: number, viewer: MailboxViewer, query: MockInboxQuery): InboxPage {
+    const unsupported = query.view === 'today' || query.q !== undefined;
+    const roleMatches = query.roleId === undefined || query.roleId === 'none';
+    const rows: { item: InboxItem; createdAt: bigint }[] = [];
+    for (const state of unsupported || !roleMatches
+      ? []
+      : this.readableStates(organizationId, viewer)) {
+      if (query.mailboxId !== undefined && state.mailbox.id !== query.mailboxId) continue;
+      const matching = this.visibleMessages(state)
+        .map(message => this.forViewer(state, message, viewer))
+        .filter(message => inInboxView(message, query));
+      const summaries = query.group === 'thread' ? threadRows(matching) : matching.map(summaryOf);
+      for (const summary of summaries) {
+        rows.push({
+          item: {
+            ...summary,
+            mailbox_address: state.mailbox.address,
+            role_id: null,
+            snippet: inboxSnippet(state.messages.get(summary.id)?.text_body ?? ''),
+          },
+          createdAt: unixNanoseconds(summary.created_at),
+        });
+      }
+    }
+    const after = query.after;
+    const page = rows
+      .filter(
+        row =>
+          !after ||
+          row.createdAt < after.createdAt ||
+          (row.createdAt === after.createdAt && BigInt(row.item.id) < after.id)
+      )
+      .sort(
+        (left, right) =>
+          (left.createdAt === right.createdAt ? 0 : left.createdAt < right.createdAt ? 1 : -1) ||
+          right.item.id - left.item.id
+      )
+      .slice(0, query.perPage + 1);
+    const hasMore = page.length > query.perPage;
+    const items = page.slice(0, query.perPage);
+    const last = items[items.length - 1];
+    return {
+      items: items.map(row => row.item),
+      meta: {
+        per_page: query.perPage,
+        has_more: hasMore,
+        next_cursor:
+          hasMore && last
+            ? encodeInboxCursor({ createdAt: last.createdAt, id: BigInt(last.item.id) })
+            : null,
+      },
+    };
   }
 
   /**
@@ -1570,6 +1675,41 @@ function threadRows(messages: MailMessage[]): MailMessageSummary[] {
       return { ...summaryOf(newest), thread };
     })
     .sort((left, right) => right.id - left.id);
+}
+
+/** `message` is as the viewer sees it; see `listInbox` for the views. */
+function inInboxView(message: MailMessage, query: MockInboxQuery): boolean {
+  const unread = message.direction === 'inbound' && !message.read;
+  if (query.unread !== undefined && unread !== query.unread) return false;
+  switch (query.view) {
+    case 'all':
+      return message.direction === 'inbound' && message.placement === 'default';
+    case 'sent':
+      return message.direction === 'outbound' && message.placement === 'default';
+    case 'pending':
+      return message.starred && message.placement !== 'archive' && message.placement !== 'trash';
+    default:
+      return false;
+  }
+}
+
+/**
+ * As the API cuts it: the first 400 characters of the text body, whitespace runs collapsed to one
+ * space, trimmed, then at most 140 characters.
+ */
+function inboxSnippet(textBody: string): string {
+  const collapsed = Array.from(textBody)
+    .slice(0, 400)
+    .join('')
+    .split(/\s+/u)
+    .filter(Boolean)
+    .join(' ');
+  const characters = Array.from(collapsed);
+  return characters.length <= 140 ? collapsed : characters.slice(0, 140).join('').trimEnd();
+}
+
+function unixNanoseconds(timestamp: string): bigint {
+  return BigInt(Date.parse(timestamp)) * nanosecondsPerMillisecond;
 }
 
 /** The listing's filters as the pagination links repeat them, ready for `page=`. */

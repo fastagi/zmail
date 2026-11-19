@@ -6,6 +6,7 @@ import { apiErrorResponse, apiJsonBodyErrorResponse } from '@/app/api/_shared/er
 import { readJsonBody } from '@/app/api/_shared/json-body';
 import { guardSameOriginMutation } from '@/app/api/_shared/mock-bff';
 import {
+  apiCursorPageResponse,
   apiNoContentResponse,
   apiPaginatedResponse,
   apiSuccessResponse,
@@ -18,6 +19,8 @@ import { getApiSessionToken } from '@/features/auth/server/api-session';
 import { getSessionUser } from '@/features/auth/server/session';
 import type { AuthUser } from '@/features/auth/types';
 import {
+  INBOX_TIME_ZONE_MAX_LENGTH,
+  INBOX_VIEWS,
   MAILBOX_DISPLAY_NAME_MAX_LENGTH,
   MAILBOX_LOCAL_PART_MAX_LENGTH,
   MAIL_ADDRESS_MAX_LENGTH,
@@ -76,8 +79,10 @@ import {
   type MockDnsRecordResult,
 } from '@/features/mailbox/server/mock-zone-store';
 import {
+  decodeInboxCursor,
   mockMailboxStore,
   type MailboxViewer,
+  type MockInboxQuery,
   type MockAccessError,
   type MockAccessResult,
   type MockMailSendResult,
@@ -91,6 +96,7 @@ import { parseOrganizationId } from '@/features/organization/server/organization
 import type { OrganizationContext } from '@/features/organization/types';
 import type {
   CreateMailboxInput,
+  InboxView,
   MailDirection,
   MailLogFilters,
   MailMessageFilters,
@@ -847,6 +853,34 @@ export async function listMailLogRoute(request: Request): Promise<NextResponse> 
     perPage
   );
   return apiPaginatedResponse(result.items, result.meta, result.links, privateMailboxHeaders());
+}
+
+/**
+ * The unified inbox: one cursor page across the mailboxes the caller reads. The query is checked
+ * here as the API checks it, so a malformed one never leaves the BFF, and only the nine documented
+ * parameters reach the API.
+ */
+export async function listInboxMessagesRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const query = parseInboxQuery(new URL(request.url).searchParams);
+  if (!query.ok) return query.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'inbox-messages',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: query.value.forward,
+    });
+  }
+  const page = mockMailboxStore.listInbox(
+    target.organizationId,
+    viewerOf(target),
+    query.value.mock
+  );
+  return apiCursorPageResponse(page.items, page.meta, privateMailboxHeaders());
 }
 
 /** Per-day counts for the last `days` UTC days; the window defaults to a week. */
@@ -3160,6 +3194,128 @@ function parseLogFilters(query: URLSearchParams): Parsed<MailLogFilters> {
       ...(q === '' ? {} : { q }),
     },
   };
+}
+
+/** The unified inbox parameters, in the order they are forwarded; each may appear once. */
+const inboxParameters = [
+  'view',
+  'role_id',
+  'mailbox_id',
+  'unread',
+  'q',
+  'group',
+  'tz',
+  'cursor',
+  'per_page',
+] as const;
+const inboxTimeZonePattern = /^[A-Za-z][A-Za-z0-9_+\-/]*$/u;
+const integerPattern = /^[+-]?\d+$/u;
+
+/**
+ * The unified inbox query rules of `contracts/MAILBOXES.md`, as the API applies them: `page`, a
+ * repeated parameter, an empty or unknown value, a malformed cursor, an unknown zone, or a
+ * combination outside the rules is invalid input; an integer `per_page` out of range is clamped.
+ * Unknown parameters are dropped. Answers the query to forward and the query for the mock.
+ */
+function parseInboxQuery(
+  query: URLSearchParams
+): Parsed<{ forward: URLSearchParams; mock: MockInboxQuery }> {
+  const invalid = (message: string) => ({ ok: false as const, response: invalidInput(message) });
+  if (query.has('page')) return invalid('Use cursor instead of page');
+  for (const name of inboxParameters) {
+    if (query.getAll(name).length > 1) return invalid('Repeated inbox parameter');
+  }
+  const value = (name: (typeof inboxParameters)[number]) => query.get(name);
+  const forward = new URLSearchParams();
+  const mock: MockInboxQuery = { view: 'all', tz: 'UTC', perPage: defaultPerPage };
+
+  const view = value('view');
+  if (view !== null) {
+    if (!isOneOf<InboxView>(INBOX_VIEWS, view)) return invalid('Invalid inbox view');
+    mock.view = view;
+    forward.set('view', view);
+  }
+  const role = value('role_id');
+  if (role !== null) {
+    const roleId = role === 'none' ? null : parseRouteId(role);
+    if (roleId !== null && !roleId.ok) return invalid('Invalid role filter');
+    mock.roleId = roleId === null ? 'none' : roleId.value;
+    forward.set('role_id', role);
+  }
+  const mailbox = value('mailbox_id');
+  if (mailbox !== null) {
+    const mailboxId = parseRouteId(mailbox);
+    if (!mailboxId.ok) return invalid('Invalid mailbox filter');
+    mock.mailboxId = mailboxId.value;
+    forward.set('mailbox_id', mailbox);
+  }
+  const unread = value('unread');
+  if (unread !== null) {
+    if (unread !== 'true' && unread !== 'false') return invalid('Invalid unread filter');
+    mock.unread = unread === 'true';
+    forward.set('unread', unread);
+  }
+  const rawSearch = value('q');
+  if (rawSearch !== null) {
+    // As in the mailbox search: the length counts as sent, the rest after trimming.
+    const q = rawSearch.trim();
+    if (q === '' || Array.from(rawSearch).length > MAIL_SEARCH_MAX_LENGTH || /\p{Cc}/u.test(q)) {
+      return invalid('Invalid search');
+    }
+    mock.q = q;
+    forward.set('q', q);
+  }
+  const group = value('group');
+  if (group !== null) {
+    if (group !== 'thread') return invalid('Invalid grouping');
+    mock.group = group;
+    forward.set('group', group);
+  }
+  const tz = value('tz');
+  if (tz !== null) {
+    if (!isTimeZone(tz)) return invalid('Invalid time zone');
+    mock.tz = tz;
+    forward.set('tz', tz);
+  }
+  const cursor = value('cursor');
+  if (cursor !== null) {
+    const after = decodeInboxCursor(cursor);
+    if (!after) return invalid('Invalid cursor');
+    mock.after = after;
+    forward.set('cursor', cursor);
+  }
+  const perPage = value('per_page');
+  if (perPage !== null) {
+    if (!integerPattern.test(perPage)) return invalid('Invalid page size');
+    mock.perPage = Math.min(Math.max(Number(perPage), 1), MAIL_PAGE_MAX_SIZE);
+  }
+  forward.set('per_page', String(mock.perPage));
+
+  if (mock.q !== undefined && mock.view !== 'all') return invalid('Search needs view all');
+  if (mock.group && mock.view !== 'all' && mock.view !== 'sent') {
+    return invalid('Grouping needs view all or sent');
+  }
+  if (mock.group && (mock.unread !== undefined || mock.q !== undefined)) {
+    return invalid('Grouping cannot be combined with unread or search');
+  }
+  return { ok: true, value: { forward, mock } };
+}
+
+/** An IANA zone name; `Local` and the empty name are never a viewer's zone. */
+function isTimeZone(value: string): boolean {
+  if (
+    value === 'Local' ||
+    value.length > INBOX_TIME_ZONE_MAX_LENGTH ||
+    !inboxTimeZonePattern.test(value)
+  ) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isOneOf<T extends string>(allowed: readonly T[], value: string): value is T {

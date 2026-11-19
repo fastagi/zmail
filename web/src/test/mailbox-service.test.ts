@@ -1017,6 +1017,114 @@ describe('mailbox organize service boundary', () => {
     );
   });
 
+  it('listInbox parses a cursor page', async () => {
+    const meta = { per_page: 15, has_more: true, next_cursor: 'MTc2My40Mg' };
+    const getEnvelope = vi.spyOn(request, 'getEnvelope').mockResolvedValue({
+      code: 0,
+      message: 'success',
+      data: [inboxItem(), { ...inboxItem(), id: 8, thread: threadRow().thread }],
+      meta,
+    });
+
+    const page = await mailboxService.listInbox(7, { view: 'all', group: 'thread', tz: 'UTC' });
+    expect(page).toEqual({
+      items: [inboxItem(), { ...inboxItem(), id: 8, thread: threadRow().thread }],
+      meta,
+    });
+    await mailboxService.listInbox(
+      7,
+      { view: 'sent', roleId: 'none', mailboxId: 12, unread: false, tz: 'Asia/Shanghai' },
+      'MTc2My40Mg',
+      50
+    );
+    await mailboxService.listInbox(7, { view: 'all', roleId: 3, q: '  invoice  ', tz: 'UTC' });
+
+    expect(getEnvelope.mock.calls.map(call => call[0])).toEqual([
+      '/inbox-messages',
+      '/inbox-messages',
+      '/inbox-messages',
+    ]);
+    for (const call of getEnvelope.mock.calls) {
+      expect(call[1]?.headers).toEqual({ 'Organization-Id': '7' });
+    }
+    expect(getEnvelope.mock.calls.map(call => call[1]?.params)).toEqual([
+      { view: 'all', group: 'thread', tz: 'UTC' },
+      {
+        view: 'sent',
+        role_id: 'none',
+        mailbox_id: 12,
+        unread: false,
+        tz: 'Asia/Shanghai',
+        cursor: 'MTc2My40Mg',
+        per_page: 50,
+      },
+      { view: 'all', role_id: 3, q: 'invoice', tz: 'UTC' },
+    ]);
+  });
+
+  it('rejects an item without mailbox_address', async () => {
+    const getEnvelope = vi.spyOn(request, 'getEnvelope');
+    const page = (
+      data: unknown[],
+      meta: unknown = { per_page: 15, has_more: false, next_cursor: null }
+    ) => ({
+      code: 0 as const,
+      message: 'success',
+      data,
+      meta,
+    });
+    const reject = async () =>
+      expect(mailboxService.listInbox(7, { view: 'all', tz: 'UTC' })).rejects.toMatchObject({
+        errorCode: ClientErrorCode.INVALID_RESPONSE,
+      });
+
+    const withoutAddress: Record<string, unknown> = inboxItem();
+    delete withoutAddress.mailbox_address;
+    const withoutSnippet: Record<string, unknown> = inboxItem();
+    delete withoutSnippet.snippet;
+    const withoutRole: Record<string, unknown> = inboxItem();
+    delete withoutRole.role_id;
+    for (const item of [
+      withoutAddress,
+      withoutSnippet,
+      withoutRole,
+      { ...inboxItem(), role_id: 0 },
+      { ...inboxItem(), text_body: 'x' },
+      summary(),
+    ]) {
+      getEnvelope.mockResolvedValueOnce(page([item]));
+      await reject();
+    }
+    // The cursor meta, not the offset one.
+    getEnvelope.mockResolvedValueOnce(page([], { per_page: 15, has_more: false }));
+    await reject();
+    getEnvelope.mockResolvedValueOnce(
+      page([], { current_page: 1, per_page: 15, total: 0, last_page: 1, from: 0, to: 0 })
+    );
+    await reject();
+  });
+
+  it('refuses invalid inbox filters before any request', async () => {
+    const getEnvelope = vi.spyOn(request, 'getEnvelope');
+    const calls = [
+      () => mailboxService.listInbox(0, { view: 'all', tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'spam' as 'all', tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', mailboxId: 0, tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', roleId: -1, tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', q: '   ', tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', q: 'x'.repeat(201), tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', tz: '' }),
+      () => mailboxService.listInbox(7, { view: 'all', tz: 'A'.repeat(65) }),
+      () => mailboxService.listInbox(7, { view: 'all', tz: 'UTC' }, ''),
+      () => mailboxService.listInbox(7, { view: 'all', tz: 'UTC' }, undefined, 0),
+      () => mailboxService.listInbox(7, { view: 'all', tz: 'UTC' }, undefined, 101),
+    ];
+    for (const call of calls) {
+      await expect(call()).rejects.toMatchObject({ errorCode: ClientErrorCode.INVALID_RESPONSE });
+    }
+    expect(getEnvelope).not.toHaveBeenCalled();
+  });
+
   it('maps the organize error codes to local copy', () => {
     expect(
       resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 422))
@@ -1034,5 +1142,15 @@ function threadRow() {
   return {
     ...summary(),
     thread: { message_count: 2, message_ids: [3, 7], unread: true, starred: false, label_ids: [9] },
+  };
+}
+
+/** A unified inbox row: a listing summary with the owning address, the mail role, and a snippet. */
+function inboxItem() {
+  return {
+    ...summary(),
+    mailbox_address: 'hello@mail.example.com',
+    role_id: null,
+    snippet: 'Hi Bob, the invoice is attached.',
   };
 }

@@ -164,6 +164,46 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   expect(filtered.meta).toMatchObject({ total: 1, last_page: 1 });
   expect((await mailboxService.listLog(organizationId, { q: '100%' })).items).toEqual([]);
 
+  // The unified inbox: cursor pages across the mailboxes the caller reads.
+  const sentThreads = await mailboxService.listInbox(organizationId, {
+    view: 'sent',
+    group: 'thread',
+    tz: 'UTC',
+  });
+  expect(sentThreads.items.map(item => item.id)).toEqual([second.id, first.id]);
+  expect(sentThreads.items.map(item => item.snippet)).toEqual(['', 'Plain body']);
+  expect(sentThreads.items[0]).toMatchObject({
+    mailbox_address: mailbox.address,
+    role_id: null,
+    thread: { message_count: 1, message_ids: [second.id] },
+  });
+  expect(sentThreads.meta).toEqual({ per_page: 15, has_more: false, next_cursor: null });
+  const newest = await mailboxService.listInbox(
+    organizationId,
+    { view: 'sent', tz: 'UTC' },
+    undefined,
+    1
+  );
+  expect(newest.items.map(item => item.id)).toEqual([second.id]);
+  expect(newest.meta.has_more).toBe(true);
+  const older = await mailboxService.listInbox(
+    organizationId,
+    { view: 'sent', tz: 'UTC' },
+    newest.meta.next_cursor ?? undefined,
+    1
+  );
+  expect(older.items.map(item => item.id)).toEqual([first.id]);
+  expect(older.meta).toEqual({ per_page: 1, has_more: false, next_cursor: null });
+  const received = await mailboxService.listInbox(organizationId, {
+    view: 'all',
+    mailboxId: other.id,
+    roleId: 'none',
+    tz: 'UTC',
+  });
+  expect(received.items.map(item => [item.mailbox_address, item.direction])).toEqual([
+    [other.address, 'inbound'],
+  ]);
+
   const week = await mailboxService.stats(organizationId);
   expect(week).toHaveLength(7);
   const totals = week.reduce(

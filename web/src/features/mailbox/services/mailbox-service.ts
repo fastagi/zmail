@@ -1,6 +1,10 @@
 import type { z } from 'zod/mini';
 
 import {
+  INBOX_CURSOR_MAX_LENGTH,
+  INBOX_TIME_ZONE_MAX_LENGTH,
+  INBOX_VIEWS,
+  inboxPageEnvelopeSchema,
   MAILBOX_ACCESS_EVENTS_MAX_PAGE_SIZE,
   MAIL_LOG_QUERY_MAX_LENGTH,
   MAIL_MESSAGE_UPDATES_MAX_IDS,
@@ -49,6 +53,8 @@ import {
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
+  InboxFilters,
+  InboxPage,
   MailAttachment,
   MailBroadcast,
   MailBroadcastInput,
@@ -467,6 +473,57 @@ export const mailboxService = {
     const parsed = mailLogPageEnvelopeSchema.safeParse(value);
     if (!parsed.success) throw invalidResponse();
     return { items: parsed.data.data, meta: parsed.data.meta, links: parsed.data.links };
+  },
+
+  /**
+   * One cursor page of the unified inbox, newest first; `cursor` is the previous page's
+   * `meta.next_cursor`. Without `perPage` the API's default applies. The API refuses filter
+   * combinations the contract does not allow.
+   */
+  async listInbox(
+    organizationId: number,
+    { view, roleId, mailboxId, unread, q, group, tz }: InboxFilters,
+    cursor?: string,
+    perPage?: number
+  ): Promise<InboxPage> {
+    const headers = organizationHeaders(organizationId);
+    if (!(INBOX_VIEWS as readonly string[]).includes(view)) throw invalidResponse();
+    if (roleId !== undefined && roleId !== 'none') validId(roleId);
+    if (mailboxId !== undefined) validId(mailboxId);
+    const query = q?.trim();
+    if (
+      query !== undefined &&
+      (query === '' || Array.from(q ?? '').length > MAIL_SEARCH_MAX_LENGTH)
+    ) {
+      throw invalidResponse();
+    }
+    if (tz === '' || tz.length > INBOX_TIME_ZONE_MAX_LENGTH) throw invalidResponse();
+    if (cursor !== undefined && (cursor === '' || cursor.length > INBOX_CURSOR_MAX_LENGTH)) {
+      throw invalidResponse();
+    }
+    if (
+      perPage !== undefined &&
+      (!Number.isSafeInteger(perPage) || perPage < 1 || perPage > MAIL_PAGE_MAX_SIZE)
+    ) {
+      throw invalidResponse();
+    }
+    const value = await request.getEnvelope<unknown>('/inbox-messages', {
+      headers,
+      params: {
+        view,
+        ...(roleId === undefined ? {} : { role_id: roleId }),
+        ...(mailboxId === undefined ? {} : { mailbox_id: mailboxId }),
+        ...(unread === undefined ? {} : { unread }),
+        ...(query === undefined ? {} : { q: query }),
+        ...(group ? { group } : {}),
+        tz,
+        ...(cursor === undefined ? {} : { cursor }),
+        ...(perPage === undefined ? {} : { per_page: perPage }),
+      },
+    });
+    const parsed = inboxPageEnvelopeSchema.safeParse(value);
+    if (!parsed.success) throw invalidResponse();
+    return { items: parsed.data.data, meta: parsed.data.meta };
   },
 
   /** One entry per UTC day for the last `days` days, oldest first, empty days included. */
@@ -1230,6 +1287,9 @@ assertContract<
 assertContract<Sends<UpdateMailMessageInput, ContractRequest<'updateMailMessage'>>>();
 assertContract<
   Accepts<z.input<typeof mailLogPageEnvelopeSchema>, ContractResponse<'listMailLog', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof inboxPageEnvelopeSchema>, ContractResponse<'listInboxMessages', 200>>
 >();
 assertContract<
   Accepts<z.input<typeof mailDayStatsListSchema>, ContractData<'listMailMessageStats', 200>>

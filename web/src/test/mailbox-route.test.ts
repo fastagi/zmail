@@ -2899,6 +2899,232 @@ describe('mailbox browser route boundary', () => {
     expect(getSessionUser).not.toHaveBeenCalled();
   });
 
+  it('forwards only whitelisted inbox parameters', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () =>
+      Response.json({
+        code: 0,
+        message: 'success',
+        data: [],
+        meta: { per_page: 15, has_more: false, next_cursor: null },
+      })
+    );
+    const route = await loadRoute();
+    activeOrganization = '7';
+    const cursor = inboxCursor('1763532000123456789', 42);
+    const inbox = (query: string) =>
+      route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`));
+
+    const first = await inbox('?view=all&group=thread&foo=1');
+    expect(first.status).toBe(200);
+    expect(first.headers.get('cache-control')).toBe('private, no-store');
+    await inbox('');
+    await inbox(
+      `?per_page=500&tz=Asia%2FShanghai&unread=false&mailbox_id=12&role_id=none&view=sent&cursor=${cursor}&sort=subject`
+    );
+    await inbox('?q=%20100%25%20off%20&role_id=3&per_page=0&user_id=9');
+    await inbox('?view=pending&unread=true&per_page=%2B5');
+    await inbox('?per_page=99999999999999999999');
+    await inbox('?per_page=-99999999999999999999');
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const target = new URL(String(url));
+      return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/inbox-messages?view=all&group=thread&per_page=15',
+      'GET /v1/inbox-messages?per_page=15',
+      `GET /v1/inbox-messages?view=sent&role_id=none&mailbox_id=12&unread=false&tz=Asia%2FShanghai&cursor=${cursor}&per_page=100`,
+      'GET /v1/inbox-messages?role_id=3&q=100%25+off&per_page=1',
+      'GET /v1/inbox-messages?view=pending&unread=true&per_page=5',
+      'GET /v1/inbox-messages?per_page=100',
+      'GET /v1/inbox-messages?per_page=1',
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('organization-id')).toBe('7');
+    }
+    expect(getSessionUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects page and repeated parameters without calling upstream', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    const route = await loadRoute();
+    const cursor = inboxCursor('1763532000123456789', 42);
+
+    for (const query of [
+      // Offset paging does not exist here, and every parameter appears at most once.
+      '?page=1',
+      '?page=',
+      '?view=all&view=all',
+      '?role_id=1&role_id=2',
+      '?mailbox_id=1&mailbox_id=1',
+      '?unread=true&unread=true',
+      '?q=a&q=b',
+      '?group=thread&group=thread',
+      '?tz=UTC&tz=UTC',
+      `?cursor=${cursor}&cursor=${cursor}`,
+      '?per_page=5&per_page=5',
+      // Unknown or empty values.
+      '?view=spam',
+      '?view=',
+      '?role_id=0',
+      '?role_id=-1',
+      '?role_id=abc',
+      '?role_id=',
+      '?mailbox_id=0',
+      '?mailbox_id=1.5',
+      '?mailbox_id=',
+      '?unread=yes',
+      '?unread=',
+      '?q=',
+      '?q=%20%20',
+      `?q=${'a'.repeat(201)}`,
+      `?q=%20${'a'.repeat(200)}`,
+      '?q=a%01b',
+      '?group=mailbox',
+      '?group=',
+      '?tz=',
+      '?tz=Local',
+      '?tz=Mars%2FOlympus',
+      `?tz=${'A'.repeat(65)}`,
+      '?cursor=',
+      '?cursor=%21%21',
+      `?cursor=${cursor}%3D`,
+      `?cursor=${inboxCursor('01', 42)}`,
+      `?cursor=${inboxCursor('5', 0)}`,
+      `?cursor=${Buffer.from('5').toString('base64url')}`,
+      `?cursor=${'A'.repeat(129)}`,
+      '?per_page=abc',
+      '?per_page=1.5',
+      '?per_page=',
+      // Combinations outside the contract's rules.
+      '?view=today&q=invoice',
+      '?view=sent&q=invoice',
+      '?view=today&group=thread',
+      '?view=pending&group=thread',
+      '?group=thread&unread=true',
+      '?group=thread&q=invoice',
+    ]) {
+      await expectError(
+        await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`)),
+        400,
+        'COMMON.INVALID_INPUT'
+      );
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("mock inbox hides another member's personal mailbox and pages by cursor", async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const created = async (body: Record<string, unknown>) =>
+      (await (await create(route, body)).json()).data as { id: number; address: string };
+    // demo-admin (user 1) owns the organization but reads only its own and shared mailboxes.
+    const riley = await created({ local_part: 'riley', type: 'personal', owner_user_id: 3 });
+    const mine = await created({ local_part: 'mine', type: 'personal', owner_user_id: 1 });
+    const team = await created({
+      local_part: 'team',
+      type: 'shared',
+      members: [
+        { user_id: 1, permission: 'manage' },
+        { user_id: 3, permission: 'view' },
+      ],
+    });
+    const ops = await created({
+      local_part: 'ops',
+      type: 'shared',
+      members: [{ user_id: 1, permission: 'view' }],
+    });
+    const inbox = async (query = '') => {
+      const response = await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      expect(response.headers.get('vary')).toContain('Organization-Id');
+      return response.json();
+    };
+    const ids = async (query = '') =>
+      (await inbox(query)).data.map((item: { id: number }) => item.id);
+
+    // Three welcome messages, newest first; riley@ is not readable by demo-admin.
+    const everything = await inbox();
+    expect(everything.data.map((item: { mailbox_id: number }) => item.mailbox_id)).toEqual([
+      ops.id,
+      team.id,
+      mine.id,
+    ]);
+    expect(everything.meta).toEqual({ per_page: 15, has_more: false, next_cursor: null });
+    expect(everything.data[0]).toMatchObject({
+      mailbox_address: ops.address,
+      role_id: null,
+      direction: 'inbound',
+      placement: 'default',
+      snippet:
+        'This message was created by the development mock. No mail is sent or received until the app uses the real API.',
+    });
+    for (const item of everything.data) {
+      expect(item).not.toHaveProperty('text_body');
+      expect(item).not.toHaveProperty('html_body');
+      expect(item).not.toHaveProperty('thread');
+    }
+
+    // Two pages by cursor: no repeats, and the last page has no cursor.
+    const first = await inbox('?per_page=2');
+    expect(first.data).toHaveLength(2);
+    expect(first.meta).toMatchObject({ per_page: 2, has_more: true });
+    expect(typeof first.meta.next_cursor).toBe('string');
+    const second = await inbox(`?per_page=2&cursor=${first.meta.next_cursor}`);
+    expect(second.meta).toEqual({ per_page: 2, has_more: false, next_cursor: null });
+    expect([...first.data, ...second.data].map((item: { id: number }) => item.id)).toEqual(
+      everything.data.map((item: { id: number }) => item.id)
+    );
+
+    // Filters that name an unreadable, missing, or role-bound mailbox match nothing.
+    expect(await ids(`?mailbox_id=${riley.id}`)).toEqual([]);
+    expect(await ids('?mailbox_id=9999')).toEqual([]);
+    expect(await ids('?role_id=1')).toEqual([]);
+    expect(await ids(`?mailbox_id=${team.id}`)).toHaveLength(1);
+    expect(await ids('?role_id=none')).toHaveLength(3);
+
+    // Sent lists outbound mail; grouping by thread carries the thread summary.
+    const reply = (
+      await (
+        await send(route, mine.id, {
+          to: ['bob@example.com'],
+          subject: 'Hi',
+          text: '  Hello\n\n  Bob  ',
+        })
+      ).json()
+    ).data;
+    const sent = await inbox('?view=sent&group=thread');
+    expect(sent.data.map((item: { id: number }) => item.id)).toEqual([reply.id]);
+    expect(sent.data[0]).toMatchObject({
+      mailbox_address: mine.address,
+      snippet: 'Hello Bob',
+      thread: { message_count: 1, message_ids: [reply.id], unread: false },
+    });
+    const grouped = await inbox('?group=thread');
+    expect(grouped.data.map((item: { thread: { unread: boolean } }) => item.thread.unread)).toEqual(
+      [true, true, true]
+    );
+
+    // demo-member reads riley@ and team@, never mine@ or ops@.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect((await inbox()).data.map((item: { mailbox_id: number }) => item.mailbox_id)).toEqual([
+      team.id,
+      riley.id,
+    ]);
+
+    // Another organization sees none of it, even when naming the mailbox.
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    activeOrganization = await secondOrganization();
+    expect(await ids(`?mailbox_id=${mine.id}`)).toEqual([]);
+  });
+
   it('rejects an invalid log or statistics query before it reaches the API', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
@@ -4730,6 +4956,11 @@ function request(
 
 function mockUser(id: string) {
   return { id, email: `${id}@example.com`, name: id };
+}
+
+/** A cursor as the API spells it: base64url of `<unix nanoseconds>.<id>` without padding. */
+function inboxCursor(nanoseconds: string, id: number): string {
+  return Buffer.from(`${nanoseconds}.${id}`).toString('base64url');
 }
 
 function base64(value: string): string {
