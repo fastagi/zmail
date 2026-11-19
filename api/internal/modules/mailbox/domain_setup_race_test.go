@@ -68,7 +68,7 @@ func (z lockedProvider) EnsureSending(ctx context.Context, zoneID, name string) 
 func (z lockedProvider) ListRecords(ctx context.Context, zoneID, name string) ([]mailtransport.DNSRecord, error) {
 	z.mu.Lock()
 	defer z.mu.Unlock()
-	return slices.Clone(z.fakeZones.records[name]), nil
+	return slices.Clone(z.records[name]), nil
 }
 
 func (z lockedProvider) CreateRecord(ctx context.Context, zoneID string, record mailtransport.DNSRecord) (mailtransport.DNSRecord, error) {

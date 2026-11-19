@@ -781,10 +781,7 @@ func TestReceivingDuringARunningSetupRunsTheSetupAgain(t *testing.T) {
 	}
 	close(release)
 	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if !fixture.service.setupRunning(sendOnly.ID) {
-			break
-		}
+	for fixture.service.setupRunning(sendOnly.ID) {
 		if time.Now().After(deadline) {
 			t.Fatal("the setup did not finish")
 		}

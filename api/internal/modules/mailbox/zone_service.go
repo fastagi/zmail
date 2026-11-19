@@ -591,8 +591,8 @@ func (s *service) ReleasePendingZone(ctx context.Context, apex string, force boo
 			// The provider zone of a reservation was never stored.
 			return nil
 		}
-		if err := s.domainProvider.DeleteZone(providerContext, locked.CloudflareZoneID); err != nil && !providerZoneGone(err) {
-			return providerError(err)
+		if deleteErr := s.domainProvider.DeleteZone(providerContext, locked.CloudflareZoneID); deleteErr != nil && !providerZoneGone(deleteErr) {
+			return providerError(deleteErr)
 		}
 		return nil
 	}
@@ -607,8 +607,8 @@ func (s *service) ReleasePendingZone(ctx context.Context, apex string, force boo
 	} else {
 		err = s.zones.DeleteZone(ctx, zone.OrganizationID, zone.ID, func(providerContext context.Context, locked *domain.MailZone) error {
 			// A registrar may already delegate to a zone Cloudflare has not activated yet.
-			if err := s.requireUndelegated(providerContext, locked.Name, true); err != nil {
-				return err
+			if delegatedErr := s.requireUndelegated(providerContext, locked.Name, true); delegatedErr != nil {
+				return delegatedErr
 			}
 			return removeAtProvider(providerContext, locked)
 		})
