@@ -683,3 +683,56 @@ func toInboxItemResponses(items []InboxItem) []InboxItemResponse {
 	}
 	return responses
 }
+
+// InboxCountsResponse is the caller's own counts over the mailboxes they may read.
+type InboxCountsResponse struct {
+	Views           InboxViewCountsResponse     `json:"views"`
+	Roles           []InboxRoleCountResponse    `json:"roles"`
+	UngroupedUnread int                         `json:"ungrouped_unread"`
+	Mailboxes       []InboxMailboxCountResponse `json:"mailboxes"`
+	TodayStartsAt   time.Time                   `json:"today_starts_at"`
+	TodayEndsAt     time.Time                   `json:"today_ends_at"`
+}
+
+// InboxViewCountsResponse counts the unified inbox views.
+type InboxViewCountsResponse struct {
+	AllUnread   int `json:"all_unread"`
+	Today       int `json:"today"`
+	TodayUnread int `json:"today_unread"`
+	Pending     int `json:"pending"`
+	SentWaiting int `json:"sent_waiting"`
+}
+
+// InboxRoleCountResponse is the unread Inbox mail of one mail role's readable mailboxes.
+type InboxRoleCountResponse struct {
+	RoleID uint `json:"role_id"`
+	Unread int  `json:"unread"`
+}
+
+// InboxMailboxCountResponse is the unread Inbox mail of one readable mailbox.
+type InboxMailboxCountResponse struct {
+	MailboxID uint `json:"mailbox_id"`
+	Unread    int  `json:"unread"`
+}
+
+func toInboxCountsResponse(counts InboxCounts) InboxCountsResponse {
+	roles := make([]InboxRoleCountResponse, 0, len(counts.Roles))
+	for _, role := range counts.Roles {
+		roles = append(roles, InboxRoleCountResponse(role))
+	}
+	mailboxes := make([]InboxMailboxCountResponse, 0, len(counts.Mailboxes))
+	for _, mailbox := range counts.Mailboxes {
+		mailboxes = append(mailboxes, InboxMailboxCountResponse(mailbox))
+	}
+	return InboxCountsResponse{
+		Views: InboxViewCountsResponse{
+			AllUnread: counts.AllUnread, Today: counts.Today, TodayUnread: counts.TodayUnread,
+			Pending: counts.Pending, SentWaiting: counts.SentWaiting,
+		},
+		Roles:           roles,
+		UngroupedUnread: counts.UngroupedUnread,
+		Mailboxes:       mailboxes,
+		TodayStartsAt:   counts.TodayStartsAt.UTC(),
+		TodayEndsAt:     counts.TodayEndsAt.UTC(),
+	}
+}

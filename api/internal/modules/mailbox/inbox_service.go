@@ -1,8 +1,11 @@
 package mailbox
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -51,9 +54,35 @@ type InboxPage struct {
 	ReadableMailboxes int
 }
 
+// InboxCounts are the viewer's own live counts over the mailboxes they read.
+type InboxCounts struct {
+	// AllUnread is Σ Roles + UngroupedUnread, the unread Inbox mail of every readable mailbox.
+	AllUnread, Today, TodayUnread, Pending, SentWaiting int
+	// Roles has one entry per mail role with a readable mailbox, role id ascending.
+	Roles           []InboxRoleCount
+	UngroupedUnread int
+	// Mailboxes has one entry per readable mailbox, mailbox id ascending.
+	Mailboxes []InboxMailboxCount
+	// TodayStartsAt and TodayEndsAt bound the viewer's day [start, end), in UTC.
+	TodayStartsAt, TodayEndsAt time.Time
+}
+
+// InboxRoleCount is the unread Inbox mail of a mail role's readable mailboxes.
+type InboxRoleCount struct {
+	RoleID uint
+	Unread int
+}
+
+// InboxMailboxCount is the unread Inbox mail of one readable mailbox.
+type InboxMailboxCount struct {
+	MailboxID uint
+	Unread    int
+}
+
 // ListInbox lists one page of the mail the viewer reads across mailboxes. Only mailboxes the
 // viewer has view on are read; a mailbox or role filter the viewer cannot read, including
-// another organization's ids, narrows the set to nothing rather than failing.
+// another organization's ids, narrows the set to nothing rather than failing. When reading the
+// mail fails, the page still carries ReadableMailboxes for the caller's log.
 func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationContext, request InboxRequest) (InboxPage, error) {
 	if !request.View.Valid() || request.PerPage < 1 {
 		return InboxPage{}, fmt.Errorf("%w: inbox request", domain.ErrInvalidInput)
@@ -86,11 +115,11 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 		After: request.After, Limit: request.PerPage + 1,
 	}
 	if request.View == domain.InboxViewToday {
-		query.DayStart, query.DayEnd = dayBounds(s.now(), request.Location)
+		query.DayStart, query.DayEnd = inboxDay(s.now(), request.Location)
 	}
 	messages, err := s.inbox.ListInbox(ctx, query)
 	if err != nil {
-		return InboxPage{}, err
+		return InboxPage{ReadableMailboxes: page.ReadableMailboxes}, err
 	}
 	if len(messages) > request.PerPage {
 		messages = messages[:request.PerPage]
@@ -130,6 +159,59 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 	return page, nil
 }
 
+// InboxCounts counts the viewer's unified inbox over the mailboxes they have view on, with today
+// as the viewer's day in location (nil is UTC). Only readable mailbox ids reach the count
+// queries; with none, the counts are zero without reading mail.
+func (s *service) InboxCounts(ctx context.Context, viewer domain.OrganizationContext, location *time.Location) (InboxCounts, error) {
+	mailboxes, err := s.accessRows(ctx, viewer)
+	if err != nil {
+		return InboxCounts{}, err
+	}
+	counts := InboxCounts{Roles: []InboxRoleCount{}, Mailboxes: []InboxMailboxCount{}}
+	counts.TodayStartsAt, counts.TodayEndsAt = inboxDay(s.now(), location)
+	readable := make([]*domain.Mailbox, 0, len(mailboxes))
+	ids := make([]uint, 0, len(mailboxes))
+	for _, mailbox := range mailboxes {
+		if mailbox.Access.View {
+			readable = append(readable, mailbox)
+			ids = append(ids, mailbox.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return counts, nil
+	}
+	slices.Sort(ids)
+	slices.SortFunc(readable, func(a, b *domain.Mailbox) int { return cmp.Compare(a.ID, b.ID) })
+
+	unread, err := s.inbox.CountUnreadByMailboxIDs(ctx, viewer.OrganizationID, viewer.MembershipID, ids)
+	if err != nil {
+		return InboxCounts{}, err
+	}
+	views, err := s.inbox.CountInboxViews(ctx, viewer.MembershipID, ids, counts.TodayStartsAt, counts.TodayEndsAt)
+	if err != nil {
+		return InboxCounts{}, err
+	}
+	counts.Today, counts.TodayUnread, counts.Pending, counts.SentWaiting =
+		views.Today, views.TodayUnread, views.Pending, views.SentWaiting
+
+	roles := map[uint]int{}
+	for _, mailbox := range readable {
+		count := unread[mailbox.ID]
+		counts.Mailboxes = append(counts.Mailboxes, InboxMailboxCount{MailboxID: mailbox.ID, Unread: count})
+		if mailbox.RoleID == nil {
+			counts.UngroupedUnread += count
+		} else {
+			roles[*mailbox.RoleID] += count
+		}
+	}
+	counts.AllUnread = counts.UngroupedUnread
+	for _, roleID := range slices.Sorted(maps.Keys(roles)) {
+		counts.Roles = append(counts.Roles, InboxRoleCount{RoleID: roleID, Unread: roles[roleID]})
+		counts.AllUnread += roles[roleID]
+	}
+	return counts, nil
+}
+
 // accessRows lists the organization's live mailboxes with the viewer's access to each, without
 // counting unread mail.
 func (s *service) accessRows(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error) {
@@ -151,16 +233,17 @@ func (s *service) accessRows(ctx context.Context, viewer domain.OrganizationCont
 	return mailboxes, nil
 }
 
-// dayBounds is the viewer's day containing now in location: [start, end). The end is the next
-// local midnight, so a day around a daylight saving change is 23 or 25 hours long.
-func dayBounds(now time.Time, location *time.Location) (start, end time.Time) {
+// inboxDay is the viewer's day containing now in location (nil is UTC) as [start, end) in UTC.
+// The end is the next local midnight, so a day around a daylight saving change is 23 or 25
+// hours long.
+func inboxDay(now time.Time, location *time.Location) (start, end time.Time) {
 	if location == nil {
 		location = time.UTC
 	}
 	local := now.In(location)
 	start = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
 	end = time.Date(local.Year(), local.Month(), local.Day()+1, 0, 0, 0, 0, location)
-	return start, end
+	return start.UTC(), end.UTC()
 }
 
 // inboxSnippet collapses each run of whitespace to one space, trims the ends, and keeps the first

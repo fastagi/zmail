@@ -49,6 +49,15 @@ func (h *Handler) ListInboxMessages(c *gin.Context) {
 	started := time.Now()
 	page, err := h.service.ListInbox(c.Request.Context(), viewer, request)
 	if err != nil {
+		if errors.Is(err, ErrMailSearchTooBroad) {
+			// Only the query's length reaches the log, never the query.
+			slog.InfoContext(c.Request.Context(), "mail.inbox.search_too_broad",
+				slog.String("request_id", c.GetString("request_id")),
+				slog.Uint64("organization_id", uint64(viewer.OrganizationID)),
+				slog.Int("query_length", utf8.RuneCountInString(request.Query)),
+				slog.Int("readable_mailboxes", page.ReadableMailboxes),
+			)
+		}
 		response.HandleError(c, "Failed to list the inbox", err)
 		return
 	}
@@ -149,14 +158,9 @@ func parseInboxRequest(query url.Values) (InboxRequest, error) {
 		request.GroupThreads = true
 	}
 	if raw, present := value("tz"); present {
-		// time.LoadLocation reads "" as UTC and "Local" as the server's zone; neither is a
-		// viewer's IANA zone.
-		if raw == "" || raw == "Local" || len(raw) > maxInboxTimeZoneLength {
-			return invalid("tz")
-		}
-		location, err := time.LoadLocation(raw)
+		location, err := parseInboxTimeZone(raw)
 		if err != nil {
-			return invalid("tz")
+			return InboxRequest{}, err
 		}
 		request.Location = location
 	}
@@ -192,6 +196,52 @@ func parseInboxRequest(query url.Values) (InboxRequest, error) {
 		return invalid("group cannot be combined with unread or q")
 	}
 	return request, nil
+}
+
+// InboxMessageCounts returns the caller's counts of the unified inbox views, mail roles, and
+// readable mailboxes. Only tz is accepted, at most once.
+func (h *Handler) InboxMessageCounts(c *gin.Context) {
+	viewer, ok := organizationScope(c)
+	if !ok {
+		return
+	}
+	query, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		response.HandleError(c, "Invalid inbox counts query", fmt.Errorf("%w: malformed query string", domain.ErrInvalidInput))
+		return
+	}
+	location := time.UTC
+	for name, values := range query {
+		if name != "tz" || len(values) != 1 {
+			response.HandleError(c, "Invalid inbox counts query", fmt.Errorf("%w: only one tz is accepted", domain.ErrInvalidInput))
+			return
+		}
+		if location, err = parseInboxTimeZone(values[0]); err != nil {
+			response.HandleError(c, "Invalid inbox counts query", err)
+			return
+		}
+	}
+	counts, err := h.service.InboxCounts(c.Request.Context(), viewer, location)
+	if err != nil {
+		response.HandleError(c, "Failed to count the inbox", err)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, toInboxCountsResponse(counts))
+}
+
+// parseInboxTimeZone reads the tz parameter as an IANA time zone. time.LoadLocation reads ""
+// as UTC and "Local" as the server's zone; neither is a viewer's zone, so both are refused.
+func parseInboxTimeZone(raw string) (*time.Location, error) {
+	invalid := fmt.Errorf("%w: tz", domain.ErrInvalidInput)
+	if raw == "" || raw == "Local" || len(raw) > maxInboxTimeZoneLength {
+		return nil, invalid
+	}
+	location, err := time.LoadLocation(raw)
+	if err != nil {
+		return nil, invalid
+	}
+	return location, nil
 }
 
 // encodeInboxCursor writes a cursor as base64url("<unix nanos>.<id>") without padding.

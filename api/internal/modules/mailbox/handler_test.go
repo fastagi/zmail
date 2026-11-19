@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -61,6 +62,7 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	router.POST("/mailboxes/:mailbox_id/messages", handler.SendMessage)
 	router.GET("/mail-messages", handler.ListLog)
 	router.GET("/inbox-messages", handler.ListInboxMessages)
+	router.GET("/inbox-message-counts", handler.InboxMessageCounts)
 	router.POST("/mail-broadcasts/:broadcast_id/sends", handler.SendBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/cancellations", handler.CancelBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/pauses", handler.PauseBroadcast)
@@ -464,6 +466,93 @@ func TestInboxItemShape(t *testing.T) {
 	_, _, last := only("/inbox-messages?per_page=1&cursor=" + next)
 	if last["id"] != float64(received.ID) {
 		t.Fatalf("second page = %v; want the older message", last)
+	}
+}
+
+func TestInboxCountsRejectsOtherParameters(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk")); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	for _, query := range []string{
+		"view=all", "tz=UTC&tz=UTC", "tz=UTC&per_page=5", "cursor=x", "page=1",
+		"tz=", "tz=Local", "tz=Mars/Base", "tz=" + strings.Repeat("A", 65), "tz=%zz",
+	} {
+		recorder, body := fixture.do(http.MethodGet, "/inbox-message-counts?"+query, "")
+		expectStatus(t, "GET /inbox-message-counts?"+query, recorder.Code, body, http.StatusBadRequest, domain.CodeInvalidInput)
+	}
+	if len(fixture.inbox.unreadCalls) != 0 || len(fixture.inbox.viewCalls) != 0 {
+		t.Fatalf("count calls = %v, %v; a refused request must count nothing", fixture.inbox.unreadCalls, fixture.inbox.viewCalls)
+	}
+
+	recorder, body := fixture.do(http.MethodGet, "/inbox-message-counts?tz=Asia/Shanghai", "")
+	expectStatus(t, "GET /inbox-message-counts?tz=Asia/Shanghai", recorder.Code, body, http.StatusOK, "")
+	if recorder.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("Cache-Control = %q; want private, no-store", recorder.Header().Get("Cache-Control"))
+	}
+	data, _ := body["data"].(map[string]any)
+	views, _ := data["views"].(map[string]any)
+	for _, field := range []string{"all_unread", "today", "today_unread", "pending", "sent_waiting"} {
+		if _, present := views[field]; !present {
+			t.Fatalf("views = %v; want %s", views, field)
+		}
+	}
+	roles, rolesOK := data["roles"].([]any)
+	mailboxes, _ := data["mailboxes"].([]any)
+	if !rolesOK || len(roles) != 0 || len(mailboxes) != 1 || data["ungrouped_unread"] != float64(0) {
+		t.Fatalf("data = %v; want no roles and the one readable mailbox", data)
+	}
+	if first, _ := mailboxes[0].(map[string]any); first["mailbox_id"] == nil || first["unread"] != float64(0) {
+		t.Fatalf("mailbox entry = %v; want mailbox_id and unread", mailboxes[0])
+	}
+	for _, field := range []string{"today_starts_at", "today_ends_at"} {
+		value, _ := data[field].(string)
+		if at, err := time.Parse(time.RFC3339, value); err != nil || !strings.HasSuffix(value, "Z") || at.IsZero() {
+			t.Fatalf("%s = %q; want an RFC 3339 UTC time", field, value)
+		}
+	}
+	if len(data) != 6 {
+		t.Fatalf("data = %v; want exactly views, roles, ungrouped_unread, mailboxes, today_starts_at, today_ends_at", data)
+	}
+
+	recorder, body = fixture.do(http.MethodGet, "/inbox-message-counts", "")
+	expectStatus(t, "GET /inbox-message-counts", recorder.Code, body, http.StatusOK, "")
+	data, _ = body["data"].(map[string]any)
+	if data["today_starts_at"] == nil {
+		t.Fatalf("data = %v; tz defaults to UTC", data)
+	}
+}
+
+func TestInboxSearchTooBroadIs422(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk")); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	fixture.inbox.listErr = fmt.Errorf("list inbox: %w", ErrMailSearchTooBroad)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	recorder, body := fixture.do(http.MethodGet, "/inbox-messages?q=%20invoice%20", "")
+	expectStatus(t, "GET a search that is too broad", recorder.Code, body, http.StatusUnprocessableEntity, domain.CodeMailSearchTooBroad)
+
+	var event map[string]any
+	for line := range strings.SplitSeq(strings.TrimSpace(logs.String()), "\n") {
+		var entry map[string]any
+		if json.Unmarshal([]byte(line), &entry) == nil && entry["msg"] == "mail.inbox.search_too_broad" {
+			event = entry
+		}
+	}
+	if event == nil || event["organization_id"] != float64(7) || event["query_length"] != float64(len("invoice")) ||
+		event["readable_mailboxes"] != float64(1) {
+		t.Fatalf("logs = %s; want mail.inbox.search_too_broad with organization 7, query length 7, 1 readable mailbox", logs.String())
+	}
+	if _, present := event["request_id"]; !present {
+		t.Fatalf("event = %v; want request_id", event)
+	}
+	if strings.Contains(logs.String(), "invoice") {
+		t.Fatalf("logs = %s; the query never reaches the log", logs.String())
 	}
 }
 

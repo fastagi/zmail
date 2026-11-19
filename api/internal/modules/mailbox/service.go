@@ -199,6 +199,9 @@ type Service interface {
 	// ListInbox lists one page of the unified inbox: the viewer's mail across every mailbox they
 	// may read.
 	ListInbox(ctx context.Context, viewer domain.OrganizationContext, request InboxRequest) (InboxPage, error)
+	// InboxCounts counts the viewer's unified inbox views, mail roles, and mailboxes, with today
+	// as the viewer's day in location.
+	InboxCounts(ctx context.Context, viewer domain.OrganizationContext, location *time.Location) (InboxCounts, error)
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
