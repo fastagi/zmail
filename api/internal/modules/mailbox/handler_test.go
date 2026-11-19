@@ -63,6 +63,11 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	router.GET("/mail-messages", handler.ListLog)
 	router.GET("/inbox-messages", handler.ListInboxMessages)
 	router.GET("/inbox-message-counts", handler.InboxMessageCounts)
+	router.GET("/mail-roles", handler.ListMailRoles)
+	router.POST("/mail-roles", handler.CreateMailRole)
+	router.PUT("/mail-roles/:role_id", handler.UpdateMailRole)
+	router.DELETE("/mail-roles/:role_id", handler.DeleteMailRole)
+	router.PUT("/mailboxes/:mailbox_id/role-assignment", handler.AssignMailboxRole)
 	router.POST("/mail-broadcasts/:broadcast_id/sends", handler.SendBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/cancellations", handler.CancelBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/pauses", handler.PauseBroadcast)
@@ -201,11 +206,60 @@ func TestMailboxRoutesRequireAnOrganizationContext(t *testing.T) {
 		{http.MethodPost, "/mailboxes"}, {http.MethodDelete, "/mailboxes/1"},
 		{http.MethodGet, "/mailboxes/1/messages"},
 		{http.MethodPost, "/mailboxes/1/messages"}, {http.MethodGet, "/mail-messages"},
-		{http.MethodGet, "/inbox-messages"},
+		{http.MethodGet, "/inbox-messages"}, {http.MethodGet, "/mail-roles"}, {http.MethodPost, "/mail-roles"},
+		{http.MethodPut, "/mail-roles/1"}, {http.MethodDelete, "/mail-roles/1"},
+		{http.MethodPut, "/mailboxes/1/role-assignment"},
 	} {
 		recorder, body := fixture.do(request[0], request[1], `{}`)
 		if recorder.Code != http.StatusBadRequest || body["error_code"] != domain.CodeOrganizationContextRequired {
 			t.Fatalf("%s %s = %d %v; want 400 %s", request[0], request[1], recorder.Code, body, domain.CodeOrganizationContextRequired)
+		}
+	}
+}
+
+func TestMailboxListCarriesRoleID(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	for _, localPart := range []string{"grouped", "loose"} {
+		if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser(localPart)); err != nil {
+			t.Fatalf("CreateMailbox(%s): %v", localPart, err)
+		}
+	}
+	fixture.repo.mailboxes[1].RoleID = new(uint(3))
+
+	listed, body := fixture.do(http.MethodGet, "/mailboxes", "")
+	mailboxes, _ := body["data"].([]any)
+	if listed.Code != http.StatusOK || len(mailboxes) != 2 {
+		t.Fatalf("list = %d %v", listed.Code, body)
+	}
+	for _, item := range mailboxes {
+		mailbox, _ := item.(map[string]any)
+		roleID, present := mailbox["role_id"]
+		want := any(nil)
+		if mailbox["id"] == float64(1) {
+			want = float64(3)
+		}
+		if !present || roleID != want {
+			t.Fatalf("mailbox %v role_id = %v (present %v); want %v", mailbox["id"], roleID, present, want)
+		}
+	}
+}
+
+func TestMailRoleErrorCodes(t *testing.T) {
+	mapper := &response.ErrorMapper{}
+	NewHandler(nil).RegisterErrorMappings(mapper)
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{ErrMailRoleNotFound, http.StatusNotFound, "MAILBOX.ROLE_NOT_FOUND"},
+		{ErrMailRoleNameTaken, http.StatusConflict, "MAILBOX.ROLE_NAME_TAKEN"},
+		{ErrMailRoleLimitReached, http.StatusUnprocessableEntity, "MAILBOX.ROLE_LIMIT_REACHED"},
+	}
+	for _, tc := range cases {
+		got := mapper.Resolve(tc.err)
+		if got.StatusCode != tc.status || got.ErrorCode != tc.code {
+			t.Fatalf("%v maps to %d %s; want %d %s", tc.err, got.StatusCode, got.ErrorCode, tc.status, tc.code)
 		}
 	}
 }

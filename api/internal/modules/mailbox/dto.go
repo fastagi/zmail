@@ -239,6 +239,53 @@ type MailFolderResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// MailRoleRequest is the whole of a mail role a create or replace sets. Unknown fields are
+// ignored; the service trims and checks every field.
+type MailRoleRequest struct {
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	Description string `json:"description"`
+	// OwnerUserID is the member responsible for the role, for display only; null for none.
+	OwnerUserID *uint `json:"owner_user_id"`
+}
+
+func (r MailRoleRequest) input() MailRoleInput {
+	return MailRoleInput{
+		Name: r.Name, Color: domain.MailLabelColor(r.Color), Description: r.Description, OwnerUserID: r.OwnerUserID,
+	}
+}
+
+// MailRoleResponse is one mail role with the mailboxes in it the caller can see, ascending.
+type MailRoleResponse struct {
+	ID          uint      `json:"id"`
+	Name        string    `json:"name"`
+	Color       string    `json:"color"`
+	Description string    `json:"description"`
+	OwnerUserID *uint     `json:"owner_user_id"`
+	MailboxIDs  []uint    `json:"mailbox_ids"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func toMailRoleResponse(role *domain.MailRole) MailRoleResponse {
+	mailboxIDs := role.MailboxIDs
+	if mailboxIDs == nil {
+		mailboxIDs = []uint{}
+	}
+	return MailRoleResponse{
+		ID: role.ID, Name: role.Name, Color: string(role.Color), Description: role.Description,
+		OwnerUserID: role.OwnerUserID, MailboxIDs: mailboxIDs, CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
+	}
+}
+
+func toMailRoleResponses(roles []*domain.MailRole) []MailRoleResponse {
+	responses := make([]MailRoleResponse, 0, len(roles))
+	for _, role := range roles {
+		responses = append(responses, toMailRoleResponse(role))
+	}
+	return responses
+}
+
 // MailLabelResponse is one label of a mailbox.
 type MailLabelResponse struct {
 	ID        uint      `json:"id"`
@@ -345,8 +392,10 @@ type MailboxResponse struct {
 	// Access is what the viewer may do with the mailbox.
 	Access MailboxAccessResponse `json:"access"`
 	// UnreadCount counts unread inbound messages; 0 for a viewer who may not read the mailbox.
-	UnreadCount int       `json:"unread_count"`
-	CreatedAt   time.Time `json:"created_at"`
+	UnreadCount int `json:"unread_count"`
+	// RoleID is the mail role the mailbox belongs to; null when it has none.
+	RoleID    *uint     `json:"role_id"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // MailboxAccessResponse is the viewer's capabilities on one mailbox.
@@ -541,6 +590,7 @@ func toMailboxResponse(mailbox *domain.Mailbox) *MailboxResponse {
 		WebhooksEnabled:  mailbox.WebhooksEnabled,
 		Access:           MailboxAccessResponse(mailbox.Access),
 		UnreadCount:      mailbox.UnreadCount,
+		RoleID:           mailbox.RoleID,
 		CreatedAt:        mailbox.CreatedAt,
 	}
 }

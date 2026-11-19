@@ -136,12 +136,13 @@ func (s *service) DeleteSealedHistory(ctx context.Context, viewer domain.Organiz
 // member rows and read rows with the membership; this records the departure: each personal
 // mailbox they owned awaits handover, and each shared mailbox they were a member of, found from
 // its own history, gets member_removed. Repeating it records nothing new on shared mailboxes.
+// Afterwards they stop owning the organization's mail roles; that failing is only logged.
 func (s *service) MemberRemoved(ctx context.Context, event domain.OrganizationMemberRemovedEvent) error {
 	at := event.OccurredAt().UTC()
 	if at.IsZero() {
 		at = s.now().UTC()
 	}
-	return s.repo.InTransaction(ctx, func(tx context.Context) error {
+	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
 		owned, err := s.repo.MarkOwnerLeft(tx, event.OrganizationID, event.UserID, at)
 		if err != nil {
 			return err
@@ -167,6 +168,9 @@ func (s *service) MemberRemoved(ctx context.Context, event domain.OrganizationMe
 		}
 		return nil
 	})
+	// Mail roles only display their owner, so clearing it is not part of the access change above.
+	s.clearMailRoleOwner(ctx, event.OrganizationID, event.UserID)
+	return err
 }
 
 // MemberJoined handles a user joining the organization: a returning owner's personal mailboxes

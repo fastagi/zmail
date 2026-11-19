@@ -44,6 +44,11 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.GET("/inbox-messages", h.ListInboxMessages).Name("inbox_messages.index")
 		auth.GET("/inbox-message-counts", h.InboxMessageCounts).Name("inbox_message_counts.index")
 
+		auth.GET("/mail-roles", h.ListMailRoles).Name("mail_roles.index")
+		auth.POST("/mail-roles", h.CreateMailRole).Name("mail_roles.store")
+		auth.PUT("/mail-roles/:role_id", h.UpdateMailRole).Name("mail_roles.update").WhereNumber("role_id")
+		auth.DELETE("/mail-roles/:role_id", h.DeleteMailRole).Name("mail_roles.destroy").WhereNumber("role_id")
+
 		auth.GET("/mail-templates", h.ListTemplates).Name("mail_templates.index")
 		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store")
 		auth.GET("/mail-templates/:template_id", h.GetTemplate).Name("mail_templates.show").WhereNumber("template_id")
@@ -98,6 +103,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.sealed_messages.destroy").WhereNumber("mailbox_id")
 		auth.PUT("/mailboxes/:mailbox_id/webhook-setting", h.SetMailboxWebhookSetting).
 			Name("mailboxes.webhook_setting.update").WhereNumber("mailbox_id")
+		auth.PUT("/mailboxes/:mailbox_id/role-assignment", h.AssignMailboxRole).
+			Name("mailboxes.role_assignment.update").WhereNumber("mailbox_id")
 
 		auth.GET("/mailboxes/:mailbox_id/messages", h.ListMessages).
 			Name("mailboxes.messages.index").WhereNumber("mailbox_id")

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -511,5 +513,73 @@ func TestInboxCountsOnlyQueryReadableMailboxes(t *testing.T) {
 	}
 	if !admin.TodayStartsAt.Equal(wantStart) || !admin.TodayEndsAt.Equal(wantEnd) {
 		t.Fatalf("admin day = [%s, %s); want the requested day still", admin.TodayStartsAt, admin.TodayEndsAt)
+	}
+}
+
+// withLooseMailbox adds loose@, a shared mailbox B views that has no mail role, with one message.
+func (f *roleFixture) withLooseMailbox(t *testing.T) (*domain.Mailbox, *domain.MailMessage) {
+	t.Helper()
+	loose, err := f.service.CreateMailbox(context.Background(), f.admin, CreateMailboxInput{
+		LocalPart: "loose", Type: domain.MailboxTypeShared,
+		Members: []MailboxMemberInput{{UserID: accessB, Permission: domain.MailboxPermissionView}},
+	})
+	if err != nil {
+		t.Fatalf("create loose@: %v", err)
+	}
+	return loose, f.receive(t, loose, "Loose note")
+}
+
+func TestInboxRoleFilter(t *testing.T) {
+	f := newRoleFixture(t)
+	_, looseMessage := f.withLooseMailbox(t)
+
+	official := listInbox(t, f.service, f.b, InboxRequest{RoleID: f.official.ID})
+	if ids := inboxIDs(official); !slices.Equal(ids, []uint{f.teamMessage.ID}) {
+		t.Fatalf("B with role Official = %v; want only team@'s message %d", ids, f.teamMessage.ID)
+	}
+	if item := official.Items[0]; item.RoleID == nil || *item.RoleID != f.official.ID {
+		t.Fatalf("team@ item role = %v; want Official", item.RoleID)
+	}
+	if ids := inboxIDs(listInbox(t, f.service, f.b, InboxRequest{Ungrouped: true})); !slices.Equal(ids, []uint{looseMessage.ID}) {
+		t.Fatalf("B with role_id=none = %v; want only loose@'s message", ids)
+	}
+
+	status, body := f.call(t, f.c, http.MethodGet, fmt.Sprintf("/inbox-messages?role_id=%d", f.design.ID), "")
+	if items, ok := body["data"].([]any); status != http.StatusOK || !ok || len(items) != 0 {
+		t.Fatalf("C with Design desk = %d %v; want an empty 200", status, body)
+	}
+	status, body = f.call(t, f.b, http.MethodGet, fmt.Sprintf("/inbox-messages?role_id=%d", f.design.ID), "")
+	items, _ := body["data"].([]any)
+	if status != http.StatusOK || len(items) != 1 {
+		t.Fatalf("B with Design desk = %d %v; want b@'s message", status, body)
+	}
+	if item, _ := items[0].(map[string]any); item["role_id"] != float64(f.design.ID) {
+		t.Fatalf("b@ item = %v; want role_id %d", item, f.design.ID)
+	}
+}
+
+func TestInboxCountsMoveWhenRoleDeleted(t *testing.T) {
+	f := newRoleFixture(t)
+	ctx := context.Background()
+	before, err := f.service.InboxCounts(ctx, f.b, nil)
+	if err != nil {
+		t.Fatalf("InboxCounts: %v", err)
+	}
+	wantRoles := []InboxRoleCount{{RoleID: f.design.ID, Unread: 1}, {RoleID: f.official.ID, Unread: 1}}
+	if before.AllUnread != 2 || before.UngroupedUnread != 0 || !slices.Equal(before.Roles, wantRoles) {
+		t.Fatalf("counts before = %+v", before)
+	}
+
+	if err = f.service.DeleteMailRole(ctx, f.admin, f.official.ID); err != nil {
+		t.Fatalf("delete Official: %v", err)
+	}
+	after, err := f.service.InboxCounts(ctx, f.b, nil)
+	if err != nil {
+		t.Fatalf("InboxCounts: %v", err)
+	}
+	// UI-8: the totals hold and team@'s unread moves to ungrouped.
+	if after.AllUnread != before.AllUnread || after.UngroupedUnread != 1 ||
+		!slices.Equal(after.Roles, wantRoles[:1]) || !slices.Equal(after.Mailboxes, before.Mailboxes) {
+		t.Fatalf("counts after deleting Official = %+v; before %+v", after, before)
 	}
 }
