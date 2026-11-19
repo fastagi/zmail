@@ -27,6 +27,7 @@ const messages = {
       revoked: 'Revoked',
     },
     noScopes: 'No scopes',
+    mode: { live: 'Live', test: 'Test' },
     neverUsed: 'Never',
     revoke: 'Revoke',
     createTitle: 'Create API key',

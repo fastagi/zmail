@@ -25,9 +25,10 @@ export const developerKeys = {
   all: ['developer'] as const,
   organization: (organizationId: number) => [...developerKeys.all, organizationId] as const,
   logs: (organizationId: number) => [...developerKeys.organization(organizationId), 'log'] as const,
-  log: (organizationId: number, filters: TransactionalLogFilters) =>
+  log: (organizationId: number, filters: TransactionalLogFilters, perPage: number) =>
     [
       ...developerKeys.logs(organizationId),
+      perPage,
       filters.mode,
       filters.status ?? '',
       filters.lastEvent ?? '',
@@ -53,17 +54,24 @@ function validId(value: number): boolean {
  * The send log, one keyset page at a time: each next page continues after the last one's
  * `meta.next_cursor`. It is read again every 10 seconds while the page is visible.
  */
-export function useTransactionalLog(organizationId: number, filters: TransactionalLogFilters) {
+export function useTransactionalLog(
+  organizationId: number,
+  filters: TransactionalLogFilters,
+  {
+    perPage = TRANSACTIONAL_LOG_PAGE_SIZE,
+    enabled = true,
+  }: { perPage?: number; enabled?: boolean } = {}
+) {
   return useInfiniteQuery({
-    queryKey: developerKeys.log(organizationId, filters),
+    queryKey: developerKeys.log(organizationId, filters, perPage),
     queryFn: ({ pageParam }) =>
       developerService.log(organizationId, filters, {
         ...(pageParam === undefined ? {} : { cursor: pageParam }),
-        perPage: TRANSACTIONAL_LOG_PAGE_SIZE,
+        perPage,
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: lastPage => lastPage.meta.next_cursor ?? undefined,
-    enabled: validId(organizationId),
+    enabled: enabled && validId(organizationId),
     staleTime: TRANSACTIONAL_LOG_REFRESH_MS,
     refetchInterval: TRANSACTIONAL_LOG_REFRESH_MS,
     refetchIntervalInBackground: false,
@@ -72,12 +80,20 @@ export function useTransactionalLog(organizationId: number, filters: Transaction
   });
 }
 
-/** One log entry with its timeline; `messageId` null holds the query back. */
-export function useTransactionalLogEntry(organizationId: number, messageId: number | null) {
+/**
+ * One log entry with its timeline; `messageId` null holds the query back. `refetchInterval` follows
+ * a fresh message until its delivery events arrive.
+ */
+export function useTransactionalLogEntry(
+  organizationId: number,
+  messageId: number | null,
+  { refetchInterval = false }: { refetchInterval?: number | false } = {}
+) {
   return useQuery({
     queryKey: developerKeys.logEntry(organizationId, messageId ?? 0),
     queryFn: () => developerService.logEntry(organizationId, messageId ?? 0),
     enabled: validId(organizationId) && messageId !== null && validId(messageId),
+    refetchInterval,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }

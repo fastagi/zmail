@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TransactionalTemplateDialog } from '@/features/developer/components/transactional-template-dialog';
+import { useDeveloperTab } from '@/features/developer/hooks/use-developer-tab';
+import { useTransactionalLog } from '@/features/developer/hooks/use-developer';
 import { OrganizationLostState } from '@/features/mailbox/components/mail-organization';
 import { EmptyState, ErrorAlert, MailHtmlFrame } from '@/features/mailbox/components/mail-shared';
 import type { MailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
@@ -42,6 +44,14 @@ export function TransactionalTemplatesTab({ organization }: { organization: Mail
   const items = templates.data ?? [];
   const selected = items.find(item => item.id === chosenId) ?? items[0] ?? null;
   const detail = useMailTemplate(organization.id, selected?.id ?? null);
+  const { mode } = useDeveloperTab();
+  // Only the selected template's count is read, so the list never costs one request per template.
+  const selectedLog = useTransactionalLog(
+    organization.id,
+    { mode, ...(selected?.key ? { template: selected.key } : {}) },
+    { perPage: 1, enabled: Boolean(selected?.key) }
+  );
+  const sent24h = selectedLog.data?.pages[0]?.meta.total_24h;
 
   const create = organization.canManage ? (
     <Button
@@ -125,6 +135,11 @@ export function TransactionalTemplatesTab({ organization }: { organization: Mail
                   <span className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">
                     {item.key}
                   </span>
+                  {active && sent24h !== undefined ? (
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {t('templates.sent24h', { count: sent24h })}
+                    </span>
+                  ) : null}
                 </button>
               </li>
             );

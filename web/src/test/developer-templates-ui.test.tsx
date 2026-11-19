@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -48,6 +49,28 @@ vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
   useMailTemplate: () => state.template,
   useSaveMailTemplate: () => state.save,
 }));
+
+// The quick start and the templates tab read the send log and the caller's keys; both stay empty here.
+vi.mock('@/features/developer/services/developer-service', () => ({
+  developerService: {
+    log: vi.fn(async () => ({ items: [], meta: { next_cursor: null, total_24h: 0 } })),
+    logEntry: vi.fn(),
+    testSend: vi.fn(),
+  },
+}));
+vi.mock('@/features/api-key/services/api-key-service', () => ({
+  apiKeyService: {
+    list: vi.fn(async () => ({
+      items: [],
+      meta: { current_page: 1, per_page: 100, total: 0, last_page: 1, from: 0, to: 0 },
+      links: { first: '', last: '', prev: null, next: null },
+    })),
+    create: vi.fn(),
+    revoke: vi.fn(),
+  },
+}));
+
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
 describe('developer console', () => {
   beforeEach(() => {
@@ -298,9 +321,11 @@ function template(overrides: Record<string, unknown> = {}) {
 
 function wrap() {
   return (
-    <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
-      <DeveloperConsole />
-    </NextIntlClientProvider>
+    <QueryClientProvider client={queryClient}>
+      <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
+        <DeveloperConsole />
+      </NextIntlClientProvider>
+    </QueryClientProvider>
   );
 }
 

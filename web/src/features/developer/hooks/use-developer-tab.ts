@@ -23,6 +23,10 @@ export function useDeveloperTab(): {
   mode: DeveloperMode;
   setTab: (tab: DeveloperTab) => void;
   setMode: (mode: DeveloperMode) => void;
+  /** The current value of another query parameter of the console, such as a log filter. */
+  param: (name: string) => string | null;
+  /** Writes several parameters at once; null removes one. Tab and mode keep their values unless given. */
+  update: (patch: Readonly<Record<string, string | null>>) => void;
 } {
   const router = useRouter();
   const pathname = usePathname();
@@ -30,17 +34,23 @@ export function useDeveloperTab(): {
   const tab = oneOf(DEVELOPER_TABS, searchParams.get('tab'), 'start');
   const mode = oneOf(DEVELOPER_MODES, searchParams.get('mode'), 'live');
 
-  const write = (next: { tab: DeveloperTab; mode: DeveloperMode }) => {
+  const update = (patch: Readonly<Record<string, string | null>>) => {
     const params = new URLSearchParams(searchParams.toString());
-    params.set('tab', next.tab);
-    params.set('mode', next.mode);
+    params.set('tab', tab);
+    params.set('mode', mode);
+    for (const [name, value] of Object.entries(patch)) {
+      if (value === null || value === '') params.delete(name);
+      else params.set(name, value);
+    }
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
   return {
     tab,
     mode,
-    setTab: nextTab => write({ tab: nextTab, mode }),
-    setMode: nextMode => write({ tab, mode: nextMode }),
+    setTab: nextTab => update({ tab: nextTab }),
+    setMode: nextMode => update({ mode: nextMode }),
+    param: name => searchParams.get(name),
+    update,
   };
 }

@@ -5,6 +5,8 @@ import { Hammer, PlugZap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { QuickStartTab } from '@/features/developer/components/quick-start-tab';
+import { SendLogTab } from '@/features/developer/components/send-log-tab';
 import { TransactionalTemplatesTab } from '@/features/developer/components/transactional-templates-tab';
 import { useDeveloperTab } from '@/features/developer/hooks/use-developer-tab';
 import { DEVELOPER_MODES, DEVELOPER_TABS, type DeveloperTab } from '@/features/developer/types';
@@ -18,6 +20,7 @@ import {
   useMailOrganization,
   type MailOrganization,
 } from '@/features/mailbox/hooks/use-mail-organization';
+import type { MailboxDomain } from '@/features/mailbox/types';
 import { useMailboxDomains } from '@/features/mailbox/hooks/use-mailbox';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
@@ -71,10 +74,16 @@ function DeveloperWorkspace({ organization }: { organization: MailOrganization }
       />
     );
   }
-  return <DeveloperTabs organization={organization} />;
+  return <DeveloperTabs organization={organization} domains={domains.data} />;
 }
 
-function DeveloperTabs({ organization }: { organization: MailOrganization }) {
+function DeveloperTabs({
+  organization,
+  domains,
+}: {
+  organization: MailOrganization;
+  domains: readonly MailboxDomain[];
+}) {
   const t = useT('developer');
   const { tab, mode, setTab, setMode } = useDeveloperTab();
 
@@ -116,8 +125,12 @@ function DeveloperTabs({ organization }: { organization: MailOrganization }) {
       </div>
       {DEVELOPER_TABS.map(item => (
         <TabsContent key={item} value={item}>
-          {item === 'templates' ? (
+          {item === 'start' ? (
+            <QuickStartTab organization={organization} mode={mode} domains={domains} />
+          ) : item === 'templates' ? (
             <TransactionalTemplatesTab organization={organization} />
+          ) : item === 'logs' ? (
+            <SendLogTab organization={organization} />
           ) : (
             <EmptyState
               icon={<Hammer className="size-5" aria-hidden="true" />}
