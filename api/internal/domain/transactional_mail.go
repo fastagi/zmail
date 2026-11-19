@@ -191,6 +191,11 @@ type TransactionalMailRepository interface {
 	ReleaseIdempotencyKey(ctx context.Context, id uint) error
 	// FindTransactional finds a message of an organization.
 	FindTransactional(ctx context.Context, organizationID, id uint) (*TransactionalMessage, error)
+	// FindTransactionalByID finds a message of any organization, for the dispatcher.
+	FindTransactionalByID(ctx context.Context, id uint) (*TransactionalMessage, error)
+	// OldestQueuedTransactional reports when the oldest live, real message still queued and not
+	// waiting for lane room was created; nil when there is none.
+	OldestQueuedTransactional(ctx context.Context) (*time.Time, error)
 	// FindTransactionalByProviderID finds the message the provider knows by this id.
 	FindTransactionalByProviderID(ctx context.Context, providerMessageID string) (*TransactionalMessage, error)
 	// CountTransactionalAttemptsSince counts the organization's provider calls since a time.

@@ -57,7 +57,14 @@ func newTxFixture(t *testing.T, edit func(*Settings)) *txFixture {
 		edit(&settings)
 	}
 	f := &txFixture{repo: repo, db: db, transport: &fakeTransport{}, notifier: &fakeNotifier{}, clock: time.Now().UTC().Truncate(time.Microsecond)}
-	f.service = NewService(repo, &fakeMemberships{}, repo, repo, repo, repo, nil, nil, nil, f.transport, f.notifier, settings,
+	if settings.Provider != config.MailboxProviderLog {
+		// A real provider sends only from a verified organization domain.
+		if err := db.Exec(`INSERT INTO mail_domains (organization_id, name, zone_id, zone_name, status, created_by, created_at, updated_at)
+			VALUES (10, 'mail.example', 'zone-1', 'mail.example', 'verified', ?, now(), now())`, txUser).Error; err != nil {
+			t.Fatalf("seed domain: %v", err)
+		}
+	}
+	f.service = NewService(repo, &fakeMemberships{}, repo, repo, repo, repo, repo, nil, nil, f.transport, f.notifier, settings,
 		repo, ratelimit.NewMemoryStores(), fakeAccounts{txUser: "Owner.Account@Example.COM"})
 	f.service.now = func() time.Time { return f.clock }
 	f.service.background = func(run func()) { run() }
@@ -138,6 +145,8 @@ func (f *txFixture) attempted(t *testing.T, ids ...uint) {
 // The secret value exists only inside the ciphertext; every readable copy is masked.
 func TestSecretNeverStoredInClear(t *testing.T) {
 	f := newTxFixture(t, nil)
+	// Hold the fast dispatch so the queued row can be read.
+	f.hold()
 	message, created := f.send(t, liveActor(), codeInput("signup-u_8812", "lilei@example.com", "482913"))
 	if !created || message.Status != domain.TransactionalStatusQueued || message.QueuedReason != nil {
 		t.Fatalf("message = %+v, created %v", message, created)
@@ -176,7 +185,7 @@ func TestSecretNeverStoredInClear(t *testing.T) {
 		stored.TemplateKey != "signup-code" || stored.APIKeyID == nil || *stored.APIKeyID != 31 || stored.CreatedBy != txUser {
 		t.Fatalf("snapshot = %+v", stored)
 	}
-	// The dispatcher is not wired yet: nothing reached the provider.
+	// The fast dispatch is held: nothing reached the provider.
 	if len(f.transport.sent) != 0 {
 		t.Fatalf("provider calls = %d", len(f.transport.sent))
 	}
@@ -438,6 +447,7 @@ func TestKeyRateLimitTwentyFirstInOneSecond(t *testing.T) {
 
 func TestSuppressedRecipientStoredWithoutCiphertext(t *testing.T) {
 	f := newTxFixture(t, func(settings *Settings) { settings.DailyTransactionalLimit = 1 })
+	f.hold()
 	ctx := context.Background()
 	if err := f.repo.AddSuppression(ctx, domain.MailSuppression{
 		OrganizationID: 10, Email: "lilei@example.com", Reason: domain.MailSuppressionReasonComplained,

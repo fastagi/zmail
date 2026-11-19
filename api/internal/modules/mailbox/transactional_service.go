@@ -17,6 +17,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/metrics"
 	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 )
 
@@ -181,12 +182,14 @@ func (s *service) transactionalEnabled() bool {
 	return s.settings.TransactionalEnabled && s.settings.SecretEncryptionKey != "" && s.transactional != nil
 }
 
-// take consumes one unit of a limit, or refuses with the time until its window has room.
-func take(ctx context.Context, store ratelimit.Store, bucket string, refusal error) error {
+// take consumes one unit of the limit of a rule, or counts the refusal and refuses with the time
+// until its window has room.
+func take(ctx context.Context, store ratelimit.Store, rule, bucket string, refusal error) error {
 	allowed, _, resetAt := store.Take(ctx, bucket)
 	if allowed {
 		return nil
 	}
+	metrics.RecordTransactionalRateLimited(rule)
 	return &RetryAfterError{Err: refusal, RetryAfter: time.Until(resetAt)}
 }
 
@@ -222,7 +225,7 @@ func (s *service) SendTransactional(ctx context.Context, actor TransactionalActo
 	}
 	if actor.APIKeyID != nil {
 		bucket := "key:" + strconv.FormatUint(uint64(*actor.APIKeyID), 10)
-		if err := take(ctx, s.transactionalLimits.key, bucket, ErrTransactionalRateLimited); err != nil {
+		if err := take(ctx, s.transactionalLimits.key, ruleTransactionalKey, bucket, ErrTransactionalRateLimited); err != nil {
 			return nil, false, err
 		}
 	}
@@ -261,7 +264,7 @@ func (s *service) SendTransactionalTest(ctx context.Context, viewer domain.Organ
 		return nil, err
 	}
 	bucket := "user:" + strconv.FormatUint(uint64(viewer.UserID), 10)
-	if err := take(ctx, s.transactionalLimits.testSend, bucket, ErrTransactionalRateLimited); err != nil {
+	if err := take(ctx, s.transactionalLimits.testSend, ruleTransactionalTestSend, bucket, ErrTransactionalRateLimited); err != nil {
 		return nil, err
 	}
 	if s.accounts == nil {
@@ -423,7 +426,7 @@ type transactionalPayload struct {
 func (s *service) sendTransactional(ctx context.Context, send *transactionalSend) (*domain.TransactionalMessage, bool, error) {
 	actor := send.actor
 	bucket := crypto.SHA256Hex(fmt.Sprintf("%d:%s:%d:%s", actor.OrganizationID, actor.Mode, send.template.ID, send.to))
-	if err := take(ctx, s.transactionalLimits.recipient, bucket, ErrMailRecipientRateLimited); err != nil {
+	if err := take(ctx, s.transactionalLimits.recipient, ruleTransactionalRecipient, bucket, ErrMailRecipientRateLimited); err != nil {
 		return nil, false, err
 	}
 	if err := s.requireTemplateSender(ctx, actor.OrganizationID, send.template.FromAddress); err != nil {

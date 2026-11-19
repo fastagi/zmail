@@ -20,6 +20,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
+	"github.com/fastagi/zmail/api/internal/infra/metrics"
 	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
@@ -797,6 +798,7 @@ func (s *service) deliver(
 	files []mailtransport.Attachment,
 	headers map[string]string,
 ) (*domain.MailMessage, bool, error) {
+	metrics.RecordSendLaneAttempt(string(message.SendLane))
 	outcome, sendErr := s.transport.Send(ctx, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,

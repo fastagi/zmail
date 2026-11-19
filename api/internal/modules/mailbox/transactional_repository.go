@@ -83,6 +83,22 @@ func (r *repository) FindTransactional(ctx context.Context, organizationID, id u
 	return r.findTransactional(ctx, "organization_id = ? AND id = ?", organizationID, id)
 }
 
+func (r *repository) FindTransactionalByID(ctx context.Context, id uint) (*domain.TransactionalMessage, error) {
+	return r.findTransactional(ctx, "id = ?", id)
+}
+
+func (r *repository) OldestQueuedTransactional(ctx context.Context) (*time.Time, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var oldest *time.Time
+	err := r.conn(ctx).Model(&TransactionalMessagePO{}).
+		Where("status = ? AND mode = ? AND NOT simulated AND (queued_reason IS NULL OR queued_reason <> ?)",
+			string(domain.TransactionalStatusQueued), string(domain.APIKeyModeLive), string(domain.TransactionalQueuedSendLimit)).
+		Select("min(created_at)").Scan(&oldest).Error
+	return oldest, err
+}
+
 func (r *repository) FindTransactionalByProviderID(ctx context.Context, providerMessageID string) (*domain.TransactionalMessage, error) {
 	return r.findTransactional(ctx, "provider_message_id = ?", providerMessageID)
 }

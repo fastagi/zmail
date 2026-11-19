@@ -656,14 +656,21 @@ type MailBroadcastRepository interface {
 	SuppressContactForMessage(ctx context.Context, messageID uint, reason string) error
 }
 
-// MailBroadcastDispatcher sends due broadcast recipients outside request paths.
+// MailBroadcastDispatcher sends queued transactional mail, waiting sends, and due broadcast
+// recipients outside request paths, and purges what outlived its retention.
 type MailBroadcastDispatcher interface {
+	// DispatchTransactional fails expired and unknown-outcome transactional messages, then sends
+	// up to limit due ones, and returns how many it finished or handled.
+	DispatchTransactional(ctx context.Context, limit int) (int, error)
 	DispatchBroadcasts(ctx context.Context, limit int) (int, error)
 	// DispatchQueuedSends sends up to limit messages that waited for room in the send limit.
 	DispatchQueuedSends(ctx context.Context, limit int) (int, error)
 	// PurgeExpiredTrash deletes for good up to limit messages that have been in the trash for
 	// MailTrashRetention at now, oldest first.
 	PurgeExpiredTrash(ctx context.Context, now time.Time, limit int) (int, error)
+	// PurgeExpiredTransactional deletes up to limit transactional messages, with their events,
+	// created TransactionalRetention before now.
+	PurgeExpiredTransactional(ctx context.Context, now time.Time, limit int) (int, error)
 }
 
 // MailZoneChecker checks pending managed zones outside request paths: it activates the zones the

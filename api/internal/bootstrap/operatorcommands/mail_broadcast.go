@@ -20,8 +20,8 @@ import (
 
 var errMailBroadcastRuntimeUnavailable = errors.New("mail broadcast runtime is unavailable")
 
-// MailBroadcastWorkCommand sends the recipients of running broadcasts and the direct sends that
-// waited for room in the send limit.
+// MailBroadcastWorkCommand sends transactional mail, the recipients of running broadcasts, and the
+// direct sends that waited for room in the send limit.
 type MailBroadcastWorkCommand struct {
 	output *console.Output
 }
@@ -32,7 +32,7 @@ func NewMailBroadcastWorkCommand() *MailBroadcastWorkCommand {
 
 func (c *MailBroadcastWorkCommand) Name() string { return "mail:broadcast:work" }
 func (c *MailBroadcastWorkCommand) Description() string {
-	return "Send queued mail and the recipients of scheduled and running mail broadcasts, and purge expired trash"
+	return "Send transactional and queued mail and the recipients of scheduled and running mail broadcasts, and purge expired trash and transactional mail"
 }
 func (c *MailBroadcastWorkCommand) Usage() string {
 	return "mail:broadcast:work [--batch=25] [--poll=2s] [--once]"
@@ -43,21 +43,33 @@ type mailBroadcastWorker struct {
 	dispatcher domain.MailBroadcastDispatcher
 }
 
-// DispatchWebhooks runs one tick: messages that waited for the send limit go first, then
-// broadcast recipients with the rest of the batch, and last the trash expired 30 days ago is
-// purged with what is left.
+// DispatchWebhooks runs one tick, each step with what the batch has left: transactional mail
+// first, then messages that waited for the send limit, broadcast recipients, the trash expired 30
+// days ago, and last transactional messages past their retention.
 func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (int, error) {
-	queued, err := w.dispatcher.DispatchQueuedSends(ctx, limit)
-	if err != nil || queued >= limit {
-		return queued, err
+	steps := []func(context.Context, int) (int, error){
+		w.dispatcher.DispatchTransactional,
+		w.dispatcher.DispatchQueuedSends,
+		w.dispatcher.DispatchBroadcasts,
+		func(ctx context.Context, limit int) (int, error) {
+			return w.dispatcher.PurgeExpiredTrash(ctx, time.Now().UTC(), limit)
+		},
+		func(ctx context.Context, limit int) (int, error) {
+			return w.dispatcher.PurgeExpiredTransactional(ctx, time.Now().UTC(), limit)
+		},
 	}
-	sent, err := w.dispatcher.DispatchBroadcasts(ctx, limit-queued)
-	processed := queued + sent
-	if err != nil || processed >= limit {
-		return processed, err
+	processed := 0
+	for _, step := range steps {
+		if processed >= limit {
+			break
+		}
+		done, err := step(ctx, limit-processed)
+		processed += done
+		if err != nil {
+			return processed, err
+		}
 	}
-	purged, err := w.dispatcher.PurgeExpiredTrash(ctx, time.Now().UTC(), limit-processed)
-	return processed + purged, err
+	return processed, nil
 }
 
 func (c *MailBroadcastWorkCommand) Run(args []string) error {
