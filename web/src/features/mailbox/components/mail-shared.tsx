@@ -71,6 +71,22 @@ export function ErrorAlert({
   );
 }
 
+/**
+ * A background refetch failed while earlier data is still on screen: the data stays, and this
+ * quiet line says it may be out of date until the next poll succeeds.
+ */
+export function StaleNotice({ message, className }: { message: string; className?: string }) {
+  return (
+    <p
+      role="status"
+      className={cn('flex items-center gap-1.5 text-xs text-muted-foreground', className)}
+    >
+      <AlertCircle className="size-3.5" aria-hidden="true" />
+      {message}
+    </p>
+  );
+}
+
 export function EmptyState({
   icon,
   title,

@@ -33,6 +33,7 @@ import {
   ErrorAlert,
   MailStatusBadge,
   mailBadgeKey,
+  StaleNotice,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import { LabelDot, type MailView } from '@/features/mailbox/components/mailbox-sidebar';
@@ -667,7 +668,8 @@ function MessageRows({
   const inTrash = view.kind === 'trash' && !q;
 
   if (messages.isPending) return <ListSkeleton />;
-  if (messages.error || !messages.data) {
+  // A failed poll keeps the list already on screen; only a list that never loaded is an error.
+  if (!messages.data) {
     const key = resolveMailboxErrorKey(messages.error);
     if (key === 'errors.searchTooBroad') {
       return (
@@ -686,7 +688,15 @@ function MessageRows({
     );
   }
   const { items, meta } = messages.data;
-  if (items.length === 0) return <EmptyView mailbox={mailbox} view={view} q={q} />;
+  const stale = messages.isRefetchError ? <StaleNotice message={t('list.refreshFailed')} /> : null;
+  if (items.length === 0) {
+    return (
+      <>
+        {stale}
+        <EmptyView mailbox={mailbox} view={view} q={q} />
+      </>
+    );
+  }
 
   const labelById = new Map(labels.map(label => [label.id, label]));
   const toggle = (row: MailMessageSummary) => {
@@ -731,6 +741,7 @@ function MessageRows({
 
   return (
     <div className="space-y-3">
+      {stale}
       <ul className="divide-y rounded-md border">
         {items.map(row => {
           const unread = rowUnread(row);

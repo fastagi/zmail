@@ -118,7 +118,71 @@ describe('mailbox live refresh', () => {
     expect(service.getMessageCounts.mock.calls.length).toBeGreaterThan(countCalls);
     await waitFor(() => expect(service.list.mock.calls.length).toBeGreaterThan(mailboxCalls));
   });
+
+  it('keeps the loaded list when a background poll fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderWorkspace();
+    expect(await screen.findByText('Old news')).toBeInTheDocument();
+    const listCalls = service.messages.mock.calls.length;
+
+    service.messages.mockRejectedValue(new Error('offline'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    // The poll and its retry both failed, and the list is still on screen.
+    expect(service.messages.mock.calls.length).toBeGreaterThanOrEqual(listCalls + 2);
+    expect(screen.getByText('Old news')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(await screen.findByText(staleNotice)).toBeInTheDocument();
+
+    // The next good poll clears the notice.
+    service.messages.mockResolvedValue(page([summary(10, 'Old news')]));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    await waitFor(() => expect(screen.queryByText(staleNotice)).not.toBeInTheDocument());
+  });
+
+  it('keeps the open thread when a background poll fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    service.getThread.mockResolvedValue([message(10, 'Old news')]);
+    renderWorkspace();
+    fireEvent.click(await screen.findByText('Old news'));
+    expect(await screen.findByText('Body of Old news')).toBeInTheDocument();
+    const threadCalls = service.getThread.mock.calls.length;
+
+    service.getThread.mockRejectedValue(new Error('offline'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+
+    expect(service.getThread.mock.calls.length).toBeGreaterThanOrEqual(threadCalls + 2);
+    expect(screen.getByText('Body of Old news')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(await screen.findByText(staleNotice)).toBeInTheDocument();
+  });
 });
+
+const staleNotice = messages.mailbox.list.refreshFailed;
+
+function message(id: number, subject: string) {
+  return {
+    ...summary(id, subject),
+    text_body: `Body of ${subject}`,
+    html_body: '',
+    message_id: `${id}@example.com`,
+    in_reply_to: '',
+    events: [],
+    attachments: [],
+  };
+}
 
 function mailbox() {
   return {

@@ -62,6 +62,7 @@ const messages = {
     outbound: 'Sent',
   },
   list: {
+    refreshFailed: 'Could not refresh. Showing what was loaded last.',
     attachments: 'Attachments: {count}',
     to: 'To: {recipients}',
     noSubject: '(no subject)',

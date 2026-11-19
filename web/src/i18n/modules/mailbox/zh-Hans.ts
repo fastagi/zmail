@@ -58,6 +58,7 @@ const messages = {
     outbound: '已发送',
   },
   list: {
+    refreshFailed: '刷新失败，显示的是上次加载的内容。',
     attachments: '{count} 个附件',
     to: '收件人：{recipients}',
     noSubject: '（无主题）',

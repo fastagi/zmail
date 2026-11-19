@@ -12,6 +12,7 @@ import { useMailOrganizationId } from '@/features/mailbox/components/mail-organi
 import {
   ErrorAlert,
   MailHtmlFrame,
+  StaleNotice,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
@@ -114,7 +115,8 @@ function ReaderState<T>({
       </div>
     );
   }
-  if (query.error || query.data === undefined) {
+  // A failed poll keeps the open message on screen; only one that never loaded is an error.
+  if (query.data === undefined) {
     return (
       <div className="space-y-3">
         <ReaderToolbar reader={reader} />
@@ -126,7 +128,13 @@ function ReaderState<T>({
       </div>
     );
   }
-  return <>{children(query.data)}</>;
+  // The notice takes its own slot, so the message below keeps its state when it comes and goes.
+  return (
+    <>
+      {query.error ? <StaleNotice message={t('list.refreshFailed')} className="mb-3" /> : null}
+      {children(query.data)}
+    </>
+  );
 }
 
 /** Back to the list, and the previous and next row of the list. */
