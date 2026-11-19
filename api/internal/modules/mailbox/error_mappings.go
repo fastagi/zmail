@@ -64,4 +64,5 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(ErrMailLabelNameTaken, http.StatusConflict, domain.CodeMailLabelNameTaken)
 	mapper.Register(ErrMailFolderLimitReached, http.StatusUnprocessableEntity, domain.CodeMailFolderLimitReached)
 	mapper.Register(ErrMailLabelLimitReached, http.StatusUnprocessableEntity, domain.CodeMailLabelLimitReached)
+	mapper.Register(ErrMailSearchTooBroad, http.StatusUnprocessableEntity, domain.CodeMailSearchTooBroad)
 }

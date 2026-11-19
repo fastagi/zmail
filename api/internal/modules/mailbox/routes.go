@@ -95,6 +95,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.messages.update").WhereNumber("mailbox_id").WhereNumber("message_id")
 		auth.DELETE("/mailboxes/:mailbox_id/messages/:message_id", h.DeleteMessage).
 			Name("mailboxes.messages.destroy").WhereNumber("mailbox_id").WhereNumber("message_id")
+		auth.GET("/mailboxes/:mailbox_id/threads/:thread_id", h.GetThread).
+			Name("mailboxes.threads.show").WhereNumber("mailbox_id").WhereNumber("thread_id")
+		auth.GET("/mailboxes/:mailbox_id/message-counts", h.MessageCounts).
+			Name("mailboxes.message_counts.show").WhereNumber("mailbox_id")
 		auth.POST("/mailboxes/:mailbox_id/message-updates", h.UpdateMessages).
 			Name("mailboxes.message_updates.store").WhereNumber("mailbox_id")
 		auth.POST("/mailboxes/:mailbox_id/trash-purges", h.PurgeTrash).

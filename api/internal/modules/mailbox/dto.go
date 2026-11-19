@@ -395,6 +395,67 @@ type MailMessageSummaryResponse struct {
 	ThreadID  uint       `json:"thread_id"`
 	TrashedAt *time.Time `json:"trashed_at"`
 	CreatedAt time.Time  `json:"created_at"`
+	// Thread summarizes the message's thread in the listed view; only group=thread sets it.
+	Thread *MailThreadSummaryResponse `json:"thread,omitempty"`
+}
+
+// MailThreadSummaryResponse is the thread of a listed message in the listed view.
+type MailThreadSummaryResponse struct {
+	MessageCount int    `json:"message_count"`
+	MessageIDs   []uint `json:"message_ids"`
+	Unread       bool   `json:"unread"`
+	Starred      bool   `json:"starred"`
+	LabelIDs     []uint `json:"label_ids"`
+}
+
+func toMailThreadSummaryResponse(thread *domain.MailThreadInfo) *MailThreadSummaryResponse {
+	if thread == nil {
+		return nil
+	}
+	ids, labelIDs := thread.MessageIDs, thread.LabelIDs
+	if ids == nil {
+		ids = []uint{}
+	}
+	if labelIDs == nil {
+		labelIDs = []uint{}
+	}
+	return &MailThreadSummaryResponse{
+		MessageCount: thread.MessageCount, MessageIDs: ids,
+		Unread: thread.Unread, Starred: thread.Starred, LabelIDs: labelIDs,
+	}
+}
+
+// MailMessageCountsResponse is the caller's counts for a mailbox's navigation.
+type MailMessageCountsResponse struct {
+	Placements MailPlacementCountsResponse `json:"placements"`
+	Folders    []MailFolderCountResponse   `json:"folders"`
+	Starred    int                         `json:"starred"`
+}
+
+// MailPlacementCountsResponse counts unread inbound messages in the Inbox and the archive.
+type MailPlacementCountsResponse struct {
+	DefaultInboundUnread int `json:"default_inbound_unread"`
+	ArchiveUnread        int `json:"archive_unread"`
+}
+
+// MailFolderCountResponse counts unread inbound messages in one folder.
+type MailFolderCountResponse struct {
+	FolderID uint `json:"folder_id"`
+	Unread   int  `json:"unread"`
+}
+
+func toMailMessageCountsResponse(counts domain.MailMessageCounts) MailMessageCountsResponse {
+	folders := make([]MailFolderCountResponse, 0, len(counts.Folders))
+	for _, folder := range counts.Folders {
+		folders = append(folders, MailFolderCountResponse{FolderID: folder.FolderID, Unread: folder.Unread})
+	}
+	return MailMessageCountsResponse{
+		Placements: MailPlacementCountsResponse{
+			DefaultInboundUnread: counts.DefaultInboundUnread, ArchiveUnread: counts.ArchiveUnread,
+		},
+		Folders: folders,
+		Starred: counts.Starred,
+	}
 }
 
 // MailMessageResponse is the full shape of a message.
@@ -526,6 +587,7 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		ThreadID:        threadIDOf(message),
 		TrashedAt:       trashedAtOf(message),
 		CreatedAt:       message.CreatedAt,
+		Thread:          toMailThreadSummaryResponse(message.Thread),
 	}
 }
 

@@ -17,13 +17,15 @@ import (
 
 type repository struct {
 	db *gorm.DB
+	// searchTimeout bounds one search statement; a search that runs longer is too broad.
+	searchTimeout time.Duration
 }
 
 var _ domain.MailboxRepository = (*repository)(nil)
 
 // NewRepository creates a new repository.
 func NewRepository(db *gorm.DB) *repository {
-	return &repository{db: db}
+	return &repository{db: db, searchTimeout: MailSearchTimeout}
 }
 
 // conn returns the transaction bound to ctx, or the pool.
@@ -110,7 +112,7 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMe
 	}
 
 	// One grouped query for every mailbox, served by the (mailbox_id, direction) index: inbound
-	// mail after the seal boundary without a read row of the reader.
+	// mail in default (the Inbox) after the seal boundary without a read row of the reader.
 	var counts []struct {
 		MailboxID uint
 		Unread    int
@@ -118,7 +120,8 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMe
 	err = r.conn(ctx).Table("mail_messages").
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
 		Select("mail_messages.mailbox_id, COUNT(*) AS unread").
-		Where("mail_messages.mailbox_id IN ? AND mail_messages.direction = ?", ids, string(domain.MailDirectionInbound)).
+		Where("mail_messages.mailbox_id IN ? AND mail_messages.direction = ? AND mail_messages.placement = ?",
+			ids, string(domain.MailDirectionInbound), string(domain.MailPlacementDefault)).
 		Where(unsealedMessage).
 		Where("NOT EXISTS (SELECT 1 FROM mail_message_reads WHERE mail_message_reads.message_id = mail_messages.id AND mail_message_reads.membership_id = ?)",
 			readerMembershipID).
@@ -462,48 +465,6 @@ func (r *repository) UpdateMessageDelivery(
 		"message_id":   messageID,
 		"failure_code": failureCode,
 	}).Error
-}
-
-func (r *repository) ListMessages(
-	ctx context.Context,
-	mailboxID uint,
-	filter domain.MailMessageFilter,
-) ([]*domain.MailMessage, int64, error) {
-	if r.db == nil {
-		return nil, 0, domain.ErrServiceUnavailable
-	}
-	page, perPage := filter.Page, filter.PerPage
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 15
-	}
-
-	query := r.conn(ctx).Model(&MailMessagePO{}).Where("mailbox_id = ?", mailboxID).Where(unsealedMessage)
-	if filter.Direction != "" {
-		query = query.Where("direction = ?", string(filter.Direction))
-	}
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var rows []MailMessagePO
-	// A listing never needs the bodies; the detail endpoint returns them.
-	err := query.
-		Omit("text_body", "html_body").
-		Order("id desc").
-		Offset((page - 1) * perPage).
-		Limit(perPage).
-		Find(&rows).Error
-	if err != nil {
-		return nil, 0, err
-	}
-	messages := make([]*domain.MailMessage, 0, len(rows))
-	for i := range rows {
-		messages = append(messages, rows[i].toDomain())
-	}
-	return messages, total, nil
 }
 
 func (r *repository) FindMessage(ctx context.Context, mailboxID, id uint) (*domain.MailMessage, error) {

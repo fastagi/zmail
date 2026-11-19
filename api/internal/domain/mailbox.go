@@ -263,8 +263,8 @@ type Mailbox struct {
 	// RoutingRuleID names the provider rule that delivers mail for an address on an organization
 	// domain. It is empty on the shared domain, whose routing the operator manages.
 	RoutingRuleID string
-	// UnreadCount is the number of unread inbound messages. Only listings fill it, and only for a
-	// viewer who may read the mailbox.
+	// UnreadCount is the number of unread inbound messages in default (the Inbox). Only listings
+	// fill it, and only for a viewer who may read the mailbox.
 	UnreadCount int
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -303,6 +303,9 @@ type MailMessage struct {
 	LabelIDs []uint
 	// Starred is whether the viewer starred the message. Star state is per person.
 	Starred bool
+	// Thread summarizes the message's thread in the listed view; only a listing grouped by thread
+	// fills it.
+	Thread *MailThreadInfo
 	// DedupeKey makes inbound delivery idempotent for one mailbox. Empty for outbound.
 	DedupeKey   string
 	FailureCode string
@@ -628,11 +631,75 @@ type MailTemplateRepository interface {
 	DeleteTemplate(ctx context.Context, organizationID, id uint) error
 }
 
-// MailMessageFilter narrows a mailbox message listing.
+// MailMessageFilter narrows a mailbox message listing. Every set field narrows it further.
 type MailMessageFilter struct {
 	Direction MailDirection
+	// Placement keeps one placement; empty lists every placement except trash.
+	Placement MailPlacement
+	// FolderID names the folder of placement folder, and is only valid with it.
+	FolderID uint
+	// LabelID keeps the messages with this label.
+	LabelID uint
+	// Starred, Unread, and HasAttachments keep the messages for which the flag has this value.
+	// Starred and Unread are the viewer's own; outbound messages are never unread.
+	Starred        *bool
+	Unread         *bool
+	HasAttachments *bool
+	// Query is the trimmed search text, matched as a literal substring ignoring case; empty means
+	// no search.
+	Query string
+	// GroupThreads lists one row per thread of a placement view instead of one per message.
+	GroupThreads bool
+	// Malformed names query parameters whose value could not be read; the listing refuses them
+	// with ErrInvalidInput after access and the referenced folder and label are checked.
+	Malformed []string
 	Page      int
 	PerPage   int
+}
+
+// MaxMailSearchLength bounds the search text of a listing, in characters as sent.
+const MaxMailSearchLength = 200
+
+// MailThreadInfo summarizes the messages of one thread in a listed view.
+type MailThreadInfo struct {
+	// MessageCount is how many of the thread's messages are in the view.
+	MessageCount int
+	// MessageIDs are the ids of the newest MaxMailThreadMessageIDs of them, ascending.
+	MessageIDs []uint
+	// Unread and Starred are whether the viewer has not read, or starred, at least one of them.
+	Unread  bool
+	Starred bool
+	// LabelIDs are every label on at least one of them, ascending.
+	LabelIDs []uint
+}
+
+// MaxMailThreadMessageIDs bounds the message ids a thread row and a thread view carry.
+const MaxMailThreadMessageIDs = 100
+
+// MailThreadSummary is one row of a listing grouped by thread: the newest message of the thread
+// in the view, and the thread in that view.
+type MailThreadSummary struct {
+	Latest *MailMessage
+	MailThreadInfo
+}
+
+// MailFolderCount is the viewer's unread inbound messages in one folder.
+type MailFolderCount struct {
+	FolderID uint
+	Unread   int
+}
+
+// MailMessageCounts are one viewer's counts for a mailbox's navigation. The trash and sealed
+// messages are never counted.
+type MailMessageCounts struct {
+	// DefaultInboundUnread counts unread inbound messages in default (the Inbox).
+	DefaultInboundUnread int
+	// ArchiveUnread counts unread inbound messages in the archive.
+	ArchiveUnread int
+	// Folders has one entry per folder of the mailbox, in the folder listing's order.
+	Folders []MailFolderCount
+	// Starred counts the messages outside the trash the viewer starred.
+	Starred int
 }
 
 // MailLogFilter narrows the log of the messages in the mailboxes a viewer may read.
@@ -695,6 +762,17 @@ type MailOrganizeRepository interface {
 	// at or before before, oldest first, and returns how many it deleted.
 	PurgeExpiredTrash(ctx context.Context, before time.Time, limit int) (int, error)
 
+	// ListThreads lists one page of the threads of a placement view of the mailbox (filter's
+	// placement, folder, and direction), newest first by their newest message, with the total
+	// number of threads. Unread and Starred are membershipID's own.
+	ListThreads(ctx context.Context, mailboxID, membershipID uint, filter MailMessageFilter) ([]MailThreadSummary, int64, error)
+	// ThreadMessages returns the newest MaxMailThreadMessageIDs unsealed messages of a thread of the
+	// mailbox outside the trash, oldest first, with bodies and membershipID's read and star state.
+	ThreadMessages(ctx context.Context, mailboxID, threadID, membershipID uint) ([]*MailMessage, error)
+	// MessageCounts counts membershipID's unread inbound messages per placement and folder, and
+	// its starred messages, outside the trash.
+	MessageCounts(ctx context.Context, mailboxID, membershipID uint) (MailMessageCounts, error)
+
 	// CreateFolder stores a folder unless the mailbox already has limit folders
 	// (ErrMailFolderLimitReached) or one with the same name ignoring case (ErrMailFolderNameTaken).
 	CreateFolder(ctx context.Context, folder *MailFolder, limit int) error
@@ -718,7 +796,7 @@ type MailOrganizeRepository interface {
 type MailboxRepository interface {
 	CreateMailbox(ctx context.Context, mailbox *Mailbox, limit int) error
 	// ListMailboxes lists the organization's mailboxes. UnreadCount is what readerMembershipID has
-	// not read of each mailbox's inbound mail after its seal boundary.
+	// not read of each mailbox's inbound mail in default (the Inbox) after its seal boundary.
 	ListMailboxes(ctx context.Context, organizationID, readerMembershipID uint) ([]*Mailbox, error)
 	FindMailbox(ctx context.Context, organizationID, id uint) (*Mailbox, error)
 	FindMailboxByAddress(ctx context.Context, address string) (*Mailbox, error)
@@ -756,7 +834,10 @@ type MailboxRepository interface {
 	// reports created=false and fills message with the stored row on a repeated delivery.
 	CreateInboundMessage(ctx context.Context, message *MailMessage) (created bool, err error)
 	UpdateMessageDelivery(ctx context.Context, id uint, status MailStatus, messageID, failureCode string) error
-	ListMessages(ctx context.Context, mailboxID uint, filter MailMessageFilter) ([]*MailMessage, int64, error)
+	// ListMessages lists one page of single messages of the mailbox matching filter, with the total.
+	// Starred and Unread use membershipID's own state. A search the database cannot finish in time
+	// reports the module's search-too-broad error.
+	ListMessages(ctx context.Context, mailboxID, membershipID uint, filter MailMessageFilter) ([]*MailMessage, int64, error)
 	FindMessage(ctx context.Context, mailboxID, id uint) (*MailMessage, error)
 	// SetMessageRead stores or deletes one membership's read row of a message of the mailbox. A
 	// sealed or missing message is ErrMailMessageNotFound; an outbound message is always read and

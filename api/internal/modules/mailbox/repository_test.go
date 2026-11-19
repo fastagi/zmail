@@ -198,7 +198,7 @@ func TestRepositoryListsMessagesWithoutBodies(t *testing.T) {
 		}
 	}
 
-	inbox, total, err := repo.ListMessages(ctx, mailbox.ID, domain.MailMessageFilter{Direction: domain.MailDirectionInbound, Page: 1, PerPage: 1})
+	inbox, total, err := repo.ListMessages(ctx, mailbox.ID, 0, domain.MailMessageFilter{Direction: domain.MailDirectionInbound, Page: 1, PerPage: 1})
 	if err != nil || total != 2 || len(inbox) != 1 {
 		t.Fatalf("inbox page = %d rows, total %d, err %v", len(inbox), total, err)
 	}
@@ -208,11 +208,11 @@ func TestRepositoryListsMessagesWithoutBodies(t *testing.T) {
 	if inbox[0].To[0] != "hello@mail.example" {
 		t.Fatalf("listing lost recipients: %+v", inbox[0])
 	}
-	second, _, err := repo.ListMessages(ctx, mailbox.ID, domain.MailMessageFilter{Direction: domain.MailDirectionInbound, Page: 2, PerPage: 1})
+	second, _, err := repo.ListMessages(ctx, mailbox.ID, 0, domain.MailMessageFilter{Direction: domain.MailDirectionInbound, Page: 2, PerPage: 1})
 	if err != nil || len(second) != 1 || second[0].ID >= inbox[0].ID {
 		t.Fatalf("second page = %+v, err %v; want the older message", second, err)
 	}
-	all, total, err := repo.ListMessages(ctx, mailbox.ID, domain.MailMessageFilter{})
+	all, total, err := repo.ListMessages(ctx, mailbox.ID, 0, domain.MailMessageFilter{})
 	if err != nil || total != 3 || len(all) != 3 {
 		t.Fatalf("unfiltered = %d rows, total %d, err %v", len(all), total, err)
 	}

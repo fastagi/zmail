@@ -98,7 +98,13 @@ type Service interface {
 	// ListMailboxes lists the mailboxes the viewer has any access to, with that access.
 	ListMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error)
 	DeleteMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) error
+	// ListMessages lists a mailbox's messages, or with filter.GroupThreads one row per thread, each
+	// row the newest message of its thread in the view with its Thread filled.
 	ListMessages(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
+	// GetThread returns a thread's messages outside the trash, oldest first, as message details.
+	GetThread(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint) ([]*domain.MailMessage, error)
+	// MessageCounts returns the viewer's unread and starred counts for the mailbox's navigation.
+	MessageCounts(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (domain.MailMessageCounts, error)
 	GetMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) (*domain.MailMessage, error)
 	// SendMessage reports created=false when an idempotency key replayed an earlier attempt.
 	SendMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, input SendInput) (message *domain.MailMessage, created bool, err error)
@@ -410,28 +416,6 @@ func (s *service) DeleteMailbox(ctx context.Context, viewer domain.OrganizationC
 	}
 	s.removeRoutingRule(ctx, mailbox)
 	return nil
-}
-
-func (s *service) ListMessages(
-	ctx context.Context,
-	viewer domain.OrganizationContext,
-	mailboxID uint,
-	filter domain.MailMessageFilter,
-) ([]*domain.MailMessage, int64, error) {
-	if filter.Direction != "" && !filter.Direction.Valid() {
-		return nil, 0, domain.ErrInvalidInput
-	}
-	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
-		return nil, 0, err
-	}
-	messages, total, err := s.repo.ListMessages(ctx, mailboxID, filter)
-	if err != nil {
-		return nil, 0, err
-	}
-	if err := s.fillViewerState(ctx, viewer, messages...); err != nil {
-		return nil, 0, err
-	}
-	return messages, total, nil
 }
 
 func (s *service) GetMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) (*domain.MailMessage, error) {

@@ -162,6 +162,7 @@ func accessRouter(svc *service, viewer domain.OrganizationContext) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(svc)
 	response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)
+	response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
 	handler.RegisterErrorMappings(response.DefaultErrorMapper)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -171,6 +172,8 @@ func accessRouter(svc *service, viewer domain.OrganizationContext) *gin.Engine {
 	router.GET("/mailboxes", handler.ListMailboxes)
 	router.POST("/mailboxes", handler.CreateMailbox)
 	router.GET("/mailboxes/:mailbox_id/messages", handler.ListMessages)
+	router.GET("/mailboxes/:mailbox_id/threads/:thread_id", handler.GetThread)
+	router.GET("/mailboxes/:mailbox_id/message-counts", handler.MessageCounts)
 	router.POST("/mailboxes/:mailbox_id/messages", handler.SendMessage)
 	router.GET("/mailboxes/:mailbox_id/messages/:message_id", handler.GetMessage)
 	router.PUT("/mailboxes/:mailbox_id/messages/:message_id", handler.UpdateMessage)

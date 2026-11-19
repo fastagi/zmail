@@ -476,7 +476,7 @@ func (r *fakeRepository) UpdateMessageDelivery(_ context.Context, id uint, statu
 	return nil
 }
 
-func (r *fakeRepository) ListMessages(_ context.Context, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error) {
+func (r *fakeRepository) ListMessages(_ context.Context, mailboxID, _ uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error) {
 	var listed []*domain.MailMessage
 	for _, message := range r.messages {
 		if message.MailboxID == mailboxID && !r.sealed(message) && (filter.Direction == "" || message.Direction == filter.Direction) {

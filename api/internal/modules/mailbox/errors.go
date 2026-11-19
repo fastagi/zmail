@@ -63,6 +63,8 @@ var (
 	ErrMailLabelNotFound         = errors.New("mail label not found")
 	ErrMailLabelNameTaken        = errors.New("mail label name is already taken")
 	ErrMailLabelLimitReached     = errors.New("mail label limit reached")
+	// ErrMailSearchTooBroad is a search the database could not finish within its time limit.
+	ErrMailSearchTooBroad = errors.New("mail search is too broad")
 )
 
 // Access errors that answer with an existing public code.
