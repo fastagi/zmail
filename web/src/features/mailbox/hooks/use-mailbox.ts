@@ -104,6 +104,8 @@ export const mailboxKeys = {
     [...mailboxKeys.mailbox(organizationId, mailboxId), 'access-events'] as const,
   accessEventPage: (organizationId: number, mailboxId: number, page: number) =>
     [...mailboxKeys.accessEvents(organizationId, mailboxId), page] as const,
+  roles: (organizationId: number) =>
+    [...mailboxKeys.organization(organizationId), 'roles'] as const,
   /** Every unified inbox listing of the organization. */
   inboxes: (organizationId: number) =>
     [...mailboxKeys.organization(organizationId), 'inbox'] as const,

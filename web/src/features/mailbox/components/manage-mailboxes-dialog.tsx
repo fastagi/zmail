@@ -16,16 +16,19 @@ import { CreateMailboxForm } from '@/features/mailbox/components/create-mailbox-
 import { hasAccessPanel } from '@/features/mailbox/components/mailbox-access-panel';
 import { MailboxMarks } from '@/features/mailbox/components/mailbox-switcher';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { ConfirmDialog } from '@/features/mailbox/components/mail-shared';
+import { ConfirmDialog, nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
+import { useAssignMailboxRole, useMailRoles } from '@/features/mailbox/hooks/use-inbox';
 import { useDeleteMailbox } from '@/features/mailbox/hooks/use-mailbox';
-import type { Mailbox, MailboxDomain } from '@/features/mailbox/types';
+import type { MailRole, Mailbox, MailboxDomain } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
+import { cn } from '@/utils';
 
 /**
  * Mailbox administration, kept out of the reading workspace: every mailbox of the organization
- * (also the ones the caller only runs and cannot read), its access, deleting it, and creating a
- * new one. Opened by owners and admins from the switcher, or from the empty workspace.
+ * (also the ones the caller only runs and cannot read), its mail role, its access, deleting it,
+ * and creating a new one. Opened by owners and admins from the switcher, or from the empty
+ * workspace.
  */
 export function ManageMailboxesDialog({
   open,
@@ -45,6 +48,8 @@ export function ManageMailboxesDialog({
   onOpenAccess: (mailbox: Mailbox) => void;
 }) {
   const t = useT('mailbox');
+  const organizationId = useMailOrganizationId();
+  const roles = useMailRoles(organizationId);
   const [deleteTarget, setDeleteTarget] = useState<Mailbox | null>(null);
 
   return (
@@ -81,6 +86,9 @@ export function ManageMailboxesDialog({
                       {mailbox.display_name || t('mailboxes.noDisplayName')}
                     </span>
                   </span>
+                  {mailbox.access.administer && roles.data ? (
+                    <MailboxRoleSelect mailbox={mailbox} roles={roles.data} />
+                  ) : null}
                   {hasAccessPanel(mailbox) ? (
                     <Button
                       type="button"
@@ -124,6 +132,41 @@ export function ManageMailboxesDialog({
         <DeleteMailboxDialog mailbox={deleteTarget} onClose={() => setDeleteTarget(null)} />
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The mailbox's mail role; changing it grants and revokes no access. */
+function MailboxRoleSelect({ mailbox, roles }: { mailbox: Mailbox; roles: readonly MailRole[] }) {
+  const t = useT('mailbox');
+  const assign = useAssignMailboxRole(useMailOrganizationId());
+  const current = mailbox.role_id ?? null;
+
+  const choose = async (value: string) => {
+    const roleId = value === '' ? null : Number(value);
+    if (roleId === current) return;
+    try {
+      await assign.mutateAsync({ mailboxId: mailbox.id, roleId });
+      toast.success(t('roles.assigned'));
+    } catch (failure) {
+      toast.error(t(resolveMailboxErrorKey(failure)));
+    }
+  };
+
+  return (
+    <select
+      aria-label={t('roles.mailboxRole', { address: mailbox.address })}
+      className={cn(nativeSelectClassName, 'w-36 shrink-0')}
+      value={current === null ? '' : String(current)}
+      disabled={assign.isPending}
+      onChange={event => void choose(event.target.value)}
+    >
+      <option value="">{t('roles.noRole')}</option>
+      {roles.map(role => (
+        <option key={role.id} value={String(role.id)}>
+          {role.name}
+        </option>
+      ))}
+    </select>
   );
 }
 

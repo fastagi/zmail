@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MailboxesRoute } from '@/features/mailbox/components/mailboxes-route';
 import { markInboxRowRead } from '@/features/mailbox/hooks/use-inbox';
 import { mailboxKeys } from '@/features/mailbox/hooks/use-mailbox';
+import { settingKeys } from '@/features/setting/hooks/use-settings';
 import type { InboxFilters, InboxItem } from '@/features/mailbox/types';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -45,6 +46,15 @@ const state = vi.hoisted(() => {
     update: mutation(),
     removeMessage: mutation(),
     send: mutation(),
+    roles: query(),
+    members: query(),
+    createRole: mutation(),
+    updateRole: mutation(),
+    deleteRole: mutation(),
+    assignRole: mutation(),
+    /** Whether the `setting` feature runs; the user's settings come from `userSettings`. */
+    settingsEnabled: false,
+    userSettings: vi.fn(async (): Promise<unknown> => []),
   };
 });
 
@@ -77,6 +87,18 @@ vi.mock('next/navigation', async () => {
 });
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => state.organizations,
+  useOrganizationMembers: () => state.members,
+}));
+vi.mock('@/config/features', async importOriginal => {
+  const original = await importOriginal<typeof import('@/config/features')>();
+  return {
+    ...original,
+    isWebFeatureEnabled: (feature: Parameters<typeof original.isWebFeatureEnabled>[0]) =>
+      feature === 'setting' ? state.settingsEnabled : original.isWebFeatureEnabled(feature),
+  };
+});
+vi.mock('@/features/setting/services/setting-service', () => ({
+  settingService: { user: () => state.userSettings() },
 }));
 vi.mock('@/features/mailbox/components/mailbox-workspace', async importOriginal => ({
   ...(await importOriginal<typeof import('@/features/mailbox/components/mailbox-workspace')>()),
@@ -104,16 +126,32 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', async importOriginal => ({
 }));
 vi.mock('@/features/mailbox/hooks/use-inbox', async importOriginal => ({
   ...(await importOriginal<typeof import('@/features/mailbox/hooks/use-inbox')>()),
-  useInboxMessages: (_organizationId: number, filters: InboxFilters) => {
+  // Only calls that load are recorded; a disabled query is pending without data.
+  useInboxMessages: (
+    _organizationId: number,
+    filters: InboxFilters,
+    { enabled = true }: { enabled?: boolean } = {}
+  ) => {
+    if (!enabled) return { ...state.inbox, data: undefined, isPending: true };
     state.inboxCalls.push(filters);
     const error = state.reject?.(filters) ?? null;
     return error ? { ...state.inbox, data: undefined, error } : state.inbox;
   },
-  useInboxCounts: (_organizationId: number, tz: string) => {
+  useInboxCounts: (
+    _organizationId: number,
+    tz: string,
+    { enabled = true }: { enabled?: boolean } = {}
+  ) => {
+    if (!enabled) return { ...state.counts, data: undefined, isPending: true };
     state.countsCalls.push(tz);
     return state.counts;
   },
   useUpdateInboxMessages: () => state.updateInbox,
+  useMailRoles: () => state.roles,
+  useCreateMailRole: () => state.createRole,
+  useUpdateMailRole: () => state.updateRole,
+  useDeleteMailRole: () => state.deleteRole,
+  useAssignMailboxRole: () => state.assignRole,
 }));
 
 let queryClient: QueryClient;
@@ -138,6 +176,11 @@ describe('unified inbox', () => {
     state.countsCalls = [];
     state.thread.data = [message({ id: 29, thread_id: 30 }), message({ id: 31, thread_id: 30 })];
     state.detail.data = message({ id: 12, mailbox_id: 1 });
+    state.roles.data = [];
+    state.members.data = page([]);
+    state.settingsEnabled = false;
+    state.userSettings.mockReset();
+    state.userSettings.mockResolvedValue([]);
     for (const query of [
       state.organizations,
       state.mailboxes,
@@ -146,6 +189,8 @@ describe('unified inbox', () => {
       state.counts,
       state.thread,
       state.detail,
+      state.roles,
+      state.members,
     ]) {
       query.isPending = false;
       query.error = null;
@@ -162,6 +207,10 @@ describe('unified inbox', () => {
       state.update,
       state.removeMessage,
       state.send,
+      state.createRole,
+      state.updateRole,
+      state.deleteRole,
+      state.assignRole,
     ]) {
       mutation.isPending = false;
       mutation.mutate.mockReset();
@@ -541,15 +590,246 @@ describe('unified inbox', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('waits for the timezone setting before loading the list and counts', async () => {
+    state.settingsEnabled = true;
+    const settings = deferred<unknown>();
+    state.userSettings.mockReturnValue(settings.promise);
+    browserZone('UTC');
+    renderRoute();
+
+    expect(state.inboxCalls).toEqual([]);
+    expect(state.countsCalls).toEqual([]);
+
+    await act(async () => settings.resolve(timezoneSetting('Asia/Shanghai')));
+
+    await waitFor(() => expect(state.inboxCalls.length).toBeGreaterThan(0));
+    expect(state.inboxCalls.every(filters => filters.tz === 'Asia/Shanghai')).toBe(true);
+    expect(state.countsCalls.length).toBeGreaterThan(0);
+    expect(state.countsCalls.every(tz => tz === 'Asia/Shanghai')).toBe(true);
+    expect(rowButton('Launch plan')).toBeInTheDocument();
+  });
+
+  it('a refused zone falls back to UTC only until a valid setting loads', async () => {
+    state.settingsEnabled = true;
+    state.userSettings.mockResolvedValue(timezoneSetting('Mars/Olympus_Mons'));
+    state.reject = filters =>
+      filters.tz === 'Mars/Olympus_Mons'
+        ? new ApiError('bad zone', ApiErrorCode.COMMON_INVALID_INPUT, 400)
+        : null;
+    renderRoute();
+
+    await waitFor(() => expect(state.inboxCalls.at(-1)).toMatchObject({ tz: 'UTC' }));
+    expect(state.inboxCalls[0]).toMatchObject({ tz: 'Mars/Olympus_Mons' });
+
+    act(() => {
+      queryClient.setQueryData(settingKeys.user(), timezoneSetting('Asia/Shanghai'));
+    });
+    await waitFor(() => expect(state.inboxCalls.at(-1)).toMatchObject({ tz: 'Asia/Shanghai' }));
+    expect(state.countsCalls.at(-1)).toBe('Asia/Shanghai');
+  });
+
+  it('a failed settings fetch is handled on the mail page with the browser zone', async () => {
+    state.settingsEnabled = true;
+    state.userSettings.mockRejectedValue(
+      new ApiError('down', ApiErrorCode.COMMON_SERVICE_UNAVAILABLE, 503)
+    );
+    browserZone('Asia/Shanghai');
+    renderRoute();
+
+    await waitFor(() => expect(state.inboxCalls.at(-1)).toMatchObject({ tz: 'Asia/Shanghai' }));
+    const query = queryClient.getQueryCache().find({ queryKey: settingKeys.user() });
+    expect(query?.meta).toEqual({ errorHandling: 'local' });
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('sidebar groups mailboxes by role with Ungrouped last', () => {
+    state.mailboxes.data = [
+      mailbox(1, 'hello', {}, 3),
+      mailbox(2, 'sales', {}, 5),
+      mailbox(3, 'ops'),
+    ];
+    state.roles.data = [role(5, 'Agency', [2], 'orange'), role(3, 'Design', [1], 'blue')];
+    state.counts.data = {
+      ...counts(),
+      roles: [
+        { role_id: 3, unread: 1 },
+        { role_id: 5, unread: 3 },
+      ],
+      ungrouped_unread: 0,
+    };
+    renderRoute();
+
+    // Roles in the API's order, then Ungrouped; their mailboxes stay folded until opened.
+    expect(groupNames()).toEqual(['Agency: 3 unread', 'Design: 1 unread', 'Ungrouped']);
+    expect(within(groupsNav()).queryByRole('button', { name: /^sales@/u })).toBeNull();
+
+    // A role narrows the list and opens its mailboxes.
+    fireEvent.click(within(groupsNav()).getByRole('button', { name: 'Agency: 3 unread' }));
+    expect(new URLSearchParams(window.location.search).get('role')).toBe('5');
+    expect(state.inboxCalls.at(-1)).toEqual({
+      view: 'all',
+      roleId: 5,
+      group: 'thread',
+      tz: 'UTC',
+    });
+    expect(within(groupsNav()).getByRole('button', { name: 'Agency: 3 unread' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    expect(mailboxButton(/^sales@/u)).toHaveAccessibleName('sales@mail.example.com: 3 unread');
+    expect(screen.getByRole('heading', { level: 2, name: 'Agency' })).toBeInTheDocument();
+
+    // A mailbox of the role narrows to that mailbox instead.
+    fireEvent.click(mailboxButton(/^sales@/u));
+    let params = new URLSearchParams(window.location.search);
+    expect([params.get('box'), params.get('role')]).toEqual(['2', null]);
+
+    // Ungrouped lists the mailboxes without a role.
+    fireEvent.click(within(groupsNav()).getByRole('button', { name: 'Ungrouped' }));
+    params = new URLSearchParams(window.location.search);
+    expect([params.get('box'), params.get('role')]).toEqual([null, 'none']);
+    expect(state.inboxCalls.at(-1)).toMatchObject({ roleId: 'none' });
+    expect(mailboxButton(/^ops@/u)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Ungrouped' })).toBeInTheDocument();
+  });
+
+  it('an admin sees unreadable mailboxes locked without a number', () => {
+    state.organizations.data = page([organization('admin')]);
+    state.mailboxes.data = [
+      mailbox(1, 'hello', {}, 3),
+      mailbox(4, 'vault', { view: false, send: false, administer: true }, 3),
+      mailbox(2, 'sales'),
+    ];
+    state.roles.data = [role(3, 'Design', [1, 4])];
+    renderRoute();
+
+    fireEvent.click(within(groupsNav()).getByRole('button', { name: /^Design/u }));
+
+    expect(mailboxButton(/^hello@/u)).toBeInTheDocument();
+    expect(within(groupsNav()).queryByRole('button', { name: /vault@/u })).toBeNull();
+    const locked = within(groupsNav()).getByText('vault@mail.example.com').parentElement;
+    expect(locked?.tagName).not.toBe('BUTTON');
+    expect(locked).toHaveTextContent('No access');
+    expect(locked?.textContent).not.toMatch(/\d/u);
+  });
+
+  it('a member does not see a role without a visible mailbox', () => {
+    state.organizations.data = page([organization('member')]);
+    state.mailboxes.data = [mailbox(1, 'hello', {}, 3), mailbox(2, 'sales')];
+    state.roles.data = [role(3, 'Design', [1]), role(9, 'Secret', [])];
+    renderRoute();
+
+    expect(groupNames()).toEqual(['Design', 'Ungrouped: 4 unread']);
+  });
+
+  it('Manage roles is only offered to owners and admins', () => {
+    for (const membership of ['owner', 'admin'] as const) {
+      state.organizations.data = page([organization(membership)]);
+      const { unmount } = renderRoute();
+      expect(within(groupsNav()).getByRole('button', { name: 'Manage roles' })).toBeInTheDocument();
+      unmount();
+    }
+
+    state.organizations.data = page([organization('member')]);
+    renderRoute();
+    expect(screen.queryByRole('button', { name: 'Manage roles' })).not.toBeInTheDocument();
+  });
+
+  it('a taken role name shows under the name field', async () => {
+    state.roles.data = [role(3, 'Design', [1])];
+    renderRoute();
+
+    fireEvent.click(within(groupsNav()).getByRole('button', { name: 'Manage roles' }));
+    const dialog = screen.getByRole('dialog', { name: 'Manage roles' });
+    const form = within(dialog).getByRole('form', { name: 'New role' });
+    const name = within(form).getByRole('textbox', { name: 'Name' });
+
+    state.createRole.mutateAsync.mockRejectedValueOnce(
+      new ApiError('taken', ApiErrorCode.MAILBOX_ROLE_NAME_TAKEN, 409)
+    );
+    fireEvent.change(name, { target: { value: '  design ' } });
+    await act(async () => {
+      fireEvent.click(within(form).getByRole('button', { name: 'Add role' }));
+    });
+
+    expect(state.createRole.mutateAsync).toHaveBeenCalledWith({
+      name: 'design',
+      color: 'gray',
+      description: '',
+      owner_user_id: null,
+    });
+    expect(name).toHaveAttribute('aria-invalid', 'true');
+    expect(name).toHaveAccessibleDescription('Another role already has this name.');
+
+    // The role limit is about the whole form, not the name.
+    state.createRole.mutateAsync.mockRejectedValueOnce(
+      new ApiError('limit', ApiErrorCode.MAILBOX_ROLE_LIMIT_REACHED, 422)
+    );
+    fireEvent.change(name, { target: { value: 'Agency' } });
+    await act(async () => {
+      fireEvent.click(within(form).getByRole('button', { name: 'Add role' }));
+    });
+    expect(within(form).getByRole('alert')).toHaveTextContent(
+      'This organization has 50 roles. Delete one to create another.'
+    );
+    expect(name).not.toHaveAttribute('aria-invalid', 'true');
+
+    // Deleting asks first and says the mailboxes become ungrouped.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete Design' }));
+    expect(within(dialog).getByText(/its mailboxes become ungrouped/iu)).toBeInTheDocument();
+    expect(state.deleteRole.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('Manage mailboxes sets the role of a mailbox the admin administers', async () => {
+    state.mailboxes.data = [mailbox(1, 'hello', { view: false, administer: true })];
+    state.roles.data = [role(3, 'Design', [])];
+    state.assignRole.mutateAsync.mockResolvedValue(mailbox(1, 'hello', {}, 3));
+    renderRoute();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manage mailboxes' }));
+    const select = screen.getByRole('combobox', { name: 'Role of hello@mail.example.com' });
+    expect(select).toHaveValue('');
+    await act(async () => {
+      fireEvent.change(select, { target: { value: '3' } });
+    });
+
+    expect(state.assignRole.mutateAsync).toHaveBeenCalledWith({ mailboxId: 1, roleId: 3 });
+    expect(toast.success).toHaveBeenCalledWith('Role updated');
+  });
+
+  it('narrowing to a role hides row role tags', () => {
+    state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales', {}, 3)];
+    state.roles.data = [role(3, 'Design', [2])];
+    state.inbox.data = listing([[{ ...threadRow(), role_id: 3 }, singleRow()]]);
+    const { unmount } = renderRoute();
+
+    expect(rowButton('Launch plan')).toHaveTextContent('Design');
+    expect(rowButton('Invoice')).not.toHaveTextContent('Design');
+    unmount();
+
+    for (const query of ['?role=3', '?box=2']) {
+      window.history.replaceState(null, '', `/console/mailboxes${query}`);
+      const view = renderRoute();
+      expect(rowButton('Launch plan')).not.toHaveTextContent('Design');
+      view.unmount();
+    }
+  });
+
   it('a 400 resets the URL to view=all', () => {
     browserZone('Asia/Shanghai');
-    window.history.replaceState(null, '', '/console/mailboxes?view=today&box=2&tab=unread&open=31');
+    window.history.replaceState(
+      null,
+      '',
+      '/console/mailboxes?view=today&box=2&role=3&tab=unread&open=31'
+    );
     state.reject = filters =>
       filters.view === 'today' ? new ApiError('bad', ApiErrorCode.COMMON_INVALID_INPUT, 400) : null;
     renderRoute();
 
     const params = new URLSearchParams(window.location.search);
-    for (const name of ['view', 'box', 'tab', 'q']) expect(params.get(name)).toBeNull();
+    for (const name of ['view', 'box', 'role', 'tab', 'q', 'open']) {
+      expect(params.get(name)).toBeNull();
+    }
     expect(state.inboxCalls.at(-1)).toEqual({
       view: 'all',
       group: 'thread',
@@ -594,9 +874,46 @@ function viewButton(name: RegExp) {
   return within(views).getByRole('button', { name });
 }
 
+function groupsNav() {
+  return screen.getByRole('navigation', { name: 'Roles & mailboxes' });
+}
+
 function mailboxButton(name: RegExp) {
-  const mailboxes = screen.getByRole('navigation', { name: 'Mailboxes' });
-  return within(mailboxes).getByRole('button', { name });
+  return within(groupsNav()).getByRole('button', { name });
+}
+
+/** The role and Ungrouped rows of the sidebar, by accessible name, in order. */
+function groupNames() {
+  return within(groupsNav())
+    .getAllByRole('button')
+    .filter(button => button.hasAttribute('aria-expanded'))
+    .map(button => button.getAttribute('aria-label') ?? button.textContent);
+}
+
+function role(id: number, name: string, mailboxIds: number[], color = 'gray') {
+  return {
+    id,
+    name,
+    color,
+    description: '',
+    owner_user_id: null,
+    mailbox_ids: mailboxIds,
+    created_at: now(),
+    updated_at: now(),
+  };
+}
+
+/** A promise with its resolve function, to answer a request at a chosen moment. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function timezoneSetting(zone: string) {
+  return [{ key: 'localization.timezone', value: zone }];
 }
 
 /** Makes the browser report `zone` as its time zone. */
@@ -650,7 +967,12 @@ function domain() {
   };
 }
 
-function mailbox(id: number, localPart: string, access: Record<string, boolean> = {}) {
+function mailbox(
+  id: number,
+  localPart: string,
+  access: Record<string, boolean> = {},
+  roleId: number | null = null
+) {
   return {
     id,
     address: `${localPart}@mail.example.com`,
@@ -671,6 +993,7 @@ function mailbox(id: number, localPart: string, access: Record<string, boolean> 
     },
     unread_count: 0,
     created_at: now(),
+    role_id: roleId,
   };
 }
 

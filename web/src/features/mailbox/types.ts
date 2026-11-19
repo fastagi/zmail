@@ -72,6 +72,8 @@ import type {
   mailMessageCountsSchema,
   mailMessageUpdatesResultSchema,
   mailPlacementSchema,
+  mailRoleInputSchema,
+  mailRoleSchema,
   mailThreadSummarySchema,
   mailTrashPurgeSchema,
   updateMailMessagesSchema,
@@ -128,6 +130,8 @@ export type MailFolder = Infer<typeof mailFolderSchema>;
 export type MailFolderInput = Infer<typeof mailFolderInputSchema>;
 export type MailLabel = Infer<typeof mailLabelSchema>;
 export type MailLabelInput = Infer<typeof mailLabelInputSchema>;
+export type MailRole = Infer<typeof mailRoleSchema>;
+export type MailRoleInput = Infer<typeof mailRoleInputSchema>;
 export type MailMessageCounts = Infer<typeof mailMessageCountsSchema>;
 export type MailMessageUpdatesResult = Infer<typeof mailMessageUpdatesResultSchema>;
 export type MailTrashPurge = Infer<typeof mailTrashPurgeSchema>;

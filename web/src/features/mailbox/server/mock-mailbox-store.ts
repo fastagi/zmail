@@ -20,6 +20,9 @@ import {
   MAIL_TEMPLATE_VALUE_MAX_LENGTH,
   MAIL_TEMPLATE_VARIABLE_PATTERN,
   MAIL_BODY_MAX_BYTES,
+  MAIL_ROLES_MAX_PER_ORGANIZATION,
+  MAIL_ROLE_DESCRIPTION_MAX_LENGTH,
+  MAIL_ROLE_NAME_MAX_LENGTH,
   attachmentsWithinLimits,
   normalizeDisplayName,
   normalizeLocalPart,
@@ -37,6 +40,8 @@ import type {
   MailEvent,
   MailFolder,
   MailLabel,
+  MailRole,
+  MailRoleInput,
   MailLabelColor,
   MailLogEntry,
   MailLogFilters,
@@ -124,6 +129,8 @@ interface StoredMailbox {
 interface MailboxState {
   mailbox: StoredMailbox;
   access: MailboxAccessState;
+  /** The mail role the mailbox belongs to; null when ungrouped. Grants nothing. */
+  roleId: number | null;
   /** Stored with `starred: false`; each viewer's star comes from `stars`. */
   messages: Map<number, MailMessage>;
   /** Who read each inbound message, by user id. */
@@ -179,7 +186,10 @@ export type MockOrganizeError =
   | 'label_name_taken'
   | 'folder_limit'
   | 'label_limit'
-  | 'search_too_broad';
+  | 'search_too_broad'
+  | 'role_not_found'
+  | 'role_name_taken'
+  | 'role_limit';
 export type MockOrganizeResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: MockOrganizeError }
@@ -260,6 +270,22 @@ function isPermission(value: unknown): value is MailboxPermission {
   return (MAILBOX_PERMISSIONS as readonly unknown[]).includes(value);
 }
 
+/** A mail role as stored: the owner as set, the mailboxes found from `MailboxState.roleId`. */
+type StoredRole = Omit<MailRole, 'mailbox_ids'>;
+
+/** A role write as the route shape-checked it; the values are judged by the store. */
+export interface MockMailRoleInput {
+  name: string;
+  color?: string;
+  description?: string;
+  owner_user_id?: number | null;
+}
+
+/** Only owners and admins write mail roles; roles never come from mailbox access. */
+function managesOrganization(viewer: MailboxViewer): boolean {
+  return viewer.role === 'owner' || viewer.role === 'admin';
+}
+
 /** One unified inbox page as the route validated it. */
 export interface MockInboxQuery extends InboxFilters {
   after?: InboxPosition;
@@ -276,6 +302,8 @@ export class MockMailboxStore {
   private nextAccessEventId = 1;
   private nextFolderId = 1;
   private nextLabelId = 1;
+  private nextRoleId = 1;
+  private roles = new Map<number, Map<number, StoredRole>>();
   private templates = new Map<number, Map<number, MailTemplate>>();
   private organizations = new Map<number, Map<number, MailboxState>>();
   /** Every address that is or ever was a mailbox, across all organizations. */
@@ -352,6 +380,7 @@ export class MockMailboxStore {
     const state: MailboxState = {
       mailbox,
       access,
+      roleId: null,
       messages: new Map(),
       reads: new Map(),
       stars: new Map(),
@@ -470,9 +499,9 @@ export class MockMailboxStore {
    * `(created_at, id)`. `all` is inbound mail in `default`, `sent` outbound mail in `default`,
    * `today` inbound mail outside the trash that arrived during the viewer's day in `tz`, and
    * `pending` the viewer's stars outside the archive and the trash. `q` searches both directions
-   * outside the trash, as the mailbox search does, and a one-character search is too broad. Mock
-   * mailboxes have no mail role, so a role id matches nothing and `none` matches every mailbox;
-   * an unreadable or foreign mailbox matches nothing.
+   * outside the trash, as the mailbox search does, and a one-character search is too broad. A role
+   * id keeps the mailboxes in that role and `none` those without one; an unreadable or foreign
+   * mailbox, or a role holding none the viewer reads, matches nothing.
    */
   listInbox(
     organizationId: number,
@@ -483,11 +512,16 @@ export class MockMailboxStore {
     if (needle !== undefined && Array.from(needle).length === 1) {
       return { ok: false, error: 'search_too_broad' };
     }
-    const roleMatches = query.roleId === undefined || query.roleId === 'none';
     const day = viewerDay(this.dependencies.now(), query.tz);
     const rows: { item: InboxItem; createdAt: bigint }[] = [];
-    for (const state of roleMatches ? this.readableStates(organizationId, viewer) : []) {
+    for (const state of this.readableStates(organizationId, viewer)) {
       if (query.mailboxId !== undefined && state.mailbox.id !== query.mailboxId) continue;
+      if (
+        query.roleId !== undefined &&
+        state.roleId !== (query.roleId === 'none' ? null : query.roleId)
+      ) {
+        continue;
+      }
       const matching = this.visibleMessages(state)
         .map(message => this.forViewer(state, message, viewer))
         .filter(message => inInboxView(message, query, needle, day));
@@ -497,7 +531,7 @@ export class MockMailboxStore {
           item: {
             ...summary,
             mailbox_address: state.mailbox.address,
-            role_id: null,
+            role_id: state.roleId,
             snippet: inboxSnippet(state.messages.get(summary.id)?.text_body ?? ''),
           },
           createdAt: unixNanoseconds(summary.created_at),
@@ -540,12 +574,15 @@ export class MockMailboxStore {
   /**
    * The viewer's own unified inbox counts over the mailboxes they read, by mailbox id; the views
    * and the per-mailbox unread counts use the same rules as `listInbox` and the mailbox list.
-   * Mock mailboxes have no mail role, so every unread message is ungrouped.
+   * Each role sums its readable mailboxes, by role id; the rest is ungrouped. Mail waiting for the
+   * send limit counts outside the trash only.
    */
   inboxCounts(organizationId: number, viewer: MailboxViewer, tz: string): InboxCounts {
     const day = viewerDay(this.dependencies.now(), tz);
     const views = { all_unread: 0, today: 0, today_unread: 0, pending: 0, sent_waiting: 0 };
     const mailboxes: InboxCounts['mailboxes'] = [];
+    const roles = new Map<number, number>();
+    let ungrouped = 0;
     const states = this.readableStates(organizationId, viewer).sort(
       (left, right) => left.mailbox.id - right.mailbox.id
     );
@@ -560,15 +597,21 @@ export class MockMailboxStore {
           if (isUnread) views.today_unread += 1;
         }
         if (inInboxView(message, { view: 'pending' })) views.pending += 1;
-        if (message.queued_reason === 'send_limit') views.sent_waiting += 1;
+        if (message.queued_reason === 'send_limit' && message.placement !== 'trash') {
+          views.sent_waiting += 1;
+        }
       }
       views.all_unread += unread;
       mailboxes.push({ mailbox_id: state.mailbox.id, unread });
+      if (state.roleId === null) ungrouped += unread;
+      else roles.set(state.roleId, (roles.get(state.roleId) ?? 0) + unread);
     }
     return {
       views,
-      roles: [],
-      ungrouped_unread: views.all_unread,
+      roles: [...roles]
+        .sort(([left], [right]) => left - right)
+        .map(([roleId, unread]) => ({ role_id: roleId, unread })),
+      ungrouped_unread: ungrouped,
       mailboxes,
       today_starts_at: apiTimestamp(day.start),
       today_ends_at: apiTimestamp(day.end),
@@ -857,6 +900,94 @@ export class MockMailboxStore {
       }
     }
     return { ok: true, value: null };
+  }
+
+  /**
+   * The organization's mail roles by name ignoring case, then id. Owners and admins see every role
+   * with every mailbox in it; members only roles holding a mailbox they can see, with only those.
+   * An owner who left the organization reads as none.
+   */
+  listRoles(organizationId: number, viewer: MailboxViewer): MailRole[] {
+    const roles = sortedByName(this.rolesOf(organizationId))
+      .map(role => this.roleView(organizationId, role, viewer))
+      .filter(role => managesOrganization(viewer) || role.mailbox_ids.length > 0);
+    return roles;
+  }
+
+  /** Owners and admins only; the limit is judged before the name, as the API's insert does. */
+  createRole(
+    organizationId: number,
+    viewer: MailboxViewer,
+    input: MockMailRoleInput
+  ): MockOrganizeResult<MailRole> {
+    if (!managesOrganization(viewer)) return { ok: false, error: 'forbidden' };
+    const checked = this.checkRole(organizationId, input);
+    if (!checked.ok) return checked;
+    const roles = this.rolesOf(organizationId);
+    if (roles.size >= MAIL_ROLES_MAX_PER_ORGANIZATION) return { ok: false, error: 'role_limit' };
+    if (nameTaken(roles, checked.value.name)) return { ok: false, error: 'role_name_taken' };
+    const now = this.timestamp();
+    const role: StoredRole = {
+      id: this.nextRoleId++,
+      ...checked.value,
+      created_at: now,
+      updated_at: now,
+    };
+    roles.set(role.id, role);
+    return { ok: true, value: this.roleView(organizationId, role, viewer) };
+  }
+
+  /** Replaces every field; the last write wins. Owners and admins only. */
+  updateRole(
+    organizationId: number,
+    viewer: MailboxViewer,
+    roleId: number,
+    input: MockMailRoleInput
+  ): MockOrganizeResult<MailRole> {
+    if (!managesOrganization(viewer)) return { ok: false, error: 'forbidden' };
+    const roles = this.rolesOf(organizationId);
+    const existing = roles.get(roleId);
+    if (!existing) return { ok: false, error: 'role_not_found' };
+    const checked = this.checkRole(organizationId, input);
+    if (!checked.ok) return checked;
+    if (nameTaken(roles, checked.value.name, roleId))
+      return { ok: false, error: 'role_name_taken' };
+    const role: StoredRole = { ...existing, ...checked.value, updated_at: this.timestamp() };
+    roles.set(roleId, role);
+    return { ok: true, value: this.roleView(organizationId, role, viewer) };
+  }
+
+  /** Deletes the role; its mailboxes become ungrouped, and no access changes. */
+  deleteRole(
+    organizationId: number,
+    viewer: MailboxViewer,
+    roleId: number
+  ): MockOrganizeResult<null> {
+    if (!managesOrganization(viewer)) return { ok: false, error: 'forbidden' };
+    if (!this.rolesOf(organizationId).delete(roleId)) return { ok: false, error: 'role_not_found' };
+    for (const state of this.mailboxesOf(organizationId).values()) {
+      if (state.roleId === roleId) state.roleId = null;
+    }
+    return { ok: true, value: null };
+  }
+
+  /**
+   * Puts the mailbox in a role, or takes it out with null; needs `administer`. Setting the current
+   * value succeeds. Answers the mailbox as the caller sees it.
+   */
+  assignRole(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer,
+    roleId: number | null
+  ): MockOrganizeResult<Mailbox> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'administer');
+    if (!found.ok) return found;
+    if (roleId !== null && !this.rolesOf(organizationId).has(roleId)) {
+      return { ok: false, error: 'role_not_found' };
+    }
+    found.state.roleId = roleId;
+    return { ok: true, value: this.view(found.state, viewer, found.access) };
   }
 
   attachment(
@@ -1250,6 +1381,8 @@ export class MockMailboxStore {
     this.nextAccessEventId = 1;
     this.nextFolderId = 1;
     this.nextLabelId = 1;
+    this.nextRoleId = 1;
+    this.roles.clear();
     this.templates.clear();
     this.organizations.clear();
     this.claimedAddresses.clear();
@@ -1537,7 +1670,7 @@ export class MockMailboxStore {
       webhooks_enabled: state.access.webhooksEnabled,
       access,
       unread_count: unread,
-      role_id: null,
+      role_id: state.roleId,
     };
   }
 
@@ -1574,6 +1707,68 @@ export class MockMailboxStore {
       in_reply_to: '',
       events: [],
       attachments: [],
+    };
+  }
+
+  private rolesOf(organizationId: number): Map<number, StoredRole> {
+    const existing = this.roles.get(organizationId);
+    if (existing) return existing;
+    if (this.roles.size >= maxMockOrganizations) {
+      const oldest = this.roles.keys().next().value;
+      if (oldest !== undefined) this.roles.delete(oldest);
+    }
+    const created = new Map<number, StoredRole>();
+    this.roles.set(organizationId, created);
+    return created;
+  }
+
+  /** The role as the viewer sees it: the mailboxes they can see, and only a current owner. */
+  private roleView(organizationId: number, role: StoredRole, viewer: MailboxViewer): MailRole {
+    const mailboxIds = this.statesOf(organizationId)
+      .filter(
+        state => state.roleId === role.id && anyAccess(mailboxAccessFor(state.access, viewer))
+      )
+      .map(state => state.mailbox.id)
+      .sort((left, right) => left - right);
+    const owner =
+      role.owner_user_id !== null &&
+      this.dependencies.membershipOf(organizationId, role.owner_user_id) !== null
+        ? role.owner_user_id
+        : null;
+    return { ...role, owner_user_id: owner, mailbox_ids: mailboxIds };
+  }
+
+  /** The field rules of a role write, with the defaults applied. */
+  private checkRole(
+    organizationId: number,
+    input: MockMailRoleInput
+  ):
+    | { ok: true; value: Required<MailRoleInput> & { color: MailLabelColor } }
+    | { ok: false; error: 'validation'; fields: Record<string, string[]> } {
+    const fields: Record<string, string[]> = {};
+    const name = organizeName(fields, input.name, MAIL_ROLE_NAME_MAX_LENGTH);
+    const color = input.color ?? 'gray';
+    if (!isLabelColor(color))
+      addField(fields, 'color', `must be one of: ${MAIL_LABEL_COLORS.join(', ')}`);
+    const description = (input.description ?? '').trim();
+    if (
+      Array.from(description).length > MAIL_ROLE_DESCRIPTION_MAX_LENGTH ||
+      /\p{Cc}/u.test(description)
+    ) {
+      addField(
+        fields,
+        'description',
+        `must be at most ${MAIL_ROLE_DESCRIPTION_MAX_LENGTH} characters without control characters`
+      );
+    }
+    const owner = input.owner_user_id ?? null;
+    if (owner !== null && this.dependencies.membershipOf(organizationId, owner) === null) {
+      addField(fields, 'owner_user_id', 'must be a member of the organization');
+    }
+    if (Object.keys(fields).length > 0) return { ok: false, error: 'validation', fields };
+    return {
+      ok: true,
+      value: { name, color: color as MailLabelColor, description, owner_user_id: owner },
     };
   }
 

@@ -7,9 +7,10 @@ import { ExternalLink, Search, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { rowUnread } from '@/features/mailbox/components/message-list';
 import { MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
-import type { InboxItem, InboxPage } from '@/features/mailbox/types';
+import type { InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -177,11 +178,12 @@ export function InboxListHeader({
 /**
  * The rows of the unified inbox, newest first, across every loaded page. Each row shows an unread
  * dot (with bold text, so unread never rests on color alone), the sender, the thread size, the
- * time, the subject, and the snippet. The next page loads as the end of the list comes near, and
- * stops once the last page says there is no more.
+ * mailbox's role tag, the time, the subject, and the snippet. The next page loads as the end of
+ * the list comes near, and stops once the last page says there is no more.
  */
 export function InboxList({
   pages,
+  roles = null,
   timeZone,
   selectedId,
   onOpen,
@@ -190,6 +192,8 @@ export function InboxList({
   loadingMore = false,
 }: {
   pages: readonly InboxPage[];
+  /** The roles by id for the rows' role tags; null hides the tags (a list narrowed to one). */
+  roles?: ReadonlyMap<number, MailRole> | null;
   /** The inbox's zone, in which each row's time is shown. */
   timeZone: string;
   selectedId: number | null;
@@ -224,6 +228,7 @@ export function InboxList({
         const unread = rowUnread(item);
         const selected = item.id === selectedId;
         const count = item.thread?.message_count ?? 1;
+        const role = item.role_id === null ? undefined : roles?.get(item.role_id);
         return (
           <li key={item.id}>
             <button
@@ -255,6 +260,12 @@ export function InboxList({
                 {count > 1 ? (
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {t('inbox.threadCount', { count })}
+                  </span>
+                ) : null}
+                {role ? (
+                  <span className="flex min-w-0 shrink items-center gap-1 rounded-full bg-muted px-1.5 text-[0.6875rem] text-muted-foreground">
+                    <LabelDot color={role.color} className="size-1.5" />
+                    <span className="truncate">{role.name}</span>
                   </span>
                 ) : null}
                 <time

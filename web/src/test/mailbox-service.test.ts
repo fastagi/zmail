@@ -1166,6 +1166,82 @@ describe('mailbox organize service boundary', () => {
     expect(getEnvelope).not.toHaveBeenCalled();
   });
 
+  it('calls the mail role routes with the header and parses the answers', async () => {
+    const role = mailRole();
+    const get = vi.spyOn(request, 'get').mockResolvedValue([role]);
+    const post = vi.spyOn(request, 'post').mockResolvedValue(role);
+    const put = vi
+      .spyOn(request, 'put')
+      .mockImplementation(async url =>
+        url.endsWith('/role-assignment') ? accessMailbox({ role_id: 3 }) : role
+      );
+    const remove = vi.spyOn(request, 'delete').mockResolvedValue(undefined);
+    const input = { name: 'Design', color: 'orange' as const, description: '', owner_user_id: 7 };
+
+    await expect(mailboxService.listRoles(7)).resolves.toEqual([role]);
+    await expect(mailboxService.createRole(7, input)).resolves.toEqual(role);
+    await expect(mailboxService.updateRole(7, 3, input)).resolves.toEqual(role);
+    await mailboxService.deleteRole(7, 3);
+    await expect(mailboxService.assignRole(7, 12, 3)).resolves.toMatchObject({
+      id: 12,
+      role_id: 3,
+    });
+    put.mockResolvedValueOnce(accessMailbox({ role_id: null }));
+    await expect(mailboxService.assignRole(7, 12, null)).resolves.toMatchObject({ role_id: null });
+
+    expect(get.mock.calls.map(call => call[0])).toEqual(['/mail-roles']);
+    expect(post.mock.calls.map(call => [call[0], call[1]])).toEqual([['/mail-roles', input]]);
+    expect(put.mock.calls.map(call => [call[0], call[1]])).toEqual([
+      ['/mail-roles/3', input],
+      ['/mailboxes/12/role-assignment', { role_id: 3 }],
+      ['/mailboxes/12/role-assignment', { role_id: null }],
+    ]);
+    expect(remove.mock.calls.map(call => call[0])).toEqual(['/mail-roles/3']);
+    const configs = [
+      ...get.mock.calls.map(call => call[1]),
+      ...post.mock.calls.map(call => call[2]),
+      ...put.mock.calls.map(call => call[2]),
+      ...remove.mock.calls.map(call => call[1]),
+    ];
+    for (const config of configs) expect(config?.headers).toEqual({ 'Organization-Id': '7' });
+
+    // Drift, another role than the one written, or another mailbox, is an invalid response.
+    const invalid = expect.objectContaining({ errorCode: ClientErrorCode.INVALID_RESPONSE });
+    get.mockResolvedValueOnce([{ ...role, color: 'black' }]);
+    await expect(mailboxService.listRoles(7)).rejects.toEqual(invalid);
+    put.mockResolvedValueOnce({ ...role, id: 4 });
+    await expect(mailboxService.updateRole(7, 3, input)).rejects.toEqual(invalid);
+    put.mockResolvedValueOnce(accessMailbox({ id: 13, role_id: 3 }));
+    await expect(mailboxService.assignRole(7, 12, 3)).rejects.toEqual(invalid);
+    post.mockResolvedValueOnce({ ...role, mailbox_ids: undefined });
+    await expect(mailboxService.createRole(7, input)).rejects.toEqual(invalid);
+
+    // Invalid ids never leave the browser.
+    const calls = [get, post, put, remove].map(spy => spy.mock.calls.length);
+    for (const call of [
+      () => mailboxService.updateRole(7, 0, input),
+      () => mailboxService.deleteRole(7, Number.NaN),
+      () => mailboxService.assignRole(7, 0, 3),
+      () => mailboxService.assignRole(7, 12, -1),
+      () => mailboxService.listRoles(0),
+    ]) {
+      await expect(call()).rejects.toEqual(invalid);
+    }
+    expect([get, post, put, remove].map(spy => spy.mock.calls.length)).toEqual(calls);
+  });
+
+  it('maps the mail role error codes to local copy', () => {
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_ROLE_NOT_FOUND, 404))
+    ).toBe('errors.roleNotFound');
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_ROLE_NAME_TAKEN, 409))
+    ).toBe('errors.roleNameTaken');
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_ROLE_LIMIT_REACHED, 422))
+    ).toBe('errors.roleLimitReached');
+  });
+
   it('maps the organize error codes to local copy', () => {
     expect(
       resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 422))
@@ -1193,5 +1269,19 @@ function inboxItem() {
     mailbox_address: 'hello@mail.example.com',
     role_id: null,
     snippet: 'Hi Bob, the invoice is attached.',
+  };
+}
+
+function mailRole(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 3,
+    name: 'Design',
+    color: 'orange',
+    description: '',
+    owner_user_id: 7,
+    mailbox_ids: [12, 14],
+    created_at: now,
+    updated_at: now,
+    ...overrides,
   };
 }

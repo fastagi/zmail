@@ -487,6 +487,37 @@ export const inboxCountsSchema = strictObject({
   today_ends_at: timestampSchema,
 });
 
+/** The most mail roles an organization holds. */
+export const MAIL_ROLES_MAX_PER_ORGANIZATION = 50;
+/** A role name is 1 to 64 characters after trimming, unique in the organization ignoring case. */
+export const MAIL_ROLE_NAME_MAX_LENGTH = 64;
+/** A role description is at most 280 characters after trimming, without control characters. */
+export const MAIL_ROLE_DESCRIPTION_MAX_LENGTH = 280;
+
+/**
+ * An organization-level grouping of mailboxes for navigation; it grants nothing. `mailbox_ids` are
+ * the role's mailboxes the caller can see, ascending; `owner_user_id` is for display only.
+ */
+export const mailRoleSchema = strictObject({
+  id: safeIdSchema,
+  name: string(),
+  color: mailLabelColorSchema,
+  description: string(),
+  owner_user_id: nullable(safeIdSchema),
+  mailbox_ids: array(safeIdSchema),
+  created_at: timestampSchema,
+  updated_at: timestampSchema,
+});
+export const mailRoleListSchema = array(mailRoleSchema);
+
+/** Every field of a role; an omitted one takes its default (gray, empty, no owner). */
+export const mailRoleInputSchema = strictObject({
+  name: string(),
+  color: optional(mailLabelColorSchema),
+  description: optional(string()),
+  owner_user_id: optional(nullable(safeIdSchema)),
+});
+
 /** A thread's messages outside the trash, oldest first, with their bodies. */
 export const mailThreadSchema = array(mailMessageSchema);
 

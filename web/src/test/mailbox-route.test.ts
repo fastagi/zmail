@@ -3322,6 +3322,338 @@ describe('mailbox browser route boundary', () => {
     }
   });
 
+  it('mock counts leave queued mail in the trash out of sent_waiting', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const { mockMailboxStore } = await import('@/features/mailbox/server/mock-mailbox-store');
+    const desk = (await (await create(route, { local_part: 'desk' })).json()).data;
+    const sendQueued = async (subject: string) => {
+      const sent = (
+        await (
+          await send(route, desk.id, { to: ['bob@example.com'], subject, text: 'Body' })
+        ).json()
+      ).data;
+      // The mock never runs out of send limit; hold the message as the API would.
+      const state = mockMailboxStore['organizations'].get(1)?.get(desk.id);
+      const stored = state?.messages.get(sent.id);
+      if (!state || !stored) throw new Error('message not stored');
+      state.messages.set(sent.id, { ...stored, status: 'queued', queued_reason: 'send_limit' });
+      return sent.id as number;
+    };
+    const waiting = async () =>
+      (await (await route.getInboxMessageCountsRoute(request('/api/inbox-message-counts'))).json())
+        .data.views.sent_waiting;
+
+    await sendQueued('One');
+    const trashed = await sendQueued('Two');
+    expect(await waiting()).toBe(2);
+    const moved = await route.updateMailMessageRoute(
+      request(`/api/mailboxes/${desk.id}/messages/${trashed}`, {
+        method: 'PUT',
+        body: JSON.stringify({ placement: 'trash' }),
+      }),
+      String(desk.id),
+      String(trashed)
+    );
+    expect(moved.status).toBe(200);
+    expect(await waiting()).toBe(1);
+  });
+
+  it('mock role writes: member 403, duplicate 409, 51st 422, delete ungroups', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const write = (method: string, path: string, body?: unknown) =>
+      request(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const createRole = (body: unknown) =>
+      route.createMailRoleRoute(write('POST', '/api/mail-roles', body));
+    const updateRole = (roleId: number | string, body: unknown) =>
+      route.updateMailRoleRoute(write('PUT', `/api/mail-roles/${roleId}`, body), String(roleId));
+    const deleteRole = (roleId: number | string) =>
+      route.deleteMailRoleRoute(write('DELETE', `/api/mail-roles/${roleId}`), String(roleId));
+    const assign = (mailboxId: number, body: unknown) =>
+      route.setMailboxRoleRoute(
+        write('PUT', `/api/mailboxes/${mailboxId}/role-assignment`, body),
+        String(mailboxId)
+      );
+    const listRoles = async () => {
+      const response = await route.listMailRolesRoute(request('/api/mail-roles'));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      return (await response.json()).data as { id: number; name: string; mailbox_ids: number[] }[];
+    };
+
+    const created = await createRole({ name: '  Design desk ', color: 'orange', owner_user_id: 3 });
+    expect(created.status).toBe(201);
+    expect(created.headers.get('vary')).toContain('Organization-Id');
+    const design = (await created.json()).data;
+    expect(design).toMatchObject({
+      name: 'Design desk',
+      color: 'orange',
+      description: '',
+      owner_user_id: 3,
+      mailbox_ids: [],
+    });
+    // The defaults: gray, no description, no owner.
+    const plain = (await (await createRole({ name: 'Billing' })).json()).data;
+    expect(plain).toMatchObject({ color: 'gray', description: '', owner_user_id: null });
+
+    await expectError(await createRole({ name: 'DESIGN DESK' }), 409, 'MAILBOX.ROLE_NAME_TAKEN');
+    await expectError(
+      await updateRole(plain.id, { name: 'design desk' }),
+      409,
+      'MAILBOX.ROLE_NAME_TAKEN'
+    );
+    for (const body of [
+      { name: '   ' },
+      { name: 'x'.repeat(65) },
+      { name: 'Ok', color: 'black' },
+      { name: 'Ok', description: 'd'.repeat(281) },
+      { name: 'Ok', description: 'bad\u0007bell' },
+      { name: 'Ok', owner_user_id: 999 },
+      { name: 7 },
+      { name: 'Ok', owner_user_id: 'x' },
+    ]) {
+      await expectError(await createRole(body), 422, 'COMMON.VALIDATION_FAILED');
+    }
+    await expectError(
+      await route.createMailRoleRoute(request('/api/mail-roles', { method: 'POST', body: '{' })),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+    await expectError(
+      await route.createMailRoleRoute(
+        write('POST', '/api/mail-roles', { name: 'Big', description: 'x'.repeat(5_000) })
+      ),
+      413,
+      'COMMON.REQUEST_TOO_LARGE'
+    );
+    await expectError(await updateRole(9999, { name: 'Gone' }), 404, 'MAILBOX.ROLE_NOT_FOUND');
+    await expectError(await updateRole('abc', { name: 'Bad' }), 400, 'COMMON.INVALID_INPUT');
+
+    // team@ is readable by demo-member; vault@ is not, though demo-admin administers it.
+    const team = (
+      await (
+        await create(route, {
+          local_part: 'team',
+          type: 'shared',
+          members: [
+            { user_id: 1, permission: 'manage' },
+            { user_id: 3, permission: 'view' },
+          ],
+        })
+      ).json()
+    ).data;
+    const vault = (
+      await (
+        await create(route, {
+          local_part: 'vault',
+          type: 'shared',
+          members: [{ user_id: 1, permission: 'manage' }],
+        })
+      ).json()
+    ).data;
+    const assigned = await assign(team.id, { role_id: design.id });
+    expect(assigned.status).toBe(200);
+    await expect(assigned.json()).resolves.toMatchObject({
+      data: { id: team.id, role_id: design.id },
+    });
+    // Assigning the same role again changes nothing and succeeds.
+    expect((await assign(team.id, { role_id: design.id })).status).toBe(200);
+    expect((await assign(vault.id, { role_id: plain.id })).status).toBe(200);
+    await expectError(await assign(team.id, { role_id: 9999 }), 404, 'MAILBOX.ROLE_NOT_FOUND');
+    await expectError(await assign(team.id, {}), 422, 'COMMON.VALIDATION_FAILED');
+    await expectError(await assign(team.id, { role_id: 0 }), 422, 'COMMON.VALIDATION_FAILED');
+    await expectError(await assign(9999, { role_id: null }), 404, 'MAILBOX.NOT_FOUND');
+
+    expect((await listRoles()).map(role => [role.name, role.mailbox_ids])).toEqual([
+      ['Billing', [vault.id]],
+      ['Design desk', [team.id]],
+    ]);
+    const inboxIds = async (query: string) =>
+      (
+        await (await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`))).json()
+      ).data.map((item: { mailbox_id: number; role_id: number | null }) => [
+        item.mailbox_id,
+        item.role_id,
+      ]);
+    expect(await inboxIds(`?role_id=${design.id}`)).toEqual([[team.id, design.id]]);
+    expect(await inboxIds('?role_id=none')).toEqual([]);
+    const counts = async () =>
+      (await (await route.getInboxMessageCountsRoute(request('/api/inbox-message-counts'))).json())
+        .data;
+    expect(await counts()).toMatchObject({
+      roles: [
+        { role_id: design.id, unread: 1 },
+        { role_id: plain.id, unread: 1 },
+      ],
+      ungrouped_unread: 0,
+    });
+
+    // A member reads roles holding a mailbox they can see, and only those mailboxes.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect((await listRoles()).map(role => [role.name, role.mailbox_ids])).toEqual([
+      ['Design desk', [team.id]],
+    ]);
+    await expectError(await createRole({ name: 'Mine' }), 403, 'PERMISSION.DENIED');
+    await expectError(await updateRole(design.id, { name: 'Mine' }), 403, 'PERMISSION.DENIED');
+    await expectError(await deleteRole(design.id), 403, 'PERMISSION.DENIED');
+    await expectError(await assign(team.id, { role_id: null }), 403, 'PERMISSION.DENIED');
+    await expectError(await assign(vault.id, { role_id: null }), 404, 'MAILBOX.NOT_FOUND');
+
+    // Deleting a role ungroups its mailboxes; a second delete finds nothing.
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    expect((await deleteRole(design.id)).status).toBe(204);
+    await expectError(await deleteRole(design.id), 404, 'MAILBOX.ROLE_NOT_FOUND');
+    const mailboxes = (await (await route.listMailboxesRoute(request('/api/mailboxes'))).json())
+      .data as { id: number; role_id: number | null }[];
+    expect(mailboxes.find(mailbox => mailbox.id === team.id)?.role_id).toBeNull();
+    expect(await inboxIds('?role_id=none')).toEqual([[team.id, null]]);
+    expect(await counts()).toMatchObject({
+      roles: [{ role_id: plain.id, unread: 1 }],
+      ungrouped_unread: 1,
+    });
+
+    // At most 50 roles per organization; the limit is judged before the name.
+    for (let index = 1; index <= 49; index += 1) {
+      expect((await createRole({ name: `Role ${index}` })).status).toBe(201);
+    }
+    await expectError(await createRole({ name: 'One more' }), 422, 'MAILBOX.ROLE_LIMIT_REACHED');
+    await expectError(await createRole({ name: 'billing' }), 422, 'MAILBOX.ROLE_LIMIT_REACHED');
+    expect((await updateRole(plain.id, { name: 'Finance', color: 'teal' })).status).toBe(200);
+
+    // Another organization sees none of these roles.
+    activeOrganization = await secondOrganization();
+    expect(await listRoles()).toEqual([]);
+    await expectError(
+      await updateRole(plain.id, { name: 'Elsewhere' }),
+      404,
+      'MAILBOX.ROLE_NOT_FOUND'
+    );
+    await expectError(await deleteRole(plain.id), 404, 'MAILBOX.ROLE_NOT_FOUND');
+  });
+
+  it('proxy role routes use the right upstream method and path', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async (_url, init) =>
+      init?.method === 'DELETE'
+        ? new Response(null, { status: 204 })
+        : Response.json({ code: 0, message: 'success', data: {} })
+    );
+    const route = await loadRoute();
+    activeOrganization = '7';
+    const write = (method: string, path: string, body?: unknown) =>
+      request(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+
+    await route.listMailRolesRoute(request('/api/mail-roles?owner=1'));
+    await route.createMailRoleRoute(
+      write('POST', '/api/mail-roles', { name: 'Design', color: 'orange', id: 9, extra: true })
+    );
+    await route.updateMailRoleRoute(
+      write('PUT', '/api/mail-roles/3', {
+        name: 'Design',
+        description: 'Agency accounts',
+        owner_user_id: 7,
+      }),
+      '3'
+    );
+    const removed = await route.deleteMailRoleRoute(write('DELETE', '/api/mail-roles/3'), '3');
+    expect(removed.status).toBe(204);
+    await route.setMailboxRoleRoute(
+      write('PUT', '/api/mailboxes/12/role-assignment', { role_id: 3, mailbox_id: 1 }),
+      '12'
+    );
+    await route.setMailboxRoleRoute(
+      write('PUT', '/api/mailboxes/12/role-assignment', { role_id: null }),
+      '12'
+    );
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const target = new URL(String(url));
+      return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/mail-roles',
+      'POST /v1/mail-roles',
+      'PUT /v1/mail-roles/3',
+      'DELETE /v1/mail-roles/3',
+      'PUT /v1/mailboxes/12/role-assignment',
+      'PUT /v1/mailboxes/12/role-assignment',
+    ]);
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      init?.body === undefined ? undefined : JSON.parse(String(init.body))
+    );
+    expect(bodies).toEqual([
+      undefined,
+      { name: 'Design', color: 'orange', description: '', owner_user_id: null },
+      { name: 'Design', color: 'gray', description: 'Agency accounts', owner_user_id: 7 },
+      undefined,
+      { role_id: 3 },
+      { role_id: null },
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('organization-id')).toBe('7');
+    }
+
+    // Malformed ids, bodies, and oversized bodies never reach the API.
+    fetchMock.mockClear();
+    await expectError(
+      await route.updateMailRoleRoute(write('PUT', '/api/mail-roles/0', { name: 'x' }), '0'),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+    await expectError(
+      await route.deleteMailRoleRoute(write('DELETE', '/api/mail-roles/x'), 'x'),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+    await expectError(
+      await route.createMailRoleRoute(
+        write('POST', '/api/mail-roles', { name: 'Big', description: 'x'.repeat(5_000) })
+      ),
+      413,
+      'COMMON.REQUEST_TOO_LARGE'
+    );
+    await expectError(
+      await route.setMailboxRoleRoute(
+        write('PUT', '/api/mailboxes/12/role-assignment', { role_id: 'three' }),
+        '12'
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('role writes reject cross-origin requests', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const options = { body: '{', origin: 'https://evil.example' };
+
+    const responses = await Promise.all([
+      route.createMailRoleRoute(request('/api/mail-roles', { ...options, method: 'POST' })),
+      route.updateMailRoleRoute(request('/api/mail-roles/1', { ...options, method: 'PUT' }), '1'),
+      route.deleteMailRoleRoute(
+        request('/api/mail-roles/1', { ...options, method: 'DELETE' }),
+        '1'
+      ),
+      route.setMailboxRoleRoute(
+        request('/api/mailboxes/1/role-assignment', { ...options, method: 'PUT' }),
+        '1'
+      ),
+    ]);
+
+    for (const response of responses) {
+      expect(response.status).toBe(403);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    }
+    expect(getSessionUser).not.toHaveBeenCalled();
+  });
+
   it('rejects an invalid log or statistics query before it reaches the API', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';

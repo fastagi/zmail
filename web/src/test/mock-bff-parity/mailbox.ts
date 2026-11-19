@@ -233,6 +233,45 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   expect(totals).toEqual({ sent: 2, failed: 0, received: 2 });
   expect(await mailboxService.stats(organizationId, 1)).toHaveLength(1);
 
+  // Mail roles: the shared mailbox in a role, its rows tagged, the counts grouped by role.
+  const role = await mailboxService.createRole(organizationId, { name: 'Parity desk' });
+  expect(role).toMatchObject({ color: 'gray', description: '', owner_user_id: null });
+  expect(role.mailbox_ids).toEqual([]);
+  expect(await mailboxService.assignRole(organizationId, mailbox.id, role.id)).toMatchObject({
+    id: mailbox.id,
+    role_id: role.id,
+  });
+  expect(
+    (await mailboxService.listRoles(organizationId)).map(item => [item.id, item.mailbox_ids])
+  ).toEqual([[role.id, [mailbox.id]]]);
+  const inRole = await mailboxService.listInbox(organizationId, {
+    view: 'sent',
+    roleId: role.id,
+    tz: 'UTC',
+  });
+  expect(inRole.items.map(item => item.role_id)).toEqual([role.id, role.id]);
+  expect((await mailboxService.inboxCounts(organizationId, 'UTC')).roles).toEqual([
+    { role_id: role.id, unread: 0 },
+  ]);
+  expect(
+    await mailboxService.updateRole(organizationId, role.id, {
+      name: 'Parity team',
+      color: 'teal',
+      description: 'Shared parity mail',
+      owner_user_id: 2,
+    })
+  ).toMatchObject({
+    id: role.id,
+    name: 'Parity team',
+    owner_user_id: 2,
+    mailbox_ids: [mailbox.id],
+  });
+  await mailboxService.deleteRole(organizationId, role.id);
+  expect((await mailboxService.list(organizationId)).map(item => item.role_id)).toEqual([
+    null,
+    null,
+  ]);
+
   // Members, the webhook switch, and the access history of the shared mailbox.
   expect(await mailboxService.setMember(organizationId, mailbox.id, 3, 'view')).toMatchObject({
     user_id: 3,

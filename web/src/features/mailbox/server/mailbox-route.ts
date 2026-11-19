@@ -85,6 +85,7 @@ import {
   type MockInboxQuery,
   type MockAccessError,
   type MockAccessResult,
+  type MockMailRoleInput,
   type MockMailSendResult,
   type MockMailTemplateResult,
   type MockMessageChange,
@@ -2535,6 +2536,128 @@ export async function setMailboxWebhookSettingRoute(
   );
 }
 
+/** The organization's mail roles; every member may read them, each seeing what they may see. */
+export async function listMailRolesRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mail-roles',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return success(mockMailboxStore.listRoles(target.organizationId, viewerOf(target)));
+}
+
+/** Creates a mail role; owners and admins only, as the API decides. */
+export async function createMailRoleRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const input = await roleBody(request);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'mail-roles',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: roleFieldMap,
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.createRole(target.organizationId, viewerOf(target), input.value),
+    201
+  );
+}
+
+/** Replaces every field of a mail role; owners and admins only. */
+export async function updateMailRoleRoute(
+  request: Request,
+  rawRoleId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const roleId = parseRouteId(rawRoleId);
+  if (!roleId.ok) return roleId.response;
+  const input = await roleBody(request);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mail-roles/${roleId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: roleFieldMap,
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.updateRole(target.organizationId, viewerOf(target), roleId.value, input.value)
+  );
+}
+
+/** Deletes a mail role; its mailboxes become ungrouped. Owners and admins only. */
+export async function deleteMailRoleRoute(
+  request: Request,
+  rawRoleId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const roleId = parseRouteId(rawRoleId);
+  if (!roleId.ok) return roleId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mail-roles/${roleId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const result = mockMailboxStore.deleteRole(target.organizationId, viewerOf(target), roleId.value);
+  return result.ok ? apiNoContentResponse(privateMailboxHeaders()) : organizeFailure(result);
+}
+
+/**
+ * Puts a mailbox in a mail role (`{ role_id: id }`) or takes it out (`{ role_id: null }`); the
+ * field must be present. Needs `administer`; grants and revokes nothing.
+ */
+export async function setMailboxRoleRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const body = await jsonObject(request, maxOrganizeBodyBytes);
+  if (!body.ok) return body.response;
+  const { role_id: roleId } = body.value;
+  if (roleId !== null && !positiveId(roleId)) {
+    return validationFailed({ role_id: ['The role_id field must be an id or null'] });
+  }
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mailboxes/${mailboxId.value}/role-assignment`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { role_id: roleId },
+      fieldMap: { role_id: 'role_id' },
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.assignRole(target.organizationId, mailboxId.value, viewerOf(target), roleId)
+  );
+}
+
 function accessResponse<T>(result: MockAccessResult<T>, status: 200 | 201 = 200): NextResponse {
   return result.ok ? success(result.value, status) : accessFailure(result.error);
 }
@@ -2577,6 +2700,12 @@ function organizeFailure(
       return failure(422, ApiErrorCode.MAILBOX_LABEL_LIMIT_REACHED, 'Mail label limit reached');
     case 'search_too_broad':
       return failure(422, ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 'Search is too broad');
+    case 'role_not_found':
+      return failure(404, ApiErrorCode.MAILBOX_ROLE_NOT_FOUND, 'Mail role not found');
+    case 'role_name_taken':
+      return failure(409, ApiErrorCode.MAILBOX_ROLE_NAME_TAKEN, 'Mail role name is taken');
+    case 'role_limit':
+      return failure(422, ApiErrorCode.MAILBOX_ROLE_LIMIT_REACHED, 'Mail role limit reached');
     case 'mailbox_not_found':
     case 'forbidden':
     case 'not_found':
@@ -2957,6 +3086,12 @@ const messageChangeFieldMap = {
 } as const;
 
 const organizeFieldMap = { name: 'name', color: 'color' } as const;
+const roleFieldMap = {
+  name: 'name',
+  color: 'color',
+  description: 'description',
+  owner_user_id: 'owner_user_id',
+} as const;
 
 /**
  * Shape checks only: each field the right JSON type, ids non-negative integers. Whether the
@@ -3022,6 +3157,38 @@ async function organizeBody(
   return {
     ok: true,
     value: withColor ? { name: name as string, color: color as string } : { name: name as string },
+  };
+}
+
+/**
+ * A mail role write: shape checks only, with the documented defaults filled in (gray, empty, no
+ * owner) so the whole role is replaced. The name, palette, length, and owner rules are the API's
+ * and, in development, the mock's. Unknown keys are dropped.
+ */
+async function roleBody(request: Request): Promise<Parsed<Required<MockMailRoleInput>>> {
+  const body = await jsonObject(request, maxOrganizeBodyBytes);
+  if (!body.ok) return body;
+  const { name = '', color = null, description = null, owner_user_id: owner = null } = body.value;
+  const errors: Record<string, string[]> = {};
+  if (typeof name !== 'string') errors.name = ['The name field must be a string'];
+  if (color !== null && typeof color !== 'string') {
+    errors.color = ['The color field must be a string'];
+  }
+  if (description !== null && typeof description !== 'string') {
+    errors.description = ['The description field must be a string'];
+  }
+  if (owner !== null && !positiveId(owner)) {
+    errors.owner_user_id = ['The owner_user_id field must be an id or null'];
+  }
+  if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
+  return {
+    ok: true,
+    value: {
+      name: name as string,
+      color: (color as string | null) ?? 'gray',
+      description: (description as string | null) ?? '',
+      owner_user_id: owner as number | null,
+    },
   };
 }
 

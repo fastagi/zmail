@@ -55,6 +55,11 @@ vi.mock('@/features/organization/hooks/use-organizations', () => ({
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
   useMailTemplates: () => ({ data: [] }),
 }));
+// Mailbox administration offers each mailbox's mail role; these tests have no roles.
+vi.mock('@/features/mailbox/hooks/use-inbox', () => ({
+  useMailRoles: () => ({ data: [], isPending: false, error: null }),
+  useAssignMailboxRole: () => ({ isPending: false, mutateAsync: vi.fn() }),
+}));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useMailboxDomains: () => state.domains,
   useMailboxes: () => state.mailboxes,

@@ -21,10 +21,11 @@ import {
   InboxReadingPane,
   type InboxReaderNavigation,
 } from '@/features/mailbox/components/inbox-reading-pane';
-import { InboxSidebar } from '@/features/mailbox/components/inbox-sidebar';
+import { InboxSidebar, type InboxRoleFilter } from '@/features/mailbox/components/inbox-sidebar';
 import { MailboxAccessPanel } from '@/features/mailbox/components/mailbox-access-panel';
 import { MAILBOX_PARAM } from '@/features/mailbox/components/mailbox-workspace';
 import { ManageMailboxesDialog } from '@/features/mailbox/components/manage-mailboxes-dialog';
+import { ManageRolesDialog } from '@/features/mailbox/components/manage-roles-dialog';
 import {
   MailOrganizationBoundary,
   MailPageHeader,
@@ -41,6 +42,7 @@ import {
   useInboxCounts,
   useInboxMessages,
   useInboxTimezone,
+  useMailRoles,
 } from '@/features/mailbox/hooks/use-inbox';
 import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
@@ -51,6 +53,7 @@ import type {
   InboxItem,
   InboxView,
   MailMessage,
+  MailRole,
   Mailbox,
 } from '@/features/mailbox/types';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
@@ -61,13 +64,18 @@ import { cn } from '@/utils';
 
 /** Query parameter naming the open row of the unified inbox, so a reload keeps it open. */
 export const OPEN_PARAM = 'open';
-/** The URL state of the unified inbox (D20): the view, one mailbox, the search, the Unread tab. */
+/**
+ * The URL state of the unified inbox (D20): the view, one mailbox or one mail role (`none` for the
+ * mailboxes without one), the search, the Unread tab.
+ */
 const VIEW_PARAM = 'view';
 const BOX_PARAM = 'box';
+const ROLE_PARAM = 'role';
 const SEARCH_PARAM = 'q';
 const TAB_PARAM = 'tab';
 const UNREAD_TAB = 'unread';
-const filterParams = [VIEW_PARAM, BOX_PARAM, SEARCH_PARAM, TAB_PARAM] as const;
+const NO_ROLE = 'none';
+const filterParams = [VIEW_PARAM, BOX_PARAM, ROLE_PARAM, SEARCH_PARAM, TAB_PARAM] as const;
 const rowIdPattern = /^[1-9]\d{0,15}$/u;
 const fallbackTimeZone = 'UTC';
 
@@ -75,6 +83,7 @@ const fallbackTimeZone = 'UTC';
 interface InboxUrlState {
   view: InboxView;
   box: number | null;
+  role: InboxRoleFilter | null;
   q: string;
   unread: boolean;
 }
@@ -95,9 +104,14 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
       ? (rawView as InboxView)
       : 'all';
   const rawBox = params.get(BOX_PARAM) ?? '';
+  const rawRole = params.get(ROLE_PARAM) ?? '';
+  let role: InboxRoleFilter | null = null;
+  if (rawRole === NO_ROLE) role = NO_ROLE;
+  else if (rowIdPattern.test(rawRole)) role = Number(rawRole);
   return {
     view,
     box: rowIdPattern.test(rawBox) ? Number(rawBox) : null,
+    role,
     q,
     unread: params.get(TAB_PARAM) === UNREAD_TAB,
   };
@@ -107,10 +121,11 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
  * The list query for the URL state. `all` and `sent` group by thread, except for the Unread tab
  * and a search, which list single messages.
  */
-function inboxFilters({ view, box, q, unread }: InboxUrlState, tz: string): InboxFilters {
+function inboxFilters({ view, box, role, q, unread }: InboxUrlState, tz: string): InboxFilters {
   const grouped = !unread && q === '' && (view === 'all' || view === 'sent');
   return {
     view,
+    ...(role === null ? {} : { roleId: role }),
     ...(box === null ? {} : { mailboxId: box }),
     ...(unread ? { unread: true } : {}),
     ...(q === '' ? {} : { q }),
@@ -123,8 +138,14 @@ function inboxFilters({ view, box, q, unread }: InboxUrlState, tz: string): Inbo
 function listingUnread(counts: InboxCounts | undefined, state: InboxUrlState): number | undefined {
   if (!counts || state.q !== '') return undefined;
   if (state.box !== null) {
-    if (state.view !== 'all') return undefined;
+    if (state.view !== 'all' || state.role !== null) return undefined;
     return counts.mailboxes.find(item => item.mailbox_id === state.box)?.unread;
+  }
+  if (state.role !== null) {
+    if (state.view !== 'all') return undefined;
+    if (state.role === NO_ROLE) return counts.ungrouped_unread;
+    const role = state.role;
+    return counts.roles.find(item => item.role_id === role)?.unread ?? 0;
   }
   if (state.view === 'all') return counts.views.all_unread;
   return state.view === 'today' ? counts.views.today_unread : undefined;
@@ -168,13 +189,16 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const mailboxes = useMailboxes(organizationId, { live: true });
-  const inboxZone = useInboxTimezone();
-  const [zoneRefused, setZoneRefused] = useState(false);
-  const timeZone = zoneRefused ? fallbackTimeZone : inboxZone;
+  const roles = useMailRoles(organizationId);
+  const { zone: inboxZone, ready: zoneReady } = useInboxTimezone();
+  // The zone the inbox refused; UTC stands in for it only while it is still the inbox's zone.
+  const [refusedZone, setRefusedZone] = useState<string | null>(null);
+  const timeZone = refusedZone === inboxZone ? fallbackTimeZone : inboxZone;
   const urlState = readInboxUrl(searchParams);
   const filters = inboxFilters(urlState, timeZone);
-  const inbox = useInboxMessages(organizationId, filters);
-  const counts = useInboxCounts(organizationId, timeZone);
+  const inbox = useInboxMessages(organizationId, filters, { enabled: zoneReady });
+  const counts = useInboxCounts(organizationId, timeZone, { enabled: zoneReady });
+  const [managingRoles, setManagingRoles] = useState(false);
   const [held, setHeld] = useState<InboxItem | null>(null);
   const [draft, setDraft] = useState<{ mailbox: Mailbox; draft: ComposeDraft } | null>(null);
   const formatter = useDateTimeFormat();
@@ -199,8 +223,8 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
     });
 
   // A 400 means the inbox refused the query (§11.3). With filters in the URL they are the cause,
-  // so the URL goes back to `view=all`; without any, only the zone can be, and UTC is always known.
-  // A listing already on screen keeps its URL when a later page fails.
+  // so the URL goes back to `view=all` and the open row closes; without any, only the zone can be,
+  // and UTC is always known. A listing already on screen keeps its URL when a later page fails.
   const rejected = !inbox.data && isRejectedQuery(inbox.error);
   const filtered = filterParams.some(name => searchParams.has(name));
   const resetting = rejected && (filtered || timeZone !== fallbackTimeZone);
@@ -208,10 +232,10 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
     if (!rejected) return;
     if (filtered) {
       replaceParams(next => {
-        for (const name of filterParams) next.delete(name);
+        for (const name of [OPEN_PARAM, ...filterParams]) next.delete(name);
       });
     } else if (timeZone !== fallbackTimeZone) {
-      setZoneRefused(true);
+      setRefusedZone(timeZone);
     }
   }, [rejected, filtered, timeZone, replaceParams]);
 
@@ -322,10 +346,22 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
 
   const narrowedTo =
     urlState.box === null ? null : (readable.find(mailbox => mailbox.id === urlState.box) ?? null);
+  const roleList = roles.data ?? [];
+  const narrowedRole =
+    typeof urlState.role === 'number'
+      ? (roleList.find(role => role.id === urlState.role) ?? null)
+      : null;
   let title: string;
   if (urlState.box !== null) title = narrowedTo?.address ?? t('inbox.views.all');
+  else if (urlState.role === NO_ROLE) title = t('inbox.groups.ungrouped');
+  else if (urlState.role !== null) title = narrowedRole?.name ?? t('inbox.views.all');
   else if (urlState.q !== '') title = t('inbox.search.results', { q: urlState.q });
   else title = t(`inbox.views.${urlState.view}`);
+  // Rows name their role only while the list spans roles.
+  const roleTags =
+    urlState.box === null && urlState.role === null
+      ? new Map<number, MailRole>(roleList.map(role => [role.id, role]))
+      : null;
   const emptyTitle =
     urlState.q !== ''
       ? t('inbox.empty.search')
@@ -375,6 +411,7 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
     list = (
       <InboxList
         pages={pages}
+        roles={roleTags}
         timeZone={timeZone}
         selectedId={openItem?.id ?? null}
         onOpen={row => setOpenParam(row.id)}
@@ -390,13 +427,18 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
       <aside className="flex min-h-0 flex-col gap-3 lg:overflow-y-auto lg:border-r lg:pr-4">
         <InboxSidebar
           counts={counts.data}
-          mailboxes={readable}
+          mailboxes={mailboxes.data}
+          roles={roles.data}
+          canManage={canManage}
           view={urlState.view}
           box={urlState.box}
+          role={urlState.role}
           onView={view =>
             setListing({ [VIEW_PARAM]: view === 'all' ? null : view, [SEARCH_PARAM]: null })
           }
-          onBox={mailboxId => setListing({ [BOX_PARAM]: String(mailboxId) })}
+          onBox={mailboxId => setListing({ [BOX_PARAM]: String(mailboxId), [ROLE_PARAM]: null })}
+          onRole={role => setListing({ [ROLE_PARAM]: String(role), [BOX_PARAM]: null })}
+          onManageRoles={() => setManagingRoles(true)}
         />
       </aside>
 
@@ -418,7 +460,9 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
             onSearch={q => setListing({ [SEARCH_PARAM]: q === '' ? null : q, [VIEW_PARAM]: null })}
             mailboxHref={urlState.box === null ? null : mailboxHref(urlState.box)}
             onClearMailbox={
-              urlState.box === null ? undefined : () => setListing({ [BOX_PARAM]: null })
+              urlState.box === null && urlState.role === null
+                ? undefined
+                : () => setListing({ [BOX_PARAM]: null, [ROLE_PARAM]: null })
             }
           />
           {list}
@@ -447,6 +491,10 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
           )}
         </section>
       </div>
+
+      {canManage && managingRoles ? (
+        <ManageRolesDialog open onOpenChange={open => setManagingRoles(open)} />
+      ) : null}
 
       {draft && draft.mailbox.access.send ? (
         <ComposeDialog

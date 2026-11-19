@@ -47,6 +47,8 @@ import {
   mailFolderSchema,
   mailLabelListSchema,
   mailLabelSchema,
+  mailRoleListSchema,
+  mailRoleSchema,
   mailMessageCountsSchema,
   mailMessageUpdatesResultSchema,
   mailThreadSchema,
@@ -103,6 +105,8 @@ import type {
   MailFolderInput,
   MailLabel,
   MailLabelInput,
+  MailRole,
+  MailRoleInput,
   MailMessageCounts,
   MailMessageFilters,
   MailMessageUpdatesResult,
@@ -407,6 +411,69 @@ export const mailboxService = {
       })
     );
     if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /**
+   * The organization's mail roles in the API's order. Owners and admins get every role; members
+   * only those holding a mailbox they can see, with only those mailboxes.
+   */
+  async listRoles(organizationId: number): Promise<MailRole[]> {
+    const parsed = mailRoleListSchema.safeParse(
+      await request.get<unknown>('/mail-roles', { headers: organizationHeaders(organizationId) })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** Owners and admins only. */
+  async createRole(organizationId: number, input: MailRoleInput): Promise<MailRole> {
+    const headers = organizationHeaders(organizationId);
+    return parseOrganizeItem(
+      mailRoleSchema,
+      await request.post<unknown, MailRoleInput>('/mail-roles', input, { headers })
+    );
+  },
+
+  /** Replaces every field of the role; an omitted field takes its default. */
+  async updateRole(
+    organizationId: number,
+    roleId: number,
+    input: MailRoleInput
+  ): Promise<MailRole> {
+    const headers = organizationHeaders(organizationId);
+    validId(roleId);
+    return parseOrganizeItem(
+      mailRoleSchema,
+      await request.put<unknown, MailRoleInput>(`/mail-roles/${roleId}`, input, { headers }),
+      roleId
+    );
+  },
+
+  /** Its mailboxes become ungrouped; no access changes. */
+  async deleteRole(organizationId: number, roleId: number): Promise<void> {
+    const headers = organizationHeaders(organizationId);
+    validId(roleId);
+    await request.delete<void>(`/mail-roles/${roleId}`, { headers });
+  },
+
+  /** Puts the mailbox in a role, or takes it out with null; needs `administer`. */
+  async assignRole(
+    organizationId: number,
+    mailboxId: number,
+    roleId: number | null
+  ): Promise<Mailbox> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    if (roleId !== null) validId(roleId);
+    const parsed = mailboxSchema.safeParse(
+      await request.put<unknown, { role_id: number | null }>(
+        `/mailboxes/${mailboxId}/role-assignment`,
+        { role_id: roleId },
+        { headers }
+      )
+    );
+    if (!parsed.success || parsed.data.id !== mailboxId) throw invalidResponse();
     return parsed.data;
   },
 
@@ -1397,6 +1464,15 @@ assertContract<Accepts<z.input<typeof mailFolderSchema>, ContractData<'renameMai
 assertContract<Sends<MailFolderInput, ContractRequest<'createMailFolder'>>>();
 assertContract<Sends<MailFolderInput, ContractRequest<'renameMailFolder'>>>();
 assertContract<Accepts<z.input<typeof mailLabelListSchema>, ContractData<'listMailLabels', 200>>>();
+assertContract<Accepts<z.input<typeof mailRoleListSchema>, ContractData<'listMailRoles', 200>>>();
+assertContract<Accepts<z.input<typeof mailRoleSchema>, ContractData<'createMailRole', 201>>>();
+assertContract<Accepts<z.input<typeof mailRoleSchema>, ContractData<'updateMailRole', 200>>>();
+assertContract<Sends<MailRoleInput, ContractRequest<'createMailRole'>>>();
+assertContract<Sends<MailRoleInput, ContractRequest<'updateMailRole'>>>();
+assertContract<
+  Accepts<z.input<typeof mailboxSchema>, ContractData<'setMailboxRoleAssignment', 200>>
+>();
+assertContract<Sends<{ role_id: number | null }, ContractRequest<'setMailboxRoleAssignment'>>>();
 assertContract<Accepts<z.input<typeof mailLabelSchema>, ContractData<'createMailLabel', 201>>>();
 assertContract<Accepts<z.input<typeof mailLabelSchema>, ContractData<'updateMailLabel', 200>>>();
 assertContract<Sends<MailLabelInput, ContractRequest<'createMailLabel'>>>();
