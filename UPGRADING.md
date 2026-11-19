@@ -11,6 +11,28 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Unified inbox
+
+### Medium — The migration locks `mail_messages` while it builds the inbox index
+
+Run migrations: `2026_11_22_090100_add_mail_inbox_index` adds `idx_mail_messages_inbox_time`, a
+B-tree index on `(mailbox_id, direction, created_at DESC, id DESC)` that the unified inbox reads.
+It is built inside the migration's transaction, so on a large `mail_messages` table it blocks
+inbound delivery and sends until the build ends.
+
+A large installation builds the index beforehand, without blocking writes, and the migration then
+skips it (it creates the index with `IF NOT EXISTS`). Run this before the migration, outside a
+transaction, as a role that owns `mail_messages`:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_inbox_time
+  ON mail_messages (mailbox_id, direction, created_at DESC, id DESC);
+```
+
+If the `CONCURRENTLY` build fails, it leaves an invalid index of that name, which the migration
+would then skip; drop it (`DROP INDEX CONCURRENTLY idx_mail_messages_inbox_time;`) and build it
+again before migrating.
+
 ## Unreleased — Mailbox organize
 
 ### High — `DELETE` on a message moves it to the trash

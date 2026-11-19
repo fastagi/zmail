@@ -814,6 +814,7 @@ INDEX CREATE UNIQUE INDEX mail_message_stars_pkey ON mail_message_stars USING bt
 INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree (mailbox_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_folder ON mail_messages USING btree (folder_id) WHERE (folder_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING btree (mailbox_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
+INDEX CREATE INDEX idx_mail_messages_inbox_time ON mail_messages USING btree (mailbox_id, direction, created_at DESC, id DESC)
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
 INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (message_id) WHERE (((direction)::text = 'outbound'::text) AND ((message_id)::text <> ''::text))
 INDEX CREATE INDEX idx_mail_messages_rfc_message_id ON mail_messages USING btree (mailbox_id, rfc_message_id)
