@@ -43,6 +43,13 @@ type TemplateInput struct {
 	SampleVariables map[string]string
 	// Design is the visual editor's document; empty or JSON null when the template is HTML.
 	Design json.RawMessage
+	// Kind is standard when empty. Only a transactional template has Key, FromAddress, FromName,
+	// and VariableDefinitions.
+	Kind                domain.MailTemplateKind
+	Key                 string
+	FromAddress         string
+	FromName            string
+	VariableDefinitions []domain.TransactionalVariable
 }
 
 // TemplateSendInput sends a stored template with values for its variables.
@@ -77,40 +84,89 @@ func TemplateVariables(template *domain.MailTemplate) []string {
 	return parsed.variables()
 }
 
-func (s *service) ListTemplates(ctx context.Context, organizationID uint) ([]*domain.MailTemplate, error) {
-	return s.templates.ListTemplates(ctx, organizationID)
+func (s *service) ListTemplates(ctx context.Context, organizationID uint, kind domain.MailTemplateKind) ([]*domain.MailTemplate, error) {
+	return s.templates.ListTemplates(ctx, organizationID, kind)
 }
 
 func (s *service) GetTemplate(ctx context.Context, organizationID, id uint) (*domain.MailTemplate, error) {
 	return s.templates.FindTemplate(ctx, organizationID, id)
 }
 
-func (s *service) CreateTemplate(ctx context.Context, organizationID, createdBy uint, input TemplateInput) (*domain.MailTemplate, error) {
-	template, _, err := buildTemplate(input)
+func (s *service) CreateTemplate(ctx context.Context, viewer domain.OrganizationContext, input TemplateInput) (*domain.MailTemplate, error) {
+	if err := requireTemplateWriter(viewer, templateKind(input.Kind)); err != nil {
+		return nil, err
+	}
+	template, err := s.buildSavedTemplate(ctx, viewer.OrganizationID, input)
 	if err != nil {
 		return nil, err
 	}
-	template.OrganizationID, template.CreatedBy = organizationID, createdBy
+	template.OrganizationID, template.CreatedBy = viewer.OrganizationID, viewer.UserID
 	if err := s.templates.CreateTemplate(ctx, template, domain.MaxMailTemplatesPerOrganization); err != nil {
 		return nil, err
 	}
 	return template, nil
 }
 
-func (s *service) UpdateTemplate(ctx context.Context, organizationID, id uint, input TemplateInput) (*domain.MailTemplate, error) {
-	template, _, err := buildTemplate(input)
+// UpdateTemplate replaces a template. Both the stored and the requested kind decide who may, so a
+// member can neither edit a transactional template nor turn one into a standard template.
+func (s *service) UpdateTemplate(ctx context.Context, viewer domain.OrganizationContext, id uint, input TemplateInput) (*domain.MailTemplate, error) {
+	kind := templateKind(input.Kind)
+	if err := requireTemplateWriter(viewer, kind); err != nil {
+		return nil, err
+	}
+	stored, err := s.templates.FindTemplate(ctx, viewer.OrganizationID, id)
 	if err != nil {
 		return nil, err
 	}
-	template.ID, template.OrganizationID = id, organizationID
+	if err = requireTemplateWriter(viewer, stored.Kind); err != nil {
+		return nil, err
+	}
+	if kind != stored.Kind {
+		return nil, ErrMailTemplateKindImmutable
+	}
+	template, err := s.buildSavedTemplate(ctx, viewer.OrganizationID, input)
+	if err != nil {
+		return nil, err
+	}
+	template.ID, template.OrganizationID = id, viewer.OrganizationID
 	if err := s.templates.UpdateTemplate(ctx, template); err != nil {
 		return nil, err
 	}
 	return template, nil
 }
 
-func (s *service) DeleteTemplate(ctx context.Context, organizationID, id uint) error {
-	return s.templates.DeleteTemplate(ctx, organizationID, id)
+func (s *service) DeleteTemplate(ctx context.Context, viewer domain.OrganizationContext, id uint) error {
+	stored, err := s.templates.FindTemplate(ctx, viewer.OrganizationID, id)
+	if err != nil {
+		return err
+	}
+	if err := requireTemplateWriter(viewer, stored.Kind); err != nil {
+		return err
+	}
+	return s.templates.DeleteTemplate(ctx, viewer.OrganizationID, id)
+}
+
+// buildSavedTemplate validates a template about to be stored, including, for a transactional
+// template, that its sender domain is verified.
+func (s *service) buildSavedTemplate(ctx context.Context, organizationID uint, input TemplateInput) (*domain.MailTemplate, error) {
+	template, _, err := buildTemplate(input)
+	if err != nil {
+		return nil, err
+	}
+	if template.Kind == domain.MailTemplateTransactional {
+		if err := s.requireTemplateSender(ctx, organizationID, template.FromAddress); err != nil {
+			return nil, err
+		}
+	}
+	return template, nil
+}
+
+// templateKind is the kind a request asks for: standard unless it says otherwise.
+func templateKind(kind domain.MailTemplateKind) domain.MailTemplateKind {
+	if kind == "" {
+		return domain.MailTemplateStandard
+	}
+	return kind
 }
 
 func (s *service) PreviewTemplate(ctx context.Context, organizationID uint, input PreviewInput) (*TemplatePreview, error) {
@@ -160,6 +216,9 @@ func (s *service) SendTemplateTest(
 	if err != nil {
 		return nil, err
 	}
+	if err = requireStandardTemplate(template); err != nil {
+		return nil, err
+	}
 	mailbox, err := s.authorizeMailbox(ctx, viewer, mailboxID, canSend)
 	if err != nil {
 		return nil, err
@@ -183,6 +242,9 @@ func (s *service) applyTemplate(ctx context.Context, organizationID uint, input 
 	}
 	template, err := s.templates.FindTemplate(ctx, organizationID, input.Template.ID)
 	if err != nil {
+		return input, 0, err
+	}
+	if err = requireStandardTemplate(template); err != nil {
 		return input, 0, err
 	}
 	parsed, err := parseStoredTemplate(template)
@@ -234,10 +296,25 @@ func buildTemplate(input TemplateInput) (*domain.MailTemplate, *parsedTemplate, 
 		TextBody:        text,
 		SampleVariables: samples,
 		Design:          design,
+		Kind:            templateKind(input.Kind),
 	}
 	parsed, err := parseStoredTemplate(template)
 	if err != nil {
 		return nil, nil, err
+	}
+	switch template.Kind {
+	case domain.MailTemplateStandard:
+		if input.Key != "" || input.FromAddress != "" || input.FromName != "" || len(input.VariableDefinitions) > 0 {
+			return nil, nil, fmt.Errorf("%w: a standard template has no key, sender, or variable definitions", ErrMailTemplateInvalid)
+		}
+	case domain.MailTemplateTransactional:
+		template.Key, template.FromAddress, template.FromName = input.Key, input.FromAddress, input.FromName
+		template.Variables = append([]domain.TransactionalVariable(nil), input.VariableDefinitions...)
+		if err := validateTransactionalTemplate(template, parsed); err != nil {
+			return nil, nil, err
+		}
+	default:
+		return nil, nil, fmt.Errorf("%w: kind", ErrMailTemplateInvalid)
 	}
 	return template, parsed, nil
 }

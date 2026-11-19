@@ -188,7 +188,11 @@ func (s *service) buildBroadcast(ctx context.Context, viewer domain.Organization
 	if _, err := s.authorizeMailbox(ctx, viewer, input.MailboxID, canSend); err != nil {
 		return nil, err
 	}
-	if _, err := s.templates.FindTemplate(ctx, organizationID, input.TemplateID); err != nil {
+	template, err := s.templates.FindTemplate(ctx, organizationID, input.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	if err = requireStandardTemplate(template); err != nil {
 		return nil, err
 	}
 	lists, err := s.contacts.ListContactLists(ctx, organizationID)
@@ -232,6 +236,9 @@ func (s *service) SendBroadcast(ctx context.Context, viewer domain.OrganizationC
 	}
 	template, err := s.templates.FindTemplate(ctx, organizationID, broadcast.TemplateID)
 	if err != nil {
+		return nil, err
+	}
+	if err = requireStandardTemplate(template); err != nil {
 		return nil, err
 	}
 	if _, err := parseStoredTemplate(template); err != nil {

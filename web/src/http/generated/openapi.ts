@@ -5964,7 +5964,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A field failed validation, or the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`). */
+            /** @description A field failed validation, the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -60,6 +60,10 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	router.POST("/mail-broadcasts/:broadcast_id/cancellations", handler.CancelBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/pauses", handler.PauseBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/resumptions", handler.ResumeBroadcast)
+	router.GET("/mail-templates", handler.ListTemplates)
+	router.POST("/mail-templates", handler.CreateTemplate)
+	router.PUT("/mail-templates/:template_id", handler.UpdateTemplate)
+	router.DELETE("/mail-templates/:template_id", handler.DeleteTemplate)
 	return &handlerFixture{router: router, service: svc, repo: repo}
 }
 

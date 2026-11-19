@@ -374,6 +374,24 @@ type MailAttachment struct {
 	Content []byte
 }
 
+// MailTemplateKind says which sends may use a template. It is fixed when the template is created.
+type MailTemplateKind string
+
+const (
+	// MailTemplateStandard templates serve mailbox sends, template tests, and broadcasts.
+	MailTemplateStandard MailTemplateKind = "standard"
+	// MailTemplateTransactional templates serve only transactional messages.
+	MailTemplateTransactional MailTemplateKind = "transactional"
+)
+
+// TransactionalVariable declares one variable of a transactional template. A secret variable
+// is always required; a required variable has no fallback and an optional one always has one.
+type TransactionalVariable struct {
+	Name     string
+	Secret   bool
+	Required bool
+}
+
 // MailTemplate is reusable message content with variables, owned by an organization.
 type MailTemplate struct {
 	ID             uint
@@ -386,10 +404,18 @@ type MailTemplate struct {
 	SampleVariables map[string]string
 	// Design is the visual editor's JSON document the bodies were rendered from; empty when the
 	// template is written in HTML. The API stores it as given and never renders it.
-	Design    string
-	CreatedBy uint
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Design string
+	// Kind is standard unless the template is transactional; the fields below are set only for
+	// a transactional template.
+	Kind MailTemplateKind
+	// Key names a transactional template in the API, unique in its organization.
+	Key         string
+	FromAddress string
+	FromName    string
+	Variables   []TransactionalVariable
+	CreatedBy   uint
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // MailContactStatus says whether a contact may receive broadcasts.
@@ -652,8 +678,11 @@ type MailZoneChecker interface {
 type MailTemplateRepository interface {
 	// CreateTemplate stores a template unless the organization already has limit templates.
 	CreateTemplate(ctx context.Context, template *MailTemplate, limit int) error
-	ListTemplates(ctx context.Context, organizationID uint) ([]*MailTemplate, error)
+	// ListTemplates lists the organization's templates of one kind, or every template when kind
+	// is empty.
+	ListTemplates(ctx context.Context, organizationID uint, kind MailTemplateKind) ([]*MailTemplate, error)
 	FindTemplate(ctx context.Context, organizationID, id uint) (*MailTemplate, error)
+	FindTemplateByKey(ctx context.Context, organizationID uint, key string) (*MailTemplate, error)
 	UpdateTemplate(ctx context.Context, template *MailTemplate) error
 	DeleteTemplate(ctx context.Context, organizationID, id uint) error
 }

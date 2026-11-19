@@ -67,6 +67,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_21_090000_add_mail_organize",
 			"2026_11_21_090100_backfill_mail_threads",
 			"2026_11_23_080000_add_send_lanes",
+			"2026_11_23_100000_add_transactional_templates",
 		),
 	)
 }

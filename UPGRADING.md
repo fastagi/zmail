@@ -11,6 +11,29 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Transactional templates
+
+### Medium — Templates have a kind; template writes take the viewer
+
+Templates gain `kind` (`standard`, the default, or `transactional`). A transactional template has
+a `key` unique in its organization, a sender (`from_address` on a verified domain of the
+organization, or the instance `MAILBOX_DOMAIN` with the `log` provider, and an optional
+`from_name`), and `variable_definitions`. Only owners and admins write transactional templates.
+Mailbox sends, template tests, and broadcasts (create, update, send) refuse a transactional
+template with `422 MAILBOX.TEMPLATE_KIND_MISMATCH`; `DELETE /v1/mail-domains/{id}` answers
+`409 MAILBOX.DOMAIN_IN_USE` while a transactional template sends from the domain.
+`GET /v1/mail-templates` accepts `?kind=`. Template responses add `kind`, `key`, `from`, and
+`variable_definitions`; clients that validate responses strictly must accept them.
+
+Run migrations: `2026_11_23_100000_add_transactional_templates` adds `kind`, `template_key`,
+`from_address`, `from_name`, and `variable_definitions` to `mail_templates`, the unique index
+`mail_templates_key_idx`, and a check tying the fields to the kind. Existing templates become
+`standard`. Rolling back runs `DELETE FROM mail_templates WHERE kind = 'transactional'` before
+dropping the columns, so transactional templates are lost. In Go, `Service.CreateTemplate`,
+`UpdateTemplate`, and `DeleteTemplate` take a `domain.OrganizationContext` instead of IDs;
+`ListTemplates` and `domain.MailTemplateRepository.ListTemplates` take a `domain.MailTemplateKind`
+(empty lists all); the repository adds `FindTemplateByKey`.
+
 ## Unreleased — Send lanes
 
 ### Medium — The send limit is split into three lanes

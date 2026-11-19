@@ -151,11 +151,14 @@ type Service interface {
 	// MemberRemoved and MemberJoined follow the organization starter's membership events.
 	MemberRemoved(ctx context.Context, event domain.OrganizationMemberRemovedEvent) error
 	MemberJoined(ctx context.Context, event domain.OrganizationMemberJoinedEvent) error
-	ListTemplates(ctx context.Context, organizationID uint) ([]*domain.MailTemplate, error)
+	// ListTemplates lists templates of one kind, or every template when kind is empty.
+	ListTemplates(ctx context.Context, organizationID uint, kind domain.MailTemplateKind) ([]*domain.MailTemplate, error)
 	GetTemplate(ctx context.Context, organizationID, id uint) (*domain.MailTemplate, error)
-	CreateTemplate(ctx context.Context, organizationID, createdBy uint, input TemplateInput) (*domain.MailTemplate, error)
-	UpdateTemplate(ctx context.Context, organizationID, id uint, input TemplateInput) (*domain.MailTemplate, error)
-	DeleteTemplate(ctx context.Context, organizationID, id uint) error
+	// CreateTemplate, UpdateTemplate, and DeleteTemplate let every member write standard
+	// templates and only owners and admins write transactional ones.
+	CreateTemplate(ctx context.Context, viewer domain.OrganizationContext, input TemplateInput) (*domain.MailTemplate, error)
+	UpdateTemplate(ctx context.Context, viewer domain.OrganizationContext, id uint, input TemplateInput) (*domain.MailTemplate, error)
+	DeleteTemplate(ctx context.Context, viewer domain.OrganizationContext, id uint) error
 	PreviewTemplate(ctx context.Context, organizationID uint, input PreviewInput) (*TemplatePreview, error)
 	SendTemplateTest(ctx context.Context, viewer domain.OrganizationContext, templateID, mailboxID uint, to []string, values map[string]string) (*domain.MailMessage, error)
 	ListContacts(ctx context.Context, organizationID uint, filter domain.MailContactFilter) ([]*domain.MailContact, int64, error)

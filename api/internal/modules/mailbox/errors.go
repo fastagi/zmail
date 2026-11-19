@@ -34,6 +34,12 @@ var (
 	ErrMailTemplateInvalid       = errors.New("mail template is invalid")
 	ErrMailTemplateNameTaken     = errors.New("mail template name is already taken")
 	ErrMailTemplateLimitReached  = errors.New("mail template limit reached")
+	ErrMailTemplateKeyTaken      = errors.New("mail template key is already taken")
+	// ErrMailTemplateKindImmutable means a replace tried to change a template's kind.
+	ErrMailTemplateKindImmutable = errors.New("mail template kind cannot change")
+	// ErrMailTemplateKindMismatch means a send named a template of the wrong kind, such as a
+	// transactional template in a mailbox send or a broadcast.
+	ErrMailTemplateKindMismatch  = errors.New("mail template kind does not fit this send")
 	ErrMailContactNotFound       = errors.New("mail contact not found")
 	ErrMailContactExists         = errors.New("mail contact already exists")
 	ErrMailContactInvalid        = errors.New("mail contact is invalid")

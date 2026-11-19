@@ -65,7 +65,7 @@ func newBroadcastFixture(t *testing.T, dailyLimit int) *broadcastFixture {
 	})
 	fixture.service.now = func() time.Time { return fixture.now }
 	var err error
-	fixture.template, err = fixture.service.CreateTemplate(ctx, 1, testCreator, TemplateInput{
+	fixture.template, err = fixture.service.CreateTemplate(ctx, as(1), TemplateInput{
 		Name:    "News",
 		Subject: "News for {{first_name|you}}",
 		HTML:    "<html><body><p>Hi {{first_name|there}}, plan {{plan|free}}.</p></body></html>",
@@ -138,7 +138,7 @@ func TestBroadcastSendsToSubscribedListMembers(t *testing.T) {
 	}
 	// Editing the template now does not change the broadcast.
 	changed := TemplateInput{Name: "News", Subject: "Changed", Text: "Changed"}
-	if _, err = fixture.service.UpdateTemplate(ctx, 1, fixture.template.ID, changed); err != nil {
+	if _, err = fixture.service.UpdateTemplate(ctx, as(1), fixture.template.ID, changed); err != nil {
 		t.Fatalf("UpdateTemplate: %v", err)
 	}
 	if _, err = fixture.service.UpdateBroadcast(ctx, as(1), broadcast.ID, BroadcastInput{Name: "x", MailboxID: fixture.mailbox.ID, TemplateID: fixture.template.ID, ListID: fixture.list.ID}); !errors.Is(err, ErrMailBroadcastNotEditable) {

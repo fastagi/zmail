@@ -998,9 +998,9 @@ Every member reads every template and writes standard ones. Creating, replacing,
 transactional template needs an owner or admin; a member is `403 PERMISSION.DENIED`.
 
 A transactional template serves only transactional messages. Naming one in a mailbox send
-(`template`), a template test (`POST /v1/mail-templates/{id}/tests`), or a broadcast (create or send)
-is `422 MAILBOX.TEMPLATE_KIND_MISMATCH`. A broadcast copies its template when it starts, so a
-running broadcast is not affected. If the sender domain later loses verification, the template is
+(`template`), a template test (`POST /v1/mail-templates/{id}/tests`), or a broadcast (create,
+update, or send) is `422 MAILBOX.TEMPLATE_KIND_MISMATCH`. A broadcast copies its template when it
+starts, so a running broadcast is not affected. If the sender domain later loses verification, the template is
 kept and sends from it are refused.
 
 ### Contacts

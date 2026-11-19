@@ -22,6 +22,13 @@ type MailTemplateRequest struct {
 	SampleVariables map[string]string `json:"sample_variables" binding:"omitempty,max=100"`
 	// Design is the visual editor's document; the console renders html and text from it.
 	Design json.RawMessage `json:"design"`
+	// Kind defaults to standard. Key, FromAddress, FromName, and VariableDefinitions belong only to
+	// a transactional template; each declaration is {name, secret, required}.
+	Kind                domain.MailTemplateKind        `json:"kind" binding:"omitempty,oneof=standard transactional"`
+	Key                 string                         `json:"key" binding:"max=64"`
+	FromAddress         string                         `json:"from_address" binding:"max=320"`
+	FromName            string                         `json:"from_name" binding:"max=100"`
+	VariableDefinitions []domain.TransactionalVariable `json:"variable_definitions" binding:"omitempty,max=100"`
 }
 
 func (r MailTemplateRequest) input() TemplateInput {
@@ -57,6 +64,24 @@ type MailTemplateSummaryResponse struct {
 	Variables []string  `json:"variables"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Kind      string    `json:"kind"`
+	// Key and From are null for a standard template, and VariableDefinitions is empty.
+	Key                 *string                          `json:"key"`
+	From                *MailTemplateSenderResponse      `json:"from"`
+	VariableDefinitions []MailTemplateVariableDefinition `json:"variable_definitions"`
+}
+
+// MailTemplateSenderResponse is the sender of a transactional template.
+type MailTemplateSenderResponse struct {
+	Address string `json:"address"`
+	Name    string `json:"name"`
+}
+
+// MailTemplateVariableDefinition declares one variable of a transactional template.
+type MailTemplateVariableDefinition struct {
+	Name     string `json:"name"`
+	Secret   bool   `json:"secret"`
+	Required bool   `json:"required"`
 }
 
 // MailTemplateResponse is the full shape of a template.
@@ -80,14 +105,25 @@ type MailTemplatePreviewResponse struct {
 }
 
 func toMailTemplateSummary(template *domain.MailTemplate) MailTemplateSummaryResponse {
-	return MailTemplateSummaryResponse{
-		ID:        template.ID,
-		Name:      template.Name,
-		Subject:   template.Subject,
-		Variables: TemplateVariables(template),
-		CreatedAt: template.CreatedAt,
-		UpdatedAt: template.UpdatedAt,
+	summary := MailTemplateSummaryResponse{
+		ID:                  template.ID,
+		Name:                template.Name,
+		Subject:             template.Subject,
+		Variables:           TemplateVariables(template),
+		CreatedAt:           template.CreatedAt,
+		UpdatedAt:           template.UpdatedAt,
+		Kind:                string(templateKind(template.Kind)),
+		VariableDefinitions: make([]MailTemplateVariableDefinition, 0, len(template.Variables)),
 	}
+	if template.Kind == domain.MailTemplateTransactional {
+		key := template.Key
+		summary.Key = &key
+		summary.From = &MailTemplateSenderResponse{Address: template.FromAddress, Name: template.FromName}
+	}
+	for _, variable := range template.Variables {
+		summary.VariableDefinitions = append(summary.VariableDefinitions, MailTemplateVariableDefinition(variable))
+	}
+	return summary
 }
 
 func toMailTemplateResponse(template *domain.MailTemplate) MailTemplateResponse {
@@ -111,14 +147,20 @@ func designJSON(design string) json.RawMessage {
 	return json.RawMessage(design)
 }
 
-// ListTemplates returns every template of the organization by name, without bodies.
+// ListTemplates returns every template of the organization, or those of the kind query
+// parameter, by name and without bodies.
 // fastbuild:bounded-list max=200 reason=an organization keeps at most MaxMailTemplatesPerOrganization templates
 func (h *Handler) ListTemplates(c *gin.Context) {
 	organizationID, ok := currentOrganizationID(c)
 	if !ok {
 		return
 	}
-	templates, err := h.service.ListTemplates(c.Request.Context(), organizationID)
+	kind := domain.MailTemplateKind(c.Query("kind"))
+	if kind != "" && kind != domain.MailTemplateStandard && kind != domain.MailTemplateTransactional {
+		response.HandleError(c, "Invalid template kind", domain.ErrInvalidInput)
+		return
+	}
+	templates, err := h.service.ListTemplates(c.Request.Context(), organizationID, kind)
 	if err != nil {
 		response.HandleError(c, "Failed to list mail templates", err)
 		return
@@ -154,8 +196,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	template, err := h.service.CreateTemplate(
-		c.Request.Context(), organization.OrganizationID, organization.UserID, req.input())
+	template, err := h.service.CreateTemplate(c.Request.Context(), organization, req.input())
 	if err != nil {
 		response.HandleError(c, "Failed to create mail template", err)
 		return
@@ -165,7 +206,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 }
 
 func (h *Handler) UpdateTemplate(c *gin.Context) {
-	organizationID, templateID, ok := templateScope(c)
+	viewer, templateID, ok := viewerScope(c, "template_id")
 	if !ok {
 		return
 	}
@@ -173,7 +214,7 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	template, err := h.service.UpdateTemplate(c.Request.Context(), organizationID, templateID, req.input())
+	template, err := h.service.UpdateTemplate(c.Request.Context(), viewer, templateID, req.input())
 	if err != nil {
 		response.HandleError(c, "Failed to update mail template", err)
 		return
@@ -183,11 +224,11 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 }
 
 func (h *Handler) DeleteTemplate(c *gin.Context) {
-	organizationID, templateID, ok := templateScope(c)
+	viewer, templateID, ok := viewerScope(c, "template_id")
 	if !ok {
 		return
 	}
-	if err := h.service.DeleteTemplate(c.Request.Context(), organizationID, templateID); err != nil {
+	if err := h.service.DeleteTemplate(c.Request.Context(), viewer, templateID); err != nil {
 		response.HandleError(c, "Failed to delete mail template", err)
 		return
 	}

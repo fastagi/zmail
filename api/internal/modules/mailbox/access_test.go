@@ -643,7 +643,7 @@ func listedMailboxCount(t *testing.T, f *accessFixture) int {
 func broadcastScene(t *testing.T, f *accessFixture) (templateID, listID uint) {
 	t.Helper()
 	ctx := context.Background()
-	template, err := f.service.CreateTemplate(ctx, accessOrg, accessB, TemplateInput{
+	template, err := f.service.CreateTemplate(ctx, viewerOf(accessOrg, accessB, domain.OrganizationRoleMember), TemplateInput{
 		Name: "News", Subject: "News", HTML: "<p>Hi</p>", Text: "Hi",
 	})
 	if err != nil {

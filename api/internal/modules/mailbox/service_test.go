@@ -108,6 +108,9 @@ func (r *fakeRepository) CreateTemplate(_ context.Context, template *domain.Mail
 		if existing.Name == template.Name {
 			return ErrMailTemplateNameTaken
 		}
+		if template.Key != "" && existing.Key == template.Key {
+			return ErrMailTemplateKeyTaken
+		}
 	}
 	if owned >= limit {
 		return ErrMailTemplateLimitReached
@@ -118,10 +121,10 @@ func (r *fakeRepository) CreateTemplate(_ context.Context, template *domain.Mail
 	return nil
 }
 
-func (r *fakeRepository) ListTemplates(_ context.Context, organizationID uint) ([]*domain.MailTemplate, error) {
+func (r *fakeRepository) ListTemplates(_ context.Context, organizationID uint, kind domain.MailTemplateKind) ([]*domain.MailTemplate, error) {
 	var listed []*domain.MailTemplate
 	for _, template := range r.templates {
-		if template.OrganizationID == organizationID {
+		if template.OrganizationID == organizationID && (kind == "" || template.Kind == kind) {
 			copied := *template
 			listed = append(listed, &copied)
 		}
@@ -138,6 +141,16 @@ func (r *fakeRepository) FindTemplate(_ context.Context, organizationID, id uint
 	return &copied, nil
 }
 
+func (r *fakeRepository) FindTemplateByKey(_ context.Context, organizationID uint, key string) (*domain.MailTemplate, error) {
+	for _, template := range r.templates {
+		if template.OrganizationID == organizationID && template.Key == key && key != "" {
+			copied := *template
+			return &copied, nil
+		}
+	}
+	return nil, ErrMailTemplateNotFound
+}
+
 func (r *fakeRepository) UpdateTemplate(_ context.Context, template *domain.MailTemplate) error {
 	existing, ok := r.templates[template.ID]
 	if !ok || existing.OrganizationID != template.OrganizationID {
@@ -146,6 +159,9 @@ func (r *fakeRepository) UpdateTemplate(_ context.Context, template *domain.Mail
 	for _, other := range r.templates {
 		if other.ID != template.ID && other.OrganizationID == template.OrganizationID && other.Name == template.Name {
 			return ErrMailTemplateNameTaken
+		}
+		if other.ID != template.ID && other.OrganizationID == template.OrganizationID && template.Key != "" && other.Key == template.Key {
+			return ErrMailTemplateKeyTaken
 		}
 	}
 	template.CreatedBy, template.CreatedAt = existing.CreatedBy, existing.CreatedAt

@@ -214,8 +214,9 @@ func (r *repository) UpdateDomain(ctx context.Context, mailDomain *domain.MailDo
 	return nil
 }
 
-// DeleteDomain refuses while a live mailbox has an address on the domain. Deleted mailboxes keep
-// their address reserved but no longer hold the domain.
+// DeleteDomain refuses while a live mailbox has an address on the domain or a transactional
+// template sends from it. Deleted mailboxes keep their address reserved but no longer hold the
+// domain.
 func (r *repository) DeleteDomain(ctx context.Context, organizationID, id uint) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
@@ -231,6 +232,13 @@ func (r *repository) DeleteDomain(ctx context.Context, organizationID, id uint) 
 		}
 		var used int64
 		if err := tx.Model(&MailboxPO{}).Where("address LIKE ?", "%@"+escapeLike(po.Name)).Count(&used).Error; err != nil {
+			return err
+		}
+		if used > 0 {
+			return ErrMailDomainInUse
+		}
+		// A transactional template sending from the domain holds it too.
+		if err := tx.Model(&MailTemplatePO{}).Where("from_address LIKE ?", "%@"+escapeLike(po.Name)).Count(&used).Error; err != nil {
 			return err
 		}
 		if used > 0 {

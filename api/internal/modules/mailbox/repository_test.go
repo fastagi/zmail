@@ -778,7 +778,7 @@ func TestRepositoryKeepsTemplatesPerOrganization(t *testing.T) {
 	if _, err = repo.FindTemplate(ctx, 2, template.ID); !errors.Is(err, ErrMailTemplateNotFound) {
 		t.Fatalf("another organization's template error = %v", err)
 	}
-	listed, err := repo.ListTemplates(ctx, 1)
+	listed, err := repo.ListTemplates(ctx, 1, "")
 	if err != nil || len(listed) != 2 || listed[0].Name != "Second" {
 		t.Fatalf("ListTemplates = %+v, %v; want two, by name", listed, err)
 	}

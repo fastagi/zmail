@@ -247,6 +247,11 @@ TABLE mail_templates
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
   COLUMN design jsonb
+  COLUMN kind character varying(16) NOT NULL DEFAULT 'standard'::character varying
+  COLUMN template_key character varying(64)
+  COLUMN from_address character varying(320)
+  COLUMN from_name character varying(100) NOT NULL DEFAULT ''::character varying
+  COLUMN variable_definitions jsonb NOT NULL DEFAULT '[]'::jsonb
 
 TABLE mail_zones
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_zones_id_seq'::regclass)
@@ -633,6 +638,8 @@ CONSTRAINT mail_messages.chk_mail_messages_status CHECK (((status)::text = ANY (
 CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_messages.mail_messages_folder_id_fkey FOREIGN KEY (folder_id) REFERENCES mail_folders(id) ON DELETE SET NULL
 CONSTRAINT mail_messages.mail_messages_pkey PRIMARY KEY (id)
+CONSTRAINT mail_templates.chk_mail_templates_kind CHECK (((kind)::text = ANY ((ARRAY['standard'::character varying, 'transactional'::character varying])::text[])))
+CONSTRAINT mail_templates.chk_mail_templates_transactional_fields CHECK (((((kind)::text = 'transactional'::text) AND (template_key IS NOT NULL) AND (from_address IS NOT NULL)) OR (((kind)::text = 'standard'::text) AND (template_key IS NULL) AND (from_address IS NULL) AND ((from_name)::text = ''::text) AND (variable_definitions = '[]'::jsonb))))
 CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_templates.mail_templates_pkey PRIMARY KEY (id)
 CONSTRAINT mail_zones.chk_mail_zones_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'active'::character varying])::text[])))
@@ -831,6 +838,7 @@ INDEX CREATE INDEX idx_mail_messages_trgm_to_addresses ON mail_messages USING gi
 INDEX CREATE INDEX idx_mail_messages_waiting ON mail_messages USING btree (id) WHERE (queued_reason IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
+INDEX CREATE UNIQUE INDEX mail_templates_key_idx ON mail_templates USING btree (organization_id, template_key) WHERE (template_key IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_zones_cloudflare_zone ON mail_zones USING btree (cloudflare_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_zones_name ON mail_zones USING btree (name)
