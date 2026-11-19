@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/fastagi/zmail/api/internal/app"
 	"github.com/fastagi/zmail/api/internal/bootstrap"
@@ -31,7 +32,7 @@ func NewMailBroadcastWorkCommand() *MailBroadcastWorkCommand {
 
 func (c *MailBroadcastWorkCommand) Name() string { return "mail:broadcast:work" }
 func (c *MailBroadcastWorkCommand) Description() string {
-	return "Send queued mail and the recipients of scheduled and running mail broadcasts"
+	return "Send queued mail and the recipients of scheduled and running mail broadcasts, and purge expired trash"
 }
 func (c *MailBroadcastWorkCommand) Usage() string {
 	return "mail:broadcast:work [--batch=25] [--poll=2s] [--once]"
@@ -43,14 +44,20 @@ type mailBroadcastWorker struct {
 }
 
 // DispatchWebhooks runs one tick: messages that waited for the send limit go first, then
-// broadcast recipients with the rest of the batch.
+// broadcast recipients with the rest of the batch, and last the trash expired 30 days ago is
+// purged with what is left.
 func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (int, error) {
 	queued, err := w.dispatcher.DispatchQueuedSends(ctx, limit)
 	if err != nil || queued >= limit {
 		return queued, err
 	}
 	sent, err := w.dispatcher.DispatchBroadcasts(ctx, limit-queued)
-	return queued + sent, err
+	processed := queued + sent
+	if err != nil || processed >= limit {
+		return processed, err
+	}
+	purged, err := w.dispatcher.PurgeExpiredTrash(ctx, time.Now().UTC(), limit-processed)
+	return processed + purged, err
 }
 
 func (c *MailBroadcastWorkCommand) Run(args []string) error {

@@ -329,9 +329,9 @@ func (h *Handler) UpdateMessage(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	message, err := h.service.SetMessageRead(c.Request.Context(), viewer, mailboxID, messageID, *req.Read)
+	message, err := h.service.UpdateMessage(c.Request.Context(), viewer, mailboxID, messageID, req.update())
 	if err != nil {
-		response.HandleError(c, "Failed to update mail message", err)
+		respondOrganizeError(c, "Failed to update mail message", err)
 		return
 	}
 	privateResponse(c)

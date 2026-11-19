@@ -17,7 +17,7 @@ func TestMailboxAccessFor(t *testing.T) {
 	none := MailboxAccess{}
 	administer := MailboxAccess{Administer: true, SeeHistory: true}
 	administerShared := MailboxAccess{Administer: true, SeeHistory: true, ManageMembers: true}
-	ownerAccess := MailboxAccess{View: true, Send: true, SeeHistory: true}
+	ownerAccess := MailboxAccess{View: true, Send: true, SeeHistory: true, Organize: true}
 
 	tests := []struct {
 		name    string
@@ -31,7 +31,7 @@ func TestMailboxAccessFor(t *testing.T) {
 		{"personal admin", personal, viewer(12, 120, OrganizationRoleAdmin), nil, administer},
 		{"personal organization owner", personal, viewer(12, 120, OrganizationRoleOwner), nil, administer},
 		{"personal owner who is admin", personal, viewer(10, 100, OrganizationRoleAdmin), nil,
-			MailboxAccess{View: true, Send: true, Administer: true, SeeHistory: true}},
+			MailboxAccess{View: true, Send: true, Administer: true, SeeHistory: true, Organize: true}},
 		{"personal ignores a member row", personal, viewer(11, 110, OrganizationRoleMember),
 			&MailboxMember{MailboxID: 1, MembershipID: 110, Permission: MailboxPermissionManage}, none},
 		{"personal without owner", orphan, viewer(10, 100, OrganizationRoleMember), nil, none},
@@ -41,7 +41,7 @@ func TestMailboxAccessFor(t *testing.T) {
 		{"shared send", shared, viewer(11, 110, OrganizationRoleMember), member(110, MailboxPermissionSend),
 			MailboxAccess{View: true, Send: true}},
 		{"shared manage", shared, viewer(11, 110, OrganizationRoleMember), member(110, MailboxPermissionManage),
-			MailboxAccess{View: true, Send: true, ManageMembers: true, SeeHistory: true}},
+			MailboxAccess{View: true, Send: true, ManageMembers: true, SeeHistory: true, Organize: true}},
 		{"shared row of another membership", shared, viewer(11, 110, OrganizationRoleMember),
 			member(999, MailboxPermissionManage), none},
 		{"shared row of another mailbox", shared, viewer(11, 110, OrganizationRoleMember),
@@ -50,6 +50,11 @@ func TestMailboxAccessFor(t *testing.T) {
 		{"shared admin without row", shared, viewer(12, 120, OrganizationRoleAdmin), nil, administerShared},
 		{"shared admin with view row", shared, viewer(12, 120, OrganizationRoleAdmin), member(120, MailboxPermissionView),
 			MailboxAccess{View: true, Administer: true, SeeHistory: true, ManageMembers: true}},
+		// Organizing needs the mailbox itself: the role alone, even with send, never grants it.
+		{"shared owner with send row", shared, viewer(12, 120, OrganizationRoleOwner), member(120, MailboxPermissionSend),
+			MailboxAccess{View: true, Send: true, Administer: true, SeeHistory: true, ManageMembers: true}},
+		{"shared admin with manage row", shared, viewer(12, 120, OrganizationRoleAdmin), member(120, MailboxPermissionManage),
+			MailboxAccess{View: true, Send: true, Administer: true, SeeHistory: true, ManageMembers: true, Organize: true}},
 		{"other organization", shared, OrganizationContext{OrganizationID: 8, MembershipID: 110, UserID: 11,
 			Role: OrganizationRoleOwner}, member(110, MailboxPermissionManage), none},
 		{"nil mailbox", nil, viewer(10, 100, OrganizationRoleOwner), nil, none},

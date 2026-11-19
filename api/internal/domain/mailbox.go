@@ -613,6 +613,9 @@ type MailBroadcastDispatcher interface {
 	DispatchBroadcasts(ctx context.Context, limit int) (int, error)
 	// DispatchQueuedSends sends up to limit messages that waited for room in the send limit.
 	DispatchQueuedSends(ctx context.Context, limit int) (int, error)
+	// PurgeExpiredTrash deletes for good up to limit messages that have been in the trash for
+	// MailTrashRetention at now, oldest first.
+	PurgeExpiredTrash(ctx context.Context, now time.Time, limit int) (int, error)
 }
 
 // MailTemplateRepository stores templates. Every lookup is scoped to an organization.
@@ -651,8 +654,47 @@ type MailDayStats struct {
 	Received int
 }
 
-// MailOrganizeRepository persists the folders and labels of a mailbox.
+// MailTrashRetention is how long a message stays in the trash before it is deleted for good.
+const MailTrashRetention = 30 * 24 * time.Hour
+
+// MailMessageChange is one change applied to several messages of a mailbox at once. A nil or
+// empty field changes nothing. Read and Starred are the viewer's own; the rest is shared.
+type MailMessageChange struct {
+	Read    *bool
+	Starred *bool
+	// Placement moves the messages; FolderID names the folder when it is MailPlacementFolder.
+	Placement *MailPlacement
+	FolderID  *uint
+	// AddLabelIDs and RemoveLabelIDs add and remove labels; SetLabelIDs replaces every label.
+	AddLabelIDs    []uint
+	RemoveLabelIDs []uint
+	SetLabelIDs    *[]uint
+}
+
+// MailOrganizeRepository persists the folders and labels of a mailbox and the shared and
+// per-person state of its messages.
 type MailOrganizeRepository interface {
+	// LockMessages locks the unsealed messages of the mailbox among ids until the transaction ctx
+	// carries ends, and returns them. Ids that name no such message are left out.
+	LockMessages(ctx context.Context, mailboxID uint, ids []uint) ([]*MailMessage, error)
+	// LockFolder finds a folder of the mailbox and keeps it from being deleted until the
+	// transaction ends, or reports ErrMailFolderNotFound.
+	LockFolder(ctx context.Context, mailboxID, id uint) (*MailFolder, error)
+	// LockLabels finds the labels of the mailbox among ids and keeps them from being deleted until
+	// the transaction ends. Ids that name no such label are left out.
+	LockLabels(ctx context.Context, mailboxID uint, ids []uint) ([]*MailLabel, error)
+	// ApplyMessageChange applies change to the given messages for membershipID at the given time.
+	// Moving to the trash keeps the trashed_at of a message already there and cancels a send still
+	// waiting for the send limit; every placement but folder clears folder_id.
+	ApplyMessageChange(ctx context.Context, ids []uint, membershipID uint, change MailMessageChange, at time.Time) error
+	// DeleteTrashedMessages deletes for good the unsealed messages of the mailbox in the trash, with
+	// their files, events, and read, star, and label rows: only those among ids, or all when ids is
+	// nil. It returns how many it deleted.
+	DeleteTrashedMessages(ctx context.Context, mailboxID uint, ids []uint) (int, error)
+	// PurgeExpiredTrash deletes for good up to limit messages of any mailbox that moved to the trash
+	// at or before before, oldest first, and returns how many it deleted.
+	PurgeExpiredTrash(ctx context.Context, before time.Time, limit int) (int, error)
+
 	// CreateFolder stores a folder unless the mailbox already has limit folders
 	// (ErrMailFolderLimitReached) or one with the same name ignoring case (ErrMailFolderNameTaken).
 	CreateFolder(ctx context.Context, folder *MailFolder, limit int) error
@@ -722,6 +764,10 @@ type MailboxRepository interface {
 	SetMessageRead(ctx context.Context, mailboxID, id, membershipID uint, read bool, at time.Time) error
 	// ReadMessages reports which of the given messages the membership has read.
 	ReadMessages(ctx context.Context, membershipID uint, messageIDs []uint) (map[uint]bool, error)
+	// StarredMessages reports which of the given messages the membership has starred.
+	StarredMessages(ctx context.Context, membershipID uint, messageIDs []uint) (map[uint]bool, error)
+	// MessageLabelIDs returns the label ids of each of the given messages, ascending.
+	MessageLabelIDs(ctx context.Context, messageIDs []uint) (map[uint][]uint, error)
 	// DeleteMailboxReads removes a membership's read and star rows of every message of a mailbox;
 	// membership id 0 removes everyone's.
 	DeleteMailboxReads(ctx context.Context, mailboxID, membershipID uint) error

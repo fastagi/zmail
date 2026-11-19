@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 )
@@ -75,7 +76,9 @@ func (r *repository) DeleteFolder(ctx context.Context, mailboxID, id uint) error
 	}
 	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		var po MailFolderPO
-		if err := tx.Where("id = ? AND mailbox_id = ?", id, mailboxID).First(&po).Error; err != nil {
+		// FOR UPDATE waits for messages moving into the folder (LockFolder) and then sees them.
+		if err := tx.Where("id = ? AND mailbox_id = ?", id, mailboxID).
+			Clauses(clause.Locking{Strength: "UPDATE"}).First(&po).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrMailFolderNotFound
 			}

@@ -26,7 +26,7 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := newFakeRepository()
-	svc := NewService(repo, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
+	svc := NewService(repo, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
 		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5,
 	})
 	handler := NewHandler(svc)
@@ -203,5 +203,32 @@ func TestOnlyOwnersAndAdminsControlBroadcasts(t *testing.T) {
 		if recorder.Code != http.StatusForbidden || body["error_code"] != domain.CodePermissionDenied {
 			t.Fatalf("member POST %s = %d %v; want 403", path, recorder.Code, body)
 		}
+	}
+}
+
+// TestOrganizeErrorCodes maps every organize error to the status and code the contract names.
+func TestOrganizeErrorCodes(t *testing.T) {
+	mapper := &response.ErrorMapper{}
+	NewHandler(nil).RegisterErrorMappings(mapper)
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{ErrMailFolderNotFound, http.StatusNotFound, domain.CodeMailFolderNotFound},
+		{ErrMailLabelNotFound, http.StatusNotFound, domain.CodeMailLabelNotFound},
+		{ErrMailFolderNameTaken, http.StatusConflict, domain.CodeMailFolderNameTaken},
+		{ErrMailLabelNameTaken, http.StatusConflict, domain.CodeMailLabelNameTaken},
+		{ErrMailFolderLimitReached, http.StatusUnprocessableEntity, domain.CodeMailFolderLimitReached},
+		{ErrMailLabelLimitReached, http.StatusUnprocessableEntity, domain.CodeMailLabelLimitReached},
+	}
+	for _, tc := range cases {
+		got := mapper.Resolve(tc.err)
+		if got.StatusCode != tc.status || got.ErrorCode != tc.code {
+			t.Fatalf("%v maps to %d %s; want %d %s", tc.err, got.StatusCode, got.ErrorCode, tc.status, tc.code)
+		}
+	}
+	if domain.CodeMailSearchTooBroad != "MAILBOX.SEARCH_TOO_BROAD" {
+		t.Fatalf("search code = %q", domain.CodeMailSearchTooBroad)
 	}
 }

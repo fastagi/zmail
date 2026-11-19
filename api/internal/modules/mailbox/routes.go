@@ -95,6 +95,27 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.messages.update").WhereNumber("mailbox_id").WhereNumber("message_id")
 		auth.DELETE("/mailboxes/:mailbox_id/messages/:message_id", h.DeleteMessage).
 			Name("mailboxes.messages.destroy").WhereNumber("mailbox_id").WhereNumber("message_id")
+		auth.POST("/mailboxes/:mailbox_id/message-updates", h.UpdateMessages).
+			Name("mailboxes.message_updates.store").WhereNumber("mailbox_id")
+		auth.POST("/mailboxes/:mailbox_id/trash-purges", h.PurgeTrash).
+			Name("mailboxes.trash_purges.store").WhereNumber("mailbox_id")
+
+		auth.GET("/mailboxes/:mailbox_id/mail-folders", h.ListFolders).
+			Name("mailboxes.mail_folders.index").WhereNumber("mailbox_id")
+		auth.POST("/mailboxes/:mailbox_id/mail-folders", h.CreateFolder).
+			Name("mailboxes.mail_folders.store").WhereNumber("mailbox_id")
+		auth.PUT("/mailboxes/:mailbox_id/mail-folders/:folder_id", h.RenameFolder).
+			Name("mailboxes.mail_folders.update").WhereNumber("mailbox_id").WhereNumber("folder_id")
+		auth.DELETE("/mailboxes/:mailbox_id/mail-folders/:folder_id", h.DeleteFolder).
+			Name("mailboxes.mail_folders.destroy").WhereNumber("mailbox_id").WhereNumber("folder_id")
+		auth.GET("/mailboxes/:mailbox_id/mail-labels", h.ListLabels).
+			Name("mailboxes.mail_labels.index").WhereNumber("mailbox_id")
+		auth.POST("/mailboxes/:mailbox_id/mail-labels", h.CreateLabel).
+			Name("mailboxes.mail_labels.store").WhereNumber("mailbox_id")
+		auth.PUT("/mailboxes/:mailbox_id/mail-labels/:label_id", h.UpdateLabel).
+			Name("mailboxes.mail_labels.update").WhereNumber("mailbox_id").WhereNumber("label_id")
+		auth.DELETE("/mailboxes/:mailbox_id/mail-labels/:label_id", h.DeleteLabel).
+			Name("mailboxes.mail_labels.destroy").WhereNumber("mailbox_id").WhereNumber("label_id")
 	})
 
 	// Programmatic sending for backend services: an API key instead of a browser session, with

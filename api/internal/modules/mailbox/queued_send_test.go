@@ -25,7 +25,7 @@ func newQueueFixture(t *testing.T) *queueFixture {
 	transport := &fakeTransport{}
 	notifier := &fakeNotifier{}
 	memberships := newAccessMemberships()
-	svc := NewService(repo, memberships, repo, repo, repo, nil, nil, transport, notifier, accessSettings())
+	svc := NewService(repo, memberships, repo, repo, repo, repo, nil, nil, transport, notifier, accessSettings())
 	f := &queueFixture{notifier: notifier, clock: time.Now().UTC()}
 	svc.now = func() time.Time { return f.clock }
 	f.accessFixture = seedAccessFixture(t, svc, repo, transport, memberships)
@@ -183,6 +183,12 @@ func TestDeletedWaitingMessageIsNeverSent(t *testing.T) {
 	waiting := f.mustSend(t, "w1", true)
 	if err := f.service.DeleteMessage(context.Background(), f.b, f.team.ID, waiting.ID); err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
+	}
+	// Deleting moves it to the trash, which cancels the send for good.
+	if po := f.stored(t, waiting.ID); po.Placement != string(domain.MailPlacementTrash) ||
+		po.Status != string(domain.MailStatusFailed) || po.FailureCode != failureSendCanceled {
+		t.Fatalf("deleted waiting message = placement %q status %q failure %q; want trash, failed, %s",
+			po.Placement, po.Status, po.FailureCode, failureSendCanceled)
 	}
 	f.clock = start.Add(25 * time.Hour)
 	before := len(f.transport.sent)

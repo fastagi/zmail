@@ -17,6 +17,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailContactRepository), new(*repository)),
 	wire.Bind(new(domain.MailBroadcastRepository), new(*repository)),
 	wire.Bind(new(domain.MailDomainRepository), new(*repository)),
+	wire.Bind(new(domain.MailOrganizeRepository), new(*repository)),
 	wire.Bind(new(domain.MailBroadcastDispatcher), new(*service)),
 	// Owners and members are validated against the organization starter's memberships.
 	NewMembershipDirectory,

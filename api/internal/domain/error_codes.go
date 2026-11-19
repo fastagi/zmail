@@ -138,6 +138,13 @@ const (
 	CodeMailDomainNotVerified        = "MAILBOX.DOMAIN_NOT_VERIFIED"
 	CodeMailDomainsDisabled          = "MAILBOX.DOMAINS_DISABLED"
 	CodeMailDomainProviderFailed     = "MAILBOX.DOMAIN_PROVIDER_FAILED"
+	CodeMailFolderNotFound           = "MAILBOX.FOLDER_NOT_FOUND"
+	CodeMailLabelNotFound            = "MAILBOX.LABEL_NOT_FOUND"
+	CodeMailFolderNameTaken          = "MAILBOX.FOLDER_NAME_TAKEN"
+	CodeMailLabelNameTaken           = "MAILBOX.LABEL_NAME_TAKEN"
+	CodeMailFolderLimitReached       = "MAILBOX.FOLDER_LIMIT_REACHED"
+	CodeMailLabelLimitReached        = "MAILBOX.LABEL_LIMIT_REACHED"
+	CodeMailSearchTooBroad           = "MAILBOX.SEARCH_TOO_BROAD"
 
 	CodeOperatorForbidden       = "OPERATOR.FORBIDDEN"
 	CodeOperatorOriginRejected  = "OPERATOR.ORIGIN_REJECTED"

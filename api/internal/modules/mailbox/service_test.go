@@ -533,6 +533,16 @@ func (r *fakeRepository) ReadMessages(_ context.Context, membershipID uint, mess
 	return read, nil
 }
 
+// StarredMessages reports no stars: the in-memory scenes never star, PostgreSQL ones do.
+func (r *fakeRepository) StarredMessages(_ context.Context, _ uint, messageIDs []uint) (map[uint]bool, error) {
+	return make(map[uint]bool, len(messageIDs)), nil
+}
+
+// MessageLabelIDs reports no labels: the in-memory scenes never label, PostgreSQL ones do.
+func (r *fakeRepository) MessageLabelIDs(_ context.Context, messageIDs []uint) (map[uint][]uint, error) {
+	return make(map[uint][]uint, len(messageIDs)), nil
+}
+
 func (r *fakeRepository) DeleteMailboxReads(_ context.Context, mailboxID, membershipID uint) error {
 	for key := range r.reads {
 		if message, ok := r.messages[key[1]]; (membershipID == 0 || key[0] == membershipID) && ok && message.MailboxID == mailboxID {
@@ -801,7 +811,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		contacts:  newFakeContacts(),
 		now:       time.Unix(1_800_000_000, 0).UTC(),
 	}
-	fixture.service = NewService(fixture.repo, &fakeMemberships{}, fixture.repo, fixture.contacts, &stubBroadcasts{}, nil, nil, fixture.transport, fixture.notifier, Settings{
+	fixture.service = NewService(fixture.repo, &fakeMemberships{}, fixture.repo, fixture.contacts, &stubBroadcasts{}, nil, nil, nil, fixture.transport, fixture.notifier, Settings{
 		Domain:           "mail.example",
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,

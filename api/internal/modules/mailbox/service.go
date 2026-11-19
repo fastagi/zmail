@@ -153,7 +153,21 @@ type Service interface {
 	GetAttachment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error)
 	GetOutboundMessage(ctx context.Context, viewer domain.OrganizationContext, messageID uint) (*domain.MailMessage, error)
 	SetMessageRead(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint, read bool) (*domain.MailMessage, error)
+	// DeleteMessage moves a message to the trash, or deletes it for good when it is already there.
 	DeleteMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) error
+	// UpdateMessage and UpdateMessages mark, star, move, or label messages; see MessageUpdate.
+	UpdateMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint, update MessageUpdate) (*domain.MailMessage, error)
+	UpdateMessages(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, ids []uint, update MessageUpdate) (int, error)
+	// PurgeTrash empties the trash of a mailbox and returns how many messages it deleted.
+	PurgeTrash(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (int, error)
+	ListFolders(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) ([]*domain.MailFolder, error)
+	CreateFolder(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, name string) (*domain.MailFolder, error)
+	RenameFolder(ctx context.Context, viewer domain.OrganizationContext, mailboxID, folderID uint, name string) (*domain.MailFolder, error)
+	DeleteFolder(ctx context.Context, viewer domain.OrganizationContext, mailboxID, folderID uint) error
+	ListLabels(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) ([]*domain.MailLabel, error)
+	CreateLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, name string, color domain.MailLabelColor) (*domain.MailLabel, error)
+	UpdateLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID, labelID uint, name string, color domain.MailLabelColor) (*domain.MailLabel, error)
+	DeleteLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID, labelID uint) error
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -176,6 +190,8 @@ type service struct {
 	contacts    domain.MailContactRepository
 	// broadcasts is the broadcast store; nil until NewService wires it.
 	broadcasts domain.MailBroadcastRepository
+	// organize stores folders, labels, placements, and stars; nil when a test does not need them.
+	organize domain.MailOrganizeRepository
 	// domains and domainProvider serve organization domains; nil when a test does not need them.
 	domains        domain.MailDomainRepository
 	domainProvider mailtransport.DomainProvider
@@ -198,6 +214,7 @@ func NewService(
 	templates domain.MailTemplateRepository,
 	contacts domain.MailContactRepository,
 	broadcasts domain.MailBroadcastRepository,
+	organize domain.MailOrganizeRepository,
 	domains domain.MailDomainRepository,
 	domainProvider mailtransport.DomainProvider,
 	transport mailtransport.Transport,
@@ -205,7 +222,8 @@ func NewService(
 	settings Settings,
 ) *service {
 	return &service{
-		repo: repo, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts, domains: domains,
+		repo: repo, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
+		organize: organize, domains: domains,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },
 	}
@@ -309,7 +327,7 @@ func (s *service) ListLog(ctx context.Context, viewer domain.OrganizationContext
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := s.fillRead(ctx, viewer, messages...); err != nil {
+	if err := s.fillViewerState(ctx, viewer, messages...); err != nil {
 		return nil, 0, err
 	}
 	return messages, total, nil
@@ -410,7 +428,7 @@ func (s *service) ListMessages(
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := s.fillRead(ctx, viewer, messages...); err != nil {
+	if err := s.fillViewerState(ctx, viewer, messages...); err != nil {
 		return nil, 0, err
 	}
 	return messages, total, nil
@@ -424,7 +442,7 @@ func (s *service) GetMessage(ctx context.Context, viewer domain.OrganizationCont
 	if err != nil {
 		return nil, err
 	}
-	if err := s.fillRead(ctx, viewer, message); err != nil {
+	if err := s.fillViewerState(ctx, viewer, message); err != nil {
 		return nil, err
 	}
 	return s.withEvents(ctx, message)
@@ -473,17 +491,10 @@ func (s *service) SetMessageRead(ctx context.Context, viewer domain.Organization
 	if err != nil {
 		return nil, err
 	}
-	if err := s.fillRead(ctx, viewer, message); err != nil {
+	if err := s.fillViewerState(ctx, viewer, message); err != nil {
 		return nil, err
 	}
 	return message, nil
-}
-
-func (s *service) DeleteMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) error {
-	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canSend); err != nil {
-		return err
-	}
-	return s.repo.DeleteMessage(ctx, mailboxID, messageID)
 }
 
 // SendMessage stores the message as queued, calls the provider, and records the real outcome.
@@ -533,6 +544,10 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 		return nil, err
 	}
 	if err := s.checkAccess(ctx, viewer, mailbox, canView, ErrMailMessageNotFound); err != nil {
+		return nil, err
+	}
+	// An API key acts for no viewing person: it sees the shared labels but never a star.
+	if err := s.fillLabels(ctx, message); err != nil {
 		return nil, err
 	}
 	return s.withEvents(ctx, message)
