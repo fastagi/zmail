@@ -4,7 +4,7 @@ import { expect } from 'vitest';
  * Runs every mailbox service method against the mock BFF, so a mock response that drifts from the
  * service's schema fails as an invalid response. Loaded by `mock-bff-service-parity.test.ts`.
  * Mailboxes belong to an organization: every call names the harness's organization, of which the
- * harness user is the owner.
+ * harness user (user 1) is the owner; users 2 and 3 are the seeded admin and member.
  */
 export async function runServiceParity(context: { organizationId: number }): Promise<void> {
   const { organizationId } = context;
@@ -23,6 +23,16 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   const mailbox = await mailboxService.create(organizationId, {
     local_part: 'Parity',
     display_name: 'Parity Box',
+    type: 'shared',
+    members: [{ user_id: 1, permission: 'manage' }],
+  });
+  expect(mailbox).toMatchObject({ type: 'shared', webhooks_enabled: false, sealed_before: null });
+  expect(mailbox.access).toEqual({
+    view: true,
+    send: true,
+    manage_members: true,
+    administer: true,
+    see_history: true,
   });
   expect(mailbox.address).toBe(`parity@${domain.domain}`);
   expect((await mailboxService.list(organizationId)).map(item => item.id)).toEqual([mailbox.id]);
@@ -66,7 +76,11 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   expect(sent.meta).toMatchObject({ total: 2, last_page: 2 });
 
   // The log spans every mailbox, names the owner of each entry, and filters like the API.
-  const other = await mailboxService.create(organizationId, { local_part: 'parity-two' });
+  const other = await mailboxService.create(organizationId, {
+    local_part: 'parity-two',
+    type: 'personal',
+    owner_user_id: 1,
+  });
   const log = await mailboxService.listLog(organizationId);
   expect(log.items.map(item => item.id)).toEqual(
     [...log.items.map(item => item.id)].sort((left, right) => right - left)
@@ -100,6 +114,31 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   );
   expect(totals).toEqual({ sent: 2, failed: 0, received: 2 });
   expect(await mailboxService.stats(organizationId, 1)).toHaveLength(1);
+
+  // Members, the webhook switch, and the access history of the shared mailbox.
+  expect(await mailboxService.setMember(organizationId, mailbox.id, 3, 'view')).toMatchObject({
+    user_id: 3,
+    permission: 'view',
+    granted_by: 1,
+  });
+  expect(
+    (await mailboxService.members(organizationId, mailbox.id)).map(member => member.user_id)
+  ).toEqual([1, 3]);
+  await mailboxService.removeMember(organizationId, mailbox.id, 3);
+  expect(
+    (await mailboxService.setWebhooks(organizationId, mailbox.id, true)).webhooks_enabled
+  ).toBe(true);
+  const history = await mailboxService.accessEvents(organizationId, mailbox.id, { perPage: 2 });
+  expect(history.items.map(event => event.type)).toEqual(['webhooks_changed', 'member_removed']);
+  expect(history.meta.total).toBe(5);
+
+  // Handover of the personal mailbox seals its earlier mail, which can then be deleted.
+  const handed = await mailboxService.handOver(organizationId, other.id, 2);
+  expect(handed).toMatchObject({ id: other.id, type: 'shared', owner_user_id: null });
+  expect(handed.sealed_before).not.toBeNull();
+  expect(
+    await mailboxService.deleteSealedHistory(organizationId, other.id, other.address.toUpperCase())
+  ).toEqual({ deleted_messages: 1, deleted_broadcasts: 0 });
 
   await mailboxService.remove(organizationId, other.id);
   await mailboxService.removeMessage(organizationId, mailbox.id, first.id);

@@ -36,7 +36,7 @@ ready for review. Scheduled runs happen once a week, on Monday between 02:41 and
 | HTTP contracts, API (PostgreSQL 16), Web, Admin | When `contracts/`, `api/`, `web/`, `admin/`, `registry/`, or CI changes, per area | Yes | Yes | Via `make release-check` |
 | Web and Admin on Node 24 | No | Yes | Yes | Via `make release-check` |
 | PostgreSQL 15, 17, 18 compatibility | No | Yes | Yes | — |
-| Initialized project (`scripts/verify-init-project.sh`) | When `project:init`, ignore rules, root docs, or repository scripts change | Yes | Yes | — |
+| Initialized project (`scripts/verify-init-project.sh`; passes without running in a checkout that is already an initialized project) | When `project:init`, ignore rules, root docs, or repository scripts change | Yes | Yes | — |
 | API, Web, and Admin containers | When an image input changes (Dockerfile, dependency manifests, container scripts) | No | Yes | Built and scanned by `release.yml` |
 | End-to-end | When a browser shell, sign-in, the operator flow, or the dev stack changes | No | Yes | — |
 | Dependency security | When a dependency manifest changes | No | Yes | — |

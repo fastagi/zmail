@@ -148,3 +148,43 @@ type OrganizationInvitationRepository interface {
 	RevokeInvitation(ctx context.Context, organizationID, invitationID, revokedBy uint, now time.Time) (*OrganizationInvitation, error)
 	AcceptInvitation(ctx context.Context, tokenHash string, userID uint, now time.Time) (*OrganizationMembership, *OrganizationInvitation, error)
 }
+
+// Organization membership events, published after the membership change commits.
+const (
+	EventOrganizationMemberRemoved = "organization.member.removed"
+	EventOrganizationMemberJoined  = "organization.member.joined"
+)
+
+// OrganizationMemberRemovedEvent says a user left an organization or was removed from it. The
+// membership no longer exists when it is published.
+type OrganizationMemberRemovedEvent struct {
+	OrganizationID uint
+	UserID         uint
+	MembershipID   uint
+	occurredAt     time.Time
+}
+
+// NewOrganizationMemberRemovedEvent describes a membership removed at the given time.
+func NewOrganizationMemberRemovedEvent(organizationID, userID, membershipID uint, at time.Time) OrganizationMemberRemovedEvent {
+	return OrganizationMemberRemovedEvent{OrganizationID: organizationID, UserID: userID, MembershipID: membershipID, occurredAt: at}
+}
+
+func (e OrganizationMemberRemovedEvent) EventName() string     { return EventOrganizationMemberRemoved }
+func (e OrganizationMemberRemovedEvent) OccurredAt() time.Time { return e.occurredAt }
+
+// OrganizationMemberJoinedEvent says a membership was created: the organization's creator, an
+// accepted invitation, or a returning user.
+type OrganizationMemberJoinedEvent struct {
+	OrganizationID uint
+	UserID         uint
+	MembershipID   uint
+	occurredAt     time.Time
+}
+
+// NewOrganizationMemberJoinedEvent describes a membership created at the given time.
+func NewOrganizationMemberJoinedEvent(organizationID, userID, membershipID uint, at time.Time) OrganizationMemberJoinedEvent {
+	return OrganizationMemberJoinedEvent{OrganizationID: organizationID, UserID: userID, MembershipID: membershipID, occurredAt: at}
+}
+
+func (e OrganizationMemberJoinedEvent) EventName() string     { return EventOrganizationMemberJoined }
+func (e OrganizationMemberJoinedEvent) OccurredAt() time.Time { return e.occurredAt }

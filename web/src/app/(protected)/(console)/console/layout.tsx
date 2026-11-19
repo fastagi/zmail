@@ -202,7 +202,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                 className="h-9 w-9 rounded-full overflow-hidden border border-border/50 hover:border-primary/50 transition-colors"
               >
                 <Avatar className="h-full w-full">
-                  <AvatarFallback className="bg-primary/10 text-primary">
+                  <AvatarFallback aria-hidden="true" className="bg-primary/10 text-primary">
                     {(user?.name || user?.email || 'ZM')
                       .split(/[\s@._-]+/)
                       .filter(Boolean)

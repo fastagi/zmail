@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -78,8 +79,9 @@ type SendInput struct {
 // Service defines the business interface of the mailbox starter.
 type Service interface {
 	Domain() string
-	// CreateMailbox creates an address on domainName, the shared domain when it is empty.
-	CreateMailbox(ctx context.Context, organizationID, createdBy uint, localPart, displayName, domainName string) (*domain.Mailbox, error)
+	// CreateMailbox creates a personal or shared mailbox on the input's domain, the shared domain
+	// when it is empty. Only owners and admins may.
+	CreateMailbox(ctx context.Context, viewer domain.OrganizationContext, input CreateMailboxInput) (*domain.Mailbox, error)
 	CustomDomainsEnabled() bool
 	// MailboxDomains lists the shared domain and the organization's verified domains.
 	MailboxDomains(ctx context.Context, organizationID uint) ([]MailboxDomain, error)
@@ -89,21 +91,35 @@ type Service interface {
 	SetUpMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	CheckMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	DeleteMailDomain(ctx context.Context, organizationID, id uint) error
-	ListMailboxes(ctx context.Context, organizationID uint) ([]*domain.Mailbox, error)
-	DeleteMailbox(ctx context.Context, organizationID, mailboxID uint) error
-	ListMessages(ctx context.Context, organizationID, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
-	GetMessage(ctx context.Context, organizationID, mailboxID, messageID uint) (*domain.MailMessage, error)
+	// ListMailboxes lists the mailboxes the viewer has any access to, with that access.
+	ListMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error)
+	DeleteMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) error
+	ListMessages(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
+	GetMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) (*domain.MailMessage, error)
 	// SendMessage reports created=false when an idempotency key replayed an earlier attempt.
-	SendMessage(ctx context.Context, organizationID, mailboxID uint, input SendInput) (message *domain.MailMessage, created bool, err error)
-	// SendFromAddress sends from the mailbox with this address, which the organization must own.
-	SendFromAddress(ctx context.Context, organizationID uint, from string, input SendInput) (message *domain.MailMessage, created bool, err error)
+	SendMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, input SendInput) (message *domain.MailMessage, created bool, err error)
+	// SendFromAddress sends from the mailbox with this address, which the viewer must be allowed to send from.
+	SendFromAddress(ctx context.Context, viewer domain.OrganizationContext, from string, input SendInput) (message *domain.MailMessage, created bool, err error)
+	ListMailboxMembers(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) ([]*domain.MailboxMember, error)
+	SetMailboxMember(ctx context.Context, viewer domain.OrganizationContext, mailboxID, userID uint, permission domain.MailboxPermission) (*domain.MailboxMember, error)
+	RemoveMailboxMember(ctx context.Context, viewer domain.OrganizationContext, mailboxID, userID uint) error
+	ListMailboxAccessEvents(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, page, size int) ([]*domain.MailboxAccessEvent, int64, error)
+	// HandOverMailbox makes a personal mailbox shared with a successor and seals its history.
+	HandOverMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID, successorUserID uint) (*domain.Mailbox, error)
+	// SetMailboxWebhooks turns mail webhooks of a shared mailbox on or off.
+	SetMailboxWebhooks(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, enabled bool) (*domain.Mailbox, error)
+	// DeleteSealedHistory deletes the messages and broadcasts before the seal boundary.
+	DeleteSealedHistory(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, confirmAddress string) (*SealedDeletion, error)
+	// MemberRemoved and MemberJoined follow the organization starter's membership events.
+	MemberRemoved(ctx context.Context, event domain.OrganizationMemberRemovedEvent) error
+	MemberJoined(ctx context.Context, event domain.OrganizationMemberJoinedEvent) error
 	ListTemplates(ctx context.Context, organizationID uint) ([]*domain.MailTemplate, error)
 	GetTemplate(ctx context.Context, organizationID, id uint) (*domain.MailTemplate, error)
 	CreateTemplate(ctx context.Context, organizationID, createdBy uint, input TemplateInput) (*domain.MailTemplate, error)
 	UpdateTemplate(ctx context.Context, organizationID, id uint, input TemplateInput) (*domain.MailTemplate, error)
 	DeleteTemplate(ctx context.Context, organizationID, id uint) error
 	PreviewTemplate(ctx context.Context, organizationID uint, input PreviewInput) (*TemplatePreview, error)
-	SendTemplateTest(ctx context.Context, organizationID, templateID, mailboxID uint, to []string, values map[string]string) (*domain.MailMessage, error)
+	SendTemplateTest(ctx context.Context, viewer domain.OrganizationContext, templateID, mailboxID uint, to []string, values map[string]string) (*domain.MailMessage, error)
 	ListContacts(ctx context.Context, organizationID uint, filter domain.MailContactFilter) ([]*domain.MailContact, int64, error)
 	GetContact(ctx context.Context, organizationID, id uint) (*domain.MailContact, error)
 	CreateContact(ctx context.Context, organizationID uint, input ContactInput) (*domain.MailContact, error)
@@ -115,26 +131,30 @@ type Service interface {
 	RenameContactList(ctx context.Context, organizationID, id uint, name string) (*domain.MailContactList, error)
 	DeleteContactList(ctx context.Context, organizationID, id uint) error
 	BroadcastsEnabled() bool
-	ListBroadcasts(ctx context.Context, organizationID uint, page, perPage int) ([]*domain.MailBroadcast, int64, error)
-	GetBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error)
-	CreateBroadcast(ctx context.Context, organizationID, createdBy uint, input BroadcastInput) (*domain.MailBroadcast, error)
-	UpdateBroadcast(ctx context.Context, organizationID, id uint, input BroadcastInput) (*domain.MailBroadcast, error)
-	DeleteBroadcast(ctx context.Context, organizationID, id uint) error
-	SendBroadcast(ctx context.Context, organizationID, id uint, scheduledAt *time.Time) (*domain.MailBroadcast, error)
-	CancelBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error)
-	PauseBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error)
-	ResumeBroadcast(ctx context.Context, organizationID, id uint) (*domain.MailBroadcast, error)
-	ListBroadcastRecipients(ctx context.Context, organizationID, id uint, status domain.MailRecipientStatus, page, perPage int) ([]*domain.MailBroadcastRecipient, int64, error)
+	// ListBroadcasts lists the broadcasts of the mailboxes the viewer may read.
+	ListBroadcasts(ctx context.Context, viewer domain.OrganizationContext, page, perPage int) ([]*domain.MailBroadcast, int64, error)
+	GetBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, error)
+	CreateBroadcast(ctx context.Context, viewer domain.OrganizationContext, input BroadcastInput) (*domain.MailBroadcast, error)
+	UpdateBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint, input BroadcastInput) (*domain.MailBroadcast, error)
+	DeleteBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) error
+	SendBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint, scheduledAt *time.Time) (*domain.MailBroadcast, error)
+	// CancelBroadcast and PauseBroadcast need no access to the sender mailbox; visible reports
+	// whether the viewer may read it, and so see more than the broadcast's id and status.
+	CancelBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (broadcast *domain.MailBroadcast, visible bool, err error)
+	PauseBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (broadcast *domain.MailBroadcast, visible bool, err error)
+	ResumeBroadcast(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.MailBroadcast, error)
+	ListBroadcastRecipients(ctx context.Context, viewer domain.OrganizationContext, id uint, status domain.MailRecipientStatus, page, perPage int) ([]*domain.MailBroadcastRecipient, int64, error)
 	Unsubscribe(ctx context.Context, token string) error
 	// GetAttachment returns one attachment of a message with its content.
-	GetAttachment(ctx context.Context, organizationID, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error)
-	GetOutboundMessage(ctx context.Context, organizationID, messageID uint) (*domain.MailMessage, error)
-	SetMessageRead(ctx context.Context, organizationID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error)
-	DeleteMessage(ctx context.Context, organizationID, mailboxID, messageID uint) error
-	// ListLog lists messages across every mailbox of the organization.
-	ListLog(ctx context.Context, organizationID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
-	// Stats returns one entry per UTC day for the last days days, oldest first, including empty days.
-	Stats(ctx context.Context, organizationID uint, days int) ([]domain.MailDayStats, error)
+	GetAttachment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error)
+	GetOutboundMessage(ctx context.Context, viewer domain.OrganizationContext, messageID uint) (*domain.MailMessage, error)
+	SetMessageRead(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint, read bool) (*domain.MailMessage, error)
+	DeleteMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) error
+	// ListLog lists messages across the mailboxes the viewer may read.
+	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
+	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
+	// days, counting only the mailboxes the viewer may read.
+	Stats(ctx context.Context, viewer domain.OrganizationContext, days int) ([]domain.MailDayStats, error)
 	Provider() string
 	InboundEnabled() bool
 	DailySendLimit() int
@@ -145,9 +165,11 @@ type Service interface {
 }
 
 type service struct {
-	repo      domain.MailboxRepository
-	templates domain.MailTemplateRepository
-	contacts  domain.MailContactRepository
+	repo domain.MailboxRepository
+	// memberships validates owners and members against the organization's current members.
+	memberships membershipDirectory
+	templates   domain.MailTemplateRepository
+	contacts    domain.MailContactRepository
 	// broadcasts is the broadcast store; nil until NewService wires it.
 	broadcasts domain.MailBroadcastRepository
 	// domains and domainProvider serve organization domains; nil when a test does not need them.
@@ -168,6 +190,7 @@ var _ Service = (*service)(nil)
 // NewService creates the mailbox service.
 func NewService(
 	repo domain.MailboxRepository,
+	memberships membershipDirectory,
 	templates domain.MailTemplateRepository,
 	contacts domain.MailContactRepository,
 	broadcasts domain.MailBroadcastRepository,
@@ -178,7 +201,7 @@ func NewService(
 	settings Settings,
 ) *service {
 	return &service{
-		repo: repo, templates: templates, contacts: contacts, broadcasts: broadcasts, domains: domains,
+		repo: repo, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts, domains: domains,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },
 	}
@@ -259,7 +282,7 @@ const (
 	MaxStatsDays = 90
 )
 
-func (s *service) ListLog(ctx context.Context, organizationID uint, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error) {
+func (s *service) ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error) {
 	if filter.Direction != "" && !filter.Direction.Valid() {
 		return nil, 0, domain.ErrInvalidInput
 	}
@@ -270,17 +293,60 @@ func (s *service) ListLog(ctx context.Context, organizationID uint, filter domai
 	if len(filter.Query) > maxLogQueryLength {
 		return nil, 0, domain.ErrInvalidInput
 	}
-	return s.repo.ListMessagesForOrganization(ctx, organizationID, filter)
+	readable, err := s.readableMailboxIDs(ctx, viewer)
+	if err != nil {
+		return nil, 0, err
+	}
+	if filter.MailboxID != 0 {
+		// A mailbox filter the viewer may not read lists nothing, like a mailbox without mail.
+		readable = slices.DeleteFunc(readable, func(id uint) bool { return id != filter.MailboxID })
+	}
+	messages, total, err := s.repo.ListMessagesForOrganization(ctx, viewer.OrganizationID, readable, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.fillRead(ctx, viewer, messages...); err != nil {
+		return nil, 0, err
+	}
+	return messages, total, nil
 }
 
-func (s *service) Stats(ctx context.Context, organizationID uint, days int) ([]domain.MailDayStats, error) {
+// fillRead sets each inbound message's read state to the viewer's own. Outbound mail is always
+// read. Filling it never changes read state.
+func (s *service) fillRead(ctx context.Context, viewer domain.OrganizationContext, messages ...*domain.MailMessage) error {
+	ids := make([]uint, 0, len(messages))
+	for _, message := range messages {
+		if message.Direction == domain.MailDirectionInbound {
+			ids = append(ids, message.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	read, err := s.repo.ReadMessages(ctx, viewer.MembershipID, ids)
+	if err != nil {
+		return err
+	}
+	for _, message := range messages {
+		if message.Direction == domain.MailDirectionInbound {
+			message.Read = read[message.ID]
+		}
+	}
+	return nil
+}
+
+func (s *service) Stats(ctx context.Context, viewer domain.OrganizationContext, days int) ([]domain.MailDayStats, error) {
 	if days < 1 || days > MaxStatsDays {
 		return nil, domain.ErrInvalidInput
 	}
 	now := s.now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	first := today.AddDate(0, 0, -(days - 1))
-	counted, err := s.repo.StatsForOrganization(ctx, organizationID, first)
+	readable, err := s.readableMailboxIDs(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	counted, err := s.repo.StatsForOrganization(ctx, viewer.OrganizationID, readable, first)
 	if err != nil {
 		return nil, err
 	}
@@ -298,57 +364,26 @@ func (s *service) Stats(ctx context.Context, organizationID uint, days int) ([]d
 	return stats, nil
 }
 
-func (s *service) CreateMailbox(ctx context.Context, organizationID, createdBy uint, localPart, displayName, domainName string) (*domain.Mailbox, error) {
-	normalized, err := normalizeLocalPart(localPart)
+func (s *service) ListMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error) {
+	mailboxes, err := s.visibleMailboxes(ctx, viewer)
 	if err != nil {
 		return nil, err
 	}
-	displayName = strings.Join(strings.Fields(displayName), " ")
-	if len(displayName) > 120 || strings.ContainsAny(displayName, "<>\"") {
-		return nil, fmt.Errorf("%w: display name", ErrMailboxAddressInvalid)
-	}
-	addressDomain, connected, err := s.mailboxDomainFor(ctx, organizationID, domainName)
-	if err != nil {
-		return nil, err
-	}
-	mailbox := &domain.Mailbox{
-		OrganizationID: organizationID,
-		CreatedBy:      createdBy,
-		Address:        normalized + "@" + addressDomain,
-		DisplayName:    displayName,
-	}
-	if connected != nil {
-		// Claim the address before routing mail to it, so a taken address never gets a rule.
-		if _, err := s.repo.FindMailboxByAddress(ctx, mailbox.Address); err == nil {
-			return nil, ErrMailboxAddressTaken
-		} else if !errors.Is(err, ErrMailboxNotFound) {
-			return nil, err
+	for _, mailbox := range mailboxes {
+		// Unread counts describe mail; a viewer who may not read it learns nothing about it.
+		if !mailbox.Access.View {
+			mailbox.UnreadCount = 0
 		}
-		ruleID, err := s.domainProvider.CreateRoutingRule(ctx, connected.ZoneID, mailbox.Address, s.settings.EmailWorker)
-		if err != nil {
-			return nil, providerError(err)
-		}
-		mailbox.RoutingRuleID = ruleID
 	}
-	if err := s.repo.CreateMailbox(ctx, mailbox, domain.MaxMailboxesPerOrganization); err != nil {
-		if connected != nil {
-			s.removeRoutingRule(ctx, mailbox)
-		}
-		return nil, err
-	}
-	return mailbox, nil
+	return mailboxes, nil
 }
 
-func (s *service) ListMailboxes(ctx context.Context, organizationID uint) ([]*domain.Mailbox, error) {
-	return s.repo.ListMailboxes(ctx, organizationID)
-}
-
-func (s *service) DeleteMailbox(ctx context.Context, organizationID, mailboxID uint) error {
-	mailbox, err := s.repo.FindMailbox(ctx, organizationID, mailboxID)
+func (s *service) DeleteMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) error {
+	mailbox, err := s.authorizeMailbox(ctx, viewer, mailboxID, canAdminister)
 	if err != nil {
 		return err
 	}
-	if err := s.repo.DeleteMailbox(ctx, organizationID, mailboxID); err != nil {
+	if err := s.repo.DeleteMailbox(ctx, viewer.OrganizationID, mailboxID); err != nil {
 		return err
 	}
 	s.removeRoutingRule(ctx, mailbox)
@@ -357,31 +392,42 @@ func (s *service) DeleteMailbox(ctx context.Context, organizationID, mailboxID u
 
 func (s *service) ListMessages(
 	ctx context.Context,
-	organizationID, mailboxID uint,
+	viewer domain.OrganizationContext,
+	mailboxID uint,
 	filter domain.MailMessageFilter,
 ) ([]*domain.MailMessage, int64, error) {
 	if filter.Direction != "" && !filter.Direction.Valid() {
 		return nil, 0, domain.ErrInvalidInput
 	}
-	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
+	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
 		return nil, 0, err
 	}
-	return s.repo.ListMessages(ctx, mailboxID, filter)
+	messages, total, err := s.repo.ListMessages(ctx, mailboxID, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.fillRead(ctx, viewer, messages...); err != nil {
+		return nil, 0, err
+	}
+	return messages, total, nil
 }
 
-func (s *service) GetMessage(ctx context.Context, organizationID, mailboxID, messageID uint) (*domain.MailMessage, error) {
-	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
+func (s *service) GetMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) (*domain.MailMessage, error) {
+	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
 		return nil, err
 	}
 	message, err := s.repo.FindMessage(ctx, mailboxID, messageID)
 	if err != nil {
 		return nil, err
 	}
+	if err := s.fillRead(ctx, viewer, message); err != nil {
+		return nil, err
+	}
 	return s.withEvents(ctx, message)
 }
 
-func (s *service) GetAttachment(ctx context.Context, organizationID, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error) {
-	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
+func (s *service) GetAttachment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error) {
+	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
 		return nil, err
 	}
 	if _, err := s.repo.FindMessage(ctx, mailboxID, messageID); err != nil {
@@ -407,23 +453,30 @@ func (s *service) withEvents(ctx context.Context, message *domain.MailMessage) (
 	return message, nil
 }
 
-func (s *service) SetMessageRead(ctx context.Context, organizationID, mailboxID, messageID uint, read bool) (*domain.MailMessage, error) {
-	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
+// SetMessageRead changes the viewer's own read state of a message; nobody else's changes. It
+// needs View. Marking an outbound message changes nothing: it is always read.
+func (s *service) SetMessageRead(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint, read bool) (*domain.MailMessage, error) {
+	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
 		return nil, err
 	}
-	var readAt *time.Time
-	if read {
-		now := s.now().UTC()
-		readAt = &now
-	}
-	if err := s.repo.SetMessageRead(ctx, mailboxID, messageID, readAt); err != nil {
+	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
+		return s.repo.SetMessageRead(tx, mailboxID, messageID, viewer.MembershipID, read, s.now().UTC())
+	})
+	if err != nil {
 		return nil, err
 	}
-	return s.repo.FindMessage(ctx, mailboxID, messageID)
+	message, err := s.repo.FindMessage(ctx, mailboxID, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.fillRead(ctx, viewer, message); err != nil {
+		return nil, err
+	}
+	return message, nil
 }
 
-func (s *service) DeleteMessage(ctx context.Context, organizationID, mailboxID, messageID uint) error {
-	if _, err := s.repo.FindMailbox(ctx, organizationID, mailboxID); err != nil {
+func (s *service) DeleteMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) error {
+	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canSend); err != nil {
 		return err
 	}
 	return s.repo.DeleteMessage(ctx, mailboxID, messageID)
@@ -432,15 +485,16 @@ func (s *service) DeleteMessage(ctx context.Context, organizationID, mailboxID, 
 // SendMessage stores the message as queued, calls the provider, and records the real outcome.
 // A provider failure keeps the message with status "failed" and returns ErrMailDeliveryFailed
 // together with the stored message, so a caller never sees a failed send reported as sent.
-func (s *service) SendMessage(ctx context.Context, organizationID, mailboxID uint, input SendInput) (*domain.MailMessage, bool, error) {
-	mailbox, err := s.repo.FindMailbox(ctx, organizationID, mailboxID)
+// Access is checked before anything is validated, stored, or counted against the send limit.
+func (s *service) SendMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, input SendInput) (*domain.MailMessage, bool, error) {
+	mailbox, err := s.authorizeMailbox(ctx, viewer, mailboxID, canSend)
 	if err != nil {
 		return nil, false, err
 	}
 	return s.send(ctx, mailbox, input)
 }
 
-func (s *service) SendFromAddress(ctx context.Context, organizationID uint, from string, input SendInput) (*domain.MailMessage, bool, error) {
+func (s *service) SendFromAddress(ctx context.Context, viewer domain.OrganizationContext, from string, input SendInput) (*domain.MailMessage, bool, error) {
 	address, ok := normalizeRecipient(from)
 	if !ok {
 		return nil, false, fmt.Errorf("%w: from", ErrMailMessageInvalid)
@@ -449,16 +503,32 @@ func (s *service) SendFromAddress(ctx context.Context, organizationID uint, from
 	if err != nil {
 		return nil, false, err
 	}
-	// Another organization's address answers exactly like an address that is not a mailbox.
-	if mailbox.OrganizationID != organizationID {
+	// Another organization's address answers exactly like an address that is not a mailbox, and
+	// so does a mailbox the key's owner has no access to.
+	if mailbox.OrganizationID != viewer.OrganizationID {
 		return nil, false, ErrMailboxNotFound
+	}
+	if err := s.checkAccess(ctx, viewer, mailbox, canSend, ErrMailboxNotFound); err != nil {
+		return nil, false, err
 	}
 	return s.send(ctx, mailbox, input)
 }
 
-func (s *service) GetOutboundMessage(ctx context.Context, organizationID, messageID uint) (*domain.MailMessage, error) {
-	message, err := s.repo.FindOutboundMessageForOrganization(ctx, organizationID, messageID)
+// GetOutboundMessage needs View on the message's mailbox; a message of a mailbox the viewer has
+// no access to answers like a message that does not exist.
+func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.OrganizationContext, messageID uint) (*domain.MailMessage, error) {
+	message, err := s.repo.FindOutboundMessageForOrganization(ctx, viewer.OrganizationID, messageID)
 	if err != nil {
+		return nil, err
+	}
+	mailbox, err := s.repo.FindMailbox(ctx, viewer.OrganizationID, message.MailboxID)
+	if errors.Is(err, ErrMailboxNotFound) {
+		return nil, ErrMailMessageNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkAccess(ctx, viewer, mailbox, canView, ErrMailMessageNotFound); err != nil {
 		return nil, err
 	}
 	return s.withEvents(ctx, message)
@@ -480,7 +550,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	if message.IdempotencyKey != "" {
 		existing, findErr := s.repo.FindMessageByIdempotencyKey(ctx, mailbox.ID, message.IdempotencyKey)
 		if findErr == nil {
-			replayed, replayErr := replayOutbound(existing, message.IdempotencyFingerprint)
+			replayed, replayErr := replayOutbound(mailbox, existing, message.IdempotencyFingerprint)
 			return replayed, false, replayErr
 		}
 		if !errors.Is(findErr, ErrMailMessageNotFound) {
@@ -503,7 +573,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	}
 	if !created {
 		// A concurrent request with the same key stored its message first.
-		replayed, replayErr := replayOutbound(message, fingerprint)
+		replayed, replayErr := replayOutbound(mailbox, message, fingerprint)
 		return replayed, false, replayErr
 	}
 
@@ -567,12 +637,8 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 // sendNotifications lists what a finished send tells webhook endpoints: whether the provider
 // took the message, and anything it already said about a recipient.
 func sendNotifications(mailbox *domain.Mailbox, message *domain.MailMessage, events []domain.MailEvent, at time.Time) []MailNotification {
-	base := MailNotification{
-		OrganizationID: mailbox.OrganizationID,
-		MailboxAddress: mailbox.Address,
-		Message:        message,
-		OccurredAt:     at,
-	}
+	base := mailNotificationFor(mailbox, message)
+	base.OccurredAt = at
 	outcome := base
 	outcome.Type = WebhookMailSent
 	if message.Status == domain.MailStatusFailed {
@@ -593,6 +659,24 @@ func sendNotifications(mailbox *domain.Mailbox, message *domain.MailMessage, eve
 		notifications = append(notifications, notification)
 	}
 	return notifications
+}
+
+// mailNotificationFor starts a notification about a message of the mailbox, carrying what the
+// webhook guard needs to know about the mailbox.
+func mailNotificationFor(mailbox *domain.Mailbox, message *domain.MailMessage) MailNotification {
+	return MailNotification{
+		OrganizationID:  mailbox.OrganizationID,
+		MailboxAddress:  mailbox.Address,
+		MailboxType:     mailbox.Type,
+		WebhooksEnabled: mailbox.WebhooksEnabled,
+		SealedBefore:    mailbox.SealedBefore,
+		Message:         message,
+	}
+}
+
+// sealedFor reports whether a message or broadcast created at createdAt is sealed in the mailbox.
+func sealedFor(mailbox *domain.Mailbox, createdAt time.Time) bool {
+	return mailbox.SealedBefore != nil && createdAt.Before(*mailbox.SealedBefore)
 }
 
 // sendEvents turns what the provider said during the send call into delivery events.
@@ -617,9 +701,10 @@ func sendEvents(outcome mailtransport.Result, accepted bool, at time.Time) []dom
 }
 
 // replayOutbound answers a send whose idempotency key already names a message. The provider is
-// not called again: the caller gets the first attempt's outcome, whatever it was.
-func replayOutbound(existing *domain.MailMessage, fingerprint string) (*domain.MailMessage, error) {
-	if existing.IdempotencyFingerprint != fingerprint {
+// not called again: the caller gets the first attempt's outcome, whatever it was. A sealed
+// message is a conflict that reveals nothing of it.
+func replayOutbound(mailbox *domain.Mailbox, existing *domain.MailMessage, fingerprint string) (*domain.MailMessage, error) {
+	if sealedFor(mailbox, existing.CreatedAt) || existing.IdempotencyFingerprint != fingerprint {
 		return nil, ErrMailIdempotencyConflict
 	}
 	switch existing.Status {
@@ -688,7 +773,6 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		fingerprint = sendFingerprint(to, cc, cleanText(subject), text, html, inReplyTo, attachmentDigest(attachments))
 	}
 
-	now := s.now().UTC()
 	return &domain.MailMessage{
 		IdempotencyKey:         idempotencyKey,
 		IdempotencyFingerprint: fingerprint,
@@ -705,8 +789,8 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		InReplyTo:              inReplyTo,
 		Attachments:            attachments,
 		AttachmentCount:        len(attachments),
-		// The owner wrote it, so it starts out read.
-		ReadAt: &now,
+		// Outbound mail is read for everyone.
+		Read: true,
 	}, nil
 }
 
@@ -769,13 +853,10 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		if created, createErr = s.repo.CreateInboundMessage(tx, message); createErr != nil || !created {
 			return nil, createErr
 		}
-		return []MailNotification{{
-			Type:           WebhookMailReceived,
-			OrganizationID: mailbox.OrganizationID,
-			MailboxAddress: mailbox.Address,
-			Message:        message,
-			OccurredAt:     s.now().UTC(),
-		}}, nil
+		notification := mailNotificationFor(mailbox, message)
+		notification.Type = WebhookMailReceived
+		notification.OccurredAt = s.now().UTC()
+		return []MailNotification{notification}, nil
 	})
 	if err != nil {
 		return nil, false, err

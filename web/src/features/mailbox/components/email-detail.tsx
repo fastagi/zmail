@@ -35,12 +35,15 @@ export function EmailDetail({
   mailboxId,
   mailboxAddress,
   messageId,
+  canSend,
   onClose,
   onReply,
 }: {
   mailboxId: number;
   mailboxAddress: string;
   messageId: number;
+  /** The mailbox's `access.send`; false when the mailbox is not among the user's. */
+  canSend: boolean;
   onClose: () => void;
   onReply: (message: MailMessage) => void;
 }) {
@@ -94,7 +97,7 @@ export function EmailDetail({
     <article className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {back}
-        <MessageActions message={message} onReply={onReply} onClose={onClose} />
+        <MessageActions message={message} canSend={canSend} onReply={onReply} onClose={onClose} />
       </div>
 
       <div className="space-y-4 rounded-md border p-4">

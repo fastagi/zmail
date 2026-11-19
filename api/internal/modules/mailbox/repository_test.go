@@ -25,7 +25,7 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailMessagePO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{})
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{})
 	return NewRepository(db), db
 }
 
@@ -38,11 +38,24 @@ func createOwner(t *testing.T, db *gorm.DB, id uint) {
 
 func createMailbox(t *testing.T, repo *repository, address string) *domain.Mailbox {
 	t.Helper()
-	mailbox := &domain.Mailbox{OrganizationID: 1, Address: address, DisplayName: "Owner"}
+	mailbox := &domain.Mailbox{OrganizationID: 1, Address: address, DisplayName: "Owner", Type: domain.MailboxTypeShared}
 	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MaxMailboxesPerOrganization); err != nil {
 		t.Fatalf("CreateMailbox(%q): %v", address, err)
 	}
+	// as(1) works the mailbox, like the creator a service-created mailbox gets as its manager.
+	addMember(t, repo, mailbox.ID, as(1), domain.MailboxPermissionManage)
 	return mailbox
+}
+
+// addMember gives viewer's membership a permission on a mailbox.
+func addMember(t *testing.T, repo *repository, mailboxID uint, viewer domain.OrganizationContext, permission domain.MailboxPermission) {
+	t.Helper()
+	member := &domain.MailboxMember{
+		MailboxID: mailboxID, MembershipID: viewer.MembershipID, UserID: viewer.UserID, Permission: permission, GrantedBy: viewer.UserID,
+	}
+	if _, err := repo.UpsertMailboxMember(context.Background(), member, domain.MaxMailboxMembers); err != nil {
+		t.Fatalf("UpsertMailboxMember: %v", err)
+	}
 }
 
 func TestRepositoryKeepsAReleasedAddressReserved(t *testing.T) {
@@ -87,7 +100,7 @@ func TestRepositoryEnforcesTheMailboxLimitPerOrganization(t *testing.T) {
 		t.Fatalf("another organization is limited by the first one's mailboxes: %v", err)
 	}
 
-	owned, err := repo.ListMailboxes(ctx, 1)
+	owned, err := repo.ListMailboxes(ctx, 1, 0)
 	if err != nil || len(owned) != 2 || owned[0].Address != "a@mail.example" {
 		t.Fatalf("ListMailboxes = %v, %v", owned, err)
 	}
@@ -222,19 +235,17 @@ func TestRepositoryRecordsDeliveryReadStateAndDeletion(t *testing.T) {
 		t.Fatalf("UpdateMessageDelivery: %v", err)
 	}
 	readAt := time.Now().UTC().Truncate(time.Microsecond)
-	if err := repo.SetMessageRead(ctx, mailbox.ID, message.ID, &readAt); err != nil {
+	reader := as(1).MembershipID
+	// Outbound mail is always read and stores no read row.
+	if err := repo.SetMessageRead(ctx, mailbox.ID, message.ID, reader, false, readAt); err != nil {
 		t.Fatalf("SetMessageRead: %v", err)
 	}
 	stored, err := repo.FindMessage(ctx, mailbox.ID, message.ID)
-	if err != nil || stored.Status != domain.MailStatusFailed || stored.FailureCode != "provider.http_500" ||
-		stored.ReadAt == nil || !stored.ReadAt.Equal(readAt) {
+	if err != nil || stored.Status != domain.MailStatusFailed || stored.FailureCode != "provider.http_500" || !stored.Read {
 		t.Fatalf("stored = %+v, err %v", stored, err)
 	}
-	if clearErr := repo.SetMessageRead(ctx, mailbox.ID, message.ID, nil); clearErr != nil {
-		t.Fatalf("clear read: %v", clearErr)
-	}
-	if stored, _ := repo.FindMessage(ctx, mailbox.ID, message.ID); stored.ReadAt != nil {
-		t.Fatalf("read_at = %v; want cleared", stored.ReadAt)
+	if read, _ := repo.ReadMessages(ctx, reader, []uint{message.ID}); read[message.ID] {
+		t.Fatal("an outbound message stored a read row")
 	}
 
 	count, err := repo.CountOutboundSince(ctx, 1, time.Now().Add(-time.Hour))
@@ -251,7 +262,7 @@ func TestRepositoryRecordsDeliveryReadStateAndDeletion(t *testing.T) {
 	if err := repo.DeleteMessage(ctx, mailbox.ID, message.ID); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("second delete error = %v", err)
 	}
-	if err := repo.SetMessageRead(ctx, mailbox.ID, message.ID, &readAt); !errors.Is(err, ErrMailMessageNotFound) {
+	if err := repo.SetMessageRead(ctx, mailbox.ID, message.ID, reader, true, readAt); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("read on a deleted message error = %v", err)
 	}
 }
@@ -348,6 +359,7 @@ func TestRepositoryCountsUnreadInboundMessagesPerMailbox(t *testing.T) {
 	busy := createMailbox(t, repo, "busy@mail.example")
 	quiet := createMailbox(t, repo, "quiet@mail.example")
 	readAt := time.Now().UTC()
+	reader, other := as(1).MembershipID, viewerOf(1, 2, domain.OrganizationRoleMember).MembershipID
 	add := func(mailboxID uint, direction domain.MailDirection, read bool) {
 		message := &domain.MailMessage{
 			MailboxID: mailboxID, Direction: direction, Status: domain.MailStatusReceived,
@@ -356,11 +368,13 @@ func TestRepositoryCountsUnreadInboundMessagesPerMailbox(t *testing.T) {
 		if direction == domain.MailDirectionOutbound {
 			message.Status = domain.MailStatusSent
 		}
-		if read {
-			message.ReadAt = &readAt
-		}
 		if _, err := repo.CreateMessage(ctx, message); err != nil {
 			t.Fatalf("CreateMessage: %v", err)
+		}
+		if read {
+			if err := repo.SetMessageRead(ctx, mailboxID, message.ID, reader, true, readAt); err != nil {
+				t.Fatalf("SetMessageRead: %v", err)
+			}
 		}
 	}
 	add(busy.ID, domain.MailDirectionInbound, false)
@@ -369,12 +383,16 @@ func TestRepositoryCountsUnreadInboundMessagesPerMailbox(t *testing.T) {
 	// An outbound message is never unread mail, even without a read time.
 	add(busy.ID, domain.MailDirectionOutbound, false)
 
-	owned, err := repo.ListMailboxes(ctx, 1)
+	owned, err := repo.ListMailboxes(ctx, 1, reader)
 	if err != nil || len(owned) != 2 {
 		t.Fatalf("ListMailboxes = %v, %v", owned, err)
 	}
 	if owned[0].ID != busy.ID || owned[0].UnreadCount != 2 {
 		t.Fatalf("busy mailbox unread = %d; want 2", owned[0].UnreadCount)
+	}
+	// Read state is the reader's own: someone who read nothing has everything unread.
+	if others, _ := repo.ListMailboxes(ctx, 1, other); others[0].UnreadCount != 3 {
+		t.Fatalf("busy mailbox unread for another reader = %d; want 3", others[0].UnreadCount)
 	}
 	if owned[1].ID != quiet.ID || owned[1].UnreadCount != 0 {
 		t.Fatalf("quiet mailbox unread = %d; want 0", owned[1].UnreadCount)
@@ -408,7 +426,7 @@ func TestRepositoryListsTheLogAcrossAnOrganizationsMailboxes(t *testing.T) {
 
 	list := func(filter domain.MailLogFilter) []*domain.MailMessage {
 		t.Helper()
-		messages, total, err := repo.ListMessagesForOrganization(ctx, 1, filter)
+		messages, total, err := repo.ListMessagesForOrganization(ctx, 1, []uint{first.ID, second.ID, foreign.ID}, filter)
 		if err != nil || int(total) != len(messages) {
 			t.Fatalf("ListMessagesForOrganization(%+v) = %d rows, total %d, err %v", filter, len(messages), total, err)
 		}
@@ -451,9 +469,19 @@ func TestRepositoryListsTheLogAcrossAnOrganizationsMailboxes(t *testing.T) {
 		t.Fatalf("a lone _ matched %d rows; want 0", len(got))
 	}
 
-	page, total, err := repo.ListMessagesForOrganization(ctx, 1, domain.MailLogFilter{Page: 2, PerPage: 2})
+	page, total, err := repo.ListMessagesForOrganization(ctx, 1, []uint{first.ID, second.ID}, domain.MailLogFilter{Page: 2, PerPage: 2})
 	if err != nil || total != 3 || len(page) != 1 || page[0].Subject != "Invoice 100% due" {
 		t.Fatalf("page 2 = %+v, total %d, err %v", page, total, err)
+	}
+
+	// Only the given mailboxes are listed and counted; none lists nothing.
+	readable, total, err := repo.ListMessagesForOrganization(ctx, 1, []uint{second.ID}, domain.MailLogFilter{Query: "Invoice"})
+	if err != nil || total != 0 || len(readable) != 0 {
+		t.Fatalf("log of an unreadable mailbox's subject = %+v, total %d, err %v", readable, total, err)
+	}
+	none, total, err := repo.ListMessagesForOrganization(ctx, 1, nil, domain.MailLogFilter{})
+	if err != nil || total != 0 || len(none) != 0 {
+		t.Fatalf("log without mailboxes = %+v, total %d, err %v", none, total, err)
 	}
 }
 
@@ -486,7 +514,10 @@ func TestRepositoryCountsMailPerDay(t *testing.T) {
 	add(mailbox.ID, domain.MailDirectionInbound, domain.MailStatusReceived, time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))
 	add(foreign.ID, domain.MailDirectionInbound, domain.MailStatusReceived, day2)
 
-	stats, err := repo.StatsForOrganization(ctx, 1, time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC))
+	if empty, err := repo.StatsForOrganization(ctx, 1, nil, time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)); err != nil || len(empty) != 0 {
+		t.Fatalf("stats without mailboxes = %+v, %v", empty, err)
+	}
+	stats, err := repo.StatsForOrganization(ctx, 1, []uint{mailbox.ID, foreign.ID}, time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC))
 	if err != nil || len(stats) != 2 {
 		t.Fatalf("StatsForOrganization = %+v, %v; want 2 days", stats, err)
 	}
@@ -546,17 +577,21 @@ func TestRepositoryStoresDeliveryEventsOnceAndSummarizesThem(t *testing.T) {
 	if err != nil || stored.LastEvent != domain.MailEventBounced {
 		t.Fatalf("stored summary = %q, err %v", stored.LastEvent, err)
 	}
-	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, domain.MailLogFilter{})
+	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, []uint{mailbox.ID}, domain.MailLogFilter{})
 	if err != nil || len(listed) != 1 || listed[0].LastEvent != domain.MailEventBounced {
 		t.Fatalf("the log does not carry the summary: %+v, %v", listed, err)
 	}
 
-	found, err := repo.FindOutboundMessageByProviderID(ctx, "prov-9@mail.example")
+	found, foundMailbox, err := repo.FindOutboundMessageByProviderID(ctx, "prov-9@mail.example")
 	if err != nil || found.ID != message.ID || found.MailboxAddress != mailbox.Address || found.OrganizationID != 1 {
 		t.Fatalf("FindOutboundMessageByProviderID = %+v, %v", found, err)
 	}
+	if foundMailbox.ID != mailbox.ID || foundMailbox.OrganizationID != 1 || foundMailbox.Type != domain.MailboxTypeShared ||
+		foundMailbox.WebhooksEnabled || foundMailbox.SealedBefore != nil {
+		t.Fatalf("provider-id lookup mailbox = %+v", foundMailbox)
+	}
 	for _, missing := range []string{"", "unknown@mail.example"} {
-		if _, err := repo.FindOutboundMessageByProviderID(ctx, missing); !errors.Is(err, ErrMailMessageNotFound) {
+		if _, _, err := repo.FindOutboundMessageByProviderID(ctx, missing); !errors.Is(err, ErrMailMessageNotFound) {
 			t.Fatalf("provider id %q error = %v", missing, err)
 		}
 	}
@@ -568,7 +603,7 @@ func TestRepositoryStoresDeliveryEventsOnceAndSummarizesThem(t *testing.T) {
 	if _, err := repo.CreateMessage(ctx, inbound); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if _, err := repo.FindOutboundMessageByProviderID(ctx, "only-inbound@sender.test"); !errors.Is(err, ErrMailMessageNotFound) {
+	if _, _, err := repo.FindOutboundMessageByProviderID(ctx, "only-inbound@sender.test"); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("an inbound message matched a provider event: %v", err)
 	}
 	if _, _, err := repo.AddMessageEvents(ctx, 999999, []domain.MailEvent{{Type: domain.MailEventAccepted, OccurredAt: at(0)}}); !errors.Is(err, ErrMailMessageNotFound) {
@@ -582,7 +617,7 @@ func TestRepositoryStoresDeliveryEventsOnceAndSummarizesThem(t *testing.T) {
 
 func TestRepositoryReportsADisabledDatabase(t *testing.T) {
 	repo := NewRepository(nil)
-	if _, err := repo.ListMailboxes(context.Background(), 1); !errors.Is(err, domain.ErrServiceUnavailable) {
+	if _, err := repo.ListMailboxes(context.Background(), 1, 0); !errors.Is(err, domain.ErrServiceUnavailable) {
 		t.Fatalf("error = %v; want ErrServiceUnavailable", err)
 	}
 }
@@ -662,7 +697,7 @@ func TestRepositoryStoresAttachmentsWithTheirMessage(t *testing.T) {
 	if err != nil || stored.AttachmentCount != 2 {
 		t.Fatalf("FindMessage = %+v, %v", stored, err)
 	}
-	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, domain.MailLogFilter{})
+	listed, _, err := repo.ListMessagesForOrganization(ctx, 1, []uint{mailbox.ID}, domain.MailLogFilter{})
 	if err != nil || len(listed) != 1 || listed[0].AttachmentCount != 2 {
 		t.Fatalf("log = %+v, %v", listed, err)
 	}
@@ -947,4 +982,71 @@ func sameJSON(a, b string) bool {
 		return false
 	}
 	return reflect.DeepEqual(left, right)
+}
+
+// A message deleted between SetMessageRead's lookup and its insert hits the read row's foreign
+// key; that answers not found, as the lookup would have.
+func TestRepositorySetMessageReadOnAMessageDeletedAtInsert(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	// The schema migration's foreign key; AutoMigrate does not create it.
+	if err := db.Exec(`ALTER TABLE mail_message_reads ADD CONSTRAINT mail_message_reads_message_fk
+		FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE`).Error; err != nil {
+		t.Fatalf("add foreign key: %v", err)
+	}
+	mailbox := createMailbox(t, repo, "hello@mail.example")
+	message := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
+		FromAddress: "alice@sender.test", To: []string{mailbox.Address}, Subject: "In", DedupeKey: "in",
+	}
+	if _, err := repo.CreateInboundMessage(ctx, message); err != nil {
+		t.Fatalf("CreateInboundMessage: %v", err)
+	}
+	// Another request deletes the message right before the read row is inserted.
+	deleted := false
+	if err := db.Callback().Create().Before("gorm:create").Register("test:delete_message_first", func(tx *gorm.DB) {
+		if tx.Statement.Table != "mail_message_reads" || deleted {
+			return
+		}
+		deleted = true
+		if err := db.Exec(`DELETE FROM mail_messages WHERE id = ?`, message.ID).Error; err != nil {
+			t.Errorf("concurrent delete: %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+
+	err := repo.SetMessageRead(ctx, mailbox.ID, message.ID, as(1).MembershipID, true, time.Now().UTC())
+	if !deleted {
+		t.Fatal("the read row was never inserted")
+	}
+	if !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("SetMessageRead on a message deleted at insert = %v; want ErrMailMessageNotFound", err)
+	}
+}
+
+// Read state belongs to a membership: the repository refuses a read without one.
+func TestRepositorySetMessageReadNeedsAMembership(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	mailbox := createMailbox(t, repo, "hello@mail.example")
+	message := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
+		FromAddress: "alice@sender.test", To: []string{mailbox.Address}, Subject: "In", DedupeKey: "in",
+	}
+	if _, err := repo.CreateInboundMessage(ctx, message); err != nil {
+		t.Fatalf("CreateInboundMessage: %v", err)
+	}
+	for _, read := range []bool{true, false} {
+		if err := repo.SetMessageRead(ctx, mailbox.ID, message.ID, 0, read, time.Now().UTC()); !errors.Is(err, domain.ErrInvalidInput) {
+			t.Fatalf("SetMessageRead(read=%v) without a membership = %v; want ErrInvalidInput", read, err)
+		}
+	}
+	var rows int64
+	db.Model(&MailMessageReadPO{}).Count(&rows)
+	if rows != 0 {
+		t.Fatalf("stored %d read rows without a membership", rows)
+	}
 }

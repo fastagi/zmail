@@ -14,6 +14,8 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(ErrMailboxAddressInvalid, http.StatusUnprocessableEntity, domain.CodeMailboxAddressInvalid)
 	mapper.Register(ErrMailboxAddressReserved, http.StatusUnprocessableEntity, domain.CodeMailboxAddressReserved)
 	mapper.Register(ErrMailboxLimitReached, http.StatusConflict, domain.CodeMailboxLimitReached)
+	mapper.Register(ErrMailboxAccessInvalid, http.StatusUnprocessableEntity, domain.CodeMailboxAccessInvalid)
+	mapper.Register(ErrMailboxAccessConflict, http.StatusConflict, domain.CodeMailboxAccessConflict)
 	mapper.Register(ErrMailMessageNotFound, http.StatusNotFound, domain.CodeMailMessageNotFound)
 	mapper.Register(ErrMailMessageInvalid, http.StatusUnprocessableEntity, domain.CodeMailMessageInvalid)
 	mapper.Register(ErrMailSendLimitReached, http.StatusTooManyRequests, domain.CodeMailSendLimitReached)

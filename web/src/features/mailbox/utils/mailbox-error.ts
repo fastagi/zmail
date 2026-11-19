@@ -2,6 +2,8 @@ import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 
 export type MailboxErrorKey =
+  | 'errors.accessConflict'
+  | 'errors.accessInvalid'
   | 'errors.addressInvalid'
   | 'errors.attachmentsInvalid'
   | 'errors.broadcastDisabled'
@@ -37,6 +39,7 @@ export type MailboxErrorKey =
   | 'errors.messageInvalid'
   | 'errors.messageNotFound'
   | 'errors.organizationNotFound'
+  | 'errors.createDenied'
   | 'errors.permissionDenied'
   | 'errors.sendLimitReached'
   | 'errors.senderNotConfigured'
@@ -65,6 +68,8 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_ADDRESS_INVALID]: 'errors.addressInvalid',
   [ApiErrorCode.MAILBOX_ADDRESS_RESERVED]: 'errors.addressReserved',
   [ApiErrorCode.MAILBOX_LIMIT_REACHED]: 'errors.limitReached',
+  [ApiErrorCode.MAILBOX_ACCESS_INVALID]: 'errors.accessInvalid',
+  [ApiErrorCode.MAILBOX_ACCESS_CONFLICT]: 'errors.accessConflict',
   [ApiErrorCode.MAILBOX_MESSAGE_INVALID]: 'errors.messageInvalid',
   [ApiErrorCode.MAILBOX_SEND_LIMIT_REACHED]: 'errors.sendLimitReached',
   [ApiErrorCode.MAILBOX_DELIVERY_FAILED]: 'errors.deliveryFailed',
@@ -102,6 +107,16 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
 export function resolveMailboxErrorKey(error: unknown): MailboxErrorKey {
   if (!(error instanceof ApiError)) return 'errors.generic';
   return errorKeys[error.errorCode] ?? 'errors.generic';
+}
+
+/** True when the mailbox's access changed since the console loaded it: a refresh shows it. */
+export function isAccessConflict(error: unknown): boolean {
+  return error instanceof ApiError && error.errorCode === ApiErrorCode.MAILBOX_ACCESS_CONFLICT;
+}
+
+/** True when the caller lacks the capability, such as access lost since the page loaded. */
+export function isPermissionDenied(error: unknown): boolean {
+  return error instanceof ApiError && error.errorCode === ApiErrorCode.PERMISSION_DENIED;
 }
 
 /** True when the API no longer finds the organization for this member: access was lost. */

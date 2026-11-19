@@ -857,6 +857,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mailboxes/{mailbox_id}/access-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a mailbox's access history, newest first
+         * @description Needs `see_history` on the mailbox.
+         */
+        get: operations["listMailboxAccessEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/handovers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hand a personal mailbox over to a successor
+         * @description Owners and admins only. The mailbox becomes shared, the successor becomes a `send` member, the former owner keeps no access or read records, and `sealed_before` is set to the time the owner left the organization when they are gone, otherwise to now. Messages and broadcasts created before it are sealed. Writes a `handed_over` access event.
+         */
+        post: operations["handOverMailbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the members of a shared mailbox
+         * @description Needs `manage_members` on the mailbox.
+         */
+        get: operations["listMailboxMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Add a member to a shared mailbox or change their permission
+         * @description Needs `manage_members` on the mailbox. Owners and admins may add themselves; the change is recorded in the access history.
+         */
+        put: operations["setMailboxMember"];
+        post?: never;
+        /**
+         * Remove a member from a shared mailbox
+         * @description Needs `manage_members` on the mailbox. An absent member is `404 MAILBOX.NOT_FOUND`.
+         */
+        delete: operations["removeMailboxMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mailboxes/{mailbox_id}/messages": {
         parameters: {
             query?: never;
@@ -887,7 +971,10 @@ export interface paths {
         };
         /** Get a message with its bodies */
         get: operations["getMailMessage"];
-        /** Mark a message read or unread */
+        /**
+         * Mark a message read or unread
+         * @description Changes only the caller's own read state and needs `view`. Outbound messages are always read. A sealed message is not found.
+         */
         put: operations["updateMailMessage"];
         post?: never;
         /** Delete a message */
@@ -910,6 +997,46 @@ export interface paths {
          */
         get: operations["downloadMailAttachment"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/sealed-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a mailbox's sealed history
+         * @description Owners and admins only. Sealed broadcasts still scheduled, sending, or paused are cancelled first; then sealed broadcasts with their recipients and sealed messages with their events and attachments are deleted. The seal boundary stays. Writes a `sealed_deleted` access event.
+         */
+        delete: operations["deleteMailboxSealedMessages"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/webhook-setting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Turn mail webhooks for a shared mailbox on or off
+         * @description Needs `manage_members` on the mailbox. A change writes a `webhooks_changed` access event; setting the current value writes nothing.
+         */
+        put: operations["setMailboxWebhookSetting"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2307,6 +2434,11 @@ export interface components {
             domain?: string;
             /** @description Lowercase letters and digits with inner dots, underscores, or hyphens. Role addresses such as `postmaster` are reserved. */
             local_part: string;
+            /** @description Required for a shared mailbox, 1 to 100 distinct users; must be absent for a personal one. */
+            members?: components["schemas"]["MailboxMemberRequest"][];
+            /** @description Required for a personal mailbox; must be absent for a shared one. */
+            owner_user_id?: components["schemas"]["PositiveID"];
+            type?: components["schemas"]["MailboxType"];
         };
         CursorPageMeta: {
             has_more: boolean;
@@ -2314,11 +2446,15 @@ export interface components {
             next_cursor: string | null;
             per_page: number;
         };
+        DeleteMailboxSealedMessagesRequest: {
+            /** @description The mailbox address, compared ignoring case. */
+            confirm_address: string;
+        };
         /**
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -2328,6 +2464,9 @@ export interface components {
         };
         FieldErrors: {
             [key: string]: string[];
+        };
+        HandOverMailboxRequest: {
+            successor_user_id: components["schemas"]["PositiveID"];
         };
         HealthCheckResult: {
             details?: {
@@ -2392,14 +2531,55 @@ export interface components {
             filename: string;
         };
         Mailbox: {
+            access: components["schemas"]["MailboxAccess"];
             address: string;
+            /** @description True while a personal mailbox's owner has left the organization and nobody has taken it over. */
+            awaiting_handover: boolean;
             /** Format: date-time */
             created_at: string;
             display_name: string;
             id: components["schemas"]["PositiveID"];
-            /** @description Number of unread inbound messages in the mailbox. */
+            /** @description The owner of a personal mailbox; null for a shared one or a personal one whose owner left. */
+            owner_user_id: components["schemas"]["PositiveID"] | null;
+            /** @description Messages and broadcasts created before this instant are sealed and invisible on every surface; set once at handover, null when nothing is sealed. */
+            sealed_before: string | null;
+            type: components["schemas"]["MailboxType"];
+            /** @description Number of inbound messages after the seal boundary that the caller has not read; 0 for a caller without `view`. */
             unread_count: number;
+            /** @description Whether mail webhooks are published for this mailbox; always false for a personal one. */
+            webhooks_enabled: boolean;
         };
+        /** @description What the caller may do with the mailbox. */
+        MailboxAccess: {
+            administer: boolean;
+            manage_members: boolean;
+            see_history: boolean;
+            send: boolean;
+            view: boolean;
+        };
+        MailboxAccessEvent: {
+            /** @description Null for a change Zmail made itself. */
+            actor_user_id: components["schemas"]["PositiveID"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Ids, permissions, timestamps, and counts only; never message content. A departure sets `reason` to `left_organization` on `owner_left` and `member_removed`. */
+            detail: {
+                [key: string]: unknown;
+            };
+            id: components["schemas"]["PositiveID"];
+            subject_user_id: components["schemas"]["PositiveID"] | null;
+            type: components["schemas"]["MailboxAccessEventType"];
+        };
+        MailboxAccessEventPageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailboxAccessEvent"][];
+            links: components["schemas"]["PaginationLinks"];
+            message: string;
+            meta: components["schemas"]["PaginationMeta"];
+        };
+        /** @enum {string} */
+        MailboxAccessEventType: "created" | "member_set" | "member_removed" | "owner_left" | "owner_returned" | "handed_over" | "sealed_deleted" | "webhooks_changed";
         MailboxDomain: {
             /** @description Whether broadcasts can be sent. Unsubscribe links need `MAILBOX_INBOUND_SECRET` and `MAILBOX_PUBLIC_URL`. */
             broadcasts_enabled: boolean;
@@ -2435,12 +2615,52 @@ export interface components {
             data: components["schemas"]["Mailbox"][];
             message: string;
         };
+        MailboxMember: {
+            /** Format: date-time */
+            created_at: string;
+            granted_by: components["schemas"]["PositiveID"];
+            permission: components["schemas"]["MailboxPermission"];
+            user_id: components["schemas"]["PositiveID"];
+        };
+        MailboxMemberListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailboxMember"][];
+            message: string;
+        };
+        MailboxMemberRequest: {
+            permission: components["schemas"]["MailboxPermission"];
+            user_id: components["schemas"]["PositiveID"];
+        };
+        MailboxMemberResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailboxMember"];
+            message: string;
+        };
+        /**
+         * @description Each level includes the previous one.
+         * @enum {string}
+         */
+        MailboxPermission: "view" | "send" | "manage";
         MailboxResponse: {
             /** @constant */
             code: 0;
             data: components["schemas"]["Mailbox"];
             message: string;
         };
+        MailboxSealedDeletion: {
+            deleted_broadcasts: number;
+            deleted_messages: number;
+        };
+        MailboxSealedDeletionResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailboxSealedDeletion"];
+            message: string;
+        };
+        /** @enum {string} */
+        MailboxType: "personal" | "shared";
         MailBroadcast: {
             counts: components["schemas"]["MailBroadcastCounts"];
             /** Format: date-time */
@@ -2812,6 +3032,7 @@ export interface components {
             mailbox_id: components["schemas"]["PositiveID"];
             /** @description RFC 5322 Message-ID without angle brackets; empty when unknown. */
             message_id: string;
+            /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
@@ -2847,6 +3068,7 @@ export interface components {
             id: components["schemas"]["PositiveID"];
             last_event: components["schemas"]["MailEventSummary"];
             mailbox_id: components["schemas"]["PositiveID"];
+            /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
@@ -3431,6 +3653,12 @@ export interface components {
             template?: components["schemas"]["MailTemplateSendInput"];
             text?: string;
             to: string[];
+        };
+        SetMailboxMemberRequest: {
+            permission: components["schemas"]["MailboxPermission"];
+        };
+        SetMailboxWebhookSettingRequest: {
+            enabled: boolean;
         };
         Setting: {
             key: string;
@@ -4071,6 +4299,8 @@ export interface components {
         MailAttachmentID: components["schemas"]["PositiveID"];
         /** @description Positive mailbox identifier. */
         MailboxID: components["schemas"]["PositiveID"];
+        /** @description Positive user identifier of the mailbox member. */
+        MailboxMemberUserID: components["schemas"]["PositiveID"];
         /** @description Positive mail broadcast identifier. */
         MailBroadcastID: components["schemas"]["PositiveID"];
         /** @description Positive mail contact identifier. */
@@ -5136,6 +5366,13 @@ export interface operations {
                     "application/json": components["schemas"]["MailBroadcastResponse"];
                 };
             };
+            /** @description Done, for a caller who may not view the sender mailbox (or for a sealed broadcast); no body, so nothing about the broadcast is revealed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -5175,6 +5412,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MailBroadcastResponse"];
                 };
+            };
+            /** @description Done, for a caller who may not view the sender mailbox (or for a sealed broadcast); no body, so nothing about the broadcast is revealed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
@@ -6457,7 +6701,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every mailbox of the organization, oldest first. */
+            /** @description The mailboxes the caller has any access to, oldest first. Owners and admins see every mailbox's metadata. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6511,7 +6755,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, the local part is invalid (`MAILBOX.ADDRESS_INVALID`) or reserved (`MAILBOX.ADDRESS_RESERVED`), or the named domain is still pending (`MAILBOX.DOMAIN_NOT_VERIFIED`). A domain the organization did not connect is `404 MAILBOX.DOMAIN_NOT_FOUND`. */
+            /** @description A field failed validation, the local part is invalid (`MAILBOX.ADDRESS_INVALID`) or reserved (`MAILBOX.ADDRESS_RESERVED`), the named domain is still pending (`MAILBOX.DOMAIN_NOT_VERIFIED`), or the type, owner, or members are invalid (`MAILBOX.ACCESS_INVALID`). A domain the organization did not connect is `404 MAILBOX.DOMAIN_NOT_FOUND`. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6558,6 +6802,232 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailboxAccessEvents: {
+        parameters: {
+            query?: {
+                /** @description One-based page number. */
+                page?: components["parameters"]["Page"];
+                /** @description Requested page size, capped by the API. */
+                per_page?: components["parameters"]["PerPage"];
+            };
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated access events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxAccessEventPageResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    handOverMailbox: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HandOverMailboxRequest"];
+            };
+        };
+        responses: {
+            /** @description The mailbox after the handover, as the caller sees it. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The mailbox is already shared (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation, or the successor is not a member of the organization (`MAILBOX.ACCESS_INVALID`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailboxMembers: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The members, ordered by user id. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxMemberListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The mailbox is personal and has no members (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    setMailboxMember: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive user identifier of the mailbox member. */
+                user_id: components["parameters"]["MailboxMemberUserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMailboxMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description The member after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxMemberResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The mailbox is personal and has no members (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation, or the user is not a member of the organization, the permission is unknown, or the mailbox already has 100 members (`MAILBOX.ACCESS_INVALID`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    removeMailboxMember: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive user identifier of the mailbox member. */
+                user_id: components["parameters"]["MailboxMemberUserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The member is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The mailbox is personal and has no members (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -6640,7 +7110,7 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description The `Idempotency-Key` was used with different content (`MAILBOX.IDEMPOTENCY_CONFLICT`), or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`). */
+            /** @description The `Idempotency-Key` was used with different content or matches a sealed message (`MAILBOX.IDEMPOTENCY_CONFLICT`, with no message data), or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6815,6 +7285,106 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailboxSealedMessages: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteMailboxSealedMessagesRequest"];
+            };
+        };
+        responses: {
+            /** @description How many messages and broadcasts were deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxSealedDeletionResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The mailbox has no seal boundary (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation, or `confirm_address` is not the mailbox address (`MAILBOX.ACCESS_INVALID`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    setMailboxWebhookSetting: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMailboxWebhookSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description The mailbox after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The mailbox is personal (`MAILBOX.ACCESS_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -8405,7 +8975,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The `Idempotency-Key` was used with different content (`MAILBOX.IDEMPOTENCY_CONFLICT`), or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`). */
+            /** @description The `Idempotency-Key` was used with different content or matches a sealed message (`MAILBOX.IDEMPOTENCY_CONFLICT`, with no message data), or its first attempt has not finished (`MAILBOX.SEND_IN_PROGRESS`). */
             409: {
                 headers: {
                     [name: string]: unknown;

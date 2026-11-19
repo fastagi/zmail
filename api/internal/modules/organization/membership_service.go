@@ -83,6 +83,7 @@ func (s *service) RemoveMember(ctx context.Context, userID, organizationID, memb
 			"role":            removed.Role,
 		},
 	})
+	s.publish(ctx, domain.NewOrganizationMemberRemovedEvent(organizationID, removed.UserID, removed.ID, s.now()))
 	return nil
 }
 

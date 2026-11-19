@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[4]
 HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 COMMENT_WITH_HAN = re.compile(r"(?://|#|/\*|\*)[^\n]*[\u3400-\u4dbf\u4e00-\u9fff]")
 SOURCE_SUFFIXES = {".css", ".go", ".js", ".mjs", ".py", ".sh", ".ts", ".tsx", ".yaml", ".yml"}
-IGNORED_PARTS = {".git", ".next", "coverage", "dist", "node_modules"}
+IGNORED_PARTS = {".git", ".next", ".superpowers", "coverage", "dist", "node_modules"}
 
 
 PLUGIN_FILES = re.compile(r"^registry/plugins/[^/]+/files/")
@@ -31,6 +31,12 @@ def is_localization_source(path: Path) -> bool:
         or relative == "web/src/i18n/locales.ts"
         or (relative.startswith("web/src/i18n/modules/") and relative.endswith("/zh-Hans.ts"))
     )
+
+
+def is_chinese_document(path: Path) -> bool:
+    """Product documents written for Chinese readers opt out with a .zh-CN.md name."""
+    relative = installed_path(path)
+    return path.name.endswith(".zh-CN.md") and relative.startswith(("docs/", "research/"))
 
 
 def is_test_source(path: Path) -> bool:
@@ -73,6 +79,8 @@ def main() -> int:
         content = path.read_text(encoding="utf-8")
         relative = path.relative_to(ROOT).as_posix()
 
+        if is_chinese_document(path):
+            continue
         if path.suffix == ".md" or path.name == ".editorconfig":
             matcher = HAN
         elif is_localization_source(path):
@@ -91,7 +99,7 @@ def main() -> int:
             print(f"English source check failed: {failure}", file=sys.stderr)
         return 1
 
-    print("English source check passed (locales and Unicode test values preserved).")
+    print("English source check passed (locales, Unicode test values, and .zh-CN.md documents preserved).")
     return 0
 
 
