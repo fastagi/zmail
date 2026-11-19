@@ -81,10 +81,11 @@ func (z *fakeZones) ListRecords(_ context.Context, _, name string) ([]mailtransp
 	return z.records[strings.ToLower(name)], nil
 }
 
-func (z *fakeZones) CreateRecord(_ context.Context, _ string, record mailtransport.DNSRecord) error {
+func (z *fakeZones) CreateRecord(_ context.Context, _ string, record mailtransport.DNSRecord) (mailtransport.DNSRecord, error) {
+	record.ID = fmt.Sprintf("rec-%d", len(z.created)+1)
 	z.created = append(z.created, record)
 	z.add(record)
-	return nil
+	return record, nil
 }
 
 func (z *fakeZones) CreateRoutingRule(_ context.Context, _, address, worker string) (string, error) {
@@ -104,6 +105,34 @@ func (z *fakeZones) DeleteRoutingRule(_ context.Context, _, ruleID string) error
 	delete(z.rules, ruleID)
 	return nil
 }
+
+// Zone management is not exercised by the mail domain service yet; these keep fakeZones a
+// complete DomainProvider.
+func (z *fakeZones) CreateZone(context.Context, string) (mailtransport.ZoneDetails, error) {
+	return mailtransport.ZoneDetails{}, mailtransport.ErrNotConfigured
+}
+
+func (z *fakeZones) GetZone(context.Context, string) (mailtransport.ZoneDetails, error) {
+	return mailtransport.ZoneDetails{}, mailtransport.ErrNotConfigured
+}
+
+func (z *fakeZones) RequestActivationCheck(context.Context, string) error { return nil }
+
+func (z *fakeZones) DeleteZone(context.Context, string) error { return nil }
+
+func (z *fakeZones) ScanRecords(context.Context, string) error { return nil }
+
+func (z *fakeZones) ListZoneRecords(context.Context, string) ([]mailtransport.DNSRecord, error) {
+	var all []mailtransport.DNSRecord
+	for _, records := range z.records {
+		all = append(all, records...)
+	}
+	return all, nil
+}
+
+func (z *fakeZones) UpdateRecord(context.Context, string, mailtransport.DNSRecord) error { return nil }
+
+func (z *fakeZones) DeleteRecord(context.Context, string, string) error { return nil }
 
 type fakeDomains struct {
 	domains map[uint]*domain.MailDomain

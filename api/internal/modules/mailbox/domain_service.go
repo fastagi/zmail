@@ -235,7 +235,7 @@ func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*do
 				// without content stands for sending that is not enabled yet.
 				continue
 			}
-			if err := s.domainProvider.CreateRecord(ctx, mailDomain.ZoneID, mailtransport.DNSRecord{
+			if _, err := s.domainProvider.CreateRecord(ctx, mailDomain.ZoneID, mailtransport.DNSRecord{
 				Type: record.Type, Name: record.Name, Content: record.Content, Priority: record.Priority,
 			}); err != nil {
 				failures = append(failures, err)

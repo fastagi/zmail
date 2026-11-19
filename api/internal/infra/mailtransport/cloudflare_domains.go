@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,8 +19,28 @@ import (
 // ErrZoneNotFound reports that no zone the credentials can manage contains the domain.
 var ErrZoneNotFound = errors.New("no manageable zone contains the domain")
 
+// ErrZoneExists reports that the provider already holds a zone for the name, in this account or
+// another one.
+var ErrZoneExists = errors.New("the zone already exists at the provider")
+
+// ErrActivationCheckLimited reports that the provider refused an activation check because one
+// ran too recently.
+var ErrActivationCheckLimited = errors.New("the zone activation check is rate limited")
+
 // maxDomainResponseBytes bounds one management response; a zone's record listing is the largest.
 const maxDomainResponseBytes = 1024 * 1024
+
+// Cloudflare error codes the client turns into sentinel errors.
+const (
+	cloudflareCodeZoneExists             = 1061
+	cloudflareCodeActivationCheckLimited = 1224
+)
+
+// recordsPerPage and maxRecordPages bound a full zone listing to 10,000 records.
+const (
+	recordsPerPage = 100
+	maxRecordPages = 100
+)
 
 // Zone is a DNS zone the provider manages.
 type Zone struct {
@@ -27,17 +48,32 @@ type Zone struct {
 	Name string
 }
 
-// DNSRecord is one DNS record. Name is a fully qualified name without a trailing dot.
+// ZoneDetails is a zone with its activation state. Status is the provider's own value, such as
+// pending, active, or moved. NameServers are the ones the provider assigned; OriginalNameServers
+// are the ones the domain used before it was added.
+type ZoneDetails struct {
+	ID                  string
+	Name                string
+	Status              string
+	NameServers         []string
+	OriginalNameServers []string
+}
+
+// DNSRecord is one DNS record. Name is a fully qualified name without a trailing dot. ID is the
+// provider's record ID, empty for a record not written yet. TTL 1 means automatic.
 type DNSRecord struct {
+	ID       string
 	Type     string
 	Name     string
 	Content  string
 	Priority int
+	TTL      int
+	Proxied  bool
 }
 
-// DomainProvider sets up and inspects the email settings of domains in the provider account. It
-// holds no business rules: callers decide what to create and what counts as complete. It only
-// ever adds records and rules; it never edits or deletes records it did not create.
+// DomainProvider manages zones in the provider account, their DNS records, and the email
+// settings of their domains. It holds no business rules: callers decide what to create, change,
+// or remove, and what counts as complete.
 type DomainProvider interface {
 	// FindZone returns the zone that contains name: the zone itself or the closest parent.
 	FindZone(ctx context.Context, name string) (Zone, error)
@@ -49,10 +85,27 @@ type DomainProvider interface {
 	SendingRecords(ctx context.Context, zoneID, tag string) ([]DNSRecord, error)
 	// ListRecords lists the records of every type at exactly name.
 	ListRecords(ctx context.Context, zoneID, name string) ([]DNSRecord, error)
-	CreateRecord(ctx context.Context, zoneID string, record DNSRecord) error
+	// CreateRecord writes one record and returns it with its provider ID.
+	CreateRecord(ctx context.Context, zoneID string, record DNSRecord) (DNSRecord, error)
 	// CreateRoutingRule routes mail for one address to the named Email Worker.
 	CreateRoutingRule(ctx context.Context, zoneID, address, worker string) (string, error)
 	DeleteRoutingRule(ctx context.Context, zoneID, ruleID string) error
+
+	// CreateZone adds name to the account as a full zone. It reports ErrZoneExists when the
+	// provider already holds the name.
+	CreateZone(ctx context.Context, name string) (ZoneDetails, error)
+	GetZone(ctx context.Context, zoneID string) (ZoneDetails, error)
+	// RequestActivationCheck asks the provider to look for the assigned name servers now. It
+	// reports ErrActivationCheckLimited when a check ran too recently.
+	RequestActivationCheck(ctx context.Context, zoneID string) error
+	DeleteZone(ctx context.Context, zoneID string) error
+	// ScanRecords asks the provider to import the records the domain already publishes.
+	ScanRecords(ctx context.Context, zoneID string) error
+	// ListZoneRecords lists every record in the zone.
+	ListZoneRecords(ctx context.Context, zoneID string) ([]DNSRecord, error)
+	// UpdateRecord rewrites the record with record.ID.
+	UpdateRecord(ctx context.Context, zoneID string, record DNSRecord) error
+	DeleteRecord(ctx context.Context, zoneID, recordID string) error
 }
 
 // NewDomainProvider returns the Cloudflare domain client when Cloudflare is the configured
@@ -124,18 +177,30 @@ type cloudflareEnvelope struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 	} `json:"errors"`
-	Result json.RawMessage `json:"result"`
+	Result     json.RawMessage      `json:"result"`
+	ResultInfo cloudflareResultInfo `json:"result_info"`
+}
+
+type cloudflareResultInfo struct {
+	TotalPages int `json:"total_pages"`
 }
 
 func (c *CloudflareDomains) call(ctx context.Context, operation, method, path string, query url.Values, body, out any) error {
+	_, err := c.callPaged(ctx, operation, method, path, query, body, out)
+	return err
+}
+
+// callPaged is call that also returns the pagination details of a list response.
+func (c *CloudflareDomains) callPaged(ctx context.Context, operation, method, path string, query url.Values, body, out any) (cloudflareResultInfo, error) {
+	var none cloudflareResultInfo
 	if c == nil || c.token == "" {
-		return ErrNotConfigured
+		return none, ErrNotConfigured
 	}
 	var payload io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encode %s request: %w", operation, err)
+			return none, fmt.Errorf("encode %s request: %w", operation, err)
 		}
 		payload = bytes.NewReader(encoded)
 	}
@@ -147,7 +212,7 @@ func (c *CloudflareDomains) call(ctx context.Context, operation, method, path st
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestContext, method, target, payload)
 	if err != nil {
-		return fmt.Errorf("build %s request: %w", operation, err)
+		return none, fmt.Errorf("build %s request: %w", operation, err)
 	}
 	request.Header.Set("Authorization", "Bearer "+c.token)
 	if body != nil {
@@ -155,12 +220,12 @@ func (c *CloudflareDomains) call(ctx context.Context, operation, method, path st
 	}
 	response, err := c.client.Do(request)
 	if err != nil {
-		return &DomainError{Operation: operation, Message: "the provider could not be reached"}
+		return none, &DomainError{Operation: operation, Message: "the provider could not be reached"}
 	}
 	defer response.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxDomainResponseBytes+1))
 	if err != nil || len(raw) > maxDomainResponseBytes {
-		return &DomainError{Operation: operation, Status: response.StatusCode, Message: "the provider response could not be read"}
+		return none, &DomainError{Operation: operation, Status: response.StatusCode, Message: "the provider response could not be read"}
 	}
 	var envelope cloudflareEnvelope
 	decodeErr := json.Unmarshal(raw, &envelope)
@@ -170,14 +235,14 @@ func (c *CloudflareDomains) call(ctx context.Context, operation, method, path st
 			failure.Code = envelope.Errors[0].Code
 			failure.Message = truncate(envelope.Errors[0].Message, 300)
 		}
-		return failure
+		return none, failure
 	}
 	if out != nil && len(envelope.Result) > 0 && string(envelope.Result) != "null" {
 		if err := json.Unmarshal(envelope.Result, out); err != nil {
-			return &DomainError{Operation: operation, Status: response.StatusCode, Message: "the provider response was not understood"}
+			return none, &DomainError{Operation: operation, Status: response.StatusCode, Message: "the provider response was not understood"}
 		}
 	}
-	return nil
+	return envelope.ResultInfo, nil
 }
 
 func truncate(value string, limit int) string {
@@ -252,19 +317,37 @@ func (c *CloudflareDomains) EnsureSending(ctx context.Context, zoneID, name stri
 }
 
 type cloudflareRecord struct {
+	ID       string `json:"id,omitempty"`
 	Type     string `json:"type"`
 	Name     string `json:"name"`
 	Content  string `json:"content"`
 	Priority *int   `json:"priority,omitempty"`
 	TTL      int    `json:"ttl,omitempty"`
+	Proxied  *bool  `json:"proxied,omitempty"`
 }
 
 func (r cloudflareRecord) toRecord(zoneName string) DNSRecord {
-	record := DNSRecord{Type: strings.ToUpper(r.Type), Name: qualify(r.Name, zoneName), Content: r.Content}
+	record := DNSRecord{ID: r.ID, Type: strings.ToUpper(r.Type), Name: qualify(r.Name, zoneName), Content: r.Content, TTL: r.TTL}
 	if r.Priority != nil {
 		record.Priority = *r.Priority
 	}
+	if r.Proxied != nil {
+		record.Proxied = *r.Proxied
+	}
 	return record
+}
+
+// recordBody is the write body for record; MX records carry their priority.
+func recordBody(record DNSRecord) cloudflareRecord {
+	body := cloudflareRecord{Type: record.Type, Name: record.Name, Content: record.Content, TTL: record.TTL}
+	if body.TTL <= 0 {
+		body.TTL = 1
+	}
+	if strings.EqualFold(record.Type, "MX") {
+		priority := record.Priority
+		body.Priority = &priority
+	}
+	return body
 }
 
 // qualify turns a relative record name, or "@", into a fully qualified name of the zone.
@@ -311,7 +394,7 @@ func (c *CloudflareDomains) SendingRecords(ctx context.Context, zoneID, tag stri
 func (c *CloudflareDomains) ListRecords(ctx context.Context, zoneID, name string) ([]DNSRecord, error) {
 	var rows []cloudflareRecord
 	query := url.Values{"name": {name}, "per_page": {"100"}}
-	if err := c.call(ctx, "list records", http.MethodGet, "/zones/"+url.PathEscape(zoneID)+"/dns_records", query, nil, &rows); err != nil {
+	if err := c.call(ctx, "list records", http.MethodGet, recordsPath(zoneID), query, nil, &rows); err != nil {
 		return nil, err
 	}
 	records := make([]DNSRecord, 0, len(rows))
@@ -321,13 +404,134 @@ func (c *CloudflareDomains) ListRecords(ctx context.Context, zoneID, name string
 	return records, nil
 }
 
-func (c *CloudflareDomains) CreateRecord(ctx context.Context, zoneID string, record DNSRecord) error {
-	body := cloudflareRecord{Type: record.Type, Name: record.Name, Content: record.Content, TTL: 1}
-	if record.Type == "MX" {
-		priority := record.Priority
-		body.Priority = &priority
+func (c *CloudflareDomains) CreateRecord(ctx context.Context, zoneID string, record DNSRecord) (DNSRecord, error) {
+	body := recordBody(record)
+	var created cloudflareRecord
+	if err := c.call(ctx, "create record", http.MethodPost, recordsPath(zoneID), nil, body, &created); err != nil {
+		return DNSRecord{}, err
 	}
-	return c.call(ctx, "create record", http.MethodPost, "/zones/"+url.PathEscape(zoneID)+"/dns_records", nil, body, nil)
+	if created.ID == "" {
+		return DNSRecord{}, &DomainError{Operation: "create record", Message: "the provider returned no record"}
+	}
+	// The written values are authoritative; the provider adds the ID and its own settings.
+	record.ID = created.ID
+	record.TTL = body.TTL
+	if created.TTL > 0 {
+		record.TTL = created.TTL
+	}
+	if created.Proxied != nil {
+		record.Proxied = *created.Proxied
+	}
+	return record, nil
+}
+
+func recordsPath(zoneID string) string {
+	return "/zones/" + url.PathEscape(zoneID) + "/dns_records"
+}
+
+func (c *CloudflareDomains) ListZoneRecords(ctx context.Context, zoneID string) ([]DNSRecord, error) {
+	var records []DNSRecord
+	for page := 1; ; page++ {
+		if page > maxRecordPages {
+			return nil, &DomainError{Operation: "list zone records", Message: "the zone has too many records"}
+		}
+		var rows []cloudflareRecord
+		query := url.Values{"per_page": {strconv.Itoa(recordsPerPage)}, "page": {strconv.Itoa(page)}}
+		info, err := c.callPaged(ctx, "list zone records", http.MethodGet, recordsPath(zoneID), query, nil, &rows)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			records = append(records, row.toRecord(""))
+		}
+		if page >= info.TotalPages || len(rows) == 0 {
+			return records, nil
+		}
+	}
+}
+
+func (c *CloudflareDomains) UpdateRecord(ctx context.Context, zoneID string, record DNSRecord) error {
+	if record.ID == "" {
+		return &DomainError{Operation: "update record", Message: "the record has no provider ID"}
+	}
+	body := recordBody(record)
+	proxied := record.Proxied
+	body.Proxied = &proxied
+	return c.call(ctx, "update record", http.MethodPatch, recordsPath(zoneID)+"/"+url.PathEscape(record.ID), nil, body, nil)
+}
+
+func (c *CloudflareDomains) DeleteRecord(ctx context.Context, zoneID, recordID string) error {
+	return c.call(ctx, "delete record", http.MethodDelete, recordsPath(zoneID)+"/"+url.PathEscape(recordID), nil, nil, nil)
+}
+
+func (c *CloudflareDomains) ScanRecords(ctx context.Context, zoneID string) error {
+	return c.call(ctx, "scan records", http.MethodPost, recordsPath(zoneID)+"/scan", nil, nil, nil)
+}
+
+type cloudflareZone struct {
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Status              string   `json:"status"`
+	NameServers         []string `json:"name_servers"`
+	OriginalNameServers []string `json:"original_name_servers"`
+}
+
+func (z cloudflareZone) toDetails() ZoneDetails {
+	return ZoneDetails{
+		ID:                  z.ID,
+		Name:                strings.ToLower(z.Name),
+		Status:              z.Status,
+		NameServers:         z.NameServers,
+		OriginalNameServers: z.OriginalNameServers,
+	}
+}
+
+type cloudflareZoneAccount struct {
+	ID string `json:"id"`
+}
+
+type cloudflareCreateZone struct {
+	Name    string                `json:"name"`
+	Account cloudflareZoneAccount `json:"account"`
+	Type    string                `json:"type"`
+}
+
+func (c *CloudflareDomains) CreateZone(ctx context.Context, name string) (ZoneDetails, error) {
+	body := cloudflareCreateZone{Name: name, Account: cloudflareZoneAccount{ID: c.accountID}, Type: "full"}
+	var zone cloudflareZone
+	if err := c.call(ctx, "create zone", http.MethodPost, "/zones", nil, body, &zone); err != nil {
+		var failure *DomainError
+		if errors.As(err, &failure) && failure.Code == cloudflareCodeZoneExists {
+			return ZoneDetails{}, fmt.Errorf("%w: %w", ErrZoneExists, err)
+		}
+		return ZoneDetails{}, err
+	}
+	if zone.ID == "" {
+		return ZoneDetails{}, &DomainError{Operation: "create zone", Message: "the provider returned no zone"}
+	}
+	return zone.toDetails(), nil
+}
+
+func (c *CloudflareDomains) GetZone(ctx context.Context, zoneID string) (ZoneDetails, error) {
+	var zone cloudflareZone
+	if err := c.call(ctx, "get zone", http.MethodGet, "/zones/"+url.PathEscape(zoneID), nil, nil, &zone); err != nil {
+		return ZoneDetails{}, err
+	}
+	return zone.toDetails(), nil
+}
+
+func (c *CloudflareDomains) RequestActivationCheck(ctx context.Context, zoneID string) error {
+	err := c.call(ctx, "activation check", http.MethodPut, "/zones/"+url.PathEscape(zoneID)+"/activation_check", nil, nil, nil)
+	var failure *DomainError
+	if errors.As(err, &failure) &&
+		(failure.Status == http.StatusTooManyRequests || failure.Code == cloudflareCodeActivationCheckLimited) {
+		return fmt.Errorf("%w: %w", ErrActivationCheckLimited, err)
+	}
+	return err
+}
+
+func (c *CloudflareDomains) DeleteZone(ctx context.Context, zoneID string) error {
+	return c.call(ctx, "delete zone", http.MethodDelete, "/zones/"+url.PathEscape(zoneID), nil, nil, nil)
 }
 
 type cloudflareMatcher struct {
@@ -389,12 +593,36 @@ func (unconfiguredDomains) SendingRecords(context.Context, string, string) ([]DN
 func (unconfiguredDomains) ListRecords(context.Context, string, string) ([]DNSRecord, error) {
 	return nil, ErrNotConfigured
 }
-func (unconfiguredDomains) CreateRecord(context.Context, string, DNSRecord) error {
-	return ErrNotConfigured
+func (unconfiguredDomains) CreateRecord(context.Context, string, DNSRecord) (DNSRecord, error) {
+	return DNSRecord{}, ErrNotConfigured
 }
 func (unconfiguredDomains) CreateRoutingRule(context.Context, string, string, string) (string, error) {
 	return "", ErrNotConfigured
 }
 func (unconfiguredDomains) DeleteRoutingRule(context.Context, string, string) error {
+	return ErrNotConfigured
+}
+func (unconfiguredDomains) CreateZone(context.Context, string) (ZoneDetails, error) {
+	return ZoneDetails{}, ErrNotConfigured
+}
+func (unconfiguredDomains) GetZone(context.Context, string) (ZoneDetails, error) {
+	return ZoneDetails{}, ErrNotConfigured
+}
+func (unconfiguredDomains) RequestActivationCheck(context.Context, string) error {
+	return ErrNotConfigured
+}
+func (unconfiguredDomains) DeleteZone(context.Context, string) error {
+	return ErrNotConfigured
+}
+func (unconfiguredDomains) ScanRecords(context.Context, string) error {
+	return ErrNotConfigured
+}
+func (unconfiguredDomains) ListZoneRecords(context.Context, string) ([]DNSRecord, error) {
+	return nil, ErrNotConfigured
+}
+func (unconfiguredDomains) UpdateRecord(context.Context, string, DNSRecord) error {
+	return ErrNotConfigured
+}
+func (unconfiguredDomains) DeleteRecord(context.Context, string, string) error {
 	return ErrNotConfigured
 }
