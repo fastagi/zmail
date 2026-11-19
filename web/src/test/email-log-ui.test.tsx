@@ -877,11 +877,13 @@ describe('emails console', () => {
     await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
+    // Deleting moves the message to the trash at once, with an undo instead of a confirmation.
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    expect(state.removeMessage.mutateAsync).not.toHaveBeenCalled();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(state.removeMessage.mutateAsync).toHaveBeenCalledWith(31));
-    expect(toast.success).toHaveBeenCalledWith('Message deleted');
+    expect(toast.success).toHaveBeenCalledWith(
+      'Moved to the trash',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) })
+    );
     await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
   });
 

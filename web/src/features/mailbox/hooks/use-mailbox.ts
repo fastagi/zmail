@@ -13,7 +13,6 @@ import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import type {
   CreateMailboxInput,
   MailDomain,
-  MailDirection,
   MailFolderInput,
   MailLabelInput,
   MailLogFilters,
@@ -28,6 +27,19 @@ export const MAIL_PAGE_SIZE = 20;
 /** How often a domain whose setup runs is read again. */
 const setupRefreshMs = 3_000;
 export const MAIL_STATS_DAYS = 7;
+/** How often an open mailbox looks for new mail while its tab is visible. */
+export const MAIL_REFRESH_MS = 15_000;
+
+/**
+ * Polling for the open mailbox: every 15 seconds while the tab is visible, and again when the
+ * window regains focus (the global client turns focus refetches off). A refetch keeps the data on
+ * screen, so it neither resets the selection nor moves the scroll position or the focus.
+ */
+const liveRefresh = {
+  refetchInterval: MAIL_REFRESH_MS,
+  refetchIntervalInBackground: false,
+  refetchOnWindowFocus: true,
+} as const;
 
 /** Every key names the organization, so one organization's data is never shown for another. */
 export const mailboxKeys = {
@@ -42,8 +54,6 @@ export const mailboxKeys = {
     [...mailboxKeys.organization(organizationId), mailboxId] as const,
   messages: (organizationId: number, mailboxId: number) =>
     [...mailboxKeys.mailbox(organizationId, mailboxId), 'messages'] as const,
-  page: (organizationId: number, mailboxId: number, direction: MailDirection, page: number) =>
-    [...mailboxKeys.messages(organizationId, mailboxId), direction, page] as const,
   filteredPage: (
     organizationId: number,
     mailboxId: number,
@@ -197,12 +207,14 @@ export function useRemoveMailDomain(organizationId: number) {
   });
 }
 
-export function useMailboxes(organizationId: number) {
+/** `live` keeps the list (and its unread counts) fresh while a mailbox is open. */
+export function useMailboxes(organizationId: number, { live = false }: { live?: boolean } = {}) {
   return useQuery({
     queryKey: mailboxKeys.list(organizationId),
     queryFn: () => mailboxService.list(organizationId),
     enabled: validId(organizationId),
     staleTime: 15_000,
+    ...(live ? liveRefresh : {}),
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
@@ -230,27 +242,6 @@ export function useDeleteMailbox(organizationId: number) {
         queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
         invalidateLog(queryClient, organizationId),
       ]),
-  });
-}
-
-export function useMailMessages(
-  organizationId: number,
-  mailboxId: number,
-  direction: MailDirection,
-  page: number
-) {
-  return useQuery({
-    queryKey: mailboxKeys.page(organizationId, mailboxId, direction, page),
-    queryFn: () =>
-      mailboxService.messages(organizationId, mailboxId, {
-        direction,
-        page,
-        perPage: MAIL_PAGE_SIZE,
-      }),
-    enabled: validId(organizationId),
-    placeholderData: keepPreviousData,
-    staleTime: 15_000,
-    meta: LOCAL_ERROR_HANDLING_META,
   });
 }
 
@@ -399,6 +390,7 @@ export function useMailMessageList(
     enabled: validId(organizationId) && validId(mailboxId),
     placeholderData: keepPreviousData,
     staleTime: 15_000,
+    ...liveRefresh,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
@@ -410,6 +402,7 @@ export function useMailThread(organizationId: number, mailboxId: number, threadI
     queryFn: () => mailboxService.getThread(organizationId, mailboxId, threadId ?? 0),
     enabled: validId(organizationId) && validId(mailboxId) && threadId !== null,
     staleTime: 15_000,
+    ...liveRefresh,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
@@ -421,6 +414,7 @@ export function useMailMessageCounts(organizationId: number, mailboxId: number, 
     queryFn: () => mailboxService.getMessageCounts(organizationId, mailboxId),
     enabled: enabled && validId(organizationId) && validId(mailboxId),
     staleTime: 15_000,
+    ...liveRefresh,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }

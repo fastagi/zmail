@@ -24,16 +24,47 @@ const state = vi.hoisted(() => {
     mailboxes: query(),
     inbox: query(),
     sent: query(),
+    archive: query(),
+    trash: query(),
+    starred: query(),
+    labelled: query(),
+    folder: query(),
+    search: query(),
     detail: query(),
-    listCalls: [] as { mailboxId: number; direction: string; page: number }[],
+    thread: query(),
+    counts: query(),
+    folders: query(),
+    labels: query(),
+    listCalls: [] as { mailboxId: number; direction: string | undefined; page: number }[],
+    filterCalls: [] as { mailboxId: number; filters: Record<string, unknown>; page: number }[],
     detailCalls: [] as (number | null)[],
+    threadCalls: [] as (number | null)[],
     createMailbox: mutation(),
     deleteMailbox: mutation(),
     send: mutation(),
     update: mutation(),
+    updateMany: mutation(),
+    purge: mutation(),
     removeMessage: mutation(),
+    createFolder: mutation(),
+    renameFolder: mutation(),
+    deleteFolder: mutation(),
+    createLabel: mutation(),
+    updateLabel: mutation(),
+    deleteLabel: mutation(),
   };
 });
+
+/** The fixture a listing hook answers with, chosen by its filters as the API would. */
+function listFor(filters: Record<string, unknown>) {
+  if (filters.q) return state.search;
+  if (filters.placement === 'trash') return state.trash;
+  if (filters.placement === 'archive') return state.archive;
+  if (filters.placement === 'folder') return state.folder;
+  if (filters.starred) return state.starred;
+  if (filters.labelId) return state.labelled;
+  return filters.direction === 'outbound' ? state.sent : state.inbox;
+}
 
 /** A router whose `replace` changes the URL the page reads, as the real one does. */
 const navigation = vi.hoisted(() => {
@@ -93,19 +124,43 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
   return {
     useMailboxDomains: (organizationId: number) => scoped(organizationId, state.domains),
     useMailboxes: (organizationId: number) => scoped(organizationId, state.mailboxes),
-    useMailMessages: (
+    useMailMessageList: (
       organizationId: number,
       mailboxId: number,
-      direction: string,
+      filters: Record<string, unknown>,
       page: number
     ) => {
-      state.listCalls.push({ mailboxId, direction, page });
-      return scoped(organizationId, direction === 'inbound' ? state.inbox : state.sent);
+      state.listCalls.push({ mailboxId, direction: filters.direction as string | undefined, page });
+      state.filterCalls.push({ mailboxId, filters, page });
+      return scoped(organizationId, listFor(filters));
     },
     useMailMessage: (organizationId: number, _mailboxId: number, messageId: number | null) => {
       state.detailCalls.push(messageId);
       return scoped(organizationId, state.detail);
     },
+    // Without a thread fixture, a thread is the one message of the detail fixture.
+    useMailThread: (organizationId: number, _mailboxId: number, threadId: number | null) => {
+      state.threadCalls.push(threadId);
+      if (threadId !== null) state.detailCalls.push(threadId);
+      if (state.thread.data !== undefined || state.thread.error) {
+        return scoped(organizationId, state.thread);
+      }
+      return scoped(organizationId, {
+        ...state.detail,
+        data: state.detail.data === undefined ? undefined : [state.detail.data],
+      });
+    },
+    useMailMessageCounts: (organizationId: number) => scoped(organizationId, state.counts),
+    useMailFolders: (organizationId: number) => scoped(organizationId, state.folders),
+    useMailLabels: (organizationId: number) => scoped(organizationId, state.labels),
+    useUpdateMailMessages: (organizationId: number) => scoped(organizationId, state.updateMany),
+    usePurgeMailTrash: (organizationId: number) => scoped(organizationId, state.purge),
+    useCreateMailFolder: (organizationId: number) => scoped(organizationId, state.createFolder),
+    useRenameMailFolder: (organizationId: number) => scoped(organizationId, state.renameFolder),
+    useDeleteMailFolder: (organizationId: number) => scoped(organizationId, state.deleteFolder),
+    useCreateMailLabel: (organizationId: number) => scoped(organizationId, state.createLabel),
+    useUpdateMailLabel: (organizationId: number) => scoped(organizationId, state.updateLabel),
+    useDeleteMailLabel: (organizationId: number) => scoped(organizationId, state.deleteLabel),
     useCreateMailbox: (organizationId: number) => scoped(organizationId, state.createMailbox),
     useDeleteMailbox: (organizationId: number) => scoped(organizationId, state.deleteMailbox),
     useSendMailMessage: (organizationId: number) => scoped(organizationId, state.send),
@@ -121,6 +176,7 @@ describe('mailbox workspace', () => {
     templateState.data = [];
     navigation.replace.mockClear();
     window.sessionStorage.clear();
+    window.localStorage.clear();
     window.history.replaceState(null, '', '/console/mailboxes');
     state.organizations.data = organizations(organization(1, 'Acme', 'owner'));
     state.organizationIds = [];
@@ -142,26 +198,64 @@ describe('mailbox workspace', () => {
       }),
     ]);
     state.detail.data = message();
+    state.thread.data = undefined;
+    for (const list of [
+      state.archive,
+      state.trash,
+      state.starred,
+      state.labelled,
+      state.folder,
+      state.search,
+    ]) {
+      list.data = page([]);
+    }
+    state.counts.data = {
+      placements: { default_inbound_unread: 1, archive_unread: 0 },
+      folders: [],
+      starred: 0,
+    };
+    state.folders.data = [];
+    state.labels.data = [];
     for (const query of [
       state.organizations,
       state.domains,
       state.mailboxes,
       state.inbox,
       state.sent,
+      state.archive,
+      state.trash,
+      state.starred,
+      state.labelled,
+      state.folder,
+      state.search,
       state.detail,
+      state.thread,
+      state.counts,
+      state.folders,
+      state.labels,
     ]) {
       query.isPending = false;
       query.error = null;
       query.refetch.mockReset();
     }
     state.listCalls = [];
+    state.filterCalls = [];
     state.detailCalls = [];
+    state.threadCalls = [];
     for (const mutation of [
       state.createMailbox,
       state.deleteMailbox,
       state.send,
       state.update,
+      state.updateMany,
+      state.purge,
       state.removeMessage,
+      state.createFolder,
+      state.renameFolder,
+      state.deleteFolder,
+      state.createLabel,
+      state.updateLabel,
+      state.deleteLabel,
     ]) {
       mutation.isPending = false;
       mutation.mutate.mockReset();
@@ -169,24 +263,30 @@ describe('mailbox workspace', () => {
     }
   });
 
-  it('lists mailboxes with the limit and shows the inbox of the first one', () => {
+  it('shows the inbox of the first mailbox and lists the mailboxes in the switcher', () => {
     renderWorkspace();
 
-    expect(screen.getByRole('button', { name: /^hello@mail\.example\.com/u })).toHaveAttribute(
-      'aria-current',
-      'true'
-    );
-    // Once in the list and once as the heading of the selected mailbox.
-    expect(screen.getAllByText('Hello Team')).toHaveLength(2);
-    expect(screen.getByText('No display name')).toBeInTheDocument();
-    expect(screen.getByText('2 of 10 used')).toBeInTheDocument();
-    expect(screen.getByText('@mail.example.com')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /^Switch mailbox, current: hello@mail\.example\.com/u })
+    ).toHaveTextContent('Hello Team');
     expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'inbound', page: 1 });
     expect(screen.getByText('Unread question')).toBeInTheDocument();
     expect(screen.getAllByText('Unread')).toHaveLength(1);
 
+    openSwitcher();
+    expect(screen.getByRole('button', { name: /^hello@mail\.example\.com/u })).toHaveAttribute(
+      'aria-current',
+      'true'
+    );
+    expect(screen.getByText(/^No display name/u)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^sales@mail\.example\.com/u }));
     expect(state.listCalls.at(-1)).toEqual({ mailboxId: 2, direction: 'inbound', page: 1 });
+
+    // The limit and the domain are part of mailbox administration.
+    openManage();
+    const dialog = screen.getByRole('dialog', { name: 'Manage mailboxes' });
+    expect(within(dialog).getByText('2 of 10 used')).toBeInTheDocument();
+    expect(within(dialog).getByText('@mail.example.com')).toBeInTheDocument();
   });
 
   it('names the only organization as text and asks every hook for it', () => {
@@ -277,13 +377,17 @@ describe('mailbox workspace', () => {
     expect(new Set(state.organizationIds)).toEqual(new Set([1]));
   });
 
-  it('lets an owner and an admin manage mailboxes and shows a member a read-only list', () => {
+  it('lets an owner and an admin manage mailboxes and gives a member only the mail', () => {
     for (const role of ['owner', 'admin'] as const) {
       state.organizations.data = organizations(organization(1, 'Acme', role));
       const view = renderWorkspace();
-      expect(screen.getByRole('button', { name: 'Create mailbox' }), role).toBeInTheDocument();
-      expect(screen.getAllByRole('button', { name: /^Delete /u }), role).toHaveLength(2);
-      expect(screen.queryByText(/Owners and admins of this organization/u), role).toBeNull();
+      openManage();
+      const dialog = screen.getByRole('dialog', { name: 'Manage mailboxes' });
+      expect(
+        within(dialog).getByRole('button', { name: 'Create mailbox' }),
+        role
+      ).toBeInTheDocument();
+      expect(within(dialog).getAllByRole('button', { name: /^Delete /u }), role).toHaveLength(2);
       view.unmount();
     }
 
@@ -295,23 +399,21 @@ describe('mailbox workspace', () => {
       manage_members: false,
       administer: false,
       see_history: false,
+      organize: false,
     };
     state.mailboxes.data = [mailbox(1, 'hello', 'Hello Team'), mailbox(2, 'sales', '')].map(
       item => ({ ...item, access: memberAccess })
     );
     renderWorkspace();
+    openSwitcher();
+    expect(screen.queryByRole('button', { name: 'Manage mailboxes' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Create mailbox' })).toBeNull();
     expect(screen.queryByLabelText('Address')).toBeNull();
-    expect(screen.queryByText('New mailbox')).toBeNull();
-    expect(screen.queryByRole('button', { name: /^Delete /u })).toBeNull();
-    expect(
-      screen.getByText('Owners and admins of this organization create and delete mailboxes.')
-    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Delete .*@/u })).toBeNull();
     // Reading and sending stay available to a member.
-    expect(screen.getByText('2 of 10 used')).toBeInTheDocument();
     expect(screen.getByText('Unread question')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Compose' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    fireEvent.click(rowButton('Unread question'));
     expect(screen.getByRole('button', { name: 'Reply' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Mark unread' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
@@ -380,22 +482,10 @@ describe('mailbox workspace', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
-  it('shows an unread badge only on mailboxes with unread mail, capped at 99+', () => {
-    state.mailboxes.data = [
-      mailbox(1, 'hello', 'Hello Team', 3),
-      mailbox(2, 'sales', '', 0),
-      mailbox(3, 'busy', '', 250),
-    ];
-    renderWorkspace();
-
-    expect(screen.getByLabelText('3 unread')).toHaveTextContent('3');
-    expect(screen.getByLabelText('250 unread')).toHaveTextContent('99+');
-    expect(screen.queryByLabelText('0 unread')).not.toBeInTheDocument();
-  });
-
   it('creates a mailbox with a normalized address and selects it', async () => {
     state.createMailbox.mutateAsync.mockResolvedValue(mailbox(3, 'support-team', 'Support Team'));
     renderWorkspace();
+    openManage();
 
     fireEvent.change(screen.getByLabelText('Address'), { target: { value: ' Support-Team ' } });
     fireEvent.change(screen.getByLabelText('Display name (optional)'), {
@@ -414,10 +504,13 @@ describe('mailbox workspace', () => {
     );
     expect(toast.success).toHaveBeenCalledWith('Mailbox created');
     expect(screen.getByLabelText('Address')).toHaveValue('');
+    // The new mailbox becomes the open one.
+    expect(new URLSearchParams(window.location.search).get('mailbox')).toBe('3');
   });
 
   it('explains address errors without sending and maps the API codes', async () => {
     renderWorkspace();
+    openManage();
     const address = screen.getByLabelText('Address');
     const submit = screen.getByRole('button', { name: 'Create mailbox' });
 
@@ -454,6 +547,7 @@ describe('mailbox workspace', () => {
   it('replaces the create form with the limit once it is reached', () => {
     state.domains.data = [domain(2)];
     renderWorkspace();
+    openManage();
 
     expect(screen.getByText(/reached the limit of 2 mailboxes/u)).toBeInTheDocument();
     expect(screen.queryByLabelText('Address')).toBeNull();
@@ -463,10 +557,11 @@ describe('mailbox workspace', () => {
   it('deletes a mailbox only after confirmation', async () => {
     state.deleteMailbox.mutateAsync.mockResolvedValue(undefined);
     renderWorkspace();
+    openManage();
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete sales@mail.example.com' }));
     expect(state.deleteMailbox.mutateAsync).not.toHaveBeenCalled();
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('alertdialog');
     expect(dialog).toHaveTextContent(/sales@mail\.example\.com and every message in it/u);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
@@ -479,9 +574,12 @@ describe('mailbox workspace', () => {
       new ApiError('backend text', ApiErrorCode.PERMISSION_DENIED, 403)
     );
     renderWorkspace();
+    openManage();
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete sales@mail.example.com' }));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' })
+    );
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
@@ -494,12 +592,12 @@ describe('mailbox workspace', () => {
   it('marks an unread inbound message read when it is opened, and only then', () => {
     renderWorkspace();
 
-    fireEvent.click(screen.getByRole('button', { name: /Old news/u }));
+    fireEvent.click(rowButton('Old news'));
     expect(state.detailCalls.at(-1)).toBe(10);
     expect(state.update.mutate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Back to list' }));
 
-    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    fireEvent.click(rowButton('Unread question'));
     expect(state.detailCalls.at(-1)).toBe(11);
     expect(state.update.mutate).toHaveBeenCalledTimes(1);
     expect(state.update.mutate).toHaveBeenCalledWith({ messageId: 11, read: true });
@@ -514,7 +612,7 @@ describe('mailbox workspace', () => {
     renderWorkspace();
 
     // Start on the middle read message so neither unread neighbor has been opened yet.
-    const middleRow = screen.getByRole('button', { name: /Middle read/u });
+    const middleRow = rowButton('Middle read');
     fireEvent.click(middleRow);
     expect(middleRow).toHaveAttribute('aria-current', 'true');
     expect(state.detailCalls.at(-1)).toBe(12);
@@ -528,10 +626,7 @@ describe('mailbox workspace', () => {
     // Stepping forward opens the older unread message and marks it read.
     fireEvent.click(nextButton);
     expect(state.detailCalls.at(-1)).toBe(11);
-    expect(screen.getByRole('button', { name: /Oldest unread/u })).toHaveAttribute(
-      'aria-current',
-      'true'
-    );
+    expect(rowButton('Oldest unread')).toHaveAttribute('aria-current', 'true');
     expect(middleRow).not.toHaveAttribute('aria-current');
     expect(state.update.mutate).toHaveBeenCalledTimes(1);
     expect(state.update.mutate).toHaveBeenCalledWith({ messageId: 11, read: true });
@@ -545,10 +640,7 @@ describe('mailbox workspace', () => {
 
     fireEvent.click(prevButton);
     expect(state.detailCalls.at(-1)).toBe(13);
-    expect(screen.getByRole('button', { name: /Newest unread/u })).toHaveAttribute(
-      'aria-current',
-      'true'
-    );
+    expect(rowButton('Newest unread')).toHaveAttribute('aria-current', 'true');
     expect(state.update.mutate).toHaveBeenCalledTimes(2);
     expect(state.update.mutate).toHaveBeenLastCalledWith({ messageId: 13, read: true });
     expect(prevButton).toBeDisabled();
@@ -560,7 +652,7 @@ describe('mailbox workspace', () => {
       html_body: '<p id="from-sender">Hi</p><script>window.pwned = true</script>',
     });
     const { container } = renderWorkspace();
-    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    fireEvent.click(rowButton('Unread question'));
 
     const frame = screen.getByTitle('Message content');
     expect(frame.tagName).toBe('IFRAME');
@@ -584,7 +676,7 @@ describe('mailbox workspace', () => {
     state.update.mutateAsync.mockResolvedValue(message());
     state.removeMessage.mutateAsync.mockResolvedValue(undefined);
     const { container } = renderWorkspace();
-    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    fireEvent.click(rowButton('Unread question'));
 
     expect(screen.getByRole('heading', { name: 'Unread question' })).toBeInTheDocument();
     expect(screen.getByText('Bob <bob@example.com>')).toBeInTheDocument();
@@ -599,11 +691,15 @@ describe('mailbox workspace', () => {
     // Marking unread returns to the list instead of reopening (and re-reading) the message.
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Mark unread' })).toBeNull());
 
-    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    fireEvent.click(rowButton('Unread question'));
+    // Deleting moves the message to the trash at once, with an undo instead of a confirmation.
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(state.removeMessage.mutateAsync).toHaveBeenCalledWith(11));
-    expect(toast.success).toHaveBeenCalledWith('Message deleted');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(toast.success).toHaveBeenCalledWith(
+      'Moved to the trash',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) })
+    );
   });
 
   it('switches to the sent folder and marks failed messages with the failure code', () => {
@@ -612,7 +708,7 @@ describe('mailbox workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sent' }));
 
     expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'outbound', page: 1 });
-    expect(screen.getByRole('button', { name: 'Sent' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Sent' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByText('To: bob@example.com')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
     expect(screen.getByText('provider.rejected')).toBeInTheDocument();
@@ -625,7 +721,7 @@ describe('mailbox workspace', () => {
       failure_code: 'provider.rejected',
       html_body: '',
     });
-    fireEvent.click(screen.getByRole('button', { name: /Bounced offer/u }));
+    fireEvent.click(rowButton('Bounced offer'));
     expect(screen.getByText(/was not delivered\. Reason: provider\.rejected/u)).toBeInTheDocument();
     expect(state.update.mutate).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
@@ -663,7 +759,7 @@ describe('mailbox workspace', () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Sent' }));
 
-    const row = (subject: string) => screen.getByRole('button', { name: new RegExp(subject, 'u') });
+    const row = rowButton;
     expect(within(row('Gone')).getByText('Bounced')).toHaveAttribute('data-event', 'bounced');
     expect(within(row('Gone')).getByText('Bounced')).toHaveClass('text-error');
     expect(within(row('Arrived')).getByText('Delivered')).toHaveAttribute(
@@ -831,7 +927,7 @@ describe('mailbox workspace', () => {
     renderWorkspace();
 
     expect(screen.getByRole('img', { name: 'Attachments: 1' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    fireEvent.click(rowButton('Unread question'));
     expect(screen.getByRole('heading', { name: 'Attachments' })).toBeInTheDocument();
     expect(screen.getByText('report.pdf')).toBeInTheDocument();
     expect(screen.getByText('2.0 KB')).toBeInTheDocument();
@@ -958,7 +1054,7 @@ describe('mailbox workspace', () => {
   it('prefills a reply with the sender, a Re: subject, and the message it answers', async () => {
     state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
     renderWorkspace();
-    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    fireEvent.click(rowButton('Unread question'));
     fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
     const dialog = screen.getByRole('dialog');
 
@@ -986,7 +1082,385 @@ describe('mailbox workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(state.mailboxes.refetch).toHaveBeenCalled();
   });
+
+  const viewOnlyAccess = {
+    view: true,
+    send: false,
+    manage_members: false,
+    administer: false,
+    see_history: false,
+    organize: false,
+  };
+  const sendAccess = { ...viewOnlyAccess, send: true };
+
+  function threadSummary(ids: number[], overrides: Record<string, unknown> = {}) {
+    return {
+      message_count: ids.length,
+      message_ids: ids,
+      unread: false,
+      starred: false,
+      label_ids: [],
+      ...overrides,
+    };
+  }
+
+  function openSwitcher() {
+    fireEvent.click(screen.getByRole('button', { name: /^Switch mailbox/u }));
+  }
+
+  /** The bar of actions on the selected rows. */
+  function bulk() {
+    return within(screen.getByRole('toolbar'));
+  }
+
+  function openManage() {
+    openSwitcher();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage mailboxes' }));
+  }
+
+  describe('mailbox organize', () => {
+    beforeEach(() => {
+      state.organizations.data = organizations(organization(1, 'Acme', 'owner'));
+    });
+
+    it('view-only member sees no move or label actions', () => {
+      state.organizations.data = organizations(organization(1, 'Acme', 'member'));
+      state.mailboxes.data = [{ ...mailbox(1, 'hello', 'Hello Team'), access: viewOnlyAccess }];
+      state.folders.data = [folder(4, 'Contracts')];
+      state.labels.data = [label(7, 'Urgent', 'red')];
+      renderWorkspace();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Unread question' }));
+      expect(bulk().getByRole('button', { name: 'Mark read' })).toBeInTheDocument();
+      expect(bulk().getByRole('button', { name: 'Mark unread' })).toBeInTheDocument();
+      for (const name of ['Archive', 'Move to folder', 'Label', 'Delete', 'Delete forever']) {
+        expect(bulk().queryByRole('button', { name }), name).toBeNull();
+      }
+      // Nor on the row itself: only reading state.
+      expect(screen.queryByRole('button', { name: 'Archive Unread question' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Delete Unread question' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Mark Unread question read' })).toBeInTheDocument();
+      // Folders and labels are listed, but only `organize` arranges them.
+      expect(screen.getByRole('button', { name: /Contracts/u })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Manage folders' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Manage labels' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Compose' })).toBeNull();
+    });
+
+    it('archiving a thread row removes it from inbox', async () => {
+      state.inbox.data = page([
+        summary({
+          id: 13,
+          subject: 'Quote request',
+          thread_id: 11,
+          thread: threadSummary([11, 12, 13], { unread: true }),
+        }),
+        summary({ id: 10, subject: 'Old news', read: true }),
+      ]);
+      state.updateMany.mutateAsync.mockImplementation(async () => {
+        state.inbox.data = page([summary({ id: 10, subject: 'Old news', read: true })]);
+        return { updated: 3 };
+      });
+      renderWorkspace();
+
+      expect(state.filterCalls.at(-1)?.filters).toEqual({
+        placement: 'default',
+        direction: 'inbound',
+        group: 'thread',
+      });
+      expect(screen.getByLabelText('3 messages in this conversation')).toHaveTextContent('3');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Quote request' }));
+      expect(screen.getByText('1 selected')).toBeInTheDocument();
+      fireEvent.click(bulk().getByRole('button', { name: 'Archive' }));
+
+      await waitFor(() =>
+        expect(state.updateMany.mutateAsync).toHaveBeenCalledWith({
+          message_ids: [11, 12, 13],
+          placement: 'archive',
+        })
+      );
+      expect(toast.success).toHaveBeenCalledWith(
+        'Archived',
+        expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) })
+      );
+      await waitFor(() => expect(screen.queryByText('Quote request')).toBeNull());
+      expect(screen.getByText('Old news')).toBeInTheDocument();
+      expect(screen.queryByText('1 selected')).toBeNull();
+    });
+
+    it('search shows ungrouped results and too-broad notice', async () => {
+      state.search.data = page([
+        summary({ id: 31, subject: 'Invoice March', placement: 'archive', read: true }),
+        summary({
+          id: 32,
+          subject: 'Re: Invoice March',
+          direction: 'outbound',
+          status: 'sent',
+          to: ['bob@example.com'],
+          read: true,
+        }),
+      ]);
+      renderWorkspace();
+
+      const search = screen.getByRole('searchbox', { name: 'Search this mailbox' });
+      fireEvent.change(search, { target: { value: '  invoice ' } });
+      fireEvent.submit(screen.getByRole('search'));
+
+      expect(state.filterCalls.at(-1)?.filters).toEqual({ q: 'invoice' });
+      expect(screen.getByRole('heading', { name: 'Results for “invoice”' })).toBeInTheDocument();
+      expect(screen.getByText('Invoice March')).toBeInTheDocument();
+      expect(screen.getByText('Re: Invoice March')).toBeInTheDocument();
+      expect(screen.queryByLabelText(/messages in this conversation/u)).toBeNull();
+
+      state.search.data = undefined;
+      state.search.error = new ApiError('slow', ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 422);
+      fireEvent.change(search, { target: { value: 'a' } });
+      fireEvent.submit(screen.getByRole('search'));
+      expect(await screen.findByText(/Enter a longer keyword/u)).toBeInTheDocument();
+      expect(screen.queryByText('slow')).toBeNull();
+
+      // Choosing a folder leaves the search.
+      fireEvent.click(screen.getByRole('button', { name: /^Inbox/u }));
+      expect(search).toHaveValue('');
+      expect(state.filterCalls.at(-1)?.filters).toMatchObject({ placement: 'default' });
+    });
+
+    it('thread view lists sent reply', () => {
+      state.inbox.data = page([
+        summary({
+          id: 13,
+          subject: 'Quote request',
+          thread_id: 11,
+          thread: threadSummary([11, 13], { unread: true }),
+        }),
+      ]);
+      state.thread.data = [
+        message({
+          id: 11,
+          subject: 'Quote request',
+          text_body: 'Can you send a quote?',
+          html_body: '',
+          read: false,
+        }),
+        message({
+          id: 13,
+          direction: 'outbound',
+          status: 'sent',
+          thread_id: 11,
+          from: { address: 'hello@mail.example.com', name: 'Hello Team' },
+          to: ['bob@example.com'],
+          subject: 'Re: Quote request',
+          text_body: 'Here is the quote.',
+          html_body: '',
+          read: true,
+        }),
+      ];
+      renderWorkspace();
+
+      fireEvent.click(rowButton('Quote request'));
+      expect(state.threadCalls.at(-1)).toBe(11);
+      expect(state.updateMany.mutate).toHaveBeenCalledWith({ message_ids: [11, 13], read: true });
+
+      const conversation = screen.getByRole('list', { name: 'Conversation' });
+      const items = within(conversation).getAllByRole('listitem');
+      expect(items).toHaveLength(2);
+      // Oldest first; the newest, the sent reply, is open.
+      expect(items[0]).toHaveTextContent('Bob');
+      expect(items[0]).toHaveTextContent('Can you send a quote?');
+      expect(items[1]).toHaveTextContent('Hello Team <hello@mail.example.com>');
+      expect(within(items[1]).getByText('Here is the quote.')).toBeInTheDocument();
+
+      // An older message opens on request.
+      fireEvent.click(within(items[0]).getByRole('button', { name: /Show the message from Bob/u }));
+      expect(within(items[0]).getByText('Bob <bob@example.com>')).toBeInTheDocument();
+    });
+
+    it('trash shows restore and, for organize, delete forever', async () => {
+      state.trash.data = page([
+        summary({
+          id: 41,
+          subject: 'Spam offer',
+          placement: 'trash',
+          trashed_at: now(),
+          read: true,
+        }),
+      ]);
+      state.updateMany.mutateAsync.mockResolvedValue({ updated: 1 });
+      state.removeMessage.mutateAsync.mockResolvedValue(undefined);
+      state.purge.mutateAsync.mockResolvedValue({ deleted: 1 });
+      const view = renderWorkspace();
+
+      fireEvent.click(screen.getByRole('button', { name: /^Trash/u }));
+      expect(state.filterCalls.at(-1)?.filters).toEqual({ placement: 'trash' });
+      expect(
+        screen.getByText('Messages in the trash are deleted for good after 30 days.')
+      ).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Spam offer' }));
+      expect(bulk().queryByRole('button', { name: 'Archive' })).toBeNull();
+      fireEvent.click(bulk().getByRole('button', { name: 'Restore' }));
+      await waitFor(() =>
+        expect(state.updateMany.mutateAsync).toHaveBeenCalledWith({
+          message_ids: [41],
+          placement: 'default',
+        })
+      );
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Spam offer' }));
+      fireEvent.click(bulk().getByRole('button', { name: 'Delete forever' }));
+      expect(state.removeMessage.mutateAsync).not.toHaveBeenCalled();
+      fireEvent.click(
+        within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete forever' })
+      );
+      await waitFor(() => expect(state.removeMessage.mutateAsync).toHaveBeenCalledWith(41));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Empty trash' }));
+      fireEvent.click(
+        within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Empty trash' })
+      );
+      await waitFor(() => expect(state.purge.mutateAsync).toHaveBeenCalled());
+      view.unmount();
+
+      // `send` restores, but deleting for good needs `organize`.
+      state.mailboxes.data = [{ ...mailbox(1, 'hello', 'Hello Team'), access: sendAccess }];
+      renderWorkspace();
+      fireEvent.click(screen.getByRole('button', { name: /^Trash/u }));
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Spam offer' }));
+      expect(bulk().getByRole('button', { name: 'Restore' })).toBeInTheDocument();
+      expect(bulk().queryByRole('button', { name: 'Delete forever' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Empty trash' })).toBeNull();
+    });
+
+    it('star is per person', () => {
+      // Another member's listing of the same message: a star here never reaches it.
+      const otherMember = summary({ id: 11, subject: 'Unread question', starred: false });
+      const otherBefore = structuredClone(otherMember);
+      state.organizations.data = organizations(organization(1, 'Acme', 'member'));
+      state.mailboxes.data = [{ ...mailbox(1, 'hello', 'Hello Team'), access: viewOnlyAccess }];
+      state.inbox.data = page([
+        summary({ id: 11, subject: 'Unread question' }),
+        summary({ id: 10, subject: 'Old news', read: true, starred: true }),
+      ]);
+      renderWorkspace();
+
+      const row = (subject: string) => {
+        const item = rowButton(subject).closest('li');
+        if (!item) throw new Error(subject);
+        return item;
+      };
+      expect(within(row('Old news')).getByRole('button', { name: 'Remove star' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+      // Starring needs only `view` and changes nothing but the caller's own star.
+      fireEvent.click(within(row('Unread question')).getByRole('button', { name: 'Star' }));
+      expect(state.update.mutateAsync).toHaveBeenCalledWith({ messageId: 11, starred: true });
+      expect(state.updateMany.mutateAsync).not.toHaveBeenCalled();
+      expect(otherMember).toEqual(otherBefore);
+    });
+
+    it('folder name taken shows inline error', async () => {
+      state.folders.data = [folder(4, 'Contracts')];
+      state.createFolder.mutateAsync.mockRejectedValue(
+        new ApiError('taken', ApiErrorCode.MAILBOX_FOLDER_NAME_TAKEN, 409)
+      );
+      renderWorkspace();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Manage folders' }));
+      const dialog = screen.getByRole('dialog', { name: 'Folders' });
+      fireEvent.change(within(dialog).getByLabelText('New folder'), {
+        target: { value: ' contracts ' },
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Add folder' }));
+
+      await waitFor(() =>
+        expect(state.createFolder.mutateAsync).toHaveBeenCalledWith({ name: 'contracts' })
+      );
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+        'Another folder of this mailbox already has this name.'
+      );
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(screen.getByRole('dialog', { name: 'Folders' })).toBeInTheDocument();
+    });
+
+    it('switching mailbox in the switcher changes the list and URL', () => {
+      window.history.replaceState(null, '', '/console/mailboxes?org=1');
+      renderWorkspace();
+      expect(state.listCalls.at(-1)?.mailboxId).toBe(1);
+
+      openSwitcher();
+      fireEvent.click(
+        within(screen.getByRole('list', { name: 'Shared mailboxes' })).getByRole('button', {
+          name: /^sales@mail\.example\.com/u,
+        })
+      );
+
+      expect(state.listCalls.at(-1)?.mailboxId).toBe(2);
+      const search = new URLSearchParams(window.location.search);
+      expect(search.get('org')).toBe('1');
+      expect(search.get('mailbox')).toBe('2');
+      expect(window.localStorage.getItem('zmail.mailbox.1')).toBe('2');
+      expect(screen.getByRole('button', { name: /^Switch mailbox/u })).toHaveTextContent(
+        'sales@mail.example.com'
+      );
+    });
+
+    it('switcher shows unread counts', () => {
+      state.mailboxes.data = [
+        mailbox(1, 'hello', 'Hello Team', 3),
+        mailbox(2, 'sales', '', 0),
+        mailbox(3, 'busy', '', 250),
+      ];
+      renderWorkspace();
+
+      // The other mailboxes' unread mail, on the trigger.
+      expect(screen.getByLabelText('250 unread in other mailboxes')).toHaveTextContent('99+');
+      openSwitcher();
+      const list = screen.getByRole('list', { name: 'Shared mailboxes' });
+      expect(within(list).getByLabelText('3 unread')).toHaveTextContent('3');
+      expect(within(list).getByLabelText('250 unread')).toHaveTextContent('99+');
+      expect(within(list).queryByLabelText('0 unread')).toBeNull();
+    });
+
+    it('create mailbox lives in the manage dialog for admins and is absent for members', () => {
+      const view = renderWorkspace();
+      expect(screen.queryByLabelText('Address')).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Delete .*@/u })).toBeNull();
+      openSwitcher();
+      fireEvent.click(screen.getByRole('button', { name: 'Manage mailboxes' }));
+      const dialog = screen.getByRole('dialog', { name: 'Manage mailboxes' });
+      expect(within(dialog).getByRole('form', { name: 'New mailbox' })).toBeInTheDocument();
+      expect(within(dialog).getByText('2 of 10 used')).toBeInTheDocument();
+      expect(within(dialog).getAllByRole('button', { name: /^Delete /u })).toHaveLength(2);
+      view.unmount();
+
+      state.organizations.data = organizations(organization(1, 'Acme', 'member'));
+      renderWorkspace();
+      openSwitcher();
+      expect(screen.queryByRole('button', { name: 'Manage mailboxes' })).toBeNull();
+      expect(screen.queryByLabelText('Address')).toBeNull();
+    });
+  });
 });
+
+function folder(id: number, name: string) {
+  return { id, name, created_at: now() };
+}
+
+function label(id: number, name: string, color: string) {
+  return { id, name, color, created_at: now() };
+}
+
+/** The button that opens a row; the row's star and quick actions have their own names. */
+function rowButton(subject: string) {
+  const row = screen.getByRole('checkbox', { name: `Select ${subject}` }).closest('li');
+  if (!row) throw new Error(`no row ${subject}`);
+  const button = within(row)
+    .getAllByRole('button')
+    .find(element => !element.hasAttribute('aria-label'));
+  if (!button) throw new Error(`no open button for ${subject}`);
+  return button;
+}
 
 function fillValidMessage(dialog: HTMLElement) {
   fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
@@ -1026,15 +1500,29 @@ function mailbox(id: number, localPart: string, displayName: string, unreadCount
     awaiting_handover: false,
     sealed_before: null,
     webhooks_enabled: false,
-    access: { view: true, send: true, manage_members: true, administer: true, see_history: true },
+    access: {
+      view: true,
+      send: true,
+      manage_members: true,
+      administer: true,
+      see_history: true,
+      organize: true,
+    },
     unread_count: unreadCount,
     created_at: now(),
   };
 }
 
 function summary(overrides: Record<string, unknown> = {}) {
+  const id = typeof overrides.id === 'number' ? overrides.id : 11;
   return {
-    id: 11,
+    id,
+    placement: 'default',
+    folder_id: null,
+    label_ids: [],
+    starred: false,
+    thread_id: id,
+    trashed_at: null,
     mailbox_id: 1,
     direction: 'inbound',
     status: 'received',
@@ -1055,7 +1543,7 @@ function summary(overrides: Record<string, unknown> = {}) {
 
 function message(overrides: Record<string, unknown> = {}) {
   return {
-    ...summary(),
+    ...summary(overrides),
     text_body: 'Plain question',
     html_body: '<p>Formatted question</p>',
     message_id: 'question-1@example.com',

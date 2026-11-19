@@ -1,35 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  AlertCircle,
-  ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
-  Inbox,
-  Lock,
-  Mail,
-  PenLine,
-  Send,
-  ShieldCheck,
-  Trash2,
-  User,
-  UserX,
-  Users,
-} from 'lucide-react';
-import { toast } from 'sonner';
+import { useEffect, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Mail, MailOpen, PenLine, Settings2, ShieldCheck } from 'lucide-react';
 
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   ComposeDialog,
@@ -39,11 +14,20 @@ import {
   replyAllDraft,
   type ComposeDraft,
 } from '@/features/mailbox/components/compose-dialog';
-import { CreateMailboxForm } from '@/features/mailbox/components/create-mailbox-form';
 import {
   hasAccessPanel,
   MailboxAccessPanel,
 } from '@/features/mailbox/components/mailbox-access-panel';
+import {
+  inboxView,
+  MailboxSidebar,
+  viewFilters,
+  type MailView,
+} from '@/features/mailbox/components/mailbox-sidebar';
+import { MailboxSwitcher } from '@/features/mailbox/components/mailbox-switcher';
+import { ManageFoldersDialog } from '@/features/mailbox/components/manage-folders-dialog';
+import { ManageLabelsDialog } from '@/features/mailbox/components/manage-labels-dialog';
+import { ManageMailboxesDialog } from '@/features/mailbox/components/manage-mailboxes-dialog';
 import {
   MailOrganizationBoundary,
   MailPageHeader,
@@ -53,28 +37,33 @@ import {
 import {
   EmptyState,
   ErrorAlert,
-  MailHtmlFrame,
-  MailStatusBadge,
-  mailBadgeKey,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import {
-  AttachmentIndicator,
-  MailAttachmentList,
-} from '@/features/mailbox/components/mail-attachments';
-import { MessageActions } from '@/features/mailbox/components/message-actions';
+  ListSkeleton,
+  MessageListPane,
+  rowMessageIds,
+  rowUnread,
+} from '@/features/mailbox/components/message-list';
 import {
-  useDeleteMailbox,
-  useMailMessage,
-  useMailMessages,
+  MessageDetail,
+  ThreadView,
+  type ReaderProps,
+} from '@/features/mailbox/components/thread-view';
+import {
+  useMailFolders,
+  useMailLabels,
+  useMailMessageCounts,
+  useMailMessageList,
   useMailboxDomains,
   useMailboxes,
   useUpdateMailMessage,
+  useUpdateMailMessages,
 } from '@/features/mailbox/hooks/use-mailbox';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import type {
-  MailDirection,
   MailMessage,
+  MailMessageFilters,
   MailMessageSummary,
   Mailbox,
 } from '@/features/mailbox/types';
@@ -82,12 +71,38 @@ import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/u
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
+/** Query parameter naming the open mailbox; the organization stays in `org`. */
+export const MAILBOX_PARAM = 'mailbox';
+const mailboxIdPattern = /^[1-9]\d{0,15}$/u;
+const searchDelayMilliseconds = 300;
+
+function storageKey(organizationId: number): string {
+  return `zmail.mailbox.${organizationId}`;
+}
+
+function readStoredMailboxId(organizationId: number): number | null {
+  try {
+    const raw = window.localStorage.getItem(storageKey(organizationId)) ?? '';
+    return mailboxIdPattern.test(raw) ? Number(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredMailboxId(organizationId: number, mailboxId: number): void {
+  try {
+    window.localStorage.setItem(storageKey(organizationId), String(mailboxId));
+  } catch {
+    // Storage may be unavailable; the URL still names the mailbox.
+  }
+}
+
 /**
- * Mailbox console: the mailboxes of the chosen organization the user has any access to, with the
- * inbox and sent folder of the selected one. What a user may do follows each mailbox's `access`:
- * without `view` the mailbox is locked, without `send` there is no compose, reply, or delete.
- * Only owners and admins create mailboxes. The API remains the authority for membership, access,
- * address rules, and delivery; the checks here only save a round trip.
+ * Mailbox console, laid out as a three-pane mail client: the left rail with the mailbox switcher
+ * and the views, the list of the open view, and the reading pane. The switcher lists the
+ * mailboxes the user reads; what a user may do follows each mailbox's `access`. Creating,
+ * deleting, and giving access to mailboxes lives in the Manage mailboxes dialog for owners and
+ * admins. The API remains the authority; the checks here only save a round trip.
  */
 export function MailboxWorkspace() {
   const t = useT('mailbox');
@@ -105,16 +120,34 @@ export function MailboxWorkspace() {
 function Workspace({ canManage }: { canManage: boolean }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const domains = useMailboxDomains(organizationId);
-  const mailboxes = useMailboxes(organizationId);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Mailbox | null>(null);
+  const mailboxes = useMailboxes(organizationId, { live: true });
+  const [storedId] = useState(() => readStoredMailboxId(organizationId));
+  const [manageOpen, setManageOpen] = useState(false);
   const [accessTargetId, setAccessTargetId] = useState<number | null>(null);
+
+  const items = mailboxes.data;
+  const readable = (items ?? []).filter(item => item.access.view);
+  const raw = searchParams.get(MAILBOX_PARAM) ?? '';
+  const requestedId = mailboxIdPattern.test(raw) ? Number(raw) : null;
+  const selected =
+    readable.find(item => item.id === requestedId) ??
+    readable.find(item => item.id === storedId) ??
+    readable[0] ??
+    null;
+  const selectedId = selected?.id;
+
+  useEffect(() => {
+    if (selectedId !== undefined) writeStoredMailboxId(organizationId, selectedId);
+  }, [organizationId, selectedId]);
 
   if (mailboxes.isPending || domains.isPending) return <WorkspaceSkeleton />;
   const loadError = mailboxes.error ?? domains.error;
   if (isOrganizationLost(loadError)) return <OrganizationLostState />;
-  if (loadError || !mailboxes.data || !domains.data) {
+  if (loadError || !items || !domains.data) {
     return (
       <ErrorAlert
         message={t(resolveMailboxErrorKey(loadError))}
@@ -127,214 +160,181 @@ function Workspace({ canManage }: { canManage: boolean }) {
     );
   }
 
-  const items = mailboxes.data;
   const domain = domains.data.find(item => item.kind === 'shared') ?? domains.data[0] ?? null;
-  const selected = items.find(item => item.id === selectedId) ?? items[0] ?? null;
   // Looked up on every render, so the panel follows the list after a change.
   const accessTarget = items.find(item => item.id === accessTargetId) ?? null;
 
+  const select = (mailbox: Mailbox) => {
+    writeStoredMailboxId(organizationId, mailbox.id);
+    const next = new URLSearchParams(window.location.search);
+    next.set(MAILBOX_PARAM, String(mailbox.id));
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  };
+  const manageButton = canManage ? (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      icon={<Settings2 className="size-4" />}
+      onClick={() => setManageOpen(true)}
+    >
+      {t('switcher.manage')}
+    </Button>
+  ) : null;
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
-      <section className="space-y-4" aria-labelledby="mailbox-list-title">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 id="mailbox-list-title" className="text-sm font-semibold">
-            {t('mailboxes.title')}
-          </h2>
-          {domain ? (
-            <span className="text-xs text-muted-foreground">
-              {t('mailboxes.count', { count: items.length, max: domain.max_mailboxes })}
-            </span>
-          ) : null}
-        </div>
-        {items.length === 0 ? (
-          <EmptyState
-            icon={<Mail className="size-5" aria-hidden="true" />}
-            title={t('mailboxes.emptyTitle')}
-            description={t(canManage ? 'mailboxes.empty' : 'organization.readOnly')}
-          />
-        ) : (
-          <ul className="space-y-1" aria-labelledby="mailbox-list-title">
-            {items.map(mailbox => (
-              <li key={mailbox.id} className="flex items-center gap-1">
-                <button
-                  type="button"
-                  aria-current={mailbox.id === selected?.id ? 'true' : undefined}
-                  className={cn(
-                    'min-w-0 flex-1 rounded-md border px-3 py-2 text-left focus-ring hover:bg-accent',
-                    mailbox.id === selected?.id ? 'border-primary bg-accent' : 'border-transparent'
-                  )}
-                  onClick={() => setSelectedId(mailbox.id)}
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {mailbox.address}
-                    </span>
-                    <MailboxMarks mailbox={mailbox} />
-                    {mailbox.access.view && mailbox.unread_count > 0 ? (
-                      <span
-                        className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground"
-                        aria-label={t('mailboxes.unreadCount', { count: mailbox.unread_count })}
-                      >
-                        {mailbox.unread_count > 99 ? '99+' : mailbox.unread_count}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {mailbox.display_name || t('mailboxes.noDisplayName')}
-                  </span>
-                </button>
-                {mailbox.access.administer ? (
-                  <Button
-                    type="button"
-                    isIcon
-                    size="sm"
-                    variant="ghost"
-                    aria-label={t('deleteMailbox.label', { address: mailbox.address })}
-                    title={t('deleteMailbox.label', { address: mailbox.address })}
-                    onClick={() => setDeleteTarget(mailbox)}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-        {!canManage ? (
-          items.length > 0 ? (
-            <p className="text-xs text-muted-foreground">{t('organization.readOnly')}</p>
-          ) : null
-        ) : domain ? (
-          <CreateMailboxForm
-            domain={domain}
-            domains={domains.data}
-            count={items.length}
-            onCreated={mailbox => setSelectedId(mailbox.id)}
-          />
-        ) : null}
-      </section>
+    <>
+      {selected ? (
+        <MailboxView
+          key={selected.id}
+          mailbox={selected}
+          switcher={
+            <MailboxSwitcher
+              mailboxes={readable}
+              selected={selected}
+              canManage={canManage}
+              onSelect={select}
+              onManage={() => setManageOpen(true)}
+            />
+          }
+          onOpenAccess={() => setAccessTargetId(selected.id)}
+          onRefreshMailboxes={() => void mailboxes.refetch()}
+        />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={<Mail className="size-5" aria-hidden="true" />}
+          title={t('mailboxes.emptyTitle')}
+          description={t(canManage ? 'mailboxes.empty' : 'organization.readOnly')}
+          action={manageButton ?? undefined}
+        />
+      ) : (
+        <EmptyState
+          icon={<Mail className="size-5" aria-hidden="true" />}
+          title={t('switcher.noReadableTitle')}
+          description={t(canManage ? 'switcher.noReadable' : 'organization.readOnly')}
+          action={manageButton ?? undefined}
+        />
+      )}
 
-      <section className="min-w-0">
-        {selected ? (
-          <MailboxMessages
-            key={selected.id}
-            mailbox={selected}
-            onOpenAccess={() => setAccessTargetId(selected.id)}
-          />
-        ) : null}
-      </section>
-
-      <DeleteMailboxDialog mailbox={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      {canManage ? (
+        <ManageMailboxesDialog
+          open={manageOpen}
+          mailboxes={items}
+          domain={domain}
+          domains={domains.data}
+          onClose={() => setManageOpen(false)}
+          onCreated={select}
+          onOpenAccess={mailbox => {
+            setManageOpen(false);
+            setAccessTargetId(mailbox.id);
+          }}
+        />
+      ) : null}
       <MailboxAccessPanel
         mailbox={accessTarget}
         onClose={() => setAccessTargetId(null)}
         onRefresh={() => void mailboxes.refetch()}
       />
-    </div>
+    </>
   );
 }
 
-function DeleteMailboxDialog({
+/** What the reading pane shows: a thread from a placement view, or one message from the others. */
+type OpenItem =
+  | { kind: 'thread'; threadId: number; rowId: number }
+  | { kind: 'message'; messageId: number; rowId: number };
+
+/** One mailbox the user reads. Remounted per mailbox, so a switch starts at the Inbox. */
+function MailboxView({
   mailbox,
-  onClose,
-}: {
-  mailbox: Mailbox | null;
-  onClose: () => void;
-}) {
-  const t = useT('mailbox');
-  const remove = useDeleteMailbox(useMailOrganizationId());
-
-  const confirm = async () => {
-    if (!mailbox) return;
-    try {
-      await remove.mutateAsync(mailbox.id);
-      toast.success(t('messages.mailboxDeleted'));
-      onClose();
-    } catch (failure) {
-      toast.error(t(resolveMailboxErrorKey(failure)));
-    }
-  };
-
-  return (
-    <Dialog open={mailbox !== null} onOpenChange={open => !open && !remove.isPending && onClose()}>
-      <DialogContent size="sm">
-        <DialogHeader>
-          <DialogTitle>{t('deleteMailbox.title')}</DialogTitle>
-          <DialogDescription>
-            {t('deleteMailbox.description', { address: mailbox?.address ?? '' })}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="outline" disabled={remove.isPending} onClick={onClose}>
-            {t('actions.cancel')}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            loading={remove.isPending}
-            icon={<Trash2 className="size-4" />}
-            onClick={() => void confirm()}
-          >
-            {t('actions.delete')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** Type, handover, and lock marks of a list item, with their names for assistive technology. */
-function MailboxMarks({ mailbox }: { mailbox: Mailbox }) {
-  const t = useT('mailbox');
-  const typeLabel = t(
-    mailbox.awaiting_handover
-      ? 'mailboxes.awaitingHandover'
-      : mailbox.type === 'personal'
-        ? 'mailboxes.personal'
-        : 'mailboxes.shared'
-  );
-  const TypeIcon = mailbox.awaiting_handover ? UserX : mailbox.type === 'personal' ? User : Users;
-  return (
-    <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
-      <span title={typeLabel} className="flex items-center">
-        <TypeIcon className="size-3.5" aria-hidden="true" />
-        <span className="sr-only">{typeLabel}</span>
-      </span>
-      {mailbox.access.view ? null : (
-        <span title={t('mailboxes.locked')} className="flex items-center">
-          <Lock className="size-3.5" aria-hidden="true" />
-          <span className="sr-only">{t('mailboxes.locked')}</span>
-        </span>
-      )}
-    </span>
-  );
-}
-
-function MailboxMessages({
-  mailbox,
+  switcher,
   onOpenAccess,
+  onRefreshMailboxes,
 }: {
   mailbox: Mailbox;
+  switcher: React.ReactNode;
   onOpenAccess: () => void;
+  onRefreshMailboxes: () => void;
 }) {
   const t = useT('mailbox');
-  const [direction, setDirection] = useState<MailDirection>('inbound');
+  const organizationId = useMailOrganizationId();
+  const [view, setView] = useState<MailView>(inboxView);
+  const [q, setQ] = useState('');
+  const [search, setSearch] = useState('');
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [page, setPage] = useState(1);
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [open, setOpen] = useState<OpenItem | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
-  const update = useUpdateMailMessage(useMailOrganizationId(), mailbox.id);
+  const [managing, setManaging] = useState<'folders' | 'labels' | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showFolder = (next: MailDirection) => {
-    setDirection(next);
+  useEffect(
+    () => () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    },
+    []
+  );
+
+  const base: MailMessageFilters = q ? { q } : viewFilters(view);
+  // The unread filter lists single messages: threads group only whole placement views.
+  const filters: MailMessageFilters = unreadOnly
+    ? { ...base, group: undefined, unread: true }
+    : base;
+  const grouped = filters.group === 'thread';
+  const messages = useMailMessageList(organizationId, mailbox.id, filters, page);
+  const counts = useMailMessageCounts(organizationId, mailbox.id);
+  const folders = useMailFolders(organizationId, mailbox.id);
+  const labels = useMailLabels(organizationId, mailbox.id);
+  const update = useUpdateMailMessage(organizationId, mailbox.id);
+  const updateMany = useUpdateMailMessages(organizationId, mailbox.id);
+  const folderList = folders.data ?? [];
+  const labelList = labels.data ?? [];
+
+  /** Every change of what is listed starts on page one, with nothing selected or open. */
+  const resetListing = () => {
     setPage(1);
-    setOpenId(null);
+    setOpen(null);
+    setSelected(new Set());
+  };
+  const showView = (next: MailView) => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    setView(next);
+    setQ('');
+    setSearch('');
+    resetListing();
+  };
+  const commitSearch = (value: string) => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const next = value.trim();
+    if (next === q) return;
+    setQ(next);
+    resetListing();
+  };
+  const changeSearch = (value: string) => {
+    setSearch(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (value.trim() === '') {
+      commitSearch('');
+      return;
+    }
+    searchTimer.current = setTimeout(() => commitSearch(value), searchDelayMilliseconds);
   };
 
-  const open = (message: MailMessageSummary) => {
-    setOpenId(message.id);
-    // Opening an unread inbound message is what marks it read.
-    if (message.direction === 'inbound' && !message.read) {
-      update.mutate({ messageId: message.id, read: true });
+  const rows = messages.data?.items ?? [];
+  const openIndex = open === null ? -1 : rows.findIndex(row => row.id === open.rowId);
+
+  const openRow = (row: MailMessageSummary) => {
+    setOpen(
+      grouped
+        ? { kind: 'thread', threadId: row.thread_id, rowId: row.id }
+        : { kind: 'message', messageId: row.id, rowId: row.id }
+    );
+    // Opening unread mail is what marks it read: the whole thread for a thread row.
+    if (rowUnread(row)) {
+      const ids = rowMessageIds(row);
+      if (ids.length === 1) update.mutate({ messageId: ids[0], read: true });
+      else updateMany.mutate({ message_ids: ids, read: true });
     }
   };
 
@@ -344,537 +344,189 @@ function MailboxMessages({
     quotedHeader: (params: { date: string; sender: string }) => t('compose.quotedHeader', params),
     formatDate: (iso: string) => formatter.format(new Date(iso)),
   };
-  const reply = (message: MailMessage) => setDraft(quotedReplyDraft(message, replyCopy));
-  const replyAll = (message: MailMessage) =>
-    setDraft(replyAllDraft(message, mailbox.address, replyCopy));
-  const forward = (message: MailMessage) => {
-    setDraft(
-      forwardDraft(message, {
-        prefixSubject: subject => t('compose.forwardSubject', { subject }),
-        forwardedHeader: t('compose.forwardedHeader'),
-        formatDate: iso => formatter.format(new Date(iso)),
-        labels: {
-          from: t('message.from'),
-          date: t('message.date'),
-          subject: t('emails.subject'),
-          to: t('message.to'),
-          cc: t('message.cc'),
-        },
-      })
-    );
+  const reader: ReaderProps = {
+    mailboxId: mailbox.id,
+    mailboxAddress: mailbox.address,
+    canSend: mailbox.access.send,
+    canOrganize: mailbox.access.organize,
+    onPrevious: openIndex > 0 ? () => openRow(rows[openIndex - 1]) : null,
+    onNext:
+      openIndex >= 0 && openIndex < rows.length - 1 ? () => openRow(rows[openIndex + 1]) : null,
+    onClose: () => setOpen(null),
+    onReply: (message: MailMessage) => setDraft(quotedReplyDraft(message, replyCopy)),
+    onReplyAll: (message: MailMessage) =>
+      setDraft(replyAllDraft(message, mailbox.address, replyCopy)),
+    onForward: (message: MailMessage) =>
+      setDraft(
+        forwardDraft(message, {
+          prefixSubject: subject => t('compose.forwardSubject', { subject }),
+          forwardedHeader: t('compose.forwardedHeader'),
+          formatDate: iso => formatter.format(new Date(iso)),
+          labels: {
+            from: t('message.from'),
+            date: t('message.date'),
+            subject: t('emails.subject'),
+            to: t('message.to'),
+            cc: t('message.cc'),
+          },
+        })
+      ),
   };
 
+  const title = q ? t('search.results', { q }) : viewTitle(view);
+  function viewTitle(current: MailView): string {
+    switch (current.kind) {
+      case 'folder':
+        return folderList.find(folder => folder.id === current.id)?.name ?? t('views.folders');
+      case 'label':
+        return labelList.find(label => label.id === current.id)?.name ?? t('views.labels');
+      default:
+        return t(`views.${current.kind}`);
+    }
+  }
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold">{mailbox.address}</h2>
-          {mailbox.display_name ? (
-            <p className="truncate text-sm text-muted-foreground">{mailbox.display_name}</p>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
+    <div className="grid gap-4 lg:h-[calc(100dvh-12rem)] lg:min-h-[36rem] lg:grid-cols-[16rem_minmax(0,1fr)]">
+      <aside className="flex min-h-0 flex-col gap-3 lg:overflow-y-auto lg:border-r lg:pr-4">
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">{switcher}</div>
           {hasAccessPanel(mailbox) ? (
             <Button
               type="button"
+              isIcon
               size="sm"
-              variant="outline"
-              icon={<ShieldCheck className="size-4" />}
+              variant="ghost"
               aria-label={t('access.openLabel', { address: mailbox.address })}
+              title={t('access.openLabel', { address: mailbox.address })}
               onClick={onOpenAccess}
             >
-              {t('access.open')}
-            </Button>
-          ) : null}
-          {mailbox.access.send ? (
-            <Button
-              type="button"
-              size="sm"
-              icon={<PenLine className="size-4" />}
-              onClick={() => setDraft(emptyDraft)}
-            >
-              {t('actions.compose')}
+              <ShieldCheck className="size-4" />
             </Button>
           ) : null}
         </div>
-      </div>
+        {mailbox.access.send ? (
+          <Button
+            type="button"
+            className="w-full"
+            icon={<PenLine className="size-4" />}
+            onClick={() => setDraft(emptyDraft)}
+          >
+            {t('actions.compose')}
+          </Button>
+        ) : null}
+        <MailboxSidebar
+          view={q ? null : view}
+          counts={counts.data}
+          folders={folderList}
+          labels={labelList}
+          canOrganize={mailbox.access.organize}
+          onSelect={showView}
+          onManageFolders={() => setManaging('folders')}
+          onManageLabels={() => setManaging('labels')}
+        />
+      </aside>
 
-      {mailbox.access.view ? (
-        <MailboxFolders
-          mailbox={mailbox}
-          direction={direction}
-          page={page}
-          openId={openId}
-          onShowFolder={showFolder}
-          onPageChange={nextPage => {
-            setPage(nextPage);
-            setOpenId(null);
-          }}
-          onOpen={open}
-          onClose={() => setOpenId(null)}
-          onReply={reply}
-          onReplyAll={replyAll}
-          onForward={forward}
-        />
-      ) : (
-        <EmptyState
-          icon={<Lock className="size-5" aria-hidden="true" />}
-          title={t('mailboxes.lockedTitle')}
-          description={t(
-            mailbox.awaiting_handover
-              ? 'mailboxes.lockedAwaiting'
-              : mailbox.type === 'personal'
-                ? 'mailboxes.lockedPersonal'
-                : 'mailboxes.lockedShared'
+      <div className="grid min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(20rem,28rem)_minmax(0,1fr)]">
+        <section
+          data-scroll-pane
+          aria-label={title}
+          className={cn('min-h-0 min-w-0 lg:overflow-y-auto lg:pr-1', open && 'hidden xl:block')}
+        >
+          <MessageListPane
+            mailbox={mailbox}
+            view={view}
+            listKey={JSON.stringify([filters, page])}
+            title={title}
+            q={q}
+            unreadOnly={unreadOnly}
+            messages={messages}
+            folders={folderList}
+            labels={labelList}
+            openRowId={open?.rowId ?? null}
+            selected={selected}
+            search={search}
+            refreshing={Boolean(messages.isFetching || counts.isFetching)}
+            onUnreadOnlyChange={value => {
+              setUnreadOnly(value);
+              resetListing();
+            }}
+            onSelectedChange={setSelected}
+            onSearchChange={changeSearch}
+            onSearchSubmit={() => commitSearch(search)}
+            onRefresh={() => {
+              void messages.refetch();
+              void counts.refetch();
+              onRefreshMailboxes();
+            }}
+            onPageChange={next => {
+              setPage(next);
+              setOpen(null);
+              setSelected(new Set());
+            }}
+            onOpen={openRow}
+            onLeave={rowIds => {
+              if (open && rowIds.includes(open.rowId)) setOpen(null);
+            }}
+          />
+        </section>
+        <section
+          className={cn(
+            'animate-enter min-h-0 min-w-0 lg:overflow-y-auto xl:border-l xl:pl-4',
+            !open && 'hidden xl:block'
           )}
-        />
-      )}
+        >
+          {open?.kind === 'thread' ? (
+            <ThreadView threadId={open.threadId} {...reader} />
+          ) : open?.kind === 'message' ? (
+            <MessageDetail messageId={open.messageId} {...reader} />
+          ) : (
+            <div className="flex h-full min-h-48 items-center justify-center">
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <MailOpen className="size-4" aria-hidden="true" />
+                {t('list.readerEmpty')}
+              </p>
+            </div>
+          )}
+        </section>
+      </div>
 
       {draft && mailbox.access.send ? (
         <ComposeDialog
           mailbox={mailbox}
           draft={draft}
           onClose={() => setDraft(null)}
-          onStored={() => showFolder('outbound')}
+          onStored={() => showView({ kind: 'sent' })}
         />
       ) : null}
-    </div>
-  );
-}
-
-/** The folders and messages of a mailbox the user reads. */
-function MailboxFolders({
-  mailbox,
-  direction,
-  page,
-  openId,
-  onShowFolder,
-  onPageChange,
-  onOpen,
-  onClose,
-  onReply,
-  onReplyAll,
-  onForward,
-}: {
-  mailbox: Mailbox;
-  direction: MailDirection;
-  page: number;
-  openId: number | null;
-  onShowFolder: (direction: MailDirection) => void;
-  onPageChange: (page: number) => void;
-  onOpen: (message: MailMessageSummary) => void;
-  onClose: () => void;
-  onReply: (message: MailMessage) => void;
-  onReplyAll: (message: MailMessage) => void;
-  onForward: (message: MailMessage) => void;
-}) {
-  const t = useT('mailbox');
-  const showFolder = onShowFolder;
-  // Loaded here, only for a mailbox the user reads, so the open message can step through it.
-  const messages = useMailMessages(useMailOrganizationId(), mailbox.id, direction, page);
-  const items = messages.data?.items ?? [];
-  const openIndex = openId === null ? -1 : items.findIndex(item => item.id === openId);
-  const previousMessage = openIndex > 0 ? items[openIndex - 1] : null;
-  const nextMessage = openIndex >= 0 && openIndex < items.length - 1 ? items[openIndex + 1] : null;
-  return (
-    <>
-      <div role="group" aria-label={t('folders.label')} className="flex gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={direction === 'inbound' ? 'default' : 'outline'}
-          aria-pressed={direction === 'inbound'}
-          icon={<Inbox className="size-4" />}
-          onClick={() => showFolder('inbound')}
-        >
-          {t('folders.inbound')}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={direction === 'outbound' ? 'default' : 'outline'}
-          aria-pressed={direction === 'outbound'}
-          icon={<Send className="size-4" />}
-          onClick={() => showFolder('outbound')}
-        >
-          {t('folders.outbound')}
-        </Button>
-      </div>
-
-      <div
-        className={cn(
-          openId !== null && 'xl:grid xl:grid-cols-[20rem_minmax(0,1fr)] xl:items-start xl:gap-4'
-        )}
-      >
-        <div className={cn('min-w-0', openId !== null && 'hidden xl:block')}>
-          <MessageList
-            messages={messages}
-            mailbox={mailbox}
-            direction={direction}
-            openId={openId}
-            onPageChange={onPageChange}
-            onOpen={onOpen}
+      {mailbox.access.organize ? (
+        <>
+          <ManageFoldersDialog
+            mailboxId={mailbox.id}
+            folders={folderList}
+            open={managing === 'folders'}
+            onClose={() => setManaging(null)}
           />
-        </div>
-        {openId !== null ? (
-          <div className="animate-enter min-w-0">
-            <MessageDetail
-              mailboxId={mailbox.id}
-              mailboxAddress={mailbox.address}
-              messageId={openId}
-              canSend={mailbox.access.send}
-              onPrevious={previousMessage ? () => onOpen(previousMessage) : null}
-              onNext={nextMessage ? () => onOpen(nextMessage) : null}
-              onClose={onClose}
-              onReply={onReply}
-              onReplyAll={onReplyAll}
-              onForward={onForward}
-            />
-          </div>
-        ) : null}
-      </div>
-    </>
-  );
-}
-
-function MessageList({
-  messages,
-  mailbox,
-  direction,
-  openId,
-  onPageChange,
-  onOpen,
-}: {
-  messages: ReturnType<typeof useMailMessages>;
-  mailbox: Mailbox;
-  direction: MailDirection;
-  openId: number | null;
-  onPageChange: (page: number) => void;
-  onOpen: (message: MailMessageSummary) => void;
-}) {
-  const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
-
-  if (messages.isPending) return <ListSkeleton />;
-  if (messages.error || !messages.data) {
-    return (
-      <ErrorAlert
-        message={t(resolveMailboxErrorKey(messages.error))}
-        retryLabel={t('actions.retry')}
-        onRetry={() => void messages.refetch()}
-      />
-    );
-  }
-  const { items, meta } = messages.data;
-  if (items.length === 0) {
-    return direction === 'inbound' ? (
-      <EmptyState
-        icon={<Inbox className="size-5" aria-hidden="true" />}
-        title={t('list.emptyInboxTitle')}
-        description={t('list.emptyInbox', { address: mailbox.address })}
-      />
-    ) : (
-      <EmptyState
-        icon={<Send className="size-5" aria-hidden="true" />}
-        title={t('list.emptySentTitle')}
-        description={t('list.emptySent', { address: mailbox.address })}
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <ul className="divide-y rounded-md border">
-        {items.map(message => {
-          const unread = message.direction === 'inbound' && !message.read;
-          const selected = message.id === openId;
-          return (
-            <li key={message.id}>
-              <button
-                type="button"
-                aria-current={selected ? 'true' : undefined}
-                className={cn(
-                  'flex w-full items-start gap-3 px-4 py-3 text-left transition-colors duration-150 focus-ring hover:bg-accent/70 active:bg-accent',
-                  selected && 'bg-accent'
-                )}
-                onClick={() => onOpen(message)}
-              >
-                <span
-                  className={cn(
-                    'mt-1.5 size-2 shrink-0 rounded-full transition-transform duration-200',
-                    unread ? 'bg-primary ring-2 ring-primary/20' : 'bg-transparent'
-                  )}
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className={cn('truncate text-sm', unread && 'font-semibold')}>
-                      {message.direction === 'inbound'
-                        ? message.from.name || message.from.address
-                        : t('list.to', { recipients: message.to.join(', ') })}
-                    </span>
-                    {unread ? <span className="sr-only">{t('list.unread')}</span> : null}
-                    {message.status === 'failed' ? (
-                      <Badge variant="destructive">{t('list.failed')}</Badge>
-                    ) : message.last_event !== '' ? (
-                      <MailStatusBadge message={message} label={t(mailBadgeKey(message))} />
-                    ) : null}
-                    {message.status === 'failed' && message.failure_code ? (
-                      <code className="truncate text-xs text-muted-foreground">
-                        {message.failure_code}
-                      </code>
-                    ) : null}
-                  </span>
-                  <span
-                    className={cn(
-                      'block truncate text-sm',
-                      unread ? 'font-medium' : 'text-muted-foreground'
-                    )}
-                  >
-                    <AttachmentIndicator count={message.attachment_count} />{' '}
-                    {message.subject || t('list.noSubject')}
-                  </span>
-                </span>
-                <time
-                  dateTime={message.created_at}
-                  className="shrink-0 text-xs text-muted-foreground"
-                >
-                  {formatter.format(new Date(message.created_at))}
-                </time>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      {meta.last_page > 1 ? (
-        <div className="flex items-center justify-between gap-3">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={meta.current_page <= 1}
-            onClick={() => onPageChange(meta.current_page - 1)}
-          >
-            {t('list.previous')}
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            {t('list.page', { page: meta.current_page, total: meta.last_page })}
-          </span>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={meta.current_page >= meta.last_page}
-            onClick={() => onPageChange(meta.current_page + 1)}
-          >
-            {t('list.next')}
-          </Button>
-        </div>
+          <ManageLabelsDialog
+            mailboxId={mailbox.id}
+            labels={labelList}
+            open={managing === 'labels'}
+            onClose={() => setManaging(null)}
+          />
+        </>
       ) : null}
-    </div>
-  );
-}
-
-function MessageDetail({
-  mailboxId,
-  mailboxAddress,
-  messageId,
-  canSend,
-  onPrevious,
-  onNext,
-  onClose,
-  onReply,
-  onReplyAll,
-  onForward,
-}: {
-  mailboxId: number;
-  mailboxAddress: string;
-  messageId: number;
-  canSend: boolean;
-  onPrevious: (() => void) | null;
-  onNext: (() => void) | null;
-  onClose: () => void;
-  onReply: (message: MailMessage) => void;
-  onReplyAll: (message: MailMessage) => void;
-  onForward: (message: MailMessage) => void;
-}) {
-  const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
-  const query = useMailMessage(useMailOrganizationId(), mailboxId, messageId);
-  // Keyed by message, so stepping to another message shows its HTML again.
-  const [plainTextId, setPlainTextId] = useState<number | null>(null);
-  const plainText = plainTextId === messageId;
-
-  const navigation = (
-    <div className="flex items-center gap-1">
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        icon={<ArrowLeft className="size-4" />}
-        onClick={onClose}
-      >
-        {t('actions.back')}
-      </Button>
-      <Button
-        type="button"
-        isIcon
-        size="sm"
-        variant="ghost"
-        disabled={!onPrevious}
-        aria-label={t('message.previous')}
-        title={t('message.previous')}
-        onClick={onPrevious ?? undefined}
-      >
-        <ChevronLeft className="size-4" />
-      </Button>
-      <Button
-        type="button"
-        isIcon
-        size="sm"
-        variant="ghost"
-        disabled={!onNext}
-        aria-label={t('message.next')}
-        title={t('message.next')}
-        onClick={onNext ?? undefined}
-      >
-        <ChevronRight className="size-4" />
-      </Button>
-    </div>
-  );
-
-  if (query.isPending) {
-    return (
-      <div className="space-y-3">
-        {navigation}
-        <Skeleton className="h-48 w-full" />
-      </div>
-    );
-  }
-  if (query.error || !query.data) {
-    return (
-      <div className="space-y-3">
-        {navigation}
-        <ErrorAlert
-          message={t(resolveMailboxErrorKey(query.error))}
-          retryLabel={t('actions.retry')}
-          onRetry={() => void query.refetch()}
-        />
-      </div>
-    );
-  }
-
-  const message = query.data;
-  const hasHtml = message.html_body !== '';
-  const hasText = message.text_body !== '';
-  const showHtml = hasHtml && !(plainText && hasText);
-
-  return (
-    <article className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {navigation}
-        <MessageActions
-          message={message}
-          mailboxAddress={mailboxAddress}
-          canSend={canSend}
-          onReply={onReply}
-          onReplyAll={onReplyAll}
-          onForward={onForward}
-          onClose={onClose}
-        />
-      </div>
-
-      <div className="space-y-3 rounded-md border p-4">
-        <h3 className="text-lg font-semibold break-words">
-          {message.subject || t('list.noSubject')}
-        </h3>
-        {message.status === 'failed' ? (
-          <Alert variant="destructive">
-            <AlertCircle className="size-4" aria-hidden="true" />
-            <AlertDescription>
-              {message.failure_code
-                ? t('message.failed', { code: message.failure_code })
-                : t('message.failedUnknown')}
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
-          <dt className="text-muted-foreground">{t('message.from')}</dt>
-          <dd className="break-words">
-            {message.from.name
-              ? `${message.from.name} <${message.from.address}>`
-              : message.from.address}
-          </dd>
-          <dt className="text-muted-foreground">{t('message.to')}</dt>
-          <dd className="break-words">{message.to.join(', ')}</dd>
-          {message.cc.length > 0 ? (
-            <>
-              <dt className="text-muted-foreground">{t('message.cc')}</dt>
-              <dd className="break-words">{message.cc.join(', ')}</dd>
-            </>
-          ) : null}
-          <dt className="text-muted-foreground">{t('message.date')}</dt>
-          <dd>
-            <time dateTime={message.created_at}>
-              {formatter.format(new Date(message.created_at))}
-            </time>
-          </dd>
-        </dl>
-
-        <MailAttachmentList message={message} />
-
-        {hasHtml && hasText ? (
-          <div role="group" aria-label={t('message.viewLabel')} className="flex gap-2">
-            <Button
-              type="button"
-              size="xs"
-              variant={showHtml ? 'default' : 'outline'}
-              aria-pressed={showHtml}
-              onClick={() => setPlainTextId(null)}
-            >
-              {t('message.viewHtml')}
-            </Button>
-            <Button
-              type="button"
-              size="xs"
-              variant={showHtml ? 'outline' : 'default'}
-              aria-pressed={!showHtml}
-              onClick={() => setPlainTextId(messageId)}
-            >
-              {t('message.viewText')}
-            </Button>
-          </div>
-        ) : null}
-
-        {showHtml ? (
-          <MailHtmlFrame html={message.html_body} title={t('message.htmlTitle')} />
-        ) : hasText ? (
-          <pre className="font-sans text-sm break-words whitespace-pre-wrap">
-            {message.text_body}
-          </pre>
-        ) : (
-          <p className="text-sm text-muted-foreground">{t('message.emptyBody')}</p>
-        )}
-      </div>
-    </article>
-  );
-}
-
-function ListSkeleton() {
-  return (
-    <div className="space-y-2" aria-hidden="true">
-      <Skeleton className="h-14 w-full" />
-      <Skeleton className="h-14 w-full" />
-      <Skeleton className="h-14 w-full" />
     </div>
   );
 }
 
 function WorkspaceSkeleton() {
   return (
-    <div className="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]" aria-hidden="true">
+    <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]" aria-hidden="true">
+      <div className="space-y-2">
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-40 w-full" />
+      </div>
       <ListSkeleton />
-      <Skeleton className="h-48 w-full" />
     </div>
   );
 }

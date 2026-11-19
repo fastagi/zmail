@@ -194,6 +194,8 @@ function EmailLogContent({
   };
   // Replying needs `send` on the opened message's mailbox; one not among the user's has none.
   const openedCanSend = opened !== null && senders.some(item => item.id === opened.mailbox_id);
+  const openedCanOrganize =
+    opened !== null && owned.some(item => item.id === opened.mailbox_id && item.access.organize);
   const replyCopy = {
     prefixSubject: (subject: string) => t('compose.replySubject', { subject }),
     quotedHeader: (params: { date: string; sender: string }) => t('compose.quotedHeader', params),
@@ -262,6 +264,7 @@ function EmailLogContent({
           mailboxAddress={opened.mailbox_address}
           messageId={opened.id}
           canSend={openedCanSend}
+          canOrganize={openedCanOrganize}
           onClose={() => setOpened(null)}
           onReply={reply}
           onReplyAll={replyAll}
