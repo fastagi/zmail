@@ -880,3 +880,61 @@ func toTransactionalLogMeta(page TransactionalLogPage) TransactionalLogMetaRespo
 	}
 	return meta
 }
+
+// MailSendLaneUsageResponse is how full one send lane is.
+type MailSendLaneUsageResponse struct {
+	Lane    string `json:"lane"`
+	Limit   int    `json:"limit"`
+	Used    int64  `json:"used"`
+	Waiting int64  `json:"waiting"`
+}
+
+// MailSendLaneUsageListResponse is the usage of every send lane over the rolling window.
+type MailSendLaneUsageListResponse struct {
+	Lanes       []MailSendLaneUsageResponse `json:"lanes"`
+	WindowHours int                         `json:"window_hours"`
+	ComputedAt  time.Time                   `json:"computed_at"`
+}
+
+func toMailSendLaneUsageList(lanes []SendLaneUsage, computedAt time.Time) MailSendLaneUsageListResponse {
+	items := make([]MailSendLaneUsageResponse, 0, len(lanes))
+	for _, lane := range lanes {
+		items = append(items, MailSendLaneUsageResponse{
+			Lane: string(lane.Lane), Limit: lane.Limit, Used: lane.Used, Waiting: lane.Waiting,
+		})
+	}
+	return MailSendLaneUsageListResponse{Lanes: items, WindowHours: sendLaneWindowHours, ComputedAt: computedAt.UTC()}
+}
+
+// MailSuppressionResponse is one entry of the suppression list.
+type MailSuppressionResponse struct {
+	ID        uint      `json:"id"`
+	Email     string    `json:"email"`
+	Reason    string    `json:"reason"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// MailSuppressionPageMetaResponse is the meta of a suppression list page.
+type MailSuppressionPageMetaResponse struct {
+	NextCursor *string `json:"next_cursor"`
+}
+
+func toMailSuppressions(suppressions []domain.MailSuppression) []MailSuppressionResponse {
+	items := make([]MailSuppressionResponse, 0, len(suppressions))
+	for _, suppression := range suppressions {
+		items = append(items, MailSuppressionResponse{
+			ID: suppression.ID, Email: suppression.Email, Reason: suppression.Reason,
+			Source: suppression.Source, CreatedAt: suppression.CreatedAt.UTC(),
+		})
+	}
+	return items
+}
+
+func toMailSuppressionPageMeta(next *uint) MailSuppressionPageMetaResponse {
+	if next == nil {
+		return MailSuppressionPageMetaResponse{}
+	}
+	cursor := strconv.FormatUint(uint64(*next), 10)
+	return MailSuppressionPageMetaResponse{NextCursor: &cursor}
+}

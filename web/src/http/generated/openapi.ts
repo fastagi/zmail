@@ -839,6 +839,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail-send-lanes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show the organization's usage of each send lane
+         * @description Needs the `owner` or `admin` organization role. Computed on every request over the rolling 24 hours before `computed_at`, never cached. Always three lanes, in the order `transactional`, `broadcast`, `personal`.
+         */
+        get: operations["listMailSendLanes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-suppressions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's suppressed addresses, newest first
+         * @description Needs the `owner` or `admin` organization role. Neither transactional messages nor broadcasts reach a listed address. Keyset pages ordered by `created_at` and `id`, newest first; pass `meta.next_cursor` as `cursor` for the next, older page.
+         */
+        get: operations["listMailSuppressions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-suppressions/{suppression_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an address from the suppression list
+         * @description Needs the `owner` or `admin` organization role. Transactional messages may reach the address again; a contact's status is not changed. Idempotent, and discloses nothing; an id the organization does not have also answers `204`. A removal is audited as `mail_suppression.removed`.
+         */
+        delete: operations["deleteMailSuppression"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mail-template-previews": {
         parameters: {
             query?: never;
@@ -3986,11 +4046,64 @@ export interface components {
             data: components["schemas"]["MailRole"];
             message: string;
         };
+        MailSendLaneUsage: {
+            /** @enum {string} */
+            lane: "transactional" | "broadcast" | "personal";
+            /** @description The lane's rolling 24-hour limit. */
+            limit: number;
+            /** @description Provider calls of the lane that started in the window, failed attempts included. */
+            used: number;
+            /** @description For `transactional` and `personal`, messages waiting for room in the lane; for `broadcast`, the pending recipients of broadcasts paused because the lane was full. */
+            waiting: number;
+        };
+        MailSendLaneUsageList: {
+            /**
+             * Format: date-time
+             * @description The end of the window the usage was counted in.
+             */
+            computed_at: string;
+            /** @description Always the three lanes, in the order `transactional`, `broadcast`, `personal`. */
+            lanes: components["schemas"]["MailSendLaneUsage"][];
+            /** @constant */
+            window_hours: 24;
+        };
+        MailSendLaneUsageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailSendLaneUsageList"];
+            message: string;
+        };
         /**
          * @description `received` for inbound messages. Outbound messages are `queued` while the provider call is in flight, then `sent` or `failed`.
          * @enum {string}
          */
         MailStatus: "received" | "queued" | "sent" | "failed";
+        MailSuppression: {
+            /** Format: date-time */
+            created_at: string;
+            /** @description The suppressed address, lowercased. */
+            email: string;
+            id: components["schemas"]["PositiveID"];
+            reason: components["schemas"]["MailSuppressionReason"];
+            /**
+             * @description What first suppressed the address; `backfill` is a contact suppressed before the list existed.
+             * @enum {string}
+             */
+            source: "broadcast" | "transactional" | "backfill";
+        };
+        MailSuppressionPageMeta: {
+            /** @description Pass as `cursor` to read the next, older page; null on the last page. */
+            next_cursor: string | null;
+        };
+        MailSuppressionPageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailSuppression"][];
+            message: string;
+            meta: components["schemas"]["MailSuppressionPageMeta"];
+        };
+        /** @enum {string} */
+        MailSuppressionReason: "bounced" | "complained";
         MailTemplate: {
             /** Format: date-time */
             created_at: string;
@@ -5509,6 +5622,8 @@ export interface components {
         MailMessageID: components["schemas"]["PositiveID"];
         /** @description Positive mail role identifier. */
         MailRoleID: components["schemas"]["PositiveID"];
+        /** @description Positive suppression list entry identifier. */
+        MailSuppressionID: components["schemas"]["PositiveID"];
         /** @description Positive mail template identifier. */
         MailTemplateID: components["schemas"]["PositiveID"];
         /** @description Positive mail thread identifier, the `thread_id` of its messages. */
@@ -7893,6 +8008,106 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailSendLanes: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The usage of each lane. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSendLaneUsageResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailSuppressions: {
+        parameters: {
+            query?: {
+                /** @description Opaque keyset position from `meta.next_cursor`; absent or empty requests the newest page. */
+                cursor?: string;
+                /** @description An exact address, compared in lowercase after trimming. */
+                email?: string;
+                per_page?: number;
+                reason?: components["schemas"]["MailSuppressionReason"];
+            };
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the suppression list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSuppressionPageResponse"];
+                };
+            };
+            /** @description A filter is unusable or the cursor is malformed (`COMMON.INVALID_INPUT`); or the organization header is missing or malformed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailSuppression: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive suppression list entry identifier. */
+                suppression_id: components["parameters"]["MailSuppressionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The address is not on the suppression list. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

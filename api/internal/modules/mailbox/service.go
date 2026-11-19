@@ -259,6 +259,14 @@ type Service interface {
 	ListTransactionalLog(ctx context.Context, organizationID uint, filter domain.TransactionalLogFilter) (TransactionalLogPage, error)
 	// GetTransactionalLogEntry reads one transactional message of the organization, of either mode.
 	GetTransactionalLogEntry(ctx context.Context, organizationID, id uint) (*domain.TransactionalMessage, error)
+	// ListSendLanes counts each lane's usage over the rolling window ending at computedAt; only
+	// owners and admins may.
+	ListSendLanes(ctx context.Context, viewer domain.OrganizationContext) (lanes []SendLaneUsage, computedAt time.Time, err error)
+	// ListSuppressions lists one page of the suppression list and the next page's cursor; only
+	// owners and admins may.
+	ListSuppressions(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailSuppressionFilter) ([]domain.MailSuppression, *uint, error)
+	// RemoveSuppression takes an entry off the suppression list, succeeding when there is none.
+	RemoveSuppression(ctx context.Context, viewer domain.OrganizationContext, id uint) error
 	// RecordDeliveryEvent stores one signed provider event about an outbound mailbox message or a
 	// transactional message. Its Recorded is false when the event was already stored.
 	RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (DeliveryEventResult, error)

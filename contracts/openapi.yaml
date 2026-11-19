@@ -6891,6 +6891,121 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/mail-send-lanes:
+    get:
+      operationId: listMailSendLanes
+      summary: Show the organization's usage of each send lane
+      description: Needs the `owner` or `admin` organization role. Computed on every request over the rolling
+        24 hours before `computed_at`, never cached. Always three lanes, in the order `transactional`,
+        `broadcast`, `personal`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The usage of each lane.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailSendLaneUsageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-suppressions:
+    get:
+      operationId: listMailSuppressions
+      summary: List the organization's suppressed addresses, newest first
+      description: Needs the `owner` or `admin` organization role. Neither transactional messages nor broadcasts
+        reach a listed address. Keyset pages ordered by `created_at` and `id`, newest first; pass
+        `meta.next_cursor` as `cursor` for the next, older page.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: email
+          in: query
+          description: An exact address, compared in lowercase after trimming.
+          schema:
+            type: string
+            maxLength: 320
+        - name: reason
+          in: query
+          schema:
+            $ref: '#/components/schemas/MailSuppressionReason'
+        - name: cursor
+          in: query
+          description: Opaque keyset position from `meta.next_cursor`; absent or empty requests the newest page.
+          schema:
+            type: string
+            maxLength: 128
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: One page of the suppression list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailSuppressionPageResponse'
+        '400':
+          description: A filter is unusable or the cursor is malformed (`COMMON.INVALID_INPUT`); or the
+            organization header is missing or malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-suppressions/{suppression_id}:
+    delete:
+      operationId: deleteMailSuppression
+      summary: Remove an address from the suppression list
+      description: Needs the `owner` or `admin` organization role. Transactional messages may reach the address
+        again; a contact's status is not changed. Idempotent, and discloses nothing; an id the organization does
+        not have also answers `204`. A removal is audited as `mail_suppression.removed`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailSuppressionID'
+      responses:
+        '204':
+          description: The address is not on the suppression list.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-messages:
     get:
       operationId: listMailLog
@@ -7729,6 +7844,13 @@ components:
       in: path
       required: true
       description: Positive transactional message identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    MailSuppressionID:
+      name: suppression_id
+      in: path
+      required: true
+      description: Positive suppression list entry identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
   responses:
@@ -14460,6 +14582,136 @@ components:
             when one is given, ignoring the other filters; counting stops at 10000.
           minimum: 0
           maximum: 10000
+    MailSendLaneUsage:
+      type: object
+      additionalProperties: false
+      required:
+        - lane
+        - limit
+        - used
+        - waiting
+      properties:
+        lane:
+          type: string
+          enum:
+            - transactional
+            - broadcast
+            - personal
+        limit:
+          type: integer
+          description: The lane's rolling 24-hour limit.
+          minimum: 1
+          maximum: 100000
+        used:
+          type: integer
+          description: Provider calls of the lane that started in the window, failed attempts included.
+          minimum: 0
+        waiting:
+          type: integer
+          description: For `transactional` and `personal`, messages waiting for room in the lane; for
+            `broadcast`, the pending recipients of broadcasts paused because the lane was full.
+          minimum: 0
+    MailSendLaneUsageList:
+      type: object
+      additionalProperties: false
+      required:
+        - lanes
+        - window_hours
+        - computed_at
+      properties:
+        lanes:
+          type: array
+          description: Always the three lanes, in the order `transactional`, `broadcast`, `personal`.
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/MailSendLaneUsage'
+        window_hours:
+          const: 24
+        computed_at:
+          type: string
+          format: date-time
+          description: The end of the window the usage was counted in.
+    MailSendLaneUsageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailSendLaneUsageList'
+    MailSuppressionReason:
+      type: string
+      enum:
+        - bounced
+        - complained
+    MailSuppression:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - email
+        - reason
+        - source
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        email:
+          type: string
+          description: The suppressed address, lowercased.
+          maxLength: 320
+        reason:
+          $ref: '#/components/schemas/MailSuppressionReason'
+        source:
+          type: string
+          description: What first suppressed the address; `backfill` is a contact suppressed before the list
+            existed.
+          enum:
+            - broadcast
+            - transactional
+            - backfill
+        created_at:
+          type: string
+          format: date-time
+    MailSuppressionPageMeta:
+      type: object
+      additionalProperties: false
+      required:
+        - next_cursor
+      properties:
+        next_cursor:
+          description: Pass as `cursor` to read the next, older page; null on the last page.
+          type:
+            - string
+            - 'null'
+          maxLength: 128
+    MailSuppressionPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailSuppression'
+        meta:
+          $ref: '#/components/schemas/MailSuppressionPageMeta'
     TransactionalLogPageResponse:
       type: object
       additionalProperties: false

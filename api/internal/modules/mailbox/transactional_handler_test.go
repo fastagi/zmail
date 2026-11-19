@@ -23,12 +23,14 @@ import (
 type txHandlerFixture struct {
 	*txFixture
 	engine *gin.Engine
+	// role is the caller's organization role; member unless a test changes it.
+	role domain.OrganizationRole
 }
 
 func newTxHandlerFixture(t *testing.T, edit func(*Settings)) *txHandlerFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	f := &txHandlerFixture{txFixture: newTxFixture(t, edit)}
+	f := &txHandlerFixture{txFixture: newTxFixture(t, edit), role: domain.OrganizationRoleMember}
 	handler := NewHandler(f.service)
 	response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
 	response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)
@@ -62,7 +64,7 @@ func newTxHandlerFixture(t *testing.T, edit func(*Settings)) *txHandlerFixture {
 		c.Next()
 	})
 	routes.MiddlewareGroup("organization_context", func(c *gin.Context) {
-		viewer := viewerOf(10, txUser, domain.OrganizationRoleMember)
+		viewer := viewerOf(10, txUser, f.role)
 		c.Request = c.Request.WithContext(domain.WithOrganizationContext(c.Request.Context(), viewer))
 		c.Next()
 	})

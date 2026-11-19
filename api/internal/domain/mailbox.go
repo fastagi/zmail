@@ -633,6 +633,9 @@ type MailBroadcastRepository interface {
 	ReleaseRecipient(ctx context.Context, id uint) error
 	// SetStopReason records why the worker paused a broadcast; empty clears it.
 	SetStopReason(ctx context.Context, id uint, reason string) error
+	// CountWaitingBroadcastRecipients counts the organization's pending recipients of broadcasts
+	// the worker paused because the broadcast lane was full.
+	CountWaitingBroadcastRecipients(ctx context.Context, organizationID uint, stopReason string) (int64, error)
 	// PauseBroadcast moves a sending broadcast, or a scheduled one when organizationID is not 0,
 	// to paused with the reason. organizationID 0 is the worker.
 	PauseBroadcast(ctx context.Context, organizationID, id uint, reason string) error

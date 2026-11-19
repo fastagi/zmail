@@ -350,3 +350,86 @@ func respondFields(c *gin.Context, code, message string, fields map[string][]str
 		RequestID: c.GetString("request_id"),
 	})
 }
+
+// ListSendLanes shows owners and admins how full each send lane of the organization is.
+func (h *Handler) ListSendLanes(c *gin.Context) {
+	viewer, ok := managerScope(c)
+	if !ok {
+		return
+	}
+	lanes, computedAt, err := h.service.ListSendLanes(c.Request.Context(), viewer)
+	if err != nil {
+		response.HandleError(c, "Failed to list send lanes", err)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, toMailSendLaneUsageList(lanes, computedAt))
+}
+
+// ListSuppressions lists the organization's suppression list for owners and admins.
+func (h *Handler) ListSuppressions(c *gin.Context) {
+	viewer, ok := managerScope(c)
+	if !ok {
+		return
+	}
+	// URL.Query drops a pair it cannot decode, which would turn a malformed filter into none.
+	query, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		response.HandleError(c, "Invalid suppression list query", fmt.Errorf("%w: malformed query string", domain.ErrInvalidInput))
+		return
+	}
+	filter, err := parseSuppressionQuery(query)
+	if err != nil {
+		response.HandleError(c, "Invalid suppression list query", err)
+		return
+	}
+	suppressions, next, err := h.service.ListSuppressions(c.Request.Context(), viewer, filter)
+	if err != nil {
+		response.HandleError(c, "Failed to list suppressions", err)
+		return
+	}
+	privateResponse(c)
+	response.SuccessWithMeta(c, toMailSuppressions(suppressions), toMailSuppressionPageMeta(next))
+}
+
+// RemoveSuppression takes an address off the suppression list; it answers 204 whether or not the
+// organization had the entry.
+func (h *Handler) RemoveSuppression(c *gin.Context) {
+	viewer, ok := managerScope(c)
+	if !ok {
+		return
+	}
+	suppressionID, ok := httphandler.ParseID(c, "suppression_id")
+	if !ok {
+		return
+	}
+	if err := h.service.RemoveSuppression(c.Request.Context(), viewer, suppressionID); err != nil {
+		response.HandleError(c, "Failed to remove suppression", err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// parseSuppressionQuery reads the suppression list's query parameters; the service checks the
+// values that parse.
+func parseSuppressionQuery(query url.Values) (domain.MailSuppressionFilter, error) {
+	invalid := func(reason string) (domain.MailSuppressionFilter, error) {
+		return domain.MailSuppressionFilter{}, fmt.Errorf("%w: %s", domain.ErrInvalidInput, reason)
+	}
+	filter := domain.MailSuppressionFilter{Email: query.Get("email"), Reason: query.Get("reason")}
+	if raw := query.Get("cursor"); raw != "" {
+		cursor, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || cursor < 1 {
+			return invalid("malformed cursor")
+		}
+		filter.Cursor = uint(cursor)
+	}
+	if raw, present := query["per_page"]; present {
+		perPage, err := strconv.Atoi(raw[0])
+		if err != nil || perPage < 1 || perPage > suppressionMaxPerPage {
+			return invalid("per_page out of range")
+		}
+		filter.PerPage = perPage
+	}
+	return filter, nil
+}

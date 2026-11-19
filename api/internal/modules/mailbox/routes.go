@@ -56,6 +56,11 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.POST("/transactional-test-sends", h.SendTransactionalTest).
 			Name("transactional_test_sends.store").Middleware(middleware.BodyLimit(maxTransactionalBodyBytes))
 
+		auth.GET("/mail-send-lanes", h.ListSendLanes).Name("mail_send_lanes.index")
+		auth.GET("/mail-suppressions", h.ListSuppressions).Name("mail_suppressions.index")
+		auth.DELETE("/mail-suppressions/:suppression_id", h.RemoveSuppression).
+			Name("mail_suppressions.destroy").WhereNumber("suppression_id")
+
 		auth.GET("/mail-templates", h.ListTemplates).Name("mail_templates.index")
 		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store")
 		auth.GET("/mail-templates/:template_id", h.GetTemplate).Name("mail_templates.show").WhereNumber("template_id")

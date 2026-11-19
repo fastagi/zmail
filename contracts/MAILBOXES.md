@@ -29,7 +29,7 @@ Within the organization, what a caller may do with a mailbox follows from the ma
 | Role | May |
 |---|---|
 | `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the unified inbox, the log, and statistics of the mailboxes they may read; list the mail roles of the mailboxes they can see |
-| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them |
+| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; read the usage of each send lane; list the suppression list and remove addresses from it |
 
 The owner and admin roles never grant reading or sending mail by themselves: an admin reads a
 mailbox only as a member of it, and the access history records how they became one. A member who
@@ -97,6 +97,9 @@ recorded but has no special rights to it. A removed member loses access on their
 | Transactional send log | `GET /api/transactional-mail-log` | `GET /v1/transactional-mail-log` | Keyset envelope |
 | Transactional log entry | `GET /api/transactional-mail-log/:id` | `GET /v1/transactional-mail-log/:message_id` | `200` envelope |
 | Transactional test send | `POST /api/transactional-test-sends` | `POST /v1/transactional-test-sends` | `202` envelope |
+| Send lane usage | `GET /api/mail-send-lanes` | `GET /v1/mail-send-lanes` | `200` envelope, 3 lanes |
+| List the suppression list | `GET /api/mail-suppressions` | `GET /v1/mail-suppressions` | Keyset envelope |
+| Remove a suppressed address | `DELETE /api/mail-suppressions/:id` | `DELETE /v1/mail-suppressions/:suppression_id` | `204` |
 | Inbound delivery | none | `POST /v1/inbound-mail-messages` | `201`, or `200` for a repeat |
 | Delivery event | none | `POST /v1/mail-delivery-events` | `201`, or `200` for a repeat |
 
@@ -962,6 +965,30 @@ requests in flight. There is no automatic retry. A client that retries a `502` w
 `Idempotency-Key` may send a duplicate when the first attempt reached the provider but the answer
 was lost (`failure_code` `transport.unreachable`); see [Idempotency](#idempotency).
 
+#### Lane Usage
+
+`GET /v1/mail-send-lanes` shows owners and admins how full each lane is; a member gets
+`403 PERMISSION.DENIED` and reads only the limits from `GET /v1/mailbox-domains`. It is computed on
+every request and never cached:
+
+```json
+{
+  "lanes": [
+    { "lane": "transactional", "limit": 200, "used": 37, "waiting": 0 },
+    { "lane": "broadcast", "limit": 200, "used": 200, "waiting": 412 },
+    { "lane": "personal", "limit": 200, "used": 12, "waiting": 0 }
+  ],
+  "window_hours": 24,
+  "computed_at": "2026-11-23T08:00:00Z"
+}
+```
+
+`lanes` always has the three lanes in this order. `used` counts the lane's provider calls that
+started in the 24 hours before `computed_at`, failed attempts included, exactly as the limit counts
+them, and may exceed `limit` by the requests that were in flight. `waiting` is the messages waiting
+for room in the transactional or personal lane, and for the broadcast lane the pending recipients
+of broadcasts paused because the lane was full.
+
 ### Attachments
 
 A message has at most 10 attachments, and together they are at most 4 MiB after decoding.
@@ -1616,6 +1643,35 @@ A recipient on the organization's suppression list is not sent to: the message i
 (see [Send](#send)). When the lane is full the message is stored as `queued` with `queued_reason`
 `send_limit` and sent when the lane has room; when as many messages already wait as the lane allows,
 the request is `429 MAILBOX.SEND_LIMIT_REACHED` and nothing is stored.
+
+### Suppression List
+
+The suppression list holds one entry per organization and address (lowercased). An address is
+added when a delivery event reports it `bounced` or `complained` (see [Delivery Events](#delivery-events));
+`rejected` events and provider refusals at send time never add one. Transactional messages to a
+listed address are `suppressed`, and broadcasts skip it. Owners and admins manage the list; a
+member gets `403 PERMISSION.DENIED`.
+
+`GET /v1/mail-suppressions` lists entries newest first, by `created_at` then `id`, in keyset pages.
+Each entry has `id`, `email`, `reason` (`bounced` or `complained`), `source` (`transactional`,
+`broadcast`, or `backfill` for a contact suppressed before the list existed), and `created_at`.
+
+| Query | Meaning |
+|---|---|
+| `email` | An exact address, at most 320 characters, compared after trimming and lowercasing |
+| `reason` | `bounced` or `complained` |
+| `cursor` | `meta.next_cursor` of the previous page |
+| `per_page` | 1 to 100, default 50 |
+
+An unusable filter or a malformed cursor is `400 COMMON.INVALID_INPUT`. `meta` holds only
+`next_cursor`, null on the last page.
+
+`DELETE /v1/mail-suppressions/:suppression_id` removes an entry and answers `204`. It is idempotent
+and discloses nothing: an entry already removed, or one of another organization, also answers `204`
+and changes nothing. A removal that deleted an entry is audited as `mail_suppression.removed` with
+the entry's id and reason. Removing an address lets transactional messages reach it again; it never
+changes a contact's status, so a contact still `suppressed` is still skipped by broadcasts until it
+is changed too.
 
 ### Status And Retries
 
