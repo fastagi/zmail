@@ -197,9 +197,20 @@ func (h *Handler) ListMessages(c *gin.Context) {
 	if !ok {
 		return
 	}
+	unread, ok := parseOptionalBoolQuery(c, "unread")
+	if !ok {
+		response.HandleError(c, "Invalid unread filter", domain.ErrInvalidInput)
+		return
+	}
+	if len(c.QueryArray("direction")) > 1 || len(c.QueryArray("q")) > 1 {
+		response.HandleError(c, "Invalid message filter", domain.ErrInvalidInput)
+		return
+	}
 	page := pagination.FromContext(c)
 	messages, total, err := h.service.ListMessages(c.Request.Context(), viewer, mailboxID, domain.MailMessageFilter{
 		Direction: domain.MailDirection(c.Query("direction")),
+		Query:     c.Query("q"),
+		Unread:    unread,
 		Page:      page.GetPage(),
 		PerPage:   page.GetPerPage(),
 	})
@@ -211,6 +222,28 @@ func (h *Handler) ListMessages(c *gin.Context) {
 	paginator.SetPath(c.Request.URL.Path)
 	privateResponse(c)
 	response.Success(c, paginator)
+}
+
+func parseOptionalBoolQuery(c *gin.Context, name string) (*bool, bool) {
+	values, exists := c.GetQueryArray(name)
+	if !exists {
+		return nil, true
+	}
+	if len(values) != 1 {
+		return nil, false
+	}
+	switch values[0] {
+	case "":
+		return nil, true
+	case "true":
+		parsed := true
+		return &parsed, true
+	case "false":
+		parsed := false
+		return &parsed, true
+	default:
+		return nil, false
+	}
 }
 
 func (h *Handler) GetMessage(c *gin.Context) {

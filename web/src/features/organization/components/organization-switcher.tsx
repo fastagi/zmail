@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { Building2, Check, ChevronsUpDown } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -18,14 +18,49 @@ import { useOrganizations } from '@/features/organization/hooks/use-organization
 import { useT } from '@/i18n';
 
 const organizationPath = /^\/console\/organizations\/([1-9]\d*)(?:\/|$)/;
+const organizationIdPattern = /^[1-9]\d{0,15}$/u;
+const ACTIVE_ORGANIZATION_STORAGE_KEY = 'zmail.activeOrganizationId';
+
+const queryScopedConsolePaths = new Set<string>([
+  ROUTES.CONSOLE.EMAILS,
+  ROUTES.CONSOLE.MAILBOXES,
+  ROUTES.CONSOLE.MAIL_BROADCASTS,
+  ROUTES.CONSOLE.MAIL_CONTACTS,
+  ROUTES.CONSOLE.MAIL_TEMPLATES,
+  ROUTES.CONSOLE.MAIL_DOMAIN,
+]);
+
+function rememberOrganization(organizationId: number): void {
+  try {
+    window.sessionStorage.setItem(ACTIVE_ORGANIZATION_STORAGE_KEY, String(organizationId));
+  } catch {
+    // Ignore storage errors in restricted contexts.
+  }
+}
+
+function readRememberedOrganization(): number | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(ACTIVE_ORGANIZATION_STORAGE_KEY) ?? '';
+    return organizationIdPattern.test(raw) ? Number(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
 export function OrganizationSwitcher() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const t = useT();
   const organizations = useOrganizations();
-  const match = organizationPath.exec(pathname);
-  const selectedId = match ? Number(match[1]) : null;
-  const selected = organizations.data?.items.find(({ id }) => id === selectedId);
+  const items = organizations.data?.items ?? [];
+
+  const pathMatch = organizationPath.exec(pathname);
+  const queryOrg = searchParams.get('org') ?? '';
+  const queryId = organizationIdPattern.test(queryOrg) ? Number(queryOrg) : null;
+  const candidateId = pathMatch ? Number(pathMatch[1]) : (queryId ?? readRememberedOrganization());
+  const selected = items.find(({ id }) => id === candidateId) ?? items[0];
+  const staysOnCurrentPage = queryScopedConsolePaths.has(pathname);
 
   return (
     <DropdownMenu>
@@ -41,21 +76,33 @@ export function OrganizationSwitcher() {
           <span className="hidden min-w-0 flex-1 truncate text-left sm:block">
             {selected?.name ?? t('nav.organizations')}
           </span>
-          <ChevronsUpDown className="hidden size-3.5 text-muted-foreground sm:block" aria-hidden="true" />
+          <ChevronsUpDown
+            className="hidden size-3.5 text-muted-foreground sm:block"
+            aria-hidden="true"
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
         <DropdownMenuLabel>{t('nav.organizations')}</DropdownMenuLabel>
-        {organizations.data?.items.map((organization) => (
-          <DropdownMenuItem key={organization.id} asChild>
-            <Link href={getOrganizationRoute(organization.id)}>
-              <span className="min-w-0 flex-1 truncate">{organization.name}</span>
-              {organization.id === selectedId ? (
-                <Check className="ml-auto size-4" aria-hidden="true" />
-              ) : null}
-            </Link>
-          </DropdownMenuItem>
-        ))}
+        {items.map(organization => {
+          const href = staysOnCurrentPage
+            ? `${pathname}?org=${organization.id}`
+            : getOrganizationRoute(organization.id);
+          return (
+            <DropdownMenuItem
+              key={organization.id}
+              asChild
+              onSelect={() => rememberOrganization(organization.id)}
+            >
+              <Link href={href}>
+                <span className="min-w-0 flex-1 truncate">{organization.name}</span>
+                {organization.id === selected?.id ? (
+                  <Check className="ml-auto size-4" aria-hidden="true" />
+                ) : null}
+              </Link>
+            </DropdownMenuItem>
+          );
+        })}
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href={ROUTES.CONSOLE.ORGANIZATIONS}>

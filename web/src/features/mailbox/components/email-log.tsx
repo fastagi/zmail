@@ -21,7 +21,9 @@ import { ROUTES } from '@/constants/routes';
 import {
   ComposeDialog,
   emptyDraft,
-  replyDraft,
+  forwardDraft,
+  quotedReplyDraft,
+  replyAllDraft,
   type ComposeDraft,
 } from '@/features/mailbox/components/compose-dialog';
 import { EmailDetail } from '@/features/mailbox/components/email-detail';
@@ -130,6 +132,7 @@ function EmailLogContent({
   initialView: EmailLogView;
 }) {
   const t = useT('mailbox');
+  const formatter = useDateTimeFormat();
   const organizationId = useMailOrganizationId();
   const mailboxes = useMailboxes(organizationId);
   const markRead = useMarkMailMessageRead(organizationId);
@@ -191,10 +194,42 @@ function EmailLogContent({
   };
   // Replying needs `send` on the opened message's mailbox; one not among the user's has none.
   const openedCanSend = opened !== null && senders.some(item => item.id === opened.mailbox_id);
+  const replyCopy = {
+    prefixSubject: (subject: string) => t('compose.replySubject', { subject }),
+    quotedHeader: (params: { date: string; sender: string }) => t('compose.quotedHeader', params),
+    formatDate: (isoDate: string) => formatter.format(new Date(isoDate)),
+  };
   const reply = (message: MailMessage) => {
     if (!opened || !openedCanSend) return;
     setComposition({
-      draft: replyDraft(message, subject => t('compose.replySubject', { subject })),
+      draft: quotedReplyDraft(message, replyCopy),
+      mailbox: { id: opened.mailbox_id, address: opened.mailbox_address },
+      pickFrom: false,
+    });
+  };
+  const replyAll = (message: MailMessage) => {
+    if (!opened || !openedCanSend) return;
+    setComposition({
+      draft: replyAllDraft(message, opened.mailbox_address, replyCopy),
+      mailbox: { id: opened.mailbox_id, address: opened.mailbox_address },
+      pickFrom: false,
+    });
+  };
+  const forward = (message: MailMessage) => {
+    if (!opened || !openedCanSend) return;
+    setComposition({
+      draft: forwardDraft(message, {
+        prefixSubject: subject => t('compose.forwardSubject', { subject }),
+        forwardedHeader: t('compose.forwardedHeader'),
+        formatDate: isoDate => formatter.format(new Date(isoDate)),
+        labels: {
+          from: t('message.from'),
+          date: t('message.date'),
+          subject: t('compose.subject'),
+          to: t('message.to'),
+          cc: t('message.cc'),
+        },
+      }),
       mailbox: { id: opened.mailbox_id, address: opened.mailbox_address },
       pickFrom: false,
     });
@@ -229,6 +264,8 @@ function EmailLogContent({
           canSend={openedCanSend}
           onClose={() => setOpened(null)}
           onReply={reply}
+          onReplyAll={replyAll}
+          onForward={forward}
         />
       ) : (
         <>

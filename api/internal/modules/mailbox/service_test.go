@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -81,6 +82,7 @@ type fakeRepository struct {
 	// hideIdempotencyLookup simulates a concurrent request that stores its message between
 	// this request's lookup and its insert.
 	hideIdempotencyLookup bool
+	lastMessageFilter     domain.MailMessageFilter
 	lastLogFilter         domain.MailLogFilter
 	lastLogMailboxes      []uint
 	lastStatsSince        time.Time
@@ -439,13 +441,55 @@ func (r *fakeRepository) UpdateMessageDelivery(_ context.Context, id uint, statu
 }
 
 func (r *fakeRepository) ListMessages(_ context.Context, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error) {
+	r.lastMessageFilter = filter
 	var listed []*domain.MailMessage
 	for _, message := range r.messages {
-		if message.MailboxID == mailboxID && !r.sealed(message) && (filter.Direction == "" || message.Direction == filter.Direction) {
-			listed = append(listed, message)
+		if message.MailboxID != mailboxID || r.sealed(message) {
+			continue
+		}
+		if filter.Direction != "" && message.Direction != filter.Direction {
+			continue
+		}
+		_, readByReader := r.reads[[2]uint{filter.ReaderMembershipID, message.ID}]
+		read := message.Direction == domain.MailDirectionOutbound || readByReader
+		if filter.Unread != nil && read == *filter.Unread {
+			continue
+		}
+		if filter.Query != "" && !fakeMessageMatchesQuery(message, filter.Query) {
+			continue
+		}
+		listed = append(listed, message)
+	}
+	slices.SortFunc(listed, func(left, right *domain.MailMessage) int {
+		return cmp.Compare(right.ID, left.ID)
+	})
+	total := int64(len(listed))
+	if filter.PerPage > 0 {
+		page := max(filter.Page, 1)
+		start := min((page-1)*filter.PerPage, len(listed))
+		end := min(start+filter.PerPage, len(listed))
+		listed = listed[start:end]
+	}
+	return listed, total, nil
+}
+
+func fakeMessageMatchesQuery(message *domain.MailMessage, query string) bool {
+	needle := strings.ToLower(query)
+	if strings.Contains(strings.ToLower(message.Subject), needle) ||
+		strings.Contains(strings.ToLower(message.FromAddress), needle) {
+		return true
+	}
+	for _, recipient := range message.To {
+		if strings.Contains(strings.ToLower(recipient), needle) {
+			return true
 		}
 	}
-	return listed, int64(len(listed)), nil
+	for _, recipient := range message.Cc {
+		if strings.Contains(strings.ToLower(recipient), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *fakeRepository) FindMessage(_ context.Context, mailboxID, id uint) (*domain.MailMessage, error) {
@@ -1210,9 +1254,88 @@ func TestListLogValidatesFiltersAndTrimsTheQuery(t *testing.T) {
 		{Direction: "sideways"},
 		{Status: "delivered"},
 		{Query: strings.Repeat("q", 201)},
+		{Query: "bad\x00query"},
 	}
 	for _, filter := range invalid {
 		if _, _, err := fixture.service.ListLog(ctx, as(1), filter); !errors.Is(err, domain.ErrInvalidInput) {
+			t.Fatalf("filter %+v error = %v; want ErrInvalidInput", filter, err)
+		}
+	}
+}
+
+func TestListMessagesValidatesFiltersAndForwardsSearchAndUnread(t *testing.T) {
+	fixture := newServiceFixture(t)
+	ctx := context.Background()
+	mine := fixture.mailbox(t, 1, "mine")
+
+	unreadInbound, _, err := fixture.service.ReceiveInbound(ctx, fixture.delivery("mine@mail.example", crlf(
+		"From: Alice <alice@sender.test>",
+		"To: mine@mail.example",
+		"Subject: Invoice #42",
+		"Message-ID: <in-search-1@sender.test>",
+		"",
+		"Body.",
+	)))
+	if err != nil {
+		t.Fatalf("ReceiveInbound: %v", err)
+	}
+	readInbound, _, err := fixture.service.ReceiveInbound(ctx, fixture.delivery("mine@mail.example", crlf(
+		"From: Billing <billing@sender.test>",
+		"To: mine@mail.example",
+		"Subject: Invoice #43 paid",
+		"Message-ID: <in-search-2@sender.test>",
+		"",
+		"Body.",
+	)))
+	if err != nil {
+		t.Fatalf("ReceiveInbound: %v", err)
+	}
+	if _, err = fixture.service.SetMessageRead(ctx, as(1), mine.ID, readInbound.ID, true); err != nil {
+		t.Fatalf("SetMessageRead: %v", err)
+	}
+	if _, _, err = fixture.service.SendMessage(ctx, as(1), mine.ID, SendInput{
+		To: []string{"bob@example.com"}, Cc: []string{"carol@example.org"}, Subject: "Receipt", Text: "Thanks",
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	messages, total, err := fixture.service.ListMessages(ctx, as(1), mine.ID, domain.MailMessageFilter{Query: "  invoice  "})
+	if err != nil || total != 2 || len(messages) != 2 {
+		t.Fatalf("ListMessages(query) = %d messages, total %d, err %v", len(messages), total, err)
+	}
+	if fixture.repo.lastMessageFilter.Query != "invoice" {
+		t.Fatalf("forwarded query = %q; want trimmed %q", fixture.repo.lastMessageFilter.Query, "invoice")
+	}
+	if fixture.repo.lastMessageFilter.ReaderMembershipID != as(1).MembershipID {
+		t.Fatalf("reader = %d; want the viewer's membership", fixture.repo.lastMessageFilter.ReaderMembershipID)
+	}
+
+	unreadOnly := true
+	unreadMessages, total, err := fixture.service.ListMessages(ctx, as(1), mine.ID, domain.MailMessageFilter{Unread: &unreadOnly})
+	if err != nil || total != 1 || len(unreadMessages) != 1 || unreadMessages[0].ID != unreadInbound.ID {
+		t.Fatalf("ListMessages(unread=true) = %+v, total %d, err %v", unreadMessages, total, err)
+	}
+
+	readOnly := false
+	readMessages, total, err := fixture.service.ListMessages(ctx, as(1), mine.ID, domain.MailMessageFilter{Unread: &readOnly})
+	if err != nil || total != 2 || len(readMessages) != 2 {
+		t.Fatalf("ListMessages(unread=false) = %+v, total %d, err %v", readMessages, total, err)
+	}
+
+	// 200 multi-byte runes (>200 UTF-8 bytes) fit within the 200-character limit.
+	if _, _, err := fixture.service.ListMessages(ctx, as(1), mine.ID, domain.MailMessageFilter{Query: strings.Repeat("é", 200)}); err != nil {
+		t.Fatalf("200-rune UTF-8 query error = %v; want nil", err)
+	}
+
+	for _, filter := range []domain.MailMessageFilter{
+		{Direction: "sideways"},
+		{Query: strings.Repeat("q", 201)},
+		{Query: strings.Repeat("é", 201)},
+		{Query: "inv\x00oice"},
+		{Query: "inv\noice"},
+		{Query: string([]byte{0xff})},
+	} {
+		if _, _, err := fixture.service.ListMessages(ctx, as(1), mine.ID, filter); !errors.Is(err, domain.ErrInvalidInput) {
 			t.Fatalf("filter %+v error = %v; want ErrInvalidInput", filter, err)
 		}
 	}

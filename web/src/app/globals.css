@@ -239,6 +239,19 @@
   @keyframes float-out-bottom { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(0.95) translateY(-4px); } }
   @keyframes float-out-left { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(0.95) translateX(4px); } }
   @keyframes float-out-right { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(0.95) translateX(-4px); } }
+
+  @keyframes zmail-fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes zmail-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes zmail-scale-in {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
+  }
 }
 
 @layer utilities {
@@ -329,6 +342,26 @@
   }
 
   /* UTILS */
+  .animate-enter {
+    animation: zmail-fade-up 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .animate-fade {
+    animation: zmail-fade-in 180ms ease-out both;
+  }
+
+  .animate-pop {
+    animation: zmail-scale-in 200ms var(--ease-soft-spring) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-enter,
+    .animate-fade,
+    .animate-pop {
+      animation: none !important;
+    }
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

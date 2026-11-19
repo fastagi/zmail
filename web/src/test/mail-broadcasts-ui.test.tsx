@@ -194,7 +194,7 @@ describe('mail broadcasts console', () => {
     ).toBeInTheDocument();
     const code = screen.getByRole('textbox', { name: 'code' });
     expect(code).toHaveAccessibleDescription(
-      'No value and no fallback: contacts without a "code" field will not get this broadcast.'
+      'No value and no fallback: contacts without the "code" field will not get this broadcast.'
     );
     expect(screen.getByRole('textbox', { name: 'ends' })).toHaveAttribute(
       'placeholder',
@@ -291,6 +291,121 @@ describe('mail broadcasts console', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel broadcast' }));
     await waitFor(() => expect(state.cancel.mutateAsync).toHaveBeenCalledWith(9));
     expect(toast.success).toHaveBeenCalledWith('Broadcast canceled');
+  });
+
+  it('saves and sends a brand-new broadcast in one step', async () => {
+    state.save.mutateAsync.mockResolvedValue(broadcast({ id: 15, name: 'Flash sale' }));
+    state.send.mutateAsync.mockImplementation(async () => {
+      const started = broadcast({
+        id: 15,
+        name: 'Flash sale',
+        status: 'sending',
+        counts: counts({ total: 12, pending: 12 }),
+      });
+      state.broadcast.data = started;
+      return started;
+    });
+
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'New broadcast' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Flash sale' } });
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Template'), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText('Contact list'), { target: { value: '4' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'code' }), {
+      target: { value: 'FLASH50' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send now' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send now' }));
+
+    await waitFor(() =>
+      expect(state.save.mutateAsync).toHaveBeenCalledWith({
+        input: {
+          name: 'Flash sale',
+          mailbox_id: 2,
+          template_id: 3,
+          list_id: 4,
+          unsubscribe_label: '',
+          test_percent: 0,
+          test_wait_minutes: 30,
+          variables: { code: 'FLASH50' },
+        },
+      })
+    );
+    await waitFor(() =>
+      expect(state.send.mutateAsync).toHaveBeenCalledWith({ broadcastId: 15, input: {} })
+    );
+    expect(toast.success).toHaveBeenCalledWith('Broadcast started');
+    expect(await screen.findByRole('heading', { name: 'Flash sale' })).toBeInTheDocument();
+  });
+
+  it('renders a live preview with sample variables, shared values, and unsubscribe placeholder', () => {
+    state.template.data = {
+      ...(state.template.data as Record<string, unknown>),
+      sample_variables: { first_name: 'Ann' },
+    };
+
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'New broadcast' }));
+    expect(screen.queryByRole('region', { name: 'Preview' })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Template'), { target: { value: '3' } });
+    const preview = screen.getByRole('region', { name: 'Preview' });
+    expect(
+      within(preview).getByText(
+        'Rendered with the shared template values above; contact fields use sample or fallback text.'
+      )
+    ).toBeInTheDocument();
+    expect(within(preview).getByText('Ann, use')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'code' }), {
+      target: { value: 'SAVE30' },
+    });
+    expect(within(preview).getByText('Ann, use SAVE30')).toBeInTheDocument();
+    const frame = within(preview).getByTitle('Preview');
+    expect(frame).toHaveAttribute('srcdoc', expect.stringContaining('SAVE30 until Friday'));
+    expect(frame).toHaveAttribute('srcdoc', expect.stringContaining('href="#unsubscribe"'));
+  });
+
+  it('displays the local timezone hint and rejects past schedule times', () => {
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Draft idea' }));
+
+    const sendAt = screen.getByLabelText('Send at');
+    expect(sendAt).toHaveAccessibleDescription(/^Local time \(.+\)$/u);
+
+    fireEvent.change(sendAt, { target: { value: '2020-01-01T09:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(state.send.mutateAsync).not.toHaveBeenCalled();
+    expect(
+      screen.getByText('Choose a future time to schedule this broadcast.')
+    ).toBeInTheDocument();
+  });
+
+  it('confirms before discarding unsaved edits on Back and guards window unload', () => {
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Draft idea' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Updated draft' } });
+
+    const unloadEvent = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unloadEvent);
+    expect(unloadEvent.defaultPrevented).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to broadcasts' }));
+    const keepDialog = screen.getByRole('dialog');
+    expect(within(keepDialog).getByText('Discard unsaved changes?')).toBeInTheDocument();
+    fireEvent.click(within(keepDialog).getByRole('button', { name: 'Keep it' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByLabelText('Name')).toHaveValue('Updated draft');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to broadcasts' }));
+    const discardDialog = screen.getByRole('dialog');
+    fireEvent.click(within(discardDialog).getByRole('button', { name: 'Discard changes' }));
+    expect(screen.getByRole('button', { name: 'New broadcast' })).toBeInTheDocument();
   });
 });
 

@@ -22,13 +22,13 @@ const messages = {
   },
   home: {
     defaultUser: '朋友',
-    welcomeDescription: '在这里收发组织邮件、管理联系人和模版，并向联系人群发产品更新。',
+    welcomeDescription: '在这里收发组织邮件、管理联系人和模板，并向联系人群发产品更新。',
     open: '打开',
     gettingStartedTitle: '开始使用',
     quickLinks: {
       emails: {
-        title: '邮件',
-        description: '查看收件箱，回复和发送邮件。',
+        title: '收发记录',
+        description: '检索全组织所有邮箱的收发记录、投递事件与最近 7 天统计。',
       },
       broadcasts: {
         title: '群发',
@@ -36,15 +36,15 @@ const messages = {
       },
       contacts: {
         title: '联系人',
-        description: '导入联系人并按群组管理，退订会自动生效。',
+        description: '导入联系人并按名单分组管理，退订会自动生效。',
       },
       templates: {
-        title: '模版',
+        title: '模板',
         description: '保存常用的邮件内容，群发时直接选用。',
       },
       mailboxes: {
         title: '邮箱',
-        description: '为成员和用途创建发件地址。',
+        description: '创建团队邮箱地址，查看收件箱、回复和发送日常邮件。',
       },
       domain: {
         title: '域名',
@@ -52,7 +52,7 @@ const messages = {
       },
       apiAccess: {
         title: 'API 访问',
-        description: '管理用户 API 密钥和 Starter 偏好设置。',
+        description: '管理用户 API 密钥与个人账号设置。',
       },
       styleguide: {
         title: '设计规范',
@@ -76,9 +76,9 @@ const messages = {
     gettingStarted: {
       domain: '在「域名」绑定自己的域名，或直接使用共享域名。',
       mailbox: '在「邮箱」创建发件地址，例如 hello@你的域名。',
-      contacts: '在「联系人」创建群组并导入联系人。',
-      template: '在「模版」保存一封产品更新邮件。',
-      broadcast: '在「群发」选择域名、邮箱、模版和群组，先发测试批次再全量发送。',
+      contacts: '在「联系人」新建名单并导入联系人。',
+      template: '在「模板」保存一封产品更新邮件。',
+      broadcast: '在「群发」选择域名、邮箱、模板和名单，先发测试批次再全量发送。',
     },
   },
 } as const satisfies LocaleMessageShape<ConsoleMessages>;
