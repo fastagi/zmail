@@ -116,7 +116,8 @@ func (h *Handler) ConnectMailDomain(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	mailDomain, err := h.service.ConnectMailDomain(c.Request.Context(), organization.OrganizationID, organization.UserID, req.Name)
+	// The request names no capability yet, so every domain is connected to send and receive.
+	mailDomain, err := h.service.ConnectMailDomain(c.Request.Context(), organization.OrganizationID, organization.UserID, req.Name, "")
 	if err != nil {
 		response.HandleError(c, "Failed to connect mail domain", err)
 		return

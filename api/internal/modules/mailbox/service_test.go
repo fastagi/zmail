@@ -441,7 +441,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		contacts:  newFakeContacts(),
 		now:       time.Unix(1_800_000_000, 0).UTC(),
 	}
-	fixture.service = NewService(fixture.repo, fixture.repo, fixture.contacts, &stubBroadcasts{}, nil, nil, fixture.transport, fixture.notifier, Settings{
+	fixture.service = NewService(fixture.repo, fixture.repo, fixture.contacts, &stubBroadcasts{}, nil, nil, nil, fixture.transport, fixture.notifier, Settings{
 		Domain:           "mail.example",
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,

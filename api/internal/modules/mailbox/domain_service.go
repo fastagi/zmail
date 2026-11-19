@@ -59,7 +59,7 @@ func (s *service) MailboxDomains(ctx context.Context, organizationID uint) ([]Ma
 }
 
 func (s *service) requireDomains() error {
-	if !s.settings.CustomDomainsEnabled || s.domains == nil || s.domainProvider == nil {
+	if !s.settings.CustomDomainsEnabled || s.domains == nil || s.zones == nil || s.domainProvider == nil {
 		return ErrMailDomainsDisabled
 	}
 	return nil
@@ -70,10 +70,16 @@ func (s *service) ListMailDomains(ctx context.Context, organizationID uint) ([]*
 		return nil, err
 	}
 	domains, err := s.domains.ListDomains(ctx, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.attachZones(ctx, organizationID, domains); err != nil {
+		return nil, err
+	}
 	for _, mailDomain := range domains {
 		s.markSettingUp(mailDomain)
 	}
-	return domains, err
+	return domains, nil
 }
 
 func (s *service) GetMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error) {
@@ -82,6 +88,14 @@ func (s *service) GetMailDomain(ctx context.Context, organizationID, id uint) (*
 	}
 	mailDomain, err := s.domains.FindDomain(ctx, organizationID, id)
 	if err != nil {
+		return nil, err
+	}
+	return s.present(ctx, mailDomain)
+}
+
+// present fills what a domain returned to a caller carries besides its stored fields.
+func (s *service) present(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
+	if err := s.attachZones(ctx, mailDomain.OrganizationID, []*domain.MailDomain{mailDomain}); err != nil {
 		return nil, err
 	}
 	return s.markSettingUp(mailDomain), nil
@@ -112,7 +126,7 @@ func (s *service) startSetUp(ctx context.Context, mailDomain *domain.MailDomain)
 	if err != nil {
 		return nil, err
 	}
-	return s.markSettingUp(current), nil
+	return s.present(ctx, current)
 }
 
 // normalizeDomainName lowercases a typed domain and rejects what no mailbox may use, including
@@ -128,10 +142,11 @@ func (s *service) normalizeDomainName(name string) (string, error) {
 	return name, nil
 }
 
-// ConnectMailDomain claims a domain for the organization and runs its setup. A provider failure
-// during setup does not fail the call: the domain stays pending with the reason, and the owner
-// can run the setup again.
-func (s *service) ConnectMailDomain(ctx context.Context, organizationID, createdBy uint, name string) (*domain.MailDomain, error) {
+// ConnectMailDomain claims a domain for the organization in the zone that holds it, creating a
+// managed zone when the provider account has none, and runs its setup once the zone is in use. A
+// provider failure during setup does not fail the call: the domain stays pending with the
+// reason, and the owner can run the setup again. An empty capability means send_receive.
+func (s *service) ConnectMailDomain(ctx context.Context, organizationID, createdBy uint, name string, capability domain.MailDomainCapability) (*domain.MailDomain, error) {
 	if err := s.requireDomains(); err != nil {
 		return nil, err
 	}
@@ -139,25 +154,46 @@ func (s *service) ConnectMailDomain(ctx context.Context, organizationID, created
 	if err != nil {
 		return nil, err
 	}
+	switch capability {
+	case "":
+		capability = domain.MailDomainSendReceive
+	case domain.MailDomainSendReceive, domain.MailDomainSendOnly:
+	default:
+		return nil, ErrMailDomainInvalid
+	}
 	if _, lookupErr := s.domains.FindDomainByName(ctx, name); lookupErr == nil {
 		return nil, ErrMailDomainTaken
 	} else if !errors.Is(lookupErr, ErrMailDomainNotFound) {
 		return nil, lookupErr
 	}
-	zone, err := s.domainProvider.FindZone(ctx, name)
+	zone, err := s.resolveZone(ctx, organizationID, createdBy, name)
 	if err != nil {
-		return nil, providerError(err)
+		return nil, err
 	}
 	mailDomain := &domain.MailDomain{
 		OrganizationID: organizationID,
 		Name:           name,
-		ZoneID:         zone.ID,
-		ZoneName:       zone.Name,
+		ZoneID:         zone.providerID,
+		ZoneName:       zone.name,
+		Capability:     capability,
 		Status:         domain.MailDomainStatusPending,
 		CreatedBy:      createdBy,
 	}
+	if zone.managed != nil {
+		zoneID := zone.managed.ID
+		mailDomain.MailZoneID = &zoneID
+	}
 	if err := s.domains.CreateDomain(ctx, mailDomain, domain.MaxMailDomainsPerOrganization); err != nil {
+		if zone.created {
+			s.discardManagedZone(ctx, zone.managed)
+		}
 		return nil, err
+	}
+	if zone.managed != nil && zone.managed.Status != domain.MailZoneStatusActive {
+		// The provider does not serve the zone until the registrar delegates it, so the setup
+		// waits for the zone to become active.
+		mailDomain.Zone = zone.managed
+		return s.markSettingUp(mailDomain), nil
 	}
 	return s.startSetUp(ctx, mailDomain)
 }
@@ -200,9 +236,13 @@ func (s *service) CheckMailDomain(ctx context.Context, organizationID, id uint) 
 	}
 	if _, running := s.domainSetups.Load(id); running {
 		// The running setup checks when it is done; a second check now would race it.
-		return s.markSettingUp(mailDomain), nil
+		return s.present(ctx, mailDomain)
 	}
-	return s.check(ctx, mailDomain, nil)
+	checked, err := s.check(ctx, mailDomain, nil)
+	if err != nil {
+		return nil, err
+	}
+	return s.present(ctx, checked)
 }
 
 func (s *service) DeleteMailDomain(ctx context.Context, organizationID, id uint) error {
@@ -212,12 +252,15 @@ func (s *service) DeleteMailDomain(ctx context.Context, organizationID, id uint)
 	return s.domains.DeleteDomain(ctx, organizationID, id)
 }
 
-// setUp enables receiving and sending, adds the sending and DMARC records the zone lacks, and
-// checks the result. It only ever adds: a record that conflicts stays as it is and is reported.
+// setUp enables receiving (unless the domain only sends) and sending, adds the sending and DMARC
+// records the zone lacks, and checks the result. It only ever adds: a record that conflicts stays
+// as it is and is reported.
 func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
 	var failures []error
-	if err := s.domainProvider.EnableRouting(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
-		failures = append(failures, err)
+	if receives(mailDomain) {
+		if err := s.domainProvider.EnableRouting(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
+			failures = append(failures, err)
+		}
 	}
 	if tag, err := s.domainProvider.EnsureSending(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
 		failures = append(failures, err)
@@ -283,17 +326,25 @@ func (s *service) check(ctx context.Context, mailDomain *domain.MailDomain, fail
 	return mailDomain, nil
 }
 
+// receives reports whether the domain receives mail through Zmail. A send-only domain leaves its
+// MX with another mail service, so Email Routing is never enabled for it.
+func receives(mailDomain *domain.MailDomain) bool {
+	return mailDomain.Capability != domain.MailDomainSendOnly
+}
+
 // evaluate lists the records the domain needs and what its zone has for each.
 func (s *service) evaluate(ctx context.Context, mailDomain *domain.MailDomain) ([]domain.MailDomainRecord, error) {
 	required := make([]domain.MailDomainRecord, 0, 8)
-	for _, host := range routingMXHosts {
+	if receives(mailDomain) {
+		for _, host := range routingMXHosts {
+			required = append(required, domain.MailDomainRecord{
+				Purpose: domain.MailDomainRecordReceiving, Type: "MX", Name: mailDomain.Name, Content: host,
+			})
+		}
 		required = append(required, domain.MailDomainRecord{
-			Purpose: domain.MailDomainRecordReceiving, Type: "MX", Name: mailDomain.Name, Content: host,
+			Purpose: domain.MailDomainRecordReceiving, Type: "TXT", Name: mailDomain.Name, Content: routingSPF,
 		})
 	}
-	required = append(required, domain.MailDomainRecord{
-		Purpose: domain.MailDomainRecordReceiving, Type: "TXT", Name: mailDomain.Name, Content: routingSPF,
-	})
 	if mailDomain.SendingTag != "" {
 		sending, err := s.domainProvider.SendingRecords(ctx, mailDomain.ZoneID, mailDomain.SendingTag)
 		if err != nil {

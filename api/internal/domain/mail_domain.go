@@ -68,6 +68,8 @@ type MailDomain struct {
 	// MailZoneID is the managed zone the domain lives in; nil for a zone the operator manages.
 	MailZoneID *uint
 	Capability MailDomainCapability
+	// Zone is the managed zone MailZoneID names, filled on reads; it is not stored.
+	Zone *MailZone
 	// SendingTag identifies the domain's Email Sending configuration at the provider.
 	SendingTag string
 	Status     MailDomainStatus

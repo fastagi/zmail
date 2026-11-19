@@ -40,6 +40,8 @@ type Settings struct {
 	CustomDomainsEnabled bool
 	// EmailWorker names the Email Worker routing rules of organization domains deliver to.
 	EmailWorker string
+	// MaxZonesPerOrganization bounds the managed zones one organization may have Zmail create.
+	MaxZonesPerOrganization int
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -85,7 +87,7 @@ type Service interface {
 	MailboxDomains(ctx context.Context, organizationID uint) ([]MailboxDomain, error)
 	ListMailDomains(ctx context.Context, organizationID uint) ([]*domain.MailDomain, error)
 	GetMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
-	ConnectMailDomain(ctx context.Context, organizationID, createdBy uint, name string) (*domain.MailDomain, error)
+	ConnectMailDomain(ctx context.Context, organizationID, createdBy uint, name string, capability domain.MailDomainCapability) (*domain.MailDomain, error)
 	SetUpMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	CheckMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	DeleteMailDomain(ctx context.Context, organizationID, id uint) error
@@ -150,8 +152,10 @@ type service struct {
 	contacts  domain.MailContactRepository
 	// broadcasts is the broadcast store; nil until NewService wires it.
 	broadcasts domain.MailBroadcastRepository
-	// domains and domainProvider serve organization domains; nil when a test does not need them.
+	// domains, zones, and domainProvider serve organization domains; nil when a test does not
+	// need them.
 	domains        domain.MailDomainRepository
+	zones          domain.MailZoneRepository
 	domainProvider mailtransport.DomainProvider
 	// domainSetups holds the IDs of domains whose setup runs in the background.
 	domainSetups sync.Map
@@ -172,13 +176,14 @@ func NewService(
 	contacts domain.MailContactRepository,
 	broadcasts domain.MailBroadcastRepository,
 	domains domain.MailDomainRepository,
+	zones domain.MailZoneRepository,
 	domainProvider mailtransport.DomainProvider,
 	transport mailtransport.Transport,
 	notifier mailNotifier,
 	settings Settings,
 ) *service {
 	return &service{
-		repo: repo, templates: templates, contacts: contacts, broadcasts: broadcasts, domains: domains,
+		repo: repo, templates: templates, contacts: contacts, broadcasts: broadcasts, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },
 	}
@@ -220,6 +225,8 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 		Provider:         config.MailboxProviderLog,
 		InboundTolerance: config.DefaultMailboxInboundTolerance,
 		DailySendLimit:   config.DefaultMailboxDailySendLimit,
+
+		MaxZonesPerOrganization: config.DefaultMailboxMaxZonesPerOrganization,
 	}
 	if cfg == nil {
 		return settings
@@ -233,6 +240,9 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.EmailWorker = resolved.CloudflareEmailWorker
 	if resolved.DailySendLimit > 0 {
 		settings.DailySendLimit = resolved.DailySendLimit
+	}
+	if resolved.MaxZonesPerOrganization > 0 {
+		settings.MaxZonesPerOrganization = resolved.MaxZonesPerOrganization
 	}
 	return settings
 }
