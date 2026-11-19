@@ -125,7 +125,7 @@ func (f *accessFixture) receive(t *testing.T, mailbox *domain.Mailbox, subject s
 
 func (f *accessFixture) outboundCount(t *testing.T) int64 {
 	t.Helper()
-	count, err := f.repo.CountOutboundSince(context.Background(), accessOrg, time.Time{})
+	count, err := f.repo.CountOutboundSince(context.Background(), accessOrg, domain.SendLanePersonal, time.Time{})
 	if err != nil {
 		t.Fatalf("CountOutboundSince: %v", err)
 	}

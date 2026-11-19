@@ -439,7 +439,7 @@ const (
 	DefaultMailboxDomain = "mail.localhost"
 	// DefaultMailboxRequestTimeout caps one outbound provider call.
 	DefaultMailboxRequestTimeout = 15 * time.Second
-	// DefaultMailboxDailySendLimit bounds outbound messages per user per 24 hours.
+	// DefaultMailboxDailySendLimit bounds personal outbound messages per organization per 24 hours.
 	DefaultMailboxDailySendLimit = 200
 	// DefaultMailboxInboundTolerance is the accepted clock skew for a signed inbound delivery.
 	DefaultMailboxInboundTolerance = 5 * time.Minute
@@ -458,8 +458,14 @@ type MailboxConfig struct {
 	CloudflareAPIToken  string
 	RequestTimeout      time.Duration
 	// InboundSecret signs deliveries from the mail edge. Empty disables inbound mail.
-	InboundSecret  string
+	InboundSecret string
+	// DailySendLimit is the personal lane limit: console sends, replies, API outbound messages, and
+	// template tests one organization may attempt per rolling 24 hours.
 	DailySendLimit int
+	// DailyBroadcastLimit and DailyTransactionalLimit are the broadcast and transactional lane
+	// limits; 0 (unset) takes DailySendLimit when resolved.
+	DailyBroadcastLimit     int
+	DailyTransactionalLimit int
 	// PublicURL is the public origin of the Web console, such as https://app.example.com. Broadcast
 	// unsubscribe links point at it; empty disables broadcasts.
 	PublicURL string
@@ -486,6 +492,12 @@ func (m MailboxConfig) Resolved(production bool) MailboxConfig {
 	m.InboundSecret = strings.TrimSpace(m.InboundSecret)
 	m.PublicURL = strings.TrimRight(strings.TrimSpace(m.PublicURL), "/")
 	m.CloudflareEmailWorker = strings.TrimSpace(m.CloudflareEmailWorker)
+	if m.DailyBroadcastLimit == 0 {
+		m.DailyBroadcastLimit = m.DailySendLimit
+	}
+	if m.DailyTransactionalLimit == 0 {
+		m.DailyTransactionalLimit = m.DailySendLimit
+	}
 	if !production {
 		if m.Domain == "" {
 			m.Domain = DefaultMailboxDomain
@@ -676,16 +688,19 @@ func Load() (*Config, error) {
 			PendingTTL:         env.GetDuration("ASSET_PENDING_TTL", DefaultAssetPendingTTL),
 		},
 		Mailbox: MailboxConfig{
-			Domain:                env.Get("MAILBOX_DOMAIN", ""),
-			Provider:              env.Get("MAILBOX_PROVIDER", ""),
-			CloudflareAccountID:   env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", ""),
-			CloudflareAPIToken:    env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", ""),
-			RequestTimeout:        env.GetDuration("MAILBOX_REQUEST_TIMEOUT", DefaultMailboxRequestTimeout),
-			InboundSecret:         env.Get("MAILBOX_INBOUND_SECRET", ""),
-			DailySendLimit:        env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
-			PublicURL:             env.Get("MAILBOX_PUBLIC_URL", ""),
-			CustomDomainsEnabled:  env.GetBool("MAILBOX_CUSTOM_DOMAINS_ENABLED", false),
-			CloudflareEmailWorker: env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
+			Domain:              env.Get("MAILBOX_DOMAIN", ""),
+			Provider:            env.Get("MAILBOX_PROVIDER", ""),
+			CloudflareAccountID: env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", ""),
+			CloudflareAPIToken:  env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", ""),
+			RequestTimeout:      env.GetDuration("MAILBOX_REQUEST_TIMEOUT", DefaultMailboxRequestTimeout),
+			InboundSecret:       env.Get("MAILBOX_INBOUND_SECRET", ""),
+			DailySendLimit:      env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
+
+			DailyBroadcastLimit:     env.GetInt("MAILBOX_DAILY_BROADCAST_LIMIT", 0),
+			DailyTransactionalLimit: env.GetInt("MAILBOX_DAILY_TRANSACTIONAL_LIMIT", 0),
+			PublicURL:               env.Get("MAILBOX_PUBLIC_URL", ""),
+			CustomDomainsEnabled:    env.GetBool("MAILBOX_CUSTOM_DOMAINS_ENABLED", false),
+			CloudflareEmailWorker:   env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
 
 			MaxZonesPerOrganization: env.GetInt("MAILBOX_MAX_ZONES_PER_ORGANIZATION", DefaultMailboxMaxZonesPerOrganization),
 		},
@@ -1324,6 +1339,12 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 	}
 	if resolved.DailySendLimit <= 0 || resolved.DailySendLimit > 100000 {
 		return fmt.Errorf("MAILBOX_DAILY_SEND_LIMIT must be between 1 and 100000")
+	}
+	if resolved.DailyBroadcastLimit <= 0 || resolved.DailyBroadcastLimit > 100000 {
+		return fmt.Errorf("MAILBOX_DAILY_BROADCAST_LIMIT must be between 1 and 100000, or unset to take MAILBOX_DAILY_SEND_LIMIT")
+	}
+	if resolved.DailyTransactionalLimit <= 0 || resolved.DailyTransactionalLimit > 100000 {
+		return fmt.Errorf("MAILBOX_DAILY_TRANSACTIONAL_LIMIT must be between 1 and 100000, or unset to take MAILBOX_DAILY_SEND_LIMIT")
 	}
 	if resolved.PublicURL != "" {
 		parsed, err := url.Parse(resolved.PublicURL)

@@ -608,12 +608,16 @@ func (r *fakeRepository) DeleteMessage(_ context.Context, mailboxID, id uint) er
 	return nil
 }
 
-func (r *fakeRepository) CountOutboundSince(_ context.Context, organizationID uint, _ time.Time) (int64, error) {
+func (r *fakeRepository) CountOutboundSince(_ context.Context, organizationID uint, lane domain.SendLane, _ time.Time) (int64, error) {
 	var count int64
 	for _, message := range r.messages {
 		mailbox, ok := r.mailboxes[message.MailboxID]
+		messageLane := message.SendLane
+		if messageLane == "" {
+			messageLane = domain.SendLanePersonal
+		}
 		if ok && mailbox.OrganizationID == organizationID && message.Direction == domain.MailDirectionOutbound &&
-			message.QueuedReason == "" {
+			message.QueuedReason == "" && messageLane == lane {
 			count++
 		}
 	}

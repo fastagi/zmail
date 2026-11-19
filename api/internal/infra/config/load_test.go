@@ -774,3 +774,31 @@ func TestLoad_RegistrationIsOpenUnlessDisabled(t *testing.T) {
 		t.Fatal("AUTH_REGISTRATION_ENABLED=false should close registration")
 	}
 }
+
+func TestLoad_MailboxLaneLimitsFromEnvironment(t *testing.T) {
+	withoutEnv(t, "MAILBOX_DAILY_SEND_LIMIT", "MAILBOX_DAILY_BROADCAST_LIMIT", "MAILBOX_DAILY_TRANSACTIONAL_LIMIT")
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("DB_ENABLED", "false")
+	t.Setenv("MAILBOX_DAILY_SEND_LIMIT", "40")
+	t.Setenv("MAILBOX_DAILY_BROADCAST_LIMIT", "0")
+
+	cfg, err := LoadFresh()
+	if err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	resolved := cfg.Mailbox.Resolved(false)
+	if resolved.DailySendLimit != 40 || resolved.DailyBroadcastLimit != 40 || resolved.DailyTransactionalLimit != 40 {
+		t.Fatalf("lanes = %d/%d/%d; want 0 and unset to inherit 40",
+			resolved.DailySendLimit, resolved.DailyBroadcastLimit, resolved.DailyTransactionalLimit)
+	}
+
+	t.Setenv("MAILBOX_DAILY_BROADCAST_LIMIT", "500")
+	t.Setenv("MAILBOX_DAILY_TRANSACTIONAL_LIMIT", "600")
+	cfg, err = LoadFresh()
+	if err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	if cfg.Mailbox.DailyBroadcastLimit != 500 || cfg.Mailbox.DailyTransactionalLimit != 600 {
+		t.Fatalf("lanes = %d/%d; want 500/600", cfg.Mailbox.DailyBroadcastLimit, cfg.Mailbox.DailyTransactionalLimit)
+	}
+}

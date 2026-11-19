@@ -282,7 +282,11 @@ type MailboxDomainResponse struct {
 	Provider string `json:"provider"`
 	// InboundEnabled tells whether the API accepts signed deliveries from the mail edge.
 	InboundEnabled bool `json:"inbound_enabled"`
-	DailySendLimit int  `json:"daily_send_limit"`
+	// DailySendLimit is the personal lane limit; the broadcast and transactional lanes have
+	// their own, each counted separately per organization over a rolling 24 hours.
+	DailySendLimit          int `json:"daily_send_limit"`
+	DailyBroadcastLimit     int `json:"daily_broadcast_limit"`
+	DailyTransactionalLimit int `json:"daily_transactional_limit"`
 	// BroadcastsEnabled tells whether broadcasts can be sent: unsubscribe links need the inbound
 	// secret and MAILBOX_PUBLIC_URL.
 	BroadcastsEnabled bool `json:"broadcasts_enabled"`

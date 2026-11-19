@@ -843,6 +843,15 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 		{name: "short inbound secret", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "short" }, wantErr: "MAILBOX_INBOUND_SECRET"},
 		{name: "inbound may stay disabled", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "" }},
 		{name: "send limit must be positive", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailySendLimit = 0 }, wantErr: "MAILBOX_DAILY_SEND_LIMIT"},
+		{name: "lane limits inherit the send limit", environment: "development", edit: func(cfg *Config) {
+			cfg.Mailbox.DailyBroadcastLimit, cfg.Mailbox.DailyTransactionalLimit = 0, 0
+		}},
+		{name: "lane limits may reach the cap", environment: "development", edit: func(cfg *Config) {
+			cfg.Mailbox.DailyBroadcastLimit, cfg.Mailbox.DailyTransactionalLimit = 100000, 1
+		}},
+		{name: "broadcast limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailyBroadcastLimit = 100001 }, wantErr: "MAILBOX_DAILY_BROADCAST_LIMIT"},
+		{name: "broadcast limit negative", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailyBroadcastLimit = -1 }, wantErr: "MAILBOX_DAILY_BROADCAST_LIMIT"},
+		{name: "transactional limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailyTransactionalLimit = 100001 }, wantErr: "MAILBOX_DAILY_TRANSACTIONAL_LIMIT"},
 		{name: "custom domains with the default zone limit", environment: "production", edit: func(cfg *Config) {
 			cfg.Mailbox.CustomDomainsEnabled, cfg.Mailbox.CloudflareEmailWorker = true, "zmail-email-worker"
 			cfg.Mailbox.MaxZonesPerOrganization = DefaultMailboxMaxZonesPerOrganization
@@ -889,4 +898,17 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 			t.Fatalf("validate() error = %v", err)
 		}
 	})
+}
+
+// An unset or zero lane limit takes the personal limit's value, so an upgrade never shrinks the
+// room broadcasts or transactional mail had under the shared limit.
+func TestMailboxConfigLaneLimitsInheritTheSendLimit(t *testing.T) {
+	resolved := MailboxConfig{DailySendLimit: 50}.Resolved(false)
+	if resolved.DailyBroadcastLimit != 50 || resolved.DailyTransactionalLimit != 50 {
+		t.Fatalf("resolved lanes = %d, %d; want both to inherit 50", resolved.DailyBroadcastLimit, resolved.DailyTransactionalLimit)
+	}
+	resolved = MailboxConfig{DailySendLimit: 50, DailyBroadcastLimit: 7, DailyTransactionalLimit: 9}.Resolved(false)
+	if resolved.DailyBroadcastLimit != 7 || resolved.DailyTransactionalLimit != 9 {
+		t.Fatalf("resolved lanes = %d, %d; want the explicit 7 and 9", resolved.DailyBroadcastLimit, resolved.DailyTransactionalLimit)
+	}
 }

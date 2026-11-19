@@ -233,6 +233,7 @@ TABLE mail_messages
   COLUMN thread_id bigint
   COLUMN references_header text NOT NULL DEFAULT ''::text
   COLUMN rfc_message_id character varying(998) NOT NULL DEFAULT ''::character varying
+  COLUMN send_lane character varying(16) NOT NULL DEFAULT 'personal'::character varying
 
 TABLE mail_templates
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_templates_id_seq'::regclass)
@@ -627,6 +628,7 @@ CONSTRAINT mail_message_stars.mail_message_stars_pkey PRIMARY KEY (membership_id
 CONSTRAINT mail_messages.chk_mail_messages_direction CHECK (((direction)::text = ANY ((ARRAY['inbound'::character varying, 'outbound'::character varying])::text[])))
 CONSTRAINT mail_messages.chk_mail_messages_folder CHECK ((((placement)::text <> 'folder'::text) OR (folder_id IS NOT NULL)))
 CONSTRAINT mail_messages.chk_mail_messages_placement CHECK (((placement)::text = ANY ((ARRAY['default'::character varying, 'archive'::character varying, 'folder'::character varying, 'trash'::character varying])::text[])))
+CONSTRAINT mail_messages.chk_mail_messages_send_lane CHECK (((send_lane)::text = ANY ((ARRAY['personal'::character varying, 'broadcast'::character varying])::text[])))
 CONSTRAINT mail_messages.chk_mail_messages_status CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'queued'::character varying, 'sent'::character varying, 'failed'::character varying])::text[])))
 CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_messages.mail_messages_folder_id_fkey FOREIGN KEY (folder_id) REFERENCES mail_folders(id) ON DELETE SET NULL
@@ -814,10 +816,10 @@ INDEX CREATE UNIQUE INDEX mail_message_stars_pkey ON mail_message_stars USING bt
 INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree (mailbox_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_folder ON mail_messages USING btree (folder_id) WHERE (folder_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING btree (mailbox_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
+INDEX CREATE INDEX idx_mail_messages_lane_attempted ON mail_messages USING btree (send_lane, send_attempted_at) WHERE ((direction)::text = 'outbound'::text)
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
 INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (message_id) WHERE (((direction)::text = 'outbound'::text) AND ((message_id)::text <> ''::text))
 INDEX CREATE INDEX idx_mail_messages_rfc_message_id ON mail_messages USING btree (mailbox_id, rfc_message_id)
-INDEX CREATE INDEX idx_mail_messages_send_attempted ON mail_messages USING btree (send_attempted_at) WHERE ((direction)::text = 'outbound'::text)
 INDEX CREATE INDEX idx_mail_messages_threads ON mail_messages USING btree (mailbox_id, placement, thread_id, id DESC)
 INDEX CREATE INDEX idx_mail_messages_trash ON mail_messages USING btree (placement, trashed_at)
 INDEX CREATE INDEX idx_mail_messages_trgm_cc_addresses ON mail_messages USING gin (cc_addresses public.gin_trgm_ops)

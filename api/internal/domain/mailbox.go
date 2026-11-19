@@ -125,6 +125,20 @@ func (d MailDirection) Valid() bool {
 // rolling 24-hour send limit has room.
 const MailQueuedForSendLimit = "send_limit"
 
+// SendLane is the send limit an outbound message counts against. Each lane has its own rolling
+// 24-hour limit per organization, and a message belongs to exactly one lane, fixed when stored.
+type SendLane string
+
+const (
+	// SendLanePersonal counts console sends, replies, API outbound messages, and template tests.
+	SendLanePersonal SendLane = "personal"
+	// SendLaneBroadcast counts each broadcast recipient.
+	SendLaneBroadcast SendLane = "broadcast"
+	// SendLaneTransactional counts live, non-simulated transactional messages, which are stored
+	// outside mail_messages.
+	SendLaneTransactional SendLane = "transactional"
+)
+
 type MailStatus string
 
 const (
@@ -315,6 +329,8 @@ type MailMessage struct {
 	// SendAttemptedAt is when the provider call of an outbound message started; the send limit
 	// counts attempts by it. Nil while the message waits and for inbound mail.
 	SendAttemptedAt *time.Time
+	// SendLane is the lane the message counts against; personal when empty.
+	SendLane SendLane
 	// IdempotencyKey names an outbound message chosen by the sender; a later send with the same
 	// key in the same mailbox finds this message instead of sending again. Empty when unused.
 	IdempotencyKey string
@@ -864,14 +880,17 @@ type MailboxRepository interface {
 	// membership id 0 removes everyone's.
 	DeleteMailboxReads(ctx context.Context, mailboxID, membershipID uint) error
 	DeleteMessage(ctx context.Context, mailboxID, id uint) error
-	CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error)
+	// CountOutboundSince counts the organization's outbound attempts in one lane since the given
+	// time, failed attempts included.
+	CountOutboundSince(ctx context.Context, organizationID uint, lane SendLane, since time.Time) (int64, error)
 	// CountWaitingSends counts the organization's messages waiting for room in the send limit.
 	CountWaitingSends(ctx context.Context, organizationID uint) (int64, error)
 	// WaitingSendOrganizations lists the organizations that have messages waiting for the send limit.
 	WaitingSendOrganizations(ctx context.Context) ([]uint, error)
 	// LeaseWaitingSends leases, until leaseUntil, the organization's oldest waiting messages whose
-	// lease has expired at now: at most limit of them, and no more than the room sendLimit leaves
-	// after the attempts since windowStart and the messages other workers still hold. Workers on
+	// lease has expired at now: at most limit of them, and no more than the room sendLimit (the
+	// personal lane limit) leaves after the personal attempts since windowStart and the messages
+	// other workers still hold. Workers on
 	// the same organization lease one at a time, so together they never pass the limit.
 	LeaseWaitingSends(ctx context.Context, organizationID uint, now, leaseUntil, windowStart time.Time,
 		sendLimit, limit int) ([]*MailMessage, error)

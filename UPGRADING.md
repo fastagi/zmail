@@ -11,6 +11,34 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Send lanes
+
+### Medium — The send limit is split into three lanes
+
+The single per-organization send limit is replaced by three lanes, each counted separately over a
+rolling 24 hours by provider-call start, failed attempts included:
+
+- `personal` (`MAILBOX_DAILY_SEND_LIMIT`, default `200`): console sends, replies,
+  `POST /v1/outbound-mail-messages`, and template test sends. Full → the message waits, as before.
+- `broadcast` (`MAILBOX_DAILY_BROADCAST_LIMIT`): each broadcast recipient. Full → the broadcast
+  pauses with `stop_reason` `send_limit_reached`, as before.
+- `transactional` (`MAILBOX_DAILY_TRANSACTIONAL_LIMIT`): live, non-simulated transactional
+  messages (added by a later change).
+
+The two new limits take the value of `MAILBOX_DAILY_SEND_LIMIT` when unset or `0`; each is 1 to
+100000. The defaults keep the personal and broadcast lanes at least as large as the shared limit
+was, so no organization gets less room. Because lanes no longer share the room, an organization's
+theoretical maximum per 24 hours is the sum of the three (triple the old limit with the defaults):
+set `MAILBOX_DAILY_BROADCAST_LIMIT` and `MAILBOX_DAILY_TRANSACTIONAL_LIMIT` so the total stays within
+the Cloudflare account's sending limit.
+
+Run migrations: `2026_11_23_080000_add_send_lanes` adds `mail_messages.send_lane`, marks every
+message a broadcast recipient points at as `broadcast`, and replaces
+`idx_mail_messages_send_attempted` with `idx_mail_messages_lane_attempted`. `GET
+/v1/mailbox-domains` adds `daily_broadcast_limit` and `daily_transactional_limit`;
+`daily_send_limit` now means the personal lane. In Go, `domain.MailboxRepository.CountOutboundSince`
+takes a `domain.SendLane`, and `LeaseWaitingSends` counts only personal attempts.
+
 ## Unreleased — Mailbox organize
 
 ### High — `DELETE` on a message moves it to the trash

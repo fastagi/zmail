@@ -234,6 +234,80 @@ func TestBroadcastPausesAtTheSendLimitAndResumes(t *testing.T) {
 	}
 }
 
+// storedLane reads the lane a message was stored in.
+func (f *broadcastFixture) storedLane(t *testing.T, id uint) string {
+	t.Helper()
+	var lane string
+	if err := f.repo.db.Raw(`SELECT send_lane FROM mail_messages WHERE id = ?`, id).Scan(&lane).Error; err != nil {
+		t.Fatalf("load lane of %d: %v", id, err)
+	}
+	return lane
+}
+
+// Spec 5.4: a full broadcast lane must not hold back a member's own mail.
+func TestBroadcastLaneDoesNotConsumePersonalLane(t *testing.T) {
+	fixture := newBroadcastFixture(t, 3)
+	ctx := context.Background()
+	for _, email := range []string{"a@example.com", "b@example.com", "c@example.com"} {
+		fixture.contact(t, email, "", domain.MailContactSubscribed, true)
+	}
+	broadcast := fixture.draft(t)
+	if _, err := fixture.service.SendBroadcast(ctx, as(1), broadcast.ID, nil); err != nil {
+		t.Fatalf("SendBroadcast: %v", err)
+	}
+	if processed, err := fixture.service.DispatchBroadcasts(ctx, 10); err != nil || processed != 3 {
+		t.Fatalf("DispatchBroadcasts = %d, %v; want all 3 recipients", processed, err)
+	}
+	recipients, _, err := fixture.service.ListBroadcastRecipients(ctx, as(1), broadcast.ID, domain.MailRecipientSent, 1, 10)
+	if err != nil || len(recipients) != 3 {
+		t.Fatalf("sent recipients = %d, %v", len(recipients), err)
+	}
+	for _, recipient := range recipients {
+		if lane := fixture.storedLane(t, recipient.MessageID); lane != string(domain.SendLaneBroadcast) {
+			t.Fatalf("broadcast message %d lane = %q; want broadcast", recipient.MessageID, lane)
+		}
+	}
+
+	message, created, err := fixture.service.SendMessage(ctx, as(1), fixture.mailbox.ID,
+		SendInput{To: []string{"bob@example.com"}, Subject: "Personal", Text: "body"})
+	if err != nil || !created || message.Status != domain.MailStatusSent || message.QueuedReason != "" {
+		t.Fatalf("personal send after a full broadcast lane = %+v, %v, %v; want sent at once", message, created, err)
+	}
+	if lane := fixture.storedLane(t, message.ID); lane != string(domain.SendLanePersonal) {
+		t.Fatalf("personal message lane = %q; want personal", lane)
+	}
+}
+
+// A full personal lane must not pause a broadcast.
+func TestPersonalLaneFullStillLetsBroadcastSend(t *testing.T) {
+	fixture := newBroadcastFixture(t, 3)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		if _, _, err := fixture.service.SendMessage(ctx, as(1), fixture.mailbox.ID,
+			SendInput{To: []string{"bob@example.com"}, Subject: "Personal", Text: "body"}); err != nil {
+			t.Fatalf("personal send %d: %v", i, err)
+		}
+	}
+	waiting, _, err := fixture.service.SendMessage(ctx, as(1), fixture.mailbox.ID,
+		SendInput{To: []string{"bob@example.com"}, Subject: "Waits", Text: "body"})
+	if err != nil || waiting.QueuedReason != domain.MailQueuedForSendLimit {
+		t.Fatalf("fourth personal send = %+v, %v; want it to wait for the personal lane", waiting, err)
+	}
+
+	fixture.contact(t, "a@example.com", "A", domain.MailContactSubscribed, true)
+	broadcast := fixture.draft(t)
+	if _, err := fixture.service.SendBroadcast(ctx, as(1), broadcast.ID, nil); err != nil {
+		t.Fatalf("SendBroadcast: %v", err)
+	}
+	if processed, err := fixture.service.DispatchBroadcasts(ctx, 10); err != nil || processed != 1 {
+		t.Fatalf("DispatchBroadcasts = %d, %v; want the recipient sent", processed, err)
+	}
+	done, _ := fixture.service.GetBroadcast(ctx, as(1), broadcast.ID)
+	if done.Status != domain.MailBroadcastSent || done.StopReason != "" || done.Counts.Sent != 1 {
+		t.Fatalf("broadcast = %+v; want sent without send_limit_reached", done)
+	}
+}
+
 func TestBroadcastScheduleCancelAndValidation(t *testing.T) {
 	fixture := newBroadcastFixture(t, 100)
 	ctx := context.Background()

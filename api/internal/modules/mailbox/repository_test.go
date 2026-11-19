@@ -250,11 +250,11 @@ func TestRepositoryRecordsDeliveryReadStateAndDeletion(t *testing.T) {
 		t.Fatal("an outbound message stored a read row")
 	}
 
-	count, err := repo.CountOutboundSince(ctx, 1, time.Now().Add(-time.Hour))
+	count, err := repo.CountOutboundSince(ctx, 1, domain.SendLanePersonal, time.Now().Add(-time.Hour))
 	if err != nil || count != 1 {
 		t.Fatalf("CountOutboundSince = %d, %v", count, err)
 	}
-	if count, _ := repo.CountOutboundSince(ctx, 1, time.Now().Add(time.Hour)); count != 0 {
+	if count, _ := repo.CountOutboundSince(ctx, 1, domain.SendLanePersonal, time.Now().Add(time.Hour)); count != 0 {
 		t.Fatalf("CountOutboundSince in the future = %d", count)
 	}
 
@@ -1177,7 +1177,7 @@ func TestCountOutboundSinceUsesAttemptTime(t *testing.T) {
 	store("old attempt", &old, "")
 	waiting := store("waiting", nil, domain.MailQueuedForSendLimit)
 
-	count, err := repo.CountOutboundSince(ctx, 1, now.Add(-24*time.Hour))
+	count, err := repo.CountOutboundSince(ctx, 1, domain.SendLanePersonal, now.Add(-24*time.Hour))
 	if err != nil || count != 1 {
 		t.Fatalf("CountOutboundSince = %d, %v; want 1, the late attempt only", count, err)
 	}

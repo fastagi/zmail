@@ -405,3 +405,44 @@ func TestQueuedSendUsesStoredRFCMessageID(t *testing.T) {
 		t.Fatalf("rfc_message_id after send = %q; want %q", after.RFCMessageID, stored.RFCMessageID)
 	}
 }
+
+// Only personal attempts take the room waiting messages are sent into: broadcast attempts in the
+// window belong to their own lane.
+func TestQueuedSendsCountOnlyPersonalAttempts(t *testing.T) {
+	f := newQueueFixture(t)
+	start := f.clock
+	for i := 0; i < 5; i++ {
+		f.mustSend(t, "fill", false)
+	}
+	w1 := f.mustSend(t, "w1", true)
+	f.mustSend(t, "w2", true)
+
+	// The personal attempts leave the window; broadcast attempts made since fill the old count.
+	f.clock = start.Add(25 * time.Hour)
+	repo := f.repo.(*repository)
+	for i := 0; i < 5; i++ {
+		attempted := f.clock.Add(-time.Hour)
+		broadcastMessage := &domain.MailMessage{
+			MailboxID: f.team.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusSent,
+			FromAddress: f.team.Address, To: []string{"list@example.com"}, Subject: "news",
+			SendAttemptedAt: &attempted, SendLane: domain.SendLaneBroadcast,
+		}
+		if _, err := repo.CreateMessage(context.Background(), broadcastMessage); err != nil {
+			t.Fatalf("store broadcast attempt: %v", err)
+		}
+	}
+	if got := f.dispatch(t, 25); got != 2 {
+		t.Fatalf("dispatch processed %d; want both waiting messages, broadcast attempts use another lane", got)
+	}
+	if sent := f.stored(t, w1.ID); sent.Status != string(domain.MailStatusSent) || sent.SendLane != string(domain.SendLanePersonal) {
+		t.Fatalf("w1 = status %s, lane %s; want sent in the personal lane", sent.Status, sent.SendLane)
+	}
+	count, err := repo.CountOutboundSince(context.Background(), accessOrg, domain.SendLaneBroadcast, f.clock.Add(-sendLimitWindow))
+	if err != nil || count != 5 {
+		t.Fatalf("broadcast lane count = %d, %v; want 5", count, err)
+	}
+	count, err = repo.CountOutboundSince(context.Background(), accessOrg, domain.SendLanePersonal, f.clock.Add(-sendLimitWindow))
+	if err != nil || count != 2 {
+		t.Fatalf("personal lane count = %d, %v; want the 2 dispatched messages", count, err)
+	}
+}

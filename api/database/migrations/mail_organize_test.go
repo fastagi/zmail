@@ -27,8 +27,11 @@ func mailOrganizeFixture(t *testing.T) (*gorm.DB, func(string, ...any)) {
 	return db, exec
 }
 
+// rollBackMailOrganize rolls back, newest first, the organize migrations and every later
+// migration that changes mail_messages, so applying them again rebuilds the same column order.
 func rollBackMailOrganize(t *testing.T, db *gorm.DB) {
 	t.Helper()
+	require.NoError(t, (&addSendLanes{}).Down(db))
 	require.NoError(t, (&backfillMailThreads{}).Down(db))
 	require.NoError(t, (&addMailOrganize{}).Down(db))
 }
@@ -37,6 +40,7 @@ func applyMailOrganize(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, (&addMailOrganize{}).Up(db))
 	require.NoError(t, (&backfillMailThreads{}).Up(db))
+	require.NoError(t, (&addSendLanes{}).Up(db))
 }
 
 // TestMailOrganizeMigrationUpDown rolls both organize migrations back over stored folders, labels,

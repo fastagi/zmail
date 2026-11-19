@@ -254,7 +254,8 @@ provider call independently and composes with caller cancellation. See [`EMAIL.m
 
 The optional `mailbox` starter requires the `organization` starter and reads `MAILBOX_DOMAIN`, `MAILBOX_PROVIDER`,
 `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN`, `MAILBOX_REQUEST_TIMEOUT`,
-`MAILBOX_INBOUND_SECRET`, `MAILBOX_DAILY_SEND_LIMIT`, `MAILBOX_PUBLIC_URL`,
+`MAILBOX_INBOUND_SECRET`, `MAILBOX_DAILY_SEND_LIMIT`, `MAILBOX_DAILY_BROADCAST_LIMIT`,
+`MAILBOX_DAILY_TRANSACTIONAL_LIMIT`, `MAILBOX_PUBLIC_URL`,
 `MAILBOX_CUSTOM_DOMAINS_ENABLED`, `MAILBOX_CLOUDFLARE_EMAIL_WORKER`, and
 `MAILBOX_MAX_ZONES_PER_ORGANIZATION` from the same typed snapshot. They are
 validated only when the starter is selected.
@@ -266,7 +267,9 @@ validated only when the starter is selected.
 | `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN` | empty | Both are required when the provider is `cloudflare`. The token is a secret. |
 | `MAILBOX_REQUEST_TIMEOUT` | `15s` | Bounds one provider call; greater than 0 and at most `60s`. |
 | `MAILBOX_INBOUND_SECRET` | empty | Shared secret of at least 32 characters that signs deliveries from the mail edge. Empty keeps inbound mail disabled. |
-| `MAILBOX_DAILY_SEND_LIMIT` | `200` | Outbound messages one organization may attempt per rolling 24 hours; 1 to 100000. |
+| `MAILBOX_DAILY_SEND_LIMIT` | `200` | The personal lane: console sends, replies, API outbound messages, and template test sends one organization may attempt per rolling 24 hours; 1 to 100000. |
+| `MAILBOX_DAILY_BROADCAST_LIMIT` | value of `MAILBOX_DAILY_SEND_LIMIT` | The broadcast lane: broadcast recipients one organization may attempt per rolling 24 hours; 1 to 100000. Unset or `0` takes the personal limit. |
+| `MAILBOX_DAILY_TRANSACTIONAL_LIMIT` | value of `MAILBOX_DAILY_SEND_LIMIT` | The transactional lane: live, non-simulated transactional messages one organization may attempt per rolling 24 hours; 1 to 100000. Unset or `0` takes the personal limit. Lanes are counted separately, so an organization's total can reach the sum of the three; keep it within the provider account's limit. |
 | `MAILBOX_PUBLIC_URL` | empty | Public origin of the Web console that broadcast unsubscribe links point at. Empty keeps broadcasts off. |
 | `MAILBOX_CUSTOM_DOMAINS_ENABLED` | `false` | Lets owners and admins connect their own domains: into a zone the operator added to the Cloudflare account, or into a managed zone Zmail creates for an apex the account does not hold. Requires the `cloudflare` provider. The token then needs Account → Zone: Edit, DNS Edit, Zone Settings Edit, Email Routing Rules Edit, and Email Sending Edit, with zone resources set to all zones of the account, since a token scoped to named zones cannot reach the zones Zmail creates later. Any organization may claim a domain in any zone the operator added, so keep zones organizations must not use in a separate Cloudflare account. |
 | `MAILBOX_CLOUDFLARE_EMAIL_WORKER` | empty | The Email Worker that routing rules of connected domains deliver to; required when custom domains are enabled. |

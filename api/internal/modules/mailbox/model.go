@@ -143,6 +143,8 @@ type MailMessagePO struct {
 	QueuedReason *string `gorm:"size:32"`
 	// SendAttemptedAt is when the provider call started; the send limit counts by it.
 	SendAttemptedAt *time.Time
+	// SendLane is the send limit lane the message counts against: personal or broadcast.
+	SendLane string `gorm:"size:16;not null;default:'personal'"`
 	// SendLeaseUntil keeps a waiting message to one worker while it is being sent.
 	SendLeaseUntil *time.Time
 	// Placement is default, archive, folder, or trash; FolderID names the folder while in one.
@@ -276,6 +278,10 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 		message.QueuedReason = *po.QueuedReason
 	}
 	message.SendAttemptedAt = po.SendAttemptedAt
+	message.SendLane = domain.SendLane(po.SendLane)
+	if message.SendLane == "" {
+		message.SendLane = domain.SendLanePersonal
+	}
 	message.Placement = domain.MailPlacement(po.Placement)
 	if message.Placement == "" {
 		message.Placement = domain.MailPlacementDefault
@@ -326,6 +332,10 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		po.QueuedReason = &reason
 	}
 	po.SendAttemptedAt = message.SendAttemptedAt
+	po.SendLane = string(message.SendLane)
+	if po.SendLane == "" {
+		po.SendLane = string(domain.SendLanePersonal)
+	}
 	po.Placement = string(message.Placement)
 	if po.Placement == "" {
 		po.Placement = string(domain.MailPlacementDefault)

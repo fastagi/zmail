@@ -42,7 +42,13 @@ type Settings struct {
 	Provider         string
 	InboundSecret    string
 	InboundTolerance time.Duration
-	DailySendLimit   int
+	// DailySendLimit is the personal lane limit: console sends, replies, API outbound messages, and
+	// template tests one organization may attempt per rolling 24 hours.
+	DailySendLimit int
+	// DailyBroadcastLimit is the broadcast lane limit; 0 takes DailySendLimit.
+	DailyBroadcastLimit int
+	// DailyTransactionalLimit is the transactional lane limit; 0 takes DailySendLimit.
+	DailyTransactionalLimit int
 	// PublicURL is the public Web origin unsubscribe links point at; empty disables broadcasts.
 	PublicURL string
 	// CustomDomainsEnabled lets organizations connect their own domains.
@@ -204,6 +210,8 @@ type Service interface {
 	Provider() string
 	InboundEnabled() bool
 	DailySendLimit() int
+	DailyBroadcastLimit() int
+	DailyTransactionalLimit() int
 	// RecordDeliveryEvent stores one signed provider event about an outbound message. It
 	// reports recorded=false when the event was already stored.
 	RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (message *domain.MailMessage, event domain.MailEvent, recorded bool, err error)
@@ -325,6 +333,8 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	if resolved.DailySendLimit > 0 {
 		settings.DailySendLimit = resolved.DailySendLimit
 	}
+	settings.DailyBroadcastLimit = resolved.DailyBroadcastLimit
+	settings.DailyTransactionalLimit = resolved.DailyTransactionalLimit
 	if resolved.MaxZonesPerOrganization > 0 {
 		settings.MaxZonesPerOrganization = resolved.MaxZonesPerOrganization
 	}
@@ -340,7 +350,27 @@ func (s *service) Provider() string {
 }
 
 func (s *service) DailySendLimit() int {
-	return s.settings.DailySendLimit
+	return s.settings.laneLimit(domain.SendLanePersonal)
+}
+
+func (s *service) DailyBroadcastLimit() int {
+	return s.settings.laneLimit(domain.SendLaneBroadcast)
+}
+
+func (s *service) DailyTransactionalLimit() int {
+	return s.settings.laneLimit(domain.SendLaneTransactional)
+}
+
+// laneLimit is the rolling 24-hour limit of one lane. A lane without its own limit takes the
+// personal limit, so no lane has less room than the shared limit gave before lanes existed.
+func (settings Settings) laneLimit(lane domain.SendLane) int {
+	switch {
+	case lane == domain.SendLaneBroadcast && settings.DailyBroadcastLimit > 0:
+		return settings.DailyBroadcastLimit
+	case lane == domain.SendLaneTransactional && settings.DailyTransactionalLimit > 0:
+		return settings.DailyTransactionalLimit
+	}
+	return settings.DailySendLimit
 }
 
 func (s *service) InboundEnabled() bool {
@@ -589,9 +619,10 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 	return s.withEvents(ctx, message)
 }
 
-// send stores and sends one outbound message. A direct send (queueAtLimit) that finds the
-// organization's send limit full is stored as a waiting message instead, for the worker to send
-// when the window has room; a broadcast recipient gets ErrMailSendLimitReached and pauses.
+// send stores and sends one outbound message. A direct send (queueAtLimit) counts in the personal
+// lane and, when that lane is full, is stored as a waiting message instead, for the worker to send
+// when the window has room. A broadcast recipient (not queueAtLimit) counts in the broadcast lane
+// and gets ErrMailSendLimitReached there, which pauses the broadcast.
 func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput, queueAtLimit bool) (*domain.MailMessage, bool, error) {
 	var templateID uint
 	if input.Template != nil {
@@ -605,6 +636,10 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		return nil, false, err
 	}
 	message.TemplateID = templateID
+	message.SendLane = domain.SendLanePersonal
+	if !queueAtLimit {
+		message.SendLane = domain.SendLaneBroadcast
+	}
 	if message.IdempotencyKey != "" {
 		existing, findErr := s.repo.FindMessageByIdempotencyKey(ctx, mailbox.ID, message.IdempotencyKey)
 		if findErr == nil {
@@ -626,11 +661,11 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		}
 	}
 
-	sent, err := s.repo.CountOutboundSince(ctx, mailbox.OrganizationID, s.now().Add(-sendLimitWindow))
+	sent, err := s.repo.CountOutboundSince(ctx, mailbox.OrganizationID, message.SendLane, s.now().Add(-sendLimitWindow))
 	if err != nil {
 		return nil, false, err
 	}
-	if sent >= int64(s.settings.DailySendLimit) {
+	if sent >= int64(s.settings.laneLimit(message.SendLane)) {
 		if !queueAtLimit {
 			return nil, false, ErrMailSendLimitReached
 		}
@@ -732,14 +767,14 @@ func (s *service) deliver(
 	return message, true, result
 }
 
-// queueForSendLimit stores a direct send as a waiting message. At most one day's limit of messages
-// may wait per organization; one more is rejected and nothing is stored.
+// queueForSendLimit stores a direct send as a waiting message. At most one day's personal lane
+// limit of messages may wait per organization; one more is rejected and nothing is stored.
 func (s *service) queueForSendLimit(ctx context.Context, mailbox *domain.Mailbox, message *domain.MailMessage) (*domain.MailMessage, bool, error) {
 	waiting, err := s.repo.CountWaitingSends(ctx, mailbox.OrganizationID)
 	if err != nil {
 		return nil, false, err
 	}
-	if waiting >= int64(s.settings.DailySendLimit) {
+	if waiting >= int64(s.settings.laneLimit(domain.SendLanePersonal)) {
 		return nil, false, ErrMailSendLimitReached
 	}
 	message.Status = domain.MailStatusQueued

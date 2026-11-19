@@ -69,14 +69,16 @@ func (h *Handler) ListDomains(c *gin.Context) {
 			kind = "shared"
 		}
 		items = append(items, MailboxDomainResponse{
-			Domain:               mailboxDomain.Name,
-			Kind:                 kind,
-			MaxMailboxes:         domain.MaxMailboxesPerOrganization,
-			Provider:             h.service.Provider(),
-			InboundEnabled:       h.service.InboundEnabled(),
-			DailySendLimit:       h.service.DailySendLimit(),
-			BroadcastsEnabled:    h.service.BroadcastsEnabled(),
-			CustomDomainsEnabled: h.service.CustomDomainsEnabled(),
+			Domain:                  mailboxDomain.Name,
+			Kind:                    kind,
+			MaxMailboxes:            domain.MaxMailboxesPerOrganization,
+			Provider:                h.service.Provider(),
+			InboundEnabled:          h.service.InboundEnabled(),
+			DailySendLimit:          h.service.DailySendLimit(),
+			DailyBroadcastLimit:     h.service.DailyBroadcastLimit(),
+			DailyTransactionalLimit: h.service.DailyTransactionalLimit(),
+			BroadcastsEnabled:       h.service.BroadcastsEnabled(),
+			CustomDomainsEnabled:    h.service.CustomDomainsEnabled(),
 		})
 	}
 	privateResponse(c)
