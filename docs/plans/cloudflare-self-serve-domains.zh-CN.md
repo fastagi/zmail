@@ -2,7 +2,7 @@
 
 状态：已批准（2026-11-19，选择「先用 Cloudflare 改 NS」；第 3.2、3.3 节借鉴飞书邮箱的接入设计）。是 [mail-domains.md](mail-domains.md) 的扩展：那份计划已定的「Zmail 自动在 Cloudflare 写入
 收发信记录、逐条显示状态、`pending/verified`、邮箱选择域名」全部沿用，这里只写新增部分。
-自建收发信方案 [self-hosted-mail-domains.zh-CN.md](self-hosted-mail-domains.zh-CN.md) 暂停，作为以后不想迁 DNS 的客户的长期方案。
+自建收发信方案（self-hosted-mail-domains.zh-CN.md，尚未合入）暂停，作为以后不想迁 DNS 的客户的长期方案。
 
 ## 1. 目标与取舍
 
