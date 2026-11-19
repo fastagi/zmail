@@ -1,11 +1,11 @@
 'use client';
 
-import { Hammer, PlugZap } from 'lucide-react';
+import { PlugZap } from 'lucide-react';
+import dynamic from 'next/dynamic';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { DeveloperWebhooksTab } from '@/features/developer/components/developer-webhooks-tab';
 import { QuickStartTab } from '@/features/developer/components/quick-start-tab';
 import { SendLogTab } from '@/features/developer/components/send-log-tab';
 import { TransactionalTemplatesTab } from '@/features/developer/components/transactional-templates-tab';
@@ -25,6 +25,23 @@ import type { MailboxDomain } from '@/features/mailbox/types';
 import { useMailboxDomains } from '@/features/mailbox/hooks/use-mailbox';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
+
+function TabLoading() {
+  return <Skeleton className="h-72 w-full" aria-hidden="true" />;
+}
+
+// The limits and webhook tabs load on first open, keeping the console's first load small.
+const LimitsTab = dynamic(
+  () => import('@/features/developer/components/limits-tab').then(module => module.LimitsTab),
+  { loading: TabLoading }
+);
+const DeveloperWebhooksTab = dynamic(
+  () =>
+    import('@/features/developer/components/developer-webhooks-tab').then(
+      module => module.DeveloperWebhooksTab
+    ),
+  { loading: TabLoading }
+);
 
 /**
  * The developer console: transactional mail for the organization's own backend. The tab and the
@@ -132,14 +149,10 @@ function DeveloperTabs({
             <TransactionalTemplatesTab organization={organization} />
           ) : item === 'logs' ? (
             <SendLogTab organization={organization} />
-          ) : item === 'webhooks' ? (
-            <DeveloperWebhooksTab organizationId={organization.id} />
+          ) : item === 'limits' ? (
+            <LimitsTab organization={organization} domains={domains} />
           ) : (
-            <EmptyState
-              icon={<Hammer className="size-5" aria-hidden="true" />}
-              title={t('placeholder.title')}
-              description={t('placeholder.description')}
-            />
+            <DeveloperWebhooksTab organizationId={organization.id} />
           )}
         </TabsContent>
       ))}

@@ -1,6 +1,13 @@
 import type { z } from 'zod/mini';
 
 import {
+  MAIL_SUPPRESSION_CURSOR_PATTERN,
+  MAIL_SUPPRESSION_EMAIL_MAX_LENGTH,
+  MAIL_SUPPRESSION_MAX_PAGE_SIZE,
+  MAIL_SUPPRESSION_REASONS,
+  mailSendLaneUsageResponseSchema,
+  mailSuppressionPageSchema,
+  mailSuppressionSchema,
   TRANSACTIONAL_LOG_CURSOR_PATTERN,
   TRANSACTIONAL_LOG_MAX_PAGE_SIZE,
   TRANSACTIONAL_LOG_RECIPIENT_MAX_LENGTH,
@@ -11,6 +18,9 @@ import {
   transactionalMessageSchema,
 } from '@/features/developer/schemas';
 import type {
+  MailSendLaneUsageList,
+  MailSuppressionFilters,
+  MailSuppressionPage,
   TransactionalLogEntryDetail,
   TransactionalLogFilters,
   TransactionalLogPage,
@@ -28,6 +38,13 @@ import {
 } from '@/http/contract';
 import request, { ApiError } from '@/http/request';
 
+interface PageOptions {
+  /** `meta.next_cursor` of the previous page; absent for the newest page. */
+  cursor?: string;
+  /** Without it the API's default (50) applies. */
+  perPage?: number;
+}
+
 interface LogPageOptions {
   /** `meta.next_cursor` of the previous page; absent for the newest page. */
   cursor?: string;
@@ -36,8 +53,9 @@ interface LogPageOptions {
 }
 
 /**
- * Transactional mail as the developer console reads it: the send log and console test sends. The
- * API key route `POST /v1/transactional-messages` is for backends and has no browser service.
+ * Transactional mail as the developer console reads it: the send log, console test sends, lane
+ * usage, and the suppression list. The API key route `POST /v1/transactional-messages` is for
+ * backends and has no browser service.
  */
 export const developerService = {
   /** One keyset page of the send log, newest first, with the mode's 24-hour count. */
@@ -116,6 +134,64 @@ export const developerService = {
     if (!parsed.success) throw invalidResponse();
     return parsed.data;
   },
+
+  /** How full each send lane is; owners and admins only, members get `403 PERMISSION.DENIED`. */
+  async sendLanes(organizationId: number): Promise<MailSendLaneUsageList> {
+    const headers = organizationHeaders(organizationId);
+    const parsed = mailSendLaneUsageResponseSchema.safeParse(
+      await request.getEnvelope<unknown>('/mail-send-lanes', { headers })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data.data;
+  },
+
+  /** One keyset page of the suppression list, newest first; owners and admins only. */
+  async suppressions(
+    organizationId: number,
+    filters: MailSuppressionFilters = {},
+    { cursor, perPage }: PageOptions = {}
+  ): Promise<MailSuppressionPage> {
+    const headers = organizationHeaders(organizationId);
+    const email = filters.email?.trim().toLowerCase();
+    if (email !== undefined && email.length > MAIL_SUPPRESSION_EMAIL_MAX_LENGTH) {
+      throw invalidResponse();
+    }
+    if (
+      filters.reason !== undefined &&
+      !(MAIL_SUPPRESSION_REASONS as readonly string[]).includes(filters.reason)
+    ) {
+      throw invalidResponse();
+    }
+    if (cursor !== undefined && !MAIL_SUPPRESSION_CURSOR_PATTERN.test(cursor)) {
+      throw invalidResponse();
+    }
+    if (
+      perPage !== undefined &&
+      (!Number.isSafeInteger(perPage) || perPage < 1 || perPage > MAIL_SUPPRESSION_MAX_PAGE_SIZE)
+    ) {
+      throw invalidResponse();
+    }
+    const parsed = mailSuppressionPageSchema.safeParse(
+      await request.getEnvelope<unknown>('/mail-suppressions', {
+        headers,
+        params: {
+          ...(email === undefined || email === '' ? {} : { email }),
+          ...(filters.reason === undefined ? {} : { reason: filters.reason }),
+          ...(cursor === undefined ? {} : { cursor }),
+          ...(perPage === undefined ? {} : { per_page: perPage }),
+        },
+      })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return { items: parsed.data.data, meta: parsed.data.meta };
+  },
+
+  /** Takes an entry off the suppression list; the API answers `204` even when it is gone. */
+  async removeSuppression(organizationId: number, suppressionId: number): Promise<void> {
+    const headers = organizationHeaders(organizationId);
+    validId(suppressionId);
+    await request.delete<void>(`/mail-suppressions/${suppressionId}`, { headers });
+  },
 };
 
 function organizationHeaders(organizationId: number): Record<string, string> {
@@ -159,3 +235,15 @@ assertContract<
   Accepts<z.input<typeof transactionalMessageSchema>, ContractData<'getTransactionalMessage', 200>>
 >();
 assertContract<Sends<TransactionalTestSendInput, ContractRequest<'sendTransactionalTest'>>>();
+assertContract<
+  Accepts<
+    z.input<typeof mailSendLaneUsageResponseSchema>,
+    ContractResponse<'listMailSendLanes', 200>
+  >
+>();
+assertContract<
+  Accepts<z.input<typeof mailSuppressionPageSchema>, ContractResponse<'listMailSuppressions', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof mailSuppressionSchema>, ContractData<'listMailSuppressions', 200>[number]>
+>();

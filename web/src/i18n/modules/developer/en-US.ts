@@ -143,9 +143,102 @@ const messages = {
     retryNote:
       'A failed push is retried after about 1 minute, 5 minutes, 15 minutes, 1 hour, and then at longer gaps up to 24 hours apart, over about three days and at most 10 attempts. After that, only an operator can replay it.',
   },
-  placeholder: {
-    title: 'Coming soon',
-    description: 'This section is not available yet.',
+  limits: {
+    lanesTitle: 'Daily sending limits',
+    lanesDescription:
+      'Transactional mail has its own lane: when broadcasts use up theirs, sign-up codes still go out.',
+    lanesLabel: 'Send lanes',
+    lanes: {
+      transactional: {
+        name: 'Transactional (codes, welcome mail)',
+        note: 'Full broadcasts never hold it up. When it is full, messages wait up to an hour for room instead of being dropped.',
+      },
+      broadcast: {
+        name: 'Broadcasts',
+        note: 'When it is full, broadcasts pause until there is room; transactional mail is not affected.',
+      },
+      personal: {
+        name: 'Everyday mail (written by people)',
+        note: 'Kept for mail your members write; broadcasts and transactional mail never use it.',
+      },
+    },
+    usage: '{used} / {limit}',
+    limitOnly: '{limit} per 24 hours',
+    waiting: {
+      transactional: '{count} waiting',
+      broadcast: '{count} recipients waiting',
+      personal: '{count} waiting',
+    },
+    window: 'Counted over the last 24 hours, failed attempts included.',
+    usageAdminsOnly: 'Usage is visible to admins.',
+    rulesTitle: 'Protection rules',
+    rules: {
+      recipient: {
+        name: 'Same recipient',
+        description:
+          'At most {count} messages of one template to one address per minute, so nobody can flood an inbox with codes.',
+        value: '{count} / minute',
+      },
+      key: {
+        name: 'One API key',
+        description: 'Above this a request gets 429 with how long to wait before retrying.',
+        value: '{count} / second',
+      },
+      idempotency: {
+        name: 'Idempotency key',
+        description:
+          'One key sends once within 24 hours; a repeated request gets the first message back.',
+        value: '24 hours',
+      },
+      suppression: {
+        name: 'Bounce and complaint list',
+        description:
+          'Addresses that bounced or complained are not sent to, and do not count toward the limit.',
+        value: 'Automatic',
+      },
+      secrets: {
+        name: 'Secret variables',
+        description: 'Values marked secret are masked in the send log and never sent in webhooks.',
+        value: '••••••',
+      },
+    },
+    suppressions: {
+      title: 'Bounce and complaint list',
+      description:
+        'Mail is not sent to these addresses. Remove one only when you know it works again.',
+      searchLabel: 'Find an address',
+      searchPlaceholder: 'user@example.com',
+      search: 'Find',
+      clearSearch: 'Clear',
+      table: 'Suppression list',
+      columns: {
+        email: 'Address',
+        reason: 'Reason',
+        source: 'Added by',
+        createdAt: 'Added',
+        actions: 'Actions',
+      },
+      reasons: {
+        bounced: 'Bounced',
+        complained: 'Complained',
+      },
+      sources: {
+        transactional: 'Transactional mail',
+        broadcast: 'Broadcast',
+        backfill: 'Earlier contact status',
+      },
+      remove: 'Remove',
+      removeLabel: 'Remove {email}',
+      cancel: 'Cancel',
+      confirmTitle: 'Remove {email} from the list?',
+      confirmDescription:
+        'Transactional mail will reach this address again. If it still does not work, it may bounce again and hurt your sending reputation. A contact marked suppressed is still skipped by broadcasts.',
+      emptyTitle: 'No suppressed addresses',
+      emptyDescription: 'Addresses that bounce or complain show up here.',
+      noMatchTitle: 'This address is not on the list',
+      noMatchDescription: 'The search matches the exact address only.',
+      older: 'Older',
+    },
   },
   disabled: {
     title: 'Transactional mail is not enabled',

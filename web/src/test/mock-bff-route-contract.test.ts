@@ -232,7 +232,10 @@ const developerRouteModule = resolve(
 function isDeveloperRoute(path: string): boolean {
   const route = relativeRoute(path);
   return (
-    route.startsWith('transactional-mail-log/') || route.startsWith('transactional-test-sends/')
+    route.startsWith('transactional-mail-log/') ||
+    route.startsWith('transactional-test-sends/') ||
+    route.startsWith('mail-send-lanes/') ||
+    route.startsWith('mail-suppressions/')
   );
 }
 
@@ -558,7 +561,7 @@ describe('mock BFF route contract', () => {
       }
     }
     const routes = listRouteFiles(appApiRoot).filter(isDeveloperRoute);
-    expect(routes.length).toBe(3);
+    expect(routes.length).toBe(6);
     for (const path of routes) {
       for (const handler of routeHandlers(path)) {
         expect(delegatesDeveloperGuard(path, handler), relativeRoute(path)).toBe(true);

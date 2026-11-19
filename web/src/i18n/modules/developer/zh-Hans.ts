@@ -141,9 +141,97 @@ const messages = {
     retryNote:
       '推送失败后约隔 1 分钟、5 分钟、15 分钟、1 小时重试，之后间隔逐渐拉长，最长相隔 24 小时，前后约三天、最多 10 次；之后只有运维人员可以重放。',
   },
-  placeholder: {
-    title: '即将推出',
-    description: '这个部分暂未开放。',
+  limits: {
+    lanesTitle: '今日外发额度',
+    lanesDescription: '事务邮件走单独的通道：营销群发用满了，注册验证码照样能发。',
+    lanesLabel: '发信通道',
+    lanes: {
+      transactional: {
+        name: '事务邮件（验证码、欢迎信）',
+        note: '群发用满也不影响。通道满时消息最多排队 1 小时等待额度，不会直接丢弃。',
+      },
+      broadcast: {
+        name: '营销群发',
+        note: '用满后群发暂停，等有额度再继续；事务通道不受影响。',
+      },
+      personal: {
+        name: '日常收发（成员手写的信）',
+        note: '给成员保留，不被群发和事务邮件占用。',
+      },
+    },
+    usage: '{used} / {limit}',
+    limitOnly: '每 24 小时 {limit} 封',
+    waiting: {
+      transactional: '{count} 封排队中',
+      broadcast: '{count} 位收件人等待中',
+      personal: '{count} 封排队中',
+    },
+    window: '统计最近 24 小时，失败的尝试也计入。',
+    usageAdminsOnly: '用量仅管理员可见。',
+    rulesTitle: '保护规则',
+    rules: {
+      recipient: {
+        name: '同一收件人限频',
+        description: '同一模板发往同一地址每分钟最多 {count} 封，防止被刷验证码。',
+        value: '{count} / 分钟',
+      },
+      key: {
+        name: '单个密钥限速',
+        description: '超出后返回 429，并告诉你多久后重试。',
+        value: '{count} / 秒',
+      },
+      idempotency: {
+        name: '幂等键',
+        description: '同一个键 24 小时内只发一封，重复请求返回第一次的消息。',
+        value: '24 小时',
+      },
+      suppression: {
+        name: '退信与投诉名单',
+        description: '退信或投诉过的地址自动拦截，不计额度。',
+        value: '自动',
+      },
+      secrets: {
+        name: '秘密变量',
+        description: '标记为秘密的变量在发送日志中一律遮住，也不会出现在 Webhook 中。',
+        value: '••••••',
+      },
+    },
+    suppressions: {
+      title: '退信与投诉名单',
+      description: '不会向这些地址发信。只有确认地址已恢复正常时再解除。',
+      searchLabel: '查找地址',
+      searchPlaceholder: 'user@example.com',
+      search: '查找',
+      clearSearch: '清除',
+      table: '退信与投诉名单',
+      columns: {
+        email: '地址',
+        reason: '原因',
+        source: '来源',
+        createdAt: '加入时间',
+        actions: '操作',
+      },
+      reasons: {
+        bounced: '退信',
+        complained: '投诉',
+      },
+      sources: {
+        transactional: '事务邮件',
+        broadcast: '群发',
+        backfill: '早先的联系人状态',
+      },
+      remove: '解除',
+      removeLabel: '解除 {email}',
+      cancel: '取消',
+      confirmTitle: '把 {email} 移出名单？',
+      confirmDescription:
+        '解除后事务邮件会再次发往这个地址。如果它仍然无法收信，可能再次退信并影响发信信誉。已标记为拦截的联系人仍会被群发跳过。',
+      emptyTitle: '名单中没有地址',
+      emptyDescription: '退信或投诉的地址会出现在这里。',
+      noMatchTitle: '这个地址不在名单中',
+      noMatchDescription: '查找只匹配完整地址。',
+      older: '更早',
+    },
   },
   disabled: {
     title: '事务邮件未启用',

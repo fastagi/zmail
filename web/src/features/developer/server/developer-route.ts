@@ -5,11 +5,16 @@ import { NextResponse } from 'next/server';
 import { apiErrorResponse, apiJsonBodyErrorResponse } from '@/app/api/_shared/error-response';
 import { readJsonBody } from '@/app/api/_shared/json-body';
 import { guardMockBffRoute, guardSameOriginMutation } from '@/app/api/_shared/mock-bff';
-import { apiSuccessResponse } from '@/app/api/_shared/success-response';
+import { apiNoContentResponse, apiSuccessResponse } from '@/app/api/_shared/success-response';
 import { getApiSessionToken } from '@/features/auth/server/api-session';
 import { getSessionUser } from '@/features/auth/server/session';
 import type { AuthUser } from '@/features/auth/types';
+import type { OrganizationRole } from '@/features/organization/types';
 import {
+  MAIL_SUPPRESSION_CURSOR_PATTERN,
+  MAIL_SUPPRESSION_EMAIL_MAX_LENGTH,
+  MAIL_SUPPRESSION_MAX_PAGE_SIZE,
+  MAIL_SUPPRESSION_REASONS,
   TRANSACTIONAL_LOG_CURSOR_PATTERN,
   TRANSACTIONAL_LOG_DEFAULT_RANGE_DAYS,
   TRANSACTIONAL_LOG_EVENTS,
@@ -24,6 +29,7 @@ import {
 import {
   mockTransactionalStore,
   normalizeAddress,
+  type MockSuppressionQuery,
   type MockTransactionalLogQuery,
   type MockTestSendResult,
 } from '@/features/developer/server/mock-transactional-store';
@@ -44,8 +50,8 @@ import { forwardAuthenticatedGoApi } from '@/server/api-adapter/authenticated-ro
 import { privateNoStoreHeaders } from '@/server/http/private-response';
 
 /**
- * Browser route boundary of the developer console's transactional mail: the send log and console
- * test sends. Availability follows the mailbox feature (`resolveMailboxRoute`); the mock backend
+ * Browser route boundary of the developer console's transactional mail: the send log, console
+ * test sends, lane usage, and the suppression list. Availability follows the mailbox feature (`resolveMailboxRoute`); the mock backend
  * is also behind `guardMockBffRoute()`. Writes check availability, then the browser origin, then
  * authentication, before reading a body. The API key route `/v1/transactional-messages` has no
  * browser route: backends call the API directly.
@@ -53,7 +59,13 @@ import { privateNoStoreHeaders } from '@/server/http/private-response';
 
 type DeveloperTarget =
   | { available: true; backend: 'go-api'; accessToken: string; organizationId: number }
-  | { available: true; backend: 'mock'; organizationId: number; user: AuthUser }
+  | {
+      available: true;
+      backend: 'mock';
+      organizationId: number;
+      user: AuthUser;
+      role: OrganizationRole;
+    }
   | { available: false; response: NextResponse };
 
 type AuthenticatedDeveloperBackend =
@@ -151,6 +163,81 @@ export async function sendTransactionalTestRoute(request: Request): Promise<Next
       userId: target.user.id,
     })
   );
+}
+
+/** How full each send lane is; owners and admins only. */
+export async function listMailSendLanesRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveDeveloperReadRoute(request);
+  if (!target.available) return target.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mail-send-lanes',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  if (!canManage(target.role)) return permissionDenied();
+  const [settings] = mockMailboxStore.domains();
+  return success(
+    mockTransactionalStore.sendLanes(target.organizationId, {
+      transactional: settings.daily_transactional_limit,
+      broadcast: settings.daily_broadcast_limit,
+      personal: settings.daily_send_limit,
+    })
+  );
+}
+
+/** One keyset page of the suppression list, filtered by the documented parameters only. */
+export async function listMailSuppressionsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveDeveloperReadRoute(request);
+  if (!target.available) return target.response;
+  // The API checks the role before the query.
+  if (target.backend === 'mock' && !canManage(target.role)) return permissionDenied();
+  const query = parseSuppressionQuery(new URL(request.url).searchParams);
+  if (!query.ok) return query.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mail-suppressions',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: query.value.forward,
+    });
+  }
+  const page = mockTransactionalStore.suppressions(target.organizationId, query.value.mock);
+  return NextResponse.json(
+    { code: 0, message: 'success', data: page.items, meta: page.meta },
+    { headers: privateDeveloperHeaders() }
+  );
+}
+
+/** Removes an entry from the suppression list; `204` whether or not the organization had it. */
+export async function removeMailSuppressionRoute(
+  request: Request,
+  rawSuppressionId: string
+): Promise<NextResponse> {
+  const target = await resolveDeveloperMutationRoute(request);
+  if (!target.available) return target.response;
+  // The API checks the role before the id.
+  if (target.backend === 'mock' && !canManage(target.role)) return permissionDenied();
+  if (!routeIdPattern.test(rawSuppressionId) || !Number.isSafeInteger(Number(rawSuppressionId))) {
+    return failure(400, ApiErrorCode.COMMON_INVALID_INPUT, 'Invalid ID format');
+  }
+  const suppressionId = Number(rawSuppressionId);
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mail-suppressions/${suppressionId}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  mockTransactionalStore.removeSuppression(target.organizationId, suppressionId);
+  return apiNoContentResponse(privateDeveloperHeaders());
 }
 
 function testSendResponse(result: MockTestSendResult): NextResponse {
@@ -274,6 +361,63 @@ function parseLogQuery(query: URLSearchParams, now: Date = new Date()): Parsed<L
         ...(to === undefined ? {} : { to }),
         since: start,
         ...(until === undefined ? {} : { until }),
+        ...(values.cursor === undefined ? {} : { cursor: Number(values.cursor) }),
+        ...(perPage === undefined ? {} : { perPage }),
+      },
+    },
+  };
+}
+
+interface SuppressionQuery {
+  forward: URLSearchParams;
+  mock: MockSuppressionQuery;
+}
+
+/**
+ * Checks the suppression list query as the API does and keeps only the documented parameters.
+ * An empty value counts as absent; the address is trimmed and lowercased.
+ */
+function parseSuppressionQuery(query: URLSearchParams): Parsed<SuppressionQuery> {
+  const names = ['email', 'reason', 'cursor', 'per_page'] as const;
+  const values: Partial<Record<(typeof names)[number], string>> = {};
+  for (const name of names) {
+    const all = query.getAll(name);
+    if (all.length > 1) return invalidQuery(`Repeated ${name}`);
+    if (all.length === 1 && all[0] !== '') values[name] = all[0];
+  }
+  const email = values.email === undefined ? undefined : normalizeAddress(values.email);
+  if (email !== undefined && email.length > MAIL_SUPPRESSION_EMAIL_MAX_LENGTH) {
+    return invalidQuery('email too long');
+  }
+  const { reason } = values;
+  if (reason !== undefined && !isOneOf(MAIL_SUPPRESSION_REASONS, reason)) {
+    return invalidQuery('Unknown reason');
+  }
+  if (values.cursor !== undefined && !MAIL_SUPPRESSION_CURSOR_PATTERN.test(values.cursor)) {
+    return invalidQuery('Malformed cursor');
+  }
+  const perPage = values.per_page === undefined ? undefined : Number(values.per_page);
+  if (
+    perPage !== undefined &&
+    (!/^\d{1,3}$/u.test(values.per_page ?? '') ||
+      perPage < 1 ||
+      perPage > MAIL_SUPPRESSION_MAX_PAGE_SIZE)
+  ) {
+    return invalidQuery('per_page out of range');
+  }
+
+  const forward = new URLSearchParams();
+  for (const name of names) {
+    const value = name === 'email' ? email : values[name];
+    if (value !== undefined && value !== '') forward.set(name, value);
+  }
+  return {
+    ok: true,
+    value: {
+      forward,
+      mock: {
+        ...(email === undefined || email === '' ? {} : { email }),
+        ...(reason === undefined ? {} : { reason }),
         ...(values.cursor === undefined ? {} : { cursor: Number(values.cursor) }),
         ...(perPage === undefined ? {} : { perPage }),
       },
@@ -424,13 +568,25 @@ function targetOf(
       organizationId,
     };
   }
-  if (!mockOrganizationStore.resolveContext(authentication.user, organizationId)) {
+  const context = mockOrganizationStore.resolveContext(authentication.user, organizationId);
+  if (!context) {
     return {
       available: false,
       response: failure(404, ApiErrorCode.ORGANIZATION_NOT_FOUND, 'Organization not found'),
     };
   }
-  return { available: true, backend: 'mock', organizationId, user: authentication.user };
+  return {
+    available: true,
+    backend: 'mock',
+    organizationId,
+    user: authentication.user,
+    role: context.role,
+  };
+}
+
+/** Owners and admins read lane usage and manage the suppression list, as in the API. */
+function canManage(role: OrganizationRole): boolean {
+  return role === 'owner' || role === 'admin';
 }
 
 function isOneOf<T extends string>(allowed: readonly T[], value: string): value is T {
@@ -461,6 +617,10 @@ function fieldFailure(errorCode: ApiErrorCodeValue, message: string, names: stri
 
 function invalidQuery(message: string): Parsed<never> {
   return { ok: false, response: failure(400, ApiErrorCode.COMMON_INVALID_INPUT, message) };
+}
+
+function permissionDenied(): NextResponse {
+  return failure(403, ApiErrorCode.PERMISSION_DENIED, 'Owner or admin role required');
 }
 
 function unauthenticated(): NextResponse {

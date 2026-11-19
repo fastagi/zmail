@@ -1,6 +1,12 @@
 import type { infer as Infer } from 'zod/mini';
 
 import type {
+  MAIL_SEND_LANES,
+  mailSendLaneUsageListSchema,
+  mailSendLaneUsageSchema,
+  mailSuppressionPageMetaSchema,
+  mailSuppressionReasonSchema,
+  mailSuppressionSchema,
   TRANSACTIONAL_LOG_EVENTS,
   TRANSACTIONAL_OUTCOMES,
   transactionalLogEntryDetailSchema,
@@ -56,4 +62,24 @@ export interface TransactionalTestSendInput {
   template: string;
   mode: TransactionalMode;
   variables?: Record<string, string>;
+}
+
+export type MailSendLane = (typeof MAIL_SEND_LANES)[number];
+export type MailSendLaneUsage = Infer<typeof mailSendLaneUsageSchema>;
+/** How full each send lane is over the 24 hours before `computed_at`; owners and admins only. */
+export type MailSendLaneUsageList = Infer<typeof mailSendLaneUsageListSchema>;
+export type MailSuppressionReason = Infer<typeof mailSuppressionReasonSchema>;
+export type MailSuppression = Infer<typeof mailSuppressionSchema>;
+export type MailSuppressionPageMeta = Infer<typeof mailSuppressionPageMetaSchema>;
+
+/** One keyset page of the suppression list, newest first. */
+export interface MailSuppressionPage {
+  items: MailSuppression[];
+  meta: MailSuppressionPageMeta;
+}
+
+/** Filters of the suppression list; `email` is an exact address, compared lowercased. */
+export interface MailSuppressionFilters {
+  email?: string;
+  reason?: MailSuppressionReason;
 }

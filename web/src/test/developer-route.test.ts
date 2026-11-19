@@ -388,6 +388,150 @@ describe('developer console browser route boundary', () => {
         error_code: 'ORGANIZATION.NOT_FOUND',
       });
     });
+
+    it('shows an admin the three lanes in order, counting only live provider sends', async () => {
+      const route = await loadRoute();
+      // A live console send to a normal address reaches the (log) provider; a test one does not.
+      await testSend(route, { template: 'signup-code', mode: 'live', variables: { code: '1' } });
+      await testSend(route, { template: 'signup-code', mode: 'test', variables: { code: '2' } });
+
+      const response = await route.listMailSendLanesRoute(request('/api/mail-send-lanes'));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toContain('no-store');
+      const body = await response.json();
+      expect(body.data.window_hours).toBe(24);
+      expect(Number.isNaN(Date.parse(body.data.computed_at))).toBe(false);
+      expect(body.data.lanes).toEqual([
+        { lane: 'transactional', limit: 200, used: 1, waiting: 0 },
+        { lane: 'broadcast', limit: 200, used: 0, waiting: 0 },
+        { lane: 'personal', limit: 200, used: 0, waiting: 0 },
+      ]);
+    });
+
+    it('lists the suppression list newest first in keyset pages', async () => {
+      const route = await loadRoute();
+
+      const first = await route.listMailSuppressionsRoute(
+        request('/api/mail-suppressions?per_page=2')
+      );
+      expect(first.status).toBe(200);
+      expect(first.headers.get('cache-control')).toContain('no-store');
+      const firstBody = await first.json();
+      expect(firstBody.data.map((entry: { email: string }) => entry.email)).toEqual([
+        'full-box@example.org',
+        'complainer@example.net',
+      ]);
+      expect(Object.keys(firstBody.data[0]).sort()).toEqual(
+        ['created_at', 'email', 'id', 'reason', 'source'].sort()
+      );
+      expect(firstBody.meta).toEqual({ next_cursor: String(firstBody.data[1].id) });
+
+      const second = await (
+        await route.listMailSuppressionsRoute(
+          request(`/api/mail-suppressions?per_page=2&cursor=${firstBody.meta.next_cursor}`)
+        )
+      ).json();
+      expect(second.data.map((entry: { email: string }) => entry.email)).toEqual([
+        'old-bounce@example.com',
+      ]);
+      expect(second.meta).toEqual({ next_cursor: null });
+    });
+
+    it('finds an exact address after trimming and lowercasing, and filters by reason', async () => {
+      const route = await loadRoute();
+
+      const exact = await (
+        await route.listMailSuppressionsRoute(
+          request('/api/mail-suppressions?email=%20Full-Box@Example.ORG%20')
+        )
+      ).json();
+      expect(exact.data).toHaveLength(1);
+      expect(exact.data[0]).toMatchObject({
+        email: 'full-box@example.org',
+        reason: 'bounced',
+        source: 'transactional',
+      });
+
+      const partial = await (
+        await route.listMailSuppressionsRoute(request('/api/mail-suppressions?email=full-box'))
+      ).json();
+      expect(partial.data).toEqual([]);
+
+      const complained = await (
+        await route.listMailSuppressionsRoute(request('/api/mail-suppressions?reason=complained'))
+      ).json();
+      expect(complained.data.map((entry: { email: string }) => entry.email)).toEqual([
+        'complainer@example.net',
+      ]);
+
+      for (const query of ['reason=rejected', 'per_page=101', 'per_page=0', 'cursor=abc']) {
+        const refused = await route.listMailSuppressionsRoute(
+          request(`/api/mail-suppressions?${query}`)
+        );
+        expect(refused.status, query).toBe(400);
+        await expect(refused.json()).resolves.toMatchObject({
+          error_code: 'COMMON.INVALID_INPUT',
+        });
+      }
+    });
+
+    it('removes an entry with 204, and answers 204 again for one that is gone', async () => {
+      const route = await loadRoute();
+      const listed = await (
+        await route.listMailSuppressionsRoute(request('/api/mail-suppressions'))
+      ).json();
+      const target = listed.data[0];
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const removed = await removeSuppression(route, String(target.id));
+        expect(removed.status).toBe(204);
+        expect(await removed.text()).toBe('');
+      }
+      const unknown = await removeSuppression(route, '9999');
+      expect(unknown.status).toBe(204);
+      // Another organization's entry is never touched, and the answer discloses nothing.
+      const foreign = await removeSuppression(route, String(listed.data[1].id), '999');
+      expect(foreign.status).toBe(404);
+
+      const after = await (
+        await route.listMailSuppressionsRoute(request('/api/mail-suppressions'))
+      ).json();
+      expect(after.data.map((entry: { id: number }) => entry.id)).not.toContain(target.id);
+      expect(after.data).toHaveLength(listed.data.length - 1);
+
+      const malformed = await removeSuppression(route, 'x');
+      expect(malformed.status).toBe(400);
+    });
+
+    it('refuses usage and the suppression list to a member', async () => {
+      getSessionUser.mockResolvedValue(mockUser('demo-member'));
+      const route = await loadRoute();
+
+      for (const response of [
+        await route.listMailSendLanesRoute(request('/api/mail-send-lanes')),
+        await route.listMailSuppressionsRoute(request('/api/mail-suppressions')),
+        await removeSuppression(route, '1'),
+      ]) {
+        expect(response.status).toBe(403);
+        await expect(response.json()).resolves.toMatchObject({
+          error_code: 'PERMISSION.DENIED',
+        });
+      }
+    });
+
+    it('rejects a cross-origin removal before authentication', async () => {
+      const route = await loadRoute();
+      getSessionUser.mockClear();
+      const response = await route.removeMailSuppressionRoute(
+        request('/api/mail-suppressions/1', {
+          method: 'DELETE',
+          origin: 'https://evil.example',
+        }),
+        '1'
+      );
+      expect(response.status).toBe(403);
+      expect(getSessionUser).not.toHaveBeenCalled();
+    });
   });
 
   it('stays unavailable when the mailbox feature is not selected', async () => {
@@ -528,6 +672,100 @@ describe('developer console browser route boundary', () => {
       await expect(read.json()).resolves.toMatchObject({ error_code: 'PERMISSION.DENIED' });
     });
 
+    it('forwards lane usage, the suppression list, and a removal', async () => {
+      fetchMock
+        .mockResolvedValueOnce(
+          Response.json({
+            code: 0,
+            message: 'success',
+            data: {
+              lanes: [
+                { lane: 'transactional', limit: 500, used: 37, waiting: 0 },
+                { lane: 'broadcast', limit: 500, used: 500, waiting: 412 },
+                { lane: 'personal', limit: 200, used: 12, waiting: 0 },
+              ],
+              window_hours: 24,
+              computed_at: '2026-11-23T08:00:00Z',
+            },
+          })
+        )
+        .mockResolvedValueOnce(
+          Response.json({ code: 0, message: 'success', data: [], meta: { next_cursor: null } })
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      const route = await loadRoute();
+
+      const lanes = await route.listMailSendLanesRoute(
+        request('/api/mail-send-lanes?lane=broadcast', { organization: '7' })
+      );
+      expect(lanes.status).toBe(200);
+      expect((await lanes.json()).data.lanes[1]).toEqual({
+        lane: 'broadcast',
+        limit: 500,
+        used: 500,
+        waiting: 412,
+      });
+      const list = await route.listMailSuppressionsRoute(
+        request(
+          '/api/mail-suppressions?email=%20LiLei@Example.COM%20&reason=bounced&cursor=42&per_page=20&sort=id',
+          { organization: '7' }
+        )
+      );
+      expect(list.status).toBe(200);
+      const removed = await route.removeMailSuppressionRoute(
+        request('/api/mail-suppressions/42', { method: 'DELETE', organization: '7' }),
+        '42'
+      );
+      expect(removed.status).toBe(204);
+      expect(removed.headers.get('cache-control')).toContain('no-store');
+
+      const calls = fetchMock.mock.calls.map(([url, init]) => {
+        const target = new URL(String(url));
+        return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+      });
+      expect(calls).toEqual([
+        'GET /v1/mail-send-lanes',
+        'GET /v1/mail-suppressions?email=lilei%40example.com&reason=bounced&cursor=42&per_page=20',
+        'DELETE /v1/mail-suppressions/42',
+      ]);
+      for (const [, init] of fetchMock.mock.calls) {
+        expect(new Headers(init?.headers).get('organization-id')).toBe('7');
+      }
+      expect(getSessionUser).not.toHaveBeenCalled();
+    });
+
+    it('passes a member refusal of usage and the suppression list through', async () => {
+      const route = await loadRoute();
+      fetchMock
+        .mockResolvedValueOnce(errorResponse(403, 'PERMISSION.DENIED'))
+        .mockResolvedValueOnce(errorResponse(403, 'PERMISSION.DENIED'))
+        .mockResolvedValueOnce(errorResponse(403, 'PERMISSION.DENIED'));
+
+      for (const response of [
+        await route.listMailSendLanesRoute(request('/api/mail-send-lanes')),
+        await route.listMailSuppressionsRoute(request('/api/mail-suppressions')),
+        await removeSuppression(route, '3'),
+      ]) {
+        expect(response.status).toBe(403);
+        await expect(response.json()).resolves.toMatchObject({
+          error_code: 'PERMISSION.DENIED',
+        });
+      }
+    });
+
+    it('checks the suppression query and id before calling the API', async () => {
+      const route = await loadRoute();
+      for (const query of ['reason=rejected', 'per_page=101', 'cursor=abc', 'email=x&email=y']) {
+        const response = await route.listMailSuppressionsRoute(
+          request(`/api/mail-suppressions?${query}`)
+        );
+        expect(response.status, query).toBe(400);
+      }
+      const malformed = await removeSuppression(route, '0');
+      expect(malformed.status).toBe(400);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     it('checks the query before calling the API', async () => {
       const route = await loadRoute();
       const response = await route.listTransactionalMailLogRoute(
@@ -556,6 +794,16 @@ async function loadRoute(): Promise<DeveloperRoute> {
 function testSend(route: DeveloperRoute, body: Record<string, unknown>) {
   return route.sendTransactionalTestRoute(
     request('/api/transactional-test-sends', { method: 'POST', body: JSON.stringify(body) })
+  );
+}
+
+function removeSuppression(route: DeveloperRoute, id: string, organization?: string) {
+  return route.removeMailSuppressionRoute(
+    request(`/api/mail-suppressions/${id}`, {
+      method: 'DELETE',
+      ...(organization === undefined ? {} : { organization }),
+    }),
+    id
   );
 }
 

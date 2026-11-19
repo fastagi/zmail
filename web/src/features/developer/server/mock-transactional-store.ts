@@ -3,10 +3,15 @@ import 'server-only';
 import { randomBytes } from 'node:crypto';
 
 import {
+  MAIL_SUPPRESSION_DEFAULT_PAGE_SIZE,
   TRANSACTIONAL_LOG_DEFAULT_PAGE_SIZE,
   TRANSACTIONAL_TEST_SENDS_PER_MINUTE,
 } from '@/features/developer/schemas';
 import type {
+  MailSendLaneUsage,
+  MailSuppression,
+  MailSuppressionPage,
+  MailSuppressionReason,
   TransactionalLogEntry,
   TransactionalLogEntryDetail,
   TransactionalLogEvent,
@@ -21,9 +26,11 @@ import type { MailTemplate } from '@/features/mailbox/types';
 import { renderTemplate } from '@/features/mailbox/utils/template-render';
 
 /**
- * Development mock of transactional mail for the developer console: console test sends and the
- * send log. It reproduces the contract's masking, simulation, and the per-user test-send limit;
- * it never calls a provider, so a live send is recorded as sent without delivery events.
+ * Development mock of transactional mail for the developer console: console test sends, the send
+ * log, lane usage, and the suppression list. It reproduces the contract's masking, simulation, and
+ * the per-user test-send limit; it never calls a provider, so a live send is recorded as sent
+ * without delivery events. The mock mailbox does not count the broadcast and personal lanes, so
+ * their usage is always zero here.
  */
 
 const SIMULATOR_DOMAIN = 'test.zmail.im';
@@ -48,6 +55,45 @@ const simulatorOutcomes: Record<
 interface StoredMessage extends TransactionalMessage {
   organizationId: number;
 }
+
+interface StoredSuppression extends MailSuppression {
+  organizationId: number;
+}
+
+export interface MockSuppressionQuery {
+  /** Already trimmed and lowercased. */
+  email?: string;
+  reason?: MailSuppressionReason;
+  cursor?: number;
+  perPage?: number;
+}
+
+/** The demo organization's suppression list: a few addresses that bounced or complained. */
+const seededSuppressions: readonly (Omit<StoredSuppression, 'id' | 'created_at'> & {
+  ageMs: number;
+})[] = [
+  {
+    organizationId: 1,
+    email: 'old-bounce@example.com',
+    reason: 'bounced',
+    source: 'backfill',
+    ageMs: 3 * dayMs,
+  },
+  {
+    organizationId: 1,
+    email: 'complainer@example.net',
+    reason: 'complained',
+    source: 'broadcast',
+    ageMs: dayMs,
+  },
+  {
+    organizationId: 1,
+    email: 'full-box@example.org',
+    reason: 'bounced',
+    source: 'transactional',
+    ageMs: 2 * 60 * minuteMs,
+  },
+];
 
 export interface MockTransactionalLogQuery {
   mode: TransactionalMode;
@@ -87,12 +133,23 @@ class MockTransactionalStore {
   private messages: StoredMessage[] = [];
   /** Test sends by user and fixed one-minute window. */
   private testSends = new Map<string, { windowStart: number; count: number }>();
+  private suppressionList: StoredSuppression[] = [];
+
+  constructor() {
+    this.reset();
+  }
 
   reset(): void {
     this.enabled = true;
     this.nextId = 1;
     this.messages = [];
     this.testSends.clear();
+    const now = Date.now();
+    this.suppressionList = seededSuppressions.map(({ ageMs, ...entry }, index) => ({
+      ...entry,
+      id: index + 1,
+      created_at: new Date(now - ageMs).toISOString(),
+    }));
   }
 
   /** The instance switch `MAILBOX_TRANSACTIONAL_ENABLED`; on by default in development. */
@@ -215,6 +272,73 @@ class MockTransactionalStore {
       variables: { ...message.variables },
       events: [...message.events],
     };
+  }
+
+  /**
+   * Usage of the three lanes over the 24 hours before now, in the contract's order. Only live
+   * messages that reached the (log) provider count; simulated and test messages never do.
+   */
+  sendLanes(organizationId: number, limits: Record<MailSendLaneUsage['lane'], number>) {
+    const dayAgo = Date.now() - dayMs;
+    const used = this.messages
+      .filter(
+        message =>
+          message.organizationId === organizationId &&
+          message.mode === 'live' &&
+          !message.simulated &&
+          message.sent_at !== null &&
+          Date.parse(message.sent_at) >= dayAgo
+      )
+      .reduce((total, message) => total + message.attempts, 0);
+    const waiting = this.messages.filter(
+      message =>
+        message.organizationId === organizationId &&
+        message.status === 'queued' &&
+        message.queued_reason === 'send_limit'
+    ).length;
+    const lanes: MailSendLaneUsage[] = [
+      { lane: 'transactional', limit: limits.transactional, used, waiting },
+      { lane: 'broadcast', limit: limits.broadcast, used: 0, waiting: 0 },
+      { lane: 'personal', limit: limits.personal, used: 0, waiting: 0 },
+    ];
+    return { lanes, window_hours: 24 as const, computed_at: new Date().toISOString() };
+  }
+
+  /** One keyset page of the organization's suppression list, newest by `created_at`, then `id`. */
+  suppressions(organizationId: number, query: MockSuppressionQuery): MailSuppressionPage {
+    const perPage = query.perPage ?? MAIL_SUPPRESSION_DEFAULT_PAGE_SIZE;
+    const ordered = this.suppressionList
+      .filter(entry => entry.organizationId === organizationId)
+      .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id);
+    let start = 0;
+    if (query.cursor !== undefined) {
+      const at = ordered.findIndex(entry => entry.id === query.cursor);
+      start = at < 0 ? ordered.length : at + 1;
+    }
+    const matching = ordered
+      .slice(start)
+      .filter(entry => query.email === undefined || entry.email === query.email)
+      .filter(entry => query.reason === undefined || entry.reason === query.reason);
+    const items = matching.slice(0, perPage);
+    return {
+      items: items.map(entry => ({
+        id: entry.id,
+        email: entry.email,
+        reason: entry.reason,
+        source: entry.source,
+        created_at: entry.created_at,
+      })),
+      meta: {
+        next_cursor: matching.length > perPage ? String(items[items.length - 1].id) : null,
+      },
+    };
+  }
+
+  /** Removes an entry of the organization; an id it does not have changes nothing. */
+  removeSuppression(organizationId: number, id: number): void {
+    this.suppressionList = this.suppressionList.filter(
+      entry => !(entry.organizationId === organizationId && entry.id === id)
+    );
   }
 
   /** Counts one test send; the seconds until the window has room when it is full. */

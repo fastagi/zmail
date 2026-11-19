@@ -5,11 +5,13 @@ import {
   iso,
   literal,
   maximum,
+  maxLength,
   nonnegative,
   nullable,
   number,
   positive,
   record,
+  refine,
   strictObject,
   string,
   union,
@@ -117,4 +119,64 @@ export const transactionalMessageSchema = strictObject({
   variables: transactionalVariablesSchema,
   attempts: nonnegativeIntegerSchema,
   events: array(transactionalMessageEventSchema),
+});
+
+/** Limits of `contracts/MAILBOXES.md`, Suppression List. */
+export const MAIL_SUPPRESSION_DEFAULT_PAGE_SIZE = 50;
+export const MAIL_SUPPRESSION_MAX_PAGE_SIZE = 100;
+export const MAIL_SUPPRESSION_EMAIL_MAX_LENGTH = 320;
+/** The suppression list's cursor is the id of the last entry of the previous page. */
+export const MAIL_SUPPRESSION_CURSOR_PATTERN = /^[1-9]\d{0,15}$/u;
+export const MAIL_SUPPRESSION_REASONS = ['bounced', 'complained'] as const;
+export const MAIL_SUPPRESSION_SOURCES = ['transactional', 'broadcast', 'backfill'] as const;
+/** The send lanes, in the order `GET /v1/mail-send-lanes` always lists them. */
+export const MAIL_SEND_LANES = ['transactional', 'broadcast', 'personal'] as const;
+
+const laneLimitSchema = number().check(int(), positive(), maximum(100_000));
+
+export const mailSendLaneUsageSchema = strictObject({
+  lane: union([literal('transactional'), literal('broadcast'), literal('personal')]),
+  limit: laneLimitSchema,
+  used: nonnegativeIntegerSchema,
+  waiting: nonnegativeIntegerSchema,
+});
+
+export const mailSendLaneUsageListSchema = strictObject({
+  lanes: array(mailSendLaneUsageSchema).check(
+    refine(
+      lanes =>
+        lanes.length === MAIL_SEND_LANES.length &&
+        lanes.every((usage, index) => usage.lane === MAIL_SEND_LANES[index]),
+      'The three lanes, in order'
+    )
+  ),
+  window_hours: literal(24),
+  computed_at: timestampSchema,
+});
+
+export const mailSendLaneUsageResponseSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: mailSendLaneUsageListSchema,
+});
+
+export const mailSuppressionReasonSchema = union([literal('bounced'), literal('complained')]);
+
+export const mailSuppressionSchema = strictObject({
+  id: safeIdSchema,
+  email: string().check(maxLength(MAIL_SUPPRESSION_EMAIL_MAX_LENGTH)),
+  reason: mailSuppressionReasonSchema,
+  source: union([literal('transactional'), literal('broadcast'), literal('backfill')]),
+  created_at: timestampSchema,
+});
+
+export const mailSuppressionPageMetaSchema = strictObject({
+  next_cursor: nullable(string().check(maxLength(128))),
+});
+
+export const mailSuppressionPageSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: array(mailSuppressionSchema).check(maxLength(MAIL_SUPPRESSION_MAX_PAGE_SIZE)),
+  meta: mailSuppressionPageMetaSchema,
 });
