@@ -35,7 +35,9 @@ Comparable products ship domain onboarding as the first step:
 - The Cloudflare API token is the trust boundary. Any organization owner or admin may connect a
   domain the token can reach, first come first served, and a domain belongs to exactly one
   organization. An operator who serves several companies scopes the token to the zones they may
-  use. The feature is off until `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`.
+  use. The feature is off until `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`. (Superseded by managed
+  zones: the token now covers every zone of the account, and zones organizations must not use
+  belong in a separate Cloudflare account; see §14.)
 - Receiving uses one Email Routing rule per mailbox address, pointing at the Email Worker. A
   zone's catch-all is never touched, because it belongs to whoever owns the zone and may already
   route other mail.
@@ -150,7 +152,9 @@ domains in memory and verifies them on the first check.
 The token never leaves the server. Zmail only adds records, never edits or deletes them, and never
 changes a zone's catch-all. Domain names are validated before any Cloudflare call. A domain that a
 token can reach is claimable by any organization on the instance; the operator documentation says
-so and tells multi-tenant operators to scope the token.
+so and tells multi-tenant operators to scope the token. With managed zones the token covers every
+zone of the account instead, and multi-tenant operators keep off-limits zones in a separate
+Cloudflare account.
 
 ## 14. Observability and Operations
 

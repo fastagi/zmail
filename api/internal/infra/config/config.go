@@ -460,9 +460,10 @@ type MailboxConfig struct {
 	// PublicURL is the public origin of the Web console, such as https://app.example.com. Broadcast
 	// unsubscribe links point at it; empty disables broadcasts.
 	PublicURL string
-	// CustomDomainsEnabled lets organization owners and admins connect domains the Cloudflare
-	// token can manage. The token's zone scope is the trust boundary: any organization may claim
-	// a domain the token can reach.
+	// CustomDomainsEnabled lets organization owners and admins connect their own domains, into a
+	// zone the operator added to the Cloudflare account or into a managed zone Zmail creates. The
+	// token covers every zone of the account, so the account is the trust boundary: any
+	// organization may claim a domain in a zone the operator added.
 	CustomDomainsEnabled bool
 	// CloudflareEmailWorker names the Email Worker that routing rules of organization domains
 	// deliver to; the same Worker that posts to the inbound route.

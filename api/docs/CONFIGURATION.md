@@ -255,7 +255,8 @@ provider call independently and composes with caller cancellation. See [`EMAIL.m
 The optional `mailbox` starter requires the `organization` starter and reads `MAILBOX_DOMAIN`, `MAILBOX_PROVIDER`,
 `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN`, `MAILBOX_REQUEST_TIMEOUT`,
 `MAILBOX_INBOUND_SECRET`, `MAILBOX_DAILY_SEND_LIMIT`, `MAILBOX_PUBLIC_URL`,
-`MAILBOX_CUSTOM_DOMAINS_ENABLED`, and `MAILBOX_CLOUDFLARE_EMAIL_WORKER` from the same typed snapshot. They are
+`MAILBOX_CUSTOM_DOMAINS_ENABLED`, `MAILBOX_CLOUDFLARE_EMAIL_WORKER`, and
+`MAILBOX_MAX_ZONES_PER_ORGANIZATION` from the same typed snapshot. They are
 validated only when the starter is selected.
 
 | Key | Default | Rule |
@@ -267,8 +268,9 @@ validated only when the starter is selected.
 | `MAILBOX_INBOUND_SECRET` | empty | Shared secret of at least 32 characters that signs deliveries from the mail edge. Empty keeps inbound mail disabled. |
 | `MAILBOX_DAILY_SEND_LIMIT` | `200` | Outbound messages one organization may attempt per rolling 24 hours; 1 to 100000. |
 | `MAILBOX_PUBLIC_URL` | empty | Public origin of the Web console that broadcast unsubscribe links point at. Empty keeps broadcasts off. |
-| `MAILBOX_CUSTOM_DOMAINS_ENABLED` | `false` | Lets owners and admins connect domains the Cloudflare token can manage. Requires the `cloudflare` provider. Any organization may claim any zone the token reaches, so scope the token to the zones organizations may use. The token then also needs Zone Read, DNS Edit, Zone Settings Edit, Email Routing Rules Edit, and Email Sending Edit. |
+| `MAILBOX_CUSTOM_DOMAINS_ENABLED` | `false` | Lets owners and admins connect their own domains: into a zone the operator added to the Cloudflare account, or into a managed zone Zmail creates for an apex the account does not hold. Requires the `cloudflare` provider. The token then needs Account → Zone: Edit, DNS Edit, Zone Settings Edit, Email Routing Rules Edit, and Email Sending Edit, with zone resources set to all zones of the account, since a token scoped to named zones cannot reach the zones Zmail creates later. Any organization may claim a domain in any zone the operator added, so keep zones organizations must not use in a separate Cloudflare account. |
 | `MAILBOX_CLOUDFLARE_EMAIL_WORKER` | empty | The Email Worker that routing rules of connected domains deliver to; required when custom domains are enabled. |
+| `MAILBOX_MAX_ZONES_PER_ORGANIZATION` | `3` | Managed zones Zmail may create in the Cloudflare account for one organization; 1 to 20. |
 
 See [`../../contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md) for the HTTP behavior and
 [`../../deploy/cloudflare/email-worker/README.md`](../../deploy/cloudflare/email-worker/README.md)

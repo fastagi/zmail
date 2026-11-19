@@ -196,8 +196,9 @@ route is `404 MAILBOX.DOMAINS_DISABLED`.
 - Removing a domain that a mailbox still uses is `409 MAILBOX.DOMAIN_IN_USE`. Removing forgets the
   domain and leaves its DNS and Cloudflare settings as they are, including a managed zone, which is
   removed on its own (see Managed Zones).
-- Any owner or admin may connect any domain the token can reach. An operator serving several
-  companies scopes the token to the zones they may use.
+- Any owner or admin may connect any domain in a zone the operator added to the account. The token
+  covers every zone of the account, so it can reach the managed zones Zmail creates; an operator
+  serving several companies keeps zones they must not use in a separate Cloudflare account.
 
 ```json
 {

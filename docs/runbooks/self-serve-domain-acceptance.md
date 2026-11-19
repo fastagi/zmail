@@ -67,7 +67,7 @@ acceptance. Nothing else changes; the migration runs with the next `up`.
    docker compose logs mail-zone-worker | grep mail_zone.worker_started
    ```
 
-   The log line shows `batch=100` and `poll=10m`. An instance that does not use Compose runs
+   The log line shows `batch=100` and `poll=10m0s`. An instance that does not use Compose runs
    `/app/fastbuild mail:zone:work --batch=100 --poll=10m` from the API image as one more
    long-running process with the API's environment.
 3. Leave the existing domains alone. Domains in zones the operator added keep `zone: null` and
@@ -123,8 +123,8 @@ mail is handled by another service.
      sending and DMARC rows only, and no receiving rows. The MX record stays editable.
 3. **Send out.** Create a mailbox such as `hello@notify.example.test-domain`, send from it to
    Gmail, and check Show original as in Part A, step 6.
-4. **Start receiving.** Press Start receiving in Zmail.
-   - Expect: the confirmation lists the MX record from step 1 as the one being replaced.
+4. **Start receiving.** Press "Start receiving in Zmail".
+   - Expect: the dialog lists the MX record from step 1 under "These MX records will be replaced:".
    - Expect: after setting up, the receiving MX rows are `conflict` and the domain is pending,
      because the other service's MX is still on the name.
 5. **Remove the old MX** on the DNS records page (it is not locked), then press Check DNS.
@@ -134,7 +134,7 @@ mail is handled by another service.
 
 ## Part C: Guards
 
-1. Try to remove `example.test-domain` while it has mailboxes. Expect a refusal (the domain is in
+1. Try to remove the Part A domain while it has mailboxes. Expect a refusal (the domain is in
    use).
 2. Delete every mailbox and both domains, then press Remove from Zmail on the zone while the
    registrar still points at Cloudflare. Expect a refusal telling you to change the name servers back
