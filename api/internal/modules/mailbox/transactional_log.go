@@ -36,8 +36,8 @@ type TransactionalLogPage struct {
 	Items []*domain.TransactionalMessage
 	// NextCursor is the id to pass as the cursor of the next, older page; nil on the last page.
 	NextCursor *uint
-	// Total24h counts the mode's messages created in the last 24 hours, up to 10000, whatever
-	// the other filters.
+	// Total24h counts the mode's messages created in the last 24 hours, up to 10000, of the
+	// requested template when one is given, whatever the other filters.
 	Total24h int64
 }
 
@@ -62,7 +62,7 @@ func (s *service) ListTransactionalLog(ctx context.Context, organizationID uint,
 		next := page.Items[len(page.Items)-1].ID
 		page.NextCursor = &next
 	}
-	page.Total24h, err = s.transactional.CountTransactionalSince(ctx, organizationID, filter.Mode, "",
+	page.Total24h, err = s.transactional.CountTransactionalSince(ctx, organizationID, filter.Mode, filter.TemplateKey,
 		now.Add(-transactionalLogCountWindow), transactionalLogCountCap)
 	if err != nil {
 		return TransactionalLogPage{}, err

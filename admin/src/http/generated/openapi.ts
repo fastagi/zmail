@@ -4763,7 +4763,7 @@ export interface components {
         TransactionalLogPageMeta: {
             /** @description Pass as `cursor` to read the next, older page; null on the last page. */
             next_cursor: string | null;
-            /** @description Messages of the requested mode created in the last 24 hours, ignoring the other filters; counting stops at 10000. */
+            /** @description Messages of the requested mode created in the last 24 hours, of the requested `template` when one is given, ignoring the other filters; counting stops at 10000. */
             total_24h: number;
         };
         TransactionalLogPageResponse: {

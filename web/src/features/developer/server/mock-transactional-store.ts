@@ -175,7 +175,10 @@ class MockTransactionalStore {
     return { ok: true, message: publicMessage(message) };
   }
 
-  /** One keyset page of the organization's log, newest first, with the mode's 24-hour count. */
+  /**
+   * One keyset page of the organization's log, newest first, with the 24-hour count of the mode,
+   * and of the template when the query names one.
+   */
   list(organizationId: number, query: MockTransactionalLogQuery): TransactionalLogPage {
     const perPage = query.perPage ?? TRANSACTIONAL_LOG_DEFAULT_PAGE_SIZE;
     const matching = this.messages
@@ -188,6 +191,7 @@ class MockTransactionalStore {
       message =>
         message.organizationId === organizationId &&
         message.mode === query.mode &&
+        (query.template === undefined || message.template === query.template) &&
         Date.parse(message.created_at) >= dayAgo
     ).length;
     return {
@@ -329,17 +333,36 @@ export function maskRecipient(address: string): string {
   return `${local.slice(0, keep).join('')}••${address.slice(at)}`;
 }
 
-/** `<host>/••••` for an `http(s)` URL with a host, otherwise six bullets. */
+/**
+ * `<host>/••••` for an `http(s)` URL with a host, otherwise six bullets. It mirrors the API's
+ * `maskSecret` (Go `url.Parse` + `Hostname()`): the trimmed value's host, lowercased, without user
+ * information, port, or IPv6 brackets, and not converted to punycode as the WHATWG `URL` would.
+ */
 export function maskSecret(value: string): string {
-  try {
-    const url = new URL(value);
-    if ((url.protocol === 'http:' || url.protocol === 'https:') && url.hostname !== '') {
-      return `${url.hostname}/••••`;
-    }
-  } catch {
-    // Not a URL: masked as an opaque secret.
+  const match = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)/iu.exec(value.trim());
+  if (!match) return SECRET_MASK;
+  const scheme = match[1].toLowerCase();
+  if (scheme !== 'http' && scheme !== 'https') return SECRET_MASK;
+  const authority = match[2];
+  const hostPort = authority.slice(authority.lastIndexOf('@') + 1);
+  let host: string;
+  let port: string;
+  if (hostPort.startsWith('[')) {
+    const close = hostPort.indexOf(']');
+    if (close < 0) return SECRET_MASK;
+    host = hostPort.slice(1, close);
+    const rest = hostPort.slice(close + 1);
+    if (rest !== '' && !rest.startsWith(':')) return SECRET_MASK;
+    port = rest.slice(1);
+  } else {
+    const colon = hostPort.lastIndexOf(':');
+    host = colon < 0 ? hostPort : hostPort.slice(0, colon);
+    port = colon < 0 ? '' : hostPort.slice(colon + 1);
   }
-  return SECRET_MASK;
+  // Go refuses a non-numeric port and characters a host cannot hold.
+  if (!/^\d*$/u.test(port) || /[\s<>"{}|\\^`]/u.test(host)) return SECRET_MASK;
+  host = host.toLowerCase();
+  return host === '' ? SECRET_MASK : `${host}/••••`;
 }
 
 export const mockTransactionalStore = new MockTransactionalStore();

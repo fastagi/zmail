@@ -71,6 +71,7 @@ import type {
   MailTemplateSummary,
   SendMailMessageInput,
 } from '@/features/mailbox/types';
+import { mockTransactionalStore } from '@/features/developer/server/mock-transactional-store';
 import { renderTemplate, templateVariables } from '@/features/mailbox/utils/template-render';
 import { mockOrganizationStore } from '@/features/organization/server/mock-organization-store';
 import type { OrganizationRole } from '@/features/organization/types';
@@ -332,8 +333,8 @@ export class MockMailboxStore {
       simulator_domain: 'test.zmail.im',
       broadcasts_enabled: true,
       custom_domains_enabled: true,
-      // The mock keeps the developer console usable in development.
-      transactional_enabled: true,
+      // The instance switch of the transactional mock; on by default so the console is usable.
+      transactional_enabled: mockTransactionalStore.isEnabled(),
     };
     return [
       { domain: MOCK_MAILBOX_DOMAIN, kind: 'shared', ...settings },

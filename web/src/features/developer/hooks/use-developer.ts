@@ -11,6 +11,7 @@ import {
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import { developerService } from '@/features/developer/services/developer-service';
 import type {
+  TransactionalLogEntryDetail,
   TransactionalLogFilters,
   TransactionalLogPage,
   TransactionalTestSendInput,
@@ -73,9 +74,12 @@ export function useTransactionalLog(
     getNextPageParam: lastPage => lastPage.meta.next_cursor ?? undefined,
     enabled: enabled && validId(organizationId),
     staleTime: TRANSACTIONAL_LOG_REFRESH_MS,
-    refetchInterval: TRANSACTIONAL_LOG_REFRESH_MS,
+    // Only the newest page refreshes: an infinite query reads every loaded page again, so the
+    // timer and the focus refresh stop once the user has loaded older pages.
+    refetchInterval: query =>
+      (query.state.data?.pages.length ?? 0) > 1 ? false : TRANSACTIONAL_LOG_REFRESH_MS,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: query => (query.state.data?.pages.length ?? 0) <= 1,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
@@ -87,13 +91,21 @@ export function useTransactionalLog(
 export function useTransactionalLogEntry(
   organizationId: number,
   messageId: number | null,
-  { refetchInterval = false }: { refetchInterval?: number | false } = {}
+  {
+    refetchInterval = false,
+  }: {
+    refetchInterval?:
+      number | false | ((data: TransactionalLogEntryDetail | undefined) => number | false);
+  } = {}
 ) {
   return useQuery({
     queryKey: developerKeys.logEntry(organizationId, messageId ?? 0),
     queryFn: () => developerService.logEntry(organizationId, messageId ?? 0),
     enabled: validId(organizationId) && messageId !== null && validId(messageId),
-    refetchInterval,
+    refetchInterval:
+      typeof refetchInterval === 'function'
+        ? query => refetchInterval(query.state.data)
+        : refetchInterval,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }

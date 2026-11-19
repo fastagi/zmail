@@ -14456,8 +14456,8 @@ components:
           maxLength: 128
         total_24h:
           type: integer
-          description: Messages of the requested mode created in the last 24 hours, ignoring the other filters;
-            counting stops at 10000.
+          description: Messages of the requested mode created in the last 24 hours, of the requested `template`
+            when one is given, ignoring the other filters; counting stops at 10000.
           minimum: 0
           maximum: 10000
     TransactionalLogPageResponse:

@@ -292,13 +292,39 @@ func TestLogTotal24hCapped(t *testing.T) {
 		FROM transactional_messages, generate_series(1, 10000) AS g WHERE id = ?`, seed.ID).Error; err != nil {
 		t.Fatalf("bulk seed: %v", err)
 	}
-	// The count ignores every filter but the mode, and stops at 10000.
+	// The count ignores every filter but the mode and template, and stops at 10000.
 	items, meta := f.logItems(t, url.Values{"per_page": {"1"}, "status": {"failed"}})
 	if len(items) != 0 || meta["total_24h"] != float64(10000) {
 		t.Fatalf("items %d, total_24h = %v; want 0 and 10000", len(items), meta["total_24h"])
 	}
 	if _, meta = f.logItems(t, url.Values{"per_page": {"1"}, "mode": {"test"}}); meta["total_24h"] != float64(1) {
 		t.Fatalf("test total_24h = %v; want 1", meta["total_24h"])
+	}
+}
+
+func TestLogTotal24hHonorsTemplateOnly(t *testing.T) {
+	f := newTxHandlerFixture(t, nil)
+	f.seedLog(t, nil, "")
+	f.seedLog(t, nil, terminalAssignments+`status = 'failed'`)
+	f.seedLog(t, func(m *domain.TransactionalMessage) { m.TemplateKey = "welcome" }, "")
+	f.seedLog(t, func(m *domain.TransactionalMessage) {
+		m.TemplateKey = "welcome"
+		m.Mode = domain.APIKeyModeTest
+	}, "")
+
+	if _, meta := f.logItems(t, url.Values{"per_page": {"1"}}); meta["total_24h"] != float64(3) {
+		t.Fatalf("mode total_24h = %v; want 3", meta["total_24h"])
+	}
+	// The template narrows the count; status still does not.
+	items, meta := f.logItems(t, url.Values{"per_page": {"1"}, "template": {"welcome"}, "status": {"failed"}})
+	if len(items) != 0 || meta["total_24h"] != float64(1) {
+		t.Fatalf("welcome items %d, total_24h = %v; want 0 and 1", len(items), meta["total_24h"])
+	}
+	if _, meta = f.logItems(t, url.Values{"per_page": {"1"}, "template": {"signup-code"}}); meta["total_24h"] != float64(2) {
+		t.Fatalf("signup-code total_24h = %v; want 2", meta["total_24h"])
+	}
+	if _, meta = f.logItems(t, url.Values{"mode": {"test"}, "template": {"welcome"}}); meta["total_24h"] != float64(1) {
+		t.Fatalf("test welcome total_24h = %v; want 1", meta["total_24h"])
 	}
 }
 

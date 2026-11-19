@@ -127,6 +127,12 @@ describe('developer quick start and send log', () => {
     expect(key).toHaveTextContent('fastbuild_test_ab12cd••••9z8y');
     expect(screen.getByLabelText('Code samples')).toHaveTextContent('YOUR_API_KEY');
     expect(screen.queryByRole('button', { name: 'Show and copy' })).toBeNull();
+    // The create mutation's result held the plaintext too; it is dropped with the page state.
+    await waitFor(() =>
+      expect(
+        JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state))
+      ).not.toContain(plaintext)
+    );
   });
 
   it('counts only an own key with exactly the transactional scope in the current mode', async () => {
@@ -191,6 +197,10 @@ describe('developer quick start and send log', () => {
       )
     ).toBeInTheDocument();
     expect(developer.logEntry).toHaveBeenCalledWith(1, 7012);
+    // A delivered message is settled: polling stops instead of running for 30 seconds.
+    const calls = developer.logEntry.mock.calls.length;
+    await new Promise(resolve => setTimeout(resolve, 2_500));
+    expect(developer.logEntry.mock.calls.length).toBe(calls);
   });
 
   it('a rate-limited test send shows the retry seconds', async () => {

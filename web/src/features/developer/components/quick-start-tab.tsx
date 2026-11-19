@@ -51,6 +51,15 @@ const SETTLED_EVENTS: ReadonlySet<string> = new Set([
   'failed',
 ]);
 
+/** True when a message has nothing more to wait for: refused, failed, or a final event. */
+function isSettled(message: Pick<TransactionalLogEntry, 'status' | 'last_event'>): boolean {
+  return (
+    message.status === 'failed' ||
+    message.status === 'suppressed' ||
+    (message.last_event !== null && SETTLED_EVENTS.has(message.last_event))
+  );
+}
+
 /** A key created on this page: its plaintext is held only until the user confirms saving it. */
 interface CreatedKey {
   mode: DeveloperMode;
@@ -323,7 +332,15 @@ function KeyPanel({
         </div>
         {created?.plaintext ? (
           revealed ? (
-            <Button type="button" variant="outline" onClick={onSaved}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                // The mutation result holds the plaintext too; drop it with the page state.
+                createKey.reset();
+                onSaved();
+              }}
+            >
               {t('start.keySaved')}
             </Button>
           ) : (
@@ -422,15 +439,14 @@ function TestSend({
   const [expired, setExpired] = useState<number | null>(null);
   const following = sent !== null && sent.mode === 'live' && expired !== sent.id;
   const entry = useTransactionalLogEntry(organizationId, sent?.id ?? null, {
-    refetchInterval: following ? FOLLOW_INTERVAL_MS : false,
+    // Read again until the message settles or 30 seconds pass, whichever comes first.
+    refetchInterval: following
+      ? data => (data && isSettled(data) ? false : FOLLOW_INTERVAL_MS)
+      : false,
   });
   const current: TransactionalLogEntry | TransactionalMessage | null =
     entry.data?.id === sent?.id ? (entry.data ?? sent) : sent;
-  const settled =
-    current !== null &&
-    (current.status === 'failed' ||
-      current.status === 'suppressed' ||
-      (current.last_event !== null && SETTLED_EVENTS.has(current.last_event)));
+  const settled = current !== null && isSettled(current);
 
   useEffect(() => {
     if (!sent || sent.mode !== 'live') return;

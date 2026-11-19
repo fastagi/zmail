@@ -234,6 +234,67 @@ describe('developer console browser route boundary', () => {
       expect(test.data).toEqual([]);
     });
 
+    it('counts the last 24 hours per template when the log names one', async () => {
+      const route = await loadRoute();
+      const { mockMailboxStore } = await import('@/features/mailbox/server/mock-mailbox-store');
+      const welcome = mockMailboxStore.createTemplate(1, {
+        ...signupTemplate,
+        name: 'Welcome',
+        key: 'welcome',
+      });
+      expect(welcome.ok).toBe(true);
+      await testSend(route, { template: 'signup-code', mode: 'test', variables: { code: '1' } });
+      await testSend(route, { template: 'signup-code', mode: 'test', variables: { code: '2' } });
+      await testSend(route, { template: 'welcome', mode: 'test', variables: { code: '3' } });
+
+      const read = async (query: string) =>
+        (
+          await (
+            await route.listTransactionalMailLogRoute(
+              request(`/api/transactional-mail-log?${query}`)
+            )
+          ).json()
+        ).meta.total_24h;
+      expect(await read('mode=test&per_page=1')).toBe(3);
+      expect(await read('mode=test&per_page=1&template=signup-code')).toBe(2);
+      // Only the template narrows the count; the outcome does not.
+      expect(await read('mode=test&per_page=1&template=welcome&outcome=problem')).toBe(1);
+      expect(await read('mode=live&per_page=1&template=welcome')).toBe(0);
+    });
+
+    it('reflects the instance switch in the mock mailbox domains', async () => {
+      await loadRoute();
+      const { mockMailboxStore } = await import('@/features/mailbox/server/mock-mailbox-store');
+      const { mockTransactionalStore } =
+        await import('@/features/developer/server/mock-transactional-store');
+      expect(mockMailboxStore.domains(['acme.example']).map(d => d.transactional_enabled)).toEqual([
+        true,
+        true,
+      ]);
+      mockTransactionalStore.setEnabled(false);
+      expect(mockMailboxStore.domains(['acme.example']).map(d => d.transactional_enabled)).toEqual([
+        false,
+        false,
+      ]);
+    });
+
+    it('masks secrets as the API does', async () => {
+      const { maskSecret } = await import('@/features/developer/server/mock-transactional-store');
+      const cases: [string, string][] = [
+        ['https://u:p@reset.acme.com/t?code=1', 'reset.acme.com/••••'],
+        ['  HTTPS://Reset.ACME.com:8443/t  ', 'reset.acme.com/••••'],
+        ['http://[::1]:8080/x', '::1/••••'],
+        ['http://bücher.example/x', 'bücher.example/••••'],
+        ['reset.acme.com/t', '••••••'],
+        ['ftp://files.acme.com/x', '••••••'],
+        ['https:reset.acme.com', '••••••'],
+        ['https:///path', '••••••'],
+        ['https://acme.com:port/x', '••••••'],
+        ['482913', '••••••'],
+      ];
+      for (const [value, masked] of cases) expect(maskSecret(value), value).toBe(masked);
+    });
+
     it('filters and pages the log newest first', async () => {
       const route = await loadRoute();
       for (let index = 0; index < 3; index += 1) {
