@@ -143,7 +143,13 @@ func waitForWebhookWorker(ctx context.Context, duration time.Duration) error {
 }
 
 func parseWebhookWorkerArgs(args []string) (webhookWorkerConfig, error) {
-	cfg := webhookWorkerConfig{Batch: defaultWebhookWorkerBatch, Poll: defaultWebhookWorkerPoll}
+	return parseWorkerArgs(args, webhookWorkerConfig{Batch: defaultWebhookWorkerBatch, Poll: defaultWebhookWorkerPoll}, time.Minute)
+}
+
+// parseWorkerArgs reads --batch, --poll, and --once over the given defaults. --poll may be at
+// most maxPoll.
+func parseWorkerArgs(args []string, defaults webhookWorkerConfig, maxPoll time.Duration) (webhookWorkerConfig, error) {
+	cfg := defaults
 	for index := 0; index < len(args); index++ {
 		argument := args[index]
 		switch {
@@ -182,8 +188,8 @@ func parseWebhookWorkerArgs(args []string) (webhookWorkerConfig, error) {
 	if cfg.Batch < 1 || cfg.Batch > 100 {
 		return cfg, fmt.Errorf("--batch must be between 1 and 100")
 	}
-	if cfg.Poll < 100*time.Millisecond || cfg.Poll > time.Minute {
-		return cfg, fmt.Errorf("--poll must be between 100ms and 1m")
+	if cfg.Poll < 100*time.Millisecond || cfg.Poll > maxPoll {
+		return cfg, fmt.Errorf("--poll must be between 100ms and %s", formatPollLimit(maxPoll))
 	}
 	return cfg, nil
 }
@@ -479,4 +485,11 @@ func recordWebhookCLIAudit(
 	if err != nil {
 		slog.WarnContext(ctx, "webhook.operator_audit_failed", "action", action)
 	}
+}
+
+// formatPollLimit prints a whole-minute or whole-hour limit the way it is typed, such as 1m.
+func formatPollLimit(limit time.Duration) string {
+	text := limit.String()
+	text = strings.TrimSuffix(text, "0s")
+	return strings.TrimSuffix(text, "0m")
 }

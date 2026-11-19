@@ -188,6 +188,7 @@ func InitApplication() (*app.Application, error) {
 		WebhookMaintainer:      webhookService,
 		OperatorGrants:         operatorService,
 		MailBroadcasts:         mailboxService,
+		MailZones:              mailboxService,
 	}
 	return application, nil
 }
@@ -344,6 +345,7 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 		WebhookMaintainer:      webhookService,
 		OperatorGrants:         operatorService,
 		MailBroadcasts:         mailboxService,
+		MailZones:              mailboxService,
 	}
 	return application, nil
 }

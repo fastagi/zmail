@@ -19,6 +19,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailDomainRepository), new(*repository)),
 	wire.Bind(new(domain.MailZoneRepository), new(*repository)),
 	wire.Bind(new(domain.MailBroadcastDispatcher), new(*service)),
+	wire.Bind(new(domain.MailZoneChecker), new(*service)),
 	mailtransport.New,
 	mailtransport.NewDomainProvider,
 	SettingsFromConfig,

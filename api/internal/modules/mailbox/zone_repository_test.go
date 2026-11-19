@@ -238,3 +238,29 @@ func TestDomainCapabilityRoundTrip(t *testing.T) {
 		t.Fatalf("plain = %+v, %v", stored, err)
 	}
 }
+
+func TestDeletePendingZoneRefusesAVerifiedDomain(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	zone := newZone(1, "example.com")
+	if err := repo.CreateZone(ctx, zone, 3); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	mailDomain := &domain.MailDomain{OrganizationID: 1, Name: "example.com", ZoneID: zone.CloudflareZoneID, ZoneName: zone.Name, MailZoneID: &zone.ID, CreatedBy: 1}
+	if err := repo.CreateDomain(ctx, mailDomain, 10); err != nil {
+		t.Fatalf("CreateDomain: %v", err)
+	}
+	mailDomain.Status = domain.MailDomainStatusVerified
+	if err := repo.UpdateDomain(ctx, mailDomain); err != nil {
+		t.Fatalf("UpdateDomain: %v", err)
+	}
+	if err := repo.DeletePendingZone(ctx, zone.ID); !errors.Is(err, ErrMailZoneInUse) {
+		t.Fatalf("DeletePendingZone = %v", err)
+	}
+	if _, err := repo.FindZone(ctx, 1, zone.ID); err != nil {
+		t.Fatalf("zone removed: %v", err)
+	}
+	if _, err := repo.FindDomain(ctx, 1, mailDomain.ID); err != nil {
+		t.Fatalf("domain removed: %v", err)
+	}
+}

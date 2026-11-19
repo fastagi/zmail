@@ -3,8 +3,11 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
@@ -17,6 +20,8 @@ type fakeMailZones struct {
 	nextID    uint
 	domains   *fakeDomains
 	createErr error
+	// now stamps CreatedAt on stored zones, as the database does.
+	now func() time.Time
 }
 
 func newFakeMailZones(domains *fakeDomains) *fakeMailZones {
@@ -27,6 +32,9 @@ func newFakeMailZones(domains *fakeDomains) *fakeMailZones {
 func (z *fakeMailZones) store(zone domain.MailZone) *domain.MailZone {
 	z.nextID++
 	zone.ID = z.nextID
+	if zone.CreatedAt.IsZero() && z.now != nil {
+		zone.CreatedAt = z.now()
+	}
 	z.zones[zone.ID] = &zone
 	return &zone
 }
@@ -123,6 +131,11 @@ func (z *fakeMailZones) DeletePendingZone(_ context.Context, id uint) error {
 	zone, ok := z.zones[id]
 	if !ok || zone.Status != domain.MailZoneStatusPending {
 		return ErrMailZoneNotFound
+	}
+	for _, mailDomain := range z.domains.domains {
+		if mailDomain.MailZoneID != nil && *mailDomain.MailZoneID == id && mailDomain.Status == domain.MailDomainStatusVerified {
+			return ErrMailZoneInUse
+		}
 	}
 	for domainID, mailDomain := range z.domains.domains {
 		if mailDomain.MailZoneID != nil && *mailDomain.MailZoneID == id {
@@ -414,5 +427,242 @@ func TestDiscardKeepsAZoneThatIsNoLongerPending(t *testing.T) {
 	fixture.service.discardManagedZone(ctx, zone)
 	if _, kept := fixture.mailZones.zones[zone.ID]; !kept || len(fixture.zones.deletedZones) != 0 {
 		t.Fatalf("zone in use discarded: stored %v, deleted %v", fixture.mailZones.zones, fixture.zones.deletedZones)
+	}
+}
+
+// pendingZoneOf returns the stored managed zone of a domain connected into a new zone.
+func (f *domainFixture) pendingZoneOf(t *testing.T, mailDomain *domain.MailDomain) *domain.MailZone {
+	t.Helper()
+	if mailDomain.MailZoneID == nil {
+		t.Fatalf("domain %s has no managed zone", mailDomain.Name)
+	}
+	zone, ok := f.mailZones.zones[*mailDomain.MailZoneID]
+	if !ok {
+		t.Fatalf("zone of %s is not stored", mailDomain.Name)
+	}
+	return zone
+}
+
+func TestPendingZoneActivatesAndSetsUp(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	mailDomain := fixture.connect(t, "mail.example.org")
+	sendOnly, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "news.example.org", domain.MailDomainSendOnly)
+	if err != nil {
+		t.Fatalf("connect send-only: %v", err)
+	}
+	zone := fixture.pendingZoneOf(t, mailDomain)
+
+	// Still pending at the provider: the zone is checked, nothing is set up.
+	processed, err := fixture.service.CheckPendingZones(ctx, 100)
+	if err != nil || processed != 1 {
+		t.Fatalf("CheckPendingZones = %d, %v", processed, err)
+	}
+	zone = fixture.mailZones.zones[zone.ID]
+	if zone.Status != domain.MailZoneStatusPending || zone.LastCheckedAt == nil || !zone.LastCheckedAt.Equal(fixture.now) {
+		t.Fatalf("zone after a pending check = %+v", zone)
+	}
+	if len(fixture.zones.routingFor) != 0 || len(fixture.zones.created) != 0 {
+		t.Fatalf("setup ran on a pending zone: routing %v, records %v", fixture.zones.routingFor, fixture.zones.created)
+	}
+
+	fixture.zones.zoneStatus[zone.CloudflareZoneID] = "active"
+	processed, err = fixture.service.CheckPendingZones(ctx, 100)
+	if err != nil || processed != 1 {
+		t.Fatalf("CheckPendingZones = %d, %v", processed, err)
+	}
+	zone = fixture.mailZones.zones[zone.ID]
+	if zone.Status != domain.MailZoneStatusActive || zone.ActivatedAt == nil || !zone.ActivatedAt.Equal(fixture.now) {
+		t.Fatalf("zone = %+v", zone)
+	}
+	for _, id := range []uint{mailDomain.ID, sendOnly.ID} {
+		if stored := fixture.domains.domains[id]; stored.Status != domain.MailDomainStatusVerified {
+			t.Fatalf("domain %s = %s, %q", stored.Name, stored.Status, stored.LastError)
+		}
+	}
+	// The send-only domain is set up without Email Routing.
+	if !slices.Equal(fixture.zones.routingFor, []string{"mail.example.org"}) {
+		t.Fatalf("routing = %v", fixture.zones.routingFor)
+	}
+
+	// An active zone is no longer polled.
+	if processed, err = fixture.service.CheckPendingZones(ctx, 100); err != nil || processed != 0 {
+		t.Fatalf("CheckPendingZones after activation = %d, %v", processed, err)
+	}
+}
+
+func TestPendingZoneExpiresAfter14Days(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	expired := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.org"))
+	fresh := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.net"))
+	gone := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.dev"))
+	expired.CreatedAt = fixture.now.Add(-15 * 24 * time.Hour)
+	fresh.CreatedAt = fixture.now.Add(-13 * 24 * time.Hour)
+	gone.CreatedAt = fixture.now.Add(-20 * 24 * time.Hour)
+	// The zone of example.dev was already removed at the provider, which no longer knows it.
+	fixture.zones.getZoneErr[gone.CloudflareZoneID] = &mailtransport.DomainError{Operation: "get zone", Status: http.StatusNotFound}
+
+	processed, err := fixture.service.CheckPendingZones(ctx, 100)
+	if err != nil || processed != 3 {
+		t.Fatalf("CheckPendingZones = %d, %v", processed, err)
+	}
+	if !slices.Contains(fixture.zones.deletedZones, expired.CloudflareZoneID) {
+		t.Fatalf("deleted zones = %v", fixture.zones.deletedZones)
+	}
+	if slices.Contains(fixture.zones.deletedZones, fresh.CloudflareZoneID) {
+		t.Fatalf("a 13-day-old zone was deleted: %v", fixture.zones.deletedZones)
+	}
+	for _, removed := range []*domain.MailZone{expired, gone} {
+		if _, left := fixture.mailZones.zones[removed.ID]; left {
+			t.Fatalf("expired zone %s is still stored", removed.Name)
+		}
+	}
+	kept, ok := fixture.mailZones.zones[fresh.ID]
+	if !ok || kept.Status != domain.MailZoneStatusPending || kept.LastCheckedAt == nil {
+		t.Fatalf("fresh zone = %+v", kept)
+	}
+	if len(fixture.domains.domains) != 1 {
+		t.Fatalf("domains left = %v", fixture.domains.domains)
+	}
+	for _, mailDomain := range fixture.domains.domains {
+		if mailDomain.Name != "mail.example.net" {
+			t.Fatalf("domain left = %s", mailDomain.Name)
+		}
+	}
+}
+
+func TestPendingZoneExpiryToleratesAZoneAlreadyGone(t *testing.T) {
+	fixture := newDomainFixture(t)
+	zone := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.org"))
+	zone.CreatedAt = fixture.now.Add(-15 * 24 * time.Hour)
+	fixture.zones.deleteZoneErr = &mailtransport.DomainError{Operation: "delete zone", Status: http.StatusNotFound}
+
+	if processed, err := fixture.service.CheckPendingZones(context.Background(), 100); err != nil || processed != 1 {
+		t.Fatalf("CheckPendingZones = %d, %v", processed, err)
+	}
+	if _, left := fixture.mailZones.zones[zone.ID]; left || len(fixture.domains.domains) != 0 {
+		t.Fatalf("zones %v, domains %v", fixture.mailZones.zones, fixture.domains.domains)
+	}
+
+	// Any other provider failure keeps the rows, so the next pass tries again.
+	retry := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.net"))
+	retry.CreatedAt = fixture.now.Add(-15 * 24 * time.Hour)
+	fixture.zones.deleteZoneErr = &mailtransport.DomainError{Operation: "delete zone", Status: http.StatusInternalServerError}
+	if _, err := fixture.service.CheckPendingZones(context.Background(), 100); err != nil {
+		t.Fatalf("CheckPendingZones: %v", err)
+	}
+	if _, kept := fixture.mailZones.zones[retry.ID]; !kept {
+		t.Fatal("zone removed although the provider still holds it")
+	}
+}
+
+func TestActiveZoneNeverExpires(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	active := fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.org", CloudflareZoneID: "cf-own", Status: domain.MailZoneStatusActive,
+		CreatedAt: fixture.now.Add(-60 * 24 * time.Hour),
+	})
+	fixture.zones.zones["example.org"] = "cf-own"
+	fixture.connect(t, "mail.example.org")
+
+	if processed, err := fixture.service.CheckPendingZones(ctx, 100); err != nil || processed != 0 {
+		t.Fatalf("CheckPendingZones = %d, %v", processed, err)
+	}
+	if _, kept := fixture.mailZones.zones[active.ID]; !kept || len(fixture.zones.deletedZones) != 0 {
+		t.Fatalf("active zone removed: zones %v, deleted %v", fixture.mailZones.zones, fixture.zones.deletedZones)
+	}
+
+	// A zone that became active at the provider just before its deadline is activated, not deleted.
+	late := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.net"))
+	late.CreatedAt = fixture.now.Add(-15 * 24 * time.Hour)
+	fixture.zones.zoneStatus[late.CloudflareZoneID] = "active"
+	if _, err := fixture.service.CheckPendingZones(ctx, 100); err != nil {
+		t.Fatalf("CheckPendingZones: %v", err)
+	}
+	if stored, kept := fixture.mailZones.zones[late.ID]; !kept || stored.Status != domain.MailZoneStatusActive {
+		t.Fatalf("late zone = %+v, kept %v", stored, kept)
+	}
+	if len(fixture.zones.deletedZones) != 0 {
+		t.Fatalf("deleted zones = %v", fixture.zones.deletedZones)
+	}
+}
+
+func TestCheckPendingZoneToleratesActivationLimit(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	mailDomain := fixture.connect(t, "mail.example.org")
+	zone := fixture.pendingZoneOf(t, mailDomain)
+	fixture.zones.activationErr = fmt.Errorf("%w: HTTP 429", mailtransport.ErrActivationCheckLimited)
+
+	checked, err := fixture.service.CheckMailDomain(ctx, 7, mailDomain.ID)
+	if err != nil {
+		t.Fatalf("CheckMailDomain: %v", err)
+	}
+	if !checked.ZoneCheckLimited || checked.Status != domain.MailDomainStatusPending || len(checked.Records) != 0 {
+		t.Fatalf("checked = %+v", checked)
+	}
+	if checked.Zone == nil || checked.Zone.Status != domain.MailZoneStatusPending || checked.Zone.LastCheckedAt == nil {
+		t.Fatalf("zone = %+v", checked.Zone)
+	}
+	if !slices.Equal(fixture.zones.activationChecks, []string{zone.CloudflareZoneID}) {
+		t.Fatalf("activation checks = %v", fixture.zones.activationChecks)
+	}
+	if len(fixture.zones.routingFor) != 0 {
+		t.Fatalf("routing = %v", fixture.zones.routingFor)
+	}
+
+	// Once the provider serves the zone, the check activates it and sets the domain up.
+	fixture.zones.activationErr = nil
+	fixture.zones.zoneStatus[zone.CloudflareZoneID] = "active"
+	checked, err = fixture.service.CheckMailDomain(ctx, 7, mailDomain.ID)
+	if err != nil {
+		t.Fatalf("CheckMailDomain: %v", err)
+	}
+	if checked.ZoneCheckLimited || checked.Status != domain.MailDomainStatusVerified ||
+		checked.Zone == nil || checked.Zone.Status != domain.MailZoneStatusActive {
+		t.Fatalf("checked = %+v / zone %+v", checked, checked.Zone)
+	}
+	if !slices.Equal(fixture.zones.routingFor, []string{"mail.example.org"}) {
+		t.Fatalf("routing = %v", fixture.zones.routingFor)
+	}
+
+	// Any other refusal of the activation check fails the check.
+	pending := fixture.connect(t, "mail.example.net")
+	fixture.zones.activationErr = &mailtransport.DomainError{Operation: "activation check", Status: http.StatusInternalServerError}
+	if _, err := fixture.service.CheckMailDomain(ctx, 7, pending.ID); !errors.Is(err, ErrMailDomainProviderFailed) {
+		t.Fatalf("CheckMailDomain = %v", err)
+	}
+}
+
+func TestSetUpOnPendingZoneRefused(t *testing.T) {
+	fixture := newDomainFixture(t)
+	mailDomain := fixture.connect(t, "mail.example.org")
+
+	if _, err := fixture.service.SetUpMailDomain(context.Background(), 7, mailDomain.ID); !errors.Is(err, ErrMailZonePending) {
+		t.Fatalf("SetUpMailDomain = %v", err)
+	}
+	if len(fixture.zones.routingFor) != 0 || len(fixture.zones.created) != 0 {
+		t.Fatalf("setup ran: routing %v, records %v", fixture.zones.routingFor, fixture.zones.created)
+	}
+}
+
+func TestCheckPendingZonesContinuesAfterFailure(t *testing.T) {
+	fixture := newDomainFixture(t)
+	failing := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.org"))
+	activating := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.net"))
+	fixture.zones.getZoneErr[failing.CloudflareZoneID] = &mailtransport.DomainError{Operation: "get zone", Status: http.StatusBadGateway}
+	fixture.zones.zoneStatus[activating.CloudflareZoneID] = "active"
+
+	processed, err := fixture.service.CheckPendingZones(context.Background(), 100)
+	if err != nil || processed != 2 {
+		t.Fatalf("CheckPendingZones = %d, %v", processed, err)
+	}
+	if stored := fixture.mailZones.zones[failing.ID]; stored.Status != domain.MailZoneStatusPending || stored.LastCheckedAt == nil {
+		t.Fatalf("failing zone = %+v", stored)
+	}
+	if stored := fixture.mailZones.zones[activating.ID]; stored.Status != domain.MailZoneStatusActive {
+		t.Fatalf("activating zone = %+v", stored)
 	}
 }

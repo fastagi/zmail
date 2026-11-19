@@ -77,12 +77,15 @@ type MailDomain struct {
 	// LastError is the provider's explanation of the last failed setup or check.
 	LastError string
 	// SettingUp is true while a setup runs in the background; it is not stored.
-	SettingUp  bool
-	CheckedAt  *time.Time
-	VerifiedAt *time.Time
-	CreatedBy  uint
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	SettingUp bool
+	// ZoneCheckLimited is true when the provider refused this check's request to look for the
+	// zone's name servers now because one ran too recently; it is not stored.
+	ZoneCheckLimited bool
+	CheckedAt        *time.Time
+	VerifiedAt       *time.Time
+	CreatedBy        uint
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // MailDomainRepository defines persistence for connected domains.

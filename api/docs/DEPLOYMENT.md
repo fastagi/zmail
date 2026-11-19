@@ -15,6 +15,7 @@ cloud, registry, rollout controller, secret store, or migration orchestrator for
 | `fastbuild notification:work` | Optional notification starter | Processes durable email deliveries with bounded database leases. |
 | `fastbuild webhook:work` | Optional webhook starter | Processes signed outbound deliveries with bounded network calls and database leases. |
 | `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit. |
+| `fastbuild mail:zone:work` | Optional mailbox starter | Activates managed mail zones once their registrar delegates them, sets their pending domains up, and removes zones still pending after 14 days. |
 | [`deploy/kubernetes`](../../deploy/kubernetes/README.md) | Example | Hardened kustomize reference for the API, workers, retention jobs, migration job, and Web. |
 | Production deployment manifests | Downstream app | Own secrets, network policy, replicas, migrations, rollout, and rollback. |
 
@@ -217,6 +218,21 @@ can run; each recipient is sent with an idempotency key of its broadcast and con
 that stops after the provider call does not mail that contact again. When the organization's
 24-hour send limit is reached, the broadcast shows `stop_reason` `send_limit_reached` and resumes
 when the window has room.
+
+## Mail Zone Worker
+
+When `mailbox` is selected with `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, deploy one more worker of the
+same image:
+
+```bash
+/app/fastbuild mail:zone:work --batch=100 --poll=10m
+```
+
+Each pass reads up to `--batch` pending managed zones from Cloudflare, least recently checked
+first. A zone Cloudflare reports `active` becomes active and its pending domains are set up; a zone
+still pending 14 days after it was created is deleted at Cloudflare with its domains. The worker
+waits `--poll` (at most `1h`) between passes even when a pass was full, so more pending zones than
+`--batch` take several passes. It needs the same database and Cloudflare settings as HTTP replicas.
 
 ## Webhook Worker And Retention
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"golang.org/x/net/publicsuffix"
@@ -15,6 +16,13 @@ import (
 // zoneCleanupTimeout bounds removing a zone this request created, which runs even when the
 // request itself was canceled.
 const zoneCleanupTimeout = 30 * time.Second
+
+// pendingZoneLifetime is how long a managed zone may wait for its registrar delegation. Nobody
+// delegates to a zone that never became active, so removing it later affects no one.
+const pendingZoneLifetime = 14 * 24 * time.Hour
+
+// providerZoneActive is the provider status of a zone the registrar delegates to it.
+const providerZoneActive = "active"
 
 // apexDomain returns the registrable domain of name, the label right below its public suffix:
 // example.com for mail.example.com, example.com.cn for a.b.example.com.cn. A name that is itself
@@ -170,4 +178,156 @@ func (s *service) attachZones(ctx context.Context, organizationID uint, domains 
 		}
 	}
 	return nil
+}
+
+// CheckPendingZones checks up to limit pending managed zones, the least recently checked first:
+// a zone the provider now serves becomes active and its pending domains are set up, and a zone
+// that stayed pending past pendingZoneLifetime is removed with its domains. One zone's failure is
+// logged and does not stop the others. It returns how many zones it checked.
+func (s *service) CheckPendingZones(ctx context.Context, limit int) (int, error) {
+	if !s.domainsEnabled() {
+		// Without custom domains there are no managed zones to check.
+		return 0, nil
+	}
+	zones, err := s.zones.ListPendingZones(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	for _, zone := range zones {
+		if err := s.checkPendingZone(ctx, zone); err != nil {
+			slog.WarnContext(ctx, "pending mail zone check failed",
+				slog.String("zone", zone.Name), slog.String("error", err.Error()))
+		}
+	}
+	return len(zones), nil
+}
+
+func (s *service) checkPendingZone(ctx context.Context, zone *domain.MailZone) error {
+	if s.now().UTC().Sub(zone.CreatedAt) <= pendingZoneLifetime {
+		_, err := s.refreshZone(ctx, zone)
+		return err
+	}
+	// The registrar may have delegated the zone since the last pass; an active zone is never
+	// removed.
+	refreshed, err := s.refreshZone(ctx, zone)
+	switch {
+	case err != nil && !providerZoneGone(err):
+		return err
+	case err == nil && refreshed.Status == domain.MailZoneStatusActive:
+		return nil
+	}
+	return s.expireZone(ctx, zone)
+}
+
+// expireZone removes a pending zone from the provider, then its row and domains. The provider
+// goes first so a failure leaves the row for the next pass to retry.
+func (s *service) expireZone(ctx context.Context, zone *domain.MailZone) error {
+	if err := s.domainProvider.DeleteZone(ctx, zone.CloudflareZoneID); err != nil && !providerZoneGone(err) {
+		return err
+	}
+	if err := s.zones.DeletePendingZone(ctx, zone.ID); err != nil {
+		if errors.Is(err, ErrMailZoneNotFound) {
+			// Already removed, or activated by a concurrent check.
+			return nil
+		}
+		return err
+	}
+	slog.InfoContext(ctx, "pending mail zone expired",
+		slog.String("zone", zone.Name), slog.String("zone_id", zone.CloudflareZoneID))
+	return nil
+}
+
+// refreshZone reads the zone's status from the provider and stores when it was checked. A zone
+// the provider now serves becomes active and its pending domains are set up.
+func (s *service) refreshZone(ctx context.Context, zone *domain.MailZone) (*domain.MailZone, error) {
+	details, lookupErr := s.domainProvider.GetZone(ctx, zone.CloudflareZoneID)
+	now := s.now().UTC()
+	zone.LastCheckedAt = &now
+	activated := lookupErr == nil && details.Status == providerZoneActive && zone.Status != domain.MailZoneStatusActive
+	if activated {
+		zone.Status = domain.MailZoneStatusActive
+		zone.ActivatedAt = &now
+	}
+	if err := s.zones.UpdateZone(ctx, zone); err != nil {
+		return nil, err
+	}
+	if lookupErr != nil {
+		return zone, lookupErr
+	}
+	if activated {
+		slog.InfoContext(ctx, "mail zone activated", slog.String("zone", zone.Name))
+		s.setUpPendingDomains(ctx, zone)
+	}
+	return zone, nil
+}
+
+// setUpPendingDomains starts the setup of every pending domain in a zone that just became active.
+func (s *service) setUpPendingDomains(ctx context.Context, zone *domain.MailZone) {
+	domains, err := s.zones.ListDomainsInZone(ctx, zone.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "domains of an activated mail zone were not set up",
+			slog.String("zone", zone.Name), slog.String("error", err.Error()))
+		return
+	}
+	for _, mailDomain := range domains {
+		if mailDomain.Status != domain.MailDomainStatusPending {
+			continue
+		}
+		if _, err := s.startSetUp(ctx, mailDomain); err != nil {
+			slog.WarnContext(ctx, "mail domain setup did not start",
+				slog.String("domain", mailDomain.Name), slog.String("error", err.Error()))
+		}
+	}
+}
+
+// pendingZoneOf returns the managed zone of a domain while it is pending, or nil when the domain
+// is in an active or operator zone.
+func (s *service) pendingZoneOf(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailZone, error) {
+	if mailDomain.MailZoneID == nil {
+		return nil, nil
+	}
+	zone, err := s.zones.FindZone(ctx, mailDomain.OrganizationID, *mailDomain.MailZoneID)
+	if err != nil {
+		return nil, err
+	}
+	if zone.Status != domain.MailZoneStatusPending {
+		return nil, nil
+	}
+	return zone, nil
+}
+
+// checkDomainZone asks the provider to look for the zone's name servers now, then checks the
+// zone as the poller does. A rate-limited request is reported on the domain, not as an error.
+// The domain stays pending, without records, until its zone is active.
+func (s *service) checkDomainZone(ctx context.Context, mailDomain *domain.MailDomain, zone *domain.MailZone) (*domain.MailDomain, error) {
+	limited := false
+	if err := s.domainProvider.RequestActivationCheck(ctx, zone.CloudflareZoneID); err != nil {
+		if !errors.Is(err, mailtransport.ErrActivationCheckLimited) {
+			return nil, providerError(err)
+		}
+		limited = true
+	}
+	refreshed, err := s.refreshZone(ctx, zone)
+	if err != nil {
+		return nil, providerError(err)
+	}
+	current := mailDomain
+	if refreshed.Status == domain.MailZoneStatusActive {
+		// The activation started the setup of the domain; read it as that left it.
+		if current, err = s.domains.FindDomain(ctx, mailDomain.OrganizationID, mailDomain.ID); err != nil {
+			return nil, err
+		}
+	}
+	presented, err := s.present(ctx, current)
+	if err != nil {
+		return nil, err
+	}
+	presented.ZoneCheckLimited = limited
+	return presented, nil
+}
+
+// providerZoneGone reports whether the provider no longer has the zone.
+func providerZoneGone(err error) bool {
+	var failure *mailtransport.DomainError
+	return errors.As(err, &failure) && failure.Status == http.StatusNotFound
 }

@@ -495,6 +495,12 @@ type MailBroadcastDispatcher interface {
 	DispatchBroadcasts(ctx context.Context, limit int) (int, error)
 }
 
+// MailZoneChecker checks pending managed zones outside request paths: it activates the zones the
+// provider now serves and removes the ones that waited too long. It returns how many it checked.
+type MailZoneChecker interface {
+	CheckPendingZones(ctx context.Context, limit int) (int, error)
+}
+
 // MailTemplateRepository stores templates. Every lookup is scoped to an organization.
 type MailTemplateRepository interface {
 	// CreateTemplate stores a template unless the organization already has limit templates.

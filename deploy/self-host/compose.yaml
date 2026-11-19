@@ -61,6 +61,8 @@ x-api-environment: &api-environment
   # Organizations' own domains; off unless .env turns them on (see README).
   MAILBOX_CUSTOM_DOMAINS_ENABLED: ${MAILBOX_CUSTOM_DOMAINS_ENABLED:-false}
   MAILBOX_CLOUDFLARE_EMAIL_WORKER: ${MAILBOX_CLOUDFLARE_EMAIL_WORKER:-}
+  # Managed zones Zmail may create per organization for domains the account does not hold yet.
+  MAILBOX_MAX_ZONES_PER_ORGANIZATION: ${MAILBOX_MAX_ZONES_PER_ORGANIZATION:-3}
   # System mail (password resets, invitations); empty MAIL_FROM leaves it off.
   MAIL_PROVIDER: ${MAIL_PROVIDER:-cloudflare}
   MAIL_FROM: ${MAIL_FROM:-}
@@ -214,6 +216,14 @@ services:
   broadcast-worker:
     <<: *worker
     entrypoint: ["/app/fastbuild", "mail:broadcast:work", "--batch=25", "--poll=2s"]
+    environment:
+      <<: [*api-environment, *app-database]
+
+  # Activates managed zones once their registrar delegates them, sets their domains up, and
+  # removes zones still pending after 14 days.
+  mail-zone-worker:
+    <<: *worker
+    entrypoint: ["/app/fastbuild", "mail:zone:work", "--batch=100", "--poll=10m"]
     environment:
       <<: [*api-environment, *app-database]
 

@@ -264,7 +264,8 @@ func (r *repository) DeleteZone(ctx context.Context, organizationID, id uint) er
 }
 
 // DeletePendingZone removes a pending zone and the domains in it in one transaction. A domain in
-// a pending zone cannot have mailboxes, since it is never verified while the zone is pending.
+// a pending zone cannot have mailboxes, since it is never verified while the zone is pending; a
+// verified domain in the zone all the same makes it refuse with ErrMailZoneInUse.
 func (r *repository) DeletePendingZone(ctx context.Context, id uint) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
@@ -277,6 +278,15 @@ func (r *repository) DeletePendingZone(ctx context.Context, id uint) error {
 				return ErrMailZoneNotFound
 			}
 			return err
+		}
+		var verified int64
+		if err := tx.Model(&MailDomainPO{}).
+			Where("mail_zone_id = ? AND status = ?", po.ID, string(domain.MailDomainStatusVerified)).
+			Count(&verified).Error; err != nil {
+			return err
+		}
+		if verified > 0 {
+			return ErrMailZoneInUse
 		}
 		if err := tx.Where("mail_zone_id = ?", po.ID).Delete(&MailDomainPO{}).Error; err != nil {
 			return err

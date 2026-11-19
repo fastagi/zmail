@@ -58,8 +58,12 @@ func (s *service) MailboxDomains(ctx context.Context, organizationID uint) ([]Ma
 	return domains, nil
 }
 
+func (s *service) domainsEnabled() bool {
+	return s.settings.CustomDomainsEnabled && s.domains != nil && s.zones != nil && s.domainProvider != nil
+}
+
 func (s *service) requireDomains() error {
-	if !s.settings.CustomDomainsEnabled || s.domains == nil || s.zones == nil || s.domainProvider == nil {
+	if !s.domainsEnabled() {
 		return ErrMailDomainsDisabled
 	}
 	return nil
@@ -222,10 +226,19 @@ func (s *service) SetUpMailDomain(ctx context.Context, organizationID, id uint) 
 	if err != nil {
 		return nil, err
 	}
+	pending, err := s.pendingZoneOf(ctx, mailDomain)
+	if err != nil {
+		return nil, err
+	}
+	if pending != nil {
+		// The provider does not serve the zone until the registrar delegates it.
+		return nil, ErrMailZonePending
+	}
 	return s.startSetUp(ctx, mailDomain)
 }
 
 // CheckMailDomain compares the zone's records with what the domain needs, without writing DNS.
+// While the domain's managed zone is pending, it checks the zone's delegation instead.
 func (s *service) CheckMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error) {
 	if err := s.requireDomains(); err != nil {
 		return nil, err
@@ -233,6 +246,13 @@ func (s *service) CheckMailDomain(ctx context.Context, organizationID, id uint) 
 	mailDomain, err := s.domains.FindDomain(ctx, organizationID, id)
 	if err != nil {
 		return nil, err
+	}
+	pending, err := s.pendingZoneOf(ctx, mailDomain)
+	if err != nil {
+		return nil, err
+	}
+	if pending != nil {
+		return s.checkDomainZone(ctx, mailDomain, pending)
 	}
 	if _, running := s.domainSetups.Load(id); running {
 		// The running setup checks when it is done; a second check now would race it.

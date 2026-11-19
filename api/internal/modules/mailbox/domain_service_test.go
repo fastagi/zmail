@@ -29,6 +29,13 @@ type fakeZones struct {
 	createdZones  []string // zone names
 	deletedZones  []string // zone IDs
 	scanned       []string // zone IDs
+	// Zone activation: the provider status per zone ID (pending when unset), GetZone failures per
+	// zone ID, the activation checks asked for and how they fail, and how DeleteZone fails.
+	zoneStatus       map[string]string
+	getZoneErr       map[string]error
+	activationChecks []string
+	activationErr    error
+	deleteZoneErr    error
 }
 
 func newFakeZones() *fakeZones {
@@ -37,6 +44,9 @@ func newFakeZones() *fakeZones {
 		records: map[string][]mailtransport.DNSRecord{},
 		sending: map[string]string{},
 		rules:   map[string]string{},
+
+		zoneStatus: map[string]string{},
+		getZoneErr: map[string]error{},
 	}
 }
 
@@ -130,14 +140,32 @@ func (z *fakeZones) CreateZone(_ context.Context, name string) (mailtransport.Zo
 	}, nil
 }
 
-func (z *fakeZones) GetZone(context.Context, string) (mailtransport.ZoneDetails, error) {
-	return mailtransport.ZoneDetails{}, mailtransport.ErrNotConfigured
+func (z *fakeZones) GetZone(_ context.Context, zoneID string) (mailtransport.ZoneDetails, error) {
+	if err := z.getZoneErr[zoneID]; err != nil {
+		return mailtransport.ZoneDetails{}, err
+	}
+	for name, id := range z.zones {
+		if id == zoneID {
+			status := z.zoneStatus[zoneID]
+			if status == "" {
+				status = "pending"
+			}
+			return mailtransport.ZoneDetails{ID: id, Name: name, Status: status, NameServers: fakeNameServers}, nil
+		}
+	}
+	return mailtransport.ZoneDetails{}, &mailtransport.DomainError{Operation: "get zone", Status: 404}
 }
 
-func (z *fakeZones) RequestActivationCheck(context.Context, string) error { return nil }
+func (z *fakeZones) RequestActivationCheck(_ context.Context, zoneID string) error {
+	z.activationChecks = append(z.activationChecks, zoneID)
+	return z.activationErr
+}
 
 func (z *fakeZones) DeleteZone(_ context.Context, zoneID string) error {
 	z.deletedZones = append(z.deletedZones, zoneID)
+	if z.deleteZoneErr != nil {
+		return z.deleteZoneErr
+	}
 	for name, id := range z.zones {
 		if id == zoneID {
 			delete(z.zones, name)
@@ -260,6 +288,7 @@ func newDomainFixture(t *testing.T) *domainFixture {
 		domains:        &fakeDomains{domains: map[uint]*domain.MailDomain{}, mailbox: base.repo},
 	}
 	fixture.mailZones = newFakeMailZones(fixture.domains)
+	fixture.mailZones.now = base.service.now
 	base.service.domains = fixture.domains
 	base.service.zones = fixture.mailZones
 	base.service.settings.MaxZonesPerOrganization = 3
