@@ -279,6 +279,8 @@ describe('mail broadcasts console', () => {
       screen.getByText(/Paused: the organization reached its 24-hour send limit/u)
     ).toBeInTheDocument();
     expect(state.recipientCalls.at(-1)).toEqual({ status: undefined, live: true });
+    expect(screen.getByText('Queue progress').nextElementSibling).toHaveTextContent('100%');
+    expect(screen.getByText('Send success rate').nextElementSibling).toHaveTextContent('50%');
     const bob = screen.getByText('bob@example.com').closest('tr') as HTMLElement;
     expect(within(bob).getByText('Bounced')).toBeInTheDocument();
     expect(screen.getByText('provider.custom')).toBeInTheDocument();
