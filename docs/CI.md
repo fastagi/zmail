@@ -50,7 +50,10 @@ A scheduled failure is fixed like a failing pull request: open a fix before the 
 ## Runner Contract
 
 Workflows default to `ubuntu-latest`. An installation may set repository variable
-`CI_RUNNER_LABELS` to a JSON array of labels for a compatible self-hosted runner.
+`CI_RUNNER_LABELS` to a JSON array of labels for a compatible self-hosted runner. On a runner
+host shared by several repositories, give the repository its own pool label (for example
+`["self-hosted","fe5-zmail"]`) with its own runner cap, so its jobs do not queue behind other
+repositories.
 
 The reviewed JavaScript actions use the Node 24 action runtime. Self-hosted runners must run GitHub
 Actions Runner `v2.327.1` or newer. `actions/checkout` intentionally remains on the latest reviewed
