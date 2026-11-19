@@ -6,6 +6,21 @@ import (
 	"time"
 )
 
+// APIKeyMode says whether a key acts for real or only in test. It is fixed when the key is created.
+type APIKeyMode string
+
+const (
+	// APIKeyModeLive keys act for real. Keys created before modes existed are live.
+	APIKeyModeLive APIKeyMode = "live"
+	// APIKeyModeTest keys are accepted only by routes that declare test support.
+	APIKeyModeTest APIKeyMode = "test"
+)
+
+// Valid reports whether the mode is a known mode.
+func (m APIKeyMode) Valid() bool {
+	return m == APIKeyModeLive || m == APIKeyModeTest
+}
+
 // APIKey represents an application API key owned by a user.
 type APIKey struct {
 	ID         uint       `json:"id"`
@@ -14,6 +29,7 @@ type APIKey struct {
 	KeyPrefix  string     `json:"key_prefix"`
 	KeyHash    string     `json:"-"`
 	Scopes     []string   `json:"scopes"`
+	Mode       APIKeyMode `json:"mode"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`

@@ -11,6 +11,22 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — API key modes
+
+### Medium — API keys are live or test; scoped routes refuse test keys
+
+Every API key has an immutable `mode`: `live` (the default) or `test`. `POST /v1/api-keys`
+accepts an optional `mode`; key responses add `mode`, so clients that validate responses strictly
+must accept it. Test keys are issued with the `fastbuild_test_` prefix. `apikey.RequireScopes`
+now also answers `403 PERMISSION.DENIED` for a valid test key; a route that supports test keys
+declares it with `apikey.RequireScopesAllowingTest` and reads the mode with
+`apikey.APIKeyModeFromContext`. Fork routes that authenticate API keys without `RequireScopes`
+must check the mode themselves. `domain.APIKey` gains `Mode`.
+
+Run migrations: `2026_11_23_090000_add_api_key_mode` adds `api_keys.mode` (`varchar(8)`, default
+`live`, checked to `live` or `test`); existing keys become `live`. **Revoke every test key before
+rolling this migration back**: Down drops the column, and the old code treats every key as live.
+
 ## Unreleased — Transactional templates
 
 ### Medium — Templates have a kind; template writes take the viewer

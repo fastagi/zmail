@@ -81,3 +81,58 @@ func TestRequireScopesRejectsInvalidConfiguration(t *testing.T) {
 	assert.Panics(t, func() { RequireScopes() })
 	assert.Panics(t, func() { RequireScopes("models") })
 }
+
+func serveScopedRoute(t *testing.T, middleware gin.HandlerFunc, mode domain.APIKeyMode, scopes []string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.GET("/resource", func(c *gin.Context) {
+		c.Set(apiKeyScopesContextKey, scopes)
+		if mode != "" {
+			c.Set(apiKeyModeContextKey, mode)
+		}
+		c.Next()
+	}, middleware, func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/resource", nil))
+	return recorder
+}
+
+func TestRequireScopesRefusesTestKey(t *testing.T) {
+	for _, scopes := range [][]string{{"mail:send"}, {"*"}} {
+		recorder := serveScopedRoute(t, RequireScopes("mail:send"), domain.APIKeyModeTest, scopes)
+
+		assert.Equal(t, http.StatusForbidden, recorder.Code)
+		var body struct {
+			ErrorCode string `json:"error_code"`
+		}
+		require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
+		assert.Equal(t, domain.CodePermissionDenied, body.ErrorCode)
+	}
+
+	// A live key, or a context without a mode, still passes on scopes alone.
+	assert.Equal(t, http.StatusNoContent, serveScopedRoute(t, RequireScopes("mail:send"), domain.APIKeyModeLive, []string{"mail:send"}).Code)
+	assert.Equal(t, http.StatusNoContent, serveScopedRoute(t, RequireScopes("mail:send"), "", []string{"mail:send"}).Code)
+}
+
+func TestRequireScopesAllowingTestAcceptsBothModes(t *testing.T) {
+	for _, mode := range []domain.APIKeyMode{domain.APIKeyModeLive, domain.APIKeyModeTest} {
+		recorder := serveScopedRoute(t, RequireScopesAllowingTest("mail:transactional"), mode, []string{"mail:transactional"})
+		assert.Equal(t, http.StatusNoContent, recorder.Code, "mode %s", mode)
+
+		recorder = serveScopedRoute(t, RequireScopesAllowingTest("mail:transactional"), mode, []string{"mail:send"})
+		assert.Equal(t, http.StatusForbidden, recorder.Code, "mode %s still needs its scope", mode)
+	}
+	assert.Panics(t, func() { RequireScopesAllowingTest() })
+}
+
+func TestAPIKeyModeFromContextDefaultsToLive(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	assert.Equal(t, domain.APIKeyModeLive, APIKeyModeFromContext(c))
+	c.Set(apiKeyModeContextKey, domain.APIKeyModeTest)
+	assert.Equal(t, domain.APIKeyModeTest, APIKeyModeFromContext(c))
+	c.Set(apiKeyModeContextKey, "bogus")
+	assert.Equal(t, domain.APIKeyModeLive, APIKeyModeFromContext(c))
+}

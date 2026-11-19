@@ -86,3 +86,37 @@ func apiKeyMiddlewareTestEngine(service Service) *gin.Engine {
 	})
 	return engine
 }
+
+type apiKeyStaticService struct {
+	Service
+	key *domain.APIKey
+}
+
+func (s *apiKeyStaticService) Validate(context.Context, string, ...string) (*domain.APIKey, error) {
+	return s.key, nil
+}
+
+func TestAPIKeyMiddlewareSetsModeInContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, mode := range []domain.APIKeyMode{domain.APIKeyModeLive, domain.APIKeyModeTest} {
+		engine := gin.New()
+		routes := router.New(engine)
+		NewHandler(&apiKeyStaticService{key: &domain.APIKey{
+			ID: 3, UserID: 9, Scopes: []string{"mail:transactional"}, Mode: mode,
+		}}).RegisterMiddleware(routes)
+		var seen domain.APIKeyMode
+		routes.WithMiddleware("api_key").GET("/protected", func(c *gin.Context) {
+			seen = APIKeyModeFromContext(c)
+			c.Status(http.StatusNoContent)
+		})
+		request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+		request.Header.Set("X-API-Key", "fastbuild_ab12cd34.secret")
+		result := httptest.NewRecorder()
+
+		engine.ServeHTTP(result, request)
+
+		assert.Equal(t, http.StatusNoContent, result.Code)
+		assert.Equal(t, mode, seen)
+	}
+}

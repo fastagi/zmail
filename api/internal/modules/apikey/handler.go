@@ -51,6 +51,7 @@ func (h *Handler) RegisterMiddleware(r *router.Router) {
 					"apiKeyID":             apiKey.ID,
 					"apiKeyUserID":         apiKey.UserID,
 					apiKeyScopesContextKey: append([]string(nil), apiKey.Scopes...),
+					apiKeyModeContextKey:   storedMode(string(apiKey.Mode)),
 					"userID":               apiKey.UserID,
 				},
 			}, nil

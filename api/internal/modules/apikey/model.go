@@ -22,6 +22,7 @@ type APIKeyPO struct {
 	KeyPrefix  string         `gorm:"size:32;not null;index"`
 	KeyHash    string         `gorm:"size:64;not null;uniqueIndex"`
 	Scopes     string         `gorm:"type:text"`
+	Mode       string         `gorm:"size:8;not null;default:live"`
 	LastUsedAt *time.Time
 	ExpiresAt  *time.Time
 	RevokedAt  *time.Time
@@ -48,6 +49,7 @@ func (po *APIKeyPO) toDomain() (*domain.APIKey, error) {
 		KeyPrefix:  po.KeyPrefix,
 		KeyHash:    po.KeyHash,
 		Scopes:     scopes,
+		Mode:       storedMode(po.Mode),
 		LastUsedAt: po.LastUsedAt,
 		ExpiresAt:  po.ExpiresAt,
 		RevokedAt:  po.RevokedAt,
@@ -74,10 +76,19 @@ func newAPIKeyPO(key *domain.APIKey) (*APIKeyPO, error) {
 		KeyPrefix:  key.KeyPrefix,
 		KeyHash:    key.KeyHash,
 		Scopes:     encodedScopes,
+		Mode:       string(storedMode(string(key.Mode))),
 		LastUsedAt: key.LastUsedAt,
 		ExpiresAt:  key.ExpiresAt,
 		RevokedAt:  key.RevokedAt,
 	}, nil
+}
+
+// storedMode reads a persisted mode; anything but test is live, matching the column default.
+func storedMode(value string) domain.APIKeyMode {
+	if domain.APIKeyMode(value) == domain.APIKeyModeTest {
+		return domain.APIKeyModeTest
+	}
+	return domain.APIKeyModeLive
 }
 
 func toDomainList(items []*APIKeyPO) ([]*domain.APIKey, error) {

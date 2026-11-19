@@ -147,3 +147,19 @@ func TestRepositoryRevokeIsOwnedAndIdempotent(t *testing.T) {
 	require.NotNil(t, stored.RevokedAt)
 	assert.True(t, revokedAt.Equal(*stored.RevokedAt))
 }
+
+func TestRepositoryPersistsKeyMode(t *testing.T) {
+	db := newAPIKeyRepositoryTestDB(t)
+	repo := NewRepository(db)
+	testKey := &domain.APIKey{UserID: 7, Name: "sandbox", KeyPrefix: "fastbuild_test_ab12cd34", KeyHash: "hash-test", Mode: domain.APIKeyModeTest}
+	liveKey := &domain.APIKey{UserID: 7, Name: "deploy", KeyPrefix: "fastbuild_ab12cd34", KeyHash: "hash-live"}
+	require.NoError(t, repo.Create(context.Background(), testKey))
+	require.NoError(t, repo.Create(context.Background(), liveKey))
+
+	stored, err := repo.FindByHash(context.Background(), "hash-test")
+	require.NoError(t, err)
+	assert.Equal(t, domain.APIKeyModeTest, stored.Mode)
+	stored, err = repo.FindByHash(context.Background(), "hash-live")
+	require.NoError(t, err)
+	assert.Equal(t, domain.APIKeyModeLive, stored.Mode, "an unset mode is stored as live")
+}

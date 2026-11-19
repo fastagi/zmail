@@ -13,6 +13,7 @@ TABLE api_keys
   COLUMN last_used_at timestamp with time zone
   COLUMN expires_at timestamp with time zone
   COLUMN revoked_at timestamp with time zone
+  COLUMN mode character varying(8) NOT NULL DEFAULT 'live'::character varying
 
 TABLE assets
   COLUMN id character varying(36) NOT NULL
@@ -584,6 +585,7 @@ TABLE workflow_tasks
   COLUMN updated_at timestamp with time zone NOT NULL
 
 CONSTRAINT api_keys.api_keys_pkey PRIMARY KEY (id)
+CONSTRAINT api_keys.chk_api_keys_mode CHECK (((mode)::text = ANY ((ARRAY['live'::character varying, 'test'::character varying])::text[])))
 CONSTRAINT assets.assets_pkey PRIMARY KEY (id)
 CONSTRAINT assets.assets_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'ready'::character varying, 'rejected'::character varying, 'deleted'::character varying])::text[])))
 CONSTRAINT assets.fk_assets_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
