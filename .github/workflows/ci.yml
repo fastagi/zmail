@@ -164,6 +164,9 @@ jobs:
         # debt anywhere blocks CI here.
         env:
           FASTBUILD_TEST_POSTGRES_DSN: postgres://fastbuild:fastbuild_test@127.0.0.1:${{ job.services.postgres.ports[5432] }}/fastbuild_test?sslmode=disable
+          # Every package builds its schema in the one service database; fewer packages at a
+          # time keep that database responsive, and the mailbox package alone can pass 10 minutes.
+          GO_TEST_FLAGS: -timeout=30m -p=4
         run: bash ../.agents/skills/verification-before-completion/scripts/run-tiers.sh 1
 
       - name: Verify Wire output is current
