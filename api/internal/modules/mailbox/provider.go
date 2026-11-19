@@ -18,7 +18,9 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailBroadcastRepository), new(*repository)),
 	wire.Bind(new(domain.MailDomainRepository), new(*repository)),
 	wire.Bind(new(domain.MailOrganizeRepository), new(*repository)),
+	wire.Bind(new(domain.MailZoneRepository), new(*repository)),
 	wire.Bind(new(domain.MailBroadcastDispatcher), new(*service)),
+	wire.Bind(new(domain.MailZoneChecker), new(*service)),
 	// Owners and members are validated against the organization starter's memberships.
 	NewMembershipDirectory,
 	mailtransport.New,
@@ -60,6 +62,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_18_100000_add_mail_broadcast_variables",
 			"2026_11_19_090000_add_mailbox_access",
 			"2026_11_19_100000_add_per_person_reads",
+			"2026_11_19_100000_create_mail_zones",
 			"2026_11_20_090000_add_send_queue",
 			"2026_11_21_090000_add_mail_organize",
 			"2026_11_21_090100_backfill_mail_threads",

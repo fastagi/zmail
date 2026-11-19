@@ -58,8 +58,12 @@ func (s *service) MailboxDomains(ctx context.Context, organizationID uint) ([]Ma
 	return domains, nil
 }
 
+func (s *service) domainsEnabled() bool {
+	return s.settings.CustomDomainsEnabled && s.domains != nil && s.zones != nil && s.domainProvider != nil
+}
+
 func (s *service) requireDomains() error {
-	if !s.settings.CustomDomainsEnabled || s.domains == nil || s.domainProvider == nil {
+	if !s.domainsEnabled() {
 		return ErrMailDomainsDisabled
 	}
 	return nil
@@ -70,10 +74,16 @@ func (s *service) ListMailDomains(ctx context.Context, organizationID uint) ([]*
 		return nil, err
 	}
 	domains, err := s.domains.ListDomains(ctx, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.attachZones(ctx, organizationID, domains); err != nil {
+		return nil, err
+	}
 	for _, mailDomain := range domains {
 		s.markSettingUp(mailDomain)
 	}
-	return domains, err
+	return domains, nil
 }
 
 func (s *service) GetMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error) {
@@ -84,35 +94,120 @@ func (s *service) GetMailDomain(ctx context.Context, organizationID, id uint) (*
 	if err != nil {
 		return nil, err
 	}
+	return s.present(ctx, mailDomain)
+}
+
+// present fills what a domain returned to a caller carries besides its stored fields.
+func (s *service) present(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
+	if err := s.attachZones(ctx, mailDomain.OrganizationID, []*domain.MailDomain{mailDomain}); err != nil {
+		return nil, err
+	}
 	return s.markSettingUp(mailDomain), nil
 }
 
 func (s *service) markSettingUp(mailDomain *domain.MailDomain) *domain.MailDomain {
-	_, mailDomain.SettingUp = s.domainSetups.Load(mailDomain.ID)
+	mailDomain.SettingUp = s.setupRunning(mailDomain.ID)
 	return mailDomain
+}
+
+// setupRunning reports whether a setup of the domain runs in the background.
+func (s *service) setupRunning(id uint) bool {
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+	_, running := s.domainSetups[id]
+	return running
+}
+
+// domainSetupRun is one background setup of a domain. rerun is set when the domain changed, such
+// as its capability, while the run was in progress, so the run sets it up again before ending.
+// Both fields of the run and its place in domainSetups change only under setupMu.
+type domainSetupRun struct {
+	rerun bool
 }
 
 // startSetUp runs the setup of a domain in the background, once at a time per domain, and returns
 // the domain as it is now. The setup makes several provider calls, which can outlast the request
 // and the proxies in front of it; a background run is never cut off by a client that stops waiting.
+// A call while a setup runs asks that run to set the domain up once more, from the domain as stored
+// then, so a change made meanwhile is never lost to a run that read the domain before it. Asking
+// and ending happen under one lock, so a run either sees the request or has already ended and a
+// new run starts.
 func (s *service) startSetUp(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
-	if _, running := s.domainSetups.LoadOrStore(mailDomain.ID, struct{}{}); !running {
+	s.setupMu.Lock()
+	run, running := s.domainSetups[mailDomain.ID]
+	if running {
+		run.rerun = true
+	} else {
+		if s.domainSetups == nil {
+			s.domainSetups = map[uint]*domainSetupRun{}
+		}
+		run = &domainSetupRun{}
+		s.domainSetups[mailDomain.ID] = run
+	}
+	s.setupMu.Unlock()
+	if running {
+		if s.setupClaimHook != nil {
+			s.setupClaimHook()
+		}
+	} else {
 		target := *mailDomain
+		s.setups.Add(1)
 		s.background(func() {
-			defer s.domainSetups.Delete(target.ID)
-			setupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), domainSetupTimeout)
-			defer cancel()
-			if _, err := s.setUp(setupContext, &target); err != nil {
-				slog.WarnContext(setupContext, "mail domain setup could not be stored",
-					slog.String("domain", target.Name), slog.String("error", err.Error()))
-			}
+			defer s.setups.Done()
+			s.runSetUps(ctx, run, &target)
 		})
 	}
 	current, err := s.domains.FindDomain(ctx, mailDomain.OrganizationID, mailDomain.ID)
 	if err != nil {
 		return nil, err
 	}
-	return s.markSettingUp(current), nil
+	return s.present(ctx, current)
+}
+
+// runSetUps sets the domain up until no rerun is asked for, reading the stored domain again for
+// every run after the first, and then releases the domain.
+func (s *service) runSetUps(ctx context.Context, run *domainSetupRun, target *domain.MailDomain) {
+	for {
+		s.runSetUp(ctx, target)
+		s.setupMu.Lock()
+		if !run.rerun {
+			delete(s.domainSetups, target.ID)
+			s.setupMu.Unlock()
+			return
+		}
+		run.rerun = false
+		s.setupMu.Unlock()
+		if !s.reloadSetUpTarget(ctx, target) {
+			// The domain is gone; nothing is left to set up, whatever was asked meanwhile.
+			s.setupMu.Lock()
+			delete(s.domainSetups, target.ID)
+			s.setupMu.Unlock()
+			return
+		}
+	}
+}
+
+func (s *service) runSetUp(ctx context.Context, target *domain.MailDomain) {
+	setupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), domainSetupTimeout)
+	defer cancel()
+	if _, err := s.setUp(setupContext, target); err != nil {
+		slog.WarnContext(setupContext, "mail domain setup could not be stored",
+			slog.String("domain", target.Name), slog.String("error", err.Error()))
+	}
+}
+
+// reloadSetUpTarget replaces target with the stored domain and reports whether it still exists.
+func (s *service) reloadSetUpTarget(ctx context.Context, target *domain.MailDomain) bool {
+	current, err := s.domains.FindDomain(context.WithoutCancel(ctx), target.OrganizationID, target.ID)
+	if err != nil {
+		if !errors.Is(err, ErrMailDomainNotFound) {
+			slog.WarnContext(ctx, "mail domain setup was not repeated",
+				slog.String("domain", target.Name), slog.String("error", err.Error()))
+		}
+		return false
+	}
+	*target = *current
+	return true
 }
 
 // normalizeDomainName lowercases a typed domain and rejects what no mailbox may use, including
@@ -128,10 +223,11 @@ func (s *service) normalizeDomainName(name string) (string, error) {
 	return name, nil
 }
 
-// ConnectMailDomain claims a domain for the organization and runs its setup. A provider failure
-// during setup does not fail the call: the domain stays pending with the reason, and the owner
-// can run the setup again.
-func (s *service) ConnectMailDomain(ctx context.Context, organizationID, createdBy uint, name string) (*domain.MailDomain, error) {
+// ConnectMailDomain claims a domain for the organization in the zone that holds it, creating a
+// managed zone when the provider account has none, and runs its setup once the zone is in use. A
+// provider failure during setup does not fail the call: the domain stays pending with the
+// reason, and the owner can run the setup again. An empty capability means send_receive.
+func (s *service) ConnectMailDomain(ctx context.Context, organizationID, createdBy uint, name string, capability domain.MailDomainCapability) (*domain.MailDomain, error) {
 	if err := s.requireDomains(); err != nil {
 		return nil, err
 	}
@@ -139,25 +235,46 @@ func (s *service) ConnectMailDomain(ctx context.Context, organizationID, created
 	if err != nil {
 		return nil, err
 	}
+	switch capability {
+	case "":
+		capability = domain.MailDomainSendReceive
+	case domain.MailDomainSendReceive, domain.MailDomainSendOnly:
+	default:
+		return nil, ErrMailDomainInvalid
+	}
 	if _, lookupErr := s.domains.FindDomainByName(ctx, name); lookupErr == nil {
 		return nil, ErrMailDomainTaken
 	} else if !errors.Is(lookupErr, ErrMailDomainNotFound) {
 		return nil, lookupErr
 	}
-	zone, err := s.domainProvider.FindZone(ctx, name)
+	zone, err := s.resolveZone(ctx, organizationID, createdBy, name)
 	if err != nil {
-		return nil, providerError(err)
+		return nil, err
 	}
 	mailDomain := &domain.MailDomain{
 		OrganizationID: organizationID,
 		Name:           name,
-		ZoneID:         zone.ID,
-		ZoneName:       zone.Name,
+		ZoneID:         zone.providerID,
+		ZoneName:       zone.name,
+		Capability:     capability,
 		Status:         domain.MailDomainStatusPending,
 		CreatedBy:      createdBy,
 	}
+	if zone.managed != nil {
+		zoneID := zone.managed.ID
+		mailDomain.MailZoneID = &zoneID
+	}
 	if err := s.domains.CreateDomain(ctx, mailDomain, domain.MaxMailDomainsPerOrganization); err != nil {
+		if zone.created {
+			s.discardManagedZone(ctx, zone.managed)
+		}
 		return nil, err
+	}
+	if zone.managed != nil && zone.managed.Status != domain.MailZoneStatusActive {
+		// The provider does not serve the zone until the registrar delegates it, so the setup
+		// waits for the zone to become active.
+		mailDomain.Zone = zone.managed
+		return s.markSettingUp(mailDomain), nil
 	}
 	return s.startSetUp(ctx, mailDomain)
 }
@@ -186,10 +303,19 @@ func (s *service) SetUpMailDomain(ctx context.Context, organizationID, id uint) 
 	if err != nil {
 		return nil, err
 	}
+	pending, err := s.pendingZoneOf(ctx, mailDomain)
+	if err != nil {
+		return nil, err
+	}
+	if pending != nil {
+		// The provider does not serve the zone until the registrar delegates it.
+		return nil, ErrMailZonePending
+	}
 	return s.startSetUp(ctx, mailDomain)
 }
 
 // CheckMailDomain compares the zone's records with what the domain needs, without writing DNS.
+// While the domain's managed zone is pending, it checks the zone's delegation instead.
 func (s *service) CheckMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error) {
 	if err := s.requireDomains(); err != nil {
 		return nil, err
@@ -198,11 +324,22 @@ func (s *service) CheckMailDomain(ctx context.Context, organizationID, id uint) 
 	if err != nil {
 		return nil, err
 	}
-	if _, running := s.domainSetups.Load(id); running {
-		// The running setup checks when it is done; a second check now would race it.
-		return s.markSettingUp(mailDomain), nil
+	pending, err := s.pendingZoneOf(ctx, mailDomain)
+	if err != nil {
+		return nil, err
 	}
-	return s.check(ctx, mailDomain, nil)
+	if pending != nil {
+		return s.checkDomainZone(ctx, mailDomain, pending)
+	}
+	if s.setupRunning(id) {
+		// The running setup checks when it is done; a second check now would race it.
+		return s.present(ctx, mailDomain)
+	}
+	checked, err := s.check(ctx, mailDomain, nil)
+	if err != nil {
+		return nil, err
+	}
+	return s.present(ctx, checked)
 }
 
 func (s *service) DeleteMailDomain(ctx context.Context, organizationID, id uint) error {
@@ -212,12 +349,17 @@ func (s *service) DeleteMailDomain(ctx context.Context, organizationID, id uint)
 	return s.domains.DeleteDomain(ctx, organizationID, id)
 }
 
-// setUp enables receiving and sending, adds the sending and DMARC records the zone lacks, and
-// checks the result. It only ever adds: a record that conflicts stays as it is and is reported.
+// setUp enables receiving (unless the domain only sends) and sending, adds the sending and DMARC
+// records the zone lacks, and checks the result. It only ever adds: a record that conflicts stays
+// as it is and is reported.
 func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
 	var failures []error
-	if err := s.domainProvider.EnableRouting(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
-		failures = append(failures, err)
+	if receives(mailDomain) {
+		if err := s.domainProvider.EnableRouting(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
+			failures = append(failures, err)
+		} else {
+			failures = append(failures, s.routeUnroutedMailboxes(ctx, mailDomain)...)
+		}
 	}
 	if tag, err := s.domainProvider.EnsureSending(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
 		failures = append(failures, err)
@@ -235,7 +377,7 @@ func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*do
 				// without content stands for sending that is not enabled yet.
 				continue
 			}
-			if err := s.domainProvider.CreateRecord(ctx, mailDomain.ZoneID, mailtransport.DNSRecord{
+			if _, err := s.domainProvider.CreateRecord(ctx, mailDomain.ZoneID, mailtransport.DNSRecord{
 				Type: record.Type, Name: record.Name, Content: record.Content, Priority: record.Priority,
 			}); err != nil {
 				failures = append(failures, err)
@@ -243,6 +385,37 @@ func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*do
 		}
 	}
 	return s.check(ctx, mailDomain, failures)
+}
+
+// routeUnroutedMailboxes gives every live mailbox on a receiving domain that has no routing rule
+// its rule, the way CreateMailbox does. Such mailboxes were created while the domain only sent.
+// Mailboxes that already have a rule are left alone, so a repeated setup adds nothing.
+func (s *service) routeUnroutedMailboxes(ctx context.Context, mailDomain *domain.MailDomain) []error {
+	mailboxes, err := s.domains.ListMailboxesWithoutRoutingRule(ctx, mailDomain.OrganizationID, mailDomain.Name)
+	if err != nil {
+		return []error{err}
+	}
+	var failures []error
+	for _, mailbox := range mailboxes {
+		ruleID, err := s.domainProvider.CreateRoutingRule(ctx, mailDomain.ZoneID, mailbox.Address, s.settings.EmailWorker)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if err := s.domains.SetMailboxRoutingRule(ctx, mailbox.ID, ruleID); err != nil {
+			failures = append(failures, err)
+			// An unrecorded rule would never be removed with its mailbox.
+			if deleteErr := s.domainProvider.DeleteRoutingRule(ctx, mailDomain.ZoneID, ruleID); deleteErr != nil {
+				slog.WarnContext(ctx, "unrecorded routing rule was not removed",
+					slog.String("address", mailbox.Address), slog.String("error", deleteErr.Error()))
+			}
+		}
+	}
+	for _, failure := range failures {
+		slog.WarnContext(ctx, "existing mailbox did not get a routing rule",
+			slog.String("domain", mailDomain.Name), slog.String("error", failure.Error()))
+	}
+	return failures
 }
 
 // check evaluates the domain, stores the result, and keeps the first failure as the reason when
@@ -283,17 +456,25 @@ func (s *service) check(ctx context.Context, mailDomain *domain.MailDomain, fail
 	return mailDomain, nil
 }
 
+// receives reports whether the domain receives mail through Zmail. A send-only domain leaves its
+// MX with another mail service, so Email Routing is never enabled for it.
+func receives(mailDomain *domain.MailDomain) bool {
+	return mailDomain.Capability != domain.MailDomainSendOnly
+}
+
 // evaluate lists the records the domain needs and what its zone has for each.
 func (s *service) evaluate(ctx context.Context, mailDomain *domain.MailDomain) ([]domain.MailDomainRecord, error) {
 	required := make([]domain.MailDomainRecord, 0, 8)
-	for _, host := range routingMXHosts {
+	if receives(mailDomain) {
+		for _, host := range routingMXHosts {
+			required = append(required, domain.MailDomainRecord{
+				Purpose: domain.MailDomainRecordReceiving, Type: "MX", Name: mailDomain.Name, Content: host,
+			})
+		}
 		required = append(required, domain.MailDomainRecord{
-			Purpose: domain.MailDomainRecordReceiving, Type: "MX", Name: mailDomain.Name, Content: host,
+			Purpose: domain.MailDomainRecordReceiving, Type: "TXT", Name: mailDomain.Name, Content: routingSPF,
 		})
 	}
-	required = append(required, domain.MailDomainRecord{
-		Purpose: domain.MailDomainRecordReceiving, Type: "TXT", Name: mailDomain.Name, Content: routingSPF,
-	})
 	if mailDomain.SendingTag != "" {
 		sending, err := s.domainProvider.SendingRecords(ctx, mailDomain.ZoneID, mailDomain.SendingTag)
 		if err != nil {
@@ -463,10 +644,30 @@ func (s *service) removeRoutingRule(ctx context.Context, mailbox *domain.Mailbox
 	_, domainName, _ := strings.Cut(mailbox.Address, "@")
 	mailDomain, err := s.domains.FindDomainByName(ctx, domainName)
 	if err == nil {
+		if !receives(mailDomain) {
+			// Email Routing is never used for a send-only domain.
+			return
+		}
 		err = s.domainProvider.DeleteRoutingRule(ctx, mailDomain.ZoneID, mailbox.RoutingRuleID)
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "routing rule of a deleted mailbox was not removed",
 			slog.String("address", mailbox.Address), slog.String("error", err.Error()))
+	}
+}
+
+// WaitForSetups waits until no domain setup runs in the background, or until ctx ends. A worker
+// calls it before it exits, so an activation's setups are not cut off with the process.
+func (s *service) WaitForSetups(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.setups.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

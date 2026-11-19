@@ -431,6 +431,10 @@ const (
 	// MailboxProviderCloudflare delivers through the Cloudflare Email Sending REST API.
 	MailboxProviderCloudflare = "cloudflare"
 
+	// MaxMailboxZonesPerOrganization is the highest MAILBOX_MAX_ZONES_PER_ORGANIZATION accepted. It
+	// equals domain.MaxMailZonesPerOrganization; config may not import domain, so a mailbox test
+	// keeps the two in step.
+	MaxMailboxZonesPerOrganization = 20
 	// DefaultMailboxDomain is the development-only address domain.
 	DefaultMailboxDomain = "mail.localhost"
 	// DefaultMailboxRequestTimeout caps one outbound provider call.
@@ -439,6 +443,9 @@ const (
 	DefaultMailboxDailySendLimit = 200
 	// DefaultMailboxInboundTolerance is the accepted clock skew for a signed inbound delivery.
 	DefaultMailboxInboundTolerance = 5 * time.Minute
+	// DefaultMailboxMaxZonesPerOrganization bounds the DNS zones Zmail creates for one
+	// organization; the provider account limits how many zones it may add.
+	DefaultMailboxMaxZonesPerOrganization = 3
 )
 
 // MailboxConfig holds optional mailbox starter policy and its mail transport.
@@ -456,13 +463,17 @@ type MailboxConfig struct {
 	// PublicURL is the public origin of the Web console, such as https://app.example.com. Broadcast
 	// unsubscribe links point at it; empty disables broadcasts.
 	PublicURL string
-	// CustomDomainsEnabled lets organization owners and admins connect domains the Cloudflare
-	// token can manage. The token's zone scope is the trust boundary: any organization may claim
-	// a domain the token can reach.
+	// CustomDomainsEnabled lets organization owners and admins connect their own domains, into a
+	// zone the operator added to the Cloudflare account or into a managed zone Zmail creates. The
+	// token covers every zone of the account, so the account is the trust boundary: any
+	// organization may claim a domain in a zone the operator added.
 	CustomDomainsEnabled bool
 	// CloudflareEmailWorker names the Email Worker that routing rules of organization domains
 	// deliver to; the same Worker that posts to the inbound route.
 	CloudflareEmailWorker string
+	// MaxZonesPerOrganization bounds the zones Zmail adds to the Cloudflare account for one
+	// organization's apex domains, between 1 and MaxMailboxZonesPerOrganization.
+	MaxZonesPerOrganization int
 }
 
 // Resolved fills the development defaults: outside production an unset domain is
@@ -675,6 +686,8 @@ func Load() (*Config, error) {
 			PublicURL:             env.Get("MAILBOX_PUBLIC_URL", ""),
 			CustomDomainsEnabled:  env.GetBool("MAILBOX_CUSTOM_DOMAINS_ENABLED", false),
 			CloudflareEmailWorker: env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
+
+			MaxZonesPerOrganization: env.GetInt("MAILBOX_MAX_ZONES_PER_ORGANIZATION", DefaultMailboxMaxZonesPerOrganization),
 		},
 		Webhook: WebhookConfig{
 			EncryptionKey:       env.Get("WEBHOOK_ENCRYPTION_KEY", ""),
@@ -1325,6 +1338,9 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 		}
 		if !mailboxWorkerPattern.MatchString(resolved.CloudflareEmailWorker) {
 			return fmt.Errorf("MAILBOX_CLOUDFLARE_EMAIL_WORKER must name the Email Worker when MAILBOX_CUSTOM_DOMAINS_ENABLED is true")
+		}
+		if resolved.MaxZonesPerOrganization < 1 || resolved.MaxZonesPerOrganization > MaxMailboxZonesPerOrganization {
+			return fmt.Errorf("MAILBOX_MAX_ZONES_PER_ORGANIZATION must be between 1 and %d", MaxMailboxZonesPerOrganization)
 		}
 	}
 	return nil

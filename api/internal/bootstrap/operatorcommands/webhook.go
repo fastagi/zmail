@@ -143,7 +143,14 @@ func waitForWebhookWorker(ctx context.Context, duration time.Duration) error {
 }
 
 func parseWebhookWorkerArgs(args []string) (webhookWorkerConfig, error) {
-	cfg := webhookWorkerConfig{Batch: defaultWebhookWorkerBatch, Poll: defaultWebhookWorkerPoll}
+	return parseWorkerArgs("webhook worker", args,
+		webhookWorkerConfig{Batch: defaultWebhookWorkerBatch, Poll: defaultWebhookWorkerPoll}, time.Minute)
+}
+
+// parseWorkerArgs reads --batch, --poll, and --once over the given defaults for the named worker.
+// --poll may be at most maxPoll.
+func parseWorkerArgs(worker string, args []string, defaults webhookWorkerConfig, maxPoll time.Duration) (webhookWorkerConfig, error) {
+	cfg := defaults
 	for index := 0; index < len(args); index++ {
 		argument := args[index]
 		switch {
@@ -176,14 +183,14 @@ func parseWebhookWorkerArgs(args []string) (webhookWorkerConfig, error) {
 			}
 			cfg.Poll = value
 		default:
-			return cfg, fmt.Errorf("unknown webhook worker argument %q", argument)
+			return cfg, fmt.Errorf("unknown %s argument %q", worker, argument)
 		}
 	}
 	if cfg.Batch < 1 || cfg.Batch > 100 {
 		return cfg, fmt.Errorf("--batch must be between 1 and 100")
 	}
-	if cfg.Poll < 100*time.Millisecond || cfg.Poll > time.Minute {
-		return cfg, fmt.Errorf("--poll must be between 100ms and 1m")
+	if cfg.Poll < 100*time.Millisecond || cfg.Poll > maxPoll {
+		return cfg, fmt.Errorf("--poll must be between 100ms and %s", formatPollLimit(maxPoll))
 	}
 	return cfg, nil
 }
@@ -479,4 +486,18 @@ func recordWebhookCLIAudit(
 	if err != nil {
 		slog.WarnContext(ctx, "webhook.operator_audit_failed", "action", action)
 	}
+}
+
+// formatPollLimit prints a limit the way it is typed: 1h, 10m, 30s, or Go's duration text for
+// anything finer.
+func formatPollLimit(limit time.Duration) string {
+	switch {
+	case limit >= time.Hour && limit%time.Hour == 0:
+		return fmt.Sprintf("%dh", limit/time.Hour)
+	case limit >= time.Minute && limit%time.Minute == 0:
+		return fmt.Sprintf("%dm", limit/time.Minute)
+	case limit >= time.Second && limit%time.Second == 0:
+		return fmt.Sprintf("%ds", limit/time.Second)
+	}
+	return limit.String()
 }

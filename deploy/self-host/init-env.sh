@@ -92,8 +92,10 @@ MAILBOX_CLOUDFLARE_API_TOKEN=
 # Shared with the Cloudflare Email Worker: set the Worker secret MAILBOX_INBOUND_SECRET to this value.
 MAILBOX_INBOUND_SECRET=$inbound_secret
 MAILBOX_DAILY_SEND_LIMIT=200
-# Organizations' own domains. Turning this on needs a token that also has Zone Read, DNS Edit,
-# Zone Settings Edit, Email Routing Rules Edit, and Email Sending Edit, and the Email Worker name.
+# Organizations' own domains. Turning this on needs the Email Worker name and a token that also has
+# Account -> Zone: Edit, DNS Edit, Zone Settings Edit, Email Routing Rules Edit, and Email Sending
+# Edit, with zone resources set to all zones of the account: Zmail creates zones for domains the
+# account does not hold yet. Keep zones organizations must not use in a separate Cloudflare account.
 MAILBOX_CUSTOM_DOMAINS_ENABLED=false
 # System mail (password resets, invitations) through Cloudflare from an address on MAILBOX_DOMAIN.
 MAIL_PROVIDER=cloudflare

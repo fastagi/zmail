@@ -162,7 +162,7 @@ Tenant self-service stays in `web/`.
 ### Requirements
 
 - Docker with Compose v2 (only PostgreSQL runs in a container)
-- Go 1.26.10 or newer
+- Go 1.26.11 or newer
 - Node.js 22.12 or newer with Corepack
 
 Or open the repository in a dev container or GitHub Codespaces; [`.devcontainer`](.devcontainer)

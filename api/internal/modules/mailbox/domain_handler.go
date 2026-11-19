@@ -14,6 +14,9 @@ import (
 // MailDomainRequest connects a domain.
 type MailDomainRequest struct {
 	Name string `json:"name" binding:"required,max=253"`
+	// Capability is send_receive, the default, or send_only for a domain that keeps receiving
+	// through another mail service.
+	Capability string `json:"capability" binding:"omitempty,oneof=send_receive send_only"`
 }
 
 // MailDomainRecordResponse is one DNS record a domain needs, with what the last check found.
@@ -27,18 +30,24 @@ type MailDomainRecordResponse struct {
 	Found    string `json:"found,omitempty"`
 }
 
-// MailDomainResponse is the public shape of a connected domain.
+// MailDomainResponse is the public shape of a connected domain. Zone is the managed zone the
+// domain lives in, null for a zone the operator manages. ZoneCheckLimited is true when the
+// provider refused this check's request to look for the zone's name servers now because one ran
+// too recently.
 type MailDomainResponse struct {
-	ID         uint                       `json:"id"`
-	Name       string                     `json:"name"`
-	ZoneName   string                     `json:"zone_name"`
-	Status     string                     `json:"status"`
-	Records    []MailDomainRecordResponse `json:"records"`
-	LastError  string                     `json:"last_error,omitempty"`
-	SettingUp  bool                       `json:"setting_up"`
-	CheckedAt  *time.Time                 `json:"checked_at"`
-	VerifiedAt *time.Time                 `json:"verified_at"`
-	CreatedAt  time.Time                  `json:"created_at"`
+	ID               uint                       `json:"id"`
+	Name             string                     `json:"name"`
+	ZoneName         string                     `json:"zone_name"`
+	Capability       string                     `json:"capability"`
+	Zone             *MailZoneResponse          `json:"zone"`
+	Status           string                     `json:"status"`
+	Records          []MailDomainRecordResponse `json:"records"`
+	LastError        string                     `json:"last_error,omitempty"`
+	SettingUp        bool                       `json:"setting_up"`
+	ZoneCheckLimited bool                       `json:"zone_check_limited"`
+	CheckedAt        *time.Time                 `json:"checked_at"`
+	VerifiedAt       *time.Time                 `json:"verified_at"`
+	CreatedAt        time.Time                  `json:"created_at"`
 }
 
 func toMailDomainResponse(mailDomain *domain.MailDomain) MailDomainResponse {
@@ -55,16 +64,19 @@ func toMailDomainResponse(mailDomain *domain.MailDomain) MailDomainResponse {
 		})
 	}
 	return MailDomainResponse{
-		ID:         mailDomain.ID,
-		Name:       mailDomain.Name,
-		ZoneName:   mailDomain.ZoneName,
-		Status:     string(mailDomain.Status),
-		Records:    records,
-		LastError:  mailDomain.LastError,
-		SettingUp:  mailDomain.SettingUp,
-		CheckedAt:  mailDomain.CheckedAt,
-		VerifiedAt: mailDomain.VerifiedAt,
-		CreatedAt:  mailDomain.CreatedAt,
+		ID:               mailDomain.ID,
+		Name:             mailDomain.Name,
+		ZoneName:         mailDomain.ZoneName,
+		Capability:       string(mailDomain.Capability),
+		Zone:             toMailZoneResponse(mailDomain.Zone),
+		Status:           string(mailDomain.Status),
+		Records:          records,
+		LastError:        mailDomain.LastError,
+		SettingUp:        mailDomain.SettingUp,
+		ZoneCheckLimited: mailDomain.ZoneCheckLimited,
+		CheckedAt:        mailDomain.CheckedAt,
+		VerifiedAt:       mailDomain.VerifiedAt,
+		CreatedAt:        mailDomain.CreatedAt,
 	}
 }
 
@@ -116,7 +128,8 @@ func (h *Handler) ConnectMailDomain(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	mailDomain, err := h.service.ConnectMailDomain(c.Request.Context(), organization.OrganizationID, organization.UserID, req.Name)
+	mailDomain, err := h.service.ConnectMailDomain(c.Request.Context(), organization.OrganizationID, organization.UserID,
+		req.Name, domain.MailDomainCapability(req.Capability))
 	if err != nil {
 		response.HandleError(c, "Failed to connect mail domain", err)
 		return

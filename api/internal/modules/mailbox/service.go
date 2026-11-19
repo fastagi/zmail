@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 const (
@@ -47,6 +49,8 @@ type Settings struct {
 	CustomDomainsEnabled bool
 	// EmailWorker names the Email Worker routing rules of organization domains deliver to.
 	EmailWorker string
+	// MaxZonesPerOrganization bounds the managed zones one organization may have Zmail create.
+	MaxZonesPerOrganization int
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -93,10 +97,26 @@ type Service interface {
 	MailboxDomains(ctx context.Context, organizationID uint) ([]MailboxDomain, error)
 	ListMailDomains(ctx context.Context, organizationID uint) ([]*domain.MailDomain, error)
 	GetMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
-	ConnectMailDomain(ctx context.Context, organizationID, createdBy uint, name string) (*domain.MailDomain, error)
+	ConnectMailDomain(ctx context.Context, organizationID, createdBy uint, name string, capability domain.MailDomainCapability) (*domain.MailDomain, error)
 	SetUpMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	CheckMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	DeleteMailDomain(ctx context.Context, organizationID, id uint) error
+	// EnableMailDomainReceiving turns a send-only domain into one that also receives and sets it
+	// up again.
+	EnableMailDomainReceiving(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
+	// PreviewMailDomain reads what a domain would be connected as, without changing anything.
+	PreviewMailDomain(ctx context.Context, name string) (*MailDomainPreview, error)
+	ListMailZones(ctx context.Context, organizationID uint) ([]*domain.MailZone, error)
+	GetMailZone(ctx context.Context, organizationID, id uint) (*domain.MailZone, error)
+	// DeleteMailZone removes a managed zone no domain uses, once the registrar no longer
+	// delegates it, from Zmail and from the provider account.
+	DeleteMailZone(ctx context.Context, organizationID, id uint) error
+	// ListMailDNSRecords reads a managed zone's records from Cloudflare, marking the ones Zmail
+	// mail relies on.
+	ListMailDNSRecords(ctx context.Context, organizationID, zoneID uint) ([]MailDNSRecord, error)
+	CreateMailDNSRecord(ctx context.Context, organizationID, zoneID uint, input MailDNSRecordInput) (*MailDNSRecord, error)
+	UpdateMailDNSRecord(ctx context.Context, organizationID, zoneID uint, recordID string, patch MailDNSRecordPatch) (*MailDNSRecord, error)
+	DeleteMailDNSRecord(ctx context.Context, organizationID, zoneID uint, recordID string) error
 	// ListMailboxes lists the mailboxes the viewer has any access to, with that access.
 	ListMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error)
 	DeleteMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) error
@@ -200,17 +220,30 @@ type service struct {
 	broadcasts domain.MailBroadcastRepository
 	// organize stores folders, labels, placements, and stars; nil when a test does not need them.
 	organize domain.MailOrganizeRepository
-	// domains and domainProvider serve organization domains; nil when a test does not need them.
+	// domains, zones, and domainProvider serve organization domains; nil when a test does not
+	// need them.
 	domains        domain.MailDomainRepository
+	zones          domain.MailZoneRepository
 	domainProvider mailtransport.DomainProvider
-	// domainSetups holds the IDs of domains whose setup runs in the background.
-	domainSetups sync.Map
+	// mxResolver and nsResolver read public DNS for previews and zone removal; tests fake them.
+	mxResolver mxResolver
+	nsResolver nsResolver
+	// setupMu guards domainSetups, the setups running in the background by domain ID.
+	setupMu      sync.Mutex
+	domainSetups map[uint]*domainSetupRun
+	// setups counts the background setups that have not ended, for WaitForSetups.
+	setups sync.WaitGroup
 	// background runs domain setups off the request path; tests make it synchronous.
 	background func(func())
-	transport  mailtransport.Transport
-	notifier   mailNotifier
-	settings   Settings
-	now        func() time.Time
+	// setupClaimHook, when set, runs right after a request found a running setup of its domain;
+	// tests use it to end that setup at the worst moment.
+	setupClaimHook func()
+	transport      mailtransport.Transport
+	notifier       mailNotifier
+	settings       Settings
+	now            func() time.Time
+	// recordAudit enriches the request's audit entry; tests capture it.
+	recordAudit func(context.Context, auditstarter.Change)
 }
 
 var _ Service = (*service)(nil)
@@ -224,6 +257,7 @@ func NewService(
 	broadcasts domain.MailBroadcastRepository,
 	organize domain.MailOrganizeRepository,
 	domains domain.MailDomainRepository,
+	zones domain.MailZoneRepository,
 	domainProvider mailtransport.DomainProvider,
 	transport mailtransport.Transport,
 	notifier mailNotifier,
@@ -231,9 +265,11 @@ func NewService(
 ) *service {
 	return &service{
 		repo: repo, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
-		organize: organize, domains: domains,
+		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },
+		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
+		recordAudit: auditstarter.RecordChange,
 	}
 }
 
@@ -273,6 +309,8 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 		Provider:         config.MailboxProviderLog,
 		InboundTolerance: config.DefaultMailboxInboundTolerance,
 		DailySendLimit:   config.DefaultMailboxDailySendLimit,
+
+		MaxZonesPerOrganization: config.DefaultMailboxMaxZonesPerOrganization,
 	}
 	if cfg == nil {
 		return settings
@@ -286,6 +324,9 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.EmailWorker = resolved.CloudflareEmailWorker
 	if resolved.DailySendLimit > 0 {
 		settings.DailySendLimit = resolved.DailySendLimit
+	}
+	if resolved.MaxZonesPerOrganization > 0 {
+		settings.MaxZonesPerOrganization = resolved.MaxZonesPerOrganization
 	}
 	return settings
 }

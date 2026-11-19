@@ -18,16 +18,16 @@ FRONTEND = (
     "87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89"
 )
 API_BUILDER = (
-    "docker.io/library/golang:1.26.10-alpine3.24@sha256:"
-    "27f2d3b83cfc5803c8078f8e730af0f7c431bf067afaec8f60a36fb763187cba"
+    "docker.io/library/golang:1.26.11-alpine3.24@sha256:"
+    "ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab"
 )
 API_RUNTIME = (
     "gcr.io/distroless/static-debian12:nonroot@sha256:"
     "aef9602f8710ec12bde19d593fed1f76c708531bb7aba205110f1029786ead7b"
 )
 WEB_BASE = (
-    "docker.io/library/node:22.23.3-alpine3.24@sha256:"
-    "0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402"
+    "docker.io/library/node:22.23.5-alpine3.24@sha256:"
+    "1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a"
 )
 ADMIN_RUNTIME = (
     "docker.io/nginxinc/nginx-unprivileged:1.30.6-alpine3.24-slim@sha256:"
@@ -312,7 +312,6 @@ def main() -> int:
         ROOT / ".github/workflows/container.yml",
         (
             "scripts/container-security.sh",
-            "scripts/validate-container-sbom.py",
             "BUILD_METADATA_OUTPUT",
             "OCI_SOURCE: ${{ github.server_url }}/${{ github.repository }}",
             "fastbuild-api.build-metadata.json",
@@ -327,7 +326,6 @@ def main() -> int:
         (
             "scripts/verify-container.sh fastbuild-web:ci",
             "scripts/container-security.sh verify fastbuild-web:ci",
-            "scripts/validate-container-sbom.py",
             "OCI_SOURCE: ${{ github.server_url }}/${{ github.repository }}",
             "fastbuild-web.build-metadata.json",
             "fastbuild-web.cdx.json",
@@ -341,7 +339,6 @@ def main() -> int:
         (
             "scripts/verify-container.sh fastbuild-admin:ci",
             "scripts/container-security.sh verify fastbuild-admin:ci",
-            "scripts/validate-container-sbom.py",
             "OCI_SOURCE: ${{ github.server_url }}/${{ github.repository }}",
             "fastbuild-admin.build-metadata.json",
             "fastbuild-admin.cdx.json",

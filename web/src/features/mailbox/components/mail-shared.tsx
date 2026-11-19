@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useLocale } from 'next-intl';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, Check, Copy, RefreshCw } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -285,5 +285,41 @@ export function ConfirmDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Copies a value such as a DNS record or a name server; the label names what it copies. */
+export function CopyButton({
+  value,
+  label,
+  copiedLabel,
+}: {
+  value: string;
+  label: string;
+  copiedLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1_500);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <Button
+      type="button"
+      isIcon
+      size="sm"
+      variant="ghost"
+      className="size-6 shrink-0"
+      aria-label={copied ? copiedLabel : label}
+      title={copied ? copiedLabel : label}
+      onClick={() => void copy()}
+    >
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+    </Button>
   );
 }

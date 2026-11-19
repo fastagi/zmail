@@ -7,14 +7,8 @@ name: Skill Self-Test
 # A PR that breaks any starter module — or a skill change whose validator
 # rejects working code — will fail here before it reaches main.
 
+# Manual only: CI keeps the pull request gate minimal. Run from the Actions tab when needed.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'api/internal/modules/**'
-      - '.agents/skills/**'
-      - 'api/.agents/skills/**'
-      - '.github/workflows/skill-self-test.yml'
   workflow_dispatch:
 
 permissions:

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // baseValidConfig returns a config that passes validate() — tests then
@@ -841,6 +843,25 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 		{name: "short inbound secret", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "short" }, wantErr: "MAILBOX_INBOUND_SECRET"},
 		{name: "inbound may stay disabled", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "" }},
 		{name: "send limit must be positive", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailySendLimit = 0 }, wantErr: "MAILBOX_DAILY_SEND_LIMIT"},
+		{name: "custom domains with the default zone limit", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.CustomDomainsEnabled, cfg.Mailbox.CloudflareEmailWorker = true, "zmail-email-worker"
+			cfg.Mailbox.MaxZonesPerOrganization = DefaultMailboxMaxZonesPerOrganization
+		}},
+		{name: "zone limit may reach the hard cap", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.CustomDomainsEnabled, cfg.Mailbox.CloudflareEmailWorker = true, "zmail-email-worker"
+			cfg.Mailbox.MaxZonesPerOrganization = domain.MaxMailZonesPerOrganization
+		}},
+		{name: "zone limit must be positive", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.CustomDomainsEnabled, cfg.Mailbox.CloudflareEmailWorker = true, "zmail-email-worker"
+			cfg.Mailbox.MaxZonesPerOrganization = 0
+		}, wantErr: "MAILBOX_MAX_ZONES_PER_ORGANIZATION"},
+		{name: "zone limit above the hard cap", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.CustomDomainsEnabled, cfg.Mailbox.CloudflareEmailWorker = true, "zmail-email-worker"
+			cfg.Mailbox.MaxZonesPerOrganization = domain.MaxMailZonesPerOrganization + 1
+		}, wantErr: "MAILBOX_MAX_ZONES_PER_ORGANIZATION"},
+		{name: "zone limit unused while custom domains are off", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.MaxZonesPerOrganization = 0
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

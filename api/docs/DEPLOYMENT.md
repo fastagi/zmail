@@ -15,6 +15,8 @@ cloud, registry, rollout controller, secret store, or migration orchestrator for
 | `fastbuild notification:work` | Optional notification starter | Processes durable email deliveries with bounded database leases. |
 | `fastbuild webhook:work` | Optional webhook starter | Processes signed outbound deliveries with bounded network calls and database leases. |
 | `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends direct sends that waited for room in the organization's send limit, oldest first, then the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit, and purges trash older than 30 days. Run it wherever the API runs. |
+| `fastbuild mail:zone:work` | Optional mailbox starter | Activates managed mail zones once their registrar delegates them, sets their pending domains up, and removes zones still pending after 14 days. |
+| `fastbuild mail:zone:release` | Optional mailbox starter | One-off operator command that removes a pending managed mail zone from Cloudflare and Zmail, so another organization can claim its apex. |
 | [`deploy/kubernetes`](../../deploy/kubernetes/README.md) | Example | Hardened kustomize reference for the API, workers, retention jobs, migration job, and Web. |
 | Production deployment manifests | Downstream app | Own secrets, network policy, replicas, migrations, rollout, and rollback. |
 
@@ -221,6 +223,42 @@ when the window has room.
 The same worker sends direct messages that waited for the send limit and deletes for good mailbox
 trash older than 30 days. Run it wherever the API runs, even without broadcasts: without it, waiting
 messages are never sent and the trash is never purged.
+
+## Mail Zone Worker
+
+When `mailbox` is selected with `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, deploy one more worker of the
+same image:
+
+```bash
+/app/fastbuild mail:zone:work --batch=100 --poll=10m
+```
+
+Each pass reads up to `--batch` pending managed zones from Cloudflare, least recently checked
+first. A zone Cloudflare reports `active` becomes active and its pending domains are set up; a zone
+still pending 14 days after it was created is deleted at Cloudflare with its domains. The worker
+waits `--poll` (at most `1h`) between passes even when a pass was full, so more pending zones than
+`--batch` take several passes. It needs the same database and Cloudflare settings as HTTP replicas.
+
+Each pass also sets up the pending domains of active zones that were never checked, such as when an
+earlier worker stopped right after an activation. Before it exits, including on `SIGTERM` and after
+`--once`, the worker waits up to two minutes for the domain setups it started, so give it a
+`terminationGracePeriodSeconds` of at least 150 (or the equivalent stop timeout outside Kubernetes).
+
+### Releasing A Pending Zone
+
+An organization can hold an apex in a pending zone for up to 14 days without delegating it, which
+keeps every other organization from connecting a name under it. When the real owner of the domain
+asks for it, release the zone with the same image and settings:
+
+```bash
+/app/fastbuild mail:zone:release example.com          # refuses while domains live in the zone
+/app/fastbuild mail:zone:release --force example.com  # also removes the zone's pending domains
+```
+
+The command deletes the zone at Cloudflare and in the database and logs the zone, its organization,
+and its Cloudflare zone ID. It refuses an active zone: that zone serves DNS the registrar points at,
+and its organization removes it from the console once the name servers point elsewhere. Tell the
+organization that held the zone, since its pending domains disappear from its console.
 
 ## Webhook Worker And Retention
 

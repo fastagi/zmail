@@ -24,6 +24,27 @@ type fakeZones struct {
 	created     []mailtransport.DNSRecord
 	routingFor  []string
 	nextRuleNum int
+	// Zone management: zones created and deleted through the provider, and the scans asked for.
+	createZoneErr error
+	createdZones  []string // zone names
+	deletedZones  []string // zone IDs
+	scanned       []string // zone IDs
+	// Zone activation: the provider status per zone ID (pending when unset), GetZone failures per
+	// zone ID, the activation checks asked for and how they fail, and how DeleteZone fails.
+	zoneStatus       map[string]string
+	getZoneErr       map[string]error
+	activationChecks []string
+	activationErr    error
+	deleteZoneErr    error
+	// createZoneHook, when set, runs once CreateZone added a zone to the account and before it
+	// returns, such as to connect a domain from another request meanwhile.
+	createZoneHook func()
+	// findZoneHook, when set, runs once at the start of FindZone, such as to let another request
+	// create a zone between a lookup in Zmail and the lookup at the provider.
+	findZoneHook func()
+	// ensureSendingHook, when set, runs at the start of every EnsureSending, such as to hold a
+	// setup open.
+	ensureSendingHook func()
 }
 
 func newFakeZones() *fakeZones {
@@ -32,6 +53,9 @@ func newFakeZones() *fakeZones {
 		records: map[string][]mailtransport.DNSRecord{},
 		sending: map[string]string{},
 		rules:   map[string]string{},
+
+		zoneStatus: map[string]string{},
+		getZoneErr: map[string]error{},
 	}
 }
 
@@ -41,6 +65,10 @@ func (z *fakeZones) add(record mailtransport.DNSRecord) {
 }
 
 func (z *fakeZones) FindZone(_ context.Context, name string) (mailtransport.Zone, error) {
+	if hook := z.findZoneHook; hook != nil {
+		z.findZoneHook = nil
+		hook()
+	}
 	labels := strings.Split(name, ".")
 	for start := 0; start+2 <= len(labels); start++ {
 		candidate := strings.Join(labels[start:], ".")
@@ -66,6 +94,9 @@ func (z *fakeZones) EnableRouting(_ context.Context, _, name string) error {
 }
 
 func (z *fakeZones) EnsureSending(_ context.Context, _, name string) (string, error) {
+	if z.ensureSendingHook != nil {
+		z.ensureSendingHook()
+	}
 	if tag, ok := z.sending[name]; ok {
 		return tag, nil
 	}
@@ -81,10 +112,11 @@ func (z *fakeZones) ListRecords(_ context.Context, _, name string) ([]mailtransp
 	return z.records[strings.ToLower(name)], nil
 }
 
-func (z *fakeZones) CreateRecord(_ context.Context, _ string, record mailtransport.DNSRecord) error {
+func (z *fakeZones) CreateRecord(_ context.Context, _ string, record mailtransport.DNSRecord) (mailtransport.DNSRecord, error) {
+	record.ID = fmt.Sprintf("rec-%d", len(z.created)+1)
 	z.created = append(z.created, record)
 	z.add(record)
-	return nil
+	return record, nil
 }
 
 func (z *fakeZones) CreateRoutingRule(_ context.Context, _, address, worker string) (string, error) {
@@ -104,6 +136,80 @@ func (z *fakeZones) DeleteRoutingRule(_ context.Context, _, ruleID string) error
 	delete(z.rules, ruleID)
 	return nil
 }
+
+// fakeNameServers are the name servers the fake assigns to every zone it creates.
+var fakeNameServers = []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"}
+
+func (z *fakeZones) CreateZone(_ context.Context, name string) (mailtransport.ZoneDetails, error) {
+	if z.createZoneErr != nil {
+		return mailtransport.ZoneDetails{}, z.createZoneErr
+	}
+	if _, exists := z.zones[name]; exists {
+		return mailtransport.ZoneDetails{}, mailtransport.ErrZoneExists
+	}
+	z.createdZones = append(z.createdZones, name)
+	id := fmt.Sprintf("cf-zone-%d", len(z.createdZones))
+	z.zones[name] = id
+	if hook := z.createZoneHook; hook != nil {
+		z.createZoneHook = nil
+		hook()
+	}
+	return mailtransport.ZoneDetails{
+		ID: id, Name: name, Status: "pending",
+		NameServers: fakeNameServers, OriginalNameServers: []string{"ns1.registrar.test", "ns2.registrar.test"},
+	}, nil
+}
+
+func (z *fakeZones) GetZone(_ context.Context, zoneID string) (mailtransport.ZoneDetails, error) {
+	if err := z.getZoneErr[zoneID]; err != nil {
+		return mailtransport.ZoneDetails{}, err
+	}
+	for name, id := range z.zones {
+		if id == zoneID {
+			status := z.zoneStatus[zoneID]
+			if status == "" {
+				status = "pending"
+			}
+			return mailtransport.ZoneDetails{ID: id, Name: name, Status: status, NameServers: fakeNameServers}, nil
+		}
+	}
+	return mailtransport.ZoneDetails{}, &mailtransport.DomainError{Operation: "get zone", Status: 404}
+}
+
+func (z *fakeZones) RequestActivationCheck(_ context.Context, zoneID string) error {
+	z.activationChecks = append(z.activationChecks, zoneID)
+	return z.activationErr
+}
+
+func (z *fakeZones) DeleteZone(_ context.Context, zoneID string) error {
+	z.deletedZones = append(z.deletedZones, zoneID)
+	if z.deleteZoneErr != nil {
+		return z.deleteZoneErr
+	}
+	for name, id := range z.zones {
+		if id == zoneID {
+			delete(z.zones, name)
+		}
+	}
+	return nil
+}
+
+func (z *fakeZones) ScanRecords(_ context.Context, zoneID string) error {
+	z.scanned = append(z.scanned, zoneID)
+	return nil
+}
+
+func (z *fakeZones) ListZoneRecords(context.Context, string) ([]mailtransport.DNSRecord, error) {
+	var all []mailtransport.DNSRecord
+	for _, records := range z.records {
+		all = append(all, records...)
+	}
+	return all, nil
+}
+
+func (z *fakeZones) UpdateRecord(context.Context, string, mailtransport.DNSRecord) error { return nil }
+
+func (z *fakeZones) DeleteRecord(context.Context, string, string) error { return nil }
 
 type fakeDomains struct {
 	domains map[uint]*domain.MailDomain
@@ -161,11 +267,14 @@ func (d *fakeDomains) FindDomainByName(_ context.Context, name string) (*domain.
 	return nil, ErrMailDomainNotFound
 }
 
+// UpdateDomain keeps the stored capability and managed zone, as the repository does.
 func (d *fakeDomains) UpdateDomain(_ context.Context, mailDomain *domain.MailDomain) error {
-	if _, ok := d.domains[mailDomain.ID]; !ok {
+	existing, ok := d.domains[mailDomain.ID]
+	if !ok {
 		return ErrMailDomainNotFound
 	}
 	stored := *mailDomain
+	stored.Capability, stored.MailZoneID = existing.Capability, existing.MailZoneID
 	d.domains[mailDomain.ID] = &stored
 	return nil
 }
@@ -184,12 +293,41 @@ func (d *fakeDomains) DeleteDomain(_ context.Context, organizationID, id uint) e
 	return nil
 }
 
-func (d *fakeDomains) SetMailboxRoutingRule(context.Context, uint, string) error { return nil }
+// SetDomainCapability changes only the capability, as the repository does.
+func (d *fakeDomains) SetDomainCapability(_ context.Context, organizationID, id uint, capability domain.MailDomainCapability) error {
+	existing, ok := d.domains[id]
+	if !ok || existing.OrganizationID != organizationID {
+		return ErrMailDomainNotFound
+	}
+	existing.Capability = capability
+	return nil
+}
+
+func (d *fakeDomains) SetMailboxRoutingRule(_ context.Context, mailboxID uint, ruleID string) error {
+	if mailbox, ok := d.mailbox.mailboxes[mailboxID]; ok {
+		mailbox.RoutingRuleID = ruleID
+	}
+	return nil
+}
+
+func (d *fakeDomains) ListMailboxesWithoutRoutingRule(_ context.Context, organizationID uint, domainName string) ([]*domain.Mailbox, error) {
+	var mailboxes []*domain.Mailbox
+	for id := uint(1); id <= d.mailbox.nextID; id++ {
+		mailbox, ok := d.mailbox.mailboxes[id]
+		if ok && mailbox.OrganizationID == organizationID && mailbox.RoutingRuleID == "" &&
+			strings.HasSuffix(mailbox.Address, "@"+domainName) {
+			copied := *mailbox
+			mailboxes = append(mailboxes, &copied)
+		}
+	}
+	return mailboxes, nil
+}
 
 type domainFixture struct {
 	*serviceFixture
-	zones   *fakeZones
-	domains *fakeDomains
+	zones     *fakeZones
+	domains   *fakeDomains
+	mailZones *fakeMailZones
 }
 
 func newDomainFixture(t *testing.T) *domainFixture {
@@ -200,7 +338,11 @@ func newDomainFixture(t *testing.T) *domainFixture {
 		zones:          newFakeZones(),
 		domains:        &fakeDomains{domains: map[uint]*domain.MailDomain{}, mailbox: base.repo},
 	}
+	fixture.mailZones = newFakeMailZones(fixture.domains)
+	fixture.mailZones.now = base.service.now
 	base.service.domains = fixture.domains
+	base.service.zones = fixture.mailZones
+	base.service.settings.MaxZonesPerOrganization = 3
 	base.service.domainProvider = fixture.zones
 	// Setups run in the background in production; here they finish before the call returns.
 	base.service.background = func(run func()) { run() }
@@ -217,7 +359,7 @@ func newDomainFixture(t *testing.T) *domainFixture {
 // connect connects a domain for organization 7, the organization every domain test acts as.
 func (f *domainFixture) connect(t *testing.T, name string) *domain.MailDomain {
 	t.Helper()
-	mailDomain, err := f.service.ConnectMailDomain(context.Background(), 7, testCreator, name)
+	mailDomain, err := f.service.ConnectMailDomain(context.Background(), 7, testCreator, name, "")
 	if err != nil {
 		t.Fatalf("ConnectMailDomain(%q): %v", name, err)
 	}
@@ -335,18 +477,15 @@ func TestConnectingADomainIsRefusedWhenItCannotBelongToTheOrganization(t *testin
 	fixture := newDomainFixture(t)
 	ctx := context.Background()
 	for _, name := range []string{"", "localhost", "not a domain", "-bad.example.com", "x.localhost", strings.Repeat("a", 250) + ".com"} {
-		if _, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, name); !errors.Is(err, ErrMailDomainInvalid) {
+		if _, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, name, ""); !errors.Is(err, ErrMailDomainInvalid) {
 			t.Fatalf("ConnectMailDomain(%q) = %v", name, err)
 		}
 	}
-	if _, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "mail.example"); !errors.Is(err, ErrMailDomainTaken) {
+	if _, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "mail.example", ""); !errors.Is(err, ErrMailDomainTaken) {
 		t.Fatalf("shared domain = %v", err)
 	}
-	if _, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "elsewhere.test"); !errors.Is(err, ErrMailDomainZoneNotFound) {
-		t.Fatalf("unreachable zone = %v", err)
-	}
 	fixture.connect(t, "news.example.com")
-	if _, err := fixture.service.ConnectMailDomain(ctx, 8, testCreator, "news.example.com"); !errors.Is(err, ErrMailDomainTaken) {
+	if _, err := fixture.service.ConnectMailDomain(ctx, 8, testCreator, "news.example.com", ""); !errors.Is(err, ErrMailDomainTaken) {
 		t.Fatalf("domain of another organization = %v", err)
 	}
 	if _, err := fixture.service.GetMailDomain(ctx, 8, 1); !errors.Is(err, ErrMailDomainNotFound) {
@@ -355,7 +494,7 @@ func TestConnectingADomainIsRefusedWhenItCannotBelongToTheOrganization(t *testin
 	for i := 1; i < domain.MaxMailDomainsPerOrganization; i++ {
 		fixture.connect(t, fmt.Sprintf("d%d.example.com", i))
 	}
-	if _, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "one-more.example.com"); !errors.Is(err, ErrMailDomainLimitReached) {
+	if _, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "one-more.example.com", ""); !errors.Is(err, ErrMailDomainLimitReached) {
 		t.Fatalf("over the limit = %v", err)
 	}
 }
@@ -364,7 +503,7 @@ func TestDomainsAreUnavailableUntilEnabled(t *testing.T) {
 	fixture := newDomainFixture(t)
 	fixture.service.settings.CustomDomainsEnabled = false
 	ctx := context.Background()
-	if _, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "news.example.com"); !errors.Is(err, ErrMailDomainsDisabled) {
+	if _, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "news.example.com", ""); !errors.Is(err, ErrMailDomainsDisabled) {
 		t.Fatalf("connect = %v", err)
 	}
 	if _, err := fixture.service.ListMailDomains(ctx, 7); !errors.Is(err, ErrMailDomainsDisabled) {
@@ -521,7 +660,7 @@ func TestADomainSetupRunsInTheBackgroundOncePerDomain(t *testing.T) {
 	var pending []func()
 	fixture.service.background = func(run func()) { pending = append(pending, run) }
 
-	connected, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "news.example.com")
+	connected, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "news.example.com", "")
 	if err != nil || !connected.SettingUp || connected.Status != domain.MailDomainStatusPending || len(connected.Records) != 0 {
 		t.Fatalf("connected = %+v, %v; want a pending domain whose setup is running", connected, err)
 	}

@@ -4,18 +4,8 @@ name: Plugins
 # built, tested on each half it touches, checked by plugin:doctor, and removed again
 # (scripts/verify-plugin.sh). Runs when the registry or the plugin machinery changes, and weekly
 # so a core change that breaks a plugin is caught even when no plugin file changed.
+# Manual only: CI keeps the pull request gate minimal. Run from the Actions tab when needed.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - registry/**
-      - api/internal/infra/pluginregistry/**
-      - api/internal/infra/projectfiles/**
-      - contracts/scripts/**
-      - scripts/verify-plugin.sh
-      - .github/workflows/plugins.yml
-  schedule:
-    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 permissions:

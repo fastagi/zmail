@@ -108,6 +108,28 @@ responses gain `queued_reason`.
 Deploy the API before the web app: the web app requires `queued_reason` on every message and fails
 to read message lists from an API that does not send it yet.
 
+## Unreleased — Managed zones
+
+### Medium — Self-serve domains need a wider token and a zone worker
+
+Run migrations: `2026_11_19_100000_create_mail_zones` adds `mail_zones` and the
+`mail_domains.mail_zone_id` and `mail_domains.capability` columns. With
+`MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, a domain whose apex is not in the Cloudflare account now gets
+a managed zone that Zmail creates, instead of `422 MAILBOX.DOMAIN_ZONE_NOT_FOUND`. Before enabling
+or keeping the feature on:
+
+- Widen `MAILBOX_CLOUDFLARE_API_TOKEN`: add **Account → Zone: Edit** to DNS Edit, Zone Settings
+  Edit, Email Routing Rules Edit, and Email Sending Edit, and set its zone resources to all zones of
+  the account. Advice to scope the token to selected zones no longer applies; keep zones
+  organizations must not use in a separate Cloudflare account.
+- Run one more worker of the API image: `mail:zone:work --poll=10m --batch=100`. Docker Compose
+  installs get it as the `mail-zone-worker` service in `deploy/self-host/compose.yaml`.
+- `MAILBOX_MAX_ZONES_PER_ORGANIZATION` bounds the managed zones per organization (default 3,
+  1 to 20).
+
+[docs/runbooks/self-serve-domain-acceptance.md](docs/runbooks/self-serve-domain-acceptance.md)
+covers these steps for existing deployments and a real end-to-end check.
+
 ## Unreleased — Organization domains
 
 ### Medium — New migration for connected domains
@@ -115,7 +137,7 @@ to read message lists from an API that does not send it yet.
 Run migrations: `2026_11_17_150000_create_mail_domains` adds an empty `mail_domains` table and
 `mailboxes.routing_rule_id`. Nothing changes until `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, which also
 needs `MAILBOX_CLOUDFLARE_EMAIL_WORKER` and a token with Zone Read, DNS Edit, Zone Settings Edit,
-Email Routing Rules Edit, and Email Sending Edit.
+Email Routing Rules Edit, and Email Sending Edit; managed zones (above) widen it further.
 
 ### Medium — Broadcasts gain a paused status and owner-only controls
 

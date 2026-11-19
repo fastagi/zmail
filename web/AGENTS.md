@@ -113,6 +113,12 @@ legacy `middleware.ts` beside it.
   message text.
 - Preserve `request_id` for diagnostics without exposing sensitive provider or
   server details.
+- One exception forwards backend text: for `MAILBOX.DNS_RECORD_REJECTED` only,
+  the BFF passes the upstream `error` (Cloudflare's reason for refusing a record
+  in the organization's own zone), and only when the failure came from the
+  upstream API, capped at `MAX_UPSTREAM_DETAIL_LENGTH`. The allowlist is
+  `FORWARDED_DETAIL_CODES` in `src/server/api-adapter/authenticated-route.ts`;
+  do not add codes to it without the same review.
 
 Update the owning file under `../contracts/` when public request, response,
 status, error, session, or pagination behavior changes.

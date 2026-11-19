@@ -197,8 +197,8 @@ def main() -> int:
     if "package_json_file: web/package.json" not in ci_workflow:
         failures.append("ci.yml must source the pnpm version from web/package.json")
     for marker in (
-        # Pull requests run Node 22; pushes to main and the weekly run add Node 24.
-        """fromJSON('["22"]') || fromJSON('["22", "24"]')""",
+        # Pull requests and pushes to main run Node 22; the weekly and manual runs add Node 24.
+        """fromJSON('["22", "24"]') || fromJSON('["22"]')""",
         "node-version: ${{ matrix.node-version }}",
         "fail-fast: false",
     ):

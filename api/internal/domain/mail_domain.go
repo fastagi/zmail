@@ -16,6 +16,15 @@ const (
 	MailDomainStatusVerified MailDomainStatus = "verified"
 )
 
+// MailDomainCapability tells whether a connected domain receives mail through Zmail or only sends.
+type MailDomainCapability string
+
+const (
+	MailDomainSendReceive MailDomainCapability = "send_receive"
+	// MailDomainSendOnly leaves the domain's MX with another mail service.
+	MailDomainSendOnly MailDomainCapability = "send_only"
+)
+
 // MailDomainRecordPurpose names what a required record is for.
 type MailDomainRecordPurpose string
 
@@ -56,6 +65,11 @@ type MailDomain struct {
 	Name           string
 	ZoneID         string
 	ZoneName       string
+	// MailZoneID is the managed zone the domain lives in; nil for a zone the operator manages.
+	MailZoneID *uint
+	Capability MailDomainCapability
+	// Zone is the managed zone MailZoneID names, filled on reads; it is not stored.
+	Zone *MailZone
 	// SendingTag identifies the domain's Email Sending configuration at the provider.
 	SendingTag string
 	Status     MailDomainStatus
@@ -63,12 +77,15 @@ type MailDomain struct {
 	// LastError is the provider's explanation of the last failed setup or check.
 	LastError string
 	// SettingUp is true while a setup runs in the background; it is not stored.
-	SettingUp  bool
-	CheckedAt  *time.Time
-	VerifiedAt *time.Time
-	CreatedBy  uint
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	SettingUp bool
+	// ZoneCheckLimited is true when the provider refused this check's request to look for the
+	// zone's name servers now because one ran too recently; it is not stored.
+	ZoneCheckLimited bool
+	CheckedAt        *time.Time
+	VerifiedAt       *time.Time
+	CreatedBy        uint
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // MailDomainRepository defines persistence for connected domains.
@@ -79,8 +96,14 @@ type MailDomainRepository interface {
 	ListDomains(ctx context.Context, organizationID uint) ([]*MailDomain, error)
 	FindDomain(ctx context.Context, organizationID, id uint) (*MailDomain, error)
 	FindDomainByName(ctx context.Context, name string) (*MailDomain, error)
+	// UpdateDomain stores the result of a setup or check. It never writes the capability or the
+	// managed zone, so a setup that read the domain earlier cannot undo a capability change.
 	UpdateDomain(ctx context.Context, domain *MailDomain) error
+	SetDomainCapability(ctx context.Context, organizationID, id uint, capability MailDomainCapability) error
 	// DeleteDomain removes a domain that no live mailbox uses.
 	DeleteDomain(ctx context.Context, organizationID, id uint) error
 	SetMailboxRoutingRule(ctx context.Context, mailboxID uint, ruleID string) error
+	// ListMailboxesWithoutRoutingRule returns the organization's live mailboxes on the domain
+	// that have no routing rule, such as those created while the domain only sent.
+	ListMailboxesWithoutRoutingRule(ctx context.Context, organizationID uint, domainName string) ([]*Mailbox, error)
 }

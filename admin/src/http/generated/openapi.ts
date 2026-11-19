@@ -586,6 +586,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail-domain-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a domain before connecting it
+         * @description Changes nothing. Normalizes the name, finds its apex, and reads its public MX records to suggest a capability. Answers `404 MAILBOX.DOMAINS_DISABLED` unless the instance sets `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`.
+         */
+        post: operations["previewMailDomain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mail-domains": {
         parameters: {
             query?: never;
@@ -601,7 +621,7 @@ export interface paths {
         put?: never;
         /**
          * Connect a domain and set it up
-         * @description The domain must be a zone, or a subdomain of a zone, that the instance's Cloudflare token can manage. Zmail enables Email Routing and Email Sending for it and adds the sending and DMARC records the zone lacks; it never edits or deletes existing records. The setup runs in the background, so the answer is `201` at once with the domain pending and `setting_up` true, and a failed step later shows in `last_error`. Only owners and admins may.
+         * @description The domain goes into the organization's managed zone for its apex, else a zone or parent zone the instance's Cloudflare token can manage, else a new managed zone Zmail creates for the apex, which stays pending until the registrar delegates it. In a zone Cloudflare serves, Zmail enables Email Routing (unless `capability` is `send_only`) and Email Sending and adds the sending and DMARC records the zone lacks; it never edits or deletes existing records. The setup runs in the background, so the answer is `201` at once with the domain pending and `setting_up` true, and a failed step later shows in `last_error`. Only owners and admins may.
          */
         post: operations["connectMailDomain"];
         delete?: never;
@@ -642,9 +662,29 @@ export interface paths {
         put?: never;
         /**
          * Check the domain's DNS records
-         * @description Reads the zone and compares it with what receiving, sending, and DMARC need, without writing DNS. The domain becomes verified when every record is present. Only owners and admins may.
+         * @description Reads the zone and compares it with what receiving, sending, and DMARC need, without writing DNS. The domain becomes verified when every record is present. While the domain's managed zone is pending, it instead asks Cloudflare to look for the zone's name servers now; `zone_check_limited` is true when Cloudflare refused because it looked too recently. Only owners and admins may.
          */
         post: operations["checkMailDomain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-domains/{domain_id}/receiving": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start receiving on a send-only domain
+         * @description Turns a `send_only` domain into `send_receive` and starts its setup in the background, which enables Email Routing and gives each live mailbox on the domain without a routing rule its rule. Email Routing replaces the domain's MX, so mail stops reaching the previous mail service. A domain that already receives is answered unchanged. Only owners and admins may.
+         */
+        post: operations["enableMailDomainReceiving"];
         delete?: never;
         options?: never;
         head?: never;
@@ -662,7 +702,7 @@ export interface paths {
         put?: never;
         /**
          * Run the domain setup again
-         * @description Safe to repeat. Starts the setup in the background, unless one is running, and answers at once with `setting_up` true. Adds only what is missing, then checks. Only owners and admins may.
+         * @description Safe to repeat. Starts the setup in the background, unless one is running, and answers at once with `setting_up` true. Adds only what is missing, then checks. A domain whose managed zone is pending is refused. Only owners and admins may.
          */
         post: operations["setUpMailDomain"];
         delete?: never;
@@ -800,6 +840,95 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-zones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's managed zones
+         * @description Answers `404 MAILBOX.DOMAINS_DISABLED` unless the instance sets `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`.
+         */
+        get: operations["listMailZones"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-zones/{zone_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a managed zone */
+        get: operations["getMailZone"];
+        put?: never;
+        post?: never;
+        /**
+         * Remove a managed zone
+         * @description Removes the zone from Zmail and from the Cloudflare account. Allowed only when no domain lives in the zone and, for an active zone, when the apex's public name servers are no longer Cloudflare's. Only owners and admins may.
+         */
+        delete: operations["deleteMailZone"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-zones/{zone_id}/dns-records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a managed zone's DNS records
+         * @description Reads the records from Cloudflare, by name then type, and marks those Zmail mail relies on as locked. Answers `404 MAILBOX.DOMAINS_DISABLED` unless the instance sets `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`.
+         */
+        get: operations["listMailDNSRecords"];
+        put?: never;
+        /**
+         * Create a DNS record in a managed zone
+         * @description Validates the record, then writes it to Cloudflare. A record Zmail mail would rely on is refused. Only owners and admins may.
+         */
+        post: operations["createMailDNSRecord"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-zones/{zone_id}/dns-records/{record_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a DNS record from a managed zone
+         * @description Removes the record at Cloudflare unless Zmail mail relies on it. Only A, AAAA, CNAME, TXT, and MX records can be deleted. Only owners and admins may.
+         */
+        delete: operations["deleteMailDNSRecord"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a DNS record in a managed zone
+         * @description Applies the given fields onto the record as Cloudflare has it, validates the result, and writes the whole record. Only A, AAAA, CNAME, TXT, and MX records can be changed, and neither the record nor the result may be one Zmail mail relies on. Only owners and admins may.
+         */
+        patch: operations["updateMailDNSRecord"];
         trace?: never;
     };
     "/v1/mailbox-domains": {
@@ -2622,6 +2751,22 @@ export interface components {
             owner_user_id?: components["schemas"]["PositiveID"];
             type?: components["schemas"]["MailboxType"];
         };
+        CreateMailDNSRecordRequest: {
+            /** @description An IPv4 address for A, an IPv6 address for AAAA, a host for CNAME and MX, at most 2048 characters for TXT. */
+            content: string;
+            /** @description `@` for the zone apex, a single label relative to the zone, or a name equal to or ending in `.` and the zone name. */
+            name: string;
+            /** @description Required for MX, from 0 to 65535; ignored otherwise. */
+            priority?: number;
+            /**
+             * @description Proxy through Cloudflare; only A, AAAA, and CNAME records.
+             * @default false
+             */
+            proxied: boolean;
+            /** @description `1` (automatic, the default) or 60 to 86400. */
+            ttl?: number;
+            type: components["schemas"]["MailDNSRecordType"];
+        };
         CursorPageMeta: {
             has_more: boolean;
             /** @description Pass as `cursor` to read the next, older page; null on the last page. */
@@ -2636,7 +2781,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -3088,7 +3233,53 @@ export interface components {
         };
         /** @enum {string} */
         MailDirection: "inbound" | "outbound";
+        MailDNSRecord: {
+            content: string;
+            /** @description Cloudflare's record identifier. */
+            id: string;
+            /** @description True when Zmail mail relies on the record, so it cannot be changed or deleted. */
+            locked: boolean;
+            /**
+             * @description What Zmail mail uses the record for; present only when `locked` is true.
+             * @enum {string}
+             */
+            locked_reason?: "mail_receiving" | "mail_spf" | "mail_dmarc" | "mail_dkim" | "mail_sending";
+            /** @description The fully qualified name, without a trailing dot. */
+            name: string;
+            /** @description Present on MX records only. */
+            priority?: number;
+            proxied: boolean;
+            /** @description `1` is automatic. */
+            ttl: number;
+            /** @description The record type; a zone may hold types the editor does not write. */
+            type: string;
+        };
+        /** @description A record that failed Zmail's validation, with one field error under the request field. */
+        MailDNSRecordInvalidResponse: {
+            /** @constant */
+            code: 422;
+            /** @constant */
+            error_code: "MAILBOX.DNS_RECORD_INVALID";
+            errors: components["schemas"]["FieldErrors"];
+            message: string;
+            request_id?: string;
+        };
+        MailDNSRecordListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailDNSRecord"][];
+            message: string;
+        };
+        MailDNSRecordResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailDNSRecord"];
+            message: string;
+        };
+        /** @enum {string} */
+        MailDNSRecordType: "A" | "AAAA" | "CNAME" | "TXT" | "MX";
         MailDomain: {
+            capability: components["schemas"]["MailDomainCapability"];
             /** Format: date-time */
             checked_at: string | null;
             /** Format: date-time */
@@ -3110,13 +3301,40 @@ export interface components {
              * @description When the domain first verified.
              */
             verified_at: string | null;
+            /** @description The managed zone the domain lives in; null in a zone the operator manages. */
+            zone: components["schemas"]["MailZone"] | null;
+            /** @description True on a check answer when Cloudflare refused to look for the pending zone's name servers now because it looked too recently; check again later. */
+            zone_check_limited: boolean;
             /** @description The Cloudflare zone that contains the domain. */
             zone_name: string;
         };
+        /**
+         * @description `send_receive` (the default) receives and sends through Zmail; `send_only` only sends and leaves the domain's MX with another mail service.
+         * @enum {string}
+         */
+        MailDomainCapability: "send_receive" | "send_only";
         MailDomainListResponse: {
             /** @constant */
             code: 0;
             data: components["schemas"]["MailDomain"][];
+            message: string;
+        };
+        MailDomainPreview: {
+            /** @description The registrable domain below the public suffix, which a managed zone would serve. */
+            apex: string;
+            /** @description The name's public MX hosts, lowercase without the trailing dot; empty when the lookup failed or found none. */
+            existing_mx: string[];
+            name: string;
+            suggested_capability: components["schemas"]["MailDomainCapability"];
+        };
+        MailDomainPreviewRequest: {
+            /** @description The domain to connect. Case and a trailing dot are ignored. */
+            name: string;
+        };
+        MailDomainPreviewResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailDomainPreview"];
             message: string;
         };
         MailDomainRecord: {
@@ -3138,6 +3356,7 @@ export interface components {
             type: string;
         };
         MailDomainRequest: {
+            capability?: components["schemas"]["MailDomainCapability"];
             /** @description The domain, such as `example.com` or `mail.example.com`. Case and a trailing dot are ignored. */
             name: string;
         };
@@ -3507,6 +3726,38 @@ export interface components {
                 /** @description How many messages were deleted for good. */
                 deleted: number;
             };
+            message: string;
+        };
+        MailZone: {
+            /** Format: date-time */
+            activated_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            id: components["schemas"]["PositiveID"];
+            /** Format: date-time */
+            last_checked_at: string | null;
+            /** @description The apex domain the zone serves. */
+            name: string;
+            /** @description The name servers Cloudflare assigned; the registrar must delegate the apex to them. */
+            name_servers: string[];
+            /** @description The apex's name servers when Zmail created the zone, to return to before removing it. */
+            original_name_servers: string[];
+            /**
+             * @description `pending` until the registrar delegates the apex to `name_servers`, then `active` for good.
+             * @enum {string}
+             */
+            status: "pending" | "active";
+        };
+        MailZoneListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailZone"][];
+            message: string;
+        };
+        MailZoneResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailZone"];
             message: string;
         };
         Notification: {
@@ -4039,6 +4290,15 @@ export interface components {
         };
         /** @enum {string} */
         SettingVisibility: "public" | "private";
+        /** @description Any field of a new record; an omitted field keeps its current value. */
+        UpdateMailDNSRecordRequest: {
+            content?: string;
+            name?: string;
+            priority?: number;
+            proxied?: boolean;
+            ttl?: number;
+            type?: components["schemas"]["MailDNSRecordType"];
+        };
         /** @description At least one field, otherwise a field error under `change`. `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it; a violation is a field error under `folder_id`. Moving out of `trash` clears `trashed_at`; restoring is `placement` `default`. */
         UpdateMailMessageRequest: {
             folder_id?: components["schemas"]["PositiveID"];
@@ -4669,6 +4929,8 @@ export interface components {
         MailContactID: components["schemas"]["PositiveID"];
         /** @description Positive mail contact list identifier. */
         MailContactListID: components["schemas"]["PositiveID"];
+        /** @description Cloudflare's identifier of a DNS record. */
+        MailDNSRecordID: string;
         /** @description Positive connected mail domain identifier. */
         MailDomainID: components["schemas"]["PositiveID"];
         /** @description Positive mail folder identifier. */
@@ -4683,6 +4945,8 @@ export interface components {
         MailTemplateID: components["schemas"]["PositiveID"];
         /** @description Positive mail thread identifier, the `thread_id` of its messages. */
         MailThreadID: components["schemas"]["PositiveID"];
+        /** @description Positive managed mail zone identifier. */
+        MailZoneID: components["schemas"]["PositiveID"];
         /** @description Positive notification identifier owned by the caller. */
         NotificationID: components["schemas"]["PositiveID"];
         /** @description Read-state filter. */
@@ -6426,6 +6690,55 @@ export interface operations {
             };
         };
     };
+    previewMailDomain: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailDomainPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description What connecting the domain would find. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDomainPreviewResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description The name is the shared domain (`MAILBOX.DOMAIN_TAKEN`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A field failed validation, or the name is not a usable domain (`MAILBOX.DOMAIN_INVALID`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listMailDomains: {
         parameters: {
             query?: never;
@@ -6482,7 +6795,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The domain is already connected by an organization, or is the shared domain (`MAILBOX.DOMAIN_TAKEN`). */
+            /** @description The domain is already connected by an organization, is the shared domain, or its apex is another organization's managed zone or held by another Cloudflare account (`MAILBOX.DOMAIN_TAKEN`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -6491,7 +6804,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A field failed validation, the name is not a usable domain (`MAILBOX.DOMAIN_INVALID`), no zone the token can manage contains it (`MAILBOX.DOMAIN_ZONE_NOT_FOUND`), or the organization has 10 domains (`MAILBOX.DOMAIN_LIMIT_REACHED`). */
+            /** @description A field failed validation, the name is not a usable domain (`MAILBOX.DOMAIN_INVALID`), the organization has 10 domains (`MAILBOX.DOMAIN_LIMIT_REACHED`), or a new managed zone would exceed the organization's zone limit (`MAILBOX.ZONE_LIMIT_REACHED`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6500,7 +6813,7 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The DNS provider refused the zone lookup (`MAILBOX.DOMAIN_PROVIDER_FAILED`). */
+            /** @description The DNS provider refused the zone lookup or creation (`MAILBOX.DOMAIN_PROVIDER_FAILED`). */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -6611,6 +6924,46 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    enableMailDomainReceiving: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive connected mail domain identifier. */
+                domain_id: components["parameters"]["MailDomainID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The domain as it is now, with `setting_up` true while the setup runs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDomainResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The domain's managed zone is not active yet (`MAILBOX.ZONE_PENDING`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     setUpMailDomain: {
         parameters: {
             query?: never;
@@ -6639,6 +6992,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The domain's managed zone is not active yet (`MAILBOX.ZONE_PENDING`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -7029,6 +7391,333 @@ export interface operations {
             };
             /** @description The token is not valid (`MAILBOX.UNSUBSCRIBE_INVALID`). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailZones: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every managed zone of the organization by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailZoneListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getMailZone: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive managed mail zone identifier. */
+                zone_id: components["parameters"]["MailZoneID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The managed zone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailZoneResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailZone: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive managed mail zone identifier. */
+                zone_id: components["parameters"]["MailZoneID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zone is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description A domain still lives in the zone (`MAILBOX.ZONE_IN_USE`), or the registrar still delegates the apex to Cloudflare or its name servers could not be read (`MAILBOX.ZONE_STILL_DELEGATED`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Cloudflare refused to remove the zone (`MAILBOX.DOMAIN_PROVIDER_FAILED`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailDNSRecords: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive managed mail zone identifier. */
+                zone_id: components["parameters"]["MailZoneID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The zone's records, at most 3500. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDNSRecordListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description Cloudflare could not list the records (`MAILBOX.DOMAIN_PROVIDER_FAILED`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createMailDNSRecord: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive managed mail zone identifier. */
+                zone_id: components["parameters"]["MailZoneID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMailDNSRecordRequest"];
+            };
+        };
+        responses: {
+            /** @description The record as written. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDNSRecordResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Zmail mail would rely on the record (`MAILBOX.DNS_RECORD_LOCKED`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A field failed validation (`COMMON.VALIDATION_FAILED` or `MAILBOX.DNS_RECORD_INVALID`, each with field errors), or Cloudflare refused the record (`MAILBOX.DNS_RECORD_REJECTED`, with its reason in `error`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["MailDNSRecordInvalidResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Cloudflare could not list the zone's records (`MAILBOX.DOMAIN_PROVIDER_FAILED`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailDNSRecord: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Cloudflare's identifier of a DNS record. */
+                record_id: components["parameters"]["MailDNSRecordID"];
+                /** @description Positive managed mail zone identifier. */
+                zone_id: components["parameters"]["MailZoneID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record is removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Zmail mail relies on the record (`MAILBOX.DNS_RECORD_LOCKED`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The record is of a type the editor does not write (`MAILBOX.DNS_RECORD_INVALID` on `type`), or Cloudflare refused to remove it (`MAILBOX.DNS_RECORD_REJECTED`, with its reason in `error`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDNSRecordInvalidResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Cloudflare could not list the zone's records (`MAILBOX.DOMAIN_PROVIDER_FAILED`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailDNSRecord: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Cloudflare's identifier of a DNS record. */
+                record_id: components["parameters"]["MailDNSRecordID"];
+                /** @description Positive managed mail zone identifier. */
+                zone_id: components["parameters"]["MailZoneID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailDNSRecordRequest"];
+            };
+        };
+        responses: {
+            /** @description The record as written. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDNSRecordResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Zmail mail relies on the record or would rely on the result (`MAILBOX.DNS_RECORD_LOCKED`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A field failed validation (`COMMON.VALIDATION_FAILED` or `MAILBOX.DNS_RECORD_INVALID`, each with field errors), or Cloudflare refused the record (`MAILBOX.DNS_RECORD_REJECTED`, with its reason in `error`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["MailDNSRecordInvalidResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Cloudflare could not list the zone's records (`MAILBOX.DOMAIN_PROVIDER_FAILED`). */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
