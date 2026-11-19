@@ -1070,8 +1070,18 @@ raise SystemExit(0 if valid else 1)
         [[ "${webhook_catalog_status}" == "200" ]] || fail "webhook event catalog returned HTTP ${webhook_catalog_status}"
         if ! python3 -c '
 import json, sys
+import re
 items = json.load(open(sys.argv[1]))["data"]
-raise SystemExit(0 if items == ["webhook.test"] else 1)
+# contracts/WEBHOOKS.md: the starter webhook.test plus the Zmail mail.message.* product events.
+valid = (
+    isinstance(items, list)
+    and 0 < len(items) <= 64
+    and len(set(items)) == len(items)
+    and "webhook.test" in items
+    and all(isinstance(item, str) and re.fullmatch(r"[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+", item) for item in items)
+    and all(item == "webhook.test" or item.startswith("mail.message.") for item in items)
+)
+raise SystemExit(0 if valid else 1)
 ' "${TMP_DIR}/webhook-catalog.json"; then
           fail "webhook event catalog is not finite or contains the wrong starter event"
         fi
