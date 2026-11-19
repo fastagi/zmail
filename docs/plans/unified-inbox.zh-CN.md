@@ -1,6 +1,6 @@
 # 统一收件、邮件角色分组与 v2 外观（切片 ①）设计
 
-状态：设计稿，待评审。分支 `docs/v2-architecture`（基于 main `0cd4191`，已含 #22 邮箱权限、#23 发送队列、#27 邮箱整理）。
+状态：已实现（分支 `feature/unified-inbox`，验收流 `api/tests/kest/unified_inbox.flow.md`）。原状态：设计稿，待评审。分支 `docs/v2-architecture`（基于 main `0cd4191`，已含 #22 邮箱权限、#23 发送队列、#27 邮箱整理）。
 上级需求：[产品需求文档](../PRODUCT_REQUIREMENTS.zh-CN.md) R2「每日统一收件」中不依赖外部邮箱的部分、R3 角色台账的第一步；[邮箱权限功能需求文档](../MAILBOX_ACCESS_PRD.zh-CN.md) §3.6、§3.7。
 原型：[docs/design/v2/MainV2.dc.html](../design/v2/MainV2.dc.html)（收件箱 v2，1440×900 静态稿）。下文凡称"原型"均指此文件；它是 S4 与截图回归 UI-11 的视觉基准，§11 已把其中的布局数值抄录为文字，实施时以 §11 为准、以原型核对。本文按 [BUSINESS_IMPLEMENTATION_PLAN_STANDARD.md](../BUSINESS_IMPLEMENTATION_PLAN_STANDARD.md) 编写。
 
