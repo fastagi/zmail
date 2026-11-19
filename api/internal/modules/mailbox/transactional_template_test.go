@@ -273,7 +273,7 @@ func TestTemplateKeyUniquePerOrganization(t *testing.T) {
 	createOwner(t, db, 2)
 	svc := NewService(repo, &fakeMemberships{}, repo, repo, repo, repo, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
 		Domain: "mail.example", Provider: config.MailboxProviderLog, DailySendLimit: 3,
-	})
+	}, nil, nil, nil)
 
 	first, err := svc.CreateTemplate(ctx, as(1), transactionalInput())
 	if err != nil {
@@ -322,7 +322,7 @@ func TestListTemplatesFiltersByKind(t *testing.T) {
 	createOwner(t, db, 1)
 	svc := NewService(repo, &fakeMemberships{}, repo, repo, repo, repo, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
 		Domain: "mail.example", Provider: config.MailboxProviderLog, DailySendLimit: 3,
-	})
+	}, nil, nil, nil)
 	if _, err := svc.CreateTemplate(ctx, as(1), transactionalInput()); err != nil {
 		t.Fatalf("CreateTemplate: %v", err)
 	}

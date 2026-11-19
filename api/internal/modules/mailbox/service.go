@@ -16,9 +16,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
@@ -57,6 +59,17 @@ type Settings struct {
 	EmailWorker string
 	// MaxZonesPerOrganization bounds the managed zones one organization may have Zmail create.
 	MaxZonesPerOrganization int
+	// TransactionalEnabled accepts transactional messages; SecretEncryptionKey must be set too.
+	TransactionalEnabled bool
+	// SecretEncryptionKey encrypts queued transactional content and keys idempotency fingerprints.
+	SecretEncryptionKey string
+	// SimulatorDomain is the domain whose addresses transactional mail simulates; empty takes
+	// the default.
+	SimulatorDomain string
+	// TransactionalRecipientPerMinute and TransactionalKeyPerSecond are the transactional rate
+	// limits; 0 takes the defaults.
+	TransactionalRecipientPerMinute int
+	TransactionalKeyPerSecond       int
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -232,6 +245,15 @@ type Service interface {
 	DailySendLimit() int
 	DailyBroadcastLimit() int
 	DailyTransactionalLimit() int
+	// TransactionalPolicy reports the instance's transactional switch, rate limits, and simulator domain.
+	TransactionalPolicy() TransactionalPolicy
+	// SendTransactional sends one transactional message for an API key; created is false for an
+	// idempotent replay.
+	SendTransactional(ctx context.Context, actor TransactionalActor, input TransactionalSendInput) (message *domain.TransactionalMessage, created bool, err error)
+	// GetTransactional reads a transactional message of the organization and mode.
+	GetTransactional(ctx context.Context, organizationID uint, mode domain.APIKeyMode, id uint) (*domain.TransactionalMessage, error)
+	// SendTransactionalTest sends a transactional template to the caller's own account address.
+	SendTransactionalTest(ctx context.Context, viewer domain.OrganizationContext, input TransactionalTestInput) (*domain.TransactionalMessage, error)
 	// RecordDeliveryEvent stores one signed provider event about an outbound message. It
 	// reports recorded=false when the event was already stored.
 	RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (message *domain.MailMessage, event domain.MailEvent, recorded bool, err error)
@@ -276,6 +298,15 @@ type service struct {
 	now            func() time.Time
 	// recordAudit enriches the request's audit entry; tests capture it.
 	recordAudit func(context.Context, auditstarter.Change)
+	// transactional stores transactional messages and suppressions; nil when a test does not
+	// need them, which keeps transactional mail disabled.
+	transactional domain.TransactionalMailRepository
+	// accounts reads the caller's account address for console test sends.
+	accounts            accountDirectory
+	transactionalLimits transactionalLimits
+	// encryptor seals queued transactional content; nil without SecretEncryptionKey.
+	encryptor      *crypto.AESEncryptor
+	fingerprintKey []byte
 }
 
 var _ Service = (*service)(nil)
@@ -294,6 +325,9 @@ func NewService(
 	transport mailtransport.Transport,
 	notifier mailNotifier,
 	settings Settings,
+	transactional domain.TransactionalMailRepository,
+	limits *ratelimit.Stores,
+	accounts accountDirectory,
 ) *service {
 	var inbox domain.MailInboxRepository
 	if seam, ok := repo.(domain.MailInboxRepository); ok {
@@ -303,7 +337,15 @@ func NewService(
 	if seam, ok := repo.(domain.MailRoleRepository); ok {
 		roles = seam
 	}
+	var encryptor *crypto.AESEncryptor
+	var fingerprintKey []byte
+	if settings.SecretEncryptionKey != "" {
+		encryptor = crypto.NewAESEncryptorFromString(settings.SecretEncryptionKey)
+		fingerprintKey = transactionalFingerprintKey(settings.SecretEncryptionKey)
+	}
 	return &service{
+		transactional: transactional, accounts: accounts, transactionalLimits: newTransactionalLimits(limits, settings),
+		encryptor: encryptor, fingerprintKey: fingerprintKey,
 		repo: repo, inbox: inbox, roles: roles, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
 		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
@@ -370,6 +412,11 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	if resolved.MaxZonesPerOrganization > 0 {
 		settings.MaxZonesPerOrganization = resolved.MaxZonesPerOrganization
 	}
+	settings.TransactionalEnabled = resolved.TransactionalEnabled
+	settings.SecretEncryptionKey = resolved.SecretEncryptionKey
+	settings.SimulatorDomain = resolved.SimulatorDomain
+	settings.TransactionalRecipientPerMinute = resolved.TransactionalRecipientPerMinute
+	settings.TransactionalKeyPerSecond = resolved.TransactionalKeyPerSecond
 	return settings
 }
 

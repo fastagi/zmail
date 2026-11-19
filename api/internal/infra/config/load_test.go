@@ -802,3 +802,36 @@ func TestLoad_MailboxLaneLimitsFromEnvironment(t *testing.T) {
 		t.Fatalf("lanes = %d/%d; want 500/600", cfg.Mailbox.DailyBroadcastLimit, cfg.Mailbox.DailyTransactionalLimit)
 	}
 }
+
+func TestLoad_MailboxTransactionalSettings(t *testing.T) {
+	withoutEnv(t, "MAILBOX_TRANSACTIONAL_ENABLED", "MAILBOX_SECRET_ENCRYPTION_KEY", "MAILBOX_SIMULATOR_DOMAIN",
+		"MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE", "MAILBOX_TRANSACTIONAL_KEY_PER_SECOND")
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("DB_ENABLED", "false")
+
+	cfg, err := LoadFresh()
+	if err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	resolved := cfg.Mailbox.Resolved(false)
+	if resolved.TransactionalEnabled || resolved.SimulatorDomain != "test.zmail.im" ||
+		resolved.TransactionalRecipientPerMinute != 3 || resolved.TransactionalKeyPerSecond != 20 {
+		t.Fatalf("defaults = %+v", resolved)
+	}
+
+	t.Setenv("MAILBOX_TRANSACTIONAL_ENABLED", "true")
+	t.Setenv("MAILBOX_SECRET_ENCRYPTION_KEY", strings.Repeat("k", 32))
+	t.Setenv("MAILBOX_SIMULATOR_DOMAIN", " Sim.Example.COM ")
+	t.Setenv("MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE", "5")
+	t.Setenv("MAILBOX_TRANSACTIONAL_KEY_PER_SECOND", "50")
+	cfg, err = LoadFresh()
+	if err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	resolved = cfg.Mailbox.Resolved(false)
+	if !resolved.TransactionalEnabled || resolved.SecretEncryptionKey != strings.Repeat("k", 32) ||
+		resolved.SimulatorDomain != "sim.example.com" || resolved.TransactionalRecipientPerMinute != 5 ||
+		resolved.TransactionalKeyPerSecond != 50 {
+		t.Fatalf("configured = %+v", resolved)
+	}
+}

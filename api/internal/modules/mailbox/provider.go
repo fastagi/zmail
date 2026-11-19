@@ -24,6 +24,8 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailZoneChecker), new(*service)),
 	// Owners and members are validated against the organization starter's memberships.
 	NewMembershipDirectory,
+	// Console test sends go to the caller's account address, read through the user starter.
+	NewAccountDirectory,
 	mailtransport.New,
 	mailtransport.NewDomainProvider,
 	SettingsFromConfig,
@@ -39,6 +41,11 @@ var ProviderSet = wire.NewSet(
 // NewMembershipDirectory reads memberships through the organization starter's repository.
 func NewMembershipDirectory(organizations domain.OrganizationRepository) membershipDirectory {
 	return organizations
+}
+
+// NewAccountDirectory reads accounts through the user starter's repository.
+func NewAccountDirectory(users domain.UserRepository) accountDirectory {
+	return users
 }
 
 // NewStarterManifest describes the mailbox starter: its dependencies, routes, and migrations.

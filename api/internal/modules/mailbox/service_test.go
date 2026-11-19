@@ -827,8 +827,18 @@ func (r *fakeRepository) DeleteSealedHistory(_ context.Context, mailboxID uint, 
 // fakeNotifier records the notifications the service publishes; failures makes that many
 // publications fail first.
 type fakeNotifier struct {
-	sent     []MailNotification
-	failures int
+	sent          []MailNotification
+	transactional []TransactionalNotification
+	failures      int
+}
+
+func (n *fakeNotifier) NotifyTransactional(_ context.Context, notification TransactionalNotification) error {
+	if n.failures > 0 {
+		n.failures--
+		return errors.New("webhook outbox unavailable")
+	}
+	n.transactional = append(n.transactional, notification)
+	return nil
 }
 
 func (n *fakeNotifier) Notify(_ context.Context, notification MailNotification) error {
@@ -883,7 +893,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		InboundSecret:    testInboundSecret,
 		InboundTolerance: 5 * time.Minute,
 		DailySendLimit:   3,
-	})
+	}, nil, nil, nil)
 	fixture.service.now = func() time.Time { return fixture.now }
 	return fixture
 }

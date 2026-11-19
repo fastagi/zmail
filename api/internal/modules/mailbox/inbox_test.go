@@ -139,7 +139,7 @@ func (r *inboxRecorder) CountInboxViews(_ context.Context, membershipID uint, ma
 
 func newInboxRecorderService(repo *inboxRecorder) *service {
 	return NewService(repo, newAccessMemberships(), repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, nil,
-		&fakeTransport{}, &fakeNotifier{}, accessSettings())
+		&fakeTransport{}, &fakeNotifier{}, accessSettings(), nil, nil, nil)
 }
 
 func listInbox(t *testing.T, svc *service, viewer domain.OrganizationContext, request InboxRequest) InboxPage {

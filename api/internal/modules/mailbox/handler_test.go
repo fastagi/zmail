@@ -39,7 +39,7 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	repo := inbox.fakeRepository
 	svc := NewService(inbox, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
 		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5,
-	})
+	}, nil, nil, nil)
 	handler := NewHandler(svc)
 	response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
 	response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)

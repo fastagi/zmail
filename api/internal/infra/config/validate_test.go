@@ -852,6 +852,23 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 		{name: "broadcast limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailyBroadcastLimit = 100001 }, wantErr: "MAILBOX_DAILY_BROADCAST_LIMIT"},
 		{name: "broadcast limit negative", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailyBroadcastLimit = -1 }, wantErr: "MAILBOX_DAILY_BROADCAST_LIMIT"},
 		{name: "transactional limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailyTransactionalLimit = 100001 }, wantErr: "MAILBOX_DAILY_TRANSACTIONAL_LIMIT"},
+		{name: "transactional mail off needs no key", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.TransactionalEnabled, cfg.Mailbox.SecretEncryptionKey = false, ""
+		}},
+		{name: "transactional mail with a key", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.TransactionalEnabled, cfg.Mailbox.SecretEncryptionKey = true, strings.Repeat("k", 32)
+		}},
+		{name: "transactional mail needs a key", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.TransactionalEnabled = true
+		}, wantErr: "MAILBOX_SECRET_ENCRYPTION_KEY"},
+		{name: "transactional key too short", environment: "development", edit: func(cfg *Config) {
+			cfg.Mailbox.TransactionalEnabled, cfg.Mailbox.SecretEncryptionKey = true, strings.Repeat("k", 31)
+		}, wantErr: "MAILBOX_SECRET_ENCRYPTION_KEY"},
+		{name: "invalid simulator domain", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.SimulatorDomain = "not a domain" }, wantErr: "MAILBOX_SIMULATOR_DOMAIN"},
+		{name: "recipient limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.TransactionalRecipientPerMinute = 1001 }, wantErr: "MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE"},
+		{name: "recipient limit negative", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.TransactionalRecipientPerMinute = -1 }, wantErr: "MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE"},
+		{name: "key limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.TransactionalKeyPerSecond = 10001 }, wantErr: "MAILBOX_TRANSACTIONAL_KEY_PER_SECOND"},
+		{name: "key limit negative", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.TransactionalKeyPerSecond = -1 }, wantErr: "MAILBOX_TRANSACTIONAL_KEY_PER_SECOND"},
 		{name: "custom domains with the default zone limit", environment: "production", edit: func(cfg *Config) {
 			cfg.Mailbox.CustomDomainsEnabled, cfg.Mailbox.CloudflareEmailWorker = true, "zmail-email-worker"
 			cfg.Mailbox.MaxZonesPerOrganization = DefaultMailboxMaxZonesPerOrganization

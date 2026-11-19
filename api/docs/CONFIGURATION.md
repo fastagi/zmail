@@ -256,8 +256,11 @@ The optional `mailbox` starter requires the `organization` starter and reads `MA
 `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN`, `MAILBOX_REQUEST_TIMEOUT`,
 `MAILBOX_INBOUND_SECRET`, `MAILBOX_DAILY_SEND_LIMIT`, `MAILBOX_DAILY_BROADCAST_LIMIT`,
 `MAILBOX_DAILY_TRANSACTIONAL_LIMIT`, `MAILBOX_PUBLIC_URL`,
-`MAILBOX_CUSTOM_DOMAINS_ENABLED`, `MAILBOX_CLOUDFLARE_EMAIL_WORKER`, and
-`MAILBOX_MAX_ZONES_PER_ORGANIZATION` from the same typed snapshot. They are
+`MAILBOX_CUSTOM_DOMAINS_ENABLED`, `MAILBOX_CLOUDFLARE_EMAIL_WORKER`,
+`MAILBOX_MAX_ZONES_PER_ORGANIZATION`, `MAILBOX_TRANSACTIONAL_ENABLED`,
+`MAILBOX_SECRET_ENCRYPTION_KEY`, `MAILBOX_SIMULATOR_DOMAIN`,
+`MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE`, and `MAILBOX_TRANSACTIONAL_KEY_PER_SECOND` from the
+same typed snapshot. They are
 validated only when the starter is selected.
 
 | Key | Default | Rule |
@@ -274,6 +277,11 @@ validated only when the starter is selected.
 | `MAILBOX_CUSTOM_DOMAINS_ENABLED` | `false` | Lets owners and admins connect their own domains: into a zone the operator added to the Cloudflare account, or into a managed zone Zmail creates for an apex the account does not hold. Requires the `cloudflare` provider. The token then needs Account → Zone: Edit, DNS Edit, Zone Settings Edit, Email Routing Rules Edit, and Email Sending Edit, with zone resources set to all zones of the account, since a token scoped to named zones cannot reach the zones Zmail creates later. Any organization may claim a domain in any zone the operator added, so keep zones organizations must not use in a separate Cloudflare account. |
 | `MAILBOX_CLOUDFLARE_EMAIL_WORKER` | empty | The Email Worker that routing rules of connected domains deliver to; required when custom domains are enabled. |
 | `MAILBOX_MAX_ZONES_PER_ORGANIZATION` | `3` | Managed zones Zmail may create in the Cloudflare account for one organization; 1 to 20. |
+| `MAILBOX_TRANSACTIONAL_ENABLED` | `false` | Accepts `POST /v1/transactional-messages` and console test sends. Requires `MAILBOX_SECRET_ENCRYPTION_KEY`; off, both answer `503 MAILBOX.TRANSACTIONAL_DISABLED`. |
+| `MAILBOX_SECRET_ENCRYPTION_KEY` | empty | At least 32 characters; required when transactional mail is enabled. Encrypts queued transactional content (AES-256-GCM) and keys the idempotency fingerprints. The key is a secret: keep it apart from database backups, and turn transactional mail off and let the queue drain before rotating it. |
+| `MAILBOX_SIMULATOR_DOMAIN` | `test.zmail.im` | Addresses on this domain (`delivered`, `bounced`, `soft-bounced`, `complained`, `suppressed`, each with an optional `+tag`) are simulated and never reach the provider. |
+| `MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE` | `3` | Transactional messages of one organization, mode, template, and recipient per minute; 1 to 1000. |
+| `MAILBOX_TRANSACTIONAL_KEY_PER_SECOND` | `20` | Transactional messages one API key may send per second; 1 to 10000. The rate limits use `RATE_LIMIT_STORE`: with `memory`, each replica counts on its own. |
 
 See [`../../contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md) for the HTTP behavior and
 [`../../deploy/cloudflare/email-worker/README.md`](../../deploy/cloudflare/email-worker/README.md)

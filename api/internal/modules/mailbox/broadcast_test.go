@@ -62,7 +62,7 @@ func newBroadcastFixture(t *testing.T, dailyLimit int) *broadcastFixture {
 		InboundTolerance: 5 * time.Minute,
 		DailySendLimit:   dailyLimit,
 		PublicURL:        "https://app.example",
-	})
+	}, nil, nil, nil)
 	fixture.service.now = func() time.Time { return fixture.now }
 	var err error
 	fixture.template, err = fixture.service.CreateTemplate(ctx, as(1), TemplateInput{

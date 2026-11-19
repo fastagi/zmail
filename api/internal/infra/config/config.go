@@ -446,6 +446,16 @@ const (
 	// DefaultMailboxMaxZonesPerOrganization bounds the DNS zones Zmail creates for one
 	// organization; the provider account limits how many zones it may add.
 	DefaultMailboxMaxZonesPerOrganization = 3
+	// DefaultMailboxSimulatorDomain is the domain whose addresses transactional mail simulates
+	// instead of sending.
+	DefaultMailboxSimulatorDomain = "test.zmail.im"
+	// DefaultMailboxTransactionalRecipientPerMinute bounds transactional messages of one
+	// organization, mode, template, and recipient per minute.
+	DefaultMailboxTransactionalRecipientPerMinute = 3
+	// DefaultMailboxTransactionalKeyPerSecond bounds transactional messages one API key sends per second.
+	DefaultMailboxTransactionalKeyPerSecond = 20
+	// MinMailboxSecretEncryptionKeyLength is the shortest MAILBOX_SECRET_ENCRYPTION_KEY accepted.
+	MinMailboxSecretEncryptionKeyLength = 32
 )
 
 // MailboxConfig holds optional mailbox starter policy and its mail transport.
@@ -480,6 +490,15 @@ type MailboxConfig struct {
 	// MaxZonesPerOrganization bounds the zones Zmail adds to the Cloudflare account for one
 	// organization's apex domains, between 1 and MaxMailboxZonesPerOrganization.
 	MaxZonesPerOrganization int
+	// TransactionalEnabled accepts transactional messages; it requires SecretEncryptionKey.
+	TransactionalEnabled bool
+	// SecretEncryptionKey encrypts queued transactional content and keys idempotency fingerprints.
+	SecretEncryptionKey string
+	// SimulatorDomain is the domain whose addresses transactional mail simulates.
+	SimulatorDomain string
+	// TransactionalRecipientPerMinute and TransactionalKeyPerSecond are the transactional rate limits.
+	TransactionalRecipientPerMinute int
+	TransactionalKeyPerSecond       int
 }
 
 // Resolved fills the development defaults: outside production an unset domain is
@@ -492,6 +511,17 @@ func (m MailboxConfig) Resolved(production bool) MailboxConfig {
 	m.InboundSecret = strings.TrimSpace(m.InboundSecret)
 	m.PublicURL = strings.TrimRight(strings.TrimSpace(m.PublicURL), "/")
 	m.CloudflareEmailWorker = strings.TrimSpace(m.CloudflareEmailWorker)
+	m.SecretEncryptionKey = strings.TrimSpace(m.SecretEncryptionKey)
+	m.SimulatorDomain = strings.ToLower(strings.TrimSpace(m.SimulatorDomain))
+	if m.SimulatorDomain == "" {
+		m.SimulatorDomain = DefaultMailboxSimulatorDomain
+	}
+	if m.TransactionalRecipientPerMinute == 0 {
+		m.TransactionalRecipientPerMinute = DefaultMailboxTransactionalRecipientPerMinute
+	}
+	if m.TransactionalKeyPerSecond == 0 {
+		m.TransactionalKeyPerSecond = DefaultMailboxTransactionalKeyPerSecond
+	}
 	if m.DailyBroadcastLimit == 0 {
 		m.DailyBroadcastLimit = m.DailySendLimit
 	}
@@ -703,6 +733,12 @@ func Load() (*Config, error) {
 			CloudflareEmailWorker:   env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
 
 			MaxZonesPerOrganization: env.GetInt("MAILBOX_MAX_ZONES_PER_ORGANIZATION", DefaultMailboxMaxZonesPerOrganization),
+
+			TransactionalEnabled:            env.GetBool("MAILBOX_TRANSACTIONAL_ENABLED", false),
+			SecretEncryptionKey:             env.Get("MAILBOX_SECRET_ENCRYPTION_KEY", ""),
+			SimulatorDomain:                 env.Get("MAILBOX_SIMULATOR_DOMAIN", DefaultMailboxSimulatorDomain),
+			TransactionalRecipientPerMinute: env.GetInt("MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE", DefaultMailboxTransactionalRecipientPerMinute),
+			TransactionalKeyPerSecond:       env.GetInt("MAILBOX_TRANSACTIONAL_KEY_PER_SECOND", DefaultMailboxTransactionalKeyPerSecond),
 		},
 		Webhook: WebhookConfig{
 			EncryptionKey:       env.Get("WEBHOOK_ENCRYPTION_KEY", ""),
@@ -1346,6 +1382,9 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 	if resolved.DailyTransactionalLimit <= 0 || resolved.DailyTransactionalLimit > 100000 {
 		return fmt.Errorf("MAILBOX_DAILY_TRANSACTIONAL_LIMIT must be between 1 and 100000, or unset to take MAILBOX_DAILY_SEND_LIMIT")
 	}
+	if err := validateMailboxTransactional(resolved); err != nil {
+		return err
+	}
 	if resolved.PublicURL != "" {
 		parsed, err := url.Parse(resolved.PublicURL)
 		if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
@@ -1363,6 +1402,24 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 		if resolved.MaxZonesPerOrganization < 1 || resolved.MaxZonesPerOrganization > MaxMailboxZonesPerOrganization {
 			return fmt.Errorf("MAILBOX_MAX_ZONES_PER_ORGANIZATION must be between 1 and %d", MaxMailboxZonesPerOrganization)
 		}
+	}
+	return nil
+}
+
+// validateMailboxTransactional checks the transactional mail settings of a resolved config.
+func validateMailboxTransactional(resolved MailboxConfig) error {
+	if resolved.TransactionalEnabled && len(resolved.SecretEncryptionKey) < MinMailboxSecretEncryptionKeyLength {
+		return fmt.Errorf("MAILBOX_SECRET_ENCRYPTION_KEY must be at least %d characters when MAILBOX_TRANSACTIONAL_ENABLED is true",
+			MinMailboxSecretEncryptionKeyLength)
+	}
+	if !ValidMailboxDomain(resolved.SimulatorDomain) {
+		return fmt.Errorf("MAILBOX_SIMULATOR_DOMAIN must be a valid lowercase domain name")
+	}
+	if resolved.TransactionalRecipientPerMinute < 1 || resolved.TransactionalRecipientPerMinute > 1000 {
+		return fmt.Errorf("MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE must be between 1 and 1000")
+	}
+	if resolved.TransactionalKeyPerSecond < 1 || resolved.TransactionalKeyPerSecond > 10000 {
+		return fmt.Errorf("MAILBOX_TRANSACTIONAL_KEY_PER_SECOND must be between 1 and 10000")
 	}
 	return nil
 }

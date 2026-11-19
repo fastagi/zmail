@@ -136,6 +136,7 @@ type MailNotification struct {
 // commits or rolls back with the state change it describes.
 type mailNotifier interface {
 	Notify(ctx context.Context, notification MailNotification) error
+	NotifyTransactional(ctx context.Context, notification TransactionalNotification) error
 }
 
 // webhookNotifier publishes through the webhook starter when that starter is selected and does
@@ -195,6 +196,12 @@ func (n *webhookNotifier) Notify(ctx context.Context, notification MailNotificat
 		Data:           data,
 	})
 	return err
+}
+
+// NotifyTransactional publishes a transactional mail event. Transactional webhooks are not
+// published yet, so it does nothing.
+func (n *webhookNotifier) NotifyTransactional(_ context.Context, _ TransactionalNotification) error {
+	return nil
 }
 
 // publishableTime keeps a provider timestamp inside the window the webhook starter accepts.

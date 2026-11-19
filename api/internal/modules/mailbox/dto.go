@@ -334,6 +334,14 @@ type MailboxDomainResponse struct {
 	DailySendLimit          int `json:"daily_send_limit"`
 	DailyBroadcastLimit     int `json:"daily_broadcast_limit"`
 	DailyTransactionalLimit int `json:"daily_transactional_limit"`
+	// TransactionalEnabled tells whether the instance accepts transactional messages.
+	TransactionalEnabled bool `json:"transactional_enabled"`
+	// TransactionalRecipientLimitPerMinute and TransactionalKeyLimitPerSecond are the
+	// transactional rate limits.
+	TransactionalRecipientLimitPerMinute int `json:"transactional_recipient_limit_per_minute"`
+	TransactionalKeyLimitPerSecond       int `json:"transactional_key_limit_per_second"`
+	// SimulatorDomain is the domain whose addresses transactional mail simulates.
+	SimulatorDomain string `json:"simulator_domain"`
 	// BroadcastsEnabled tells whether broadcasts can be sent: unsubscribe links need the inbound
 	// secret and MAILBOX_PUBLIC_URL.
 	BroadcastsEnabled bool `json:"broadcasts_enabled"`

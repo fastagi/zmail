@@ -63,6 +63,7 @@ func (h *Handler) ListDomains(c *gin.Context) {
 		return
 	}
 	items := make([]MailboxDomainResponse, 0, len(domains))
+	transactional := h.service.TransactionalPolicy()
 	for _, mailboxDomain := range domains {
 		kind := "organization"
 		if mailboxDomain.Shared {
@@ -79,6 +80,11 @@ func (h *Handler) ListDomains(c *gin.Context) {
 			DailyTransactionalLimit: h.service.DailyTransactionalLimit(),
 			BroadcastsEnabled:       h.service.BroadcastsEnabled(),
 			CustomDomainsEnabled:    h.service.CustomDomainsEnabled(),
+
+			TransactionalEnabled:                 transactional.Enabled,
+			TransactionalRecipientLimitPerMinute: transactional.RecipientPerMinute,
+			TransactionalKeyLimitPerSecond:       transactional.KeyPerSecond,
+			SimulatorDomain:                      transactional.SimulatorDomain,
 		})
 	}
 	privateResponse(c)
