@@ -159,17 +159,32 @@ func TestZoneRepositoryDeleteInUse(t *testing.T) {
 	if err := repo.CreateDomain(ctx, mailDomain, 10); err != nil {
 		t.Fatalf("CreateDomain: %v", err)
 	}
-	if err := repo.DeleteZone(ctx, 1, zone.ID); !errors.Is(err, ErrMailZoneInUse) {
+	if err := repo.DeleteZone(ctx, 1, zone.ID, failAtProvider(t)); !errors.Is(err, ErrMailZoneInUse) {
 		t.Fatalf("delete in use = %v", err)
 	}
 	if err := repo.DeleteDomain(ctx, 1, mailDomain.ID); err != nil {
 		t.Fatalf("DeleteDomain: %v", err)
 	}
-	if err := repo.DeleteZone(ctx, 2, zone.ID); !errors.Is(err, ErrMailZoneNotFound) {
+	if err := repo.DeleteZone(ctx, 2, zone.ID, failAtProvider(t)); !errors.Is(err, ErrMailZoneNotFound) {
 		t.Fatalf("delete across organizations = %v", err)
 	}
-	if err := repo.DeleteZone(ctx, 1, zone.ID); err != nil {
+	// A provider refusal keeps the row, so the removal can be tried again.
+	refused := errors.New("provider refused")
+	if err := repo.DeleteZone(ctx, 1, zone.ID, func(context.Context, *domain.MailZone) error { return refused }); !errors.Is(err, refused) {
+		t.Fatalf("DeleteZone with a provider refusal = %v", err)
+	}
+	if _, err := repo.FindZone(ctx, 1, zone.ID); err != nil {
+		t.Fatalf("zone removed although the provider refused: %v", err)
+	}
+	var seen *domain.MailZone
+	if err := repo.DeleteZone(ctx, 1, zone.ID, func(_ context.Context, locked *domain.MailZone) error {
+		seen = locked
+		return nil
+	}); err != nil {
 		t.Fatalf("DeleteZone: %v", err)
+	}
+	if seen == nil || seen.ID != zone.ID || seen.Status != domain.MailZoneStatusPending || seen.CloudflareZoneID != zone.CloudflareZoneID {
+		t.Fatalf("provider removal saw %+v", seen)
 	}
 	if _, err := repo.FindZone(ctx, 1, zone.ID); !errors.Is(err, ErrMailZoneNotFound) {
 		t.Fatalf("deleted zone = %v", err)
@@ -220,13 +235,24 @@ func TestDomainCapabilityRoundTrip(t *testing.T) {
 	if err != nil || found.Capability != domain.MailDomainSendOnly || found.MailZoneID == nil || *found.MailZoneID != zone.ID {
 		t.Fatalf("send only = %+v, %v", found, err)
 	}
-	found.Capability = domain.MailDomainSendReceive
-	if err = repo.UpdateDomain(ctx, found); err != nil {
+	// The receiving upgrade sets the capability on its own; a setup or check that read the domain
+	// before the upgrade and stores its result afterwards keeps the new capability and zone.
+	stale := *found
+	if err = repo.SetDomainCapability(ctx, 1, sendOnly.ID, domain.MailDomainSendReceive); err != nil {
+		t.Fatalf("SetDomainCapability: %v", err)
+	}
+	stale.Status = domain.MailDomainStatusVerified
+	stale.MailZoneID = nil
+	if err = repo.UpdateDomain(ctx, &stale); err != nil {
 		t.Fatalf("UpdateDomain: %v", err)
 	}
 	updated, err := repo.FindDomain(ctx, 1, sendOnly.ID)
-	if err != nil || updated.Capability != domain.MailDomainSendReceive {
+	if err != nil || updated.Capability != domain.MailDomainSendReceive || updated.Status != domain.MailDomainStatusVerified ||
+		updated.MailZoneID == nil || *updated.MailZoneID != zone.ID {
 		t.Fatalf("updated = %+v, %v", updated, err)
+	}
+	if err = repo.SetDomainCapability(ctx, 2, sendOnly.ID, domain.MailDomainSendOnly); !errors.Is(err, ErrMailDomainNotFound) {
+		t.Fatalf("set capability across organizations = %v", err)
 	}
 
 	plain := &domain.MailDomain{OrganizationID: 1, Name: "operator.example", ZoneID: "z", ZoneName: "operator.example", CreatedBy: 1}
@@ -266,6 +292,14 @@ func TestDeletePendingZoneRefusesAVerifiedDomain(t *testing.T) {
 }
 
 func removedAtProvider(context.Context) error { return nil }
+
+// failAtProvider fails the test when a zone removal reaches the provider.
+func failAtProvider(t *testing.T) func(context.Context, *domain.MailZone) error {
+	return func(context.Context, *domain.MailZone) error {
+		t.Error("the provider removal ran")
+		return nil
+	}
+}
 
 func TestActivateZoneHasOneWinner(t *testing.T) {
 	repo := openZoneRepository(t)

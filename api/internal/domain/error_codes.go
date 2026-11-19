@@ -136,6 +136,11 @@ const (
 	CodeMailDomainNotVerified        = "MAILBOX.DOMAIN_NOT_VERIFIED"
 	CodeMailDomainsDisabled          = "MAILBOX.DOMAINS_DISABLED"
 	CodeMailDomainProviderFailed     = "MAILBOX.DOMAIN_PROVIDER_FAILED"
+	CodeMailZoneNotFound             = "MAILBOX.ZONE_NOT_FOUND"
+	CodeMailZonePending              = "MAILBOX.ZONE_PENDING"
+	CodeMailZoneInUse                = "MAILBOX.ZONE_IN_USE"
+	CodeMailZoneStillDelegated       = "MAILBOX.ZONE_STILL_DELEGATED"
+	CodeMailZoneLimitReached         = "MAILBOX.ZONE_LIMIT_REACHED"
 
 	CodeOperatorForbidden       = "OPERATOR.FORBIDDEN"
 	CodeOperatorOriginRejected  = "OPERATOR.ORIGIN_REJECTED"

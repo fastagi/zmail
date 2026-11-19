@@ -105,3 +105,27 @@ func TestRepositoryDeletesOnlyADomainWithoutLiveMailboxes(t *testing.T) {
 		t.Fatalf("DeleteDomain: %v", err)
 	}
 }
+
+func TestRepositoryListsMailboxesWithoutARoutingRule(t *testing.T) {
+	repo := openDomainRepository(t)
+	ctx := context.Background()
+	unrouted := createMailbox(t, repo, "hello@news.example.com")
+	routed := createMailbox(t, repo, "sales@news.example.com")
+	if err := repo.SetMailboxRoutingRule(ctx, routed.ID, "rule-1"); err != nil {
+		t.Fatalf("SetMailboxRoutingRule: %v", err)
+	}
+	deleted := createMailbox(t, repo, "gone@news.example.com")
+	if err := repo.DeleteMailbox(ctx, 1, deleted.ID); err != nil {
+		t.Fatalf("DeleteMailbox: %v", err)
+	}
+	// Neither a look-alike domain nor another organization counts.
+	createMailbox(t, repo, "hello@xnews.example.com")
+
+	listed, err := repo.ListMailboxesWithoutRoutingRule(ctx, 1, "news.example.com")
+	if err != nil || len(listed) != 1 || listed[0].ID != unrouted.ID {
+		t.Fatalf("listed = %+v, %v", listed, err)
+	}
+	if other, err := repo.ListMailboxesWithoutRoutingRule(ctx, 2, "news.example.com"); err != nil || len(other) != 0 {
+		t.Fatalf("other organization = %+v, %v", other, err)
+	}
+}

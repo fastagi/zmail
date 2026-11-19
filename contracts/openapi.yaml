@@ -3451,11 +3451,13 @@ paths:
     post:
       operationId: connectMailDomain
       summary: Connect a domain and set it up
-      description: The domain must be a zone, or a subdomain of a zone, that the instance's Cloudflare token
-        can manage. Zmail enables Email Routing and Email Sending for it and adds the sending and DMARC
-        records the zone lacks; it never edits or deletes existing records. The setup runs in the background, so
-        the answer is `201` at once with the domain pending and `setting_up` true, and a failed step later shows
-        in `last_error`. Only owners and admins may.
+      description: The domain goes into the organization's managed zone for its apex, else a zone or parent
+        zone the instance's Cloudflare token can manage, else a new managed zone Zmail creates for the apex,
+        which stays pending until the registrar delegates it. In a zone Cloudflare serves, Zmail enables Email
+        Routing (unless `capability` is `send_only`) and Email Sending and adds the sending and DMARC records the
+        zone lacks; it never edits or deletes existing records. The setup runs in the background, so the answer is
+        `201` at once with the domain pending and `setting_up` true, and a failed step later shows in
+        `last_error`. Only owners and admins may.
       tags:
         - Mailboxes
       security:
@@ -3484,15 +3486,16 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The domain is already connected by an organization, or is the shared domain (`MAILBOX.DOMAIN_TAKEN`).
+          description: The domain is already connected by an organization, is the shared domain, or its apex is
+            another organization's managed zone or held by another Cloudflare account (`MAILBOX.DOMAIN_TAKEN`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: A field failed validation, the name is not a usable domain (`MAILBOX.DOMAIN_INVALID`), no
-            zone the token can manage contains it (`MAILBOX.DOMAIN_ZONE_NOT_FOUND`), or the organization has
-            10 domains (`MAILBOX.DOMAIN_LIMIT_REACHED`).
+          description: A field failed validation, the name is not a usable domain (`MAILBOX.DOMAIN_INVALID`), the
+            organization has 10 domains (`MAILBOX.DOMAIN_LIMIT_REACHED`), or a new managed zone would exceed the
+            organization's zone limit (`MAILBOX.ZONE_LIMIT_REACHED`).
           content:
             application/json:
               schema:
@@ -3500,7 +3503,7 @@ paths:
                   - $ref: '#/components/schemas/ValidationErrorResponse'
                   - $ref: '#/components/schemas/ErrorResponse'
         '502':
-          description: The DNS provider refused the zone lookup (`MAILBOX.DOMAIN_PROVIDER_FAILED`).
+          description: The DNS provider refused the zone lookup or creation (`MAILBOX.DOMAIN_PROVIDER_FAILED`).
           content:
             application/json:
               schema:
@@ -3569,7 +3572,8 @@ paths:
       operationId: setUpMailDomain
       summary: Run the domain setup again
       description: Safe to repeat. Starts the setup in the background, unless one is running, and answers at
-        once with `setting_up` true. Adds only what is missing, then checks. Only owners and admins may.
+        once with `setting_up` true. Adds only what is missing, then checks. A domain whose managed zone is
+        pending is refused. Only owners and admins may.
       tags:
         - Mailboxes
       security:
@@ -3592,6 +3596,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The domain's managed zone is not active yet (`MAILBOX.ZONE_PENDING`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-domains/{domain_id}/checks:
@@ -3599,7 +3609,9 @@ paths:
       operationId: checkMailDomain
       summary: Check the domain's DNS records
       description: Reads the zone and compares it with what receiving, sending, and DMARC need, without writing
-        DNS. The domain becomes verified when every record is present. Only owners and admins may.
+        DNS. The domain becomes verified when every record is present. While the domain's managed zone is
+        pending, it instead asks Cloudflare to look for the zone's name servers now; `zone_check_limited` is true
+        when Cloudflare refused because it looked too recently. Only owners and admins may.
       tags:
         - Mailboxes
       security:
@@ -3622,6 +3634,183 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-domains/{domain_id}/receiving:
+    post:
+      operationId: enableMailDomainReceiving
+      summary: Start receiving on a send-only domain
+      description: Turns a `send_only` domain into `send_receive` and starts its setup in the background, which
+        enables Email Routing and gives each live mailbox on the domain without a routing rule its rule. Email
+        Routing replaces the domain's MX, so mail stops reaching the previous mail service. A domain that already
+        receives is answered unchanged. Only owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDomainID'
+      responses:
+        '200':
+          description: The domain as it is now, with `setting_up` true while the setup runs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The domain's managed zone is not active yet (`MAILBOX.ZONE_PENDING`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-domain-previews:
+    post:
+      operationId: previewMailDomain
+      summary: Preview a domain before connecting it
+      description: Changes nothing. Normalizes the name, finds its apex, and reads its public MX records to
+        suggest a capability. Answers `404 MAILBOX.DOMAINS_DISABLED` unless the instance sets
+        `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailDomainPreviewRequest'
+      responses:
+        '200':
+          description: What connecting the domain would find.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainPreviewResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The name is the shared domain (`MAILBOX.DOMAIN_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A field failed validation, or the name is not a usable domain (`MAILBOX.DOMAIN_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-zones:
+    get:
+      operationId: listMailZones
+      summary: List the organization's managed zones
+      description: Answers `404 MAILBOX.DOMAINS_DISABLED` unless the instance sets `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: Every managed zone of the organization by name.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailZoneListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-zones/{zone_id}:
+    get:
+      operationId: getMailZone
+      summary: Get a managed zone
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailZoneID'
+      responses:
+        '200':
+          description: The managed zone.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailZoneResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailZone
+      summary: Remove a managed zone
+      description: Removes the zone from Zmail and from the Cloudflare account. Allowed only when no domain lives
+        in the zone and, for an active zone, when the apex's public name servers are no longer Cloudflare's. Only
+        owners and admins may.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailZoneID'
+      responses:
+        '204':
+          description: The zone is removed.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: A domain still lives in the zone (`MAILBOX.ZONE_IN_USE`), or the registrar still delegates
+            the apex to Cloudflare or its name servers could not be read (`MAILBOX.ZONE_STILL_DELEGATED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Cloudflare refused to remove the zone (`MAILBOX.DOMAIN_PROVIDER_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-broadcasts:
@@ -5596,6 +5785,13 @@ components:
       description: Positive connected mail domain identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailZoneID:
+      name: zone_id
+      in: path
+      required: true
+      description: Positive managed mail zone identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     MailTemplateID:
       name: template_id
       in: path
@@ -6043,6 +6239,11 @@ components:
         - MAILBOX.DOMAIN_NOT_VERIFIED
         - MAILBOX.DOMAINS_DISABLED
         - MAILBOX.DOMAIN_PROVIDER_FAILED
+        - MAILBOX.ZONE_NOT_FOUND
+        - MAILBOX.ZONE_PENDING
+        - MAILBOX.ZONE_IN_USE
+        - MAILBOX.ZONE_STILL_DELEGATED
+        - MAILBOX.ZONE_LIMIT_REACHED
     FieldErrors:
       type: object
       additionalProperties:
@@ -9539,6 +9740,15 @@ components:
           description: The domain, such as `example.com` or `mail.example.com`. Case and a trailing dot are ignored.
           minLength: 1
           maxLength: 253
+        capability:
+          $ref: '#/components/schemas/MailDomainCapability'
+    MailDomainCapability:
+      type: string
+      description: '`send_receive` (the default) receives and sends through Zmail; `send_only` only sends and
+        leaves the domain''s MX with another mail service.'
+      enum:
+        - send_receive
+        - send_only
     MailDomainRecord:
       type: object
       additionalProperties: false
@@ -9588,9 +9798,12 @@ components:
         - id
         - name
         - zone_name
+        - capability
+        - zone
         - status
         - records
         - setting_up
+        - zone_check_limited
         - checked_at
         - verified_at
         - created_at
@@ -9604,6 +9817,13 @@ components:
           type: string
           description: The Cloudflare zone that contains the domain.
           maxLength: 253
+        capability:
+          $ref: '#/components/schemas/MailDomainCapability'
+        zone:
+          description: The managed zone the domain lives in; null in a zone the operator manages.
+          oneOf:
+            - $ref: '#/components/schemas/MailZone'
+            - type: 'null'
         status:
           type: string
           description: '`verified` when the last check found every record; mailboxes can be created only then.'
@@ -9619,6 +9839,10 @@ components:
           type: boolean
           description: A setup is running in the background. The domain changes when it finishes; read it again
             until this is false.
+        zone_check_limited:
+          type: boolean
+          description: True on a check answer when Cloudflare refused to look for the pending zone's name servers
+            now because it looked too recently; check again later.
         last_error:
           type: string
           description: The provider's explanation of the last failed setup step, while the domain is pending.
@@ -9668,6 +9892,140 @@ components:
           maxItems: 10
           items:
             $ref: '#/components/schemas/MailDomain'
+    MailZone:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - status
+        - name_servers
+        - original_name_servers
+        - activated_at
+        - last_checked_at
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          description: The apex domain the zone serves.
+          maxLength: 253
+        status:
+          type: string
+          description: '`pending` until the registrar delegates the apex to `name_servers`, then `active` for good.'
+          enum:
+            - pending
+            - active
+        name_servers:
+          type: array
+          description: The name servers Cloudflare assigned; the registrar must delegate the apex to them.
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 253
+        original_name_servers:
+          type: array
+          description: The apex's name servers when Zmail created the zone, to return to before removing it.
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 253
+        activated_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        last_checked_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    MailZoneResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailZone'
+    MailZoneListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/MailZone'
+    MailDomainPreviewRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: The domain to connect. Case and a trailing dot are ignored.
+          minLength: 1
+          maxLength: 253
+    MailDomainPreview:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - apex
+        - existing_mx
+        - suggested_capability
+      properties:
+        name:
+          type: string
+          maxLength: 253
+        apex:
+          type: string
+          description: The registrable domain below the public suffix, which a managed zone would serve.
+          maxLength: 253
+        existing_mx:
+          type: array
+          description: The name's public MX hosts, lowercase without the trailing dot; empty when the lookup
+            failed or found none.
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 253
+        suggested_capability:
+          $ref: '#/components/schemas/MailDomainCapability'
+    MailDomainPreviewResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailDomainPreview'
     MailContactList:
       type: object
       additionalProperties: false

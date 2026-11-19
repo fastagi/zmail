@@ -268,8 +268,14 @@ func (r *repository) TouchZone(ctx context.Context, id uint, at time.Time) error
 }
 
 // DeleteZone refuses while any mail domain lives in the zone. The foreign key catches a domain
-// added after the check.
-func (r *repository) DeleteZone(ctx context.Context, organizationID, id uint) error {
+// added after the check. The zone row stays locked from the check until commit, and
+// removeAtProvider runs inside that window: ActivateZone waits on the lock, so the status
+// removeAtProvider sees holds until the row is gone, and a provider failure rolls the delete back.
+func (r *repository) DeleteZone(
+	ctx context.Context,
+	organizationID, id uint,
+	removeAtProvider func(context.Context, *domain.MailZone) error,
+) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
@@ -295,7 +301,7 @@ func (r *repository) DeleteZone(ctx context.Context, organizationID, id uint) er
 			}
 			return err
 		}
-		return nil
+		return removeAtProvider(ctx, po.toDomain())
 	})
 }
 

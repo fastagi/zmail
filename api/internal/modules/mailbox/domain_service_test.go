@@ -270,7 +270,35 @@ func (d *fakeDomains) DeleteDomain(_ context.Context, organizationID, id uint) e
 	return nil
 }
 
-func (d *fakeDomains) SetMailboxRoutingRule(context.Context, uint, string) error { return nil }
+// SetDomainCapability changes only the capability, as the repository does.
+func (d *fakeDomains) SetDomainCapability(_ context.Context, organizationID, id uint, capability domain.MailDomainCapability) error {
+	existing, ok := d.domains[id]
+	if !ok || existing.OrganizationID != organizationID {
+		return ErrMailDomainNotFound
+	}
+	existing.Capability = capability
+	return nil
+}
+
+func (d *fakeDomains) SetMailboxRoutingRule(_ context.Context, mailboxID uint, ruleID string) error {
+	if mailbox, ok := d.mailbox.mailboxes[mailboxID]; ok {
+		mailbox.RoutingRuleID = ruleID
+	}
+	return nil
+}
+
+func (d *fakeDomains) ListMailboxesWithoutRoutingRule(_ context.Context, organizationID uint, domainName string) ([]*domain.Mailbox, error) {
+	var mailboxes []*domain.Mailbox
+	for id := uint(1); id <= d.mailbox.nextID; id++ {
+		mailbox, ok := d.mailbox.mailboxes[id]
+		if ok && mailbox.OrganizationID == organizationID && mailbox.RoutingRuleID == "" &&
+			strings.HasSuffix(mailbox.Address, "@"+domainName) {
+			copied := *mailbox
+			mailboxes = append(mailboxes, &copied)
+		}
+	}
+	return mailboxes, nil
+}
 
 type domainFixture struct {
 	*serviceFixture

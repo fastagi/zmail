@@ -3,8 +3,11 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/net/publicsuffix"
@@ -118,27 +121,27 @@ func (s *service) createManagedZone(ctx context.Context, organizationID, created
 	return zone, nil
 }
 
+// errZoneNoLongerPending keeps a zone that became active before an unused-zone cleanup ran.
+var errZoneNoLongerPending = errors.New("mail zone is no longer pending")
+
 // discardManagedZone removes a managed zone this request created when its domain could not be
 // stored, so the zone does not count against the organization's limit. A zone that is no longer
-// pending, or that a concurrent connect already put a domain in, is kept.
+// pending, or that a concurrent connect already put a domain in, is kept. The provider zone is
+// removed only while the row is locked as pending; a provider failure is logged and the row goes.
 func (s *service) discardManagedZone(ctx context.Context, zone *domain.MailZone) {
 	cleanupContext := context.WithoutCancel(ctx)
-	current, err := s.zones.FindZone(cleanupContext, zone.OrganizationID, zone.ID)
-	if err != nil || current.Status != domain.MailZoneStatusPending {
-		if err != nil && !errors.Is(err, ErrMailZoneNotFound) {
-			slog.WarnContext(ctx, "unused mail zone was not removed",
-				slog.String("zone", zone.Name), slog.String("error", err.Error()))
+	err := s.zones.DeleteZone(cleanupContext, zone.OrganizationID, zone.ID, func(providerContext context.Context, locked *domain.MailZone) error {
+		if locked.Status != domain.MailZoneStatusPending {
+			return errZoneNoLongerPending
 		}
-		return
+		s.deleteProviderZone(providerContext, locked.Name, locked.CloudflareZoneID)
+		return nil
+	})
+	if err != nil && !errors.Is(err, ErrMailZoneInUse) && !errors.Is(err, ErrMailZoneNotFound) &&
+		!errors.Is(err, errZoneNoLongerPending) {
+		slog.WarnContext(ctx, "unused mail zone was not removed",
+			slog.String("zone", zone.Name), slog.String("error", err.Error()))
 	}
-	if err := s.zones.DeleteZone(cleanupContext, zone.OrganizationID, zone.ID); err != nil {
-		if !errors.Is(err, ErrMailZoneInUse) {
-			slog.WarnContext(ctx, "unused mail zone was not removed",
-				slog.String("zone", zone.Name), slog.String("error", err.Error()))
-		}
-		return
-	}
-	s.deleteProviderZone(ctx, zone.Name, zone.CloudflareZoneID)
 }
 
 // deleteProviderZone removes a zone this request added to the provider account. A failure leaves
@@ -338,4 +341,159 @@ func (s *service) checkDomainZone(ctx context.Context, mailDomain *domain.MailDo
 func providerZoneGone(err error) bool {
 	var failure *mailtransport.DomainError
 	return errors.As(err, &failure) && failure.Status == http.StatusNotFound
+}
+
+// Public DNS lookups for previews and zone removal.
+const (
+	// publicLookupTimeout bounds one public DNS lookup.
+	publicLookupTimeout = 5 * time.Second
+	// maxPreviewMX bounds the MX hosts a preview returns.
+	maxPreviewMX = 20
+	// routingMXSuffix ends every MX host of Cloudflare Email Routing.
+	routingMXSuffix = ".mx.cloudflare.net"
+	// providerNameServerSuffix ends every name server Cloudflare assigns to a zone.
+	providerNameServerSuffix = ".ns.cloudflare.com"
+)
+
+// mxResolver reads a name's public MX records; *net.Resolver implements it.
+type mxResolver interface {
+	LookupMX(ctx context.Context, name string) ([]*net.MX, error)
+}
+
+// nsResolver reads a name's public NS records; *net.Resolver implements it.
+type nsResolver interface {
+	LookupNS(ctx context.Context, name string) ([]*net.NS, error)
+}
+
+// MailDomainPreview is what connecting a domain would find, read before connecting it.
+type MailDomainPreview struct {
+	Name string
+	Apex string
+	// ExistingMX are the public MX hosts of the name, lowercase without the trailing dot.
+	ExistingMX []string
+	// SuggestedCapability is send_only when another mail service receives for the name.
+	SuggestedCapability domain.MailDomainCapability
+}
+
+// PreviewMailDomain normalizes a name, finds its apex, and reads its public MX records. A failed
+// lookup, including a name without MX records, suggests send_receive: nothing receives there yet.
+func (s *service) PreviewMailDomain(ctx context.Context, name string) (*MailDomainPreview, error) {
+	if err := s.requireDomains(); err != nil {
+		return nil, err
+	}
+	name, err := s.normalizeDomainName(name)
+	if err != nil {
+		return nil, err
+	}
+	apex, err := apexDomain(name)
+	if err != nil {
+		return nil, err
+	}
+	preview := &MailDomainPreview{
+		Name: name, Apex: apex, ExistingMX: []string{}, SuggestedCapability: domain.MailDomainSendReceive,
+	}
+	lookupContext, cancel := context.WithTimeout(ctx, publicLookupTimeout)
+	defer cancel()
+	records, err := s.mxResolver.LookupMX(lookupContext, name)
+	if err != nil {
+		return preview, nil
+	}
+	for _, record := range records {
+		host := strings.TrimSuffix(strings.ToLower(record.Host), ".")
+		if host == "" || len(preview.ExistingMX) == maxPreviewMX {
+			// A null MX (".") states that the name receives no mail at all.
+			continue
+		}
+		preview.ExistingMX = append(preview.ExistingMX, host)
+		if !strings.HasSuffix(host, routingMXSuffix) {
+			preview.SuggestedCapability = domain.MailDomainSendOnly
+		}
+	}
+	return preview, nil
+}
+
+func (s *service) ListMailZones(ctx context.Context, organizationID uint) ([]*domain.MailZone, error) {
+	if err := s.requireDomains(); err != nil {
+		return nil, err
+	}
+	return s.zones.ListZones(ctx, organizationID)
+}
+
+func (s *service) GetMailZone(ctx context.Context, organizationID, id uint) (*domain.MailZone, error) {
+	if err := s.requireDomains(); err != nil {
+		return nil, err
+	}
+	return s.zones.FindZone(ctx, organizationID, id)
+}
+
+// DeleteMailZone removes a managed zone no mail domain uses. An active zone goes only once the
+// public name servers of its apex are no longer Cloudflare's, so removing it never takes down DNS
+// the registrar still points at it; a failed lookup refuses as well. A pending zone was never
+// delegated and skips the lookup. The zone stays locked while this runs, and a provider refusal
+// keeps the row.
+func (s *service) DeleteMailZone(ctx context.Context, organizationID, id uint) error {
+	if err := s.requireDomains(); err != nil {
+		return err
+	}
+	err := s.zones.DeleteZone(ctx, organizationID, id, func(providerContext context.Context, zone *domain.MailZone) error {
+		if zone.Status != domain.MailZoneStatusPending {
+			if err := s.requireUndelegated(providerContext, zone.Name); err != nil {
+				return err
+			}
+		}
+		if err := s.domainProvider.DeleteZone(providerContext, zone.CloudflareZoneID); err != nil && !providerZoneGone(err) {
+			return providerError(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	slog.InfoContext(ctx, "mail zone removed", slog.Uint64("zone_id", uint64(id)))
+	return nil
+}
+
+// requireUndelegated refuses while any public name server of the apex is Cloudflare's, or when
+// the name servers cannot be read.
+func (s *service) requireUndelegated(ctx context.Context, apex string) error {
+	lookupContext, cancel := context.WithTimeout(ctx, publicLookupTimeout)
+	defer cancel()
+	servers, err := s.nsResolver.LookupNS(lookupContext, apex)
+	if err != nil {
+		return fmt.Errorf("%w: its name servers could not be read", ErrMailZoneStillDelegated)
+	}
+	for _, server := range servers {
+		if strings.HasSuffix(strings.TrimSuffix(strings.ToLower(server.Host), "."), providerNameServerSuffix) {
+			return ErrMailZoneStillDelegated
+		}
+	}
+	return nil
+}
+
+// EnableMailDomainReceiving makes a send-only domain receive through Zmail and starts its setup,
+// which enables Email Routing and routes the mailboxes the domain already has. A domain that
+// already receives is returned unchanged. The domain's zone must be active.
+func (s *service) EnableMailDomainReceiving(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error) {
+	if err := s.requireDomains(); err != nil {
+		return nil, err
+	}
+	mailDomain, err := s.domains.FindDomain(ctx, organizationID, id)
+	if err != nil {
+		return nil, err
+	}
+	pending, err := s.pendingZoneOf(ctx, mailDomain)
+	if err != nil {
+		return nil, err
+	}
+	if pending != nil {
+		return nil, ErrMailZonePending
+	}
+	if receives(mailDomain) {
+		return s.present(ctx, mailDomain)
+	}
+	if err := s.domains.SetDomainCapability(ctx, organizationID, id, domain.MailDomainSendReceive); err != nil {
+		return nil, err
+	}
+	mailDomain.Capability = domain.MailDomainSendReceive
+	return s.startSetUp(ctx, mailDomain)
 }

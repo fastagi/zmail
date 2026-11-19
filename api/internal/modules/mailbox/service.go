@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -91,6 +92,16 @@ type Service interface {
 	SetUpMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	CheckMailDomain(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
 	DeleteMailDomain(ctx context.Context, organizationID, id uint) error
+	// EnableMailDomainReceiving turns a send-only domain into one that also receives and sets it
+	// up again.
+	EnableMailDomainReceiving(ctx context.Context, organizationID, id uint) (*domain.MailDomain, error)
+	// PreviewMailDomain reads what a domain would be connected as, without changing anything.
+	PreviewMailDomain(ctx context.Context, name string) (*MailDomainPreview, error)
+	ListMailZones(ctx context.Context, organizationID uint) ([]*domain.MailZone, error)
+	GetMailZone(ctx context.Context, organizationID, id uint) (*domain.MailZone, error)
+	// DeleteMailZone removes a managed zone no domain uses, once the registrar no longer
+	// delegates it, from Zmail and from the provider account.
+	DeleteMailZone(ctx context.Context, organizationID, id uint) error
 	ListMailboxes(ctx context.Context, organizationID uint) ([]*domain.Mailbox, error)
 	DeleteMailbox(ctx context.Context, organizationID, mailboxID uint) error
 	ListMessages(ctx context.Context, organizationID, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
@@ -157,6 +168,9 @@ type service struct {
 	domains        domain.MailDomainRepository
 	zones          domain.MailZoneRepository
 	domainProvider mailtransport.DomainProvider
+	// mxResolver and nsResolver read public DNS for previews and zone removal; tests fake them.
+	mxResolver mxResolver
+	nsResolver nsResolver
 	// domainSetups holds the IDs of domains whose setup runs in the background.
 	domainSetups sync.Map
 	// background runs domain setups off the request path; tests make it synchronous.
@@ -186,6 +200,7 @@ func NewService(
 		repo: repo, templates: templates, contacts: contacts, broadcasts: broadcasts, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },
+		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
 	}
 }
 

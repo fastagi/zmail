@@ -54,8 +54,10 @@ type MailZoneRepository interface {
 	ActivateZone(ctx context.Context, id uint, at time.Time) (bool, error)
 	// TouchZone records when a zone was last checked without changing its status.
 	TouchZone(ctx context.Context, id uint, at time.Time) error
-	// DeleteZone removes a zone no mail domain belongs to.
-	DeleteZone(ctx context.Context, organizationID, id uint) error
+	// DeleteZone removes a zone no mail domain belongs to. It holds the zone locked while
+	// removeAtProvider runs with the zone as stored, and commits only when that succeeds, so a
+	// provider refusal keeps the row and the zone's status cannot change during the call.
+	DeleteZone(ctx context.Context, organizationID, id uint, removeAtProvider func(context.Context, *MailZone) error) error
 	// DeletePendingZone removes a zone together with its domains, which are pending while the
 	// zone is. It holds the zone locked as pending while removeAtProvider runs and commits only
 	// when that succeeds, so a zone activated concurrently is never removed. A zone that is no

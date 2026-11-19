@@ -136,7 +136,7 @@ func (z *fakeMailZones) TouchZone(_ context.Context, id uint, at time.Time) erro
 	return nil
 }
 
-func (z *fakeMailZones) DeleteZone(_ context.Context, organizationID, id uint) error {
+func (z *fakeMailZones) DeleteZone(ctx context.Context, organizationID, id uint, removeAtProvider func(context.Context, *domain.MailZone) error) error {
 	zone, ok := z.zones[id]
 	if !ok || zone.OrganizationID != organizationID {
 		return ErrMailZoneNotFound
@@ -145,6 +145,11 @@ func (z *fakeMailZones) DeleteZone(_ context.Context, organizationID, id uint) e
 		if mailDomain.MailZoneID != nil && *mailDomain.MailZoneID == id {
 			return ErrMailZoneInUse
 		}
+	}
+	// The repository commits only after the provider call succeeds.
+	locked := *zone
+	if err := removeAtProvider(ctx, &locked); err != nil {
+		return err
 	}
 	delete(z.zones, id)
 	return nil

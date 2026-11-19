@@ -25,8 +25,8 @@ does not exist. A mailbox or message of another organization is likewise reporte
 
 | Role | May |
 |---|---|
-| `member` | List domains and mailboxes; list, read, send, mark read or unread, and delete messages; read the log and statistics |
-| `owner`, `admin` | Everything a member may, create and delete mailboxes, and connect, set up, check, and remove domains |
+| `member` | List domains, managed zones, and mailboxes; preview a domain; list, read, send, mark read or unread, and delete messages; read the log and statistics |
+| `owner`, `admin` | Everything a member may, create and delete mailboxes, connect, set up, check, enable receiving on, and remove domains, and remove managed zones |
 
 A member who creates or deletes a mailbox gets `403 PERMISSION.DENIED`. The user who created a
 mailbox is recorded but has no special rights to it; removing that user from the organization
@@ -42,6 +42,11 @@ is shared: a message one member reads is read for the whole organization.
 | Set up a domain again | `POST /api/mail-domains/:id/setups` | `POST /v1/mail-domains/:domain_id/setups` | `200` envelope |
 | Check a domain | `POST /api/mail-domains/:id/checks` | `POST /v1/mail-domains/:domain_id/checks` | `200` envelope |
 | Remove a domain | `DELETE /api/mail-domains/:id` | `DELETE /v1/mail-domains/:domain_id` | `204` |
+| Enable receiving on a domain | none yet | `POST /v1/mail-domains/:domain_id/receiving` | `200` envelope |
+| Preview a domain | none yet | `POST /v1/mail-domain-previews` | `200` envelope |
+| List managed zones | none yet | `GET /v1/mail-zones` | `200` envelope, at most 20 items |
+| Get a managed zone | none yet | `GET /v1/mail-zones/:zone_id` | `200` envelope |
+| Remove a managed zone | none yet | `DELETE /v1/mail-zones/:zone_id` | `204` |
 | List mailboxes | `GET /api/mailboxes` | `GET /v1/mailboxes` | `200` envelope, at most 50 items |
 | Create mailbox | `POST /api/mailboxes` | `POST /v1/mailboxes` | `201` envelope |
 | Delete mailbox | `DELETE /api/mailboxes/:id` | `DELETE /v1/mailboxes/:mailbox_id` | `204` |
@@ -118,19 +123,38 @@ to an organization.
 ## Domains
 
 With `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, an organization may use its own domains next to the
-shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DISABLED`.
+shared one. Without it every `/v1/mail-domains`, `/v1/mail-domain-previews`, and `/v1/mail-zones`
+route is `404 MAILBOX.DOMAINS_DISABLED`.
 
-- A domain must be a Cloudflare zone, or a subdomain of a zone, that the instance's
-  `MAILBOX_CLOUDFLARE_API_TOKEN` can manage; otherwise connecting is
-  `422 MAILBOX.DOMAIN_ZONE_NOT_FOUND`. The name is trimmed, lowercased, and loses a trailing dot; one
-  that is not a domain is `422 MAILBOX.DOMAIN_INVALID`.
+- `POST /v1/mail-domains` takes `name` and an optional `capability`: `send_receive` (the default)
+  receives and sends through Zmail; `send_only` only sends and leaves the domain's MX with another
+  mail service, so Email Routing is never enabled for it and its mailboxes get no routing rule. Any
+  other `capability` is `422 COMMON.VALIDATION_FAILED`.
+- The name is trimmed, lowercased, and loses a trailing dot; one that is not a domain, or that is
+  itself a public suffix, is `422 MAILBOX.DOMAIN_INVALID`. Its apex is the registrable domain below
+  the public suffix: `example.com` for `mail.example.com`, `example.com.cn` for `a.example.com.cn`.
+- The domain goes into the first zone that applies: a managed zone (see Managed Zones) the
+  organization already has for the apex; else a Cloudflare zone, or parent zone, the operator added
+  to the account the instance's `MAILBOX_CLOUDFLARE_API_TOKEN` manages; else a new managed zone
+  Zmail creates for the apex. A managed zone of another organization, or an apex another Cloudflare
+  account holds, is `409 MAILBOX.DOMAIN_TAKEN`. A new managed zone beyond the organization's limit
+  (`MAILBOX_MAX_ZONES_PER_ORGANIZATION`, 3 by default, at most 20) is
+  `422 MAILBOX.ZONE_LIMIT_REACHED`.
 - A domain belongs to one organization. A name another organization connected, or the shared
   domain, is `409 MAILBOX.DOMAIN_TAKEN`. An organization connects at most 10 domains; one more is
   `422 MAILBOX.DOMAIN_LIMIT_REACHED`.
-- Connecting runs the setup: Zmail enables Email Routing for the domain (Cloudflare adds its MX and
-  SPF records), enables Email Sending for it, adds each sending record Cloudflare lists that the
-  zone lacks, and adds `_dmarc.<domain>` with `v=DMARC1; p=none` when the domain has no DMARC
-  record. It never edits or deletes a record and never changes a zone's catch-all rule.
+- A domain in a managed zone carries the zone in `zone`; `zone` is `null` in an operator zone. While
+  the zone is `pending`, the domain stays `pending` without records and no setup runs:
+  `POST /v1/mail-domains/:domain_id/setups` is `409 MAILBOX.ZONE_PENDING`, and
+  `POST /v1/mail-domains/:domain_id/checks` asks Cloudflare to look for the zone's name servers now
+  and answers with the domain. Cloudflare limits how often it looks; a refused request sets
+  `zone_check_limited` to true on that answer, and the domain should be checked again later. The
+  setup of every pending domain in a zone starts when the zone becomes active.
+- Connecting into an operator zone or an active managed zone runs the setup: Zmail enables Email
+  Routing for the domain unless it is `send_only` (Cloudflare adds its MX and SPF records), enables
+  Email Sending for it, adds each sending record Cloudflare lists that the zone lacks, and adds
+  `_dmarc.<domain>` with `v=DMARC1; p=none` when the domain has no DMARC record. It never edits or
+  deletes a record and never changes a zone's catch-all rule.
 - The setup runs in the background, because it makes several provider calls that can outlast the
   request: connecting answers at once with the domain `pending` and `setting_up` true, and clients
   read the domain again until `setting_up` is false. A step the provider refuses leaves the domain
@@ -139,8 +163,9 @@ shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DI
   zone lookup while connecting is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`.
 - `POST /v1/mail-domains/:domain_id/checks` reads the zone and reports each required record with
   `purpose` (`receiving`, `sending`, `dmarc`), `type`, `name`, `content`, optional `priority`, and
-  `status`: `ok`, `missing`, or `conflict` with the conflicting value in `found`. Receiving MX
-  records match by host, since Cloudflare chooses their priorities. An SPF record matches when it
+  `status`: `ok`, `missing`, or `conflict` with the conflicting value in `found`. A `send_only`
+  domain has no receiving records. Receiving MX records match by host, since Cloudflare chooses
+  their priorities, and an MX of another mail service is a `conflict`. An SPF record matches when it
   includes what is required, and any DMARC record satisfies DMARC. A check never writes DNS.
 - The domain is `verified` when every record is `ok`, and `pending` otherwise. A later check can
   return it to `pending`; its mailboxes keep working, but new ones wait until it verifies again.
@@ -150,8 +175,22 @@ shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DI
 - Creating a mailbox on a verified domain also creates an Email Routing rule that delivers that one
   address to the Email Worker named by `MAILBOX_CLOUDFLARE_EMAIL_WORKER`. A rule Cloudflare refuses
   is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`, and no mailbox is created.
+- `POST /v1/mail-domains/:domain_id/receiving` turns a `send_only` domain into `send_receive` and
+  starts its setup again, which enables Email Routing and gives every live mailbox on the domain
+  that has no routing rule its rule; running the setup again later retries a rule Cloudflare
+  refused. The answer is the domain with `setting_up` true. A domain that already receives is
+  answered `200` unchanged, and one whose managed zone is pending is `409 MAILBOX.ZONE_PENDING`.
+  Email Routing replaces the domain's MX, so mail stops reaching the other mail service; while that
+  service's MX stays on the name, the receiving MX rows are `conflict` and the domain stays `pending`.
+- `POST /v1/mail-domain-previews` with `{ "name": "mail.example.com" }` changes nothing. It answers
+  the normalized `name`, its `apex`, the name's public MX hosts in `existing_mx` (lowercase, without
+  the trailing dot, at most 20), and `suggested_capability`: `send_only` when any of those hosts is
+  not Cloudflare Email Routing's (`*.mx.cloudflare.net`), else `send_receive`. A failed lookup,
+  including a name without MX records, answers `existing_mx: []` and `send_receive`. An unusable
+  name is `422 MAILBOX.DOMAIN_INVALID`, and the shared domain `409 MAILBOX.DOMAIN_TAKEN`.
 - Removing a domain that a mailbox still uses is `409 MAILBOX.DOMAIN_IN_USE`. Removing forgets the
-  domain and leaves its DNS and Cloudflare settings as they are.
+  domain and leaves its DNS and Cloudflare settings as they are, including a managed zone, which is
+  removed on its own (see Managed Zones).
 - Any owner or admin may connect any domain the token can reach. An operator serving several
   companies scopes the token to the zones they may use.
 
@@ -163,14 +202,59 @@ shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DI
     "id": 3,
     "name": "example.com",
     "zone_name": "example.com",
+    "capability": "send_receive",
+    "zone": null,
     "status": "verified",
     "records": [
       { "purpose": "receiving", "type": "MX", "name": "example.com", "content": "route1.mx.cloudflare.net", "status": "ok" },
       { "purpose": "dmarc", "type": "TXT", "name": "_dmarc.example.com", "content": "v=DMARC1; p=none", "status": "ok" }
     ],
+    "setting_up": false,
+    "zone_check_limited": false,
     "checked_at": "2026-11-17T10:00:00Z",
     "verified_at": "2026-11-17T10:00:00Z",
     "created_at": "2026-11-17T09:59:58Z"
+  }
+}
+```
+
+### Managed Zones
+
+A managed zone is a Cloudflare zone Zmail created for an organization's apex when no zone in the
+account held it. Cloudflare serves it only after the organization changes the apex's name servers
+at its registrar to the two in `name_servers`.
+
+- A zone is `pending` until Cloudflare sees the delegation, and `active` from then on; an active zone
+  never returns to `pending`. Zmail looks at pending zones periodically, and a domain check looks at
+  its zone at once. A zone still pending 14 days after it was created is removed together with its
+  domains: nobody ever delegated to it.
+- When Zmail created the zone, Cloudflare imported the records it could find for the apex, and
+  `original_name_servers` holds the name servers the apex had then, so the organization can return
+  to them.
+- `GET /v1/mail-zones` lists the organization's zones by name; `GET /v1/mail-zones/:zone_id` reads
+  one. A zone of another organization is `404 MAILBOX.ZONE_NOT_FOUND`.
+- `DELETE /v1/mail-zones/:zone_id` removes the zone from Zmail and from the Cloudflare account. A zone
+  any domain still lives in is `409 MAILBOX.ZONE_IN_USE`. For an active zone Zmail then reads the
+  apex's public name servers: while any is Cloudflare's (`*.ns.cloudflare.com`), or when they cannot
+  be read, the answer is `409 MAILBOX.ZONE_STILL_DELEGATED`, since removing the zone would take down
+  DNS the registrar still points at; the organization first changes the name servers back, such as
+  to `original_name_servers`. A pending zone skips that lookup. A Cloudflare refusal is
+  `502 MAILBOX.DOMAIN_PROVIDER_FAILED` and keeps the zone; a zone Cloudflare no longer has is
+  removed.
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": 4,
+    "name": "example.org",
+    "status": "pending",
+    "name_servers": ["ada.ns.cloudflare.com", "bob.ns.cloudflare.com"],
+    "original_name_servers": ["dns1.registrar.example", "dns2.registrar.example"],
+    "activated_at": null,
+    "last_checked_at": "2026-11-17T10:10:00Z",
+    "created_at": "2026-11-17T10:00:00Z"
   }
 }
 ```
@@ -742,3 +826,8 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.DOMAIN_ZONE_NOT_FOUND` | 422 |
 | `MAILBOX.DOMAIN_NOT_VERIFIED` | 422 |
 | `MAILBOX.DOMAIN_PROVIDER_FAILED` | 502 |
+| `MAILBOX.ZONE_NOT_FOUND` | 404 |
+| `MAILBOX.ZONE_PENDING` | 409 |
+| `MAILBOX.ZONE_IN_USE` | 409 |
+| `MAILBOX.ZONE_STILL_DELEGATED` | 409 |
+| `MAILBOX.ZONE_LIMIT_REACHED` | 422 |

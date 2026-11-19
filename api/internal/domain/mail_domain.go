@@ -96,8 +96,14 @@ type MailDomainRepository interface {
 	ListDomains(ctx context.Context, organizationID uint) ([]*MailDomain, error)
 	FindDomain(ctx context.Context, organizationID, id uint) (*MailDomain, error)
 	FindDomainByName(ctx context.Context, name string) (*MailDomain, error)
+	// UpdateDomain stores the result of a setup or check. It never writes the capability or the
+	// managed zone, so a setup that read the domain earlier cannot undo a capability change.
 	UpdateDomain(ctx context.Context, domain *MailDomain) error
+	SetDomainCapability(ctx context.Context, organizationID, id uint, capability MailDomainCapability) error
 	// DeleteDomain removes a domain that no live mailbox uses.
 	DeleteDomain(ctx context.Context, organizationID, id uint) error
 	SetMailboxRoutingRule(ctx context.Context, mailboxID uint, ruleID string) error
+	// ListMailboxesWithoutRoutingRule returns the organization's live mailboxes on the domain
+	// that have no routing rule, such as those created while the domain only sent.
+	ListMailboxesWithoutRoutingRule(ctx context.Context, organizationID uint, domainName string) ([]*Mailbox, error)
 }

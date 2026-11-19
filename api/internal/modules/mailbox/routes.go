@@ -23,6 +23,13 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_domains.setups.store").WhereNumber("domain_id")
 		auth.POST("/mail-domains/:domain_id/checks", h.CheckMailDomain).
 			Name("mail_domains.checks.store").WhereNumber("domain_id")
+		auth.POST("/mail-domains/:domain_id/receiving", h.EnableMailDomainReceiving).
+			Name("mail_domains.receiving.store").WhereNumber("domain_id")
+		auth.POST("/mail-domain-previews", h.PreviewMailDomain).Name("mail_domain_previews.store")
+
+		auth.GET("/mail-zones", h.ListMailZones).Name("mail_zones.index")
+		auth.GET("/mail-zones/:zone_id", h.GetMailZone).Name("mail_zones.show").WhereNumber("zone_id")
+		auth.DELETE("/mail-zones/:zone_id", h.DeleteMailZone).Name("mail_zones.destroy").WhereNumber("zone_id")
 
 		auth.GET("/mail-messages", h.ListLog).Name("mail_messages.index")
 		auth.GET("/mail-message-stats", h.ListStats).Name("mail_message_stats.index")

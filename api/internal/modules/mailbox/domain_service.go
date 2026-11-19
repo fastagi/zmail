@@ -280,6 +280,8 @@ func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*do
 	if receives(mailDomain) {
 		if err := s.domainProvider.EnableRouting(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
 			failures = append(failures, err)
+		} else {
+			failures = append(failures, s.routeUnroutedMailboxes(ctx, mailDomain)...)
 		}
 	}
 	if tag, err := s.domainProvider.EnsureSending(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
@@ -306,6 +308,37 @@ func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*do
 		}
 	}
 	return s.check(ctx, mailDomain, failures)
+}
+
+// routeUnroutedMailboxes gives every live mailbox on a receiving domain that has no routing rule
+// its rule, the way CreateMailbox does. Such mailboxes were created while the domain only sent.
+// Mailboxes that already have a rule are left alone, so a repeated setup adds nothing.
+func (s *service) routeUnroutedMailboxes(ctx context.Context, mailDomain *domain.MailDomain) []error {
+	mailboxes, err := s.domains.ListMailboxesWithoutRoutingRule(ctx, mailDomain.OrganizationID, mailDomain.Name)
+	if err != nil {
+		return []error{err}
+	}
+	var failures []error
+	for _, mailbox := range mailboxes {
+		ruleID, err := s.domainProvider.CreateRoutingRule(ctx, mailDomain.ZoneID, mailbox.Address, s.settings.EmailWorker)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if err := s.domains.SetMailboxRoutingRule(ctx, mailbox.ID, ruleID); err != nil {
+			failures = append(failures, err)
+			// An unrecorded rule would never be removed with its mailbox.
+			if deleteErr := s.domainProvider.DeleteRoutingRule(ctx, mailDomain.ZoneID, ruleID); deleteErr != nil {
+				slog.WarnContext(ctx, "unrecorded routing rule was not removed",
+					slog.String("address", mailbox.Address), slog.String("error", deleteErr.Error()))
+			}
+		}
+	}
+	for _, failure := range failures {
+		slog.WarnContext(ctx, "existing mailbox did not get a routing rule",
+			slog.String("domain", mailDomain.Name), slog.String("error", failure.Error()))
+	}
+	return failures
 }
 
 // check evaluates the domain, stores the result, and keeps the first failure as the reason when

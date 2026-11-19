@@ -197,15 +197,13 @@ func (r *repository) UpdateDomain(ctx context.Context, mailDomain *domain.MailDo
 	result := r.conn(ctx).Model(&MailDomainPO{}).
 		Where("id = ? AND organization_id = ?", mailDomain.ID, mailDomain.OrganizationID).
 		Updates(map[string]any{
-			"mail_zone_id": po.MailZoneID,
-			"capability":   po.Capability,
-			"sending_tag":  po.SendingTag,
-			"status":       po.Status,
-			"records":      po.Records,
-			"last_error":   po.LastError,
-			"checked_at":   po.CheckedAt,
-			"verified_at":  po.VerifiedAt,
-			"updated_at":   time.Now(),
+			"sending_tag": po.SendingTag,
+			"status":      po.Status,
+			"records":     po.Records,
+			"last_error":  po.LastError,
+			"checked_at":  po.CheckedAt,
+			"verified_at": po.VerifiedAt,
+			"updated_at":  time.Now(),
 		})
 	if result.Error != nil {
 		return result.Error
@@ -247,4 +245,41 @@ func (r *repository) SetMailboxRoutingRule(ctx context.Context, mailboxID uint, 
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Model(&MailboxPO{}).Where("id = ?", mailboxID).Update("routing_rule_id", ruleID).Error
+}
+
+// SetDomainCapability changes whether a domain receives through Zmail, and nothing else.
+func (r *repository) SetDomainCapability(ctx context.Context, organizationID, id uint, capability domain.MailDomainCapability) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	result := r.conn(ctx).Model(&MailDomainPO{}).
+		Where("id = ? AND organization_id = ?", id, organizationID).
+		Updates(map[string]any{"capability": string(capability), "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrMailDomainNotFound
+	}
+	return nil
+}
+
+// ListMailboxesWithoutRoutingRule returns live mailboxes only; a deleted mailbox keeps its address
+// but receives nothing.
+// fastbuild:bounded-list max=50 reason=an organization owns at most domain.MaxMailboxesPerOrganization mailboxes
+func (r *repository) ListMailboxesWithoutRoutingRule(ctx context.Context, organizationID uint, domainName string) ([]*domain.Mailbox, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var rows []MailboxPO
+	if err := r.conn(ctx).
+		Where("organization_id = ? AND routing_rule_id = '' AND address LIKE ?", organizationID, "%@"+escapeLike(strings.ToLower(domainName))).
+		Order("id asc").Limit(domain.MaxMailboxesPerOrganization).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	mailboxes := make([]*domain.Mailbox, 0, len(rows))
+	for i := range rows {
+		mailboxes = append(mailboxes, rows[i].toDomain())
+	}
+	return mailboxes, nil
 }
