@@ -6,6 +6,11 @@ as an extension of [mailbox.md](mailbox.md), [mailbox-organizations.md](mailbox-
 and [mail-campaigns.md](mail-campaigns.md); what those plans settle is not repeated. Public HTTP
 behavior is owned by [contracts/MAILBOXES.md](../../contracts/MAILBOXES.md).
 
+Domains whose DNS is not in Cloudflare yet are covered by the extension in
+[cloudflare-self-serve-domains.zh-CN.md](cloudflare-self-serve-domains.zh-CN.md): Zmail creates a
+managed zone and the organization changes its name servers. Its real acceptance is
+[docs/runbooks/self-serve-domain-acceptance.md](../runbooks/self-serve-domain-acceptance.md).
+
 ## 1. Executive Summary
 
 **Outcome.** An owner connects `example.com`, Zmail sets up receiving, sending, and DMARC in
@@ -151,7 +156,7 @@ so and tells multi-tenant operators to scope the token.
 
 Cloudflare failures are logged with the domain and the call. The deployment guide lists the token
 permissions: Zone Read, DNS Edit, Zone Settings Edit, Email Routing Rules Edit, and Email Sending
-Edit.
+Edit. Managed zones add Account → Zone: Edit (see the self-serve extension above).
 
 ## 15. Test and Verification Strategy
 

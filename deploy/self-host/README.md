@@ -1,7 +1,7 @@
 # Self-Hosting Zmail
 
-Runs Zmail on one Linux server with Docker Compose: PostgreSQL, the API, the webhook and
-broadcast workers, and the Web console. A reverse proxy on the host terminates TLS.
+Runs Zmail on one Linux server with Docker Compose: PostgreSQL, the API, the webhook, broadcast,
+and mail zone workers, and the Web console. A reverse proxy on the host terminates TLS.
 
 ## Install
 
@@ -53,12 +53,26 @@ To let organizations connect their own domains, set in `.env`:
 
 - `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`
 - `MAILBOX_CLOUDFLARE_EMAIL_WORKER` to the name of the Email Worker above.
-- A `MAILBOX_CLOUDFLARE_API_TOKEN` that also has Zone Read, DNS Edit, Zone Settings Edit,
-  Email Routing Rules Edit, and Email Sending Edit.
+- A `MAILBOX_CLOUDFLARE_API_TOKEN` that also has **Account → Zone: Edit**, DNS Edit, Zone
+  Settings Edit, Email Routing Rules Edit, and Email Sending Edit, with zone resources set to all
+  zones of the account.
+- Optionally `MAILBOX_MAX_ZONES_PER_ORGANIZATION`, the managed zones one organization may create
+  (default 3, at most 20).
 
-Then run `docker compose up -d --wait` again. Any owner or admin on the instance can connect any
-domain the token can reach, so scope the token to the zones organizations may use. See the Domains
-section of [`contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md).
+Then run `docker compose up -d --wait` again.
+
+A domain whose DNS is not in the Cloudflare account yet gets a managed zone: Zmail adds the apex to
+the account, imports its records, and shows the organization the two Cloudflare name servers to set
+at its registrar. The `mail-zone-worker` service (`mail:zone:work --batch=100 --poll=10m`) checks
+pending zones every 10 minutes, sets their domains up once Cloudflare sees the delegation, and
+removes zones still pending after 14 days. Zone: Edit is what lets Zmail create and delete those
+zones, and a token scoped to named zones cannot reach the new ones.
+
+Any owner or admin on the instance can also connect any domain in a zone the operator added to the
+account, so keep zones organizations must not use in another Cloudflare account. See the Domains
+and Managed Zones sections of [`contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md), and
+[`docs/runbooks/self-serve-domain-acceptance.md`](../../docs/runbooks/self-serve-domain-acceptance.md)
+for a real end-to-end check, including the steps for installs that predate managed zones.
 
 ## Backups
 
@@ -92,7 +106,7 @@ docker compose up -d --wait
 ## Database Roles
 
 `zmail` is the image's bootstrap superuser, for administration only. The `migrate` job connects as
-`zmail_owner`, which owns the schema. The API and both workers connect as `zmail_app`, which owns
+`zmail_owner`, which owns the schema. The API and the workers connect as `zmail_app`, which owns
 nothing and can only read and write rows.
 
 ## Upgrade
