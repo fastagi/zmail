@@ -7,6 +7,13 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd)
+
+# The check proves the scaffold can be initialized. A project that already ran `make init-project`
+# carries .fastbuild-project.json and cannot be initialized again, so there is nothing to prove.
+if [ -f "$repo/.fastbuild-project.json" ]; then
+    echo "This checkout is an initialized project (.fastbuild-project.json); the scaffold initialization check does not apply."
+    exit 0
+fi
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/fastbuild-init-XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 

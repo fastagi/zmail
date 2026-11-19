@@ -109,6 +109,11 @@ run_step() {
     echo "  ❌ $label"
     echo "     Exit code: $status"
     echo "     Log: $log_file"
+    if [ -s "$log_file" ] && grep -qE '^[[:space:]]*--- FAIL|^panic:|test timed out' "$log_file"; then
+        # Go test failures sit far above the tail when a package logs heavily; show them first.
+        echo "     Go test failures:"
+        grep -nE -A25 '^[[:space:]]*--- FAIL|^panic:|test timed out' "$log_file" | head -n 300 | sed 's/^/       /'
+    fi
     if [ -s "$log_file" ]; then
         echo "     Last $LOG_TAIL_LINES lines:"
         tail -n "$LOG_TAIL_LINES" "$log_file" | sed 's/^/       /'
