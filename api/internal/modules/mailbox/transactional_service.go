@@ -32,9 +32,6 @@ const (
 	ruleTransactionalKey       = "mail.transactional.key"
 	ruleTransactionalRecipient = "mail.transactional.recipient"
 	ruleTransactionalTestSend  = "mail.transactional.test_send"
-
-	// TransactionalSuppressedEvent is the webhook type of a message refused for a suppressed recipient.
-	TransactionalSuppressedEvent = "email.suppressed"
 )
 
 // Transactional errors.
@@ -528,7 +525,7 @@ func (s *service) sendTransactional(ctx context.Context, send *transactionalSend
 			return nil, nil
 		}
 		return []TransactionalNotification{{
-			Type: TransactionalSuppressedEvent, Message: created, Reason: "suppressed", OccurredAt: now,
+			Type: WebhookEmailSuppressed, Message: created, Reason: "suppressed", OccurredAt: now,
 		}}, nil
 	})
 	if err != nil {

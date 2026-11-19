@@ -325,7 +325,7 @@ func TestDeferredAndRejectedDoNotSuppress(t *testing.T) {
 		bounced[0].Key != "event:evt-soft-1" {
 		t.Fatalf("bounced notifications = %+v; want one temporary", bounced)
 	}
-	if suppressed := f.notificationsOf(TransactionalSuppressedEvent); len(suppressed) != 1 || suppressed[0].Key != "event:evt-soft-2" {
+	if suppressed := f.notificationsOf(WebhookEmailSuppressed); len(suppressed) != 1 || suppressed[0].Key != "event:evt-soft-2" {
 		t.Fatalf("suppressed notifications = %+v", suppressed)
 	}
 	if failed := f.notificationsOf(WebhookEmailFailed); len(failed) != 1 || failed[0].Key != "event:evt-soft-3" {

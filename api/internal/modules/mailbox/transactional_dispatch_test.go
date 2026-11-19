@@ -2,13 +2,19 @@ package mailbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
+	"github.com/fastagi/zmail/api/internal/modules/webhook"
 )
 
 // lockedTransport is a provider double that several dispatchers may call at once. It answers
@@ -210,7 +216,7 @@ func TestProviderSuppressedRecipientIsNotListed(t *testing.T) {
 	f.transport.err = &mailtransport.Error{Code: "transport.suppressed", Permanent: true, Responded: true}
 	message, _ := f.send(t, liveActor(), codeInput("k1", "lilei@example.com", "482913"))
 	assertFinal(t, f.row(t, message.ID), domain.TransactionalStatusSuppressed, "")
-	if got := f.notificationTypes(); !equalStrings(got, []string{TransactionalSuppressedEvent}) {
+	if got := f.notificationTypes(); !equalStrings(got, []string{WebhookEmailSuppressed}) {
 		t.Fatalf("notifications = %v", got)
 	}
 	if f.suppressionRows(t) != 0 {
@@ -391,7 +397,7 @@ func TestRecipientSuppressedAfterEnqueue(t *testing.T) {
 		t.Fatalf("provider calls = %d", len(f.transport.sent))
 	}
 	assertFinal(t, f.row(t, message.ID), domain.TransactionalStatusSuppressed, "")
-	if got := f.notificationTypes(); !equalStrings(got, []string{TransactionalSuppressedEvent}) {
+	if got := f.notificationTypes(); !equalStrings(got, []string{WebhookEmailSuppressed}) {
 		t.Fatalf("notifications = %v", got)
 	}
 }
@@ -414,7 +420,7 @@ func TestSimulatorOutcomes(t *testing.T) {
 		{"complained+x@test.zmail.im", liveActor(), "sent", []string{"accepted", "delivered", "complained"},
 			[]string{WebhookEmailSent, WebhookEmailDelivered, WebhookEmailComplained}, ""},
 		{"SUPPRESSED@test.zmail.im", liveActor(), "suppressed", []string{"rejected"},
-			[]string{TransactionalSuppressedEvent}, ""},
+			[]string{WebhookEmailSuppressed}, ""},
 		// A test key sending to a normal address simulates delivered.
 		{"lilei@example.com", testActor(), "sent", []string{"accepted", "delivered"},
 			[]string{WebhookEmailSent, WebhookEmailDelivered}, ""},
@@ -534,5 +540,100 @@ func TestTransactionalRetryDelay(t *testing.T) {
 		if _, ok := transactionalRetryDelay(attempts); ok {
 			t.Fatalf("transactionalRetryDelay(%d) allows a retry", attempts)
 		}
+	}
+}
+
+// webhookPublisherOn is the real webhook starter over the fixture's database, with the product
+// catalog, so publication runs the production validation and deduplication.
+func webhookPublisherOn(t *testing.T, db *gorm.DB) (domain.WebhookPublisher, *config.Config) {
+	t.Helper()
+	cfg := &config.Config{
+		Starters: config.StarterConfig{Optional: []string{config.StarterWebhook}},
+		Webhook: config.WebhookConfig{
+			EncryptionKey: "webhook-test-encryption-key-at-least-32-bytes", RequestTimeout: time.Second,
+			MaxResponseBytes: 1024, SecretOverlap: 24 * time.Hour, EventRetention: 30 * 24 * time.Hour,
+		},
+	}
+	catalog, err := NewWebhookCatalog()
+	if err != nil {
+		t.Fatalf("NewWebhookCatalog: %v", err)
+	}
+	secrets, err := webhook.NewSecretProtector(cfg)
+	if err != nil {
+		t.Fatalf("NewSecretProtector: %v", err)
+	}
+	targets := webhook.NewTargetPolicy(cfg)
+	return webhook.NewService(catalog, webhook.NewRepository(db), secrets, targets, webhook.NewSender(cfg, targets), cfg), cfg
+}
+
+func TestDuplicatePublishDeduplicated(t *testing.T) {
+	f := newTxFixture(t, nil)
+	publisher, cfg := webhookPublisherOn(t, f.db)
+	notifier := NewWebhookNotifier(cfg, publisher)
+	message := secretMessage()
+	message.ID = 501
+	notification := TransactionalNotification{
+		Type: WebhookEmailDelivered, Message: message, Reason: "delivered", Key: "event:prov-dup",
+		OccurredAt: f.clock.Add(-time.Minute),
+	}
+	for i := 0; i < 2; i++ {
+		if err := notifier.NotifyTransactional(context.Background(), notification); err != nil {
+			t.Fatalf("NotifyTransactional #%d: %v", i+1, err)
+		}
+	}
+	var rows []struct {
+		EventID   string
+		EventType string
+	}
+	if err := f.db.Raw(`SELECT event_id, event_type FROM webhook_events WHERE organization_id = 10 AND source = 'mailbox'`).
+		Scan(&rows).Error; err != nil {
+		t.Fatalf("read webhook_events: %v", err)
+	}
+	if len(rows) != 1 || rows[0].EventType != WebhookEmailDelivered ||
+		rows[0].EventID != transactionalWebhookEventID(501, WebhookEmailDelivered, "event:prov-dup") {
+		t.Fatalf("webhook_events = %+v; want one email.delivered row", rows)
+	}
+}
+
+// A simulated bounce goes through the real notifier and webhook starter: the receiver sees a
+// permanent bounce of a simulated live message, with the full address and none of its content.
+func TestSimulatedBouncePublishesPermanentBounce(t *testing.T) {
+	f := newTxFixture(t, nil)
+	publisher, cfg := webhookPublisherOn(t, f.db)
+	f.service.notifier = NewWebhookNotifier(cfg, publisher)
+	message, _ := f.send(t, liveActor(), codeInput("k1", " Bounced+u1@TEST.zmail.im ", "482913"))
+	if len(f.transport.sent) != 0 {
+		t.Fatalf("provider calls = %d", len(f.transport.sent))
+	}
+	var rows []struct {
+		EventID     string
+		EventType   string
+		PayloadJSON string `gorm:"column:payload_json"`
+	}
+	if err := f.db.Raw(`SELECT event_id, event_type, payload_json FROM webhook_events WHERE organization_id = 10 ORDER BY id`).
+		Scan(&rows).Error; err != nil {
+		t.Fatalf("read webhook_events: %v", err)
+	}
+	if len(rows) != 2 || rows[0].EventType != WebhookEmailSent || rows[1].EventType != WebhookEmailBounced {
+		t.Fatalf("webhook_events = %+v; want email.sent then email.bounced", rows)
+	}
+	for _, row := range rows {
+		if strings.Contains(row.PayloadJSON, "482913") || strings.Contains(row.PayloadJSON, "verification") {
+			t.Fatalf("payload leaks content: %s", row.PayloadJSON)
+		}
+	}
+	var bounce transactionalWebhookPayload
+	if err := json.Unmarshal([]byte(rows[1].PayloadJSON), &bounce); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	want := transactionalWebhookPayload{
+		MessageID: message.ID, Template: "signup-code", To: "bounced+u1@test.zmail.im", Mode: "live",
+		Simulated: true, BounceType: bounceTypePermanent, Reason: "simulated",
+	}
+	if bounce != want {
+		t.Fatalf("bounce payload = %+v; want %+v", bounce, want)
+	}
+	if !strings.HasPrefix(rows[1].EventID, "t"+itoa(message.ID)+":bounced:") {
+		t.Fatalf("bounce event id = %q", rows[1].EventID)
 	}
 }

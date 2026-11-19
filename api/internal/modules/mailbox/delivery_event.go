@@ -289,7 +289,7 @@ func transactionalNotificationForEvent(event domain.MailEvent) (TransactionalNot
 	case domain.MailEventComplained:
 		notification.Type = WebhookEmailComplained
 	case domain.MailEventRejected:
-		notification.Type = TransactionalSuppressedEvent
+		notification.Type = WebhookEmailSuppressed
 	case domain.MailEventFailed:
 		notification.Type = WebhookEmailFailed
 	default:

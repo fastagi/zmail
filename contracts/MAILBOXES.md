@@ -1665,7 +1665,8 @@ never the full recipient or the variables. Entries are newest first, in keyset p
 
 An unusable filter, a longer range, or a malformed cursor is `400 COMMON.INVALID_INPUT`. `meta` holds
 `next_cursor` (null on the last page) and `total_24h`: the messages of the requested mode created in
-the last 24 hours, ignoring the other filters and counted up to 10000.
+the last 24 hours, of the requested `template` when one is given, ignoring the other filters and
+counted up to 10000.
 
 `GET /v1/transactional-mail-log/:message_id` returns one entry of either mode with `from`, the masked
 `variables`, and up to 50 events, oldest first; still without the full recipient. A message of
@@ -1746,10 +1747,11 @@ and then delivered counts as `delivered`.
 ### Webhooks
 
 When the `webhook` starter is selected, an organization's webhook endpoints can subscribe to mail
-events. Mail events are published only for messages of a shared mailbox whose
+events. Mailbox mail events (`mail.message.*`) are published only for messages of a shared mailbox whose
 [webhook switch](#webhook-switch) is on, and only for messages created at or after its seal
 boundary; personal mailboxes never publish. Endpoints, signing, retries, and delivery history are those of [WEBHOOKS.md](WEBHOOKS.md);
-this section defines only the mail events.
+this section defines only the mail events. Transactional mail publishes the separate `email.*`
+events of [Transactional Mail Events](#transactional-mail-events).
 
 | Event type | Published when |
 |---|---|
@@ -1786,6 +1788,49 @@ send to several recipients publishes one `sent` and then one event per recipient
 If the webhook cannot be queued, the mail state is still recorded and the failure is logged; that
 one webhook is lost. Mail that was really sent or received is never dropped because of a webhook
 failure. Without the `webhook` starter nothing is published.
+
+#### Transactional Mail Events
+
+[Transactional messages](#transactional-mail) publish their own `email.*` events, listed by
+`GET /v1/webhook-event-types` with the mail events. A transactional message belongs to no
+mailbox, so the mailbox webhook switch and seal boundary do not apply: when the `webhook` starter
+is selected, every enabled endpoint of the organization that subscribes to a type receives it.
+Test-mode and simulated messages publish too; `mode` and `simulated` tell them apart.
+
+| Event type | Published when |
+|---|---|
+| `email.sent` | The provider accepted the message (`status` becomes `sent`), or a test-mode or simulated message finished. |
+| `email.delivered` | A `delivered` delivery event. |
+| `email.bounced` | A `bounced` delivery event (`bounce_type: "permanent"`) or a `deferred` one (`bounce_type: "temporary"`). |
+| `email.complained` | A `complained` delivery event. |
+| `email.suppressed` | The recipient was on the organization's suppression list at acceptance or before dispatch, or the provider reported it on its own suppression list (at send time or as a `rejected` event). |
+| `email.failed` | `status` became `failed` (permanent provider refusal, unknown outcome, retries exhausted, queued too long, sender domain no longer verified, payload unavailable), or a `failed` delivery event (the provider gave up without a bounce). |
+
+Every transactional event has the same `data` object, with every field always present:
+
+| Field | Value |
+|---|---|
+| `message_id` | The transactional message's id, as used by `GET /v1/transactional-messages/{id}`. |
+| `template` | The template key the message was sent with. |
+| `to` | The full normalized (trimmed, lowercased) recipient address. |
+| `mode` | `live` or `test`. |
+| `simulated` | `true` when the message was simulated and never reached the provider. |
+| `bounce_type` | `permanent` or `temporary` for `email.bounced`; `""` otherwise. |
+| `reason` | A short machine-readable code such as `5.1.1 permanent_failure`, `suppressed`, `simulated`, or a failure code; `""` when there is nothing to explain. |
+
+The payload never contains the subject, the body, or any variable, secret or not. The recipient is
+given in full, unlike the masked send log: the receiver is the organization's own signed endpoint,
+and only the full address lets it match an outcome to its user.
+
+Each event's id is `t<message id>:<type without "email.">`, followed by `:` and the first 12 bytes
+of the SHA-256 of a distinguishing key (hex) when one message can publish that type more than once,
+such as one per provider event. The webhook starter deduplicates by
+`(organization_id, source, event_id)`, so a repeated provider event or a replayed send publishes
+nothing new. Events are queued in the same transaction as the state change they report, with the
+same loss rule as the mail events. Signing, delivery history, and retries are those of
+[WEBHOOKS.md](WEBHOOKS.md): up to ten attempts, retried after about 1 minute, 5 minutes, 15
+minutes, 1 hour, 3 hours, 6 hours, 12 hours, 18 hours, and 24 hours, each with ±20% deterministic
+jitter.
 
 ### Event Intake
 

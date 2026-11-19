@@ -13,15 +13,6 @@ import (
 	"github.com/fastagi/zmail/api/internal/infra/metrics"
 )
 
-// Webhook types of transactional mail (spec §9.16). TransactionalSuppressedEvent is email.suppressed.
-const (
-	WebhookEmailSent       = "email.sent"
-	WebhookEmailDelivered  = "email.delivered"
-	WebhookEmailBounced    = "email.bounced"
-	WebhookEmailComplained = "email.complained"
-	WebhookEmailFailed     = "email.failed"
-)
-
 const (
 	// failureSenderUnverified: the template's sender domain lost its verification while queued.
 	failureSenderUnverified = "send.sender_unverified"
@@ -278,7 +269,7 @@ var simulatedOutcomes = map[string][]simulatedStep{
 		{domain.MailEventComplained, WebhookEmailComplained, ""},
 	},
 	"suppressed": {
-		{domain.MailEventRejected, TransactionalSuppressedEvent, ""},
+		{domain.MailEventRejected, WebhookEmailSuppressed, ""},
 	},
 }
 
@@ -304,7 +295,7 @@ func (s *service) finishSimulated(ctx context.Context, message *domain.Transacti
 		switch step.webhook {
 		case WebhookEmailSent:
 			reason = ""
-		case TransactionalSuppressedEvent:
+		case WebhookEmailSuppressed:
 			reason = "suppressed"
 		}
 		notifications = append(notifications, TransactionalNotification{
@@ -358,7 +349,7 @@ func (s *service) sendTransactionalAttempt(ctx context.Context, message *domain.
 		events := sendEvents(result, false, now)
 		return s.recordTransactional(recordContext, message, lease,
 			domain.TransactionalOutcome{Status: domain.TransactionalStatusSuppressed, ProviderMessageID: result.MessageID},
-			events, []TransactionalNotification{{Type: TransactionalSuppressedEvent, Reason: "suppressed", OccurredAt: now}})
+			events, []TransactionalNotification{{Type: WebhookEmailSuppressed, Reason: "suppressed", OccurredAt: now}})
 	case isTransportErr && !transportErr.Permanent && transportErr.Responded:
 		if delay, retry := transactionalRetryDelay(message.Attempts); retry {
 			scheduled, err := s.transactional.ScheduleTransactionalRetry(recordContext, message.ID, lease, now.Add(delay), transportErr.Code)
@@ -403,7 +394,7 @@ func providerNotifications(events []domain.MailEvent, at time.Time) []Transactio
 		case domain.MailEventBounced:
 			notification.Type, notification.BounceType = WebhookEmailBounced, bounceTypePermanent
 		case domain.MailEventRejected:
-			notification.Type = TransactionalSuppressedEvent
+			notification.Type = WebhookEmailSuppressed
 		default:
 			continue
 		}
@@ -423,7 +414,7 @@ func (s *service) finishTransactional(
 ) error {
 	webhook := WebhookEmailFailed
 	if outcome.Status == domain.TransactionalStatusSuppressed {
-		webhook = TransactionalSuppressedEvent
+		webhook = WebhookEmailSuppressed
 	} else {
 		reason = outcome.FailureCode
 	}
