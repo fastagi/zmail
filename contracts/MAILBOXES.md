@@ -1883,8 +1883,12 @@ Each event's id is `t<message id>:<type without "email.">`, followed by `:` and 
 of the SHA-256 of a distinguishing key (hex) when one message can publish that type more than once,
 such as one per provider event. The webhook starter deduplicates by
 `(organization_id, source, event_id)`, so a repeated provider event or a replayed send publishes
-nothing new. Events are queued in the same transaction as the state change they report, with the
-same loss rule as the mail events. Signing, delivery history, and retries are those of
+nothing new. A consumer may still receive more than one event of the same type for one message:
+for example, an `email.delivered` or `email.suppressed` reported by the provider during the send
+and the same outcome reported again by a later provider event carry different event ids. Consumers
+that act once per outcome deduplicate on `data.message_id` plus the event type. Events are queued
+in the same transaction as the state change they report, with the same loss rule as the mail
+events. Signing, delivery history, and retries are those of
 [WEBHOOKS.md](WEBHOOKS.md): up to ten attempts, retried after about 1 minute, 5 minutes, 15
 minutes, 1 hour, 3 hours, 6 hours, 12 hours, 18 hours, and 24 hours, each with ±20% deterministic
 jitter.

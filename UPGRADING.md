@@ -105,6 +105,15 @@ template with `422 MAILBOX.TEMPLATE_KIND_MISMATCH`; `DELETE /v1/mail-domains/{id
 `domain.MailTemplateRepository.ListTemplates` take a `domain.MailTemplateKind` (empty lists all);
 the repository adds `FindTemplateByKey`.
 
+### Medium — Deploy the API before the web app
+
+The web app requires `mode` on every API key; `kind`, `key`, `from`, and `variable_definitions` on
+every template; and `daily_broadcast_limit`, `daily_transactional_limit`, `transactional_enabled`,
+`transactional_recipient_limit_per_minute`, `transactional_key_limit_per_second`, and
+`simulator_domain` on every `GET /v1/mailbox-domains` item. It validates these responses strictly,
+so every mail page (and the API key and developer pages) fails to load against an API that does
+not send them yet.
+
 ### Low — New routes, webhook events, and repository seams
 
 New routes: `POST /v1/transactional-messages` and `GET /v1/transactional-messages/{id}` (API key,

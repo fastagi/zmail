@@ -232,4 +232,6 @@ The starter does not provide inbound webhooks, provider callbacks, CloudEvents t
 arbitrary headers, custom methods, query-string credentials, payload transforms, endpoint-specific
 event schemas created at runtime, wildcard subscriptions, broadcast topics, billing events,
 cross-organization endpoints, or exactly-once consumer processing. Consumers must verify timestamps
-and signatures and deduplicate `webhook-id`.
+and signatures and deduplicate `webhook-id`. A product event catalog may publish more than one
+event of the same type, under different ids, for one business object (for example a send-time
+result and a later provider report); the owning contract names the business key to deduplicate on.
