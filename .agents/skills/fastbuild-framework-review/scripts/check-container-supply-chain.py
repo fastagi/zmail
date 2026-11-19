@@ -18,8 +18,8 @@ FRONTEND = (
     "87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89"
 )
 API_BUILDER = (
-    "docker.io/library/golang:1.26.10-alpine3.24@sha256:"
-    "27f2d3b83cfc5803c8078f8e730af0f7c431bf067afaec8f60a36fb763187cba"
+    "docker.io/library/golang:1.26.11-alpine3.24@sha256:"
+    "ecb67f987aa1a57794c91d19ade7ae0209f2f0f5496aaef9e6ae85ddf92d02ab"
 )
 API_RUNTIME = (
     "gcr.io/distroless/static-debian12:nonroot@sha256:"
