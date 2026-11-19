@@ -193,7 +193,7 @@ func TestDeletePendingZoneRemovesDomains(t *testing.T) {
 	if err != nil || len(inZone) != 2 {
 		t.Fatalf("in zone = %+v, %v", inZone, err)
 	}
-	if err = repo.DeletePendingZone(ctx, zone.ID); err != nil {
+	if err = repo.DeletePendingZone(ctx, zone.ID, removedAtProvider); err != nil {
 		t.Fatalf("DeletePendingZone: %v", err)
 	}
 	if _, err = repo.FindZone(ctx, 1, zone.ID); !errors.Is(err, ErrMailZoneNotFound) {
@@ -254,7 +254,7 @@ func TestDeletePendingZoneRefusesAVerifiedDomain(t *testing.T) {
 	if err := repo.UpdateDomain(ctx, mailDomain); err != nil {
 		t.Fatalf("UpdateDomain: %v", err)
 	}
-	if err := repo.DeletePendingZone(ctx, zone.ID); !errors.Is(err, ErrMailZoneInUse) {
+	if err := repo.DeletePendingZone(ctx, zone.ID, removedAtProvider); !errors.Is(err, ErrMailZoneInUse) {
 		t.Fatalf("DeletePendingZone = %v", err)
 	}
 	if _, err := repo.FindZone(ctx, 1, zone.ID); err != nil {
@@ -262,5 +262,78 @@ func TestDeletePendingZoneRefusesAVerifiedDomain(t *testing.T) {
 	}
 	if _, err := repo.FindDomain(ctx, 1, mailDomain.ID); err != nil {
 		t.Fatalf("domain removed: %v", err)
+	}
+}
+
+func removedAtProvider(context.Context) error { return nil }
+
+func TestActivateZoneHasOneWinner(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	zone := newZone(1, "example.com")
+	if err := repo.CreateZone(ctx, zone, 3); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	at := time.Date(2026, 11, 19, 8, 0, 0, 0, time.UTC)
+	if err := repo.TouchZone(ctx, zone.ID, at); err != nil {
+		t.Fatalf("TouchZone: %v", err)
+	}
+	touched, err := repo.FindZone(ctx, 1, zone.ID)
+	if err != nil || touched.Status != domain.MailZoneStatusPending || touched.LastCheckedAt == nil || !touched.LastCheckedAt.Equal(at) {
+		t.Fatalf("touched = %+v, %v", touched, err)
+	}
+	won, err := repo.ActivateZone(ctx, zone.ID, at.Add(time.Minute))
+	if err != nil || !won {
+		t.Fatalf("first ActivateZone = %v, %v", won, err)
+	}
+	won, err = repo.ActivateZone(ctx, zone.ID, at.Add(2*time.Minute))
+	if err != nil || won {
+		t.Fatalf("second ActivateZone = %v, %v", won, err)
+	}
+	// A later check that saw the zone pending only records the time.
+	if err = repo.TouchZone(ctx, zone.ID, at.Add(3*time.Minute)); err != nil {
+		t.Fatalf("TouchZone: %v", err)
+	}
+	active, err := repo.FindZone(ctx, 1, zone.ID)
+	if err != nil || active.Status != domain.MailZoneStatusActive || active.ActivatedAt == nil ||
+		!active.ActivatedAt.Equal(at.Add(time.Minute)) || !active.LastCheckedAt.Equal(at.Add(3*time.Minute)) {
+		t.Fatalf("active = %+v, %v", active, err)
+	}
+	if err = repo.TouchZone(ctx, 999, at); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("TouchZone missing = %v", err)
+	}
+}
+
+func TestDeletePendingZoneCommitsOnlyAfterTheProvider(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	zone := newZone(1, "example.com")
+	if err := repo.CreateZone(ctx, zone, 3); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	mailDomain := &domain.MailDomain{OrganizationID: 1, Name: "mail.example.com", ZoneID: zone.CloudflareZoneID, ZoneName: zone.Name, MailZoneID: &zone.ID, CreatedBy: 1}
+	if err := repo.CreateDomain(ctx, mailDomain, 10); err != nil {
+		t.Fatalf("CreateDomain: %v", err)
+	}
+
+	providerDown := errors.New("provider down")
+	if err := repo.DeletePendingZone(ctx, zone.ID, func(context.Context) error { return providerDown }); !errors.Is(err, providerDown) {
+		t.Fatalf("DeletePendingZone = %v", err)
+	}
+	if _, err := repo.FindZone(ctx, 1, zone.ID); err != nil {
+		t.Fatalf("zone removed although the provider failed: %v", err)
+	}
+	if _, err := repo.FindDomain(ctx, 1, mailDomain.ID); err != nil {
+		t.Fatalf("domain removed although the provider failed: %v", err)
+	}
+
+	// An active zone is never handed to the provider for removal.
+	if won, err := repo.ActivateZone(ctx, zone.ID, time.Now()); err != nil || !won {
+		t.Fatalf("ActivateZone = %v, %v", won, err)
+	}
+	called := false
+	err := repo.DeletePendingZone(ctx, zone.ID, func(context.Context) error { called = true; return nil })
+	if !errors.Is(err, ErrMailZoneNotFound) || called {
+		t.Fatalf("DeletePendingZone on an active zone = %v, provider called %v", err, called)
 	}
 }

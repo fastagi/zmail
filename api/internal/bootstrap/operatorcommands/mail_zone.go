@@ -58,7 +58,7 @@ func (w mailZoneWorker) DispatchWebhooks(ctx context.Context, limit int) (int, e
 }
 
 func parseMailZoneWorkerArgs(args []string) (webhookWorkerConfig, error) {
-	return parseWorkerArgs(args,
+	return parseWorkerArgs("mail zone worker", args,
 		webhookWorkerConfig{Batch: defaultMailZoneWorkerBatch, Poll: defaultMailZoneWorkerPoll}, maxMailZoneWorkerPoll)
 }
 

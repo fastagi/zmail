@@ -22,6 +22,8 @@ type fakeMailZones struct {
 	createErr error
 	// now stamps CreatedAt on stored zones, as the database does.
 	now func() time.Time
+	// activations counts the pending-to-active transitions ActivateZone made.
+	activations int
 }
 
 func newFakeMailZones(domains *fakeDomains) *fakeMailZones {
@@ -113,6 +115,27 @@ func (z *fakeMailZones) UpdateZone(_ context.Context, zone *domain.MailZone) err
 	return nil
 }
 
+func (z *fakeMailZones) ActivateZone(_ context.Context, id uint, at time.Time) (bool, error) {
+	zone, ok := z.zones[id]
+	if !ok || zone.Status != domain.MailZoneStatusPending {
+		return false, nil
+	}
+	zone.Status = domain.MailZoneStatusActive
+	zone.ActivatedAt = &at
+	zone.LastCheckedAt = &at
+	z.activations++
+	return true, nil
+}
+
+func (z *fakeMailZones) TouchZone(_ context.Context, id uint, at time.Time) error {
+	zone, ok := z.zones[id]
+	if !ok {
+		return ErrMailZoneNotFound
+	}
+	zone.LastCheckedAt = &at
+	return nil
+}
+
 func (z *fakeMailZones) DeleteZone(_ context.Context, organizationID, id uint) error {
 	zone, ok := z.zones[id]
 	if !ok || zone.OrganizationID != organizationID {
@@ -127,7 +150,7 @@ func (z *fakeMailZones) DeleteZone(_ context.Context, organizationID, id uint) e
 	return nil
 }
 
-func (z *fakeMailZones) DeletePendingZone(_ context.Context, id uint) error {
+func (z *fakeMailZones) DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context) error) error {
 	zone, ok := z.zones[id]
 	if !ok || zone.Status != domain.MailZoneStatusPending {
 		return ErrMailZoneNotFound
@@ -136,6 +159,10 @@ func (z *fakeMailZones) DeletePendingZone(_ context.Context, id uint) error {
 		if mailDomain.MailZoneID != nil && *mailDomain.MailZoneID == id && mailDomain.Status == domain.MailDomainStatusVerified {
 			return ErrMailZoneInUse
 		}
+	}
+	// The repository commits only after the provider call succeeds.
+	if err := removeAtProvider(ctx); err != nil {
+		return err
 	}
 	for domainID, mailDomain := range z.domains.domains {
 		if mailDomain.MailZoneID != nil && *mailDomain.MailZoneID == id {
@@ -664,5 +691,80 @@ func TestCheckPendingZonesContinuesAfterFailure(t *testing.T) {
 	}
 	if stored := fixture.mailZones.zones[activating.ID]; stored.Status != domain.MailZoneStatusActive {
 		t.Fatalf("activating zone = %+v", stored)
+	}
+}
+
+func TestZoneActivationIsMonotonic(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	mailDomain := fixture.connect(t, "mail.example.org")
+	zone := fixture.pendingZoneOf(t, mailDomain)
+	stale := *zone
+
+	// A user check activates the zone after the poller listed it as pending.
+	fixture.zones.zoneStatus[zone.CloudflareZoneID] = "active"
+	if _, err := fixture.service.CheckMailDomain(ctx, 7, mailDomain.ID); err != nil {
+		t.Fatalf("CheckMailDomain: %v", err)
+	}
+	if fixture.mailZones.activations != 1 || !slices.Equal(fixture.zones.routingFor, []string{"mail.example.org"}) {
+		t.Fatalf("activations %d, routing %v", fixture.mailZones.activations, fixture.zones.routingFor)
+	}
+
+	// The poller's pass on its stale copy neither activates nor sets up a second time, even while
+	// the domain is still pending (its setup running in the API process, or failed).
+	fixture.domains.domains[mailDomain.ID].Status = domain.MailDomainStatusPending
+	staleActive := stale
+	if err := fixture.service.checkPendingZone(ctx, &staleActive); err != nil {
+		t.Fatalf("checkPendingZone: %v", err)
+	}
+	if fixture.mailZones.activations != 1 || len(fixture.zones.routingFor) != 1 {
+		t.Fatalf("second activation: %d, routing %v", fixture.mailZones.activations, fixture.zones.routingFor)
+	}
+
+	// Nor does a pass that saw the provider still pending, or failing, move the zone back.
+	fixture.zones.zoneStatus[zone.CloudflareZoneID] = "pending"
+	stalePending := stale
+	if err := fixture.service.checkPendingZone(ctx, &stalePending); err != nil {
+		t.Fatalf("checkPendingZone: %v", err)
+	}
+	fixture.zones.getZoneErr[zone.CloudflareZoneID] = &mailtransport.DomainError{Operation: "get zone", Status: http.StatusBadGateway}
+	staleFailing := stale
+	if err := fixture.service.checkPendingZone(ctx, &staleFailing); err == nil {
+		t.Fatal("checkPendingZone hid the provider failure")
+	}
+	if stored := fixture.mailZones.zones[zone.ID]; stored.Status != domain.MailZoneStatusActive || stored.ActivatedAt == nil {
+		t.Fatalf("zone reverted: %+v", stored)
+	}
+}
+
+func TestExpiryAfterActivationKeepsTheZone(t *testing.T) {
+	fixture := newDomainFixture(t)
+	zone := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.org"))
+	zone.CreatedAt = fixture.now.Add(-15 * 24 * time.Hour)
+	stale := *zone
+	// The zone became active after the poller listed it; the poller's provider read was older.
+	fixture.mailZones.zones[zone.ID].Status = domain.MailZoneStatusActive
+
+	if err := fixture.service.checkPendingZone(context.Background(), &stale); err != nil {
+		t.Fatalf("checkPendingZone: %v", err)
+	}
+	if len(fixture.zones.deletedZones) != 0 {
+		t.Fatalf("active zone deleted at the provider: %v", fixture.zones.deletedZones)
+	}
+	if stored, kept := fixture.mailZones.zones[zone.ID]; !kept || stored.Status != domain.MailZoneStatusActive || len(fixture.domains.domains) != 1 {
+		t.Fatalf("zone %+v kept %v, domains %v", stored, kept, fixture.domains.domains)
+	}
+}
+
+func TestPendingZoneMissingAtProviderExpiresAtOnce(t *testing.T) {
+	fixture := newDomainFixture(t)
+	zone := fixture.pendingZoneOf(t, fixture.connect(t, "mail.example.org"))
+	fixture.zones.getZoneErr[zone.CloudflareZoneID] = &mailtransport.DomainError{Operation: "get zone", Status: http.StatusNotFound}
+
+	if processed, err := fixture.service.CheckPendingZones(context.Background(), 100); err != nil || processed != 1 {
+		t.Fatalf("CheckPendingZones = %d, %v", processed, err)
+	}
+	if _, left := fixture.mailZones.zones[zone.ID]; left || len(fixture.domains.domains) != 0 {
+		t.Fatalf("zones %v, domains %v", fixture.mailZones.zones, fixture.domains.domains)
 	}
 }

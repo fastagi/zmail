@@ -49,10 +49,17 @@ type MailZoneRepository interface {
 	// ListPendingZones returns pending zones, least recently checked first.
 	ListPendingZones(ctx context.Context, limit int) ([]*MailZone, error)
 	UpdateZone(ctx context.Context, zone *MailZone) error
+	// ActivateZone moves a pending zone to active at the given time. It reports false, without an
+	// error, when the zone is no longer pending, so exactly one caller wins each activation.
+	ActivateZone(ctx context.Context, id uint, at time.Time) (bool, error)
+	// TouchZone records when a zone was last checked without changing its status.
+	TouchZone(ctx context.Context, id uint, at time.Time) error
 	// DeleteZone removes a zone no mail domain belongs to.
 	DeleteZone(ctx context.Context, organizationID, id uint) error
 	// DeletePendingZone removes a zone together with its domains, which are pending while the
-	// zone is.
-	DeletePendingZone(ctx context.Context, id uint) error
+	// zone is. It holds the zone locked as pending while removeAtProvider runs and commits only
+	// when that succeeds, so a zone activated concurrently is never removed. A zone that is no
+	// longer pending is ErrMailZoneNotFound, and removeAtProvider is not called.
+	DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context) error) error
 	ListDomainsInZone(ctx context.Context, zoneID uint) ([]*MailDomain, error)
 }

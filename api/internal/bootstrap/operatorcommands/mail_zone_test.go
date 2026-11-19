@@ -59,3 +59,28 @@ func TestMailZoneWorkerAlwaysWaitsForThePoll(t *testing.T) {
 	assert.Equal(t, 1, checker.calls)
 	assert.Equal(t, []int{5}, checker.limits)
 }
+
+func TestWorkerArgumentErrorsNameTheWorker(t *testing.T) {
+	_, err := parseMailZoneWorkerArgs([]string{"--fast"})
+	require.EqualError(t, err, `unknown mail zone worker argument "--fast"`)
+	_, err = parseWebhookWorkerArgs([]string{"--fast"})
+	require.EqualError(t, err, `unknown webhook worker argument "--fast"`)
+	_, err = parseMailZoneWorkerArgs([]string{"--poll=2h"})
+	require.EqualError(t, err, "--poll must be between 100ms and 1h")
+	_, err = parseWebhookWorkerArgs([]string{"--poll=2m"})
+	require.EqualError(t, err, "--poll must be between 100ms and 1m")
+}
+
+func TestFormatPollLimit(t *testing.T) {
+	for limit, want := range map[time.Duration]string{
+		time.Hour:               "1h",
+		2 * time.Hour:           "2h",
+		10 * time.Minute:        "10m",
+		90 * time.Minute:        "90m",
+		time.Minute:             "1m",
+		30 * time.Second:        "30s",
+		1500 * time.Millisecond: "1.5s",
+	} {
+		assert.Equal(t, want, formatPollLimit(limit), limit.String())
+	}
+}

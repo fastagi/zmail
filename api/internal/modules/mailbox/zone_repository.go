@@ -231,6 +231,42 @@ func (r *repository) UpdateZone(ctx context.Context, zone *domain.MailZone) erro
 	return nil
 }
 
+// ActivateZone moves a pending zone to active in one conditional update, so concurrent checks
+// agree on a single activation and an active zone never returns to pending.
+func (r *repository) ActivateZone(ctx context.Context, id uint, at time.Time) (bool, error) {
+	if r.db == nil {
+		return false, domain.ErrServiceUnavailable
+	}
+	result := r.conn(ctx).Model(&MailZonePO{}).
+		Where("id = ? AND status = ?", id, string(domain.MailZoneStatusPending)).
+		Updates(map[string]any{
+			"status":          string(domain.MailZoneStatusActive),
+			"activated_at":    at,
+			"last_checked_at": at,
+			"updated_at":      time.Now(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+// TouchZone stores when a zone was last checked and nothing else.
+func (r *repository) TouchZone(ctx context.Context, id uint, at time.Time) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	result := r.conn(ctx).Model(&MailZonePO{}).Where("id = ?", id).
+		Updates(map[string]any{"last_checked_at": at, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrMailZoneNotFound
+	}
+	return nil
+}
+
 // DeleteZone refuses while any mail domain lives in the zone. The foreign key catches a domain
 // added after the check.
 func (r *repository) DeleteZone(ctx context.Context, organizationID, id uint) error {
@@ -266,7 +302,11 @@ func (r *repository) DeleteZone(ctx context.Context, organizationID, id uint) er
 // DeletePendingZone removes a pending zone and the domains in it in one transaction. A domain in
 // a pending zone cannot have mailboxes, since it is never verified while the zone is pending; a
 // verified domain in the zone all the same makes it refuse with ErrMailZoneInUse.
-func (r *repository) DeletePendingZone(ctx context.Context, id uint) error {
+//
+// The zone row stays locked from the pending check until commit, and removeAtProvider runs inside
+// that window: ActivateZone waits on the lock, so the provider zone is removed only while the row
+// is still pending, and a provider failure rolls the rows back for a later retry.
+func (r *repository) DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context) error) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
@@ -291,7 +331,10 @@ func (r *repository) DeletePendingZone(ctx context.Context, id uint) error {
 		if err := tx.Where("mail_zone_id = ?", po.ID).Delete(&MailDomainPO{}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&MailZonePO{}, po.ID).Error
+		if err := tx.Delete(&MailZonePO{}, po.ID).Error; err != nil {
+			return err
+		}
+		return removeAtProvider(ctx)
 	})
 }
 

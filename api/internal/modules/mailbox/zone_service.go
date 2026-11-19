@@ -203,29 +203,35 @@ func (s *service) CheckPendingZones(ctx context.Context, limit int) (int, error)
 }
 
 func (s *service) checkPendingZone(ctx context.Context, zone *domain.MailZone) error {
-	if s.now().UTC().Sub(zone.CreatedAt) <= pendingZoneLifetime {
-		_, err := s.refreshZone(ctx, zone)
-		return err
-	}
-	// The registrar may have delegated the zone since the last pass; an active zone is never
-	// removed.
-	refreshed, err := s.refreshZone(ctx, zone)
+	active, err := s.refreshZone(ctx, zone)
 	switch {
-	case err != nil && !providerZoneGone(err):
+	case providerZoneGone(err):
+		// Nobody can delegate to a zone the provider no longer has.
+		return s.expireZone(ctx, zone)
+	case err != nil:
 		return err
-	case err == nil && refreshed.Status == domain.MailZoneStatusActive:
+	case active:
+		// The registrar may have delegated the zone just before its deadline; an active zone is
+		// never removed.
 		return nil
+	case s.now().UTC().Sub(zone.CreatedAt) > pendingZoneLifetime:
+		return s.expireZone(ctx, zone)
 	}
-	return s.expireZone(ctx, zone)
+	return nil
 }
 
-// expireZone removes a pending zone from the provider, then its row and domains. The provider
-// goes first so a failure leaves the row for the next pass to retry.
+// expireZone removes a pending zone from the provider together with its row and domains. The
+// repository keeps the row locked as pending while the provider call runs and commits only after
+// it succeeds, so a zone a concurrent check activates is never removed at the provider, and a
+// provider failure leaves the row for the next pass to retry.
 func (s *service) expireZone(ctx context.Context, zone *domain.MailZone) error {
-	if err := s.domainProvider.DeleteZone(ctx, zone.CloudflareZoneID); err != nil && !providerZoneGone(err) {
-		return err
-	}
-	if err := s.zones.DeletePendingZone(ctx, zone.ID); err != nil {
+	err := s.zones.DeletePendingZone(ctx, zone.ID, func(providerContext context.Context) error {
+		if err := s.domainProvider.DeleteZone(providerContext, zone.CloudflareZoneID); err != nil && !providerZoneGone(err) {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		if errors.Is(err, ErrMailZoneNotFound) {
 			// Already removed, or activated by a concurrent check.
 			return nil
@@ -237,28 +243,30 @@ func (s *service) expireZone(ctx context.Context, zone *domain.MailZone) error {
 	return nil
 }
 
-// refreshZone reads the zone's status from the provider and stores when it was checked. A zone
-// the provider now serves becomes active and its pending domains are set up.
-func (s *service) refreshZone(ctx context.Context, zone *domain.MailZone) (*domain.MailZone, error) {
+// refreshZone reads the zone's status from the provider and reports whether the provider serves
+// it. It only ever records when the zone was checked; a zone the provider serves is activated by
+// one conditional update, and only the caller that wins it sets the zone's pending domains up.
+func (s *service) refreshZone(ctx context.Context, zone *domain.MailZone) (bool, error) {
 	details, lookupErr := s.domainProvider.GetZone(ctx, zone.CloudflareZoneID)
 	now := s.now().UTC()
 	zone.LastCheckedAt = &now
-	activated := lookupErr == nil && details.Status == providerZoneActive && zone.Status != domain.MailZoneStatusActive
+	if lookupErr != nil || details.Status != providerZoneActive {
+		if err := s.zones.TouchZone(ctx, zone.ID, now); err != nil {
+			return false, err
+		}
+		return false, lookupErr
+	}
+	activated, err := s.zones.ActivateZone(ctx, zone.ID, now)
+	if err != nil {
+		return false, err
+	}
 	if activated {
 		zone.Status = domain.MailZoneStatusActive
 		zone.ActivatedAt = &now
-	}
-	if err := s.zones.UpdateZone(ctx, zone); err != nil {
-		return nil, err
-	}
-	if lookupErr != nil {
-		return zone, lookupErr
-	}
-	if activated {
 		slog.InfoContext(ctx, "mail zone activated", slog.String("zone", zone.Name))
 		s.setUpPendingDomains(ctx, zone)
 	}
-	return zone, nil
+	return true, nil
 }
 
 // setUpPendingDomains starts the setup of every pending domain in a zone that just became active.
@@ -307,12 +315,12 @@ func (s *service) checkDomainZone(ctx context.Context, mailDomain *domain.MailDo
 		}
 		limited = true
 	}
-	refreshed, err := s.refreshZone(ctx, zone)
+	active, err := s.refreshZone(ctx, zone)
 	if err != nil {
 		return nil, providerError(err)
 	}
 	current := mailDomain
-	if refreshed.Status == domain.MailZoneStatusActive {
+	if active {
 		// The activation started the setup of the domain; read it as that left it.
 		if current, err = s.domains.FindDomain(ctx, mailDomain.OrganizationID, mailDomain.ID); err != nil {
 			return nil, err
