@@ -897,6 +897,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mailboxes/{mailbox_id}/mail-folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the folders of a mailbox
+         * @description Needs `view`.
+         */
+        get: operations["listMailFolders"];
+        put?: never;
+        /**
+         * Create a folder in a mailbox
+         * @description Needs `organize`.
+         */
+        post: operations["createMailFolder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/mail-folders/{folder_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rename a folder
+         * @description Needs `organize`.
+         */
+        put: operations["renameMailFolder"];
+        post?: never;
+        /**
+         * Delete a folder
+         * @description Needs `organize`. The folder's messages return to the `default` placement.
+         */
+        delete: operations["deleteMailFolder"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/mail-labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the labels of a mailbox
+         * @description Needs `view`.
+         */
+        get: operations["listMailLabels"];
+        put?: never;
+        /**
+         * Create a label in a mailbox
+         * @description Needs `organize`.
+         */
+        post: operations["createMailLabel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/mail-labels/{label_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rename or recolor a label
+         * @description Needs `organize`. Replaces the name and the color.
+         */
+        put: operations["updateMailLabel"];
+        post?: never;
+        /**
+         * Delete a label
+         * @description Needs `organize`. The label is removed from every message.
+         */
+        delete: operations["deleteMailLabel"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mailboxes/{mailbox_id}/members": {
         parameters: {
             query?: never;
@@ -941,6 +1037,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mailboxes/{mailbox_id}/message-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count the caller's unread and starred messages per placement and folder
+         * @description Needs `view`. Read and star state are the caller's own; the trash and sealed messages are never counted.
+         */
+        get: operations["getMailMessageCounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/message-updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark, star, move, or label up to 100 messages at once
+         * @description Applies the same change to every named message in one transaction. `read` and `starred` change only the caller's own state and need `view`; `placement`, `folder_id`, `add_label_ids`, and `remove_label_ids` change shared state and need `send`. When any named message, the folder, or a label is not found, nothing changes.
+         */
+        post: operations["updateMailMessages"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mailboxes/{mailbox_id}/messages": {
         parameters: {
             query?: never;
@@ -948,7 +1084,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the messages of a mailbox, newest first */
+        /**
+         * List the messages of a mailbox, newest first
+         * @description Needs `view`. Without `placement` every placement except `trash` is listed. Without `group` each item is one message. With `group=thread` each item is the latest message of one thread in the view and carries `thread` with the thread's count, unread, starred, and labels in that view. Filters combine with AND. An invalid combination is `400 COMMON.INVALID_INPUT`; see the mailbox contract for the rules.
+         */
         get: operations["listMailMessages"];
         put?: never;
         /**
@@ -972,12 +1111,15 @@ export interface paths {
         /** Get a message with its bodies */
         get: operations["getMailMessage"];
         /**
-         * Mark a message read or unread
-         * @description Changes only the caller's own read state and needs `view`. Outbound messages are always read. A sealed message is not found.
+         * Mark, star, move, or label a message
+         * @description `read` and `starred` change only the caller's own state and need `view`; outbound messages are always read. `placement`, `folder_id`, and `label_ids` change the mailbox's shared state and need `send`. `label_ids` replaces the message's labels. A sealed message is not found.
          */
         put: operations["updateMailMessage"];
         post?: never;
-        /** Delete a message */
+        /**
+         * Move a message to the trash, or delete it from the trash for good
+         * @description A message outside the trash moves to the trash and needs `send`; a queued message that waits for the send limit is then never sent. A message already in the trash is deleted for good, with its files, and needs `organize`.
+         */
         delete: operations["deleteMailMessage"];
         options?: never;
         head?: never;
@@ -1019,6 +1161,46 @@ export interface paths {
          * @description Owners and admins only. Sealed broadcasts still scheduled, sending, or paused are cancelled first; then sealed broadcasts with their recipients and sealed messages with their events and attachments are deleted. The seal boundary stays. Writes a `sealed_deleted` access event.
          */
         delete: operations["deleteMailboxSealedMessages"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/threads/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get every message of a thread outside the trash, oldest first
+         * @description Needs `view`. Lists the thread's messages in every placement except `trash`, inbound and outbound, with their bodies. Sealed messages are left out. A thread with no such message is `404 MAILBOX.MESSAGE_NOT_FOUND`.
+         */
+        get: operations["getMailThread"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/trash-purges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Empty the trash of a mailbox
+         * @description Deletes every message in the mailbox's trash for good, with its files. Needs `organize`.
+         */
+        post: operations["purgeMailTrash"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2454,7 +2636,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -2544,7 +2726,7 @@ export interface components {
             /** @description Messages and broadcasts created before this instant are sealed and invisible on every surface; set once at handover, null when nothing is sealed. */
             sealed_before: string | null;
             type: components["schemas"]["MailboxType"];
-            /** @description Number of inbound messages after the seal boundary that the caller has not read; 0 for a caller without `view`. */
+            /** @description Number of inbound messages in the `default` placement (the Inbox) after the seal boundary that the caller has not read; 0 for a caller without `view`. */
             unread_count: number;
             /** @description Whether mail webhooks are published for this mailbox; always false for a personal one. */
             webhooks_enabled: boolean;
@@ -2553,6 +2735,8 @@ export interface components {
         MailboxAccess: {
             administer: boolean;
             manage_members: boolean;
+            /** @description Permanently delete messages, empty the trash, and create, rename, and delete folders and labels. The personal owner and `manage` members of a shared mailbox; never the organization owner or admin role alone. */
+            organize: boolean;
             see_history: boolean;
             send: boolean;
             view: boolean;
@@ -2982,6 +3166,57 @@ export interface components {
          * @enum {string}
          */
         MailEventType: "accepted" | "delivered" | "deferred" | "bounced" | "failed" | "rejected" | "complained";
+        MailFolder: {
+            /** Format: date-time */
+            created_at: string;
+            id: components["schemas"]["PositiveID"];
+            name: string;
+        };
+        MailFolderListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailFolder"][];
+            message: string;
+        };
+        MailFolderRequest: {
+            /** @description Trimmed; 1 to 64 characters afterwards, unique in the mailbox ignoring case. */
+            name: string;
+        };
+        MailFolderResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailFolder"];
+            message: string;
+        };
+        MailLabel: {
+            color: components["schemas"]["MailLabelColor"];
+            /** Format: date-time */
+            created_at: string;
+            id: components["schemas"]["PositiveID"];
+            name: string;
+        };
+        /**
+         * @description The fixed label palette.
+         * @enum {string}
+         */
+        MailLabelColor: "gray" | "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "purple" | "pink";
+        MailLabelListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailLabel"][];
+            message: string;
+        };
+        MailLabelRequest: {
+            color: components["schemas"]["MailLabelColor"];
+            /** @description Trimmed; 1 to 64 characters afterwards, unique in the mailbox ignoring case. */
+            name: string;
+        };
+        MailLabelResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailLabel"];
+            message: string;
+        };
         MailLogEntry: {
             /** @description How many files the message has; the detail lists them. */
             attachment_count: number;
@@ -3028,15 +3263,20 @@ export interface components {
             /** @description Delivery history of an outbound message, oldest first; empty for inbound messages. */
             events: components["schemas"]["MailEvent"][];
             failure_code: string;
+            /** @description The folder that holds the message when `placement` is `folder`; null otherwise. */
+            folder_id: components["schemas"]["PositiveID"] | null;
             from: components["schemas"]["MailAddress"];
             /** @description Untrusted HTML from the sender. Render it only inside a sandbox. */
             html_body: string;
             id: components["schemas"]["PositiveID"];
             in_reply_to: string;
+            /** @description The ids of the mailbox labels on the message, ascending; shared by every member. */
+            label_ids: components["schemas"]["PositiveID"][];
             last_event: components["schemas"]["MailEventSummary"];
             mailbox_id: components["schemas"]["PositiveID"];
             /** @description RFC 5322 Message-ID without angle brackets; empty when unknown. */
             message_id: string;
+            placement: components["schemas"]["MailPlacement"];
             /**
              * @description `send_limit` while a queued message waits for room in the organization's send limit; otherwise null.
              * @enum {string|null}
@@ -3044,16 +3284,45 @@ export interface components {
             queued_reason: "send_limit" | null;
             /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
+            /** @description Whether the caller starred the message; per person. */
+            starred: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
             /** @description The template the message was rendered from; null when none was used. */
             template_id: components["schemas"]["PositiveID"] | null;
             text_body: string;
+            /** @description The thread the message belongs to in this mailbox; the id of the message that started it. */
+            thread_id: components["schemas"]["PositiveID"];
             to: string[];
+            /** @description When the message was moved to the trash; null outside the trash. A message is deleted for good 30 days after this instant. */
+            trashed_at: string | null;
+        };
+        MailMessageCounts: {
+            /** @description One entry per folder of the mailbox, including folders with nothing unread. */
+            folders: {
+                folder_id: components["schemas"]["PositiveID"];
+                /** @description Inbound messages in the folder the caller has not read. */
+                unread: number;
+            }[];
+            placements: {
+                /** @description Inbound messages in `archive` the caller has not read. */
+                archive_unread: number;
+                /** @description Inbound messages in `default` (the Inbox) the caller has not read; equals the mailbox's `unread_count`. */
+                default_inbound_unread: number;
+            };
+            /** @description Messages outside the trash the caller starred, read or not. */
+            starred: number;
+        };
+        MailMessageCountsResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailMessageCounts"];
+            message: string;
         };
         MailMessagePageResponse: {
             /** @constant */
             code: 0;
+            /** @description Message summaries, newest first. With `group=thread` each item is the latest message of one thread in the view and carries `thread`. */
             data: components["schemas"]["MailMessageSummary"][];
             links: components["schemas"]["PaginationLinks"];
             message: string;
@@ -3074,10 +3343,15 @@ export interface components {
             direction: components["schemas"]["MailDirection"];
             /** @description Stable provider or transport reason when `status` is `failed`; empty otherwise. */
             failure_code: string;
+            /** @description The folder that holds the message when `placement` is `folder`; null otherwise. */
+            folder_id: components["schemas"]["PositiveID"] | null;
             from: components["schemas"]["MailAddress"];
             id: components["schemas"]["PositiveID"];
+            /** @description The ids of the mailbox labels on the message, ascending; shared by every member. */
+            label_ids: components["schemas"]["PositiveID"][];
             last_event: components["schemas"]["MailEventSummary"];
             mailbox_id: components["schemas"]["PositiveID"];
+            placement: components["schemas"]["MailPlacement"];
             /**
              * @description `send_limit` while a queued message waits for room in the organization's send limit; otherwise null.
              * @enum {string|null}
@@ -3085,12 +3359,34 @@ export interface components {
             queued_reason: "send_limit" | null;
             /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
+            /** @description Whether the caller starred the message; per person. */
+            starred: boolean;
             status: components["schemas"]["MailStatus"];
             subject: string;
             /** @description The template the message was rendered from; null when none was used. */
             template_id: components["schemas"]["PositiveID"] | null;
+            /** @description Present only with `group=thread`; summarizes the message's thread in the view. */
+            thread?: components["schemas"]["MailThreadSummary"];
+            /** @description The thread the message belongs to in this mailbox; the id of the message that started it. */
+            thread_id: components["schemas"]["PositiveID"];
             to: string[];
+            /** @description When the message was moved to the trash; null outside the trash. A message is deleted for good 30 days after this instant. */
+            trashed_at: string | null;
         };
+        MailMessageUpdatesResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                /** @description How many messages the change applied to; the number of `message_ids`. */
+                updated: number;
+            };
+            message: string;
+        };
+        /**
+         * @description Where a message is. `default` is the Inbox for inbound and Sent for outbound messages; `folder` is a mailbox folder named by `folder_id`; `trash` is deleted for good 30 days after `trashed_at`.
+         * @enum {string}
+         */
+        MailPlacement: "default" | "archive" | "folder" | "trash";
         /**
          * @description `received` for inbound messages. Outbound messages are `queued` while the provider call is in flight, then `sent` or `failed`.
          * @enum {string}
@@ -3183,6 +3479,33 @@ export interface components {
         /** @description Values by variable name; names are a letter followed by letters, digits, or underscores. */
         MailTemplateVariables: {
             [key: string]: string;
+        };
+        MailThreadResponse: {
+            /** @constant */
+            code: 0;
+            /** @description The thread's messages outside the trash, oldest first; at most the latest 100. */
+            data: components["schemas"]["MailMessage"][];
+            message: string;
+        };
+        /** @description The thread of a listed message with `group=thread`. Every count and flag covers only the thread's messages in the listed view (placement, folder, and direction); the message carrying it is the latest of them. */
+        MailThreadSummary: {
+            /** @description Every label on at least one of them, ascending. */
+            label_ids: components["schemas"]["PositiveID"][];
+            /** @description How many of the thread's messages are in the view. */
+            message_count: number;
+            /** @description Whether the caller starred at least one of them. */
+            starred: boolean;
+            /** @description Whether the caller has not read at least one of them. */
+            unread: boolean;
+        };
+        MailTrashPurgeResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                /** @description How many messages were deleted for good. */
+                deleted: number;
+            };
+            message: string;
         };
         Notification: {
             /** @description Same-origin relative path; absent when the notification has no action. */
@@ -3714,8 +4037,30 @@ export interface components {
         };
         /** @enum {string} */
         SettingVisibility: "public" | "private";
+        /** @description At least one field. `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it. Moving out of `trash` clears `trashed_at`; restoring is `placement` `default`. */
         UpdateMailMessageRequest: {
-            read: boolean;
+            folder_id?: components["schemas"]["PositiveID"];
+            /** @description The complete set of the message's labels, replacing the current one; needs `send`. */
+            label_ids?: components["schemas"]["PositiveID"][];
+            placement?: components["schemas"]["MailPlacement"];
+            /** @description The caller's own read state; needs `view`. */
+            read?: boolean;
+            /** @description The caller's own star; needs `view`. */
+            starred?: boolean;
+        };
+        /** @description `message_ids` and at least one change. `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it. A label id may not be both added and removed. */
+        UpdateMailMessagesRequest: {
+            /** @description Labels added to every named message; needs `send`. */
+            add_label_ids?: components["schemas"]["PositiveID"][];
+            folder_id?: components["schemas"]["PositiveID"];
+            message_ids: components["schemas"]["PositiveID"][];
+            placement?: components["schemas"]["MailPlacement"];
+            /** @description The caller's own read state; needs `view`. */
+            read?: boolean;
+            /** @description Labels removed from every named message; needs `send`. */
+            remove_label_ids?: components["schemas"]["PositiveID"][];
+            /** @description The caller's own star; needs `view`. */
+            starred?: boolean;
         };
         /** @enum {string} */
         UsagePeriod: "day" | "month";
@@ -4324,12 +4669,18 @@ export interface components {
         MailContactListID: components["schemas"]["PositiveID"];
         /** @description Positive connected mail domain identifier. */
         MailDomainID: components["schemas"]["PositiveID"];
+        /** @description Positive mail folder identifier. */
+        MailFolderID: components["schemas"]["PositiveID"];
         /** @description Names this send within its mailbox. A repeat with the same key and the same content returns the first attempt's outcome and does not call the provider again. */
         MailIdempotencyKey: string;
+        /** @description Positive mail label identifier. */
+        MailLabelID: components["schemas"]["PositiveID"];
         /** @description Positive mail message identifier. */
         MailMessageID: components["schemas"]["PositiveID"];
         /** @description Positive mail template identifier. */
         MailTemplateID: components["schemas"]["PositiveID"];
+        /** @description Positive mail thread identifier, the `thread_id` of its messages. */
+        MailThreadID: components["schemas"]["PositiveID"];
         /** @description Positive notification identifier owned by the caller. */
         NotificationID: components["schemas"]["PositiveID"];
         /** @description Read-state filter. */
@@ -6919,6 +7270,366 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listMailFolders: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every folder of the mailbox, by name ignoring case. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailFolderListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createMailFolder: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailFolderRequest"];
+            };
+        };
+        responses: {
+            /** @description The created folder. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailFolderResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Another folder of the mailbox has the name, ignoring case (`MAILBOX.FOLDER_NAME_TAKEN`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation, or the mailbox has 100 folders (`MAILBOX.FOLDER_LIMIT_REACHED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    renameMailFolder: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail folder identifier. */
+                folder_id: components["parameters"]["MailFolderID"];
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailFolderRequest"];
+            };
+        };
+        responses: {
+            /** @description The renamed folder. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailFolderResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The mailbox (`MAILBOX.NOT_FOUND`) or the folder (`MAILBOX.FOLDER_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Another folder of the mailbox has the name, ignoring case (`MAILBOX.FOLDER_NAME_TAKEN`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailFolder: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail folder identifier. */
+                folder_id: components["parameters"]["MailFolderID"];
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The folder is deleted and its messages are in `default`. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The mailbox (`MAILBOX.NOT_FOUND`) or the folder (`MAILBOX.FOLDER_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailLabels: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every label of the mailbox, by name ignoring case. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailLabelListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createMailLabel: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailLabelRequest"];
+            };
+        };
+        responses: {
+            /** @description The created label. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailLabelResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Another label of the mailbox has the name, ignoring case (`MAILBOX.LABEL_NAME_TAKEN`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation, or the mailbox has 100 labels (`MAILBOX.LABEL_LIMIT_REACHED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailLabel: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail label identifier. */
+                label_id: components["parameters"]["MailLabelID"];
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailLabelRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated label. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailLabelResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The mailbox (`MAILBOX.NOT_FOUND`) or the label (`MAILBOX.LABEL_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Another label of the mailbox has the name, ignoring case (`MAILBOX.LABEL_NAME_TAKEN`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailLabel: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail label identifier. */
+                label_id: components["parameters"]["MailLabelID"];
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The label is deleted and removed from every message. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The mailbox (`MAILBOX.NOT_FOUND`) or the label (`MAILBOX.LABEL_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listMailboxMembers: {
         parameters: {
             query?: never;
@@ -7055,15 +7766,107 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    getMailMessageCounts: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessageCountsResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailMessages: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailMessagesRequest"];
+            };
+        };
+        responses: {
+            /** @description The number of messages the change applied to. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessageUpdatesResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The mailbox (`MAILBOX.NOT_FOUND`), a message (`MAILBOX.MESSAGE_NOT_FOUND`), the folder (`MAILBOX.FOLDER_NOT_FOUND`), or a label (`MAILBOX.LABEL_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listMailMessages: {
         parameters: {
             query?: {
-                /** @description Keep only received (`inbound`) or sent (`outbound`) messages. */
+                /** @description Keep only received (`inbound`) or sent (`outbound`) messages. With `placement=default`, `inbound` is the Inbox and `outbound` is Sent. */
                 direction?: components["schemas"]["MailDirection"];
+                /** @description The folder to list; only with `placement=folder`, which requires it. A folder that is not the mailbox's is `404 MAILBOX.FOLDER_NOT_FOUND`. */
+                folder_id?: components["schemas"]["PositiveID"];
+                /** @description `thread` lists one item per thread. Only with `placement` `default`, `archive`, or `folder`, and without `label_id`, `starred`, `unread`, `has_attachments`, and `q`. */
+                group?: "thread";
+                /** @description Keep only messages with (`true`) or without (`false`) attached files. */
+                has_attachments?: boolean;
+                /** @description Keep only messages with this label. A label that is not the mailbox's is `404 MAILBOX.LABEL_NOT_FOUND`. */
+                label_id?: components["schemas"]["PositiveID"];
                 /** @description One-based page number. */
                 page?: components["parameters"]["Page"];
                 /** @description Requested page size, capped by the API. */
                 per_page?: components["parameters"]["PerPage"];
+                /** @description Keep only one placement. Without it every placement except `trash` is listed. `folder` needs `folder_id`. */
+                placement?: components["schemas"]["MailPlacement"];
+                /** @description Search. Case-insensitive substring match on the subject, the sender address and name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches every placement except `trash`. A search the database cannot finish within 2 seconds is `422 MAILBOX.SEARCH_TOO_BROAD`. */
+                q?: string;
+                /** @description Keep only messages the caller starred (`true`) or did not star (`false`). */
+                starred?: boolean;
+                /** @description Keep only messages the caller has not read (`true`) or has read (`false`). */
+                unread?: boolean;
             };
             header: {
                 /** @description Active organization for organization-scoped routes; verified against membership. */
@@ -7077,7 +7880,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description One page of message summaries without bodies. */
+            /** @description One page of message summaries without bodies, newest first. With `group=thread`, one page of threads, each as its latest message in the view, newest first. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7088,7 +7891,25 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
+            403: components["responses"]["Forbidden"];
+            /** @description The mailbox (`MAILBOX.NOT_FOUND`), the folder (`MAILBOX.FOLDER_NOT_FOUND`), or the label (`MAILBOX.LABEL_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The search could not finish within 2 seconds; a longer `q` is needed (`MAILBOX.SEARCH_TOO_BROAD`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -7247,7 +8068,16 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
+            403: components["responses"]["Forbidden"];
+            /** @description The mailbox (`MAILBOX.NOT_FOUND`), the message (`MAILBOX.MESSAGE_NOT_FOUND`), the folder (`MAILBOX.FOLDER_NOT_FOUND`), or a label (`MAILBOX.LABEL_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             413: components["responses"]["RequestTooLarge"];
             422: components["responses"]["ValidationFailed"];
             503: components["responses"]["ServiceUnavailable"];
@@ -7270,7 +8100,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The message is deleted. */
+            /** @description The message is in the trash, or was in the trash and is deleted for good. */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -7279,6 +8109,7 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -7372,6 +8203,70 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getMailThread: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail thread identifier, the `thread_id` of its messages. */
+                thread_id: components["parameters"]["MailThreadID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The thread's messages, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailThreadResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    purgeMailTrash: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The number of messages deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailTrashPurgeResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

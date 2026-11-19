@@ -28,7 +28,7 @@ Within the organization, what a caller may do with a mailbox follows from the ma
 
 | Role | May |
 |---|---|
-| `member` | List domains; list the mailboxes they have access to; read, send, and delete mail as their access allows; read the log and statistics of the mailboxes they may read |
+| `member` | List domains; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the log and statistics of the mailboxes they may read |
 | `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, and remove domains |
 
 The owner and admin roles never grant reading or sending mail by themselves: an admin reads a
@@ -58,8 +58,20 @@ recorded but has no special rights to it. A removed member loses access on their
 | List messages | `GET /api/mailboxes/:id/messages` | `GET /v1/mailboxes/:mailbox_id/messages` | Paginated envelope |
 | Send message | `POST /api/mailboxes/:id/messages` | `POST /v1/mailboxes/:mailbox_id/messages` | `201` envelope |
 | Get message | `GET /api/mailboxes/:id/messages/:messageId` | `GET /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
-| Mark read or unread | `PUT /api/mailboxes/:id/messages/:messageId` | `PUT /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
-| Delete message | `DELETE /api/mailboxes/:id/messages/:messageId` | `DELETE /v1/mailboxes/:mailbox_id/messages/:message_id` | `204` |
+| Update a message | `PUT /api/mailboxes/:id/messages/:messageId` | `PUT /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
+| Trash or delete a message | `DELETE /api/mailboxes/:id/messages/:messageId` | `DELETE /v1/mailboxes/:mailbox_id/messages/:message_id` | `204` |
+| Update messages at once | `POST /api/mailboxes/:id/message-updates` | `POST /v1/mailboxes/:mailbox_id/message-updates` | `200` envelope |
+| Empty the trash | `POST /api/mailboxes/:id/trash-purges` | `POST /v1/mailboxes/:mailbox_id/trash-purges` | `200` envelope |
+| Get a thread | `GET /api/mailboxes/:id/threads/:threadId` | `GET /v1/mailboxes/:mailbox_id/threads/:thread_id` | `200` envelope, at most 100 items |
+| Unread and starred counts | `GET /api/mailboxes/:id/message-counts` | `GET /v1/mailboxes/:mailbox_id/message-counts` | `200` envelope |
+| List folders | `GET /api/mailboxes/:id/mail-folders` | `GET /v1/mailboxes/:mailbox_id/mail-folders` | `200` envelope, at most 100 items |
+| Create a folder | `POST /api/mailboxes/:id/mail-folders` | `POST /v1/mailboxes/:mailbox_id/mail-folders` | `201` envelope |
+| Rename a folder | `PUT /api/mailboxes/:id/mail-folders/:folderId` | `PUT /v1/mailboxes/:mailbox_id/mail-folders/:folder_id` | `200` envelope |
+| Delete a folder | `DELETE /api/mailboxes/:id/mail-folders/:folderId` | `DELETE /v1/mailboxes/:mailbox_id/mail-folders/:folder_id` | `204` |
+| List labels | `GET /api/mailboxes/:id/mail-labels` | `GET /v1/mailboxes/:mailbox_id/mail-labels` | `200` envelope, at most 100 items |
+| Create a label | `POST /api/mailboxes/:id/mail-labels` | `POST /v1/mailboxes/:mailbox_id/mail-labels` | `201` envelope |
+| Update a label | `PUT /api/mailboxes/:id/mail-labels/:labelId` | `PUT /v1/mailboxes/:mailbox_id/mail-labels/:label_id` | `200` envelope |
+| Delete a label | `DELETE /api/mailboxes/:id/mail-labels/:labelId` | `DELETE /v1/mailboxes/:mailbox_id/mail-labels/:label_id` | `204` |
 | List the log | `GET /api/mail-messages` | `GET /v1/mail-messages` | Paginated envelope |
 | Per-day statistics | `GET /api/mail-message-stats` | `GET /v1/mail-message-stats` | `200` envelope, at most 90 items |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
@@ -123,15 +135,16 @@ has no browser route: only the mail edge calls it.
     "awaiting_handover": false,
     "sealed_before": null,
     "webhooks_enabled": false,
-    "access": { "view": false, "send": false, "manage_members": true, "administer": true, "see_history": true },
+    "access": { "view": false, "send": false, "manage_members": true, "administer": true, "see_history": true, "organize": false },
     "unread_count": 0,
     "created_at": "2026-11-16T10:00:00Z"
   }
 }
 ```
 
-`unread_count` is the number of inbound messages after the seal boundary that the caller has not
-read (see [Read State](#read-state)); sent messages never count. It is `0` for a caller who may not
+`unread_count` is the number of inbound messages in the default placement (the Inbox) after the seal
+boundary that the caller has not read (see [Read State](#read-state)); sent messages and messages that
+are archived, in a folder, or in the trash never count. It is `0` for a caller who may not
 read the mailbox. `access` is what the caller may do with the mailbox; clients show or hide
 controls from it. `awaiting_handover` is `true` while a personal mailbox's owner has left the
 organization and nobody has taken it over (see [Departure And Handover](#departure-and-handover)).
@@ -157,9 +170,9 @@ Every mailbox is one of two types:
 
 | Permission | Grants |
 |---|---|
-| `view` | Read messages, attachments, and the mailbox's broadcasts; mark messages read or unread |
-| `send` | Also send, reply, delete messages, and create, edit, and delete the mailbox's broadcasts |
-| `manage` | Also list, add, change, and remove members, and read the access history |
+| `view` | Read messages, threads, attachments, and the mailbox's broadcasts; mark messages read or unread; star them; search |
+| `send` | Also send and reply; move messages between placements (archive, folders, trash, and back), and add or remove labels; create, edit, and delete the mailbox's broadcasts |
+| `manage` | Also list, add, change, and remove members, and read the access history; delete messages for good and empty the trash; create, rename, and delete folders and labels |
 
 A caller's access is the union of what the organization role, the personal ownership, and the
 member row grant. It is returned as `access`:
@@ -170,16 +183,22 @@ member row grant. It is returned as `access`:
 | `manage_members` | Owners and admins on shared mailboxes; `manage` members |
 | `administer` | Owners and admins: delete the mailbox, hand it over, delete its sealed history |
 | `see_history` | Owners and admins; the personal owner; `manage` members |
+| `organize` | The personal owner; `manage` members. Never the owner or admin role alone |
 
 A caller with no access at all to a mailbox gets `404 MAILBOX.NOT_FOUND` on every route of it,
 exactly like a mailbox that does not exist, and does not see it in `GET /v1/mailboxes`. A caller
 with some access but not the one a route needs gets `403 PERMISSION.DENIED`. So an admin who is not
 a member sees a mailbox listed but gets `403` when opening its mail.
 
+`organize` changes what everyone sees and cannot be undone: it deletes mail for good and changes the
+mailbox's folders and labels. An owner or admin who is not a member cannot read the mail, so they do
+not get `organize` either; otherwise they could delete mail they cannot see.
+
 | Route | Needs |
 |---|---|
-| List, read, download attachments, mark read or unread | `view` |
-| Send, delete a message | `send` |
+| List, search, read a message or thread, counts, list folders and labels, download attachments, mark read or unread, star | `view` |
+| Send; move a message to another placement or folder, to the trash, or out of it; set, add, or remove labels | `send` |
+| Delete a message that is already in the trash, empty the trash; create, rename, and delete folders and labels | `organize` |
 | Delete the mailbox | `administer` |
 | List, set, remove members; webhook switch | `manage_members` |
 | Hand over; delete sealed history | `administer` |
@@ -189,10 +208,12 @@ a member sees a mailbox listed but gets `403` when opening its mail.
 
 Read state is per person. `read` on a message and `unread_count` on a mailbox are the caller's own:
 marking a message read or unread with `PUT .../messages/:message_id` needs `view` and changes it
-only for the caller. Outbound messages are always `read: true` for everyone, and marking one changes
+only for the caller. Stars work the same way: `starred` is the caller's own, starring needs `view`,
+and nobody else sees it. Placement, folder, labels, and the trash are shared by everyone with access. Outbound messages are always `read: true` for everyone, and marking one changes
 nothing. Reading mail with an API key never changes read state. A person who loses access to a
 mailbox (removed as a member, handed over as the former owner, or gone from the organization) loses
-their read records for it, so access granted again starts with everything unread.
+their read records and stars for it, so access granted again starts with everything unread and
+nothing starred.
 
 Only owners and admins create mailboxes. At creation, a personal mailbox needs `owner_user_id` and
 no `members`; a shared one needs 1 to 100 `members`, each a different `user_id` with `view`,
@@ -241,7 +262,7 @@ member. Clients ignore `detail` keys they do not know.
 ### Departure And Handover
 
 When a user leaves the organization, their access to its mailboxes ends at once and their read
-records go with it. Each personal mailbox they owned stays personal, with nobody able to read it,
+records and stars go with it. Each personal mailbox they owned stays personal, with nobody able to read it,
 and shows `awaiting_handover: true`; an `owner_left` event is written. Their memberships of shared
 mailboxes are recorded as `member_removed` with `detail.reason = "left_organization"`. If they
 rejoin before a handover, their personal mailboxes are theirs again with all mail visible,
@@ -258,7 +279,7 @@ a shared one:
 - The successor must be a current member of the organization, otherwise
   `422 MAILBOX.ACCESS_INVALID`. They become a `send` member.
 - The mailbox becomes `shared` with `owner_user_id: null` and `awaiting_handover: false`, and the
-  former owner keeps no access and no read records.
+  former owner keeps no access, no read records, and no stars.
 - The seal boundary `sealed_before` is the time the owner left when they are no longer in the
   organization, otherwise the time of the handover. It is written once and never moves. An owner
   who rejoins before the handover commits is sealed at the handover.
@@ -273,8 +294,9 @@ a shared one:
 
 ### Sealed History
 
-Messages created before `sealed_before` are sealed: nobody sees them on any surface. Message list
-and detail, mark read, delete, attachment download, the log, statistics, `unread_count`, and
+Messages created before `sealed_before` are sealed: nobody sees them on any surface. Message list,
+search, threads, counts, and detail, every message update, delete, emptying the trash, attachment
+download, the log, statistics, `unread_count`, and
 `GET /v1/outbound-mail-messages/:message_id` treat a sealed message as absent
 (`404 MAILBOX.MESSAGE_NOT_FOUND` by id). Broadcasts of the mailbox created before the boundary are
 left out of the broadcast list and are `404 MAILBOX.BROADCAST_NOT_FOUND` by id; their recipients
@@ -378,8 +400,9 @@ shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DI
 
 ## Messages
 
-Listing returns summaries, newest first, without bodies. `direction=inbound` is the inbox and
-`direction=outbound` is the sent folder; any other value is `400 COMMON.INVALID_INPUT`.
+Listing returns summaries, newest first, without bodies. Without `placement` it lists every
+placement except the trash, so a client that knows nothing of placements sees what it saw before
+they existed. See [Listing And Search](#listing-and-search) for the filters.
 
 | Field | Meaning |
 |---|---|
@@ -393,11 +416,203 @@ Listing returns summaries, newest first, without bodies. `direction=inbound` is 
 | `last_event` | Summary of the delivery events of an outbound message; see [Delivery Events](#delivery-events). Empty when none are recorded. |
 | `attachment_count` | How many files the message has |
 | `template_id` | The template the message was rendered from; `null` when none was used |
+| `placement` | `default`, `archive`, `folder`, or `trash`; see [Placements](#placements). Shared by everyone. |
+| `folder_id` | The folder that holds the message when `placement` is `folder`, otherwise `null` |
+| `label_ids` | The ids of the mailbox labels on the message, ascending. Shared by everyone. |
+| `starred` | Whether the caller starred the message; per person, see [Read State](#read-state) |
+| `thread_id` | The thread of the message in this mailbox; see [Threads](#threads) |
+| `trashed_at` | When the message moved to the trash, `null` outside it |
+| `thread` | Only with `group=thread`: `{ "message_count", "unread", "starred", "label_ids" }` for the thread in the listed view |
 
 The detail response adds `text_body`, `html_body`, `message_id`, `in_reply_to`, `events` (the
 delivery history of an outbound message), and `attachments` (see [Attachments](#attachments)). `html_body` is
 untrusted sender content: a client must render it only inside a sandbox that runs no script and
 loads nothing with the user's credentials.
+
+### Placements
+
+Every message is in exactly one placement:
+
+| `placement` | Meaning | Shown as |
+|---|---|---|
+| `default` | Where a message starts | Inbox for inbound messages, Sent for outbound ones |
+| `archive` | Archived | Archive |
+| `folder` | In the folder `folder_id` | That folder |
+| `trash` | Moved to the trash at `trashed_at` | Trash |
+
+- New messages, inbound and outbound, start in `default`.
+- Moving a message out of the trash clears `trashed_at`; restoring it is moving it to `default`.
+- A message in the trash is deleted for good 30 days after `trashed_at`, with its files and events,
+  by a worker. Until then it can be restored.
+- The placement is shared: moving a message moves it for everyone with access.
+- Sealed messages (see [Sealed History](#sealed-history)) keep their placement and stay hidden in
+  every placement.
+
+`DELETE /v1/mailboxes/:mailbox_id/messages/:message_id` answers `204` in both of its cases:
+
+| The message is | Effect | Needs |
+|---|---|---|
+| Outside the trash | Moves to the trash; `trashed_at` is set | `send` |
+| In the trash | Deleted for good, with its files and events | `organize` |
+
+A message that waits for the send limit (`queued` with `queued_reason` `send_limit`) is never sent
+once it is in the trash, exactly as deleting it used to stop it: it becomes `failed` with
+`failure_code` `send.canceled`, and restoring it does not send it. A message whose provider call is
+already in flight is recorded with its real outcome wherever it is.
+
+`POST /v1/mailboxes/:mailbox_id/trash-purges` empties the trash: every message of the mailbox in the
+trash is deleted for good, with its files and events. It needs `organize` and answers:
+
+```json
+{ "code": 0, "message": "success", "data": { "deleted": 12 } }
+```
+
+### Folders And Labels
+
+Folders and labels belong to the mailbox, not to a person: everyone with access sees the same ones.
+They are flat; a folder holds no folders.
+
+- A name is trimmed and then 1 to 64 characters. Names are unique in the mailbox ignoring case,
+  separately for folders and labels; a taken name is `409 MAILBOX.FOLDER_NAME_TAKEN` or
+  `409 MAILBOX.LABEL_NAME_TAKEN`.
+- A mailbox has at most 100 folders and 100 labels; one more is `422 MAILBOX.FOLDER_LIMIT_REACHED`
+  or `422 MAILBOX.LABEL_LIMIT_REACHED`.
+- A label has a `color` from the fixed palette `gray`, `red`, `orange`, `yellow`, `green`, `teal`,
+  `blue`, `purple`, `pink`.
+- A folder or label of another mailbox, or one that does not exist, is
+  `404 MAILBOX.FOLDER_NOT_FOUND` or `404 MAILBOX.LABEL_NOT_FOUND` wherever it is named.
+- Listing needs `view` and returns every folder or label by name, ignoring case. Creating,
+  renaming, recoloring, and deleting need `organize`.
+- Deleting a folder moves its messages to `default`. Deleting a label removes it from every message.
+
+```json
+{ "id": 4, "name": "Invoices", "created_at": "2026-11-19T10:00:00Z" }
+```
+
+```json
+{ "id": 9, "name": "Urgent", "color": "red", "created_at": "2026-11-19T10:00:00Z" }
+```
+
+`POST .../mail-folders` and `PUT .../mail-folders/:folder_id` take `{ "name" }`.
+`POST .../mail-labels` and `PUT .../mail-labels/:label_id` take `{ "name", "color" }`; `PUT`
+replaces both.
+
+### Updating Messages
+
+`PUT /v1/mailboxes/:mailbox_id/messages/:message_id` takes at least one of:
+
+| Field | Meaning | Needs |
+|---|---|---|
+| `read` | The caller's read state | `view` |
+| `starred` | The caller's star | `view` |
+| `placement` | The new placement | `send` |
+| `folder_id` | The folder, with `placement` `folder` | `send` |
+| `label_ids` | The complete set of the message's labels, replacing the current one; at most 100 | `send` |
+
+It answers `200` with the message. `POST /v1/mailboxes/:mailbox_id/message-updates` applies one
+change to several messages:
+
+```json
+{ "message_ids": [41, 42, 57], "placement": "archive", "add_label_ids": [9] }
+```
+
+- `message_ids` holds 1 to 100 different ids, and at least one change is required: `read`,
+  `starred`, `placement`, `folder_id`, `add_label_ids`, or `remove_label_ids`, with the same
+  permissions as above. A label may not be both added and removed.
+- The change applies to every named message in one transaction. When any named message is not a
+  visible message of the mailbox (`404 MAILBOX.MESSAGE_NOT_FOUND`), or the folder or a label is not
+  found, nothing changes.
+- It answers `{ "updated": 3 }`, the number of named messages.
+- A client that acts on a thread row sends the ids of that thread's messages in the current view.
+
+On both routes, `placement` `folder` needs `folder_id`, and `folder_id` is allowed only with it;
+`placement` `trash` sets `trashed_at` like `DELETE`. Breaking these rules, or an empty change, is
+`422 COMMON.VALIDATION_FAILED`. A caller who may `view` but asks for a shared change gets
+`403 PERMISSION.DENIED`, and nothing changes. Outbound messages are always read; marking them
+changes nothing.
+
+### Threads
+
+A thread is a conversation within one mailbox, linked by RFC 5322 `Message-ID`, `In-Reply-To`, and
+`References`. Threads are never merged by subject.
+
+- Every outbound message gets a `Message-ID` that Zmail generates on the mailbox's domain when the
+  message is stored, before it is sent; a message that waits for the send limit, or a repeat with
+  the same `Idempotency-Key`, keeps the same one. Inbound messages keep the sender's `Message-ID`.
+- A reply (`in_reply_to`) is sent with `In-Reply-To` and with `References` set to the replied
+  message's `References` followed by its `Message-ID`.
+- When a message is stored, Zmail looks in the same mailbox for a message whose `Message-ID` is the
+  new message's `In-Reply-To` or is in its `References`. If it finds one, the new message joins that
+  message's thread; otherwise it starts a thread, and `thread_id` is its own id.
+- Messages sent before this existed have no Zmail `Message-ID`, so replies to them start a new
+  thread. Messages stored before threads existed were grouped once by `in_reply_to`.
+
+`GET /v1/mailboxes/:mailbox_id/threads/:thread_id` needs `view` and lists the thread's messages in
+every placement except the trash, inbound and outbound, oldest first, with their bodies, as the
+message detail. It returns at most the latest 100. Sealed messages are left out. A thread with no
+such message is `404 MAILBOX.MESSAGE_NOT_FOUND`. So a thread opened from the Inbox also shows the
+replies in Sent.
+
+### Listing And Search
+
+`GET /v1/mailboxes/:mailbox_id/messages` takes these filters, combined with AND:
+
+| Query | Meaning |
+|---|---|
+| `direction` | `inbound` or `outbound`. With `placement=default`, `inbound` is the Inbox and `outbound` is Sent. |
+| `placement` | One placement. Without it, every placement except `trash`. |
+| `folder_id` | The folder; required with `placement=folder` and allowed only with it |
+| `label_id` | Messages with this label |
+| `starred` | `true` for messages the caller starred, `false` for the others |
+| `unread` | `true` for messages the caller has not read, `false` for the others |
+| `has_attachments` | `true` for messages with files, `false` for the others |
+| `q` | Search, 1 to 200 characters |
+| `group` | `thread` lists one row per thread |
+| `page`, `per_page` | Pagination |
+
+An unknown value, `folder_id` without `placement=folder`, `placement=folder` without `folder_id`,
+`q` with `placement=trash`, or `group` outside the rules below is `400 COMMON.INVALID_INPUT`. An
+unknown folder or label is `404 MAILBOX.FOLDER_NOT_FOUND` or `404 MAILBOX.LABEL_NOT_FOUND`.
+
+`group=thread` is for placement views only: it needs `placement` `default`, `archive`, or `folder`,
+and cannot be combined with `label_id`, `starred`, `unread`, `has_attachments`, or `q`. The view is
+the placement (with its folder and `direction`). Each row is the newest message of one thread in
+the view and carries `thread`: `message_count` is how many of the thread's messages are in the
+view, `unread` and `starred` say whether the caller has not read or has starred at least one of
+them, and `label_ids` is every label on at least one of them. Rows are ordered by their newest
+message, newest first, and `meta` counts threads. Acting on a row acts on the thread's messages in
+the view. The starred, label, unread, and attachment filters, search, and the trash list single
+messages.
+
+`q` searches case-insensitively for the text anywhere in the subject, the sender address and name,
+the `to` and `cc` addresses, and the text body; `%` and `_` match literally. It searches every
+placement except the trash, and the filters above narrow it. Results are single messages, newest
+first. A search the database cannot finish within 2 seconds, which can happen for one or two
+characters in a large mailbox, is `422 MAILBOX.SEARCH_TOO_BROAD`; clients ask for a longer text.
+
+### Counts
+
+`GET /v1/mailboxes/:mailbox_id/message-counts` needs `view` and answers the caller's own counts for
+a mailbox's navigation:
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "placements": { "default_inbound_unread": 3, "archive_unread": 0 },
+    "folders": [{ "folder_id": 4, "unread": 1 }],
+    "starred": 7
+  }
+}
+```
+
+- `default_inbound_unread` counts inbound messages in `default` the caller has not read; it equals
+  the mailbox's `unread_count`. `archive_unread` and each folder's `unread` count inbound messages
+  there the caller has not read.
+- `folders` has one entry per folder of the mailbox, including folders with nothing unread.
+- `starred` counts messages outside the trash the caller starred, read or not.
+- Sealed messages and the trash are never counted.
 
 ### Send
 
@@ -419,7 +634,8 @@ loads nothing with the user's credentials.
   removed. Addresses are lowercased. Display-name forms are rejected.
 - `subject` is required, at most 998 characters, with no line breaks.
 - At least one of `text` and `html` is required; each is at most 256 KiB.
-- `in_reply_to` is an optional Message-ID. It is sent as the `In-Reply-To` and `References` headers.
+- `in_reply_to` is an optional Message-ID. It is sent as the `In-Reply-To` header and ends the
+  `References` header; see [Threads](#threads).
 - `attachments` is optional; see [Attachments](#attachments) for its limits.
 - `template` is optional: `{ "id", "variables" }` sends a stored template in place of `subject`,
   `text`, and `html`, which must then be absent. See [Templates](#templates).
@@ -445,7 +661,7 @@ everyone the same thing: the limit is full and the message is queued. The `mail:
 worker sends waiting messages oldest first, per organization, as the rolling window gains room,
 and records each outcome exactly like a direct send (`sent`, or `failed` with its `failure_code`,
 and the same webhooks). No webhook is published when a message starts waiting. A waiting message
-can be deleted like any message, and then it is never sent; deleting its mailbox deletes it too. One
+moved to the trash is never sent (see [Placements](#placements)); deleting its mailbox deletes it too. One
 that a handover seals is not sent: it becomes `failed` with `failure_code` `send.canceled`. Broadcasts
 never wait this way; they pause as described in [Broadcasts](#broadcasts). This applies to both
 send routes and to template test sends. The limit is a soft bound: concurrent requests may exceed it by the number of
@@ -492,7 +708,7 @@ Binary files arrive byte for byte. A file that is entirely ASCII text may be car
 mail delivery then changes its line endings to CRLF; the received copy can differ from the sent
 one in exactly that way.
 
-Deleting a message or its mailbox deletes its files. API-key routes can send attachments and see
+Deleting a message for good, or deleting its mailbox, deletes its files. API-key routes can send attachments and see
 their metadata; they cannot download files.
 
 ### Templates
@@ -736,6 +952,10 @@ other mailboxes is neither listed nor counted in `total`. Read a message through
 An unknown `direction` or `status`, a non-positive `mailbox_id`, or an over-long `q` is
 `400 COMMON.INVALID_INPUT`. Messages of deleted mailboxes do not appear.
 
+The log, the statistics, and `GET /v1/outbound-mail-messages/:message_id` are delivery records, not
+mailbox views: they ignore placement, so archived, filed, and trashed messages appear and count as
+before. A message deleted for good disappears from them.
+
 `GET /v1/mail-message-stats?days=N` returns one entry per UTC day for the last `N` days ending
 today, oldest first, including days without mail. `N` defaults to 7 and is 1 to 90.
 
@@ -977,3 +1197,10 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.DOMAIN_ZONE_NOT_FOUND` | 422 |
 | `MAILBOX.DOMAIN_NOT_VERIFIED` | 422 |
 | `MAILBOX.DOMAIN_PROVIDER_FAILED` | 502 |
+| `MAILBOX.FOLDER_NOT_FOUND` | 404 |
+| `MAILBOX.LABEL_NOT_FOUND` | 404 |
+| `MAILBOX.FOLDER_NAME_TAKEN` | 409 |
+| `MAILBOX.LABEL_NAME_TAKEN` | 409 |
+| `MAILBOX.FOLDER_LIMIT_REACHED` | 422 |
+| `MAILBOX.LABEL_LIMIT_REACHED` | 422 |
+| `MAILBOX.SEARCH_TOO_BROAD` | 422 |

@@ -5072,6 +5072,11 @@ paths:
     get:
       operationId: listMailMessages
       summary: List the messages of a mailbox, newest first
+      description: Needs `view`. Without `placement` every placement except `trash` is listed. Without
+        `group` each item is one message. With `group=thread` each item is the latest message of one
+        thread in the view and carries `thread` with the thread's count, unread, starred, and labels in
+        that view. Filters combine with AND. An invalid combination is `400 COMMON.INVALID_INPUT`; see the
+        mailbox contract for the rules.
       tags:
         - Mailboxes
       security:
@@ -5082,14 +5087,75 @@ paths:
         - name: direction
           in: query
           required: false
-          description: Keep only received (`inbound`) or sent (`outbound`) messages.
+          description: Keep only received (`inbound`) or sent (`outbound`) messages. With `placement=default`,
+            `inbound` is the Inbox and `outbound` is Sent.
           schema:
             $ref: '#/components/schemas/MailDirection'
+        - name: placement
+          in: query
+          required: false
+          description: Keep only one placement. Without it every placement except `trash` is listed.
+            `folder` needs `folder_id`.
+          schema:
+            $ref: '#/components/schemas/MailPlacement'
+        - name: folder_id
+          in: query
+          required: false
+          description: The folder to list; only with `placement=folder`, which requires it. A folder that is
+            not the mailbox's is `404 MAILBOX.FOLDER_NOT_FOUND`.
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: label_id
+          in: query
+          required: false
+          description: Keep only messages with this label. A label that is not the mailbox's is
+            `404 MAILBOX.LABEL_NOT_FOUND`.
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: starred
+          in: query
+          required: false
+          description: Keep only messages the caller starred (`true`) or did not star (`false`).
+          schema:
+            type: boolean
+        - name: unread
+          in: query
+          required: false
+          description: Keep only messages the caller has not read (`true`) or has read (`false`).
+          schema:
+            type: boolean
+        - name: has_attachments
+          in: query
+          required: false
+          description: Keep only messages with (`true`) or without (`false`) attached files.
+          schema:
+            type: boolean
+        - name: q
+          in: query
+          required: false
+          description: Search. Case-insensitive substring match on the subject, the sender address and
+            name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches
+            every placement except `trash`. A search the database cannot finish within 2 seconds is
+            `422 MAILBOX.SEARCH_TOO_BROAD`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: group
+          in: query
+          required: false
+          description: '`thread` lists one item per thread. Only with `placement` `default`, `archive`, or
+            `folder`, and without `label_id`, `starred`, `unread`, `has_attachments`, and `q`.'
+          schema:
+            type: string
+            enum:
+              - thread
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:
         '200':
-          description: One page of message summaries without bodies.
+          description: One page of message summaries without bodies, newest first. With `group=thread`, one
+            page of threads, each as its latest message in the view, newest first.
           content:
             application/json:
               schema:
@@ -5098,8 +5164,22 @@ paths:
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: The mailbox (`MAILBOX.NOT_FOUND`), the folder (`MAILBOX.FOLDER_NOT_FOUND`), or the
+            label (`MAILBOX.LABEL_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The search could not finish within 2 seconds; a longer `q` is needed
+            (`MAILBOX.SEARCH_TOO_BROAD`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     post:
@@ -5210,9 +5290,10 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     put:
       operationId: updateMailMessage
-      summary: Mark a message read or unread
-      description: Changes only the caller's own read state and needs `view`. Outbound messages are always
-        read. A sealed message is not found.
+      summary: Mark, star, move, or label a message
+      description: '`read` and `starred` change only the caller''s own state and need `view`; outbound
+        messages are always read. `placement`, `folder_id`, and `label_ids` change the mailbox''s shared
+        state and need `send`. `label_ids` replaces the message''s labels. A sealed message is not found.'
       tags:
         - Mailboxes
       security:
@@ -5238,8 +5319,15 @@ paths:
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: The mailbox (`MAILBOX.NOT_FOUND`), the message (`MAILBOX.MESSAGE_NOT_FOUND`), the
+            folder (`MAILBOX.FOLDER_NOT_FOUND`), or a label (`MAILBOX.LABEL_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '422':
@@ -5248,7 +5336,10 @@ paths:
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
       operationId: deleteMailMessage
-      summary: Delete a message
+      summary: Move a message to the trash, or delete it from the trash for good
+      description: A message outside the trash moves to the trash and needs `send`; a queued message that
+        waits for the send limit is then never sent. A message already in the trash is deleted for good,
+        with its files, and needs `organize`.
       tags:
         - Mailboxes
       security:
@@ -5259,11 +5350,13 @@ paths:
         - $ref: '#/components/parameters/MailMessageID'
       responses:
         '204':
-          description: The message is deleted.
+          description: The message is in the trash, or was in the trash and is deleted for good.
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '503':
@@ -5307,6 +5400,460 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/message-updates:
+    post:
+      operationId: updateMailMessages
+      summary: Mark, star, move, or label up to 100 messages at once
+      description: Applies the same change to every named message in one transaction. `read` and
+        `starred` change only the caller's own state and need `view`; `placement`, `folder_id`,
+        `add_label_ids`, and `remove_label_ids` change shared state and need `send`. When any named
+        message, the folder, or a label is not found, nothing changes.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailMessagesRequest'
+      responses:
+        '200':
+          description: The number of messages the change applied to.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageUpdatesResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The mailbox (`MAILBOX.NOT_FOUND`), a message (`MAILBOX.MESSAGE_NOT_FOUND`), the
+            folder (`MAILBOX.FOLDER_NOT_FOUND`), or a label (`MAILBOX.LABEL_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/trash-purges:
+    post:
+      operationId: purgeMailTrash
+      summary: Empty the trash of a mailbox
+      description: Deletes every message in the mailbox's trash for good, with its files. Needs `organize`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      responses:
+        '200':
+          description: The number of messages deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTrashPurgeResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/threads/{thread_id}:
+    get:
+      operationId: getMailThread
+      summary: Get every message of a thread outside the trash, oldest first
+      description: Needs `view`. Lists the thread's messages in every placement except `trash`, inbound and
+        outbound, with their bodies. Sealed messages are left out. A thread with no such message is
+        `404 MAILBOX.MESSAGE_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+      responses:
+        '200':
+          description: The thread's messages, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThreadResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/message-counts:
+    get:
+      operationId: getMailMessageCounts
+      summary: Count the caller's unread and starred messages per placement and folder
+      description: Needs `view`. Read and star state are the caller's own; the trash and sealed messages
+        are never counted.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      responses:
+        '200':
+          description: The counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageCountsResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/mail-folders:
+    get:
+      operationId: listMailFolders
+      summary: List the folders of a mailbox
+      description: Needs `view`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      responses:
+        '200':
+          description: Every folder of the mailbox, by name ignoring case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailFolderListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailFolder
+      summary: Create a folder in a mailbox
+      description: Needs `organize`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailFolderRequest'
+      responses:
+        '201':
+          description: The created folder.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailFolderResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Another folder of the mailbox has the name, ignoring case (`MAILBOX.FOLDER_NAME_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the mailbox has 100 folders (`MAILBOX.FOLDER_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/mail-folders/{folder_id}:
+    put:
+      operationId: renameMailFolder
+      summary: Rename a folder
+      description: Needs `organize`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailFolderID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailFolderRequest'
+      responses:
+        '200':
+          description: The renamed folder.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailFolderResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The mailbox (`MAILBOX.NOT_FOUND`) or the folder (`MAILBOX.FOLDER_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another folder of the mailbox has the name, ignoring case (`MAILBOX.FOLDER_NAME_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailFolder
+      summary: Delete a folder
+      description: Needs `organize`. The folder's messages return to the `default` placement.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailFolderID'
+      responses:
+        '204':
+          description: The folder is deleted and its messages are in `default`.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The mailbox (`MAILBOX.NOT_FOUND`) or the folder (`MAILBOX.FOLDER_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/mail-labels:
+    get:
+      operationId: listMailLabels
+      summary: List the labels of a mailbox
+      description: Needs `view`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      responses:
+        '200':
+          description: Every label of the mailbox, by name ignoring case.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailLabelListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailLabel
+      summary: Create a label in a mailbox
+      description: Needs `organize`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailLabelRequest'
+      responses:
+        '201':
+          description: The created label.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailLabelResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Another label of the mailbox has the name, ignoring case (`MAILBOX.LABEL_NAME_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the mailbox has 100 labels (`MAILBOX.LABEL_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/mail-labels/{label_id}:
+    put:
+      operationId: updateMailLabel
+      summary: Rename or recolor a label
+      description: Needs `organize`. Replaces the name and the color.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailLabelID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailLabelRequest'
+      responses:
+        '200':
+          description: The updated label.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailLabelResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The mailbox (`MAILBOX.NOT_FOUND`) or the label (`MAILBOX.LABEL_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another label of the mailbox has the name, ignoring case (`MAILBOX.LABEL_NAME_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailLabel
+      summary: Delete a label
+      description: Needs `organize`. The label is removed from every message.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailLabelID'
+      responses:
+        '204':
+          description: The label is deleted and removed from every message.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The mailbox (`MAILBOX.NOT_FOUND`) or the label (`MAILBOX.LABEL_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/inbound-mail-messages:
@@ -5958,6 +6505,27 @@ components:
       description: Positive mail attachment identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    MailThreadID:
+      name: thread_id
+      in: path
+      required: true
+      description: Positive mail thread identifier, the `thread_id` of its messages.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    MailFolderID:
+      name: folder_id
+      in: path
+      required: true
+      description: Positive mail folder identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    MailLabelID:
+      name: label_id
+      in: path
+      required: true
+      description: Positive mail label identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     MailIdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -6386,6 +6954,13 @@ components:
         - MAILBOX.DOMAIN_NOT_VERIFIED
         - MAILBOX.DOMAINS_DISABLED
         - MAILBOX.DOMAIN_PROVIDER_FAILED
+        - MAILBOX.FOLDER_NOT_FOUND
+        - MAILBOX.LABEL_NOT_FOUND
+        - MAILBOX.FOLDER_NAME_TAKEN
+        - MAILBOX.LABEL_NAME_TAKEN
+        - MAILBOX.FOLDER_LIMIT_REACHED
+        - MAILBOX.LABEL_LIMIT_REACHED
+        - MAILBOX.SEARCH_TOO_BROAD
     FieldErrors:
       type: object
       additionalProperties:
@@ -9115,8 +9690,8 @@ components:
           $ref: '#/components/schemas/MailboxAccess'
         unread_count:
           type: integer
-          description: Number of inbound messages after the seal boundary that the caller has not read; 0 for
-            a caller without `view`.
+          description: Number of inbound messages in the `default` placement (the Inbox) after the seal
+            boundary that the caller has not read; 0 for a caller without `view`.
           minimum: 0
         created_at:
           type: string
@@ -9174,6 +9749,7 @@ components:
         - manage_members
         - administer
         - see_history
+        - organize
       properties:
         view:
           type: boolean
@@ -9185,6 +9761,11 @@ components:
           type: boolean
         see_history:
           type: boolean
+        organize:
+          type: boolean
+          description: Permanently delete messages, empty the trash, and create, rename, and delete folders
+            and labels. The personal owner and `manage` members of a shared mailbox; never the
+            organization owner or admin role alone.
     MailboxMemberRequest:
       type: object
       additionalProperties: false
@@ -9435,6 +10016,12 @@ components:
         - attachment_count
         - template_id
         - created_at
+        - placement
+        - folder_id
+        - label_ids
+        - starred
+        - thread_id
+        - trashed_at
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -9488,9 +10075,40 @@ components:
           oneOf:
             - $ref: '#/components/schemas/PositiveID'
             - type: 'null'
+        placement:
+          $ref: '#/components/schemas/MailPlacement'
+        folder_id:
+          description: The folder that holds the message when `placement` is `folder`; null otherwise.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        label_ids:
+          type: array
+          description: The ids of the mailbox labels on the message, ascending; shared by every member.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PositiveID'
+        starred:
+          type: boolean
+          description: Whether the caller starred the message; per person.
+        thread_id:
+          description: The thread the message belongs to in this mailbox; the id of the message that started
+            it.
+          allOf:
+            - $ref: '#/components/schemas/PositiveID'
+        trashed_at:
+          description: When the message was moved to the trash; null outside the trash. A message is deleted
+            for good 30 days after this instant.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
         created_at:
           type: string
           format: date-time
+        thread:
+          description: Present only with `group=thread`; summarizes the message's thread in the view.
+          $ref: '#/components/schemas/MailThreadSummary'
     MailMessage:
       type: object
       additionalProperties: false
@@ -9510,6 +10128,12 @@ components:
         - attachment_count
         - template_id
         - created_at
+        - placement
+        - folder_id
+        - label_ids
+        - starred
+        - thread_id
+        - trashed_at
         - text_body
         - html_body
         - message_id
@@ -9568,6 +10192,34 @@ components:
           oneOf:
             - $ref: '#/components/schemas/PositiveID'
             - type: 'null'
+        placement:
+          $ref: '#/components/schemas/MailPlacement'
+        folder_id:
+          description: The folder that holds the message when `placement` is `folder`; null otherwise.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        label_ids:
+          type: array
+          description: The ids of the mailbox labels on the message, ascending; shared by every member.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PositiveID'
+        starred:
+          type: boolean
+          description: Whether the caller starred the message; per person.
+        thread_id:
+          description: The thread the message belongs to in this mailbox; the id of the message that started
+            it.
+          allOf:
+            - $ref: '#/components/schemas/PositiveID'
+        trashed_at:
+          description: When the message was moved to the trash; null outside the trash. A message is deleted
+            for good 30 days after this instant.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
         created_at:
           type: string
           format: date-time
@@ -9597,6 +10249,240 @@ components:
           maxItems: 10
           items:
             $ref: '#/components/schemas/MailAttachment'
+    MailPlacement:
+      type: string
+      description: Where a message is. `default` is the Inbox for inbound and Sent for outbound messages;
+        `folder` is a mailbox folder named by `folder_id`; `trash` is deleted for good 30 days after
+        `trashed_at`.
+      enum:
+        - default
+        - archive
+        - folder
+        - trash
+    MailLabelColor:
+      type: string
+      description: The fixed label palette.
+      enum:
+        - gray
+        - red
+        - orange
+        - yellow
+        - green
+        - teal
+        - blue
+        - purple
+        - pink
+    MailThreadSummary:
+      type: object
+      additionalProperties: false
+      description: The thread of a listed message with `group=thread`. Every count and flag covers only the
+        thread's messages in the listed view (placement, folder, and direction); the message carrying it is
+        the latest of them.
+      required:
+        - message_count
+        - unread
+        - starred
+        - label_ids
+      properties:
+        message_count:
+          type: integer
+          description: How many of the thread's messages are in the view.
+          minimum: 1
+        unread:
+          type: boolean
+          description: Whether the caller has not read at least one of them.
+        starred:
+          type: boolean
+          description: Whether the caller starred at least one of them.
+        label_ids:
+          type: array
+          description: Every label on at least one of them, ascending.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PositiveID'
+    MailFolder:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        created_at:
+          type: string
+          format: date-time
+    MailFolderRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Trimmed; 1 to 64 characters afterwards, unique in the mailbox ignoring case.
+          minLength: 1
+          maxLength: 400
+    MailFolderResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailFolder'
+    MailFolderListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailFolder'
+    MailLabel:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - color
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        color:
+          $ref: '#/components/schemas/MailLabelColor'
+        created_at:
+          type: string
+          format: date-time
+    MailLabelRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - color
+      properties:
+        name:
+          type: string
+          description: Trimmed; 1 to 64 characters afterwards, unique in the mailbox ignoring case.
+          minLength: 1
+          maxLength: 400
+        color:
+          $ref: '#/components/schemas/MailLabelColor'
+    MailLabelResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailLabel'
+    MailLabelListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailLabel'
+    MailMessageCounts:
+      type: object
+      additionalProperties: false
+      required:
+        - placements
+        - folders
+        - starred
+      properties:
+        placements:
+          type: object
+          additionalProperties: false
+          required:
+            - default_inbound_unread
+            - archive_unread
+          properties:
+            default_inbound_unread:
+              type: integer
+              description: Inbound messages in `default` (the Inbox) the caller has not read; equals the
+                mailbox's `unread_count`.
+              minimum: 0
+            archive_unread:
+              type: integer
+              description: Inbound messages in `archive` the caller has not read.
+              minimum: 0
+        folders:
+          type: array
+          description: One entry per folder of the mailbox, including folders with nothing unread.
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - folder_id
+              - unread
+            properties:
+              folder_id:
+                $ref: '#/components/schemas/PositiveID'
+              unread:
+                type: integer
+                description: Inbound messages in the folder the caller has not read.
+                minimum: 0
+        starred:
+          type: integer
+          description: Messages outside the trash the caller starred, read or not.
+          minimum: 0
+    MailMessageCountsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailMessageCounts'
     MailAttachment:
       type: object
       additionalProperties: false
@@ -10640,11 +11526,133 @@ components:
     UpdateMailMessageRequest:
       type: object
       additionalProperties: false
-      required:
-        - read
+      description: At least one field. `placement` `folder` needs `folder_id`, and `folder_id` is allowed
+        only with it. Moving out of `trash` clears `trashed_at`; restoring is `placement` `default`.
+      minProperties: 1
       properties:
         read:
           type: boolean
+          description: The caller's own read state; needs `view`.
+        starred:
+          type: boolean
+          description: The caller's own star; needs `view`.
+        placement:
+          $ref: '#/components/schemas/MailPlacement'
+        folder_id:
+          $ref: '#/components/schemas/PositiveID'
+        label_ids:
+          type: array
+          description: The complete set of the message's labels, replacing the current one; needs `send`.
+          maxItems: 100
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PositiveID'
+    UpdateMailMessagesRequest:
+      type: object
+      additionalProperties: false
+      description: '`message_ids` and at least one change. `placement` `folder` needs `folder_id`, and
+        `folder_id` is allowed only with it. A label id may not be both added and removed.'
+      required:
+        - message_ids
+      minProperties: 2
+      properties:
+        message_ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PositiveID'
+        read:
+          type: boolean
+          description: The caller's own read state; needs `view`.
+        starred:
+          type: boolean
+          description: The caller's own star; needs `view`.
+        placement:
+          $ref: '#/components/schemas/MailPlacement'
+        folder_id:
+          $ref: '#/components/schemas/PositiveID'
+        add_label_ids:
+          type: array
+          description: Labels added to every named message; needs `send`.
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PositiveID'
+        remove_label_ids:
+          type: array
+          description: Labels removed from every named message; needs `send`.
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/PositiveID'
+    MailMessageUpdatesResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - updated
+          properties:
+            updated:
+              type: integer
+              description: How many messages the change applied to; the number of `message_ids`.
+              minimum: 1
+              maximum: 100
+    MailTrashPurgeResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - deleted
+          properties:
+            deleted:
+              type: integer
+              description: How many messages were deleted for good.
+              minimum: 0
+    MailThreadResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          description: The thread's messages outside the trash, oldest first; at most the latest 100.
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailMessage'
     MailMessageResponse:
       type: object
       additionalProperties: false
@@ -10675,6 +11683,8 @@ components:
           type: string
         data:
           type: array
+          description: Message summaries, newest first. With `group=thread` each item is the latest
+            message of one thread in the view and carries `thread`.
           items:
             $ref: '#/components/schemas/MailMessageSummary'
         meta:
