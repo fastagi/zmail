@@ -1,7 +1,8 @@
 name: CI
 
-# Pull requests run only the halves they change, on the production Node version. Pushes to main,
-# the weekly schedule, and manual runs check everything, including Node 24 and PostgreSQL 15/17/18.
+# Pull requests run only the halves they change, on the production Node version. Pushes to main
+# check every half once on that baseline. The weekly schedule and manual runs add Node 24 and
+# PostgreSQL 15/17/18, so a merge does not hold the shared runners for a full matrix.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -21,7 +22,7 @@ concurrency:
 
 jobs:
   changes:
-    name: Changed areas
+    name: Changed areas and governance
     if: github.event.pull_request.draft != true
     runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     outputs:
@@ -60,16 +61,9 @@ jobs:
           flag project '^(api/internal/infra/console/|api/\.gitignore|\.gitignore|Makefile|README\.md|scripts/|contracts/scripts/|\.agents/skills/fastbuild-framework-review/scripts/)'
           echo "Changed files:"; echo "$changed"
 
-  governance:
-    name: Governance
-    if: github.event.pull_request.draft != true
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-
       - name: Root governance guardrails
         run: make governance
+
 
   contracts:
     name: HTTP Contracts
@@ -139,6 +133,8 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+          --tmpfs /var/lib/postgresql/data
+          --tmpfs /var/lib/postgresql/18/docker
     defaults:
       run:
         working-directory: api
@@ -180,8 +176,8 @@ jobs:
 
   postgres-compatibility:
     name: PostgreSQL ${{ matrix.postgres-version }} compatibility
-    # PostgreSQL 16 runs with the API job on every change; other versions run after merge and weekly.
-    if: github.event_name != 'pull_request'
+    # PostgreSQL 16 runs with the API job on every change; other versions run weekly and on demand.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ fromJSON(vars.CI_RUNNER_LABELS || '["ubuntu-latest"]') }}
     strategy:
       fail-fast: false
@@ -207,6 +203,8 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+          --tmpfs /var/lib/postgresql/data
+          --tmpfs /var/lib/postgresql/18/docker
     defaults:
       run:
         working-directory: api
@@ -231,8 +229,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Node 22 is the production baseline; Node 24 runs after merge and weekly.
-        node-version: ${{ github.event_name == 'pull_request' && fromJSON('["22"]') || fromJSON('["22", "24"]') }}
+        # Node 22 is the production baseline; Node 24 runs weekly and on demand.
+        node-version: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["22", "24"]') || fromJSON('["22"]') }}
     defaults:
       run:
         working-directory: web
@@ -266,8 +264,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Node 22 is the production baseline; Node 24 runs after merge and weekly.
-        node-version: ${{ github.event_name == 'pull_request' && fromJSON('["22"]') || fromJSON('["22", "24"]') }}
+        # Node 22 is the production baseline; Node 24 runs weekly and on demand.
+        node-version: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["22", "24"]') || fromJSON('["22"]') }}
     defaults:
       run:
         working-directory: admin

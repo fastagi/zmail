@@ -25,17 +25,17 @@ permission-policy entry in `check-ci-actions.py` and a role in the table above.
 
 ## When Checks Run
 
-A pull request runs only what its change can break; everything else runs after merge, weekly,
-and before a release, so coverage is unchanged while a typical pull request runs five to eight checks.
+A pull request runs only what its change can break. A push to `main` reruns every half once on the
+baseline versions; Node 24 and PostgreSQL 15, 17, and 18 run weekly, on demand, and before a release, so coverage is unchanged while a typical pull request runs five to eight checks.
 Draft pull requests run nothing: open a draft while iterating, and checks start when it is marked
 ready for review. Scheduled runs happen once a week, on Monday between 02:41 and 05:17 UTC.
 
 | Check | Pull request (not draft) | Push to `main` | Weekly | Release tag |
 |---|---|---|---|---|
-| Governance | Always | Yes | Yes | Via `make release-check` |
+| Governance (runs inside the Changed areas job) | Always | Yes | Yes | Via `make release-check` |
 | HTTP contracts, API (PostgreSQL 16), Web, Admin | When `contracts/`, `api/`, `web/`, `admin/`, `registry/`, or CI changes, per area | Yes | Yes | Via `make release-check` |
-| Web and Admin on Node 24 | No | Yes | Yes | Via `make release-check` |
-| PostgreSQL 15, 17, 18 compatibility | No | Yes | Yes | — |
+| Web and Admin on Node 24 | No | No | Yes | Via `make release-check` |
+| PostgreSQL 15, 17, 18 compatibility | No | No | Yes | — |
 | Initialized project (`scripts/verify-init-project.sh`; passes without running in a checkout that is already an initialized project) | When `project:init`, ignore rules, root docs, or repository scripts change | Yes | Yes | — |
 | API, Web, and Admin containers | When an image input changes (Dockerfile, dependency manifests, container scripts) | No | Yes | Built and scanned by `release.yml` |
 | End-to-end | When a browser shell, sign-in, the operator flow, or the dev stack changes | No | Yes | — |
@@ -98,7 +98,9 @@ the real configured runtime, emits schema-versioned JSON, validates its closed s
 and requires core plus default-starter routes. Route inventory therefore cannot pass CI from a
 parallel source parser that omits health, conditional metrics, or optional starter registration.
 
-The complete API gate runs on PostgreSQL 16. A separate compatibility matrix uses immutable images
+The complete API gate runs on PostgreSQL 16. Every CI PostgreSQL service keeps its data directory
+on tmpfs: test databases are disposable, and disk writes on the shared self-hosted runners made the
+API job take more than 20 minutes. A separate compatibility matrix uses immutable images
 for PostgreSQL 15, 17, and 18 and runs `make test-postgres-compatibility`. That focused command owns
 migrations, repositories, transaction and locking behavior, optional starter persistence, and
 PostgreSQL durable tasks without repeating unrelated browser or pure-Go checks. On every supported
