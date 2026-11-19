@@ -627,10 +627,11 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   };
   const onView = (view: InboxView) =>
     setListing({ [VIEW_PARAM]: view === 'all' ? null : view, [SEARCH_PARAM]: null });
+  // Narrowing starts a new listing: a search typed for the previous one no longer applies.
   const onBox = (mailboxId: number) =>
-    setListing({ [BOX_PARAM]: String(mailboxId), [ROLE_PARAM]: null });
+    setListing({ [BOX_PARAM]: String(mailboxId), [ROLE_PARAM]: null, [SEARCH_PARAM]: null });
   const onRole = (role: InboxRoleFilter) =>
-    setListing({ [ROLE_PARAM]: String(role), [BOX_PARAM]: null });
+    setListing({ [ROLE_PARAM]: String(role), [BOX_PARAM]: null, [SEARCH_PARAM]: null });
   const runCommand = (command: PaletteCommand) => {
     switch (command.kind) {
       case 'mailbox':
