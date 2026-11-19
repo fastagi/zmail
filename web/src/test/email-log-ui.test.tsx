@@ -879,7 +879,10 @@ describe('emails console', () => {
     fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
     // Deleting moves the message to the trash at once, with an undo instead of a confirmation.
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    await waitFor(() => expect(state.removeMessage.mutateAsync).toHaveBeenCalledWith(31));
+    await waitFor(() =>
+      expect(state.update.mutateAsync).toHaveBeenCalledWith({ messageId: 31, placement: 'trash' })
+    );
+    expect(state.removeMessage.mutateAsync).not.toHaveBeenCalled();
     expect(toast.success).toHaveBeenCalledWith(
       'Moved to the trash',
       expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) })

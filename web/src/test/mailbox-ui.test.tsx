@@ -694,12 +694,36 @@ describe('mailbox workspace', () => {
     fireEvent.click(rowButton('Unread question'));
     // Deleting moves the message to the trash at once, with an undo instead of a confirmation.
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    await waitFor(() => expect(state.removeMessage.mutateAsync).toHaveBeenCalledWith(11));
+    // A move, never DELETE: DELETE on a message someone else already trashed deletes it for good.
+    await waitFor(() =>
+      expect(state.update.mutateAsync).toHaveBeenCalledWith({ messageId: 11, placement: 'trash' })
+    );
+    expect(state.removeMessage.mutateAsync).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(toast.success).toHaveBeenCalledWith(
       'Moved to the trash',
       expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) })
     );
+  });
+
+  it('undoes a move to the trash from the reader back to where the message was', async () => {
+    state.inbox.data = page([summary({ id: 11, subject: 'Unread question', read: true })]);
+    state.detail.data = message({ html_body: '', placement: 'folder', folder_id: 4, read: true });
+    state.update.mutateAsync.mockResolvedValue(message());
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+
+    undoLastToast();
+    await waitFor(() =>
+      expect(state.update.mutateAsync).toHaveBeenLastCalledWith({
+        messageId: 11,
+        placement: 'folder',
+        folder_id: 4,
+      })
+    );
+    expect(state.removeMessage.mutateAsync).not.toHaveBeenCalled();
   });
 
   it('switches to the sent folder and marks failed messages with the failure code', () => {
@@ -1108,6 +1132,14 @@ describe('mailbox workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Switch mailbox/u }));
   }
 
+  /** Clicks the Undo action of the last success toast. */
+  function undoLastToast() {
+    const options = toast.success.mock.calls.at(-1)?.[1] as
+      { action?: { onClick: () => void } } | undefined;
+    if (!options?.action) throw new Error('the last toast has no undo');
+    options.action.onClick();
+  }
+
   /** The bar of actions on the selected rows. */
   function bulk() {
     return within(screen.getByRole('toolbar'));
@@ -1186,6 +1218,15 @@ describe('mailbox workspace', () => {
       await waitFor(() => expect(screen.queryByText('Quote request')).toBeNull());
       expect(screen.getByText('Old news')).toBeInTheDocument();
       expect(screen.queryByText('1 selected')).toBeNull();
+
+      // Undo puts the thread back in the Inbox.
+      undoLastToast();
+      await waitFor(() =>
+        expect(state.updateMany.mutateAsync).toHaveBeenLastCalledWith({
+          message_ids: [11, 12, 13],
+          placement: 'default',
+        })
+      );
     });
 
     it('search shows ungrouped results and too-broad notice', async () => {

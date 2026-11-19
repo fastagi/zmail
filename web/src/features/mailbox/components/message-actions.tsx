@@ -49,7 +49,9 @@ export function toastWithUndo(text: string, undoLabel: string, undo: () => Promi
  * - Reply, reply all, and mark unread exist only for inbound mail; forward for any message when
  *   `onForward` is given. Reply, reply all, and forward need `send`.
  * - Star needs only `view`: a star is the caller's own.
- * - Outside the trash, `send` archives the message and deletes it, which moves it to the trash.
+ * - Outside the trash, `send` archives the message and deletes it, which moves it to the trash
+ *   with a placement update (never `DELETE`, which would delete for good a message another member
+ *   already trashed).
  * - In the trash, `send` restores it to the Inbox or Sent, and `organize` deletes it for good after
  *   a confirmation.
  *
@@ -217,7 +219,13 @@ export function MessageActions({
           aria-label={t('actions.delete')}
           title={t('actions.delete')}
           className={iconButton}
-          onClick={() => void move(() => remove.mutateAsync(message.id), t('messages.trashed'))}
+          onClick={() =>
+            void move(
+              // Always a move: DELETE would delete for good a message someone already trashed.
+              () => update.mutateAsync({ messageId: message.id, placement: 'trash' }),
+              t('messages.trashed')
+            )
+          }
         >
           <Trash2 className="size-4" />
         </Button>
