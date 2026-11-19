@@ -1,6 +1,6 @@
 # 邮箱整理、搜索与会话线程（P0 子项目 1）设计
 
-状态：已确认
+状态：已实现（分支 `feature/mailbox-organize`，待合入 main）
 依赖：PR #22（邮箱访问权限）与 PR #23（发送队列）。本子项目基于 `feature/send-quota-queue` 开发，二者合并后再合入 main。
 
 ## 1. 目的
@@ -173,3 +173,12 @@ P0 的另外两个子项目在本设计之后单独设计：
 - 30 天清理的 worker 挂在哪个现有命令上。
 - 色板具体颜色。
 - 列表聚合的 SQL 写法（窗口函数或 `DISTINCT ON`），以不拖慢收件箱为准，需要压测数据说明。
+
+## 8. 实现状态
+
+- 契约：`contracts/MAILBOXES.md` 与 `contracts/openapi.yaml` 已写入位置、文件夹、标签、星标、线程、搜索与计数。
+- API：位置与回收站（含 30 天清理）、文件夹与标签、每人星标、批量更新、按 `Message-ID` 建线程、线程列表、计数与搜索均已实现，并有 PostgreSQL 测试。
+- Web：BFF 路由与三栏邮箱界面已完成，含邮箱切换、批量操作与定时刷新。
+- 验收流程：`api/tests/kest/mailbox_organize.flow.md` 在本地 API 与一次性 PostgreSQL 上全部通过，覆盖：公共邮箱中 send 成员归档后 view 成员看到已归档、且移入回收站被拒（403，批量混合请求不留部分写入）；星标按人区分；外部回复按 `In-Reply-To` 进入原外发邮件的线程；搜索"报价"命中主题与正文，回收站中的邮件不再被搜到。
+- Message-ID 检查：`docs/runbooks/mail-message-id-check.md` 说明如何确认服务商发出的 `Message-ID` 等于库中的 `rfc_message_id`。该步骤会发真实邮件，由人执行。2026-11-19 已在开发域名上人工完成一次往返（Zmail 发出、外部邮箱回复），回复正确进入同一线程且 `in_reply_to` 有值。
+- 已知限制：接口不返回 Zmail 生成的 `Message-ID`；外发邮件详情里的 `message_id` 是服务商标识，使用 `log` 服务商时为空。

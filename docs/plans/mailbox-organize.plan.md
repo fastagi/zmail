@@ -147,7 +147,7 @@
   - Search escapes `\`, `%`, `_` and runs under `SET LOCAL statement_timeout = '2s'`; a cancel maps to `ErrMailSearchTooBroad`.
   - `unread_count` on the mailbox switches to inbound `default` unread.
 
-- [ ] **Step 1: Write failing tests:** `TestListWithoutPlacementExcludesTrash`; `TestThreadRowShowsLatestAndCount`; `TestThreadViewIncludesSentReplies`; `TestStarredViewIsNotGrouped`; `TestSearchFindsChineseSubstring` (subject `报价单确认` found by `报价单`); `TestSearchEscapesWildcards` (Review Focus 5: `50%` does not match `500`); `TestSearchTimeoutMapsToTooBroad` (fake timeout); `TestUnreadCountOnlyInbox`; `TestMessageCountsPerFolder`.
+- [ ] **Step 1: Write failing tests:** `TestListWithoutPlacementExcludesTrash`; `TestThreadRowShowsLatestAndCount`; `TestThreadViewIncludesSentReplies`; `TestStarredViewIsNotGrouped`; `TestSearchFindsChineseSubstring` (a Chinese subject, U+62A5 U+4EF7 U+5355 U+786E U+8BA4 "quote confirmation", found by its first three characters); `TestSearchEscapesWildcards` (Review Focus 5: `50%` does not match `500`); `TestSearchTimeoutMapsToTooBroad` (fake timeout); `TestUnreadCountOnlyInbox`; `TestMessageCountsPerFolder`.
 - [ ] **Step 2: Run** `cd api && go test ./internal/modules/mailbox/... -run 'List|Thread|Search|Count'` — Expected: FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** Step 2 command — Expected: PASS. Then run `BenchmarkThreadedListing200k` and `BenchmarkSearch200k` (seed 200,000 rows into disposable PostgreSQL, `-benchtime=50x`) and record p95 in the report — Expected: < 200 ms and < 500 ms. If over, add the index or query change the plan for that query shows (`EXPLAIN ANALYZE` in the report).
@@ -192,7 +192,7 @@
 - Modify: the kest acceptance flow for mailboxes (extend with organize steps), `docs/plans/mailbox-organize.zh-CN.md` (status), `contracts/MAILBOXES.md` if acceptance finds drift
 - Create: `docs/runbooks/mail-message-id-check.md`
 
-- [ ] **Step 1:** Extend the acceptance flow: two members of a shared mailbox — send member archives, view member sees it archived and cannot trash (403); stars stay per person; inbound reply to an outbound message lands in the same thread; search `报价` finds the message.
+- [ ] **Step 1:** Extend the acceptance flow: two members of a shared mailbox — send member archives, view member sees it archived and cannot trash (403); stars stay per person; inbound reply to an outbound message lands in the same thread; search for the Chinese word for quote (U+62A5 U+4EF7) finds the message.
 - [ ] **Step 2: Run** the flow against a local API and disposable PostgreSQL — Expected: all steps pass.
 - [ ] **Step 3:** Write the runbook: send one message from staging to an inbox the operator controls, open its raw headers, and confirm `Message-ID` equals the stored `rfc_message_id`. This step sends real mail, so a person runs it; the plan does not.
 - [ ] **Step 4: Run** `make agent-check-changed` — Expected: PASS.
