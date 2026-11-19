@@ -153,7 +153,9 @@ fi
 echo ""
 echo "Tier 1 — Local execution"
 if [ "$KIND" = "go" ]; then
-    run_step "go test ${SCOPE[*]}" go test "${SCOPE[@]}"
+    # GO_TEST_FLAGS adds flags such as "-timeout=30m -p=4" for a slow shared database.
+    # shellcheck disable=SC2086 # GO_TEST_FLAGS is a list of flags, split on spaces.
+    run_step "go test ${GO_TEST_FLAGS:-}${GO_TEST_FLAGS:+ }${SCOPE[*]}" go test ${GO_TEST_FLAGS:-} "${SCOPE[@]}"
 else
     run_step "pnpm test" "${PNPM[@]}" test -- --run
 fi
@@ -171,7 +173,8 @@ fi
 echo ""
 echo "Tier 2 — End-to-end"
 if [ "$KIND" = "go" ]; then
-    run_step "go test -race ${SCOPE[*]}" go test -race "${SCOPE[@]}"
+    # shellcheck disable=SC2086 # GO_TEST_FLAGS is a list of flags, split on spaces.
+    run_step "go test -race ${GO_TEST_FLAGS:-}${GO_TEST_FLAGS:+ }${SCOPE[*]}" go test -race ${GO_TEST_FLAGS:-} "${SCOPE[@]}"
 else
     run_step "pnpm build" "${PNPM[@]}" build
 fi
