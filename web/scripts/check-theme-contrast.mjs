@@ -2,7 +2,8 @@
 //
 // Resolves the design tokens the way the browser cascades them: every stylesheet imported by
 // src/themes/index.css, in order, where :root applies in both modes and .dark only in dark mode.
-// Readable text/surface pairs must meet WCAG AA 4.5:1 in light and dark mode. When the repository
+// Readable text/surface pairs must meet WCAG AA 4.5:1 in light and dark mode; faint secondary text
+// (timestamps, counts, group labels) must meet 3:1. When the repository
 // registry is present, every registry theme's Web preset is also layered on the core tokens and
 // checked, so a theme plugin cannot ship unreadable pairs or leak light values into dark mode.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -17,8 +18,14 @@ const presetRoot = join(themeRoot, 'presets');
 const sourceRoot = join(webRoot, 'src');
 const registryPlugins = resolve(webRoot, '../registry/plugins');
 const minimumTextContrast = 4.5;
+const minimumFaintTextContrast = 3;
 
-const checks = [
+const faintChecks = [
+  ['text-faint', 'bg-canvas'],
+  ['text-faint', 'bg-surface'],
+];
+
+const textChecks = [
   ['foreground', 'background'],
   ['card-foreground', 'card'],
   ['popover-foreground', 'popover'],
@@ -46,6 +53,15 @@ const checks = [
   ['info', 'bg-surface'],
   ['info', 'bg-subtle'],
   ['destructive-foreground', 'destructive'],
+];
+
+const checks = [
+  ...textChecks.map(([foreground, background]) => [foreground, background, minimumTextContrast]),
+  ...faintChecks.map(([foreground, background]) => [
+    foreground,
+    background,
+    minimumFaintTextContrast,
+  ]),
 ];
 
 function stripComments(source) {
@@ -121,16 +137,16 @@ let checked = 0;
 function checkLayers(label, files) {
   for (const mode of ['light', 'dark']) {
     const tokens = cascade(files, mode);
-    for (const [foreground, background] of checks) {
+    for (const [foreground, background, minimum] of checks) {
       checked += 1;
       try {
         const ratio = wcagContrast(
           resolveColor(foreground, tokens),
           resolveColor(background, tokens)
         );
-        if (ratio < minimumTextContrast) {
+        if (ratio < minimum) {
           failures.push(
-            `${label} ${mode}: --${foreground} on --${background} is ${ratio.toFixed(2)}:1`
+            `${label} ${mode}: --${foreground} on --${background} is ${ratio.toFixed(2)}:1 (minimum ${minimum}:1)`
           );
         }
       } catch (error) {
@@ -223,7 +239,7 @@ for (const file of sourceFiles(sourceRoot)) {
 
 if (failures.length > 0) {
   console.error(
-    `Theme contrast guard failed (minimum ${minimumTextContrast}:1):\n${failures
+    `Theme contrast guard failed (text ${minimumTextContrast}:1, faint text ${minimumFaintTextContrast}:1):\n${failures
       .map(failure => `- ${failure}`)
       .join('\n')}`
   );
@@ -231,5 +247,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Theme contrast guard passed: ${checked} semantic color pairs meet ${minimumTextContrast}:1 across the installed tokens and ${registryThemes} registry theme preset(s), and readable copy avoids the destructive surface token.`
+  `Theme contrast guard passed: ${checked} semantic color pairs meet ${minimumTextContrast}:1 (faint text ${minimumFaintTextContrast}:1) across the installed tokens and ${registryThemes} registry theme preset(s), and readable copy avoids the destructive surface token.`
 );
