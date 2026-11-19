@@ -20,6 +20,10 @@ export async function runServiceParity(context: { organizationId: number }): Pro
     daily_send_limit: 200,
     daily_broadcast_limit: 200,
     daily_transactional_limit: 200,
+    transactional_enabled: true,
+    transactional_recipient_limit_per_minute: 3,
+    transactional_key_limit_per_second: 20,
+    simulator_domain: 'test.zmail.im',
   });
 
   const mailbox = await mailboxService.create(organizationId, {

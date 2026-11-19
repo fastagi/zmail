@@ -105,13 +105,6 @@ describe('developer console', () => {
     renderConsole();
     expect(screen.getByText('Transactional mail is not enabled')).toBeInTheDocument();
     expect(screen.queryByRole('tablist')).toBeNull();
-
-    // An API that does not report the flag yet counts as off.
-    const withoutFlag: Record<string, unknown> = domain();
-    delete withoutFlag.transactional_enabled;
-    state.domains.data = [withoutFlag];
-    renderConsole();
-    expect(screen.getAllByText('Transactional mail is not enabled')).toHaveLength(2);
   });
 
   it('member sees transactional templates read-only', () => {
@@ -263,6 +256,9 @@ function domain(overrides: Record<string, unknown> = {}) {
     daily_send_limit: 200,
     daily_broadcast_limit: 200,
     daily_transactional_limit: 200,
+    transactional_recipient_limit_per_minute: 3,
+    transactional_key_limit_per_second: 20,
+    simulator_domain: 'test.zmail.im',
     broadcasts_enabled: true,
     custom_domains_enabled: true,
     transactional_enabled: true,

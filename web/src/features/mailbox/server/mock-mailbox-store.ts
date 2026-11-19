@@ -286,6 +286,9 @@ export class MockMailboxStore {
       daily_send_limit: MOCK_DAILY_SEND_LIMIT,
       daily_broadcast_limit: MOCK_DAILY_SEND_LIMIT,
       daily_transactional_limit: MOCK_DAILY_SEND_LIMIT,
+      transactional_recipient_limit_per_minute: 3,
+      transactional_key_limit_per_second: 20,
+      simulator_domain: 'test.zmail.im',
       broadcasts_enabled: true,
       custom_domains_enabled: true,
       // The mock keeps the developer console usable in development.

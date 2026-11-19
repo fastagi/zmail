@@ -6488,6 +6488,366 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/transactional-messages:
+    post:
+      operationId: sendTransactionalMessage
+      summary: Send one transactional message from a transactional template
+      description: "For backend services. The key must hold the `mail:transactional` scope (`*` also grants it);
+        test keys are accepted. The template is named by its `key` and must be a transactional template of the
+        organization named by `Organization-Id`, of which the key's owner must be a member. The message is
+        stored as `queued` and dispatched after the request commits; a test key or a simulator address never
+        calls the provider. Checks run in this order: key authentication, organization, scope, feature switch,
+        body, `Idempotency-Key`, per-key rate limit, template and variables, idempotent replay, per-recipient
+        rate limit, sender domain, suppression, transactional lane. See MAILBOXES.md, Transactional Mail."
+      tags:
+        - Mailboxes
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/TransactionalIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionalMessageRequest'
+      responses:
+        '200':
+          description: The `Idempotency-Key` already named a message of this key's mode in the last 24 hours with
+            the same content; that message is returned and nothing is sent again.
+          headers:
+            Location:
+              description: The message's path, `/v1/transactional-messages/{message_id}`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionalMessageResponse'
+        '202':
+          description: The message is stored. It is `queued` (with `queued_reason` `send_limit` when the
+            transactional lane is full) or, for a suppressed recipient, `suppressed`.
+          headers:
+            Location:
+              description: The message's path, `/v1/transactional-messages/{message_id}`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionalMessageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The key lacks `mail:transactional` (`PERMISSION.DENIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: The key's owner is not a member of the organization (`ORGANIZATION.NOT_FOUND`), or the
+            organization has no template with this key (`MAILBOX.TEMPLATE_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The `Idempotency-Key` named a message with different content in the last 24 hours
+            (`MAILBOX.IDEMPOTENCY_CONFLICT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation (`COMMON.VALIDATION_FAILED`); the recipient is not one bare
+            address, a variable is not declared by the template, or a simulator address has an unknown local
+            part (`MAILBOX.MESSAGE_INVALID`); the `Idempotency-Key` is missing or not 1 to 255 printable ASCII
+            characters (`MAILBOX.IDEMPOTENCY_KEY_INVALID`); the template is not transactional
+            (`MAILBOX.TEMPLATE_KIND_MISMATCH`); a required variable is missing or empty
+            (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, one field error per variable); or the template's sender
+            domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: The key sent more than its per-second limit (`COMMON.RATE_LIMITED`), the same template
+            went to the same recipient too often in this mode (`MAILBOX.RECIPIENT_RATE_LIMITED`), or the
+            transactional lane is full and as many messages already wait as the lane allows
+            (`MAILBOX.SEND_LIMIT_REACHED`, nothing is stored). The rate limits set `Retry-After`.
+          headers:
+            Retry-After:
+              description: Seconds until the limit has room; at least 1. Set for the two rate limits.
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: The instance has not enabled transactional mail (`MAILBOX.TRANSACTIONAL_DISABLED`), or
+            the database or a dependency is unavailable (`COMMON.SERVICE_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/transactional-messages/{message_id}:
+    get:
+      operationId: getTransactionalMessage
+      summary: Get one transactional message with its events
+      description: The key must hold the `mail:transactional` scope; test keys are accepted. A live key reads only
+        live messages and a test key only test messages; a message of the other mode, or of another
+        organization, is `404 MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/TransactionalMessageID'
+      responses:
+        '200':
+          description: The message with up to 50 events, oldest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionalMessageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The key lacks `mail:transactional` (`PERMISSION.DENIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: The key's owner is not a member of the organization (`ORGANIZATION.NOT_FOUND`), or no
+            message of this organization and mode has the id (`MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/transactional-mail-log:
+    get:
+      operationId: listTransactionalMailLog
+      summary: List the organization's transactional messages, newest first
+      description: For the console; any member may read it. Entries carry the masked recipient and masked subject,
+        never the full recipient or the variables. Keyset pages; pass `meta.next_cursor` as `cursor` for the
+        next, older page. Without `since` and `until` the last 7 days are listed; the range is at most 30 days.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: mode
+          in: query
+          description: Which mode to list. Defaults to `live`.
+          schema:
+            $ref: '#/components/schemas/TransactionalMode'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TransactionalMessageStatus'
+        - name: last_event
+          in: query
+          schema:
+            type: string
+            enum:
+              - delivered
+              - deferred
+              - bounced
+              - failed
+              - rejected
+              - complained
+        - name: outcome
+          in: query
+          description: '`delivered` keeps `last_event` `delivered`; `problem` keeps `last_event` `bounced`,
+            `complained`, `failed`, or `rejected`, or `status` `failed` or `suppressed`. Combined with `status`
+            and `last_event` as an intersection.'
+          schema:
+            type: string
+            enum:
+              - delivered
+              - problem
+        - name: template
+          in: query
+          description: A template key.
+          schema:
+            type: string
+            pattern: '^[a-z][a-z0-9-]{0,63}$'
+            maxLength: 64
+        - name: to
+          in: query
+          description: An exact recipient address, compared in lowercase after trimming.
+          schema:
+            type: string
+            maxLength: 320
+        - name: since
+          in: query
+          description: Inclusive lower bound on `created_at`.
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          description: Exclusive upper bound on `created_at`.
+          schema:
+            type: string
+            format: date-time
+        - name: cursor
+          in: query
+          description: Opaque keyset position from `meta.next_cursor`; absent or empty requests the newest page.
+          schema:
+            type: string
+            maxLength: 128
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: One page of the log.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionalLogPageResponse'
+        '400':
+          description: A filter is unusable, the range is longer than 30 days, or the cursor is malformed
+            (`COMMON.INVALID_INPUT`); or the organization header is missing or malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/transactional-mail-log/{message_id}:
+    get:
+      operationId: getTransactionalMailLogEntry
+      summary: Get one transactional message of the log with its timeline
+      description: For the console; any member may read it, in either mode. Adds the sender, the masked variables,
+        and up to 50 events to the log entry. The full recipient is never returned.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/TransactionalMessageID'
+      responses:
+        '200':
+          description: The log entry with its sender, masked variables, and events.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionalLogEntryResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The caller is not a member of the organization (`ORGANIZATION.NOT_FOUND`), or the
+            organization has no transactional message with the id (`MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/transactional-test-sends:
+    post:
+      operationId: sendTransactionalTest
+      summary: Send a transactional template to the caller's own account address
+      description: For the console; any member may. The recipient is always the caller's account email and cannot
+        be named. Variables not given take the template's sample values. `live` counts in the transactional
+        lane and calls the provider; `test` is simulated as `delivered`. At most 5 per minute per user. Otherwise
+        the message follows `POST /v1/transactional-messages` from the per-recipient rate limit on, with a
+        server-generated idempotency key.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionalTestSendRequest'
+      responses:
+        '202':
+          description: The test message is stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionalMessageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The caller is not a member of the organization (`ORGANIZATION.NOT_FOUND`), or the
+            organization has no template with this key (`MAILBOX.TEMPLATE_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation (`COMMON.VALIDATION_FAILED`); a variable is not declared by the
+            template (`MAILBOX.MESSAGE_INVALID`); the template is not transactional
+            (`MAILBOX.TEMPLATE_KIND_MISMATCH`); a required variable has no value and no sample value
+            (`MAILBOX.TEMPLATE_VARIABLES_MISSING`); or the template's sender domain is not verified
+            (`MAILBOX.DOMAIN_NOT_VERIFIED`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: The caller sent more than 5 test messages in a minute (`COMMON.RATE_LIMITED`), the same
+            template went to the caller's address too often in this mode (`MAILBOX.RECIPIENT_RATE_LIMITED`), or
+            the transactional lane is full and as many messages already wait as it allows
+            (`MAILBOX.SEND_LIMIT_REACHED`). The rate limits set `Retry-After`.
+          headers:
+            Retry-After:
+              description: Seconds until the limit has room; at least 1. Set for the two rate limits.
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: The instance has not enabled transactional mail (`MAILBOX.TRANSACTIONAL_DISABLED`), or
+            the database or a dependency is unavailable (`COMMON.SERVICE_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/mail-messages:
     get:
       operationId: listMailLog
@@ -6990,6 +7350,25 @@ components:
         minLength: 1
         maxLength: 255
         pattern: ^[\x21-\x7E]+$
+    TransactionalIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Names this message within the organization and the key's mode for 24 hours from the first
+        message. A repeat with the same content returns that message; different content is
+        `409 MAILBOX.IDEMPOTENCY_CONFLICT`. After 24 hours the key is released and names a new message.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+        pattern: ^[\x21-\x7E]+$
+    TransactionalMessageID:
+      name: message_id
+      in: path
+      required: true
+      description: Positive transactional message identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
   responses:
     Forbidden:
       description: The caller is authenticated but not allowed to perform this operation.
@@ -7387,6 +7766,9 @@ components:
         - MAILBOX.TEMPLATE_KEY_TAKEN
         - MAILBOX.TEMPLATE_KIND_IMMUTABLE
         - MAILBOX.TEMPLATE_KIND_MISMATCH
+        - MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND
+        - MAILBOX.RECIPIENT_RATE_LIMITED
+        - MAILBOX.TRANSACTIONAL_DISABLED
         - MAILBOX.CONTACT_NOT_FOUND
         - MAILBOX.CONTACT_EXISTS
         - MAILBOX.CONTACT_INVALID
@@ -7533,6 +7915,7 @@ components:
         - name
         - key_prefix
         - scopes
+        - mode
         - created_at
         - updated_at
       properties:
@@ -7546,8 +7929,11 @@ components:
           maxLength: 100
         key_prefix:
           type: string
-          description: Issued with the `fastbuild_` prefix; keys created before the rename keep their original lowercase prefix.
+          description: Issued with the `fastbuild_` prefix (`fastbuild_test_` for a test key); keys created before
+            the rename keep their original lowercase prefix.
           pattern: ^[a-z][a-z0-9]*_[a-z0-9_-]+$
+        mode:
+          $ref: '#/components/schemas/APIKeyMode'
         scopes:
           type: array
           maxItems: 32
@@ -7590,6 +7976,16 @@ components:
         expires_at:
           type: string
           format: date-time
+        mode:
+          $ref: '#/components/schemas/APIKeyMode'
+    APIKeyMode:
+      type: string
+      description: '`live` keys act for real; `test` keys are issued with the `fastbuild_test_` prefix, are
+        accepted only by routes that declare test support, and there never send mail. Fixed at creation;
+        defaults to `live`.'
+      enum:
+        - live
+        - test
     CreateAPIKeyResult:
       type: object
       additionalProperties: false
@@ -10052,6 +10448,10 @@ components:
         - daily_send_limit
         - daily_broadcast_limit
         - daily_transactional_limit
+        - transactional_enabled
+        - transactional_recipient_limit_per_minute
+        - transactional_key_limit_per_second
+        - simulator_domain
         - broadcasts_enabled
         - custom_domains_enabled
       properties:
@@ -10092,6 +10492,25 @@ components:
           description: The transactional lane limit. Live, non-simulated transactional messages one organization may
             attempt per rolling 24 hours.
           minimum: 1
+        transactional_enabled:
+          type: boolean
+          description: Whether the instance accepts transactional messages (`MAILBOX_TRANSACTIONAL_ENABLED`).
+            Instance-wide, repeated on every item.
+        transactional_recipient_limit_per_minute:
+          type: integer
+          description: Transactional messages one organization may send from one template to one recipient in
+            one mode per minute.
+          minimum: 1
+        transactional_key_limit_per_second:
+          type: integer
+          description: Transactional messages one API key may send per second.
+          minimum: 1
+        simulator_domain:
+          type: string
+          description: The domain whose addresses are simulated instead of sent (`delivered@`, `bounced@`,
+            `soft-bounced@`, `complained@`, `suppressed@`, each with an optional `+tag`).
+          minLength: 1
+          maxLength: 253
         broadcasts_enabled:
           type: boolean
           description: Whether broadcasts can be sent. Unsubscribe links need `MAILBOX_INBOUND_SECRET` and `MAILBOX_PUBLIC_URL`.
@@ -12872,11 +13291,20 @@ components:
       additionalProperties: false
       required:
         - message_id
+        - message_kind
         - type
         - duplicate
       properties:
         message_id:
+          description: The id of the matched message in the table `message_kind` names.
           $ref: '#/components/schemas/PositiveID'
+        message_kind:
+          type: string
+          description: '`mailbox` when the event matched a mailbox message, `transactional` when it matched a
+            transactional message.'
+          enum:
+            - mailbox
+            - transactional
         type:
           $ref: '#/components/schemas/MailEventType'
         duplicate:
@@ -12895,3 +13323,413 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MailDeliveryEvent'
+    TransactionalMode:
+      type: string
+      description: '`live` messages come from live keys and live console test sends; `test` messages come from
+        test keys and test console sends, are always simulated, and never call the provider.'
+      enum:
+        - live
+        - test
+    TransactionalMessageStatus:
+      type: string
+      description: '`queued` until the provider takes the message (or the simulator decides), then `sent`;
+        `failed` when the provider refused it, its outcome is unknown, retries ran out, it waited more than an
+        hour, or its sender domain lost verification; `suppressed` when the recipient is on the
+        organization''s suppression list (nothing is sent).'
+      enum:
+        - queued
+        - sent
+        - failed
+        - suppressed
+    TransactionalQueuedReason:
+      type:
+        - string
+        - 'null'
+      description: '`send_limit` while a queued message waits for room in the transactional lane; `retry` while it
+        waits for a retry after a temporary provider failure; otherwise null.'
+      enum:
+        - send_limit
+        - retry
+        - null
+    TransactionalLastEvent:
+      type:
+        - string
+        - 'null'
+      description: The most severe delivery event recorded for the message (see MAILBOXES.md, Delivery Events);
+        null when none was recorded.
+      enum:
+        - accepted
+        - delivered
+        - deferred
+        - bounced
+        - failed
+        - rejected
+        - complained
+        - null
+    TransactionalMessageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - template
+        - to
+      properties:
+        template:
+          type: string
+          description: The `key` of a transactional template of the organization.
+          pattern: '^[a-z][a-z0-9-]{0,63}$'
+          maxLength: 64
+        to:
+          type: string
+          description: One bare address. Surrounding whitespace is trimmed and the address is lowercased; a
+            display name or several addresses are refused.
+          minLength: 3
+          maxLength: 320
+        variables:
+          $ref: '#/components/schemas/MailTemplateVariables'
+    TransactionalTestSendRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - template
+        - mode
+      properties:
+        template:
+          type: string
+          description: The `key` of a transactional template of the organization.
+          pattern: '^[a-z][a-z0-9-]{0,63}$'
+          maxLength: 64
+        mode:
+          $ref: '#/components/schemas/TransactionalMode'
+        variables:
+          $ref: '#/components/schemas/MailTemplateVariables'
+    TransactionalSender:
+      type: object
+      additionalProperties: false
+      description: The template's sender when the message was created.
+      required:
+        - address
+        - name
+      properties:
+        address:
+          type: string
+          maxLength: 320
+        name:
+          type: string
+          description: The display name; empty when the template has none.
+          maxLength: 100
+    TransactionalMessageEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - detail
+        - occurred_at
+      properties:
+        type:
+          $ref: '#/components/schemas/MailEventType'
+        detail:
+          type: string
+          description: Short machine-readable reason such as `5.1.1 permanent_failure` or `simulated`; never
+            provider free text.
+          maxLength: 255
+        occurred_at:
+          type: string
+          format: date-time
+    TransactionalMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mode
+        - simulated
+        - template
+        - from
+        - to
+        - to_masked
+        - subject
+        - variables
+        - status
+        - queued_reason
+        - failure_code
+        - last_event
+        - attempts
+        - idempotency_key
+        - created_at
+        - sent_at
+        - events
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        mode:
+          $ref: '#/components/schemas/TransactionalMode'
+        simulated:
+          type: boolean
+          description: True for a simulator address or a test-mode message; the provider is never called.
+        template:
+          type: string
+          description: The template key when the message was created; kept after the template is deleted.
+          maxLength: 64
+        from:
+          $ref: '#/components/schemas/TransactionalSender'
+        to:
+          type: string
+          description: The full recipient, lowercased. Returned only on API key routes and console test sends.
+          maxLength: 320
+        to_masked:
+          type: string
+          description: The recipient with the local part cut to its first two characters (one when it has at
+            most two) followed by `••`, domain kept, for example `li••@example.com`.
+          maxLength: 330
+        subject:
+          type: string
+          description: The rendered subject with every secret variable masked.
+          maxLength: 998
+        variables:
+          type: object
+          description: The variables as sent, with secret values masked. A secret value that is an `http` or
+            `https` URL with a host shows `<host>/••••`; any other secret value shows `••••••`.
+          maxProperties: 100
+          additionalProperties:
+            type: string
+            maxLength: 2000
+        status:
+          $ref: '#/components/schemas/TransactionalMessageStatus'
+        queued_reason:
+          $ref: '#/components/schemas/TransactionalQueuedReason'
+        failure_code:
+          type:
+            - string
+            - 'null'
+          description: Stable reason when `status` is `failed`, such as `send.expired`, `send.sender_unverified`,
+            `transport.unknown_outcome`, or a provider code; null otherwise.
+          maxLength: 120
+        last_event:
+          $ref: '#/components/schemas/TransactionalLastEvent'
+        attempts:
+          type: integer
+          description: Provider calls made so far; at most 4.
+          minimum: 0
+          maximum: 4
+        idempotency_key:
+          type:
+            - string
+            - 'null'
+          description: The `Idempotency-Key` the message was created with; null once released 24 hours later.
+          maxLength: 255
+        created_at:
+          type: string
+          format: date-time
+        sent_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        events:
+          type: array
+          description: Up to 50 events, oldest first.
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/TransactionalMessageEvent'
+    TransactionalMessageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/TransactionalMessage'
+    TransactionalLogEntry:
+      type: object
+      additionalProperties: false
+      description: A transactional message as the console log shows it, without the full recipient or the
+        variables.
+      required:
+        - id
+        - mode
+        - simulated
+        - template
+        - to_masked
+        - subject
+        - status
+        - queued_reason
+        - failure_code
+        - last_event
+        - idempotency_key
+        - created_at
+        - sent_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        mode:
+          $ref: '#/components/schemas/TransactionalMode'
+        simulated:
+          type: boolean
+        template:
+          type: string
+          maxLength: 64
+        to_masked:
+          type: string
+          maxLength: 330
+        subject:
+          type: string
+          description: The rendered subject with every secret variable masked.
+          maxLength: 998
+        status:
+          $ref: '#/components/schemas/TransactionalMessageStatus'
+        queued_reason:
+          $ref: '#/components/schemas/TransactionalQueuedReason'
+        failure_code:
+          type:
+            - string
+            - 'null'
+          maxLength: 120
+        last_event:
+          $ref: '#/components/schemas/TransactionalLastEvent'
+        idempotency_key:
+          type:
+            - string
+            - 'null'
+          maxLength: 255
+        created_at:
+          type: string
+          format: date-time
+        sent_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    TransactionalLogEntryDetail:
+      type: object
+      additionalProperties: false
+      description: A log entry with its sender, masked variables, and events. Still without the full recipient.
+      required:
+        - id
+        - mode
+        - simulated
+        - template
+        - to_masked
+        - subject
+        - status
+        - queued_reason
+        - failure_code
+        - last_event
+        - idempotency_key
+        - created_at
+        - sent_at
+        - from
+        - variables
+        - events
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        mode:
+          $ref: '#/components/schemas/TransactionalMode'
+        simulated:
+          type: boolean
+        template:
+          type: string
+          maxLength: 64
+        to_masked:
+          type: string
+          maxLength: 330
+        subject:
+          type: string
+          maxLength: 998
+        status:
+          $ref: '#/components/schemas/TransactionalMessageStatus'
+        queued_reason:
+          $ref: '#/components/schemas/TransactionalQueuedReason'
+        failure_code:
+          type:
+            - string
+            - 'null'
+          maxLength: 120
+        last_event:
+          $ref: '#/components/schemas/TransactionalLastEvent'
+        idempotency_key:
+          type:
+            - string
+            - 'null'
+          maxLength: 255
+        created_at:
+          type: string
+          format: date-time
+        sent_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        from:
+          $ref: '#/components/schemas/TransactionalSender'
+        variables:
+          type: object
+          description: The variables as sent, with secret values masked.
+          maxProperties: 100
+          additionalProperties:
+            type: string
+            maxLength: 2000
+        events:
+          type: array
+          description: Up to 50 events, oldest first.
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/TransactionalMessageEvent'
+    TransactionalLogEntryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/TransactionalLogEntryDetail'
+    TransactionalLogPageMeta:
+      type: object
+      additionalProperties: false
+      required:
+        - next_cursor
+        - total_24h
+      properties:
+        next_cursor:
+          description: Pass as `cursor` to read the next, older page; null on the last page.
+          type:
+            - string
+            - 'null'
+          maxLength: 128
+        total_24h:
+          type: integer
+          description: Messages of the requested mode created in the last 24 hours, ignoring the other filters;
+            counting stops at 10000.
+          minimum: 0
+          maximum: 10000
+    TransactionalLogPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/TransactionalLogEntry'
+        meta:
+          $ref: '#/components/schemas/TransactionalLogPageMeta'

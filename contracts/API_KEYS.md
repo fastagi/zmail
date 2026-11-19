@@ -27,7 +27,8 @@ Request:
 {
   "name": "Deployment automation",
   "scopes": ["models:invoke", "models:read"],
-  "expires_at": "2027-01-01T00:00:00Z"
+  "expires_at": "2027-01-01T00:00:00Z",
+  "mode": "live"
 }
 ```
 
@@ -36,6 +37,8 @@ Request:
   removed, and the result uses `namespace:action`, where each segment starts with a letter and
   contains lowercase ASCII letters, digits, `_`, or `-`. The explicit `*` wildcard is also accepted.
 - `expires_at` is optional and must be in the future.
+- `mode` is optional, `live` (the default) or `test`; anything else is `422 COMMON.VALIDATION_FAILED`.
+  See [Modes](#modes).
 
 The response returns metadata plus `plaintext_key`. The plaintext appears only in this successful
 create response:
@@ -50,6 +53,7 @@ create response:
       "user_id": 7,
       "name": "Deployment automation",
       "key_prefix": "fastbuild_ab12cd34",
+      "mode": "live",
       "scopes": ["models:invoke", "models:read"],
       "created_at": "2026-07-15T12:00:00Z",
       "updated_at": "2026-07-15T12:00:00Z"
@@ -62,6 +66,22 @@ create response:
 The API persists only the SHA-256 hash. List responses and later reads never contain
 `plaintext_key` or `key_hash`. The Web shows the plaintext in one dialog, clears it when the dialog
 closes, and immediately resets React Query mutation data instead of placing it in query cache.
+
+## Modes
+
+Every key has a `mode`, fixed when it is created and returned on every key:
+
+| Mode | Prefix | Behavior |
+|---|---|---|
+| `live` | `fastbuild_<short id>` | Acts for real. Every key created before modes existed is `live`. |
+| `test` | `fastbuild_test_<short id>` | Accepted only by routes that declare test support, and there never sends mail or counts in a send limit. |
+
+A route declares test support explicitly; every other route refuses a valid test key with
+`403 PERMISSION.DENIED`, checked together with its scopes, so a route that forgets to declare test
+support refuses test keys. Today only `POST /v1/transactional-messages` and
+`GET /v1/transactional-messages/:message_id` declare it (see
+[`MAILBOXES.md`](MAILBOXES.md#transactional-mail)). A test key and a live key of one owner see
+disjoint data on those routes.
 
 ## List And Revoke
 
@@ -78,12 +98,13 @@ last-used update cannot clear revocation.
 
 API clients send the plaintext key in `X-API-Key` to routes using the starter-owned `api_key`
 middleware. Validation rejects missing, unknown, expired, and revoked keys. Successful validation
-adds the key owner and scopes to request context.
+adds the key owner, scopes, and mode to request context.
 
 Scopes attenuate what a key may do; they never elevate the key beyond its owning user. Scope checks
 are exact, except that `*` matches every required scope. A route that needs scopes applies
 `apikey.RequireScopes(...)` after API key authentication. Missing API key identity returns
-`401 AUTH.UNAUTHORIZED`; insufficient scope returns `403 PERMISSION.DENIED`.
+`401 AUTH.UNAUTHORIZED`; insufficient scope, or a test key on a route without test support,
+returns `403 PERMISSION.DENIED`.
 
 `last_used_at` is operational metadata, not an authorization decision. Its write is best-effort,
 atomic, and throttled to at most once per minute per active key.
@@ -96,7 +117,7 @@ atomic, and throttled to at most once per minute per active key.
 | 401 | `API_KEY.INVALID` | Client key is unknown or malformed |
 | 401 | `API_KEY.EXPIRED` | Client key has expired |
 | 401 | `API_KEY.REVOKED` | Client key was revoked |
-| 403 | `PERMISSION.DENIED` | Authenticated key lacks a required scope |
+| 403 | `PERMISSION.DENIED` | Authenticated key lacks a required scope, or is a test key on a route without test support |
 | 404 | `API_KEY.NOT_FOUND` | Owned management resource was not found |
 | 413 | `COMMON.REQUEST_TOO_LARGE` | Browser create body exceeds its limit |
 | 422 | `COMMON.VALIDATION_FAILED` | Request fields fail schema validation |

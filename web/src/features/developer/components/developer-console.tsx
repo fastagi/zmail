@@ -62,8 +62,7 @@ function DeveloperWorkspace({ organization }: { organization: MailOrganization }
       />
     );
   }
-  // An API that does not report the flag yet has transactional mail off.
-  if (!domains.data.some(domain => domain.transactional_enabled === true)) {
+  if (!domains.data.some(domain => domain.transactional_enabled)) {
     return (
       <EmptyState
         icon={<PlugZap className="size-5" aria-hidden="true" />}

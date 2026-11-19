@@ -229,13 +229,17 @@ describe('mailbox service boundary', () => {
   it('accepts domains, mailboxes, and pages without bodies', () => {
     expect(mailboxDomainListSchema.safeParse([domain()]).success).toBe(true);
     expect(mailboxDomainListSchema.safeParse([domain({ provider: 'log' })]).success).toBe(true);
-    // The provider, the inbound state, and the three lane limits are required parts of the answer.
+    // The provider, the inbound state, the lane limits, and the transactional settings are required.
     for (const field of [
       'provider',
       'inbound_enabled',
       'daily_send_limit',
       'daily_broadcast_limit',
       'daily_transactional_limit',
+      'transactional_enabled',
+      'transactional_recipient_limit_per_minute',
+      'transactional_key_limit_per_second',
+      'simulator_domain',
     ]) {
       const partial: Record<string, unknown> = domain();
       delete partial[field];
@@ -248,6 +252,9 @@ describe('mailbox service boundary', () => {
       { daily_send_limit: 1.5 },
       { daily_broadcast_limit: 0 },
       { daily_transactional_limit: 1.5 },
+      { transactional_enabled: 'yes' },
+      { transactional_recipient_limit_per_minute: 0 },
+      { transactional_key_limit_per_second: 1.5 },
     ]) {
       expect(mailboxDomainListSchema.safeParse([domain(drift)]).success).toBe(false);
     }
@@ -462,6 +469,10 @@ function domain(overrides: Record<string, unknown> = {}) {
     daily_send_limit: 200,
     daily_broadcast_limit: 200,
     daily_transactional_limit: 200,
+    transactional_enabled: true,
+    transactional_recipient_limit_per_minute: 3,
+    transactional_key_limit_per_second: 20,
+    simulator_domain: 'test.zmail.im',
     broadcasts_enabled: true,
     custom_domains_enabled: false,
     ...overrides,
