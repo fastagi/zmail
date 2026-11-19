@@ -19,11 +19,20 @@ export const settingKeys = {
     [...settingKeys.all, 'organization', organizationId] as const,
 };
 
-export function useUserSettings() {
+/**
+ * The signed-in user's settings; `enabled: false` leaves them unread. `localErrors` keeps a failure
+ * out of the global error toast, for a page that reads the settings in passing and falls back.
+ */
+export function useUserSettings({
+  enabled = true,
+  localErrors = false,
+}: { enabled?: boolean; localErrors?: boolean } = {}) {
   return useQuery({
     queryKey: settingKeys.user(),
     queryFn: () => settingService.user(),
     staleTime: 30_000,
+    enabled,
+    ...(localErrors ? { meta: LOCAL_ERROR_HANDLING_META } : {}),
   });
 }
 

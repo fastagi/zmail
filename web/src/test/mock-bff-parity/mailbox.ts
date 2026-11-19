@@ -164,6 +164,62 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   expect(filtered.meta).toMatchObject({ total: 1, last_page: 1 });
   expect((await mailboxService.listLog(organizationId, { q: '100%' })).items).toEqual([]);
 
+  // The unified inbox: cursor pages across the mailboxes the caller reads.
+  const sentThreads = await mailboxService.listInbox(organizationId, {
+    view: 'sent',
+    group: 'thread',
+    tz: 'UTC',
+  });
+  expect(sentThreads.items.map(item => item.id)).toEqual([second.id, first.id]);
+  expect(sentThreads.items.map(item => item.snippet)).toEqual(['', 'Plain body']);
+  expect(sentThreads.items[0]).toMatchObject({
+    mailbox_address: mailbox.address,
+    role_id: null,
+    thread: { message_count: 1, message_ids: [second.id] },
+  });
+  expect(sentThreads.meta).toEqual({ per_page: 15, has_more: false, next_cursor: null });
+  const newest = await mailboxService.listInbox(
+    organizationId,
+    { view: 'sent', tz: 'UTC' },
+    undefined,
+    1
+  );
+  expect(newest.items.map(item => item.id)).toEqual([second.id]);
+  expect(newest.meta.has_more).toBe(true);
+  const older = await mailboxService.listInbox(
+    organizationId,
+    { view: 'sent', tz: 'UTC' },
+    newest.meta.next_cursor ?? undefined,
+    1
+  );
+  expect(older.items.map(item => item.id)).toEqual([first.id]);
+  expect(older.meta).toEqual({ per_page: 1, has_more: false, next_cursor: null });
+  const received = await mailboxService.listInbox(organizationId, {
+    view: 'all',
+    mailboxId: other.id,
+    roleId: 'none',
+    tz: 'UTC',
+  });
+  expect(received.items.map(item => [item.mailbox_address, item.direction])).toEqual([
+    [other.address, 'inbound'],
+  ]);
+
+  const today = await mailboxService.listInbox(organizationId, { view: 'today', tz: 'UTC' });
+  expect(today.items.map(item => item.direction)).toEqual(['inbound', 'inbound']);
+  const searched = await mailboxService.listInbox(organizationId, {
+    view: 'all',
+    q: 'FIRST',
+    unread: false,
+    tz: 'UTC',
+  });
+  expect(searched.items.map(item => item.id)).toEqual([first.id]);
+  const counts = await mailboxService.inboxCounts(organizationId, 'Asia/Shanghai');
+  expect(counts.views.all_unread).toBe(
+    counts.mailboxes.reduce((sum, item) => sum + item.unread, 0)
+  );
+  expect(counts.mailboxes.map(item => item.mailbox_id)).toEqual([mailbox.id, other.id]);
+  expect(counts.views.today).toBe(2);
+
   const week = await mailboxService.stats(organizationId);
   expect(week).toHaveLength(7);
   const totals = week.reduce(
@@ -176,6 +232,45 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   );
   expect(totals).toEqual({ sent: 2, failed: 0, received: 2 });
   expect(await mailboxService.stats(organizationId, 1)).toHaveLength(1);
+
+  // Mail roles: the shared mailbox in a role, its rows tagged, the counts grouped by role.
+  const role = await mailboxService.createRole(organizationId, { name: 'Parity desk' });
+  expect(role).toMatchObject({ color: 'gray', description: '', owner_user_id: null });
+  expect(role.mailbox_ids).toEqual([]);
+  expect(await mailboxService.assignRole(organizationId, mailbox.id, role.id)).toMatchObject({
+    id: mailbox.id,
+    role_id: role.id,
+  });
+  expect(
+    (await mailboxService.listRoles(organizationId)).map(item => [item.id, item.mailbox_ids])
+  ).toEqual([[role.id, [mailbox.id]]]);
+  const inRole = await mailboxService.listInbox(organizationId, {
+    view: 'sent',
+    roleId: role.id,
+    tz: 'UTC',
+  });
+  expect(inRole.items.map(item => item.role_id)).toEqual([role.id, role.id]);
+  expect((await mailboxService.inboxCounts(organizationId, 'UTC')).roles).toEqual([
+    { role_id: role.id, unread: 0 },
+  ]);
+  expect(
+    await mailboxService.updateRole(organizationId, role.id, {
+      name: 'Parity team',
+      color: 'teal',
+      description: 'Shared parity mail',
+      owner_user_id: 2,
+    })
+  ).toMatchObject({
+    id: role.id,
+    name: 'Parity team',
+    owner_user_id: 2,
+    mailbox_ids: [mailbox.id],
+  });
+  await mailboxService.deleteRole(organizationId, role.id);
+  expect((await mailboxService.list(organizationId)).map(item => item.role_id)).toEqual([
+    null,
+    null,
+  ]);
 
   // Members, the webhook switch, and the access history of the shared mailbox.
   expect(await mailboxService.setMember(organizationId, mailbox.id, 3, 'view')).toMatchObject({

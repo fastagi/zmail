@@ -2,6 +2,9 @@ import type { infer as Infer } from 'zod/mini';
 
 import type {
   createMailboxSchema,
+  inboxCountsSchema,
+  inboxItemSchema,
+  inboxPageEnvelopeSchema,
   mailboxAccessEventPageEnvelopeSchema,
   mailboxAccessEventSchema,
   mailboxAccessEventTypeSchema,
@@ -69,6 +72,8 @@ import type {
   mailMessageCountsSchema,
   mailMessageUpdatesResultSchema,
   mailPlacementSchema,
+  mailRoleInputSchema,
+  mailRoleSchema,
   mailThreadSummarySchema,
   mailTrashPurgeSchema,
   updateMailMessagesSchema,
@@ -125,6 +130,8 @@ export type MailFolder = Infer<typeof mailFolderSchema>;
 export type MailFolderInput = Infer<typeof mailFolderInputSchema>;
 export type MailLabel = Infer<typeof mailLabelSchema>;
 export type MailLabelInput = Infer<typeof mailLabelInputSchema>;
+export type MailRole = Infer<typeof mailRoleSchema>;
+export type MailRoleInput = Infer<typeof mailRoleInputSchema>;
 export type MailMessageCounts = Infer<typeof mailMessageCountsSchema>;
 export type MailMessageUpdatesResult = Infer<typeof mailMessageUpdatesResultSchema>;
 export type MailTrashPurge = Infer<typeof mailTrashPurgeSchema>;
@@ -195,6 +202,31 @@ export interface MailLogFilters {
   status?: MailStatus;
   mailboxId?: number;
   q?: string;
+}
+
+export type InboxView = 'all' | 'today' | 'pending' | 'sent';
+
+/**
+ * Filters of the unified inbox, combined with AND; an absent field does not narrow it. `roleId`
+ * `'none'` keeps mailboxes without a role. `q` is only for `all`, and `group` only for `all` and
+ * `sent` without `unread` or `q`; see `contracts/MAILBOXES.md`. `tz` is the IANA zone of today.
+ */
+export interface InboxFilters {
+  view: InboxView;
+  roleId?: number | 'none';
+  mailboxId?: number;
+  unread?: boolean;
+  q?: string;
+  group?: 'thread';
+  tz: string;
+}
+
+export type InboxItem = Infer<typeof inboxItemSchema>;
+export type InboxCounts = Infer<typeof inboxCountsSchema>;
+
+export interface InboxPage {
+  items: InboxItem[];
+  meta: Infer<typeof inboxPageEnvelopeSchema>['meta'];
 }
 
 export type MailBroadcastStatus = Infer<typeof mailBroadcastStatusSchema>;

@@ -6,6 +6,7 @@ import { apiErrorResponse, apiJsonBodyErrorResponse } from '@/app/api/_shared/er
 import { readJsonBody } from '@/app/api/_shared/json-body';
 import { guardSameOriginMutation } from '@/app/api/_shared/mock-bff';
 import {
+  apiCursorPageResponse,
   apiNoContentResponse,
   apiPaginatedResponse,
   apiSuccessResponse,
@@ -18,6 +19,8 @@ import { getApiSessionToken } from '@/features/auth/server/api-session';
 import { getSessionUser } from '@/features/auth/server/session';
 import type { AuthUser } from '@/features/auth/types';
 import {
+  INBOX_TIME_ZONE_MAX_LENGTH,
+  INBOX_VIEWS,
   MAILBOX_DISPLAY_NAME_MAX_LENGTH,
   MAILBOX_LOCAL_PART_MAX_LENGTH,
   MAIL_ADDRESS_MAX_LENGTH,
@@ -56,6 +59,7 @@ import {
   MAIL_TEMPLATE_VALUE_MAX_LENGTH,
   MAIL_TEMPLATE_VARIABLE_PATTERN,
 } from '@/features/mailbox/schemas';
+import { decodeInboxCursor } from '@/features/mailbox/server/inbox-cursor';
 import {
   mockBroadcastStore,
   type MockBroadcastResult,
@@ -78,8 +82,10 @@ import {
 import {
   mockMailboxStore,
   type MailboxViewer,
+  type MockInboxQuery,
   type MockAccessError,
   type MockAccessResult,
+  type MockMailRoleInput,
   type MockMailSendResult,
   type MockMailTemplateResult,
   type MockMessageChange,
@@ -91,6 +97,7 @@ import { parseOrganizationId } from '@/features/organization/server/organization
 import type { OrganizationContext } from '@/features/organization/types';
 import type {
   CreateMailboxInput,
+  InboxView,
   MailDirection,
   MailLogFilters,
   MailMessageFilters,
@@ -847,6 +854,61 @@ export async function listMailLogRoute(request: Request): Promise<NextResponse> 
     perPage
   );
   return apiPaginatedResponse(result.items, result.meta, result.links, privateMailboxHeaders());
+}
+
+/**
+ * The unified inbox: one cursor page across the mailboxes the caller reads. The query is checked
+ * here as the API checks it, so a malformed one never leaves the BFF, and only the nine documented
+ * parameters reach the API.
+ */
+export async function listInboxMessagesRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const query = parseInboxQuery(new URL(request.url).searchParams);
+  if (!query.ok) return query.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'inbox-messages',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: query.value.forward,
+    });
+  }
+  const page = mockMailboxStore.listInbox(
+    target.organizationId,
+    viewerOf(target),
+    query.value.mock
+  );
+  if (!page.ok) return organizeFailure(page);
+  return apiCursorPageResponse(page.value.items, page.value.meta, privateMailboxHeaders());
+}
+
+/**
+ * The caller's own unified inbox counts. Only `tz` reaches the API, checked as the inbox checks
+ * it; other parameters are dropped.
+ */
+export async function getInboxMessageCountsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const zones = new URL(request.url).searchParams.getAll('tz');
+  if (zones.length > 1) return invalidInput('Repeated time zone');
+  const [tz] = zones;
+  if (tz !== undefined && !isTimeZone(tz)) return invalidInput('Invalid time zone');
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'inbox-message-counts',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: new URLSearchParams(tz === undefined ? {} : { tz }),
+    });
+  }
+  return success(
+    mockMailboxStore.inboxCounts(target.organizationId, viewerOf(target), tz ?? 'UTC')
+  );
 }
 
 /** Per-day counts for the last `days` UTC days; the window defaults to a week. */
@@ -2474,6 +2536,128 @@ export async function setMailboxWebhookSettingRoute(
   );
 }
 
+/** The organization's mail roles; every member may read them, each seeing what they may see. */
+export async function listMailRolesRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mail-roles',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return success(mockMailboxStore.listRoles(target.organizationId, viewerOf(target)));
+}
+
+/** Creates a mail role; owners and admins only, as the API decides. */
+export async function createMailRoleRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const input = await roleBody(request);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'mail-roles',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: roleFieldMap,
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.createRole(target.organizationId, viewerOf(target), input.value),
+    201
+  );
+}
+
+/** Replaces every field of a mail role; owners and admins only. */
+export async function updateMailRoleRoute(
+  request: Request,
+  rawRoleId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const roleId = parseRouteId(rawRoleId);
+  if (!roleId.ok) return roleId.response;
+  const input = await roleBody(request);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mail-roles/${roleId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: roleFieldMap,
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.updateRole(target.organizationId, viewerOf(target), roleId.value, input.value)
+  );
+}
+
+/** Deletes a mail role; its mailboxes become ungrouped. Owners and admins only. */
+export async function deleteMailRoleRoute(
+  request: Request,
+  rawRoleId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const roleId = parseRouteId(rawRoleId);
+  if (!roleId.ok) return roleId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mail-roles/${roleId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const result = mockMailboxStore.deleteRole(target.organizationId, viewerOf(target), roleId.value);
+  return result.ok ? apiNoContentResponse(privateMailboxHeaders()) : organizeFailure(result);
+}
+
+/**
+ * Puts a mailbox in a mail role (`{ role_id: id }`) or takes it out (`{ role_id: null }`); the
+ * field must be present. Needs `administer`; grants and revokes nothing.
+ */
+export async function setMailboxRoleRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const body = await jsonObject(request, maxOrganizeBodyBytes);
+  if (!body.ok) return body.response;
+  const { role_id: roleId } = body.value;
+  if (roleId !== null && !positiveId(roleId)) {
+    return validationFailed({ role_id: ['The role_id field must be an id or null'] });
+  }
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mailboxes/${mailboxId.value}/role-assignment`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { role_id: roleId },
+      fieldMap: { role_id: 'role_id' },
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.assignRole(target.organizationId, mailboxId.value, viewerOf(target), roleId)
+  );
+}
+
 function accessResponse<T>(result: MockAccessResult<T>, status: 200 | 201 = 200): NextResponse {
   return result.ok ? success(result.value, status) : accessFailure(result.error);
 }
@@ -2516,6 +2700,12 @@ function organizeFailure(
       return failure(422, ApiErrorCode.MAILBOX_LABEL_LIMIT_REACHED, 'Mail label limit reached');
     case 'search_too_broad':
       return failure(422, ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 'Search is too broad');
+    case 'role_not_found':
+      return failure(404, ApiErrorCode.MAILBOX_ROLE_NOT_FOUND, 'Mail role not found');
+    case 'role_name_taken':
+      return failure(409, ApiErrorCode.MAILBOX_ROLE_NAME_TAKEN, 'Mail role name is taken');
+    case 'role_limit':
+      return failure(422, ApiErrorCode.MAILBOX_ROLE_LIMIT_REACHED, 'Mail role limit reached');
     case 'mailbox_not_found':
     case 'forbidden':
     case 'not_found':
@@ -2896,6 +3086,12 @@ const messageChangeFieldMap = {
 } as const;
 
 const organizeFieldMap = { name: 'name', color: 'color' } as const;
+const roleFieldMap = {
+  name: 'name',
+  color: 'color',
+  description: 'description',
+  owner_user_id: 'owner_user_id',
+} as const;
 
 /**
  * Shape checks only: each field the right JSON type, ids non-negative integers. Whether the
@@ -2961,6 +3157,38 @@ async function organizeBody(
   return {
     ok: true,
     value: withColor ? { name: name as string, color: color as string } : { name: name as string },
+  };
+}
+
+/**
+ * A mail role write: shape checks only, with the documented defaults filled in (gray, empty, no
+ * owner) so the whole role is replaced. The name, palette, length, and owner rules are the API's
+ * and, in development, the mock's. Unknown keys are dropped.
+ */
+async function roleBody(request: Request): Promise<Parsed<Required<MockMailRoleInput>>> {
+  const body = await jsonObject(request, maxOrganizeBodyBytes);
+  if (!body.ok) return body;
+  const { name = '', color = null, description = null, owner_user_id: owner = null } = body.value;
+  const errors: Record<string, string[]> = {};
+  if (typeof name !== 'string') errors.name = ['The name field must be a string'];
+  if (color !== null && typeof color !== 'string') {
+    errors.color = ['The color field must be a string'];
+  }
+  if (description !== null && typeof description !== 'string') {
+    errors.description = ['The description field must be a string'];
+  }
+  if (owner !== null && !positiveId(owner)) {
+    errors.owner_user_id = ['The owner_user_id field must be an id or null'];
+  }
+  if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
+  return {
+    ok: true,
+    value: {
+      name: name as string,
+      color: (color as string | null) ?? 'gray',
+      description: (description as string | null) ?? '',
+      owner_user_id: owner as number | null,
+    },
   };
 }
 
@@ -3160,6 +3388,128 @@ function parseLogFilters(query: URLSearchParams): Parsed<MailLogFilters> {
       ...(q === '' ? {} : { q }),
     },
   };
+}
+
+/** The unified inbox parameters, in the order they are forwarded; each may appear once. */
+const inboxParameters = [
+  'view',
+  'role_id',
+  'mailbox_id',
+  'unread',
+  'q',
+  'group',
+  'tz',
+  'cursor',
+  'per_page',
+] as const;
+const inboxTimeZonePattern = /^[A-Za-z][A-Za-z0-9_+\-/]*$/u;
+const integerPattern = /^[+-]?\d+$/u;
+
+/**
+ * The unified inbox query rules of `contracts/MAILBOXES.md`, as the API applies them: `page`, a
+ * repeated parameter, an empty or unknown value, a malformed cursor, an unknown zone, or a
+ * combination outside the rules is invalid input; an integer `per_page` out of range is clamped.
+ * Unknown parameters are dropped. Answers the query to forward and the query for the mock.
+ */
+function parseInboxQuery(
+  query: URLSearchParams
+): Parsed<{ forward: URLSearchParams; mock: MockInboxQuery }> {
+  const invalid = (message: string) => ({ ok: false as const, response: invalidInput(message) });
+  if (query.has('page')) return invalid('Use cursor instead of page');
+  for (const name of inboxParameters) {
+    if (query.getAll(name).length > 1) return invalid('Repeated inbox parameter');
+  }
+  const value = (name: (typeof inboxParameters)[number]) => query.get(name);
+  const forward = new URLSearchParams();
+  const mock: MockInboxQuery = { view: 'all', tz: 'UTC', perPage: defaultPerPage };
+
+  const view = value('view');
+  if (view !== null) {
+    if (!isOneOf<InboxView>(INBOX_VIEWS, view)) return invalid('Invalid inbox view');
+    mock.view = view;
+    forward.set('view', view);
+  }
+  const role = value('role_id');
+  if (role !== null) {
+    const roleId = role === 'none' ? null : parseRouteId(role);
+    if (roleId !== null && !roleId.ok) return invalid('Invalid role filter');
+    mock.roleId = roleId === null ? 'none' : roleId.value;
+    forward.set('role_id', role);
+  }
+  const mailbox = value('mailbox_id');
+  if (mailbox !== null) {
+    const mailboxId = parseRouteId(mailbox);
+    if (!mailboxId.ok) return invalid('Invalid mailbox filter');
+    mock.mailboxId = mailboxId.value;
+    forward.set('mailbox_id', mailbox);
+  }
+  const unread = value('unread');
+  if (unread !== null) {
+    if (unread !== 'true' && unread !== 'false') return invalid('Invalid unread filter');
+    mock.unread = unread === 'true';
+    forward.set('unread', unread);
+  }
+  const rawSearch = value('q');
+  if (rawSearch !== null) {
+    // As in the mailbox search: the length counts as sent, the rest after trimming.
+    const q = rawSearch.trim();
+    if (q === '' || Array.from(rawSearch).length > MAIL_SEARCH_MAX_LENGTH || /\p{Cc}/u.test(q)) {
+      return invalid('Invalid search');
+    }
+    mock.q = q;
+    forward.set('q', q);
+  }
+  const group = value('group');
+  if (group !== null) {
+    if (group !== 'thread') return invalid('Invalid grouping');
+    mock.group = group;
+    forward.set('group', group);
+  }
+  const tz = value('tz');
+  if (tz !== null) {
+    if (!isTimeZone(tz)) return invalid('Invalid time zone');
+    mock.tz = tz;
+    forward.set('tz', tz);
+  }
+  const cursor = value('cursor');
+  if (cursor !== null) {
+    const after = decodeInboxCursor(cursor);
+    if (!after) return invalid('Invalid cursor');
+    mock.after = after;
+    forward.set('cursor', cursor);
+  }
+  const perPage = value('per_page');
+  if (perPage !== null) {
+    if (!integerPattern.test(perPage)) return invalid('Invalid page size');
+    mock.perPage = Math.min(Math.max(Number(perPage), 1), MAIL_PAGE_MAX_SIZE);
+  }
+  forward.set('per_page', String(mock.perPage));
+
+  if (mock.q !== undefined && mock.view !== 'all') return invalid('Search needs view all');
+  if (mock.group && mock.view !== 'all' && mock.view !== 'sent') {
+    return invalid('Grouping needs view all or sent');
+  }
+  if (mock.group && (mock.unread !== undefined || mock.q !== undefined)) {
+    return invalid('Grouping cannot be combined with unread or search');
+  }
+  return { ok: true, value: { forward, mock } };
+}
+
+/** An IANA zone name; `Local` and the empty name are never a viewer's zone. */
+function isTimeZone(value: string): boolean {
+  if (
+    value === 'Local' ||
+    value.length > INBOX_TIME_ZONE_MAX_LENGTH ||
+    !inboxTimeZonePattern.test(value)
+  ) {
+    return false;
+  }
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isOneOf<T extends string>(allowed: readonly T[], value: string): value is T {

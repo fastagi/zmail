@@ -196,6 +196,23 @@ type Service interface {
 	CreateLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, name string, color domain.MailLabelColor) (*domain.MailLabel, error)
 	UpdateLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID, labelID uint, name string, color domain.MailLabelColor) (*domain.MailLabel, error)
 	DeleteLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID, labelID uint) error
+	// ListInbox lists one page of the unified inbox: the viewer's mail across every mailbox they
+	// may read.
+	ListInbox(ctx context.Context, viewer domain.OrganizationContext, request InboxRequest) (InboxPage, error)
+	// InboxCounts counts the viewer's unified inbox views, mail roles, and mailboxes, with today
+	// as the viewer's day in location.
+	InboxCounts(ctx context.Context, viewer domain.OrganizationContext, location *time.Location) (InboxCounts, error)
+	// ListMailRoles lists the organization's mail roles with the mailboxes of each the viewer can
+	// see; members get only the roles holding such a mailbox.
+	ListMailRoles(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.MailRole, error)
+	// CreateMailRole, UpdateMailRole, and DeleteMailRole write mail roles; only owners and admins
+	// may. Mail roles group mailboxes for display and grant nothing.
+	CreateMailRole(ctx context.Context, viewer domain.OrganizationContext, input MailRoleInput) (*domain.MailRole, error)
+	UpdateMailRole(ctx context.Context, viewer domain.OrganizationContext, roleID uint, input MailRoleInput) (*domain.MailRole, error)
+	DeleteMailRole(ctx context.Context, viewer domain.OrganizationContext, roleID uint) error
+	// AssignMailboxRole puts a mailbox in a mail role, or takes it out when roleID is nil. It needs
+	// administer on the mailbox.
+	AssignMailboxRole(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, roleID *uint) (*domain.Mailbox, error)
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -220,6 +237,10 @@ type service struct {
 	broadcasts domain.MailBroadcastRepository
 	// organize stores folders, labels, placements, and stars; nil when a test does not need them.
 	organize domain.MailOrganizeRepository
+	// inbox reads the unified inbox; nil when repo does not implement it.
+	inbox domain.MailInboxRepository
+	// roles stores mail roles; nil when repo does not implement it.
+	roles domain.MailRoleRepository
 	// domains, zones, and domainProvider serve organization domains; nil when a test does not
 	// need them.
 	domains        domain.MailDomainRepository
@@ -263,8 +284,16 @@ func NewService(
 	notifier mailNotifier,
 	settings Settings,
 ) *service {
+	var inbox domain.MailInboxRepository
+	if seam, ok := repo.(domain.MailInboxRepository); ok {
+		inbox = seam
+	}
+	var roles domain.MailRoleRepository
+	if seam, ok := repo.(domain.MailRoleRepository); ok {
+		roles = seam
+	}
 	return &service{
-		repo: repo, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
+		repo: repo, inbox: inbox, roles: roles, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
 		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },

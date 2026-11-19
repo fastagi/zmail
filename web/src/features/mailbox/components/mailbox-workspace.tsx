@@ -24,6 +24,7 @@ import {
   viewFilters,
   type MailView,
 } from '@/features/mailbox/components/mailbox-sidebar';
+import { MAILBOX_PARAM } from '@/features/mailbox/components/mailbox-params';
 import { MailboxSwitcher } from '@/features/mailbox/components/mailbox-switcher';
 import { ManageFoldersDialog } from '@/features/mailbox/components/manage-folders-dialog';
 import { ManageLabelsDialog } from '@/features/mailbox/components/manage-labels-dialog';
@@ -71,8 +72,7 @@ import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/u
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
-/** Query parameter naming the open mailbox; the organization stays in `org`. */
-export const MAILBOX_PARAM = 'mailbox';
+export { MAILBOX_PARAM };
 const mailboxIdPattern = /^[1-9]\d{0,15}$/u;
 const searchDelayMilliseconds = 300;
 

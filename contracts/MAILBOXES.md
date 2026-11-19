@@ -28,8 +28,8 @@ Within the organization, what a caller may do with a mailbox follows from the ma
 
 | Role | May |
 |---|---|
-| `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the log and statistics of the mailboxes they may read |
-| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records |
+| `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the unified inbox, the log, and statistics of the mailboxes they may read; list the mail roles of the mailboxes they can see |
+| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them |
 
 The owner and admin roles never grant reading or sending mail by themselves: an admin reads a
 mailbox only as a member of it, and the access history records how they became one. A member who
@@ -83,6 +83,13 @@ recorded but has no special rights to it. A removed member loses access on their
 | Delete a label | `DELETE /api/mailboxes/:id/mail-labels/:labelId` | `DELETE /v1/mailboxes/:mailbox_id/mail-labels/:label_id` | `204` |
 | List the log | `GET /api/mail-messages` | `GET /v1/mail-messages` | Paginated envelope |
 | Per-day statistics | `GET /api/mail-message-stats` | `GET /v1/mail-message-stats` | `200` envelope, at most 90 items |
+| Unified inbox | `GET /api/inbox-messages` | `GET /v1/inbox-messages` | Cursor envelope |
+| Unified inbox counts | `GET /api/inbox-message-counts` | `GET /v1/inbox-message-counts` | `200` envelope |
+| List mail roles | `GET /api/mail-roles` | `GET /v1/mail-roles` | `200` envelope, at most 50 items |
+| Create a mail role | `POST /api/mail-roles` | `POST /v1/mail-roles` | `201` envelope |
+| Replace a mail role | `PUT /api/mail-roles/:roleId` | `PUT /v1/mail-roles/:role_id` | `200` envelope |
+| Delete a mail role | `DELETE /api/mail-roles/:roleId` | `DELETE /v1/mail-roles/:role_id` | `204` |
+| Set a mailbox's mail role | `PUT /api/mailboxes/:id/role-assignment` | `PUT /v1/mailboxes/:mailbox_id/role-assignment` | `200` envelope |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
 | Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
 | Inbound delivery | none | `POST /v1/inbound-mail-messages` | `201`, or `200` for a repeat |
@@ -146,7 +153,8 @@ has no browser route: only the mail edge calls it.
     "webhooks_enabled": false,
     "access": { "view": false, "send": false, "manage_members": true, "administer": true, "see_history": true, "organize": false },
     "unread_count": 0,
-    "created_at": "2026-11-16T10:00:00Z"
+    "created_at": "2026-11-16T10:00:00Z",
+    "role_id": null
   }
 }
 ```
@@ -159,7 +167,8 @@ controls from it. `awaiting_handover` is `true` while a personal mailbox's owner
 organization and nobody has taken it over (see [Departure And Handover](#departure-and-handover)).
 `sealed_before` is the seal boundary set at handover, `null` when nothing is sealed.
 `webhooks_enabled` is the [webhook switch](#webhook-switch); it is always `false` on a personal
-mailbox.
+mailbox. `role_id` is the [mail role](#mail-roles) the mailbox belongs to, `null` when it has none;
+clients that do not know it ignore it.
 
 Deleting a mailbox deletes its messages in the same transaction; the address stays reserved and
 later mail for it is answered `404 MAILBOX.RECIPIENT_NOT_FOUND`. A mailbox on a connected domain
@@ -212,6 +221,8 @@ not get `organize` either; otherwise they could delete mail they cannot see.
 | List, set, remove members; webhook switch | `manage_members` |
 | Hand over; delete sealed history | `administer` |
 | Access history | `see_history` |
+| Unified inbox and its counts | Any organization member; only mailboxes with `view` are read, the others match nothing |
+| Create, replace, and delete mail roles | The `owner` or `admin` organization role; setting a mailbox's mail role needs `administer` |
 
 ### Read State
 
@@ -346,6 +357,73 @@ not exempt it.
 Mailboxes that existed before access rules are shared, with their creator as a `manage` member
 while the creator is still in the organization. A mailbox left without members is visible only to
 owners and admins, who add members to it.
+
+## Mail Roles
+
+A mail role groups an organization's mailboxes by the business identity they speak for, such as a
+brand, a column, or a person, for navigation and display. A mailbox belongs to at most one mail
+role; a mailbox without one is ungrouped. A mail role is not an organization role or an access role:
+it grants and revokes nothing, and its owner gets no access to its mailboxes. Assigning a mailbox
+writes no access event.
+
+```json
+{
+  "id": 3,
+  "name": "Design desk",
+  "color": "orange",
+  "description": "Behance and Medium accounts",
+  "owner_user_id": 7,
+  "mailbox_ids": [14, 15],
+  "created_at": "2026-11-19T10:00:00Z",
+  "updated_at": "2026-11-19T10:00:00Z"
+}
+```
+
+`GET /v1/mail-roles` lists at most 50 mail roles by name ignoring case, then by id. Owners and admins
+see every mail role, with every mailbox in it. Members see only the mail roles that hold at least one
+mailbox they can see (one listed by `GET /v1/mailboxes`), and `mailbox_ids` holds only those
+mailboxes, ascending. `owner_user_id` is `null` when the user is no longer a member.
+
+`POST /v1/mail-roles` (`201`) and `PUT /v1/mail-roles/:role_id` (`200`) take the same body and need the
+`owner` or `admin` organization role; `PUT` replaces every field, an omitted one taking its default,
+and the last write wins:
+
+```json
+{ "name": "Design desk", "color": "orange", "description": "", "owner_user_id": 7 }
+```
+
+| Field | Rule | Key in `errors` |
+|---|---|---|
+| `name` | Required; trimmed, then 1 to 64 characters, unique in the organization ignoring case | `name` |
+| `color` | `gray`, `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `purple`, or `pink`; defaults to `gray` | `color` |
+| `description` | Trimmed, then at most 280 characters without control characters; defaults to empty | `description` |
+| `owner_user_id` | A current member of the organization, or `null`; defaults to `null`. For display only | `owner_user_id` |
+
+Unknown fields are ignored. A body over 4 KiB or that is not a JSON object is
+`400 COMMON.INVALID_INPUT`; a field that breaks its rule is `422 COMMON.VALIDATION_FAILED`. A taken
+name is `409 MAILBOX.ROLE_NAME_TAKEN`. An organization has at most 50 mail roles; one more is
+`422 MAILBOX.ROLE_LIMIT_REACHED`, and concurrent creates never pass the limit. A member gets
+`403 PERMISSION.DENIED`. A mail role that does not exist or belongs to another organization is
+`404 MAILBOX.ROLE_NOT_FOUND`. Checks run in the order `400`, `403`, `404`, `422`, `409`.
+
+`DELETE /v1/mail-roles/:role_id` needs the `owner` or `admin` role and answers `204`; its mailboxes
+become ungrouped in the same statement. Deleting it again is `404 MAILBOX.ROLE_NOT_FOUND`.
+
+`PUT /v1/mailboxes/:mailbox_id/role-assignment` puts a mailbox in a mail role or, with `null`, takes
+it out, and answers `200` with the mailbox:
+
+```json
+{ "role_id": 3 }
+```
+
+`role_id` is required and is a positive integer or `null`; anything else is
+`422 COMMON.VALIDATION_FAILED` keyed `role_id`. It needs `administer` on the mailbox, so only owners
+and admins may assign: a caller with no access gets `404 MAILBOX.NOT_FOUND`, one with access but not
+`administer` gets `403 PERMISSION.DENIED`. A mail role that does not exist, belongs to another
+organization, or is deleted meanwhile is `404 MAILBOX.ROLE_NOT_FOUND`. Setting the current value
+succeeds and changes nothing.
+
+When a member leaves the organization, every mail role they owned gets `owner_user_id` `null`.
 
 ## Domains
 
@@ -1161,6 +1239,117 @@ today, oldest first, including days without mail. `N` defaults to 7 and is 1 to 
 `sent` and `failed` count outbound messages by their final status; a message still `queued` is in
 neither. `received` counts inbound messages. Only mailboxes the caller may `view` are counted.
 
+### Unified Inbox
+
+`GET /v1/inbox-messages` lists the caller's mail across every mailbox of the organization they have
+`view` on, in one cursor-paged list. Owners and admins read nothing more through it than through the
+mailboxes themselves, and a [mail role](#mail-roles) never widens it. Sealed messages and the trash
+never appear.
+
+| View | Direction | Placement | Also | `group=thread` |
+|---|---|---|---|---|
+| `all` (default) | `inbound` | `default` | | Allowed |
+| `today` | `inbound` | Any except `trash` | `created_at` is in today (see below) | No |
+| `pending` | Both | Any except `archive` and `trash` | The caller starred it | No |
+| `sent` | `outbound` | `default` | | Allowed |
+
+`all` and `sent` are every mailbox's Inbox and Sent. `today` is what arrived today, read or not,
+including mail archived or filed since; mail moved to the trash leaves it. `pending` is the caller's
+own stars.
+
+| Query | Meaning |
+|---|---|
+| `view` | `all`, `today`, `pending`, or `sent` |
+| `role_id` | A positive mail role id, or `none` for mailboxes without a role. A role the caller cannot see matches nothing. |
+| `mailbox_id` | One mailbox. A mailbox the caller may not read, or another organization's, matches nothing. |
+| `unread` | `true` or `false`, as in the single-mailbox list; outbound messages are always read |
+| `q` | Search, only with `view=all`; the same rules, matching, and 2-second limit as the single-mailbox search |
+| `group` | `thread`, only with `view` `all` or `sent`, and never with `unread` or `q` |
+| `tz` | The IANA time zone that defines today, at most 64 characters; defaults to `UTC` |
+| `cursor` | `meta.next_cursor` from the previous page, unchanged |
+| `per_page` | 1 to 100, default 15; an integer outside the range is clamped |
+
+Filters combine with AND. Each parameter may appear once. A repeated parameter, `page`, an unknown
+value, a malformed `cursor`, a `tz` that is not a known IANA zone (including `Local` and an empty
+value), `q` with a view other than `all`, or `group` outside its rule is
+`400 COMMON.INVALID_INPUT`. An unreadable, missing, or foreign `mailbox_id` or `role_id` answers an
+empty page, never `403` or `404`, so the filters cannot probe what exists.
+
+With `q`, the list covers every placement except the trash, in both directions, in the readable
+mailboxes, narrowed by `role_id`, `mailbox_id`, and `unread`. A search the database cannot finish
+within 2 seconds is `422 MAILBOX.SEARCH_TOO_BROAD`.
+
+Today starts at 00:00 of the current date in `tz` and ends at 00:00 of the next date there; the start
+is inclusive and the end exclusive, so a day can last 23 or 25 hours when the clocks change. The
+counts route echoes both instants.
+
+The list is ordered by `created_at`, newest first, then by id, highest first. `meta` is
+`{ per_page, has_more, next_cursor }`; pass `next_cursor` as `cursor` for the next, older page. Mail
+that arrives while paging lands before the first page and never repeats or skips a later one.
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    {
+      "id": 9021, "mailbox_id": 12, "mailbox_address": "news@example.com", "role_id": 3,
+      "direction": "inbound", "status": "received", "queued_reason": null,
+      "from": { "address": "ann@example.com", "name": "Ann Lee" },
+      "to": ["news@example.com"], "cc": [],
+      "subject": "Can the Pro plan grow to 20 members?",
+      "snippet": "Hi, folders work great. Can the Pro plan grow to 20 members?",
+      "read": false, "starred": false, "attachment_count": 0, "template_id": null,
+      "placement": "default", "folder_id": null, "label_ids": [], "thread_id": 9001,
+      "trashed_at": null, "failure_code": "", "last_event": "",
+      "created_at": "2026-11-19T06:22:00Z",
+      "thread": { "message_count": 3, "message_ids": [9001, 9010, 9021], "unread": true, "starred": false, "label_ids": [] }
+    }
+  ],
+  "meta": { "per_page": 15, "has_more": true, "next_cursor": "eyJmIjoiY3JlYXRlZF9hdCIs" }
+}
+```
+
+Each item has every field of the single-mailbox list item, plus `mailbox_address`, `role_id` (the
+mailbox's mail role now, so moving a mailbox to another role relabels its old mail), and `snippet`:
+the first 400 characters of the text body with whitespace runs collapsed to one space, trimmed, and
+cut to 140 characters; it is empty for mail without a text body. `read` and `starred` are the
+caller's own. There is no body, `message_id`, `in_reply_to`, event list, or attachment list.
+
+With `group=thread`, each row is the newest message of one thread of one mailbox in the view and
+carries `thread`, exactly as in the [single-mailbox list](#listing-and-search). A thread that gets a
+new message while paging moves above the cursor and reappears on the first page.
+
+`GET /v1/inbox-message-counts` takes only `tz` and answers the caller's live counts over the mailboxes
+they may read:
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "views": { "all_unread": 9, "today": 14, "today_unread": 5, "pending": 3, "sent_waiting": 0 },
+    "roles": [{ "role_id": 3, "unread": 4 }, { "role_id": 5, "unread": 3 }],
+    "ungrouped_unread": 2,
+    "mailboxes": [{ "mailbox_id": 12, "unread": 3 }, { "mailbox_id": 14, "unread": 1 }],
+    "today_starts_at": "2026-11-18T16:00:00Z",
+    "today_ends_at": "2026-11-19T16:00:00Z"
+  }
+}
+```
+
+- `mailboxes` has one entry per readable mailbox, by `mailbox_id` ascending; each `unread` equals that
+  mailbox's `unread_count`. `all_unread` is their sum.
+- `roles` has one entry per mail role with at least one readable mailbox, by `role_id` ascending;
+  `ungrouped_unread` covers the readable mailboxes without a role, so `all_unread` is the sum of
+  `roles` plus `ungrouped_unread`.
+- `today` and `today_unread` count the `today` view and its unread part; `pending` counts the
+  `pending` view.
+- `sent_waiting` counts outbound messages of the readable mailboxes waiting for the send limit
+  (`queued_reason` `send_limit`); it is not organization usage.
+- A caller with no readable mailbox gets zeros and empty arrays. Sealed messages and the trash are
+  never counted.
+
 ### Idempotency
 
 Both send routes accept an optional `Idempotency-Key` header of 1 to 255 printable ASCII
@@ -1402,6 +1591,9 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.FOLDER_LIMIT_REACHED` | 422 |
 | `MAILBOX.LABEL_LIMIT_REACHED` | 422 |
 | `MAILBOX.SEARCH_TOO_BROAD` | 422 |
+| `MAILBOX.ROLE_NOT_FOUND` | 404 |
+| `MAILBOX.ROLE_NAME_TAKEN` | 409 |
+| `MAILBOX.ROLE_LIMIT_REACHED` | 422 |
 | `MAILBOX.ZONE_NOT_FOUND` | 404 |
 | `MAILBOX.ZONE_PENDING` | 409 |
 | `MAILBOX.ZONE_IN_USE` | 409 |

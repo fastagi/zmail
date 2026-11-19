@@ -141,6 +141,17 @@ describe('mailbox service boundary', () => {
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
   });
 
+  it('parses mailboxes with and without role_id', async () => {
+    const get = vi
+      .spyOn(request, 'get')
+      .mockResolvedValueOnce([accessMailbox({ role_id: 3 }), accessMailbox({ id: 13 })]);
+    const mailboxes = await mailboxService.list(7);
+    expect(mailboxes.map(mailbox => mailbox.role_id)).toEqual([3, undefined]);
+
+    get.mockResolvedValueOnce([accessMailbox({ role_id: 0 })]);
+    await expect(mailboxService.list(7)).rejects.toBeInstanceOf(ApiError);
+  });
+
   it('accepts contract-shaped messages and rejects drift', () => {
     expect(parseMailMessage(message(), 7)).toMatchObject({ id: 7, status: 'received' });
     expect(() => parseMailMessage(message(), 8)).toThrow(ApiError);
@@ -1006,6 +1017,231 @@ describe('mailbox organize service boundary', () => {
     );
   });
 
+  it('listInbox parses a cursor page', async () => {
+    const meta = { per_page: 15, has_more: true, next_cursor: 'MTc2My40Mg' };
+    const getEnvelope = vi.spyOn(request, 'getEnvelope').mockResolvedValue({
+      code: 0,
+      message: 'success',
+      data: [inboxItem(), { ...inboxItem(), id: 8, thread: threadRow().thread }],
+      meta,
+    });
+
+    const page = await mailboxService.listInbox(7, { view: 'all', group: 'thread', tz: 'UTC' });
+    expect(page).toEqual({
+      items: [inboxItem(), { ...inboxItem(), id: 8, thread: threadRow().thread }],
+      meta,
+    });
+    await mailboxService.listInbox(
+      7,
+      { view: 'sent', roleId: 'none', mailboxId: 12, unread: false, tz: 'Asia/Shanghai' },
+      'MTc2My40Mg',
+      50
+    );
+    await mailboxService.listInbox(7, { view: 'all', roleId: 3, q: '  invoice  ', tz: 'UTC' });
+
+    expect(getEnvelope.mock.calls.map(call => call[0])).toEqual([
+      '/inbox-messages',
+      '/inbox-messages',
+      '/inbox-messages',
+    ]);
+    for (const call of getEnvelope.mock.calls) {
+      expect(call[1]?.headers).toEqual({ 'Organization-Id': '7' });
+    }
+    expect(getEnvelope.mock.calls.map(call => call[1]?.params)).toEqual([
+      { view: 'all', group: 'thread', tz: 'UTC' },
+      {
+        view: 'sent',
+        role_id: 'none',
+        mailbox_id: 12,
+        unread: false,
+        tz: 'Asia/Shanghai',
+        cursor: 'MTc2My40Mg',
+        per_page: 50,
+      },
+      { view: 'all', role_id: 3, q: 'invoice', tz: 'UTC' },
+    ]);
+  });
+
+  it('inboxCounts sends only tz and parses the counts', async () => {
+    const counts = {
+      views: { all_unread: 4, today: 5, today_unread: 2, pending: 1, sent_waiting: 3 },
+      roles: [{ role_id: 3, unread: 3 }],
+      ungrouped_unread: 1,
+      mailboxes: [
+        { mailbox_id: 12, unread: 3 },
+        { mailbox_id: 14, unread: 1 },
+      ],
+      today_starts_at: '2026-11-18T16:00:00Z',
+      today_ends_at: '2026-11-19T16:00:00Z',
+    };
+    const get = vi.spyOn(request, 'get').mockResolvedValue(counts);
+
+    expect(await mailboxService.inboxCounts(7, 'Asia/Shanghai')).toEqual(counts);
+    expect(get).toHaveBeenCalledWith('/inbox-message-counts', {
+      headers: { 'Organization-Id': '7' },
+      params: { tz: 'Asia/Shanghai' },
+    });
+
+    for (const value of [
+      { ...counts, views: { ...counts.views, today: -1 } },
+      { ...counts, roles: [{ role_id: 0, unread: 1 }] },
+      { ...counts, mailboxes: [{ mailbox_id: 12 }] },
+      { ...counts, today_ends_at: 'tomorrow' },
+      { ...counts, extra: true },
+    ]) {
+      get.mockResolvedValueOnce(value);
+      await expect(mailboxService.inboxCounts(7, 'UTC')).rejects.toMatchObject({
+        errorCode: ClientErrorCode.INVALID_RESPONSE,
+      });
+    }
+    get.mockClear();
+    for (const zone of ['', 'A'.repeat(65)]) {
+      await expect(mailboxService.inboxCounts(7, zone)).rejects.toMatchObject({
+        errorCode: ClientErrorCode.INVALID_RESPONSE,
+      });
+    }
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('rejects an item without mailbox_address', async () => {
+    const getEnvelope = vi.spyOn(request, 'getEnvelope');
+    const page = (
+      data: unknown[],
+      meta: unknown = { per_page: 15, has_more: false, next_cursor: null }
+    ) => ({
+      code: 0 as const,
+      message: 'success',
+      data,
+      meta,
+    });
+    const reject = async () =>
+      expect(mailboxService.listInbox(7, { view: 'all', tz: 'UTC' })).rejects.toMatchObject({
+        errorCode: ClientErrorCode.INVALID_RESPONSE,
+      });
+
+    const withoutAddress: Record<string, unknown> = inboxItem();
+    delete withoutAddress.mailbox_address;
+    const withoutSnippet: Record<string, unknown> = inboxItem();
+    delete withoutSnippet.snippet;
+    const withoutRole: Record<string, unknown> = inboxItem();
+    delete withoutRole.role_id;
+    for (const item of [
+      withoutAddress,
+      withoutSnippet,
+      withoutRole,
+      { ...inboxItem(), role_id: 0 },
+      { ...inboxItem(), text_body: 'x' },
+      summary(),
+    ]) {
+      getEnvelope.mockResolvedValueOnce(page([item]));
+      await reject();
+    }
+    // The cursor meta, not the offset one.
+    getEnvelope.mockResolvedValueOnce(page([], { per_page: 15, has_more: false }));
+    await reject();
+    getEnvelope.mockResolvedValueOnce(
+      page([], { current_page: 1, per_page: 15, total: 0, last_page: 1, from: 0, to: 0 })
+    );
+    await reject();
+  });
+
+  it('refuses invalid inbox filters before any request', async () => {
+    const getEnvelope = vi.spyOn(request, 'getEnvelope');
+    const calls = [
+      () => mailboxService.listInbox(0, { view: 'all', tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'spam' as 'all', tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', mailboxId: 0, tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', roleId: -1, tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', q: '   ', tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', q: 'x'.repeat(201), tz: 'UTC' }),
+      () => mailboxService.listInbox(7, { view: 'all', tz: '' }),
+      () => mailboxService.listInbox(7, { view: 'all', tz: 'A'.repeat(65) }),
+      () => mailboxService.listInbox(7, { view: 'all', tz: 'UTC' }, ''),
+      () => mailboxService.listInbox(7, { view: 'all', tz: 'UTC' }, undefined, 0),
+      () => mailboxService.listInbox(7, { view: 'all', tz: 'UTC' }, undefined, 101),
+    ];
+    for (const call of calls) {
+      await expect(call()).rejects.toMatchObject({ errorCode: ClientErrorCode.INVALID_RESPONSE });
+    }
+    expect(getEnvelope).not.toHaveBeenCalled();
+  });
+
+  it('calls the mail role routes with the header and parses the answers', async () => {
+    const role = mailRole();
+    const get = vi.spyOn(request, 'get').mockResolvedValue([role]);
+    const post = vi.spyOn(request, 'post').mockResolvedValue(role);
+    const put = vi
+      .spyOn(request, 'put')
+      .mockImplementation(async url =>
+        url.endsWith('/role-assignment') ? accessMailbox({ role_id: 3 }) : role
+      );
+    const remove = vi.spyOn(request, 'delete').mockResolvedValue(undefined);
+    const input = { name: 'Design', color: 'orange' as const, description: '', owner_user_id: 7 };
+
+    await expect(mailboxService.listRoles(7)).resolves.toEqual([role]);
+    await expect(mailboxService.createRole(7, input)).resolves.toEqual(role);
+    await expect(mailboxService.updateRole(7, 3, input)).resolves.toEqual(role);
+    await mailboxService.deleteRole(7, 3);
+    await expect(mailboxService.assignRole(7, 12, 3)).resolves.toMatchObject({
+      id: 12,
+      role_id: 3,
+    });
+    put.mockResolvedValueOnce(accessMailbox({ role_id: null }));
+    await expect(mailboxService.assignRole(7, 12, null)).resolves.toMatchObject({ role_id: null });
+
+    expect(get.mock.calls.map(call => call[0])).toEqual(['/mail-roles']);
+    expect(post.mock.calls.map(call => [call[0], call[1]])).toEqual([['/mail-roles', input]]);
+    expect(put.mock.calls.map(call => [call[0], call[1]])).toEqual([
+      ['/mail-roles/3', input],
+      ['/mailboxes/12/role-assignment', { role_id: 3 }],
+      ['/mailboxes/12/role-assignment', { role_id: null }],
+    ]);
+    expect(remove.mock.calls.map(call => call[0])).toEqual(['/mail-roles/3']);
+    const configs = [
+      ...get.mock.calls.map(call => call[1]),
+      ...post.mock.calls.map(call => call[2]),
+      ...put.mock.calls.map(call => call[2]),
+      ...remove.mock.calls.map(call => call[1]),
+    ];
+    for (const config of configs) expect(config?.headers).toEqual({ 'Organization-Id': '7' });
+
+    // Drift, another role than the one written, or another mailbox, is an invalid response.
+    const invalid = expect.objectContaining({ errorCode: ClientErrorCode.INVALID_RESPONSE });
+    get.mockResolvedValueOnce([{ ...role, color: 'black' }]);
+    await expect(mailboxService.listRoles(7)).rejects.toEqual(invalid);
+    put.mockResolvedValueOnce({ ...role, id: 4 });
+    await expect(mailboxService.updateRole(7, 3, input)).rejects.toEqual(invalid);
+    put.mockResolvedValueOnce(accessMailbox({ id: 13, role_id: 3 }));
+    await expect(mailboxService.assignRole(7, 12, 3)).rejects.toEqual(invalid);
+    post.mockResolvedValueOnce({ ...role, mailbox_ids: undefined });
+    await expect(mailboxService.createRole(7, input)).rejects.toEqual(invalid);
+
+    // Invalid ids never leave the browser.
+    const calls = [get, post, put, remove].map(spy => spy.mock.calls.length);
+    for (const call of [
+      () => mailboxService.updateRole(7, 0, input),
+      () => mailboxService.deleteRole(7, Number.NaN),
+      () => mailboxService.assignRole(7, 0, 3),
+      () => mailboxService.assignRole(7, 12, -1),
+      () => mailboxService.listRoles(0),
+    ]) {
+      await expect(call()).rejects.toEqual(invalid);
+    }
+    expect([get, post, put, remove].map(spy => spy.mock.calls.length)).toEqual(calls);
+  });
+
+  it('maps the mail role error codes to local copy', () => {
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_ROLE_NOT_FOUND, 404))
+    ).toBe('errors.roleNotFound');
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_ROLE_NAME_TAKEN, 409))
+    ).toBe('errors.roleNameTaken');
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_ROLE_LIMIT_REACHED, 422))
+    ).toBe('errors.roleLimitReached');
+  });
+
   it('maps the organize error codes to local copy', () => {
     expect(
       resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 422))
@@ -1023,5 +1259,29 @@ function threadRow() {
   return {
     ...summary(),
     thread: { message_count: 2, message_ids: [3, 7], unread: true, starred: false, label_ids: [9] },
+  };
+}
+
+/** A unified inbox row: a listing summary with the owning address, the mail role, and a snippet. */
+function inboxItem() {
+  return {
+    ...summary(),
+    mailbox_address: 'hello@mail.example.com',
+    role_id: null,
+    snippet: 'Hi Bob, the invoice is attached.',
+  };
+}
+
+function mailRole(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 3,
+    name: 'Design',
+    color: 'orange',
+    description: '',
+    owner_user_id: 7,
+    mailbox_ids: [12, 14],
+    created_at: now,
+    updated_at: now,
+    ...overrides,
   };
 }
