@@ -537,8 +537,15 @@ type MailTemplateRepository interface {
 // MailMessageFilter narrows a mailbox message listing.
 type MailMessageFilter struct {
 	Direction MailDirection
-	Page      int
-	PerPage   int
+	// Query matches the subject, the sender address, or a recipient address, ignoring case.
+	Query string
+	// Unread keeps unread messages when true and read messages when false; nil keeps both. Read
+	// state is ReaderMembershipID's own: outbound mail is always read, and inbound mail is read
+	// once that member opened it.
+	Unread             *bool
+	ReaderMembershipID uint
+	Page               int
+	PerPage            int
 }
 
 // MailLogFilter narrows the log of the messages in the mailboxes a viewer may read.

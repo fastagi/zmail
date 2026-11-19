@@ -4,7 +4,7 @@ import type { MetadataMessages } from './en-US';
 
 const messages = {
   title: 'Zmail',
-  description: '基于 Next.js、TypeScript 和 Tailwind CSS 构建的用户端 Web 应用',
+  description: '面向团队的自有域名企业邮箱、可视化邮件模板与安全分批群发平台',
 } as const satisfies LocaleMessageShape<MetadataMessages>;
 
 export default messages;

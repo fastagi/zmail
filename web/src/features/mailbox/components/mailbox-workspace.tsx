@@ -4,6 +4,8 @@ import { useState } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Inbox,
   Lock,
   Mail,
@@ -32,7 +34,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   ComposeDialog,
   emptyDraft,
-  replyDraft,
+  forwardDraft,
+  quotedReplyDraft,
+  replyAllDraft,
   type ComposeDraft,
 } from '@/features/mailbox/components/compose-dialog';
 import { CreateMailboxForm } from '@/features/mailbox/components/create-mailbox-form';
@@ -334,8 +338,30 @@ function MailboxMessages({
     }
   };
 
-  const reply = (message: MailMessage) => {
-    setDraft(replyDraft(message, subject => t('compose.replySubject', { subject })));
+  const formatter = useDateTimeFormat();
+  const replyCopy = {
+    prefixSubject: (subject: string) => t('compose.replySubject', { subject }),
+    quotedHeader: (params: { date: string; sender: string }) => t('compose.quotedHeader', params),
+    formatDate: (iso: string) => formatter.format(new Date(iso)),
+  };
+  const reply = (message: MailMessage) => setDraft(quotedReplyDraft(message, replyCopy));
+  const replyAll = (message: MailMessage) =>
+    setDraft(replyAllDraft(message, mailbox.address, replyCopy));
+  const forward = (message: MailMessage) => {
+    setDraft(
+      forwardDraft(message, {
+        prefixSubject: subject => t('compose.forwardSubject', { subject }),
+        forwardedHeader: t('compose.forwardedHeader'),
+        formatDate: iso => formatter.format(new Date(iso)),
+        labels: {
+          from: t('message.from'),
+          date: t('message.date'),
+          subject: t('emails.subject'),
+          to: t('message.to'),
+          cc: t('message.cc'),
+        },
+      })
+    );
   };
 
   return (
@@ -380,10 +406,15 @@ function MailboxMessages({
           page={page}
           openId={openId}
           onShowFolder={showFolder}
-          onPageChange={setPage}
+          onPageChange={nextPage => {
+            setPage(nextPage);
+            setOpenId(null);
+          }}
           onOpen={open}
           onClose={() => setOpenId(null)}
           onReply={reply}
+          onReplyAll={replyAll}
+          onForward={forward}
         />
       ) : (
         <EmptyState
@@ -422,6 +453,8 @@ function MailboxFolders({
   onOpen,
   onClose,
   onReply,
+  onReplyAll,
+  onForward,
 }: {
   mailbox: Mailbox;
   direction: MailDirection;
@@ -432,9 +465,17 @@ function MailboxFolders({
   onOpen: (message: MailMessageSummary) => void;
   onClose: () => void;
   onReply: (message: MailMessage) => void;
+  onReplyAll: (message: MailMessage) => void;
+  onForward: (message: MailMessage) => void;
 }) {
   const t = useT('mailbox');
   const showFolder = onShowFolder;
+  // Loaded here, only for a mailbox the user reads, so the open message can step through it.
+  const messages = useMailMessages(useMailOrganizationId(), mailbox.id, direction, page);
+  const items = messages.data?.items ?? [];
+  const openIndex = openId === null ? -1 : items.findIndex(item => item.id === openId);
+  const previousMessage = openIndex > 0 ? items[openIndex - 1] : null;
+  const nextMessage = openIndex >= 0 && openIndex < items.length - 1 ? items[openIndex + 1] : null;
   return (
     <>
       <div role="group" aria-label={t('folders.label')} className="flex gap-2">
@@ -460,43 +501,59 @@ function MailboxFolders({
         </Button>
       </div>
 
-      {openId === null ? (
-        <MessageList
-          mailbox={mailbox}
-          direction={direction}
-          page={page}
-          onPageChange={onPageChange}
-          onOpen={onOpen}
-        />
-      ) : (
-        <MessageDetail
-          mailboxId={mailbox.id}
-          messageId={openId}
-          canSend={mailbox.access.send}
-          onClose={onClose}
-          onReply={onReply}
-        />
-      )}
+      <div
+        className={cn(
+          openId !== null && 'xl:grid xl:grid-cols-[20rem_minmax(0,1fr)] xl:items-start xl:gap-4'
+        )}
+      >
+        <div className={cn('min-w-0', openId !== null && 'hidden xl:block')}>
+          <MessageList
+            messages={messages}
+            mailbox={mailbox}
+            direction={direction}
+            openId={openId}
+            onPageChange={onPageChange}
+            onOpen={onOpen}
+          />
+        </div>
+        {openId !== null ? (
+          <div className="animate-enter min-w-0">
+            <MessageDetail
+              mailboxId={mailbox.id}
+              mailboxAddress={mailbox.address}
+              messageId={openId}
+              canSend={mailbox.access.send}
+              onPrevious={previousMessage ? () => onOpen(previousMessage) : null}
+              onNext={nextMessage ? () => onOpen(nextMessage) : null}
+              onClose={onClose}
+              onReply={onReply}
+              onReplyAll={onReplyAll}
+              onForward={onForward}
+            />
+          </div>
+        ) : null}
+      </div>
     </>
   );
 }
 
 function MessageList({
+  messages,
   mailbox,
   direction,
-  page,
+  openId,
   onPageChange,
   onOpen,
 }: {
+  messages: ReturnType<typeof useMailMessages>;
   mailbox: Mailbox;
   direction: MailDirection;
-  page: number;
+  openId: number | null;
   onPageChange: (page: number) => void;
   onOpen: (message: MailMessageSummary) => void;
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
-  const messages = useMailMessages(useMailOrganizationId(), mailbox.id, direction, page);
 
   if (messages.isPending) return <ListSkeleton />;
   if (messages.error || !messages.data) {
@@ -530,17 +587,22 @@ function MessageList({
       <ul className="divide-y rounded-md border">
         {items.map(message => {
           const unread = message.direction === 'inbound' && !message.read;
+          const selected = message.id === openId;
           return (
             <li key={message.id}>
               <button
                 type="button"
-                className="flex w-full items-start gap-3 px-4 py-3 text-left focus-ring hover:bg-accent"
+                aria-current={selected ? 'true' : undefined}
+                className={cn(
+                  'flex w-full items-start gap-3 px-4 py-3 text-left transition-colors duration-150 focus-ring hover:bg-accent/70 active:bg-accent',
+                  selected && 'bg-accent'
+                )}
                 onClick={() => onOpen(message)}
               >
                 <span
                   className={cn(
-                    'mt-1.5 size-2 shrink-0 rounded-full',
-                    unread ? 'bg-primary' : 'bg-transparent'
+                    'mt-1.5 size-2 shrink-0 rounded-full transition-transform duration-200',
+                    unread ? 'bg-primary ring-2 ring-primary/20' : 'bg-transparent'
                   )}
                   aria-hidden="true"
                 />
@@ -615,38 +677,76 @@ function MessageList({
 
 function MessageDetail({
   mailboxId,
+  mailboxAddress,
   messageId,
   canSend,
+  onPrevious,
+  onNext,
   onClose,
   onReply,
+  onReplyAll,
+  onForward,
 }: {
   mailboxId: number;
+  mailboxAddress: string;
   messageId: number;
   canSend: boolean;
+  onPrevious: (() => void) | null;
+  onNext: (() => void) | null;
   onClose: () => void;
   onReply: (message: MailMessage) => void;
+  onReplyAll: (message: MailMessage) => void;
+  onForward: (message: MailMessage) => void;
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
   const query = useMailMessage(useMailOrganizationId(), mailboxId, messageId);
-  const [plainText, setPlainText] = useState(false);
+  // Keyed by message, so stepping to another message shows its HTML again.
+  const [plainTextId, setPlainTextId] = useState<number | null>(null);
+  const plainText = plainTextId === messageId;
 
-  const back = (
-    <Button
-      type="button"
-      size="sm"
-      variant="ghost"
-      icon={<ArrowLeft className="size-4" />}
-      onClick={onClose}
-    >
-      {t('actions.back')}
-    </Button>
+  const navigation = (
+    <div className="flex items-center gap-1">
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        icon={<ArrowLeft className="size-4" />}
+        onClick={onClose}
+      >
+        {t('actions.back')}
+      </Button>
+      <Button
+        type="button"
+        isIcon
+        size="sm"
+        variant="ghost"
+        disabled={!onPrevious}
+        aria-label={t('message.previous')}
+        title={t('message.previous')}
+        onClick={onPrevious ?? undefined}
+      >
+        <ChevronLeft className="size-4" />
+      </Button>
+      <Button
+        type="button"
+        isIcon
+        size="sm"
+        variant="ghost"
+        disabled={!onNext}
+        aria-label={t('message.next')}
+        title={t('message.next')}
+        onClick={onNext ?? undefined}
+      >
+        <ChevronRight className="size-4" />
+      </Button>
+    </div>
   );
 
   if (query.isPending) {
     return (
       <div className="space-y-3">
-        {back}
+        {navigation}
         <Skeleton className="h-48 w-full" />
       </div>
     );
@@ -654,7 +754,7 @@ function MessageDetail({
   if (query.error || !query.data) {
     return (
       <div className="space-y-3">
-        {back}
+        {navigation}
         <ErrorAlert
           message={t(resolveMailboxErrorKey(query.error))}
           retryLabel={t('actions.retry')}
@@ -672,8 +772,16 @@ function MessageDetail({
   return (
     <article className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {back}
-        <MessageActions message={message} canSend={canSend} onReply={onReply} onClose={onClose} />
+        {navigation}
+        <MessageActions
+          message={message}
+          mailboxAddress={mailboxAddress}
+          canSend={canSend}
+          onReply={onReply}
+          onReplyAll={onReplyAll}
+          onForward={onForward}
+          onClose={onClose}
+        />
       </div>
 
       <div className="space-y-3 rounded-md border p-4">
@@ -722,7 +830,7 @@ function MessageDetail({
               size="xs"
               variant={showHtml ? 'default' : 'outline'}
               aria-pressed={showHtml}
-              onClick={() => setPlainText(false)}
+              onClick={() => setPlainTextId(null)}
             >
               {t('message.viewHtml')}
             </Button>
@@ -731,7 +839,7 @@ function MessageDetail({
               size="xs"
               variant={showHtml ? 'outline' : 'default'}
               aria-pressed={!showHtml}
-              onClick={() => setPlainText(true)}
+              onClick={() => setPlainTextId(messageId)}
             >
               {t('message.viewText')}
             </Button>

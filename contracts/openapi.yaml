@@ -5468,6 +5468,19 @@ paths:
           description: Keep only received (`inbound`) or sent (`outbound`) messages.
           schema:
             $ref: '#/components/schemas/MailDirection'
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive match on the subject, the sender address, or a recipient address.
+          schema:
+            type: string
+            maxLength: 200
+        - name: unread
+          in: query
+          required: false
+          description: Keep only unread (`true`, `read` is `false`) or read (`false`, `read` is `true`) messages.
+          schema:
+            type: boolean
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PerPage'
       responses:

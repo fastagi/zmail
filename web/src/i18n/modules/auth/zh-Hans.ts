@@ -5,11 +5,11 @@ import type { AuthMessages } from './en-US';
 const messages = {
   // Page titles
   welcomeBack: '欢迎回来',
-  signInToContinue: '登录以继续访问您的账户',
-  createAccount: '创建账户',
-  getStarted: '开始使用平台',
+  signInToContinue: '登录以继续访问你的账号',
+  createAccount: '创建账号',
+  getStarted: '开始使用 Zmail',
   registrationDisabled: '注册已关闭',
-  registrationDisabledMessage: '该平台目前暂不开放注册，请联系管理员获取访问权限。',
+  registrationDisabledMessage: '当前暂未开放公开注册，请联系组织管理员邀请你加入。',
   backToSignIn: '返回登录',
 
   // Form labels
@@ -23,7 +23,7 @@ const messages = {
   enterPassword: '请输入密码',
   createPassword: '创建一个强密码',
   confirmYourPassword: '请再次输入密码',
-  enterFullName: '请输入您的姓名',
+  enterFullName: '请输入你的姓名',
 
   // Actions
   login: '登录',
@@ -64,7 +64,7 @@ const messages = {
 
   // Password requirements
   passwordRequirements: '密码要求',
-  passwordReqLength: '至少8个字符',
+  passwordReqLength: '至少 8 个字符',
   passwordReqCase: '包含大小写字母',
   passwordReqNumber: '包含至少一个数字',
   passwordReqSpecial: '包含至少一个特殊字符',
@@ -74,18 +74,18 @@ const messages = {
   heroSubtitle: '用自己的域名收发邮件，向联系人群发产品更新，送达情况一目了然',
   feature1: '绑定多个自有域名',
   feature2: '分批群发与自动暂停保护',
-  feature3: '模版与联系人管理',
+  feature3: '模板与联系人管理',
   feature4: '多组织与成员权限',
 
   // Validation messages
   nameRequired: '请输入姓名',
   nameInvalid: '请输入有效的姓名',
-  nameMinLength: '姓名至少需要2个字符',
+  nameMinLength: '姓名至少需要 2 个字符',
   nameTooLong: '姓名过长',
   emailRequired: '请输入邮箱',
   emailInvalid: '请输入有效的邮箱地址',
   passwordRequired: '请输入密码',
-  passwordMinLength: '密码至少需要8个字符',
+  passwordMinLength: '密码至少需要 8 个字符',
   passwordTooLong: '密码过长',
   passwordTooShort: '密码过短',
   passwordInvalid: '请输入有效的密码',

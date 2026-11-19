@@ -7729,6 +7729,10 @@ export interface operations {
                 page?: components["parameters"]["Page"];
                 /** @description Requested page size, capped by the API. */
                 per_page?: components["parameters"]["PerPage"];
+                /** @description Case-insensitive match on the subject, the sender address, or a recipient address. */
+                q?: string;
+                /** @description Keep only unread (`true`, `read` is `false`) or read (`false`, `read` is `true`) messages. */
+                unread?: boolean;
             };
             header: {
                 /** @description Active organization for organization-scoped routes; verified against membership. */

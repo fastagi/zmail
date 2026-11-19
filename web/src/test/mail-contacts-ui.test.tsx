@@ -203,6 +203,60 @@ describe('mail contacts console', () => {
     expect(within(dialog).getByText('Ignored columns: Phone #')).toBeInTheDocument();
   });
 
+  it('downloads a sample CSV file from the import dialog', async () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const createObjectURL = vi.fn<(obj: Blob | MediaSource) => string>(() => 'blob:contacts-sample');
+    const revokeObjectURL = vi.fn<(url: string) => void>();
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      writable: true,
+      value: createObjectURL,
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      writable: true,
+      value: revokeObjectURL,
+    });
+    const clickedAnchors: { href: string; download: string }[] = [];
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function recordClick(this: HTMLAnchorElement) {
+        clickedAnchors.push({ href: this.href, download: this.download });
+      });
+
+    try {
+      renderContacts();
+      fireEvent.click(screen.getByRole('button', { name: 'Import CSV' }));
+      const dialog = screen.getByRole('dialog');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Download sample CSV' }));
+
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      const [blob] = createObjectURL.mock.calls[0] as [Blob];
+      expect(blob).toBeInstanceOf(Blob);
+      expect(blob.type).toContain('text/csv');
+      await expect(blob.text()).resolves.toBe(
+        'email,first_name,last_name,company,code\nann@example.com,Ann,Lee,Acme,VIP20\nbob@example.com,Bob,Chen,Globex,\n'
+      );
+      expect(clickedAnchors).toEqual([
+        { href: 'blob:contacts-sample', download: 'contacts-sample.csv' },
+      ]);
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:contacts-sample');
+    } finally {
+      anchorClick.mockRestore();
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        writable: true,
+        value: originalCreateObjectURL,
+      });
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        writable: true,
+        value: originalRevokeObjectURL,
+      });
+    }
+  });
+
   it('creates a list and selects it', async () => {
     state.saveList.mutateAsync.mockResolvedValue({
       id: 8,
@@ -217,10 +271,44 @@ describe('mail contacts console', () => {
     await waitFor(() => expect(state.contactCalls.at(-1)?.filters).toEqual({ listId: 8 }));
   });
 
-  it('shows an empty state with actions when there are no contacts', () => {
+  it('shows an empty state with actions when there are no contacts or an empty list is selected', () => {
+    state.lists.data = [
+      { id: 7, name: 'VIP', contact_count: 1, created_at: now() },
+      { id: 8, name: 'Empty List', contact_count: 0, created_at: now() },
+    ];
     state.contacts.data = page([]);
     renderContacts();
     expect(screen.getByText('No contacts yet')).toBeInTheDocument();
+
+    const emptyListButton = screen.getByRole('button', { name: /Empty List/u });
+    fireEvent.click(emptyListButton);
+    expect(emptyListButton).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByText('No contacts yet')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Add contact' }).length).toBeGreaterThan(0);
+  });
+
+  it('clears search and status filters cleanly from toolbar and empty state', () => {
+    renderContacts();
+    const vipButton = screen.getByRole('button', { name: /VIP/u });
+    fireEvent.click(vipButton);
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'unsubscribed' } });
+    fireEvent.change(screen.getByLabelText('Search contacts'), { target: { value: 'bob' } });
+    expect(state.contactCalls.at(-1)?.filters).toEqual({
+      listId: 7,
+      status: 'unsubscribed',
+      q: 'bob',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(state.contactCalls.at(-1)).toEqual({ filters: { listId: 7 }, page: 1 });
+    expect(screen.getByLabelText('Search contacts')).toHaveValue('');
+    expect(screen.getByLabelText('Status')).toHaveValue('');
+
+    state.contacts.data = page([]);
+    fireEvent.change(screen.getByLabelText('Search contacts'), { target: { value: 'nobody' } });
+    expect(screen.getByText('No matching contacts')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(state.contactCalls.at(-1)).toEqual({ filters: { listId: 7 }, page: 1 });
   });
 });
 

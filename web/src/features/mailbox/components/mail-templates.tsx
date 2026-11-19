@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useId, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
@@ -125,13 +125,7 @@ function TemplateWorkspace() {
   const [editing, setEditing] = useState<Editing>({ kind: 'list' });
   const back = () => setEditing({ kind: 'list' });
   if (editing.kind === 'new') {
-    return (
-      <TemplateEditor
-        template={null}
-        onBack={back}
-        onSaved={templateId => setEditing({ kind: 'edit', templateId })}
-      />
-    );
+    return <TemplateEditor template={null} onBack={back} />;
   }
   if (editing.kind === 'edit') {
     return <LoadedTemplateEditor templateId={editing.templateId} onBack={back} />;
@@ -262,7 +256,7 @@ function LoadedTemplateEditor({ templateId, onBack }: { templateId: number; onBa
       </div>
     );
   }
-  return <TemplateEditor template={template.data} onBack={onBack} onSaved={() => undefined} />;
+  return <TemplateEditor template={template.data} onBack={onBack} />;
 }
 
 function BackButton({ onBack }: { onBack: () => void }) {
@@ -358,6 +352,48 @@ const starterKey = {
   newsletter: 'templates.starterNewsletter',
 } as const satisfies Record<TemplateStarter, string>;
 
+function sameSamples(
+  left: Readonly<Record<string, string>>,
+  right: Readonly<Record<string, string>>
+): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    if ((left[key] ?? '') !== (right[key] ?? '')) return false;
+  }
+  return true;
+}
+
+function sameDraft(left: Draft, right: Draft): boolean {
+  return (
+    left.name === right.name &&
+    left.subject === right.subject &&
+    left.html === right.html &&
+    left.text === right.text &&
+    sameSamples(left.samples, right.samples) &&
+    JSON.stringify(left.design) === JSON.stringify(right.design)
+  );
+}
+
+function validDraft(
+  draft: Draft,
+  variables: readonly string[] | null
+): variables is readonly string[] {
+  if (!variables) return false;
+  const name = draft.name.trim();
+  const subject = draft.subject.trim();
+  if (name === '' || Array.from(name).length > MAIL_TEMPLATE_NAME_MAX_LENGTH) return false;
+  if (
+    subject === '' ||
+    Array.from(subject).length > MAIL_SUBJECT_MAX_LENGTH ||
+    subject.includes('\r') ||
+    subject.includes('\n') ||
+    subject.includes('\0')
+  ) {
+    return false;
+  }
+  return draft.html.trim() !== '' || draft.text.trim() !== '';
+}
+
 function TemplateEditor({
   template,
   onBack,
@@ -365,10 +401,11 @@ function TemplateEditor({
 }: {
   template: MailTemplate | null;
   onBack: () => void;
-  onSaved: (templateId: number) => void;
+  onSaved?: (templateId: number) => void;
 }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
+  const mailboxes = useMailboxes(organizationId);
   const save = useSaveMailTemplate(organizationId);
   const phrases = useStarterPhrases();
   const [draft, setDraft] = useState<Draft>(() => draftOf(template));
@@ -377,9 +414,11 @@ function TemplateEditor({
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
   const [testing, setTesting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const [switching, setSwitching] = useState<'visual' | 'html' | null>(null);
   const [tab, setTab] = useState<'html' | 'text'>('html');
   const visual = draft.design !== null;
+  const noMailboxes = mailboxes.isSuccess && (mailboxes.data?.length ?? 0) === 0;
   const ids = { name: useId(), subject: useId(), html: useId(), text: useId(), textHint: useId() };
 
   const source = { subject: draft.subject, html: draft.html, text: draft.text };
@@ -393,7 +432,22 @@ function TemplateEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [draft.subject, draft.html, draft.text, draft.samples]
   );
-  const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+  const dirty = !sameDraft(draft, saved);
+
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dirty]);
+
+  const requestBack = () => {
+    if (dirty) setDiscarding(true);
+    else onBack();
+  };
 
   const update = (change: Partial<Draft>) => {
     setErrorKey(null);
@@ -442,11 +496,10 @@ function TemplateEditor({
     });
   };
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!variables) {
+  const persist = async (): Promise<number | null> => {
+    if (!validDraft(draft, variables)) {
       setErrorKey('errors.templateInvalid');
-      return;
+      return null;
     }
     try {
       const stored = await save.mutateAsync({
@@ -458,38 +511,56 @@ function TemplateEditor({
       setSaved(next);
       toast.success(t(savedId === null ? 'templates.created' : 'templates.saved'));
       setSavedId(stored.id);
-      onSaved(stored.id);
+      onSaved?.(stored.id);
+      return stored.id;
     } catch (failure) {
       setErrorKey(resolveMailboxErrorKey(failure));
+      return null;
     }
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await persist();
+  };
+
+  const openTest = async () => {
+    setErrorKey(null);
+    if (!noMailboxes && (savedId === null || dirty)) {
+      const id = await persist();
+      if (id === null) return;
+    }
+    setTesting(true);
   };
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <BackButton onBack={onBack} />
-        {savedId !== null ? (
-          <div className="flex flex-wrap gap-2">
+        <BackButton onBack={requestBack} />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={save.isPending}
+            icon={<Send className="size-4" />}
+            onClick={() => void openTest()}
+          >
+            {t('templates.test')}
+          </Button>
+          {savedId !== null ? (
             <Button
               type="button"
               size="sm"
               variant="outline"
-              icon={<Send className="size-4" />}
-              onClick={() => setTesting(true)}
-            >
-              {t('templates.test')}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
+              disabled={save.isPending}
               icon={<Trash2 className="size-4" />}
               onClick={() => setDeleting(true)}
             >
               {t('templates.delete')}
             </Button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
       {savedId === null ? (
@@ -689,11 +760,20 @@ function TemplateEditor({
         </section>
       </div>
 
-      {testing && savedId !== null ? (
+      {testing ? (
         <TemplateTestDialog
           templateId={savedId}
-          unsaved={dirty}
+          unsaved={dirty && savedId !== null}
           onClose={() => setTesting(false)}
+        />
+      ) : null}
+      {discarding ? (
+        <DiscardChangesDialog
+          onConfirm={() => {
+            setDiscarding(false);
+            onBack();
+          }}
+          onClose={() => setDiscarding(false)}
         />
       ) : null}
       {switching ? (
@@ -764,7 +844,7 @@ function TemplateTestDialog({
   unsaved,
   onClose,
 }: {
-  templateId: number;
+  templateId: number | null;
   unsaved: boolean;
   onClose: () => void;
 }) {
@@ -785,6 +865,7 @@ function TemplateTestDialog({
     setErrorKey(null);
     const recipients = splitRecipients(to).map(normalizeRecipient);
     if (
+      templateId === null ||
       from === null ||
       recipients.length === 0 ||
       recipients.length > MAIL_TEMPLATE_TEST_MAX_RECIPIENTS ||
@@ -868,7 +949,7 @@ function TemplateTestDialog({
             <Button
               type="submit"
               loading={send.isPending}
-              disabled={from === null}
+              disabled={from === null || templateId === null}
               icon={<Send className="size-4" />}
             >
               {t('templates.test')}
@@ -961,6 +1042,34 @@ function SwitchModeDialog({
           </Button>
           <Button type="button" onClick={onConfirm}>
             {t(toHtml ? 'templates.visual.toHtmlConfirm' : 'templates.visual.toVisualConfirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DiscardChangesDialog({
+  onConfirm,
+  onClose,
+}: {
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const t = useT('mailbox');
+  return (
+    <Dialog open onOpenChange={open => !open && onClose()}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle>{t('templates.unsavedTitle')}</DialogTitle>
+          <DialogDescription>{t('templates.unsavedDescription')}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            {t('actions.cancel')}
+          </Button>
+          <Button type="button" variant="destructive" onClick={onConfirm}>
+            {t('templates.discard')}
           </Button>
         </DialogFooter>
       </DialogContent>

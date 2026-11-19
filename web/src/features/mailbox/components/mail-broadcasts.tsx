@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertCircle,
   ArrowLeft,
@@ -39,6 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   MailOrganizationBoundary,
   MailPageHeader,
@@ -48,6 +49,7 @@ import {
 import {
   EmptyState,
   ErrorAlert,
+  MailHtmlFrame,
   nativeSelectClassName,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
@@ -80,13 +82,14 @@ import type {
   MailBroadcast,
   MailBroadcastStatus,
   MailRecipientStatus,
+  MailTemplate,
 } from '@/features/mailbox/types';
 import {
   isOrganizationLost,
   resolveMailboxErrorKey,
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
-import { templateFallbacks } from '@/features/mailbox/utils/template-render';
+import { renderTemplate, templateFallbacks } from '@/features/mailbox/utils/template-render';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -222,7 +225,11 @@ function StatusBadge({ status }: { status: MailBroadcastStatus }) {
             ? 'outline'
             : 'secondary'
       }
+      className="gap-1.5"
     >
+      {status === 'sending' ? (
+        <span className="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
+      ) : null}
       {t(statusKey[status])}
     </Badge>
   );
@@ -243,7 +250,10 @@ function Progress({ broadcast }: { broadcast: MailBroadcast }) {
         aria-valuenow={done}
         aria-label={t('broadcasts.progress')}
       >
-        <div className="h-full bg-primary" style={{ width: `${(done / counts.total) * 100}%` }} />
+        <div
+          className="h-full bg-primary transition-all duration-500 ease-out"
+          style={{ width: `${(done / counts.total) * 100}%` }}
+        />
       </div>
       <span className="text-xs text-muted-foreground">
         {t('broadcasts.progressValue', { sent: counts.sent, total: counts.total })}
@@ -449,6 +459,17 @@ function defaultScheduleValue(): string {
   return local.toISOString().slice(0, 16);
 }
 
+/** Viewer time zone name for scheduling copy, falling back safely to UTC. */
+function viewerTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+type EditorErrorKey = MailboxErrorKey | 'broadcasts.schedulePast';
+
 function BroadcastEditor({
   broadcast,
   enabled,
@@ -473,6 +494,7 @@ function BroadcastEditor({
   const [name, setName] = useState(broadcast?.name ?? '');
   const [mailboxId, setMailboxId] = useState<number | null>(broadcast?.mailbox_id ?? null);
   const [templateId, setTemplateId] = useState<number | null>(broadcast?.template_id ?? null);
+  const selectedTemplate = useMailTemplate(organizationId, templateId);
   const [listId, setListId] = useState<number | null>(broadcast?.list_id ?? null);
   const [label, setLabel] = useState(broadcast?.unsubscribe_label ?? '');
   const [variables, setVariables] = useState<Record<string, string>>(broadcast?.variables ?? {});
@@ -482,10 +504,11 @@ function BroadcastEditor({
   );
   const [fromDomain, setFromDomain] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<number | null>(broadcast?.id ?? null);
-  const [dirty, setDirty] = useState(broadcast === null);
-  const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
-  const [confirm, setConfirm] = useState<'send' | 'schedule' | 'delete' | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [errorKey, setErrorKey] = useState<EditorErrorKey | null>(null);
+  const [confirm, setConfirm] = useState<'send' | 'schedule' | 'delete' | 'discard' | null>(null);
   const [scheduleAt, setScheduleAt] = useState(defaultScheduleValue);
+  const zone = useMemo(viewerTimeZone, []);
   const ids = {
     name: useId(),
     from: useId(),
@@ -494,12 +517,24 @@ function BroadcastEditor({
     label: useId(),
     labelHint: useId(),
     at: useId(),
+    atHint: useId(),
     domain: useId(),
     staged: useId(),
     percent: useId(),
     wait: useId(),
     stagedHint: useId(),
   };
+
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [dirty]);
+
   // Senders are picked by domain first: the shared domain and every domain the organization uses.
   // A broadcast needs `send` on its sender mailbox.
   const senderMailboxes = (mailboxes.data ?? []).filter(mailbox => mailbox.access.send);
@@ -515,6 +550,7 @@ function BroadcastEditor({
     (lists.data?.length ?? 0) > 0;
   const loading = mailboxes.isPending || templates.isPending || lists.isPending;
   const pending = save.isPending || send.isPending || remove.isPending;
+  const activeTemplate = templateId !== null ? (selectedTemplate.data ?? null) : null;
 
   const change =
     <T,>(setter: (value: T) => void) =>
@@ -524,17 +560,32 @@ function BroadcastEditor({
       setter(value);
     };
 
+  const requestBack = () => {
+    if (dirty) {
+      setConfirm('discard');
+      return;
+    }
+    onBack();
+  };
+
   // Only values for variables the chosen template uses, and only filled ones, are saved.
   const templateNames = new Set(
-    templates.data?.find(template => template.id === templateId)?.variables ?? []
+    activeTemplate?.variables ??
+      templates.data?.find(template => template.id === templateId)?.variables ??
+      []
   );
   const sharedValues = Object.fromEntries(
-    Object.entries(variables).filter(([name, value]) => templateNames.has(name) && value !== '')
+    Object.entries(variables).filter(
+      ([variableName, value]) => templateNames.has(variableName) && value !== ''
+    )
   );
+
+  const hasValidDraftFields = (): boolean =>
+    name.trim() !== '' && mailboxId !== null && templateId !== null && listId !== null;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (mailboxId === null || templateId === null || listId === null) {
+    if (!hasValidDraftFields() || mailboxId === null || templateId === null || listId === null) {
       setErrorKey('errors.broadcastInvalid');
       return;
     }
@@ -561,15 +612,75 @@ function BroadcastEditor({
     }
   };
 
+  const requestSend = () => {
+    setErrorKey(null);
+    if (!hasValidDraftFields()) {
+      setErrorKey('errors.broadcastInvalid');
+      return;
+    }
+    setConfirm('send');
+  };
+
+  const requestSchedule = () => {
+    setErrorKey(null);
+    if (!hasValidDraftFields()) {
+      setErrorKey('errors.broadcastInvalid');
+      return;
+    }
+    const timestamp = new Date(scheduleAt).getTime();
+    if (Number.isNaN(timestamp) || timestamp <= Date.now()) {
+      setErrorKey('broadcasts.schedulePast');
+      return;
+    }
+    setConfirm('schedule');
+  };
+
   const start = async (scheduled: boolean) => {
-    if (savedId === null) return;
+    if (scheduled) {
+      const timestamp = new Date(scheduleAt).getTime();
+      if (Number.isNaN(timestamp) || timestamp <= Date.now()) {
+        setConfirm(null);
+        setErrorKey('broadcasts.schedulePast');
+        return;
+      }
+    }
     try {
+      let targetId = savedId;
+      if (targetId === null || dirty) {
+        if (
+          !hasValidDraftFields() ||
+          mailboxId === null ||
+          templateId === null ||
+          listId === null
+        ) {
+          setConfirm(null);
+          setErrorKey('errors.broadcastInvalid');
+          return;
+        }
+        const stored = await save.mutateAsync({
+          input: {
+            name,
+            mailbox_id: mailboxId,
+            template_id: templateId,
+            list_id: listId,
+            unsubscribe_label: label,
+            test_percent: testPercent,
+            test_wait_minutes: testWait,
+            variables: sharedValues,
+          },
+          ...(targetId === null ? {} : { broadcastId: targetId }),
+        });
+        targetId = stored.id;
+        setSavedId(stored.id);
+        setDirty(false);
+      }
       await send.mutateAsync({
-        broadcastId: savedId,
+        broadcastId: targetId,
         input: scheduled ? { scheduled_at: new Date(scheduleAt).toISOString() } : {},
       });
       toast.success(t(scheduled ? 'broadcasts.scheduled' : 'broadcasts.started'));
       setConfirm(null);
+      onSaved(targetId);
     } catch (failure) {
       setConfirm(null);
       setErrorKey(resolveMailboxErrorKey(failure));
@@ -620,7 +731,7 @@ function BroadcastEditor({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <BackButton onBack={onBack} />
+        <BackButton onBack={requestBack} />
         {savedId !== null ? (
           <Button
             type="button"
@@ -640,212 +751,228 @@ function BroadcastEditor({
           <AlertDescription>{t('broadcasts.needsSetup')}</AlertDescription>
         </Alert>
       ) : null}
-      <form onSubmit={submit} className="max-w-2xl space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor={ids.name}>{t('broadcasts.name')}</Label>
-          <Input
-            id={ids.name}
-            value={name}
-            maxLength={MAIL_BROADCAST_NAME_MAX_LENGTH}
-            placeholder={t('broadcasts.namePlaceholder')}
-            disabled={pending}
-            onChange={event => change(setName)(event.target.value)}
-          />
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+      <div className={cn('grid gap-6', activeTemplate !== null && 'lg:grid-cols-2')}>
+        <form onSubmit={submit} className="min-w-0 max-w-2xl space-y-4">
           <div className="space-y-2">
-            <Label htmlFor={ids.domain}>{t('broadcasts.fromDomain')}</Label>
-            <select
-              id={ids.domain}
-              className={cn(nativeSelectClassName, 'w-full')}
-              value={currentDomain ?? ''}
-              disabled={pending || senderDomains.length === 0}
-              onChange={event => {
-                const next = event.target.value;
-                change(setFromDomain)(next);
-                // Keep the sender only when it is on the chosen domain.
-                const current = senderMailboxes.find(mailbox => mailbox.id === mailboxId);
-                if (!current || domainOf(current.address) !== next) setMailboxId(null);
-              }}
-            >
-              {senderDomains.map(domain => (
-                <option key={domain} value={domain}>
-                  {domain}
-                </option>
-              ))}
-            </select>
+            <Label htmlFor={ids.name}>{t('broadcasts.name')}</Label>
+            <Input
+              id={ids.name}
+              value={name}
+              maxLength={MAIL_BROADCAST_NAME_MAX_LENGTH}
+              placeholder={t('broadcasts.namePlaceholder')}
+              disabled={pending}
+              onChange={event => change(setName)(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor={ids.domain}>{t('broadcasts.fromDomain')}</Label>
+              <select
+                id={ids.domain}
+                className={cn(nativeSelectClassName, 'w-full')}
+                value={currentDomain ?? ''}
+                disabled={pending || senderDomains.length === 0}
+                onChange={event => {
+                  const next = event.target.value;
+                  change(setFromDomain)(next);
+                  // Keep the sender only when it is on the chosen domain.
+                  const current = senderMailboxes.find(mailbox => mailbox.id === mailboxId);
+                  if (!current || domainOf(current.address) !== next) setMailboxId(null);
+                }}
+              >
+                {senderDomains.map(domain => (
+                  <option key={domain} value={domain}>
+                    {domain}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {select(
+              ids.from,
+              t('broadcasts.from'),
+              mailboxId,
+              change(setMailboxId),
+              senderMailboxes
+                .filter(
+                  mailbox => currentDomain === null || domainOf(mailbox.address) === currentDomain
+                )
+                .map(mailbox => ({ id: mailbox.id, label: mailbox.address }))
+            )}
           </div>
           {select(
-            ids.from,
-            t('broadcasts.from'),
-            mailboxId,
-            change(setMailboxId),
-            senderMailboxes
-              .filter(
-                mailbox => currentDomain === null || domainOf(mailbox.address) === currentDomain
-              )
-              .map(mailbox => ({ id: mailbox.id, label: mailbox.address }))
+            ids.template,
+            t('broadcasts.template'),
+            templateId,
+            change(setTemplateId),
+            (templates.data ?? []).map(template => ({ id: template.id, label: template.name }))
           )}
-        </div>
-        {select(
-          ids.template,
-          t('broadcasts.template'),
-          templateId,
-          change(setTemplateId),
-          (templates.data ?? []).map(template => ({ id: template.id, label: template.name }))
-        )}
-        {select(
-          ids.list,
-          t('broadcasts.list'),
-          listId,
-          change(setListId),
-          (lists.data ?? []).map(list => ({
-            id: list.id,
-            label: t('broadcasts.listOption', { name: list.name, count: list.contact_count }),
-          }))
-        )}
-        {templateId === null ? null : (
-          <SharedValues
-            organizationId={organizationId}
-            templateId={templateId}
-            values={variables}
-            disabled={pending}
-            onChange={(name, value) => change(setVariables)({ ...variables, [name]: value })}
-          />
-        )}
-        <div className="space-y-2">
-          <Label htmlFor={ids.label}>{t('broadcasts.label')}</Label>
-          <Input
-            id={ids.label}
-            value={label}
-            maxLength={MAIL_BROADCAST_LABEL_MAX_LENGTH}
-            placeholder={t('broadcasts.labelPlaceholder')}
-            aria-describedby={ids.labelHint}
-            disabled={pending}
-            onChange={event => change(setLabel)(event.target.value)}
-          />
-          <p id={ids.labelHint} className="text-xs text-muted-foreground">
-            {t('broadcasts.labelHint')}
-          </p>
-        </div>
-        <fieldset className="space-y-3 rounded-md border p-3">
-          <div className="flex items-center gap-2">
-            <input
-              id={ids.staged}
-              type="checkbox"
-              className="size-4"
-              checked={testPercent > 0}
+          {select(
+            ids.list,
+            t('broadcasts.list'),
+            listId,
+            change(setListId),
+            (lists.data ?? []).map(list => ({
+              id: list.id,
+              label: t('broadcasts.listOption', { name: list.name, count: list.contact_count }),
+            }))
+          )}
+          {activeTemplate === null ? null : (
+            <SharedValues
+              template={activeTemplate}
+              values={variables}
               disabled={pending}
-              aria-describedby={ids.stagedHint}
-              onChange={event => change(setTestPercent)(event.target.checked ? 10 : 0)}
+              onChange={(variableName, value) =>
+                change(setVariables)({ ...variables, [variableName]: value })
+              }
             />
-            <Label htmlFor={ids.staged}>{t('broadcasts.staged')}</Label>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor={ids.label}>{t('broadcasts.label')}</Label>
+            <Input
+              id={ids.label}
+              value={label}
+              maxLength={MAIL_BROADCAST_LABEL_MAX_LENGTH}
+              placeholder={t('broadcasts.labelPlaceholder')}
+              aria-describedby={ids.labelHint}
+              disabled={pending}
+              onChange={event => change(setLabel)(event.target.value)}
+            />
+            <p id={ids.labelHint} className="text-xs text-muted-foreground">
+              {t('broadcasts.labelHint')}
+            </p>
           </div>
-          <p id={ids.stagedHint} className="text-xs text-muted-foreground">
-            {t('broadcasts.stagedHint')}
-          </p>
-          {testPercent > 0 ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor={ids.percent}>{t('broadcasts.testPercent')}</Label>
-                <Input
-                  id={ids.percent}
-                  type="number"
-                  min={1}
-                  max={MAIL_BROADCAST_TEST_MAX_PERCENT}
-                  value={testPercent}
-                  disabled={pending}
-                  onChange={event =>
-                    change(setTestPercent)(
-                      Math.min(
-                        MAIL_BROADCAST_TEST_MAX_PERCENT,
-                        Math.max(1, Number(event.target.value) || 1)
-                      )
-                    )
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor={ids.wait}>{t('broadcasts.testWait')}</Label>
-                <Input
-                  id={ids.wait}
-                  type="number"
-                  min={MAIL_BROADCAST_TEST_WAIT_MIN_MINUTES}
-                  max={MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES}
-                  value={testWait}
-                  disabled={pending}
-                  onChange={event =>
-                    change(setTestWait)(
-                      Math.min(
-                        MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES,
-                        Math.max(
-                          MAIL_BROADCAST_TEST_WAIT_MIN_MINUTES,
-                          Number(event.target.value) || 0
+          <fieldset className="space-y-3 rounded-md border p-3">
+            <div className="flex items-center gap-2">
+              <input
+                id={ids.staged}
+                type="checkbox"
+                className="size-4"
+                checked={testPercent > 0}
+                disabled={pending}
+                aria-describedby={ids.stagedHint}
+                onChange={event => change(setTestPercent)(event.target.checked ? 10 : 0)}
+              />
+              <Label htmlFor={ids.staged}>{t('broadcasts.staged')}</Label>
+            </div>
+            <p id={ids.stagedHint} className="text-xs text-muted-foreground">
+              {t('broadcasts.stagedHint')}
+            </p>
+            {testPercent > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor={ids.percent}>{t('broadcasts.testPercent')}</Label>
+                  <Input
+                    id={ids.percent}
+                    type="number"
+                    min={1}
+                    max={MAIL_BROADCAST_TEST_MAX_PERCENT}
+                    value={testPercent}
+                    disabled={pending}
+                    onChange={event =>
+                      change(setTestPercent)(
+                        Math.min(
+                          MAIL_BROADCAST_TEST_MAX_PERCENT,
+                          Math.max(1, Number(event.target.value) || 1)
                         )
                       )
-                    )
-                  }
-                />
-              </div>
-            </div>
-          ) : null}
-        </fieldset>
-        <p className="text-sm text-muted-foreground">{t('broadcasts.safetyHint')}</p>
-        {errorKey ? (
-          <Alert variant="destructive">
-            <AlertCircle className="size-4" aria-hidden="true" />
-            <AlertDescription>{t(errorKey)}</AlertDescription>
-          </Alert>
-        ) : null}
-        <div className="flex flex-wrap items-end gap-3">
-          <Button
-            type="submit"
-            variant={savedId === null ? 'default' : 'outline'}
-            loading={save.isPending}
-            disabled={!dirty || !ready}
-            icon={<Save className="size-4" />}
-          >
-            {t('broadcasts.save')}
-          </Button>
-          {savedId !== null && canManage ? (
-            <>
-              <Button
-                type="button"
-                loading={send.isPending && confirm === 'send'}
-                disabled={dirty || !enabled || pending}
-                icon={<Send className="size-4" />}
-                onClick={() => setConfirm('send')}
-              >
-                {t('broadcasts.sendNow')}
-              </Button>
-              <div className="flex items-end gap-2">
-                <div className="space-y-2">
-                  <Label htmlFor={ids.at}>{t('broadcasts.scheduleAt')}</Label>
-                  <Input
-                    id={ids.at}
-                    type="datetime-local"
-                    value={scheduleAt}
-                    disabled={pending}
-                    onChange={event => setScheduleAt(event.target.value)}
+                    }
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor={ids.wait}>{t('broadcasts.testWait')}</Label>
+                  <Input
+                    id={ids.wait}
+                    type="number"
+                    min={MAIL_BROADCAST_TEST_WAIT_MIN_MINUTES}
+                    max={MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES}
+                    value={testWait}
+                    disabled={pending}
+                    onChange={event =>
+                      change(setTestWait)(
+                        Math.min(
+                          MAIL_BROADCAST_TEST_WAIT_MAX_MINUTES,
+                          Math.max(
+                            MAIL_BROADCAST_TEST_WAIT_MIN_MINUTES,
+                            Number(event.target.value) || 0
+                          )
+                        )
+                      )
+                    }
+                  />
+                </div>
+              </div>
+            ) : null}
+          </fieldset>
+          <p className="text-sm text-muted-foreground">{t('broadcasts.safetyHint')}</p>
+          {errorKey ? (
+            <Alert variant="destructive">
+              <AlertCircle className="size-4" aria-hidden="true" />
+              <AlertDescription>{t(errorKey)}</AlertDescription>
+            </Alert>
+          ) : null}
+          <div className="flex flex-wrap items-end gap-3">
+            <Button
+              type="submit"
+              variant={savedId === null ? 'default' : 'outline'}
+              loading={save.isPending && confirm === null}
+              disabled={(!dirty && savedId !== null) || !ready || pending}
+              icon={<Save className="size-4" />}
+            >
+              {t('broadcasts.save')}
+            </Button>
+            {canManage ? (
+              <>
                 <Button
                   type="button"
-                  variant="outline"
-                  disabled={dirty || !enabled || pending || scheduleAt === ''}
-                  icon={<Clock className="size-4" />}
-                  onClick={() => setConfirm('schedule')}
+                  loading={(save.isPending || send.isPending) && confirm === 'send'}
+                  disabled={!ready || !enabled || pending}
+                  icon={<Send className="size-4" />}
+                  onClick={requestSend}
                 >
-                  {t('broadcasts.schedule')}
+                  {t('broadcasts.sendNow')}
                 </Button>
-              </div>
-            </>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="space-y-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <Label htmlFor={ids.at}>{t('broadcasts.scheduleAt')}</Label>
+                      <span id={ids.atHint} className="text-xs text-muted-foreground">
+                        {t('broadcasts.timezoneHint', { zone })}
+                      </span>
+                    </div>
+                    <Input
+                      id={ids.at}
+                      type="datetime-local"
+                      value={scheduleAt}
+                      aria-describedby={ids.atHint}
+                      disabled={pending}
+                      onChange={event => {
+                        setErrorKey(null);
+                        setScheduleAt(event.target.value);
+                      }}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    loading={(save.isPending || send.isPending) && confirm === 'schedule'}
+                    disabled={!ready || !enabled || pending || scheduleAt === ''}
+                    icon={<Clock className="size-4" />}
+                    onClick={requestSchedule}
+                  >
+                    {t('broadcasts.schedule')}
+                  </Button>
+                </div>
+              </>
+            ) : null}
+          </div>
+          {!canManage ? (
+            <p className="text-sm text-muted-foreground">{t('broadcasts.managersSend')}</p>
           ) : null}
-        </div>
-        {savedId !== null && !canManage ? (
-          <p className="text-sm text-muted-foreground">{t('broadcasts.managersSend')}</p>
+        </form>
+        {activeTemplate !== null ? (
+          <BroadcastPreview key={activeTemplate.id} template={activeTemplate} values={variables} />
         ) : null}
-      </form>
+      </div>
       {confirm === 'send' || confirm === 'schedule' ? (
         <ConfirmDialog
           title={t(confirm === 'send' ? 'broadcasts.sendTitle' : 'broadcasts.scheduleTitle')}
@@ -853,7 +980,7 @@ function BroadcastEditor({
             confirm === 'send' ? 'broadcasts.sendDescription' : 'broadcasts.scheduleDescription'
           )}
           confirmLabel={t(confirm === 'send' ? 'broadcasts.sendNow' : 'broadcasts.schedule')}
-          pending={send.isPending}
+          pending={save.isPending || send.isPending}
           onCancel={() => setConfirm(null)}
           onConfirm={() => void start(confirm === 'schedule')}
         />
@@ -869,7 +996,82 @@ function BroadcastEditor({
           onConfirm={() => void confirmDelete()}
         />
       ) : null}
+      {confirm === 'discard' ? (
+        <ConfirmDialog
+          title={t('broadcasts.unsavedTitle')}
+          description={t('broadcasts.unsavedDescription')}
+          confirmLabel={t('broadcasts.discard')}
+          cancelLabel={t('broadcasts.keep')}
+          destructive
+          pending={false}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            setConfirm(null);
+            onBack();
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** Live preview of the selected template with sample contact values and shared broadcast values. */
+function BroadcastPreview({
+  template,
+  values,
+}: {
+  template: MailTemplate;
+  values: Record<string, string>;
+}) {
+  const t = useT('mailbox');
+  const [chosenTab, setChosenTab] = useState<'html' | 'text' | null>(null);
+  const rendered = useMemo(() => {
+    const merged: Record<string, string> = {
+      ...template.sample_variables,
+      unsubscribe_url: template.sample_variables.unsubscribe_url || '#unsubscribe',
+      ...Object.fromEntries(Object.entries(values).filter(([, value]) => value !== '')),
+    };
+    return renderTemplate(
+      { subject: template.subject, html: template.html_body, text: template.text_body },
+      merged
+    );
+  }, [template, values]);
+
+  if (!rendered) return null;
+  const hasHtml = template.html_body !== '';
+  const tab = chosenTab ?? (hasHtml ? 'html' : 'text');
+
+  return (
+    <section
+      aria-label={t('broadcasts.previewTitle')}
+      className="min-w-0 space-y-3 lg:sticky lg:top-4 lg:self-start"
+    >
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium">{t('broadcasts.previewTitle')}</h3>
+        <p className="text-xs text-muted-foreground">{t('broadcasts.previewHint')}</p>
+      </div>
+      <p className="rounded-md border px-3 py-2 text-sm font-medium break-words">
+        {rendered.subject || '\u00A0'}
+      </p>
+      <Tabs value={tab} onValueChange={value => setChosenTab(value as 'html' | 'text')}>
+        <TabsList>
+          <TabsTrigger value="html">{t('templates.previewHtml')}</TabsTrigger>
+          <TabsTrigger value="text">{t('templates.previewText')}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="html" className="pt-2">
+          <MailHtmlFrame html={rendered.html} title={t('broadcasts.previewTitle')} />
+        </TabsContent>
+        <TabsContent value="text" className="pt-2">
+          {rendered.text ? (
+            <pre className="max-h-96 overflow-auto rounded-md border p-3 font-sans text-sm break-words whitespace-pre-wrap">
+              {rendered.text}
+            </pre>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t('templates.noText')}</p>
+          )}
+        </TabsContent>
+      </Tabs>
+    </section>
   );
 }
 
@@ -877,27 +1079,23 @@ const contactVariables: readonly string[] = MAIL_BROADCAST_CONTACT_VARIABLES;
 
 /** The template's variables: contact fields are filled per message, the rest can be shared. */
 function SharedValues({
-  organizationId,
-  templateId,
+  template,
   values,
   disabled,
   onChange,
 }: {
-  organizationId: number;
-  templateId: number;
+  template: MailTemplate;
   values: Record<string, string>;
   disabled: boolean;
   onChange: (name: string, value: string) => void;
 }) {
   const t = useT('mailbox');
   const baseId = useId();
-  const template = useMailTemplate(organizationId, templateId);
-  if (!template.data) return null;
   const fields =
     templateFallbacks({
-      subject: template.data.subject,
-      html: template.data.html_body,
-      text: template.data.text_body,
+      subject: template.subject,
+      html: template.html_body,
+      text: template.text_body,
     }) ?? [];
   const fromContact = fields.filter(field => contactVariables.includes(field.name));
   const shared = fields.filter(field => !contactVariables.includes(field.name));
