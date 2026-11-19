@@ -12,6 +12,8 @@ interface ApiErrorResponseOptions {
   status: number;
   errorCode: ApiErrorCodeValue;
   message: string;
+  /** Upstream detail; set only where the adapter allows it through. */
+  error?: string;
   errors?: Record<string, string[]>;
   headers?: HeadersInit;
   requestId?: string;
@@ -21,6 +23,7 @@ export function apiErrorResponse({
   status,
   errorCode,
   message,
+  error,
   errors,
   headers,
   requestId,
@@ -30,6 +33,7 @@ export function apiErrorResponse({
       code: status,
       error_code: errorCode,
       message,
+      ...(error ? { error } : {}),
       ...(errors ? { errors } : {}),
       ...(requestId ? { request_id: requestId } : {}),
     },

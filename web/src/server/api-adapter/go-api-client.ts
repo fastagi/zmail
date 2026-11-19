@@ -15,6 +15,7 @@ const FORWARDED_RESPONSE_HEADERS = [
   'x-ratelimit-reset',
 ] as const;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const MAX_UPSTREAM_DETAIL_LENGTH = 500;
 const SAFE_RELATIVE_PATH = /^[A-Za-z0-9._~!$&'()*+,;=@\/-]+$/;
 const SAFE_IF_MATCH = /^[\x20-\x7E]{1,128}$/;
 const SAFE_IF_NONE_MATCH = /^[\x20-\x7E]{1,1024}$/;
@@ -80,6 +81,8 @@ export interface GoApiError {
   status: number;
   errorCode: ApiErrorCodeValue;
   message: string;
+  // The upstream `error` text. Never forwarded unless the caller allows it for the error code.
+  detail?: string;
   fieldErrors?: Record<string, string[]>;
   requestId: string;
   responseHeaders?: Record<string, string>;
@@ -316,12 +319,17 @@ function upstreamError(
       ? body.request_id
       : fallbackRequestId;
   const fieldErrors = mapFieldErrors(body.errors, fieldMap);
+  const detail =
+    typeof body.error === 'string' && body.error.trim() !== ''
+      ? body.error.trim().slice(0, MAX_UPSTREAM_DETAIL_LENGTH)
+      : undefined;
 
   return {
     cause: 'upstream',
     status,
     errorCode,
     message: 'Upstream API request failed',
+    ...(detail ? { detail } : {}),
     ...(fieldErrors ? { fieldErrors } : {}),
     requestId,
     ...(responseHeaders ? { responseHeaders } : {}),

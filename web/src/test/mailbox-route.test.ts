@@ -1479,6 +1479,12 @@ describe('mailbox browser route boundary', () => {
 
     const checked = (await (await checkDomain(route, domain.id)).json()).data;
     expect(checked).toMatchObject({ status: 'verified', zone_check_limited: false });
+    // The zone turning active sets up every other pending domain in it too.
+    const domains = (await (await route.listMailDomainsRoute(request('/api/mail-domains'))).json())
+      .data as Array<{ id: number; status: string; records: unknown[] }>;
+    const siblingNow = domains.find(item => item.id === sibling.id);
+    expect(siblingNow).toMatchObject({ status: 'verified' });
+    expect(siblingNow?.records.length).toBeGreaterThan(0);
     expect(checked.zone).toMatchObject({ id: zoneId, status: 'active' });
     expect(checked.zone.activated_at).not.toBeNull();
 
@@ -1816,7 +1822,13 @@ describe('mailbox browser route boundary', () => {
     cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
     const upstream = (status: number, errorCode: string, extra: Record<string, unknown> = {}) =>
       Response.json(
-        { code: status, error_code: errorCode, message: 'cloudflare said no', ...extra },
+        {
+          code: status,
+          error_code: errorCode,
+          message: 'Unprocessable',
+          error: 'cloudflare said no',
+          ...extra,
+        },
         { status }
       );
     fetchMock
@@ -1851,7 +1863,9 @@ describe('mailbox browser route boundary', () => {
     expect(rejected.status).toBe(422);
     const rejectedBody = await rejected.json();
     expect(rejectedBody.error_code).toBe('MAILBOX.DNS_RECORD_REJECTED');
-    expect(JSON.stringify(rejectedBody)).not.toContain('cloudflare said no');
+    // Cloudflare's reason is the one upstream text the browser receives.
+    expect(rejectedBody.message).toBe('cloudflare said no');
+    expect(rejectedBody.error).toBe('cloudflare said no');
     await expectError(await deleteRecord(route, 4, 'abc123'), 404, 'MAILBOX.DNS_RECORD_NOT_FOUND');
     await expectError(await listRecords(route, 4), 404, 'MAILBOX.ZONE_NOT_FOUND');
     await expectError(await deleteZone(route, 4), 409, 'MAILBOX.ZONE_STILL_DELEGATED');
@@ -1865,6 +1879,32 @@ describe('mailbox browser route boundary', () => {
     const limited = await checkDomain(route, 3);
     expect(limited.status).toBe(200);
     expect((await limited.json()).data).toMatchObject({ zone_check_limited: true });
+  });
+
+  it('forwards upstream error text only for a rejected DNS record', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    const upstream = (status: number, errorCode: string) =>
+      Response.json(
+        { code: status, error_code: errorCode, message: 'secret', error: 'provider internals' },
+        { status }
+      );
+    fetchMock
+      .mockResolvedValueOnce(upstream(409, 'MAILBOX.DNS_RECORD_LOCKED'))
+      .mockResolvedValueOnce(upstream(502, 'MAILBOX.DOMAIN_PROVIDER_FAILED'))
+      .mockResolvedValueOnce(upstream(422, 'MAILBOX.DNS_RECORD_INVALID'));
+    const route = await loadRoute();
+
+    for (const response of [
+      await updateRecord(route, 4, 'abc123', { ttl: 300 }),
+      await createRecord(route, 4, { type: 'A', name: 'x', content: '192.0.2.1' }),
+      await createRecord(route, 4, { type: 'A', name: 'x', content: '192.0.2.1' }),
+    ]) {
+      const text = await response.text();
+      expect(text).not.toContain('provider internals');
+      expect(text).not.toContain('secret');
+    }
   });
 
   it('forwards contact routes to the fixed API paths', async () => {

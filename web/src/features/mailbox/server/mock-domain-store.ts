@@ -185,6 +185,12 @@ export class MockDomainStore {
     if (this.zonePending(state)) {
       if (action === 'setups') return { ok: false, error: 'zone_pending' };
       this.dependencies.zones.check(organizationId, state.zoneId ?? 0);
+      // The zone is active now, which starts the setup of every pending domain in it.
+      for (const sibling of this.domains.values()) {
+        if (sibling !== state && sibling.zoneId === state.zoneId) {
+          if (sibling.domain.status === 'pending') this.verify(sibling);
+        }
+      }
     }
     return { ok: true, domain: this.verify(state) };
   }

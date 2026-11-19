@@ -89,18 +89,31 @@ export async function forwardAuthenticatedGoApi(
   });
 }
 
+/**
+ * The only error codes whose upstream `error` text reaches the browser: the text is meant for the
+ * user, such as Cloudflare's reason for refusing a DNS record of the organization's own zone.
+ */
+const FORWARDED_DETAIL_CODES: ReadonlySet<string> = new Set([
+  ApiErrorCode.MAILBOX_DNS_RECORD_REJECTED,
+]);
+
 function goApiErrorResponse(error: GoApiError): NextResponse {
+  const detail =
+    error.cause === 'upstream' && FORWARDED_DETAIL_CODES.has(error.errorCode)
+      ? error.detail
+      : undefined;
   const message =
     error.cause === 'timeout'
       ? 'API request timed out'
       : error.cause === 'unavailable'
         ? 'API service unavailable'
-        : genericUpstreamMessage(error.status);
+        : (detail ?? genericUpstreamMessage(error.status));
 
   return apiErrorResponse({
     status: error.status,
     errorCode: error.errorCode,
     message,
+    ...(detail ? { error: detail } : {}),
     errors: error.fieldErrors,
     requestId: error.requestId,
     headers: authenticatedResponseHeaders(error.responseHeaders, error.requestId),
