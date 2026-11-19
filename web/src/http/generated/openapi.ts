@@ -3809,7 +3809,7 @@ export interface components {
             /** @description May use `{{name}}` and `{{name|fallback}}` placeholders, as may both bodies. */
             subject: string;
             text?: string;
-            /** @description Required for a transactional template and refused for a standard one. Every placeholder must be declared and every declaration used. A secret variable must be required; a required variable must have no fallback and an optional one must have one. */
+            /** @description For a transactional template only; a standard template refuses a non-empty list. Every placeholder must be declared and every declaration used, so it is empty when the content has no placeholders. A secret variable must be required; a required variable must have no fallback and an optional one must have one. */
             variable_definitions?: components["schemas"]["MailTemplateVariableDefinition"][];
         };
         MailTemplateResponse: {

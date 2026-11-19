@@ -94,7 +94,7 @@ func TestTransactionalTemplateRequiresDeclaredPlaceholders(t *testing.T) {
 		"duplicate": func(i *TemplateInput) {
 			i.VariableDefinitions[1] = domain.TransactionalVariable{Name: "code", Required: true}
 		},
-		"no declarations": func(i *TemplateInput) { i.VariableDefinitions = nil },
+		"undeclared all": func(i *TemplateInput) { i.VariableDefinitions = nil },
 	} {
 		input := transactionalInput()
 		input.VariableDefinitions = append([]domain.TransactionalVariable(nil), input.VariableDefinitions...)
@@ -474,5 +474,42 @@ func TestMemberTemplateRouteIsForbiddenForTransactional(t *testing.T) {
 	recorder, decoded := fixture.do(http.MethodPost, "/mail-templates", body)
 	if recorder.Code != http.StatusForbidden || decoded["error_code"] != domain.CodePermissionDenied {
 		t.Fatalf("member create = %d %v", recorder.Code, decoded)
+	}
+}
+
+func TestTransactionalTemplateWithoutPlaceholdersNeedsNoDeclarations(t *testing.T) {
+	fixture := transactionalFixture(t)
+	input := transactionalInput()
+	input.Subject, input.HTML, input.Text = "Welcome", "<p>Welcome aboard</p>", "Welcome aboard"
+	input.VariableDefinitions = nil
+	input.SampleVariables = nil
+	template, err := fixture.service.CreateTemplate(context.Background(), as(1), input)
+	if err != nil {
+		t.Fatalf("CreateTemplate without placeholders: %v", err)
+	}
+	if response := toMailTemplateResponse(template); response.VariableDefinitions == nil || len(response.VariableDefinitions) != 0 {
+		t.Fatalf("variable_definitions = %v; want an empty list", response.VariableDefinitions)
+	}
+}
+
+func TestTemplateRouteRequiresEveryDefinitionField(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleOwner))
+	fixture.service.settings.Provider = config.MailboxProviderLog
+	for name, definition := range map[string]string{
+		"secret":   `{"name":"code","required":true}`,
+		"required": `{"name":"code","secret":true}`,
+		"name":     `{"secret":true,"required":true}`,
+	} {
+		body := `{"kind":"transactional","name":"Code","key":"signup-code","from_address":"no-reply@mail.example",` +
+			`"subject":"Code","text":"Code {{code}}","variable_definitions":[` + definition + `]}`
+		recorder, decoded := fixture.do(http.MethodPost, "/mail-templates", body)
+		if recorder.Code != http.StatusUnprocessableEntity || decoded["error_code"] != "COMMON.VALIDATION_FAILED" {
+			t.Errorf("missing %s = %d %v", name, recorder.Code, decoded)
+		}
+	}
+	body := `{"kind":"transactional","name":"Code","key":"signup-code","from_address":"no-reply@mail.example",` +
+		`"subject":"Code","text":"Code {{code}}","variable_definitions":[{"name":"code","secret":false,"required":true}]}`
+	if recorder, decoded := fixture.do(http.MethodPost, "/mail-templates", body); recorder.Code != http.StatusCreated {
+		t.Fatalf("explicit false secret = %d %v", recorder.Code, decoded)
 	}
 }

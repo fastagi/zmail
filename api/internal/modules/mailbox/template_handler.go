@@ -24,15 +24,41 @@ type MailTemplateRequest struct {
 	Design json.RawMessage `json:"design"`
 	// Kind defaults to standard. Key, FromAddress, FromName, and VariableDefinitions belong only to
 	// a transactional template; each declaration is {name, secret, required}.
-	Kind                domain.MailTemplateKind        `json:"kind" binding:"omitempty,oneof=standard transactional"`
-	Key                 string                         `json:"key" binding:"max=64"`
-	FromAddress         string                         `json:"from_address" binding:"max=320"`
-	FromName            string                         `json:"from_name" binding:"max=100"`
-	VariableDefinitions []domain.TransactionalVariable `json:"variable_definitions" binding:"omitempty,max=100"`
+	Kind                domain.MailTemplateKind                 `json:"kind" binding:"omitempty,oneof=standard transactional"`
+	Key                 string                                  `json:"key" binding:"max=64"`
+	FromAddress         string                                  `json:"from_address" binding:"max=320"`
+	FromName            string                                  `json:"from_name" binding:"max=100"`
+	VariableDefinitions []MailTemplateVariableDefinitionRequest `json:"variable_definitions" binding:"omitempty,max=100,dive"`
+}
+
+// MailTemplateVariableDefinitionRequest declares one variable; every field is required.
+type MailTemplateVariableDefinitionRequest struct {
+	Name     string `json:"name" binding:"required"`
+	Secret   *bool  `json:"secret" binding:"required"`
+	Required *bool  `json:"required" binding:"required"`
 }
 
 func (r MailTemplateRequest) input() TemplateInput {
-	return TemplateInput(r)
+	input := TemplateInput{
+		Name:            r.Name,
+		Subject:         r.Subject,
+		HTML:            r.HTML,
+		Text:            r.Text,
+		SampleVariables: r.SampleVariables,
+		Design:          r.Design,
+		Kind:            r.Kind,
+		Key:             r.Key,
+		FromAddress:     r.FromAddress,
+		FromName:        r.FromName,
+	}
+	for _, definition := range r.VariableDefinitions {
+		input.VariableDefinitions = append(input.VariableDefinitions, domain.TransactionalVariable{
+			Name:     definition.Name,
+			Secret:   definition.Secret != nil && *definition.Secret,
+			Required: definition.Required != nil && *definition.Required,
+		})
+	}
+	return input
 }
 
 // MailTemplatePreviewRequest renders a stored template or unsaved source; it sends nothing.

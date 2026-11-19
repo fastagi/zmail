@@ -988,10 +988,10 @@ A transactional template also has:
 | `key` | Required. `^[a-z][a-z0-9-]{0,63}$`, unique within the organization (`409 MAILBOX.TEMPLATE_KEY_TAKEN`). The API names the template by it. |
 | `from_address` | Required. A bare address, stored lowercased, whose domain is a `verified` domain of the organization (`send_receive` or `send_only`). With the `log` provider the instance's own `MAILBOX_DOMAIN` is also allowed. Otherwise `422 MAILBOX.DOMAIN_NOT_VERIFIED`. |
 | `from_name` | Optional display name, at most 100 characters. |
-| `variable_definitions` | Required, at most 100 items of `{ name, secret, required }`, names unique and following the placeholder name rule. |
+| `variable_definitions` | At most 100 items of `{ name, secret, required }`, names unique and following the placeholder name rule. Empty or absent when the content has no placeholders. |
 
 The variable definitions must match the content exactly, or the save is
-`422 MAILBOX.TEMPLATE_INVALID` with a field error naming the problem:
+`422 MAILBOX.TEMPLATE_INVALID` with an `error` message naming the problem:
 
 - every placeholder in the subject and bodies is declared, and every declared variable is used;
 - a `required` variable has no fallback, and every placeholder of an optional variable has one;

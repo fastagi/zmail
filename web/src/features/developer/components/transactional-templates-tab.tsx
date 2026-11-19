@@ -175,10 +175,7 @@ function TemplateDetail({
       ),
     [template]
   );
-  const definitions =
-    template.variable_definitions.length > 0
-      ? template.variable_definitions
-      : template.variables.map(name => ({ name, secret: false, required: true }));
+  const definitions = template.variable_definitions;
   const sender = template.from
     ? template.from.name === ''
       ? template.from.address

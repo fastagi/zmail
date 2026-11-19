@@ -38,7 +38,7 @@ func validateTransactionalTemplate(template *domain.MailTemplate, parsed *parsed
 		return fmt.Errorf("%w: from_name", ErrMailTemplateInvalid)
 	}
 	template.FromName = fromName
-	if len(template.Variables) == 0 || len(template.Variables) > maxTemplateVariables {
+	if len(template.Variables) > maxTemplateVariables {
 		return fmt.Errorf("%w: variable_definitions", ErrMailTemplateInvalid)
 	}
 	declared := make(map[string]domain.TransactionalVariable, len(template.Variables))
