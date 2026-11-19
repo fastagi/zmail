@@ -291,7 +291,7 @@ func TestDeletePendingZoneRefusesAVerifiedDomain(t *testing.T) {
 	}
 }
 
-func removedAtProvider(context.Context) error { return nil }
+func removedAtProvider(context.Context, *domain.MailZone) error { return nil }
 
 // failAtProvider fails the test when a zone removal reaches the provider.
 func failAtProvider(t *testing.T) func(context.Context, *domain.MailZone) error {
@@ -351,7 +351,7 @@ func TestDeletePendingZoneCommitsOnlyAfterTheProvider(t *testing.T) {
 	}
 
 	providerDown := errors.New("provider down")
-	if err := repo.DeletePendingZone(ctx, zone.ID, func(context.Context) error { return providerDown }); !errors.Is(err, providerDown) {
+	if err := repo.DeletePendingZone(ctx, zone.ID, func(context.Context, *domain.MailZone) error { return providerDown }); !errors.Is(err, providerDown) {
 		t.Fatalf("DeletePendingZone = %v", err)
 	}
 	if _, err := repo.FindZone(ctx, 1, zone.ID); err != nil {
@@ -366,7 +366,7 @@ func TestDeletePendingZoneCommitsOnlyAfterTheProvider(t *testing.T) {
 		t.Fatalf("ActivateZone = %v, %v", won, err)
 	}
 	called := false
-	err := repo.DeletePendingZone(ctx, zone.ID, func(context.Context) error { called = true; return nil })
+	err := repo.DeletePendingZone(ctx, zone.ID, func(context.Context, *domain.MailZone) error { called = true; return nil })
 	if !errors.Is(err, ErrMailZoneNotFound) || called {
 		t.Fatalf("DeletePendingZone on an active zone = %v, provider called %v", err, called)
 	}
@@ -400,11 +400,16 @@ func TestZoneRepositoryListsUncheckedDomainsInActiveZones(t *testing.T) {
 		t.Fatalf("UpdateDomain: %v", err)
 	}
 
-	found, err := repo.ListUncheckedDomainsInActiveZones(ctx, 10)
+	later := time.Now().Add(time.Minute)
+	found, err := repo.ListUncheckedDomainsInActiveZones(ctx, later, 10)
 	if err != nil || len(found) != 1 || found[0].ID != unchecked.ID {
 		t.Fatalf("unchecked = %+v, %v; want only %s", found, err, unchecked.Name)
 	}
-	if limited, err := repo.ListUncheckedDomainsInActiveZones(ctx, 0); err != nil || len(limited) != 0 {
+	// A domain connected after the cutoff is still in its own request's setup.
+	if recent, err := repo.ListUncheckedDomainsInActiveZones(ctx, time.Now().Add(-time.Minute), 10); err != nil || len(recent) != 0 {
+		t.Fatalf("created before a minute ago = %+v, %v", recent, err)
+	}
+	if limited, err := repo.ListUncheckedDomainsInActiveZones(ctx, later, 0); err != nil || len(limited) != 0 {
 		t.Fatalf("limit 0 = %+v, %v", limited, err)
 	}
 }
@@ -426,6 +431,9 @@ func TestZoneRepositoryCompletesAReservation(t *testing.T) {
 	}
 	if listed, err := repo.ListZones(ctx, 1); err != nil || len(listed) != 0 {
 		t.Fatalf("listed while reserved = %+v, %v", listed, err)
+	}
+	if _, err := repo.FindZone(ctx, 1, reserved.ID); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("reservation by id = %v", err)
 	}
 
 	reserved.CloudflareZoneID = "cf-example"

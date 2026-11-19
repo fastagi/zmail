@@ -43,6 +43,8 @@ type MailZoneRepository interface {
 	// CreateZone stores a zone unless the organization already has limit zones or the name or
 	// provider zone is taken anywhere on the instance.
 	CreateZone(ctx context.Context, zone *MailZone, limit int) error
+	// FindZone reads a zone of the organization. A reservation is ErrMailZoneNotFound: it has no
+	// provider zone yet.
 	FindZone(ctx context.Context, organizationID, id uint) (*MailZone, error)
 	FindZoneByName(ctx context.Context, name string) (*MailZone, error)
 	// ListZones lists the organization's zones, leaving out reservations whose provider zone is
@@ -64,13 +66,16 @@ type MailZoneRepository interface {
 	// provider refusal keeps the row and the zone's status cannot change during the call.
 	DeleteZone(ctx context.Context, organizationID, id uint, removeAtProvider func(context.Context, *MailZone) error) error
 	// DeletePendingZone removes a zone together with its domains, which are pending while the
-	// zone is. It holds the zone locked as pending while removeAtProvider runs and commits only
-	// when that succeeds, so a zone activated concurrently is never removed. A zone that is no
-	// longer pending is ErrMailZoneNotFound, and removeAtProvider is not called.
-	DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context) error) error
+	// zone is. It holds the zone locked as pending while removeAtProvider runs with the zone as
+	// stored, and commits only when that succeeds, so a zone activated concurrently is never
+	// removed. A zone that is no longer pending is ErrMailZoneNotFound, and removeAtProvider is not
+	// called.
+	DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context, *MailZone) error) error
 	ListDomainsInZone(ctx context.Context, zoneID uint) ([]*MailDomain, error)
 	// ListUncheckedDomainsInActiveZones returns up to limit pending domains that were never
 	// checked although their managed zone is active: domains whose setup an activation started
 	// but did not finish.
-	ListUncheckedDomainsInActiveZones(ctx context.Context, limit int) ([]*MailDomain, error)
+	// Only domains created before createdBefore are listed, so a domain whose own request is
+	// still setting it up is left to that request.
+	ListUncheckedDomainsInActiveZones(ctx context.Context, createdBefore time.Time, limit int) ([]*MailDomain, error)
 }

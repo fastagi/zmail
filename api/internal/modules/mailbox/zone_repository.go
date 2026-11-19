@@ -145,7 +145,8 @@ func (r *repository) FindZone(ctx context.Context, organizationID, id uint) (*do
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailZonePO
-	if err := r.conn(ctx).Where("id = ? AND organization_id = ?", id, organizationID).First(&po).Error; err != nil {
+	if err := r.conn(ctx).Where("id = ? AND organization_id = ? AND cloudflare_zone_id NOT LIKE ?",
+		id, organizationID, zoneReservationPrefix+"%").First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailZoneNotFound
 		}
@@ -342,7 +343,7 @@ func (r *repository) DeleteZone(
 // The zone row stays locked from the pending check until commit, and removeAtProvider runs inside
 // that window: ActivateZone waits on the lock, so the provider zone is removed only while the row
 // is still pending, and a provider failure rolls the rows back for a later retry.
-func (r *repository) DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context) error) error {
+func (r *repository) DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context, *domain.MailZone) error) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
@@ -370,7 +371,7 @@ func (r *repository) DeletePendingZone(ctx context.Context, id uint, removeAtPro
 		if err := tx.Delete(&MailZonePO{}, po.ID).Error; err != nil {
 			return err
 		}
-		return removeAtProvider(ctx)
+		return removeAtProvider(ctx, po.toDomain())
 	})
 }
 
@@ -393,7 +394,7 @@ func (r *repository) ListDomainsInZone(ctx context.Context, zoneID uint) ([]*dom
 
 // ListUncheckedDomainsInActiveZones returns pending, never-checked domains of active zones, oldest
 // first. Every setup stores when it checked, so a domain leaves this list after one setup.
-func (r *repository) ListUncheckedDomainsInActiveZones(ctx context.Context, limit int) ([]*domain.MailDomain, error) {
+func (r *repository) ListUncheckedDomainsInActiveZones(ctx context.Context, createdBefore time.Time, limit int) ([]*domain.MailDomain, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
@@ -403,8 +404,8 @@ func (r *repository) ListUncheckedDomainsInActiveZones(ctx context.Context, limi
 	var rows []MailDomainPO
 	if err := r.conn(ctx).Model(&MailDomainPO{}).
 		Joins("JOIN mail_zones ON mail_zones.id = mail_domains.mail_zone_id").
-		Where("mail_zones.status = ? AND mail_domains.status = ? AND mail_domains.checked_at IS NULL",
-			string(domain.MailZoneStatusActive), string(domain.MailDomainStatusPending)).
+		Where("mail_zones.status = ? AND mail_domains.status = ? AND mail_domains.checked_at IS NULL AND mail_domains.created_at < ?",
+			string(domain.MailZoneStatusActive), string(domain.MailDomainStatusPending), createdBefore).
 		Order("mail_domains.id ASC").Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}

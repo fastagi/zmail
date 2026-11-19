@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"testing"
@@ -24,6 +25,9 @@ type fakeMailZones struct {
 	now func() time.Time
 	// activations counts the pending-to-active transitions ActivateZone made.
 	activations int
+	// beforeDeletePending, when set, runs in DeletePendingZone before the row is locked, such as
+	// to complete a reservation meanwhile.
+	beforeDeletePending func()
 }
 
 func newFakeMailZones(domains *fakeDomains) *fakeMailZones {
@@ -66,7 +70,7 @@ func (z *fakeMailZones) CreateZone(_ context.Context, zone *domain.MailZone, lim
 
 func (z *fakeMailZones) FindZone(_ context.Context, organizationID, id uint) (*domain.MailZone, error) {
 	zone, ok := z.zones[id]
-	if !ok || zone.OrganizationID != organizationID {
+	if !ok || zone.OrganizationID != organizationID || isZoneReservation(zone) {
 		return nil, ErrMailZoneNotFound
 	}
 	copied := *zone
@@ -165,7 +169,11 @@ func (z *fakeMailZones) DeleteZone(ctx context.Context, organizationID, id uint,
 	return nil
 }
 
-func (z *fakeMailZones) DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context) error) error {
+func (z *fakeMailZones) DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context, *domain.MailZone) error) error {
+	if hook := z.beforeDeletePending; hook != nil {
+		z.beforeDeletePending = nil
+		hook()
+	}
 	zone, ok := z.zones[id]
 	if !ok || zone.Status != domain.MailZoneStatusPending {
 		return ErrMailZoneNotFound
@@ -176,7 +184,8 @@ func (z *fakeMailZones) DeletePendingZone(ctx context.Context, id uint, removeAt
 		}
 	}
 	// The repository commits only after the provider call succeeds.
-	if err := removeAtProvider(ctx); err != nil {
+	locked := *zone
+	if err := removeAtProvider(ctx, &locked); err != nil {
 		return err
 	}
 	for domainID, mailDomain := range z.domains.domains {
@@ -834,11 +843,12 @@ func TestWaitForSetupsWaitsForBackgroundSetups(t *testing.T) {
 	}
 }
 
-func (z *fakeMailZones) ListUncheckedDomainsInActiveZones(_ context.Context, limit int) ([]*domain.MailDomain, error) {
+func (z *fakeMailZones) ListUncheckedDomainsInActiveZones(_ context.Context, createdBefore time.Time, limit int) ([]*domain.MailDomain, error) {
 	var domains []*domain.MailDomain
 	for id := uint(1); id <= z.domains.nextID && len(domains) < limit; id++ {
 		mailDomain, ok := z.domains.domains[id]
-		if !ok || mailDomain.MailZoneID == nil || mailDomain.Status != domain.MailDomainStatusPending || mailDomain.CheckedAt != nil {
+		if !ok || mailDomain.MailZoneID == nil || mailDomain.Status != domain.MailDomainStatusPending || mailDomain.CheckedAt != nil ||
+			!mailDomain.CreatedAt.Before(createdBefore) {
 			continue
 		}
 		if zone, ok := z.zones[*mailDomain.MailZoneID]; ok && zone.Status == domain.MailZoneStatusActive {
@@ -940,5 +950,120 @@ func TestReleasePendingZone(t *testing.T) {
 	}
 	if fixture.mailZones.zones[active.ID] == nil {
 		t.Fatal("an active zone was released")
+	}
+}
+
+// Another organization's zone can appear at the provider between this request's lookup in Zmail
+// and its lookup at the provider: the provider zone is then that organization's, never an
+// operator zone.
+func TestConnectFindingAnotherOrganizationsNewZoneAtTheProviderIsTaken(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	var ownerErr error
+	fixture.zones.findZoneHook = func() {
+		_, ownerErr = fixture.service.ConnectMailDomain(ctx, 7, testCreator, "mail.example.org", "")
+	}
+	if _, err := fixture.service.ConnectMailDomain(ctx, 8, testCreator, "news.example.org", ""); !errors.Is(err, ErrMailDomainTaken) {
+		t.Fatalf("connect while another organization created the zone = %v; want taken", err)
+	}
+	if ownerErr != nil {
+		t.Fatalf("owner connect = %v", ownerErr)
+	}
+	for _, stored := range fixture.domains.domains {
+		if stored.OrganizationID != 7 {
+			t.Fatalf("another organization stored %+v in the new zone", stored)
+		}
+	}
+}
+
+// A reservation is no zone yet: reading, listing records of, or removing it is not found, and
+// its placeholder never reaches the provider.
+func TestAReservationIsNotFoundByID(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	reserved := fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.org", CloudflareZoneID: newZoneReservation(), Status: domain.MailZoneStatusPending,
+	})
+	if _, err := fixture.service.GetMailZone(ctx, 7, reserved.ID); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("GetMailZone = %v", err)
+	}
+	if err := fixture.service.DeleteMailZone(ctx, 7, reserved.ID); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("DeleteMailZone = %v", err)
+	}
+	if fixture.mailZones.zones[reserved.ID] == nil || len(fixture.zones.deletedZones) != 0 {
+		t.Fatalf("reservation removed: zones %v, deleted %v", fixture.mailZones.zones, fixture.zones.deletedZones)
+	}
+}
+
+// A forced release removes at the provider the zone as locked, which a completed reservation has
+// filled with its Cloudflare zone ID since it was read.
+func TestForcedReleaseDeletesTheZoneAsLocked(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	reserved := fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.org", CloudflareZoneID: newZoneReservation(), Status: domain.MailZoneStatusPending,
+	})
+	fixture.mailZones.beforeDeletePending = func() {
+		fixture.mailZones.zones[reserved.ID].CloudflareZoneID = "cf-filled"
+	}
+	if err := fixture.service.ReleasePendingZone(ctx, "example.org", true); err != nil {
+		t.Fatalf("release = %v", err)
+	}
+	if !slices.Equal(fixture.zones.deletedZones, []string{"cf-filled"}) {
+		t.Fatalf("deleted at the provider = %v; want the zone as locked", fixture.zones.deletedZones)
+	}
+}
+
+// Without --force, a release reads the apex's name servers as removal from the console does: a
+// registrar may delegate to a zone before Cloudflare activates it.
+func TestReleaseRefusesAZoneTheRegistrarDelegates(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	resolver := &fakeResolver{ns: map[string][]*net.NS{"example.org": {{Host: "ada.ns.cloudflare.com."}}}}
+	fixture.service.nsResolver = resolver
+	zone := fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.org", CloudflareZoneID: "cf-pending", Status: domain.MailZoneStatusPending,
+	})
+	if err := fixture.service.ReleasePendingZone(ctx, "example.org", false); !errors.Is(err, ErrMailZoneStillDelegated) {
+		t.Fatalf("release while delegated = %v", err)
+	}
+	if fixture.mailZones.zones[zone.ID] == nil || len(fixture.zones.deletedZones) != 0 {
+		t.Fatal("a delegated pending zone was released")
+	}
+	resolver.nsErr = &net.DNSError{Err: "no such host", Name: "example.org", IsNotFound: true}
+	if err := fixture.service.ReleasePendingZone(ctx, "example.org", false); err != nil {
+		t.Fatalf("release of an unregistered name = %v", err)
+	}
+}
+
+// The sweep leaves a domain connected moments ago to the request that connected it, and a pass
+// records that it looked at a recent reservation.
+func TestSweepSkipsNewDomainsAndPassesTouchReservations(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	fresh := fixture.connect(t, "mail.example.org")
+	zone := fixture.pendingZoneOf(t, fresh)
+	fixture.mailZones.zones[zone.ID].Status = domain.MailZoneStatusActive
+	fixture.domains.domains[fresh.ID].CreatedAt = fixture.now.Add(-time.Second)
+	reserved := fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.net", CloudflareZoneID: newZoneReservation(), Status: domain.MailZoneStatusPending,
+	})
+
+	if _, err := fixture.service.CheckPendingZones(ctx, 100); err != nil {
+		t.Fatalf("CheckPendingZones: %v", err)
+	}
+	if stored := fixture.domains.domains[fresh.ID]; stored.CheckedAt != nil || len(fixture.zones.routingFor) != 0 {
+		t.Fatalf("a domain connected a second ago was swept: %+v", stored)
+	}
+	if touched := fixture.mailZones.zones[reserved.ID].LastCheckedAt; touched == nil || !touched.Equal(fixture.now) {
+		t.Fatalf("reservation last checked = %v", touched)
+	}
+
+	fixture.domains.domains[fresh.ID].CreatedAt = fixture.now.Add(-domainSetupTimeout - time.Second)
+	if _, err := fixture.service.CheckPendingZones(ctx, 100); err != nil {
+		t.Fatalf("CheckPendingZones: %v", err)
+	}
+	if stored := fixture.domains.domains[fresh.ID]; stored.Status != domain.MailDomainStatusVerified {
+		t.Fatalf("left-behind domain = %s", stored.Status)
 	}
 }

@@ -39,6 +39,9 @@ type fakeZones struct {
 	// createZoneHook, when set, runs once CreateZone added a zone to the account and before it
 	// returns, such as to connect a domain from another request meanwhile.
 	createZoneHook func()
+	// findZoneHook, when set, runs once at the start of FindZone, such as to let another request
+	// create a zone between a lookup in Zmail and the lookup at the provider.
+	findZoneHook func()
 	// ensureSendingHook, when set, runs at the start of every EnsureSending, such as to hold a
 	// setup open.
 	ensureSendingHook func()
@@ -62,6 +65,10 @@ func (z *fakeZones) add(record mailtransport.DNSRecord) {
 }
 
 func (z *fakeZones) FindZone(_ context.Context, name string) (mailtransport.Zone, error) {
+	if hook := z.findZoneHook; hook != nil {
+		z.findZoneHook = nil
+		hook()
+	}
 	labels := strings.Split(name, ".")
 	for start := 0; start+2 <= len(labels); start++ {
 		candidate := strings.Join(labels[start:], ".")

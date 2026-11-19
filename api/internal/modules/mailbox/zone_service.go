@@ -91,6 +91,14 @@ func (s *service) resolveZone(ctx context.Context, organizationID, createdBy uin
 	}
 	zone, err := s.domainProvider.FindZone(ctx, name)
 	if err == nil {
+		// An organization reserves its apex before it creates the provider zone, so a provider
+		// zone found now that Zmail stores, reserved or created, is that organization's even
+		// when the first lookup missed it.
+		if _, lookupErr := s.zones.FindZoneByName(ctx, zone.Name); lookupErr == nil {
+			return domainZone{}, ErrMailDomainTaken
+		} else if !errors.Is(lookupErr, ErrMailZoneNotFound) {
+			return domainZone{}, lookupErr
+		}
 		return domainZone{providerID: zone.ID, name: zone.Name}, nil
 	}
 	if !errors.Is(err, mailtransport.ErrZoneNotFound) {
@@ -244,7 +252,9 @@ func (s *service) CheckPendingZones(ctx context.Context, limit int) (int, error)
 // setUpLeftBehindDomains starts the setup of pending, never-checked domains in active zones. A
 // domain whose setup already runs, such as one this pass activated, is left to that run.
 func (s *service) setUpLeftBehindDomains(ctx context.Context, limit int) {
-	domains, err := s.zones.ListUncheckedDomainsInActiveZones(ctx, limit)
+	// A domain younger than one setup may still be in the setup its own request started.
+	createdBefore := s.now().UTC().Add(-domainSetupTimeout)
+	domains, err := s.zones.ListUncheckedDomainsInActiveZones(ctx, createdBefore, limit)
 	if err != nil {
 		slog.WarnContext(ctx, "left-behind mail domains were not listed", slog.String("error", err.Error()))
 		return
@@ -286,10 +296,11 @@ func (s *service) checkPendingZone(ctx context.Context, zone *domain.MailZone) e
 // zone of that name in the account may be the operator's. A provider zone the abandoned request
 // did create shows up in the operator's Cloudflare account and the log below.
 func (s *service) checkZoneReservation(ctx context.Context, zone *domain.MailZone) error {
-	if s.now().UTC().Sub(zone.CreatedAt) <= zoneReservationLifetime {
-		return nil
+	if now := s.now().UTC(); now.Sub(zone.CreatedAt) <= zoneReservationLifetime {
+		// Recorded so the pass after this one looks at other zones first.
+		return s.zones.TouchZone(ctx, zone.ID, now)
 	}
-	err := s.zones.DeletePendingZone(ctx, zone.ID, func(context.Context) error { return nil })
+	err := s.zones.DeletePendingZone(ctx, zone.ID, func(context.Context, *domain.MailZone) error { return nil })
 	if err != nil {
 		if errors.Is(err, ErrMailZoneNotFound) {
 			return nil
@@ -306,8 +317,8 @@ func (s *service) checkZoneReservation(ctx context.Context, zone *domain.MailZon
 // it succeeds, so a zone a concurrent check activates is never removed at the provider, and a
 // provider failure leaves the row for the next pass to retry.
 func (s *service) expireZone(ctx context.Context, zone *domain.MailZone) error {
-	err := s.zones.DeletePendingZone(ctx, zone.ID, func(providerContext context.Context) error {
-		if err := s.domainProvider.DeleteZone(providerContext, zone.CloudflareZoneID); err != nil && !providerZoneGone(err) {
+	err := s.zones.DeletePendingZone(ctx, zone.ID, func(providerContext context.Context, locked *domain.MailZone) error {
+		if err := s.domainProvider.DeleteZone(providerContext, locked.CloudflareZoneID); err != nil && !providerZoneGone(err) {
 			return err
 		}
 		return nil
@@ -515,6 +526,10 @@ func (s *service) DeleteMailZone(ctx context.Context, organizationID, id uint) e
 		return err
 	}
 	err := s.zones.DeleteZone(ctx, organizationID, id, func(providerContext context.Context, zone *domain.MailZone) error {
+		if isZoneReservation(zone) {
+			// The zone is still being created; its placeholder ID is not a provider zone.
+			return ErrMailZoneNotFound
+		}
 		if err := s.requireUndelegated(providerContext, zone.Name, zone.Status == domain.MailZoneStatusPending); err != nil {
 			return err
 		}
@@ -582,16 +597,21 @@ func (s *service) ReleasePendingZone(ctx context.Context, apex string, force boo
 		return nil
 	}
 	if force {
-		// DeletePendingZone keeps the row locked as pending and removes its domains with it.
-		err = s.zones.DeletePendingZone(ctx, zone.ID, func(providerContext context.Context) error {
-			return removeAtProvider(providerContext, zone)
-		})
+		// DeletePendingZone keeps the row locked as pending and removes its domains with it. The
+		// operator overrides the delegation check.
+		err = s.zones.DeletePendingZone(ctx, zone.ID, removeAtProvider)
 		if errors.Is(err, ErrMailZoneNotFound) {
 			// The zone became active, or went, after it was read.
 			return errZoneNoLongerPending
 		}
 	} else {
-		err = s.zones.DeleteZone(ctx, zone.OrganizationID, zone.ID, removeAtProvider)
+		err = s.zones.DeleteZone(ctx, zone.OrganizationID, zone.ID, func(providerContext context.Context, locked *domain.MailZone) error {
+			// A registrar may already delegate to a zone Cloudflare has not activated yet.
+			if err := s.requireUndelegated(providerContext, locked.Name, true); err != nil {
+				return err
+			}
+			return removeAtProvider(providerContext, locked)
+		})
 	}
 	if err != nil {
 		return err

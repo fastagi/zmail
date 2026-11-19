@@ -237,7 +237,8 @@ waits `--poll` (at most `1h`) between passes even when a pass was full, so more 
 
 Each pass also sets up the pending domains of active zones that were never checked, such as when an
 earlier worker stopped right after an activation. Before it exits, including on `SIGTERM` and after
-`--once`, the worker waits up to two minutes for the domain setups it started.
+`--once`, the worker waits up to two minutes for the domain setups it started, so give it a
+`terminationGracePeriodSeconds` of at least 150 (or the equivalent stop timeout outside Kubernetes).
 
 ### Releasing A Pending Zone
 
