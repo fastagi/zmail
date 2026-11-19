@@ -125,7 +125,8 @@ has no browser route: only the mail edge calls it.
   organization's verified domains (`kind: "organization"`). Every item repeats the instance
   settings: `max_mailboxes` (per organization, across all domains), the outbound `provider`
   (`cloudflare` delivers; `log` only records and is for development), `inbound_enabled`,
-  `daily_send_limit` (per organization), `broadcasts_enabled`, and `custom_domains_enabled`.
+  the per-organization lane limits `daily_send_limit` (personal), `daily_broadcast_limit`, and
+  `daily_transactional_limit` (see [Send](#send)), `broadcasts_enabled`, and `custom_domains_enabled`.
 - An address that is or ever was a mailbox is
   `409 MAILBOX.ADDRESS_TAKEN`: deleting a mailbox keeps its address reserved, so a later owner
   never receives mail meant for the previous one.
@@ -845,11 +846,21 @@ answers:
 | Provider accepted | `201` with the message | `sent` |
 | Provider rejected or was unreachable | `502 MAILBOX.DELIVERY_FAILED` | `failed`, with `failure_code` |
 | No provider configured | `503 MAILBOX.SENDER_NOT_CONFIGURED` | `failed` |
-| Organization's rolling 24-hour limit reached | `202` with the message | `queued`, `queued_reason` `send_limit` |
+| Organization's rolling 24-hour personal lane limit reached | `202` with the message | `queued`, `queued_reason` `send_limit` |
 | Limit reached and as many messages already waiting as the limit | `429 MAILBOX.SEND_LIMIT_REACHED` | nothing stored |
 
-A send is never reported as successful before the provider accepts it. The send limit is counted
-per organization over the instants provider calls started, and failed attempts count toward it.
+A send is never reported as successful before the provider accepts it.
+
+The send limit is split into three lanes. Each lane is counted separately per organization over a
+rolling 24 hours by the instants provider calls started, failed attempts count toward it, and a
+full lane never consumes another lane's room. Every message belongs to exactly one lane, fixed when
+it is stored:
+
+| Lane | Counts | Limit (`GET /v1/mailbox-domains`) | When full |
+|---|---|---|---|
+| Personal | Console sends, replies, `POST /v1/outbound-mail-messages`, and template test sends | `daily_send_limit` | The message waits (below) |
+| Broadcast | Each broadcast recipient | `daily_broadcast_limit` | The broadcast pauses (see [Broadcasts](#broadcasts)) |
+| Transactional | Live, non-simulated transactional messages | `daily_transactional_limit` | The message is queued |
 
 A `202` message waits; nothing about the limit's usage is in the answer, and the Web console tells
 everyone the same thing: the limit is full and the message is queued. The `mail:broadcast:work`
@@ -1090,8 +1101,8 @@ the mailbox.
 #### Sending
 
 The `mail:broadcast:work` worker sends each recipient as an ordinary outbound message from the
-broadcast's mailbox, so the organization's send limit, delivery events, the log, and webhooks apply
-to it.
+broadcast's mailbox, so the organization's broadcast lane limit, delivery events, the log, and
+webhooks apply to it.
 
 - Variables come from the broadcast's `variables`, then the contact's properties (which override a
   shared value of the same name), then the contact's `email`, `first_name`, `last_name`, and
@@ -1105,8 +1116,9 @@ to it.
   (`contact_not_subscribed`); a deleted contact is `skipped` (`contact_deleted`).
 - Each recipient is sent with an idempotency key of its broadcast and contact, so a worker that stops
   after the provider call never sends that contact a second message.
-- When the send limit is reached, the broadcast keeps `sending` with `stop_reason`
-  `send_limit_reached` and continues when the 24-hour window has room.
+- When the broadcast lane limit (`daily_broadcast_limit`) is reached, the broadcast keeps `sending`
+  with `stop_reason` `send_limit_reached` and continues when the 24-hour window has room. Personal
+  and transactional sends never use the broadcast lane's room, and a broadcast never uses theirs.
 
 The broadcast reports `counts` of its recipients by status. `GET
 /v1/mail-broadcasts/{id}/recipients` pages them, with an optional `status` filter, each with the

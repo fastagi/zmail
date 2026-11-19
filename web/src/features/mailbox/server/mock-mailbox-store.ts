@@ -280,6 +280,8 @@ export class MockMailboxStore {
       provider: 'log' as const,
       inbound_enabled: false,
       daily_send_limit: MOCK_DAILY_SEND_LIMIT,
+      daily_broadcast_limit: MOCK_DAILY_SEND_LIMIT,
+      daily_transactional_limit: MOCK_DAILY_SEND_LIMIT,
       broadcasts_enabled: true,
       custom_domains_enabled: true,
     };

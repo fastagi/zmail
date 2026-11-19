@@ -141,7 +141,10 @@ export const mailboxDomainSchema = strictObject({
   // `cloudflare` delivers; `log` only records and is for development.
   provider: union([literal('cloudflare'), literal('log')]),
   inbound_enabled: boolean(),
+  // Per-organization lane limits over a rolling 24 hours: personal, broadcast, transactional.
   daily_send_limit: positiveIntegerSchema,
+  daily_broadcast_limit: positiveIntegerSchema,
+  daily_transactional_limit: positiveIntegerSchema,
   // Broadcasts need the inbound secret and MAILBOX_PUBLIC_URL for their unsubscribe links.
   broadcasts_enabled: boolean(),
   // Instance-wide: whether owners and admins may connect their own domains.

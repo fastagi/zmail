@@ -229,8 +229,14 @@ describe('mailbox service boundary', () => {
   it('accepts domains, mailboxes, and pages without bodies', () => {
     expect(mailboxDomainListSchema.safeParse([domain()]).success).toBe(true);
     expect(mailboxDomainListSchema.safeParse([domain({ provider: 'log' })]).success).toBe(true);
-    // The provider, the inbound state, and the send limit are required parts of the answer.
-    for (const field of ['provider', 'inbound_enabled', 'daily_send_limit']) {
+    // The provider, the inbound state, and the three lane limits are required parts of the answer.
+    for (const field of [
+      'provider',
+      'inbound_enabled',
+      'daily_send_limit',
+      'daily_broadcast_limit',
+      'daily_transactional_limit',
+    ]) {
       const partial: Record<string, unknown> = domain();
       delete partial[field];
       expect(mailboxDomainListSchema.safeParse([partial]).success, field).toBe(false);
@@ -240,6 +246,8 @@ describe('mailbox service boundary', () => {
       { inbound_enabled: 'yes' },
       { daily_send_limit: 0 },
       { daily_send_limit: 1.5 },
+      { daily_broadcast_limit: 0 },
+      { daily_transactional_limit: 1.5 },
     ]) {
       expect(mailboxDomainListSchema.safeParse([domain(drift)]).success).toBe(false);
     }
@@ -452,6 +460,8 @@ function domain(overrides: Record<string, unknown> = {}) {
     provider: 'cloudflare',
     inbound_enabled: true,
     daily_send_limit: 200,
+    daily_broadcast_limit: 200,
+    daily_transactional_limit: 200,
     broadcasts_enabled: true,
     custom_domains_enabled: false,
     ...overrides,

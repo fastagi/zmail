@@ -18,6 +18,8 @@ export async function runServiceParity(context: { organizationId: number }): Pro
     provider: 'log',
     inbound_enabled: false,
     daily_send_limit: 200,
+    daily_broadcast_limit: 200,
+    daily_transactional_limit: 200,
   });
 
   const mailbox = await mailboxService.create(organizationId, {

@@ -2914,8 +2914,12 @@ export interface components {
             broadcasts_enabled: boolean;
             /** @description Whether owners and admins may connect their own domains. Instance-wide, repeated on every item. */
             custom_domains_enabled: boolean;
-            /** @description Outbound messages one organization may attempt per rolling 24 hours. */
+            /** @description The broadcast lane limit. Broadcast recipients one organization may attempt per rolling 24 hours. */
+            daily_broadcast_limit: number;
+            /** @description The personal lane limit. Personal messages (console sends, replies, `outbound-mail-messages`, and template test sends) one organization may attempt per rolling 24 hours. */
             daily_send_limit: number;
+            /** @description The transactional lane limit. Live, non-simulated transactional messages one organization may attempt per rolling 24 hours. */
+            daily_transactional_limit: number;
             domain: string;
             /** @description Whether the API accepts signed deliveries from the mail edge. */
             inbound_enabled: boolean;

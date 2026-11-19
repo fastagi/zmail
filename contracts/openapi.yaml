@@ -10004,6 +10004,8 @@ components:
         - provider
         - inbound_enabled
         - daily_send_limit
+        - daily_broadcast_limit
+        - daily_transactional_limit
         - broadcasts_enabled
         - custom_domains_enabled
       properties:
@@ -10032,7 +10034,17 @@ components:
           description: Whether the API accepts signed deliveries from the mail edge.
         daily_send_limit:
           type: integer
-          description: Outbound messages one organization may attempt per rolling 24 hours.
+          description: The personal lane limit. Personal messages (console sends, replies, `outbound-mail-messages`,
+            and template test sends) one organization may attempt per rolling 24 hours.
+          minimum: 1
+        daily_broadcast_limit:
+          type: integer
+          description: The broadcast lane limit. Broadcast recipients one organization may attempt per rolling 24 hours.
+          minimum: 1
+        daily_transactional_limit:
+          type: integer
+          description: The transactional lane limit. Live, non-simulated transactional messages one organization may
+            attempt per rolling 24 hours.
           minimum: 1
         broadcasts_enabled:
           type: boolean

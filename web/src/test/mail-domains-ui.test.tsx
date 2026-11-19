@@ -685,6 +685,8 @@ function sharedDomain(customDomainsEnabled: boolean) {
     provider: 'cloudflare',
     inbound_enabled: true,
     daily_send_limit: 200,
+    daily_broadcast_limit: 200,
+    daily_transactional_limit: 200,
     broadcasts_enabled: true,
     custom_domains_enabled: customDomainsEnabled,
   };

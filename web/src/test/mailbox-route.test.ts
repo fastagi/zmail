@@ -188,6 +188,8 @@ describe('mailbox browser route boundary', () => {
           provider: 'log',
           inbound_enabled: false,
           daily_send_limit: 200,
+          daily_broadcast_limit: 200,
+          daily_transactional_limit: 200,
           broadcasts_enabled: true,
           custom_domains_enabled: true,
         },

@@ -59,6 +59,8 @@ describe('mailbox live refresh', () => {
         provider: 'log',
         inbound_enabled: true,
         daily_send_limit: 200,
+        daily_broadcast_limit: 200,
+        daily_transactional_limit: 200,
         broadcasts_enabled: false,
         custom_domains_enabled: false,
       },
