@@ -328,6 +328,50 @@ func (d *fakeDomains) ListMailboxesWithoutRoutingRule(_ context.Context, organiz
 	return mailboxes, nil
 }
 
+func TestPromotedSharedDomainRoutesRepliesAcrossOrganizations(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	connected := fixture.connect(t, "news.example.com")
+	fixture.service.settings.Domain = connected.Name
+	for _, organizationID := range []uint{7, 8} {
+		domains, err := fixture.service.MailboxDomains(ctx, organizationID)
+		if err != nil || len(domains) != 1 || !domains[0].Shared || domains[0].Name != connected.Name {
+			t.Fatalf("organization %d domains = %+v, error = %v", organizationID, domains, err)
+		}
+	}
+	mailbox, err := fixture.service.CreateMailbox(ctx, as(8), sharedInput("team", "Team", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mailbox.RoutingRuleID == "" || fixture.zones.rules[mailbox.RoutingRuleID] != "team@news.example.com" {
+		t.Fatalf("shared subdomain has no reply route: %+v", mailbox)
+	}
+	if _, err := fixture.service.GetMailDomain(ctx, 8, connected.ID); !errors.Is(err, ErrMailDomainNotFound) {
+		t.Fatalf("shared sending must not grant domain management: %v", err)
+	}
+}
+
+func TestPromotedSharedDomainFailsClosedBeforeCreatingMailbox(t *testing.T) {
+	for _, pending := range []bool{true, false} {
+		t.Run(fmt.Sprintf("pending=%t", pending), func(t *testing.T) {
+			fixture := newDomainFixture(t)
+			connected := fixture.connect(t, "news.example.com")
+			fixture.service.settings.Domain = connected.Name
+			want := ErrMailDomainNotVerified
+			if pending {
+				fixture.domains.domains[connected.ID].Status = domain.MailDomainStatusPending
+			} else {
+				fixture.zones.ruleErr = &mailtransport.DomainError{Operation: "create rule", Status: 503}
+				want = ErrMailDomainProviderFailed
+			}
+			_, err := fixture.service.CreateMailbox(context.Background(), as(8), sharedInput("team", "", ""))
+			if !errors.Is(err, want) || len(fixture.repo.mailboxes) != 0 || len(fixture.zones.rules) != 0 {
+				t.Fatalf("error = %v; mailboxes = %d; routes = %d", err, len(fixture.repo.mailboxes), len(fixture.zones.rules))
+			}
+		})
+	}
+}
+
 type domainFixture struct {
 	*serviceFixture
 	zones     *fakeZones
