@@ -25,7 +25,7 @@ func newQueueFixture(t *testing.T) *queueFixture {
 	notifier := &fakeNotifier{}
 	memberships := newAccessMemberships()
 	svc := NewService(repo, memberships, repo, repo, repo, nil, nil, transport, notifier, accessSettings())
-	f := &queueFixture{notifier: notifier, clock: time.Now().UTC()}
+	f := &queueFixture{notifier: notifier, clock: time.Now().UTC().Truncate(time.Microsecond)}
 	svc.now = func() time.Time { return f.clock }
 	f.accessFixture = seedAccessFixture(t, svc, repo, transport, memberships)
 	return f
