@@ -20,6 +20,8 @@ type MailDomainPO struct {
 	Name           string `gorm:"size:253;not null;uniqueIndex:idx_mail_domains_name"`
 	ZoneID         string `gorm:"size:64;not null"`
 	ZoneName       string `gorm:"size:253;not null"`
+	MailZoneID     *uint  `gorm:"index:idx_mail_domains_mail_zone"`
+	Capability     string `gorm:"size:20;not null;default:'send_receive'"`
 	SendingTag     string `gorm:"size:64;not null;default:''"`
 	Status         string `gorm:"size:20;not null;default:'pending'"`
 	Records        string `gorm:"type:jsonb;not null;default:'[]'"`
@@ -42,6 +44,8 @@ func (po *MailDomainPO) toDomain() *domain.MailDomain {
 		Name:           po.Name,
 		ZoneID:         po.ZoneID,
 		ZoneName:       po.ZoneName,
+		MailZoneID:     po.MailZoneID,
+		Capability:     domain.MailDomainCapability(po.Capability),
 		SendingTag:     po.SendingTag,
 		Status:         domain.MailDomainStatus(po.Status),
 		LastError:      po.LastError,
@@ -76,12 +80,18 @@ func mailDomainPO(mailDomain *domain.MailDomain) (*MailDomainPO, error) {
 	if status == "" {
 		status = domain.MailDomainStatusPending
 	}
+	capability := mailDomain.Capability
+	if capability == "" {
+		capability = domain.MailDomainSendReceive
+	}
 	return &MailDomainPO{
 		ID:             mailDomain.ID,
 		OrganizationID: mailDomain.OrganizationID,
 		Name:           mailDomain.Name,
 		ZoneID:         mailDomain.ZoneID,
 		ZoneName:       mailDomain.ZoneName,
+		MailZoneID:     mailDomain.MailZoneID,
+		Capability:     string(capability),
 		SendingTag:     mailDomain.SendingTag,
 		Status:         string(status),
 		Records:        string(encoded),
@@ -187,13 +197,15 @@ func (r *repository) UpdateDomain(ctx context.Context, mailDomain *domain.MailDo
 	result := r.conn(ctx).Model(&MailDomainPO{}).
 		Where("id = ? AND organization_id = ?", mailDomain.ID, mailDomain.OrganizationID).
 		Updates(map[string]any{
-			"sending_tag": po.SendingTag,
-			"status":      po.Status,
-			"records":     po.Records,
-			"last_error":  po.LastError,
-			"checked_at":  po.CheckedAt,
-			"verified_at": po.VerifiedAt,
-			"updated_at":  time.Now(),
+			"mail_zone_id": po.MailZoneID,
+			"capability":   po.Capability,
+			"sending_tag":  po.SendingTag,
+			"status":       po.Status,
+			"records":      po.Records,
+			"last_error":   po.LastError,
+			"checked_at":   po.CheckedAt,
+			"verified_at":  po.VerifiedAt,
+			"updated_at":   time.Now(),
 		})
 	if result.Error != nil {
 		return result.Error

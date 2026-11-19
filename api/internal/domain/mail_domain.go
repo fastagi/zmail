@@ -16,6 +16,15 @@ const (
 	MailDomainStatusVerified MailDomainStatus = "verified"
 )
 
+// MailDomainCapability tells whether a connected domain receives mail through Zmail or only sends.
+type MailDomainCapability string
+
+const (
+	MailDomainSendReceive MailDomainCapability = "send_receive"
+	// MailDomainSendOnly leaves the domain's MX with another mail service.
+	MailDomainSendOnly MailDomainCapability = "send_only"
+)
+
 // MailDomainRecordPurpose names what a required record is for.
 type MailDomainRecordPurpose string
 
@@ -56,6 +65,9 @@ type MailDomain struct {
 	Name           string
 	ZoneID         string
 	ZoneName       string
+	// MailZoneID is the managed zone the domain lives in; nil for a zone the operator manages.
+	MailZoneID *uint
+	Capability MailDomainCapability
 	// SendingTag identifies the domain's Email Sending configuration at the provider.
 	SendingTag string
 	Status     MailDomainStatus

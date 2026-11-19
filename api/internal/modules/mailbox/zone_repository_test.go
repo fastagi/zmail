@@ -1,0 +1,240 @@
+package mailbox
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/fastagi/zmail/api/internal/domain"
+)
+
+func openZoneRepository(t *testing.T) *repository {
+	t.Helper()
+	repo, db := openRepository(t)
+	if err := db.AutoMigrate(&MailZonePO{}, &MailDomainPO{}); err != nil {
+		t.Fatalf("migrate mail zones: %v", err)
+	}
+	createOwner(t, db, 1)
+	createOwner(t, db, 2)
+	return repo
+}
+
+func newZone(organizationID uint, name string) *domain.MailZone {
+	return &domain.MailZone{
+		OrganizationID:   organizationID,
+		Name:             name,
+		CloudflareZoneID: "cf-" + name,
+		NameServers:      []string{"ada.ns.cloudflare.com", "bob.ns.cloudflare.com"},
+		CreatedBy:        organizationID,
+	}
+}
+
+func TestZoneRepositoryLimit(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	for i := range 3 {
+		zone := newZone(1, fmt.Sprintf("example%d.com", i))
+		if err := repo.CreateZone(ctx, zone, 3); err != nil {
+			t.Fatalf("CreateZone %d: %v", i, err)
+		}
+		if zone.ID == 0 || zone.Status != domain.MailZoneStatusPending || len(zone.NameServers) != 2 || zone.OriginalNameServers == nil {
+			t.Fatalf("created = %+v", zone)
+		}
+	}
+	if err := repo.CreateZone(ctx, newZone(1, "example3.com"), 3); !errors.Is(err, ErrMailZoneLimitReached) {
+		t.Fatalf("fourth zone = %v", err)
+	}
+	listed, err := repo.ListZones(ctx, 1)
+	if err != nil || len(listed) != 3 || listed[0].Name != "example0.com" {
+		t.Fatalf("listed = %+v, %v", listed, err)
+	}
+}
+
+func TestZoneRepositoryNameUnique(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	first := newZone(1, "example.com")
+	if err := repo.CreateZone(ctx, first, 3); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	if err := repo.CreateZone(ctx, newZone(2, "example.com"), 3); !errors.Is(err, ErrMailDomainTaken) {
+		t.Fatalf("same name in another organization = %v", err)
+	}
+	sameCloudflareZone := newZone(2, "other.com")
+	sameCloudflareZone.CloudflareZoneID = first.CloudflareZoneID
+	if err := repo.CreateZone(ctx, sameCloudflareZone, 3); !errors.Is(err, ErrMailDomainTaken) {
+		t.Fatalf("same cloudflare zone = %v", err)
+	}
+	if _, err := repo.FindZone(ctx, 2, first.ID); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("read across organizations = %v", err)
+	}
+	found, err := repo.FindZoneByName(ctx, "EXAMPLE.com")
+	if err != nil || found.ID != first.ID {
+		t.Fatalf("found = %+v, %v", found, err)
+	}
+	if _, err := repo.FindZoneByName(ctx, "missing.com"); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("missing zone = %v", err)
+	}
+}
+
+func TestZoneRepositoryConcurrentCreate(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	results := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range 2 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			zone := newZone(uint(i+1), "example.com")
+			zone.CloudflareZoneID = fmt.Sprintf("cf-%d", i)
+			results[i] = repo.CreateZone(ctx, zone, 3)
+		}(i)
+	}
+	wg.Wait()
+	succeeded := 0
+	for _, err := range results {
+		switch {
+		case err == nil:
+			succeeded++
+		case !errors.Is(err, ErrMailDomainTaken):
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("succeeded = %d, results = %v", succeeded, results)
+	}
+}
+
+func TestZoneRepositoryUpdatesAndListsPendingZones(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	checked := newZone(1, "checked.com")
+	unchecked := newZone(1, "unchecked.com")
+	active := newZone(2, "active.com")
+	for _, zone := range []*domain.MailZone{checked, unchecked, active} {
+		if err := repo.CreateZone(ctx, zone, 3); err != nil {
+			t.Fatalf("CreateZone(%s): %v", zone.Name, err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	checked.LastCheckedAt = &now
+	checked.OriginalNameServers = []string{"ns1.registrar.example"}
+	if err := repo.UpdateZone(ctx, checked); err != nil {
+		t.Fatalf("UpdateZone: %v", err)
+	}
+	active.Status = domain.MailZoneStatusActive
+	active.ActivatedAt = &now
+	if err := repo.UpdateZone(ctx, active); err != nil {
+		t.Fatalf("UpdateZone active: %v", err)
+	}
+	pending, err := repo.ListPendingZones(ctx, 10)
+	if err != nil || len(pending) != 2 || pending[0].Name != "unchecked.com" || pending[1].Name != "checked.com" {
+		t.Fatalf("pending = %+v, %v", pending, err)
+	}
+	if len(pending[1].OriginalNameServers) != 1 || pending[1].LastCheckedAt == nil {
+		t.Fatalf("updated zone = %+v", pending[1])
+	}
+	stored, err := repo.FindZone(ctx, 2, active.ID)
+	if err != nil || stored.Status != domain.MailZoneStatusActive || stored.ActivatedAt == nil {
+		t.Fatalf("active = %+v, %v", stored, err)
+	}
+	active.OrganizationID = 1
+	if err := repo.UpdateZone(ctx, active); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("update across organizations = %v", err)
+	}
+}
+
+func TestZoneRepositoryDeleteInUse(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	zone := newZone(1, "example.com")
+	if err := repo.CreateZone(ctx, zone, 3); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	mailDomain := &domain.MailDomain{OrganizationID: 1, Name: "example.com", ZoneID: zone.CloudflareZoneID, ZoneName: zone.Name, MailZoneID: &zone.ID, CreatedBy: 1}
+	if err := repo.CreateDomain(ctx, mailDomain, 10); err != nil {
+		t.Fatalf("CreateDomain: %v", err)
+	}
+	if err := repo.DeleteZone(ctx, 1, zone.ID); !errors.Is(err, ErrMailZoneInUse) {
+		t.Fatalf("delete in use = %v", err)
+	}
+	if err := repo.DeleteDomain(ctx, 1, mailDomain.ID); err != nil {
+		t.Fatalf("DeleteDomain: %v", err)
+	}
+	if err := repo.DeleteZone(ctx, 2, zone.ID); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("delete across organizations = %v", err)
+	}
+	if err := repo.DeleteZone(ctx, 1, zone.ID); err != nil {
+		t.Fatalf("DeleteZone: %v", err)
+	}
+	if _, err := repo.FindZone(ctx, 1, zone.ID); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("deleted zone = %v", err)
+	}
+}
+
+func TestDeletePendingZoneRemovesDomains(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	zone := newZone(1, "example.com")
+	if err := repo.CreateZone(ctx, zone, 3); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	for _, name := range []string{"example.com", "news.example.com"} {
+		mailDomain := &domain.MailDomain{OrganizationID: 1, Name: name, ZoneID: zone.CloudflareZoneID, ZoneName: zone.Name, MailZoneID: &zone.ID, CreatedBy: 1}
+		if err := repo.CreateDomain(ctx, mailDomain, 10); err != nil {
+			t.Fatalf("CreateDomain(%s): %v", name, err)
+		}
+	}
+	inZone, err := repo.ListDomainsInZone(ctx, zone.ID)
+	if err != nil || len(inZone) != 2 {
+		t.Fatalf("in zone = %+v, %v", inZone, err)
+	}
+	if err = repo.DeletePendingZone(ctx, zone.ID); err != nil {
+		t.Fatalf("DeletePendingZone: %v", err)
+	}
+	if _, err = repo.FindZone(ctx, 1, zone.ID); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("deleted zone = %v", err)
+	}
+	left, err := repo.ListDomains(ctx, 1)
+	if err != nil || len(left) != 0 {
+		t.Fatalf("domains left = %+v, %v", left, err)
+	}
+}
+
+func TestDomainCapabilityRoundTrip(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	zone := newZone(1, "example.com")
+	if err := repo.CreateZone(ctx, zone, 3); err != nil {
+		t.Fatalf("CreateZone: %v", err)
+	}
+	sendOnly := &domain.MailDomain{OrganizationID: 1, Name: "example.com", ZoneID: zone.CloudflareZoneID, ZoneName: zone.Name, MailZoneID: &zone.ID, Capability: domain.MailDomainSendOnly, CreatedBy: 1}
+	if err := repo.CreateDomain(ctx, sendOnly, 10); err != nil {
+		t.Fatalf("CreateDomain: %v", err)
+	}
+	found, err := repo.FindDomain(ctx, 1, sendOnly.ID)
+	if err != nil || found.Capability != domain.MailDomainSendOnly || found.MailZoneID == nil || *found.MailZoneID != zone.ID {
+		t.Fatalf("send only = %+v, %v", found, err)
+	}
+	found.Capability = domain.MailDomainSendReceive
+	if err = repo.UpdateDomain(ctx, found); err != nil {
+		t.Fatalf("UpdateDomain: %v", err)
+	}
+	updated, err := repo.FindDomain(ctx, 1, sendOnly.ID)
+	if err != nil || updated.Capability != domain.MailDomainSendReceive {
+		t.Fatalf("updated = %+v, %v", updated, err)
+	}
+
+	plain := &domain.MailDomain{OrganizationID: 1, Name: "operator.example", ZoneID: "z", ZoneName: "operator.example", CreatedBy: 1}
+	if err = repo.CreateDomain(ctx, plain, 10); err != nil {
+		t.Fatalf("CreateDomain plain: %v", err)
+	}
+	stored, err := repo.FindDomainByName(ctx, "operator.example")
+	if err != nil || stored.Capability != domain.MailDomainSendReceive || stored.MailZoneID != nil {
+		t.Fatalf("plain = %+v, %v", stored, err)
+	}
+}
