@@ -27,6 +27,7 @@ export const ROUTES = {
     MAILBOXES: '/console/mailboxes',
     EMAILS: '/console/emails',
     MAIL_DOMAIN: '/console/mail-domain',
+    MAIL_ZONE_DNS: '/console/mail-domain/:zoneId/dns',
     MAIL_TEMPLATES: '/console/mail-templates',
     MAIL_CONTACTS: '/console/mail-contacts',
     MAIL_BROADCASTS: '/console/mail-broadcasts',
@@ -80,6 +81,10 @@ export function getConsoleRoute(route: ConsoleRoutes): string {
 
 export function getOrganizationRoute(organizationId: number | string): string {
   return buildRoute(ROUTES.CONSOLE.ORGANIZATION, { organizationId });
+}
+
+export function getMailZoneDnsRoute(zoneId: number | string): string {
+  return buildRoute(ROUTES.CONSOLE.MAIL_ZONE_DNS, { zoneId });
 }
 
 export function getDevtoolsRoute(route: DevtoolsRoutes): string {

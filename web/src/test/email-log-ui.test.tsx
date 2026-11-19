@@ -90,6 +90,8 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
     useConnectMailDomain: () => ({ isPending: false, mutateAsync: async () => undefined }),
     useRefreshMailDomain: () => ({ isPending: false, mutateAsync: async () => undefined }),
     useRemoveMailDomain: () => ({ isPending: false, mutateAsync: async () => undefined }),
+    usePreviewMailDomain: () => ({ isPending: false, mutateAsync: async () => undefined }),
+    useListMailZones: () => ({ isPending: false, error: null, data: [], refetch: () => undefined }),
     useMailboxes: (organizationId: number) => scoped(organizationId, state.mailboxes),
     useMailLog: (organizationId: number, filters: Record<string, unknown>, page: number) => {
       state.logCalls.push({ filters, page });
