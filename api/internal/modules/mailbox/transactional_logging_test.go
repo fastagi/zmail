@@ -15,6 +15,8 @@ import (
 var transactionalLogKeys = map[string]bool{
 	"request_id": true, "organization_id": true, "message_id": true, "template_id": true, "mode": true,
 	"status": true, "failure_code": true, "attempts": true, "duration_ms": true, "count": true,
+	// event is a delivery event type (delivered, bounced, ...), not personal data.
+	"event": true,
 }
 
 // slogAttributeConstructors build one attribute from a key and a value.
@@ -34,6 +36,8 @@ func TestTransactionalLogsCarryNoPersonalData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob: %v", err)
 	}
+	// Delivery events of transactional messages are recorded here too.
+	files = append(files, "delivery_event.go")
 	checked := 0
 	for _, name := range files {
 		if strings.HasSuffix(name, "_test.go") {
@@ -72,7 +76,7 @@ func TestTransactionalLogsCarryNoPersonalData(t *testing.T) {
 			return true
 		})
 	}
-	if checked < 3 {
+	if checked < 4 {
 		t.Fatalf("checked %d transactional files; the glob found too few", checked)
 	}
 }

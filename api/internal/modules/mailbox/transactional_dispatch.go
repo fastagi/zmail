@@ -64,7 +64,7 @@ func (s *service) DispatchTransactionalMessage(ctx context.Context, id uint) err
 	if message.Status != domain.TransactionalStatusQueued {
 		return nil
 	}
-	_, err = s.dispatchTransactionalOrganization(ctx, message.OrganizationID, []uint{id}, 1)
+	_, err = s.dispatchTransactionalOrganization(ctx, message.OrganizationID, []uint{id}, s.now().UTC(), 1)
 	return err
 }
 
@@ -102,7 +102,7 @@ func (s *service) DispatchTransactional(ctx context.Context, limit int) (int, er
 		if processed >= limit {
 			break
 		}
-		sent, err := s.dispatchTransactionalOrganization(ctx, organizationID, nil, limit-processed)
+		sent, err := s.dispatchTransactionalOrganization(ctx, organizationID, nil, now, limit-processed)
 		processed += sent
 		if err != nil {
 			return processed, err
@@ -177,8 +177,10 @@ func (s *service) reportTransactionalQueue(ctx context.Context) {
 // dispatchTransactionalOrganization leases up to limit due messages of one organization (only the
 // given ones when ids is set) and dispatches each. Live, real messages lease only while the
 // transactional lane has room.
-func (s *service) dispatchTransactionalOrganization(ctx context.Context, organizationID uint, ids []uint, limit int) (int, error) {
-	now := s.now().UTC()
+//
+// A worker pass passes the now it failed unknown outcomes with, so a lease that runs out between
+// that check and this lease is left for the next pass's check instead of being leased again.
+func (s *service) dispatchTransactionalOrganization(ctx context.Context, organizationID uint, ids []uint, now time.Time, limit int) (int, error) {
 	leased, err := s.transactional.LeaseTransactional(ctx, organizationID, ids, now, now.Add(domain.TransactionalLease),
 		now.Add(-sendLimitWindow), s.settings.laneLimit(domain.SendLaneTransactional), limit)
 	if err != nil {
@@ -359,8 +361,13 @@ func (s *service) sendTransactionalAttempt(ctx context.Context, message *domain.
 			events, []TransactionalNotification{{Type: TransactionalSuppressedEvent, Reason: "suppressed", OccurredAt: now}})
 	case isTransportErr && !transportErr.Permanent && transportErr.Responded:
 		if delay, retry := transactionalRetryDelay(message.Attempts); retry {
-			if _, err := s.transactional.ScheduleTransactionalRetry(recordContext, message.ID, lease, now.Add(delay), transportErr.Code); err != nil {
+			scheduled, err := s.transactional.ScheduleTransactionalRetry(recordContext, message.ID, lease, now.Add(delay), transportErr.Code)
+			if err != nil {
 				return err
+			}
+			if !scheduled {
+				logTransactionalLeaseLost(ctx, message)
+				return nil
 			}
 			logTransactional(ctx, "transactional_message.retry_scheduled", message,
 				slog.Int("attempts", message.Attempts), slog.String("failure_code", transportErr.Code))
@@ -456,8 +463,13 @@ func (s *service) recordTransactional(
 		}
 		return published, nil
 	})
-	if err != nil || !finished {
+	if err != nil {
 		return err
+	}
+	if !finished {
+		// The lease ran out before the outcome was recorded; whoever holds the message now decides.
+		logTransactionalLeaseLost(ctx, message)
+		return nil
 	}
 	message.Status = outcome.Status
 	event := "transactional_message." + string(outcome.Status)
@@ -468,6 +480,13 @@ func (s *service) recordTransactional(
 	}
 	metrics.RecordTransactionalMessage(string(message.Mode), string(outcome.Status))
 	return nil
+}
+
+// logTransactionalLeaseLost reports a dispatcher that lost its lease before recording what it did.
+func logTransactionalLeaseLost(ctx context.Context, message *domain.TransactionalMessage) {
+	slog.WarnContext(ctx, "transactional_message.lease_lost",
+		slog.Uint64("organization_id", uint64(message.OrganizationID)),
+		slog.Uint64("message_id", uint64(message.ID)))
 }
 
 // logTransactional writes one structured event with the message's identifiers only: never an

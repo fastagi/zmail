@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -163,8 +164,8 @@ func (r *repository) LeaseTransactional(
 	now, leaseUntil = pgTime(now), pgTime(leaseUntil)
 	var leased []TransactionalMessagePO
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('zmail.transactional_send'), ?::int)`,
-			organizationID).Error; err != nil {
+		lockKey := int32(organizationID) //nolint:gosec // lock key only needs to be stable per organization
+		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('zmail.transactional_send'), ?)`, lockKey).Error; err != nil {
 			return err
 		}
 		var attempts, held int64
@@ -181,23 +182,45 @@ func (r *repository) LeaseTransactional(
 		}
 		room := laneLimit - int(attempts) - int(held)
 
-		query := tx.Where(`organization_id = ? AND status = ? AND next_attempt_at <= ? AND (lease_until IS NULL OR lease_until <= ?)`,
-			organizationID, string(domain.TransactionalStatusQueued), now, now)
-		if len(ids) > 0 {
-			query = query.Where("id IN ?", ids)
-		}
+		// Lane-exempt (test and simulated) and live messages are selected apart, so live messages
+		// waiting for lane room never crowd test and simulated ones out of the batch.
 		var candidates []TransactionalMessagePO
-		if err := query.Order("next_attempt_at, id").Limit(limit).
-			Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Find(&candidates).Error; err != nil {
-			return err
+		for _, lane := range []string{
+			`(mode = 'test' OR simulated)`,
+			`(mode = 'live' AND NOT simulated)`,
+		} {
+			query := tx.Where(`organization_id = ? AND status = ? AND next_attempt_at <= ? AND (lease_until IS NULL OR lease_until <= ?)`,
+				organizationID, string(domain.TransactionalStatusQueued), now, now).
+				Where(notLostAttempt, leaseSeconds).
+				Where(lane)
+			if len(ids) > 0 {
+				query = query.Where("id IN ?", ids)
+			}
+			var found []TransactionalMessagePO
+			if err := query.Order("next_attempt_at, id").Limit(limit).
+				Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+				Find(&found).Error; err != nil {
+				return err
+			}
+			candidates = append(candidates, found...)
 		}
+		sort.SliceStable(candidates, func(i, j int) bool {
+			a, b := candidates[i], candidates[j]
+			if !a.NextAttemptAt.Equal(*b.NextAttemptAt) {
+				return a.NextAttemptAt.Before(*b.NextAttemptAt)
+			}
+			return a.ID < b.ID
+		})
 		var leaseIDs, waitIDs []uint
 		for i := range candidates {
 			candidate := &candidates[i]
 			countsInLane := candidate.Mode == string(domain.APIKeyModeLive) && !candidate.Simulated
 			if countsInLane && room <= 0 {
 				waitIDs = append(waitIDs, candidate.ID)
+				continue
+			}
+			if len(leased) >= limit {
+				// Over the batch: left for the next pass, unchanged.
 				continue
 			}
 			if countsInLane {
@@ -238,6 +261,7 @@ func (r *repository) TransactionalDueOrganizations(ctx context.Context, now time
 	err := r.conn(ctx).Model(&TransactionalMessagePO{}).
 		Where(`status = ? AND next_attempt_at <= ? AND (lease_until IS NULL OR lease_until <= ?)`,
 			string(domain.TransactionalStatusQueued), now, now).
+		Where(notLostAttempt, leaseSeconds).
 		Distinct().Order("organization_id").Limit(limit).
 		Pluck("organization_id", &organizations).Error
 	return organizations, err
@@ -294,17 +318,23 @@ func (r *repository) ExpireTransactional(ctx context.Context, now time.Time, lim
 	now = pgTime(now)
 	return r.failQueued(ctx, now, limit, domain.TransactionalFailureExpired,
 		`created_at < ? AND (lease_until IS NULL OR lease_until <= ?)
-		  AND NOT (lease_until IS NOT NULL AND send_attempted_at IS NOT NULL
-		           AND send_attempted_at >= lease_until - ? * interval '1 second')`,
+		  AND `+notLostAttempt,
 		now.Add(-domain.TransactionalQueueTimeout), now, leaseSeconds)
 }
 
 func (r *repository) FailUnknownTransactional(ctx context.Context, now time.Time, limit int) ([]*domain.TransactionalMessage, error) {
 	now = pgTime(now)
 	return r.failQueued(ctx, now, limit, domain.TransactionalFailureUnknownOutcome,
-		`lease_until <= ? AND send_attempted_at >= lease_until - ? * interval '1 second'`,
-		now, leaseSeconds)
+		`lease_until <= ? AND `+lostAttempt, now, leaseSeconds)
 }
+
+// lostAttempt matches a message whose provider call started inside its current lease: once that
+// lease runs out, the call's result is unknown. notLostAttempt is its complement; a message that
+// matches lostAttempt is never leased again, only failed by FailUnknownTransactional (D33).
+const (
+	lostAttempt    = `(lease_until IS NOT NULL AND send_attempted_at IS NOT NULL AND send_attempted_at >= lease_until - ? * interval '1 second')`
+	notLostAttempt = `NOT ` + lostAttempt
+)
 
 // failQueued fails at most limit queued messages matching the condition, oldest first, skipping
 // rows another transaction holds, and returns them as stored.

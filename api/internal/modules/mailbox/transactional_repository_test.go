@@ -114,7 +114,9 @@ func TestIdempotencyUniqueUnderConcurrency(t *testing.T) {
 		t.Fatalf("results = %v, want exactly one winner", results)
 	}
 	var rows int64
-	db.Raw(`SELECT count(*) FROM transactional_messages`).Scan(&rows)
+	if err := db.Raw(`SELECT count(*) FROM transactional_messages`).Scan(&rows).Error; err != nil {
+		t.Fatalf("query: %v", err)
+	}
 	if rows != 1 {
 		t.Fatalf("rows = %d, want 1", rows)
 	}
@@ -319,6 +321,71 @@ func TestTransactionalDueOrganizations(t *testing.T) {
 	}
 }
 
+// A provider call that started inside a lease that then ran out may have been accepted: the
+// message is never leased again (D33), only failed by FailUnknownTransactional.
+func TestLostLeaseAttemptIsNeverLeasedAgain(t *testing.T) {
+	repo, _ := openTransactionalRepository(t)
+	ctx := context.Background()
+	start := txBase.Add(time.Minute)
+	message := createTransactional(t, repo, newTransactional(txBase))
+	leased := leaseAll(t, repo, start, 10)
+	if len(leased) != 1 {
+		t.Fatalf("leased = %d", len(leased))
+	}
+	if ok, err := repo.StartTransactionalAttempt(ctx, message.ID, *leased[0].LeaseUntil, start); err != nil || !ok {
+		t.Fatalf("start = %v, %v", ok, err)
+	}
+	later := start.Add(domain.TransactionalLease + time.Second)
+	if again := leaseAll(t, repo, later, 10); len(again) != 0 {
+		t.Fatalf("a lost-lease attempt was leased again: %+v", again[0])
+	}
+	if again, err := repo.LeaseTransactional(ctx, 10, []uint{message.ID}, later, later.Add(domain.TransactionalLease),
+		later.Add(-24*time.Hour), 10, 1); err != nil || len(again) != 0 {
+		t.Fatalf("leasing by id = %v, %v; want nothing", again, err)
+	}
+	if organizations, err := repo.TransactionalDueOrganizations(ctx, later, 10); err != nil || len(organizations) != 0 {
+		t.Fatalf("due organizations = %v, %v; want none", organizations, err)
+	}
+	failed, err := repo.FailUnknownTransactional(ctx, later, 10)
+	if err != nil || len(failed) != 1 || failed[0].FailureCode != domain.TransactionalFailureUnknownOutcome {
+		t.Fatalf("FailUnknownTransactional = %v, %v", failed, err)
+	}
+}
+
+// Live messages waiting for lane room never starve test and simulated messages, however many of
+// them are older than the batch.
+func TestLaneExemptMessagesLeaseDespiteWaitingLiveMessages(t *testing.T) {
+	repo, _ := openTransactionalRepository(t)
+	now := txBase.Add(time.Hour)
+	for i := range 4 {
+		createTransactional(t, repo, newTransactional(txBase.Add(time.Duration(i)*time.Second)))
+	}
+	test := newTransactional(txBase.Add(time.Minute))
+	test.Mode = domain.APIKeyModeTest
+	test.Simulated = true
+	test = createTransactional(t, repo, test)
+	simulated := newTransactional(txBase.Add(2 * time.Minute))
+	simulated.Simulated = true
+	simulated = createTransactional(t, repo, simulated)
+
+	leased, err := repo.LeaseTransactional(context.Background(), 10, nil, now, now.Add(domain.TransactionalLease),
+		now.Add(-24*time.Hour), 0, 2)
+	if err != nil {
+		t.Fatalf("LeaseTransactional: %v", err)
+	}
+	ids := make([]uint, 0, len(leased))
+	for _, message := range leased {
+		ids = append(ids, message.ID)
+	}
+	if !slices.Equal(ids, []uint{test.ID, simulated.ID}) {
+		t.Fatalf("leased = %v; want the test and simulated messages %d, %d", ids, test.ID, simulated.ID)
+	}
+	waiting, err := repo.CountTransactionalWaiting(context.Background(), 10)
+	if err != nil || waiting != 2 {
+		t.Fatalf("waiting = %d, %v; want the two oldest live messages marked", waiting, err)
+	}
+}
+
 func TestStaleLeaseHolderCannotFinish(t *testing.T) {
 	repo, _ := openTransactionalRepository(t)
 	ctx := context.Background()
@@ -408,7 +475,7 @@ func TestFailUnknownOnlyAfterAttemptInsideLostLease(t *testing.T) {
 	for _, message := range leaseAll(t, repo, start, 10) {
 		leases[message.ID] = *message.LeaseUntil
 	}
-	if ok, _ := repo.StartTransactionalAttempt(ctx, lost.ID, leases[lost.ID], start.Add(time.Second)); !ok {
+	if ok, err := repo.StartTransactionalAttempt(ctx, lost.ID, leases[lost.ID], start.Add(time.Second)); err != nil || !ok {
 		t.Fatal("start lost attempt")
 	}
 	// running: attempted inside a lease that is still held.
@@ -420,12 +487,12 @@ func TestFailUnknownOnlyAfterAttemptInsideLostLease(t *testing.T) {
 		t.Fatalf("lease running = %v, %v", runningLeased, err)
 	}
 	runningLease := *runningLeased[0].LeaseUntil
-	if ok, _ := repo.StartTransactionalAttempt(ctx, running.ID, runningLease, later); !ok {
+	if ok, startErr := repo.StartTransactionalAttempt(ctx, running.ID, runningLease, later); startErr != nil || !ok {
 		t.Fatal("start running attempt")
 	}
 	// retrying: attempted earlier, now waiting for its retry with no lease.
 	retrying := createTransactional(t, repo, newTransactional(txBase))
-	db.Exec(`UPDATE transactional_messages SET send_attempted_at = ?, queued_reason = 'retry', next_attempt_at = ? WHERE id = ?`,
+	mustExec(t, db, `UPDATE transactional_messages SET send_attempted_at = ?, queued_reason = 'retry', next_attempt_at = ? WHERE id = ?`,
 		start, later.Add(time.Hour), retrying.ID)
 
 	now := later.Add(time.Minute) // lost's and notStarted's leases are gone, running's is held
@@ -514,8 +581,12 @@ func TestPurgeDeletesEventsAfterThirtyDays(t *testing.T) {
 		}
 	}
 	var messages, events int64
-	db.Raw(`SELECT count(*) FROM transactional_messages`).Scan(&messages)
-	db.Raw(`SELECT count(*) FROM transactional_message_events`).Scan(&events)
+	if err := db.Raw(`SELECT count(*) FROM transactional_messages`).Scan(&messages).Error; err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if err := db.Raw(`SELECT count(*) FROM transactional_message_events`).Scan(&events).Error; err != nil {
+		t.Fatalf("query: %v", err)
+	}
 	if messages != 1 || events != 1 {
 		t.Fatalf("left = %d messages, %d events; want the recent one", messages, events)
 	}
@@ -608,11 +679,11 @@ func TestTransactionalLogFilters(t *testing.T) {
 	repo, db := openTransactionalRepository(t)
 	ctx := context.Background()
 	delivered := createTransactional(t, repo, newTransactional(txBase))
-	db.Exec(`UPDATE transactional_messages SET last_event = 'delivered', status = 'sent', payload_ciphertext = NULL, next_attempt_at = NULL WHERE id = ?`, delivered.ID)
+	mustExec(t, db, `UPDATE transactional_messages SET last_event = 'delivered', status = 'sent', payload_ciphertext = NULL, next_attempt_at = NULL WHERE id = ?`, delivered.ID)
 	bounced := newTransactional(txBase.Add(time.Minute))
 	bounced.ToAddress, bounced.TemplateKey = "han@example.com", "reset"
 	createTransactional(t, repo, bounced)
-	db.Exec(`UPDATE transactional_messages SET last_event = 'bounced', status = 'sent', payload_ciphertext = NULL, next_attempt_at = NULL WHERE id = ?`, bounced.ID)
+	mustExec(t, db, `UPDATE transactional_messages SET last_event = 'bounced', status = 'sent', payload_ciphertext = NULL, next_attempt_at = NULL WHERE id = ?`, bounced.ID)
 	suppressed := newTransactional(txBase.Add(2 * time.Minute))
 	suppressed.Status, suppressed.PayloadCiphertext, suppressed.NextAttemptAt = domain.TransactionalStatusSuppressed, nil, nil
 	createTransactional(t, repo, suppressed)
@@ -689,7 +760,9 @@ func TestSuppressionUniquePerOrganization(t *testing.T) {
 		Email          string
 		Reason         string
 	}
-	db.Raw(`SELECT organization_id, email, reason FROM mail_suppressions ORDER BY organization_id, email`).Scan(&rows)
+	if err := db.Raw(`SELECT organization_id, email, reason FROM mail_suppressions ORDER BY organization_id, email`).Scan(&rows).Error; err != nil {
+		t.Fatalf("query: %v", err)
+	}
 	if len(rows) != 3 || rows[1].Email != "lilei@example.com" || rows[1].Reason != "bounced" {
 		t.Fatalf("rows = %+v", rows)
 	}
@@ -732,5 +805,13 @@ func TestSuppressionUniquePerOrganization(t *testing.T) {
 	}
 	if again, err := repo.DeleteSuppression(ctx, 10, listed[0].ID); err != nil || again != nil {
 		t.Fatalf("second DeleteSuppression = %+v, %v", again, err)
+	}
+}
+
+// mustExec runs a fixture statement and stops the test when it fails.
+func mustExec(t *testing.T, db *gorm.DB, statement string, arguments ...any) {
+	t.Helper()
+	if err := db.Exec(statement, arguments...).Error; err != nil {
+		t.Fatalf("exec %q: %v", statement, err)
 	}
 }

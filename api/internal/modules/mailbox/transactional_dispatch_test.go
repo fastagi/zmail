@@ -274,6 +274,53 @@ func TestCrashAfterProviderCallIsNotResent(t *testing.T) {
 	}
 }
 
+// afterFailUnknown runs a hook right after the worker's unknown-outcome check.
+type afterFailUnknown struct {
+	domain.TransactionalMailRepository
+	hook func()
+}
+
+func (r afterFailUnknown) FailUnknownTransactional(ctx context.Context, now time.Time, limit int) ([]*domain.TransactionalMessage, error) {
+	failed, err := r.TransactionalMailRepository.FailUnknownTransactional(ctx, now, limit)
+	r.hook()
+	return failed, err
+}
+
+// A lease that runs out between the worker's unknown-outcome check and its leasing must not be
+// leased again: the provider may have accepted the message (D33).
+func TestLeaseLostAfterUnknownCheckIsNotResent(t *testing.T) {
+	f := newTxFixture(t, nil)
+	f.hold()
+	message, _ := f.send(t, liveActor(), codeInput("k1", "lilei@example.com", "482913"))
+	leaseUntil := f.clock.Add(domain.TransactionalLease)
+	if leased, err := f.repo.LeaseTransactional(context.Background(), 10, []uint{message.ID}, f.clock, leaseUntil,
+		f.clock.Add(-sendLimitWindow), 100, 1); err != nil || len(leased) != 1 {
+		t.Fatalf("lease = %v, %v", leased, err)
+	}
+	if started, err := f.repo.StartTransactionalAttempt(context.Background(), message.ID, leaseUntil, f.clock); err != nil || !started {
+		t.Fatalf("start = %v, %v", started, err)
+	}
+	// The worker checks while the lease still holds; the lease runs out right after.
+	f.clock = leaseUntil.Add(-time.Second)
+	f.service.transactional = afterFailUnknown{TransactionalMailRepository: f.repo, hook: func() {
+		f.clock = leaseUntil.Add(time.Second)
+	}}
+	f.dispatch(t)
+	if len(f.transport.sent) != 0 || f.row(t, message.ID).Status != "queued" {
+		t.Fatalf("calls %d, row %+v; want nothing sent and the message left for the next check", len(f.transport.sent), f.row(t, message.ID))
+	}
+	// Another dispatcher leasing after the lease ran out does not take it either.
+	f.service.transactional = f.repo
+	if processed, err := f.service.dispatchTransactionalOrganization(context.Background(), 10, nil, f.clock, 25); err != nil || processed != 0 {
+		t.Fatalf("dispatchTransactionalOrganization = %d, %v; want nothing leased", processed, err)
+	}
+	f.dispatch(t)
+	if len(f.transport.sent) != 0 {
+		t.Fatalf("provider calls = %d; a possibly sent message was resent", len(f.transport.sent))
+	}
+	assertFinal(t, f.row(t, message.ID), domain.TransactionalStatusFailed, domain.TransactionalFailureUnknownOutcome)
+}
+
 func TestQueuedOverOneHourExpires(t *testing.T) {
 	f := newTxFixture(t, nil)
 	f.hold()
