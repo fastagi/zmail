@@ -25,17 +25,21 @@ threading logic, not what the provider puts on the wire.
 ## Steps
 
 1. In the staging Web console, send one plain message from the mailbox to your external inbox.
-   Use a unique subject, for example `Message-ID check <date>`.
-2. Note the message's Zmail id (the `id` of the message in Sent, or in the reading pane URL).
-3. Read the stored values:
+   Use a subject nobody else will use, for example `Message-ID check <date> <random word>`.
+2. Look the message up by its mailbox and subject, newest first, and read its stored values:
 
    ```sql
-   SELECT id, rfc_message_id, message_id AS provider_message_id, status
-   FROM mail_messages
-   WHERE id = <id>;
+   SELECT m.id, m.rfc_message_id, m.message_id AS provider_message_id, m.status, m.created_at
+   FROM mail_messages m
+   JOIN mailboxes b ON b.id = m.mailbox_id
+   WHERE b.address = '<mailbox address>'
+     AND m.direction = 'outbound'
+     AND m.subject = '<the unique subject>'
+   ORDER BY m.id DESC
+   LIMIT 1;
    ```
 
-   `status` is `sent` and `rfc_message_id` is not empty.
+3. Confirm that `status` is `sent` and `rfc_message_id` is not empty.
 4. In the external inbox, open the message's raw headers and find `Message-ID`.
 5. Confirm that the header equals `<` + `rfc_message_id` + `>` exactly.
 6. Optional round trip: reply from the external inbox, wait for the reply to arrive in the Zmail
