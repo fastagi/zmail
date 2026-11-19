@@ -746,6 +746,24 @@ describe('mailbox workspace', () => {
     expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'outbound', page: 1 });
   });
 
+  it('tells the sender a send at the limit is queued, with no usage numbers', async () => {
+    state.send.mutateAsync.mockResolvedValue(
+      message({ direction: 'outbound', status: 'queued', queued_reason: 'send_limit' })
+    );
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
+    fillValidMessage(screen.getByRole('dialog'));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        'Send limit reached. Your message is queued and will be sent automatically.'
+      )
+    );
+    expect(toast.success).not.toHaveBeenCalledWith('Message sent');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
   it('attaches files as base64, lets one be removed, and refuses too many', async () => {
     state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
     renderWorkspace();
@@ -1026,6 +1044,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     subject: 'Unread question',
     read: false,
     failure_code: '',
+    queued_reason: null,
     last_event: '',
     attachment_count: 0,
     template_id: null,

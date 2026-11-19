@@ -204,6 +204,8 @@ const summaryShape = {
   subject: string(),
   read: boolean(),
   failure_code: string(),
+  // "send_limit" while the message waits for room in the organization's send limit.
+  queued_reason: nullable(literal('send_limit')),
   last_event: mailEventSummarySchema,
   attachment_count: nonnegativeIntegerSchema,
   template_id: nullable(safeIdSchema),

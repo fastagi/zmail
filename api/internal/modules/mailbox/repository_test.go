@@ -223,9 +223,11 @@ func TestRepositoryRecordsDeliveryReadStateAndDeletion(t *testing.T) {
 	ctx := context.Background()
 	createOwner(t, db, 1)
 	mailbox := createMailbox(t, repo, "hello@mail.example")
+	attemptedAt := time.Now().UTC()
 	message := &domain.MailMessage{
 		MailboxID: mailbox.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusQueued,
 		FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Subject: "Out",
+		SendAttemptedAt: &attemptedAt,
 	}
 	if _, err := repo.CreateMessage(ctx, message); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
@@ -1145,5 +1147,46 @@ func TestRepositorySetMessageReadNeedsAMembership(t *testing.T) {
 	db.Model(&MailMessageReadPO{}).Count(&rows)
 	if rows != 0 {
 		t.Fatalf("stored %d read rows without a membership", rows)
+	}
+}
+
+func TestCountOutboundSinceUsesAttemptTime(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	mailbox := createMailbox(t, repo, "hello@mail.example")
+	now := time.Now().UTC()
+	store := func(subject string, attemptedAt *time.Time, queuedReason string) *domain.MailMessage {
+		t.Helper()
+		message := &domain.MailMessage{
+			MailboxID: mailbox.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusQueued,
+			FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Subject: subject,
+			SendAttemptedAt: attemptedAt, QueuedReason: queuedReason,
+		}
+		if _, err := repo.CreateMessage(ctx, message); err != nil {
+			t.Fatalf("CreateMessage(%s): %v", subject, err)
+		}
+		return message
+	}
+	// Created two days ago but only attempted now: it counts in today's window.
+	late := store("late", &now, "")
+	if err := db.Exec("UPDATE mail_messages SET created_at = ? WHERE id = ?", now.Add(-48*time.Hour), late.ID).Error; err != nil {
+		t.Fatalf("age message: %v", err)
+	}
+	old := now.Add(-48 * time.Hour)
+	store("old attempt", &old, "")
+	waiting := store("waiting", nil, domain.MailQueuedForSendLimit)
+
+	count, err := repo.CountOutboundSince(ctx, 1, now.Add(-24*time.Hour))
+	if err != nil || count != 1 {
+		t.Fatalf("CountOutboundSince = %d, %v; want 1, the late attempt only", count, err)
+	}
+	waitingCount, err := repo.CountWaitingSends(ctx, 1)
+	if err != nil || waitingCount != 1 {
+		t.Fatalf("CountWaitingSends = %d, %v; want 1", waitingCount, err)
+	}
+	stored, err := repo.FindMessage(ctx, mailbox.ID, waiting.ID)
+	if err != nil || stored.QueuedReason != domain.MailQueuedForSendLimit || stored.SendAttemptedAt != nil {
+		t.Fatalf("stored waiting = %+v, %v", stored, err)
 	}
 }

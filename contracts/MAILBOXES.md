@@ -265,6 +265,8 @@ a shared one:
 - Broadcasts of the mailbox created before the boundary that are still `scheduled`, `sending`, or
   `paused` are cancelled in the same transaction, with their pending recipients, so a sealed
   broadcast sends no new mail the successor could read.
+- Messages of the mailbox created before the boundary that still wait for the send limit become
+  `failed` with `failure_code` `send.canceled` in the same transaction; they are never sent.
 - A shared mailbox, including one a concurrent handover already converted, is
   `409 MAILBOX.ACCESS_CONFLICT`.
 - `handed_over` is written, and the answer is `201` with the mailbox as the caller sees it.
@@ -391,7 +393,8 @@ An unknown `direction`, a non-boolean `unread`, or an over-long or control-chara
 | Field | Meaning |
 |---|---|
 | `direction` | `inbound` or `outbound` |
-| `status` | `received` for inbound. Outbound is `queued` while the provider call is in flight, then `sent` or `failed`. |
+| `status` | `received` for inbound. Outbound is `queued` while it waits for the send limit or while the provider call is in flight, then `sent` or `failed`. |
+| `queued_reason` | `send_limit` while a queued message waits for room in the organization's send limit; otherwise `null`. |
 | `from` | `{ "address", "name" }` |
 | `to`, `cc` | Lowercase addresses |
 | `read` | Whether the caller has read the message; see [Read State](#read-state). Outbound messages are always read. |
@@ -440,10 +443,21 @@ answers:
 | Provider accepted | `201` with the message | `sent` |
 | Provider rejected or was unreachable | `502 MAILBOX.DELIVERY_FAILED` | `failed`, with `failure_code` |
 | No provider configured | `503 MAILBOX.SENDER_NOT_CONFIGURED` | `failed` |
-| Organization's rolling 24-hour limit reached | `429 MAILBOX.SEND_LIMIT_REACHED` | nothing stored |
+| Organization's rolling 24-hour limit reached | `202` with the message | `queued`, `queued_reason` `send_limit` |
+| Limit reached and as many messages already waiting as the limit | `429 MAILBOX.SEND_LIMIT_REACHED` | nothing stored |
 
 A send is never reported as successful before the provider accepts it. The send limit is counted
-per organization, and failed attempts count toward it. The limit is a soft bound: concurrent requests may exceed it by the number of
+per organization over the instants provider calls started, and failed attempts count toward it.
+
+A `202` message waits; nothing about the limit's usage is in the answer, and the Web console tells
+everyone the same thing: the limit is full and the message is queued. The `mail:broadcast:work`
+worker sends waiting messages oldest first, per organization, as the rolling window gains room,
+and records each outcome exactly like a direct send (`sent`, or `failed` with its `failure_code`,
+and the same webhooks). No webhook is published when a message starts waiting. A waiting message
+can be deleted like any message, and then it is never sent; deleting its mailbox deletes it too. One
+that a handover seals is not sent: it becomes `failed` with `failure_code` `send.canceled`. Broadcasts
+never wait this way; they pause as described in [Broadcasts](#broadcasts). This applies to both
+send routes and to template test sends. The limit is a soft bound: concurrent requests may exceed it by the number of
 requests in flight. There is no automatic retry. A client that retries a `502` without an
 `Idempotency-Key` may send a duplicate when the first attempt reached the provider but the answer
 was lost (`failure_code` `transport.unreachable`); see [Idempotency](#idempotency).
@@ -751,7 +765,8 @@ one mailbox. A later send in the same mailbox with the same key never calls the 
 |---|---|---|
 | `sent` | `200` with the stored message | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
 | `failed` | The same error as the first attempt, with the stored message kept | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
-| Still `queued` | `409 MAILBOX.SEND_IN_PROGRESS` | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
+| Waiting for the send limit | `202` with the stored message | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
+| Still `queued` with the provider call in flight | `409 MAILBOX.SEND_IN_PROGRESS` | `409 MAILBOX.IDEMPOTENCY_CONFLICT` |
 
 A key that matches a sealed message (see [Sealed History](#sealed-history)) is
 `409 MAILBOX.IDEMPOTENCY_CONFLICT` with no message data, whatever the content.

@@ -27,6 +27,9 @@ const (
 	deliveryRecordTimeout = 5 * time.Second
 	failureNotConfigured  = "transport.not_configured"
 	failureUnknown        = "transport.failed"
+	// failureSendCanceled marks a waiting message that will never be sent: its mailbox was
+	// deleted or a handover sealed it.
+	failureSendCanceled = "send.canceled"
 )
 
 // Settings is the resolved policy the service runs with.
@@ -509,7 +512,7 @@ func (s *service) SendMessage(ctx context.Context, viewer domain.OrganizationCon
 	if err != nil {
 		return nil, false, err
 	}
-	return s.send(ctx, mailbox, input)
+	return s.send(ctx, mailbox, input, true)
 }
 
 func (s *service) SendFromAddress(ctx context.Context, viewer domain.OrganizationContext, from string, input SendInput) (*domain.MailMessage, bool, error) {
@@ -529,7 +532,7 @@ func (s *service) SendFromAddress(ctx context.Context, viewer domain.Organizatio
 	if err := s.checkAccess(ctx, viewer, mailbox, canSend, ErrMailboxNotFound); err != nil {
 		return nil, false, err
 	}
-	return s.send(ctx, mailbox, input)
+	return s.send(ctx, mailbox, input, true)
 }
 
 // GetOutboundMessage needs View on the message's mailbox; a message of a mailbox the viewer has
@@ -552,7 +555,10 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 	return s.withEvents(ctx, message)
 }
 
-func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput) (*domain.MailMessage, bool, error) {
+// send stores and sends one outbound message. A direct send (queueAtLimit) that finds the
+// organization's send limit full is stored as a waiting message instead, for the worker to send
+// when the window has room; a broadcast recipient gets ErrMailSendLimitReached and pauses.
+func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput, queueAtLimit bool) (*domain.MailMessage, bool, error) {
 	var templateID uint
 	if input.Template != nil {
 		var err error
@@ -581,9 +587,24 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		return nil, false, err
 	}
 	if sent >= int64(s.settings.DailySendLimit) {
-		return nil, false, ErrMailSendLimitReached
+		if !queueAtLimit {
+			return nil, false, ErrMailSendLimitReached
+		}
+		return s.queueForSendLimit(ctx, mailbox, message)
+	}
+	if queueAtLimit {
+		// Older messages still wait: a new one queues behind them instead of overtaking them.
+		waiting, countErr := s.repo.CountWaitingSends(ctx, mailbox.OrganizationID)
+		if countErr != nil {
+			return nil, false, countErr
+		}
+		if waiting > 0 {
+			return s.queueForSendLimit(ctx, mailbox, message)
+		}
 	}
 
+	attemptedAt := s.now().UTC()
+	message.SendAttemptedAt = &attemptedAt
 	fingerprint := message.IdempotencyFingerprint
 	created, err := s.repo.CreateMessage(ctx, message)
 	if err != nil {
@@ -605,6 +626,19 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		// The stored copy is the record; the response carries metadata only.
 		message.Attachments[i].Content = nil
 	}
+	return s.deliver(ctx, mailbox, message, files, input.Headers)
+}
+
+// deliver calls the provider for a stored message whose attempt has started and records the
+// outcome, its delivery events, and the webhooks they publish. A direct send and the worker that
+// sends waiting messages share it, so both record a send the same way.
+func (s *service) deliver(
+	ctx context.Context,
+	mailbox *domain.Mailbox,
+	message *domain.MailMessage,
+	files []mailtransport.Attachment,
+	headers map[string]string,
+) (*domain.MailMessage, bool, error) {
 	outcome, sendErr := s.transport.Send(ctx, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,
@@ -615,7 +649,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		HTMLBody:    message.HTMLBody,
 		InReplyTo:   message.InReplyTo,
 		Attachments: files,
-		Headers:     input.Headers,
+		Headers:     headers,
 	})
 
 	message.Status = domain.MailStatusSent
@@ -632,7 +666,7 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	defer cancel()
 	occurredAt := s.now().UTC()
 	events := sendEvents(outcome, sendErr == nil, occurredAt)
-	err = s.apply(recordContext, func(tx context.Context) ([]MailNotification, error) {
+	err := s.apply(recordContext, func(tx context.Context) ([]MailNotification, error) {
 		if updateErr := s.repo.UpdateMessageDelivery(tx, message.ID, message.Status, message.MessageID, message.FailureCode); updateErr != nil {
 			return nil, updateErr
 		}
@@ -650,6 +684,34 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		return nil, false, err
 	}
 	return message, true, result
+}
+
+// queueForSendLimit stores a direct send as a waiting message. At most one day's limit of messages
+// may wait per organization; one more is rejected and nothing is stored.
+func (s *service) queueForSendLimit(ctx context.Context, mailbox *domain.Mailbox, message *domain.MailMessage) (*domain.MailMessage, bool, error) {
+	waiting, err := s.repo.CountWaitingSends(ctx, mailbox.OrganizationID)
+	if err != nil {
+		return nil, false, err
+	}
+	if waiting >= int64(s.settings.DailySendLimit) {
+		return nil, false, ErrMailSendLimitReached
+	}
+	message.Status = domain.MailStatusQueued
+	message.QueuedReason = domain.MailQueuedForSendLimit
+	fingerprint := message.IdempotencyFingerprint
+	created, err := s.repo.CreateMessage(ctx, message)
+	if err != nil {
+		return nil, false, err
+	}
+	if !created {
+		replayed, replayErr := replayOutbound(mailbox, message, fingerprint)
+		return replayed, false, replayErr
+	}
+	// The stored copy keeps the attachments for the worker; the response carries metadata only.
+	for i := range message.Attachments {
+		message.Attachments[i].Content = nil
+	}
+	return message, true, nil
 }
 
 // sendNotifications lists what a finished send tells webhook endpoints: whether the provider
@@ -724,6 +786,10 @@ func sendEvents(outcome mailtransport.Result, accepted bool, at time.Time) []dom
 func replayOutbound(mailbox *domain.Mailbox, existing *domain.MailMessage, fingerprint string) (*domain.MailMessage, error) {
 	if sealedFor(mailbox, existing.CreatedAt) || existing.IdempotencyFingerprint != fingerprint {
 		return nil, ErrMailIdempotencyConflict
+	}
+	if existing.QueuedReason != "" {
+		// Still waiting for the send limit: the caller gets the same queued answer again.
+		return existing, nil
 	}
 	switch existing.Status {
 	case domain.MailStatusSent:

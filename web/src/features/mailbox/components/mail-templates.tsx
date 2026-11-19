@@ -875,11 +875,11 @@ function TemplateTestDialog({
       return;
     }
     try {
-      await send.mutateAsync({
+      const stored = await send.mutateAsync({
         templateId,
         input: { mailbox_id: from, to: recipients as string[] },
       });
-      toast.success(t('templates.testSent'));
+      toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'templates.testSent'));
       onClose();
     } catch (failure) {
       setErrorKey(resolveMailboxErrorKey(failure));

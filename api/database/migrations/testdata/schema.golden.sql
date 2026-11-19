@@ -198,6 +198,9 @@ TABLE mail_messages
   COLUMN last_event character varying(16) NOT NULL DEFAULT ''::character varying
   COLUMN attachment_count bigint NOT NULL DEFAULT 0
   COLUMN template_id bigint
+  COLUMN queued_reason character varying(32)
+  COLUMN send_attempted_at timestamp with time zone
+  COLUMN send_lease_until timestamp with time zone
 
 TABLE mail_templates
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_templates_id_seq'::regclass)
@@ -738,6 +741,8 @@ INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree 
 INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING btree (mailbox_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
 INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (message_id) WHERE (((direction)::text = 'outbound'::text) AND ((message_id)::text <> ''::text))
+INDEX CREATE INDEX idx_mail_messages_send_attempted ON mail_messages USING btree (send_attempted_at) WHERE ((direction)::text = 'outbound'::text)
+INDEX CREATE INDEX idx_mail_messages_waiting ON mail_messages USING btree (id) WHERE (queued_reason IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
 INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)

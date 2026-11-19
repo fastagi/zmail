@@ -561,7 +561,38 @@ func (r *fakeRepository) CountOutboundSince(_ context.Context, organizationID ui
 	var count int64
 	for _, message := range r.messages {
 		mailbox, ok := r.mailboxes[message.MailboxID]
-		if ok && mailbox.OrganizationID == organizationID && message.Direction == domain.MailDirectionOutbound {
+		if ok && mailbox.OrganizationID == organizationID && message.Direction == domain.MailDirectionOutbound &&
+			message.QueuedReason == "" {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// The in-memory repository keeps waiting messages but never dispatches them: the queue worker
+// is tested against PostgreSQL, where leases and SKIP LOCKED are real.
+func (r *fakeRepository) WaitingSendOrganizations(context.Context) ([]uint, error) { return nil, nil }
+
+func (r *fakeRepository) LeaseWaitingSends(context.Context, uint, time.Time, time.Time, time.Time, int, int) ([]*domain.MailMessage, error) {
+	return nil, nil
+}
+
+func (r *fakeRepository) StartWaitingSend(context.Context, uint, time.Time) (bool, error) {
+	return false, nil
+}
+
+func (r *fakeRepository) CancelWaitingSend(_ context.Context, id uint, failureCode string) error {
+	if message, ok := r.messages[id]; ok && message.QueuedReason != "" {
+		message.Status, message.FailureCode, message.QueuedReason = domain.MailStatusFailed, failureCode, ""
+	}
+	return nil
+}
+
+func (r *fakeRepository) CountWaitingSends(_ context.Context, organizationID uint) (int64, error) {
+	var count int64
+	for _, message := range r.messages {
+		mailbox, ok := r.mailboxes[message.MailboxID]
+		if ok && mailbox.OrganizationID == organizationID && message.QueuedReason != "" {
 			count++
 		}
 	}
@@ -969,7 +1000,7 @@ func TestSendMessageValidatesInput(t *testing.T) {
 	}
 }
 
-func TestSendMessageEnforcesTheDailyLimit(t *testing.T) {
+func TestSendAtLimitQueues(t *testing.T) {
 	fixture := newServiceFixture(t)
 	mailbox := fixture.mailbox(t, 1, "hello")
 	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}
@@ -978,11 +1009,76 @@ func TestSendMessageEnforcesTheDailyLimit(t *testing.T) {
 			t.Fatalf("send %d: %v", i+1, err)
 		}
 	}
-	if _, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, input); !errors.Is(err, ErrMailSendLimitReached) {
-		t.Fatalf("error = %v; want ErrMailSendLimitReached", err)
+	message, created, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, input)
+	if err != nil {
+		t.Fatalf("send at the limit: %v", err)
+	}
+	if !created || message.Status != domain.MailStatusQueued || message.QueuedReason != domain.MailQueuedForSendLimit {
+		t.Fatalf("message = %+v, created %v; want a new queued message waiting for the send limit", message, created)
+	}
+	if message.SendAttemptedAt != nil {
+		t.Fatalf("a waiting message has an attempt time: %v", message.SendAttemptedAt)
 	}
 	if len(fixture.transport.sent) != 3 {
-		t.Fatalf("transport calls = %d; want 3", len(fixture.transport.sent))
+		t.Fatalf("transport calls = %d; want 3, the queued message is not sent yet", len(fixture.transport.sent))
+	}
+	if stored := fixture.repo.messages[message.ID]; stored == nil || stored.QueuedReason != domain.MailQueuedForSendLimit {
+		t.Fatalf("stored = %+v; want the waiting message stored", stored)
+	}
+}
+
+func TestSendAtWaitingCapIsRejected(t *testing.T) {
+	fixture := newServiceFixture(t)
+	mailbox := fixture.mailbox(t, 1, "hello")
+	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}
+	// Three sends fill the window, three more fill the waiting cap of one day's limit.
+	for i := 0; i < 6; i++ {
+		if _, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, input); err != nil {
+			t.Fatalf("send %d: %v", i+1, err)
+		}
+	}
+	if _, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, input); !errors.Is(err, ErrMailSendLimitReached) {
+		t.Fatalf("error = %v; want ErrMailSendLimitReached at the waiting cap", err)
+	}
+	if len(fixture.repo.messages) != 6 {
+		t.Fatalf("stored messages = %d; want 6, nothing stored at the cap", len(fixture.repo.messages))
+	}
+}
+
+func TestReplayOfWaitingMessageAnswers202(t *testing.T) {
+	fixture := newServiceFixture(t)
+	mailbox := fixture.mailbox(t, 1, "hello")
+	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}
+	for i := 0; i < 3; i++ {
+		if _, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, input); err != nil {
+			t.Fatalf("send %d: %v", i+1, err)
+		}
+	}
+	keyed := input
+	keyed.IdempotencyKey = "waiting-1"
+	first, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, keyed)
+	if err != nil || first.QueuedReason != domain.MailQueuedForSendLimit {
+		t.Fatalf("first = %+v, %v; want a waiting message", first, err)
+	}
+	replayed, created, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, keyed)
+	if err != nil {
+		t.Fatalf("replay of a waiting message: %v; want the same message, not SEND_IN_PROGRESS", err)
+	}
+	if created || replayed.ID != first.ID || replayed.QueuedReason != domain.MailQueuedForSendLimit {
+		t.Fatalf("replayed = %+v, created %v; want message %d still waiting", replayed, created, first.ID)
+	}
+}
+
+func TestSentMessageRecordsItsAttemptTime(t *testing.T) {
+	fixture := newServiceFixture(t)
+	mailbox := fixture.mailbox(t, 1, "hello")
+	message, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID,
+		SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if message.SendAttemptedAt == nil || !message.SendAttemptedAt.Equal(fixture.now) || message.QueuedReason != "" {
+		t.Fatalf("message = %+v; want attempted at %v and not waiting", message, fixture.now)
 	}
 }
 

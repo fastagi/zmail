@@ -1400,6 +1400,7 @@ function entry(overrides: Record<string, unknown> = {}) {
     subject: 'Unread question',
     read: false,
     failure_code: '',
+    queued_reason: null,
     last_event: '',
     attachment_count: 0,
     template_id: null,

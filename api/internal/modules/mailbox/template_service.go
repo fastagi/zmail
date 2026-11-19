@@ -171,7 +171,7 @@ func (s *service) SendTemplateTest(
 	message, _, err := s.send(ctx, mailbox, SendInput{
 		To:       to,
 		Template: &TemplateSendInput{ID: template.ID, Variables: mergeValues(template.SampleVariables, cleaned)},
-	})
+	}, true)
 	return message, err
 }
 

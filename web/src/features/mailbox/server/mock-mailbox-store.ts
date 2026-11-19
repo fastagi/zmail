@@ -786,6 +786,7 @@ export class MockMailboxStore {
       // A member wrote it, so it starts out read.
       read: true,
       failure_code: '',
+      queued_reason: null,
       last_event: 'delivered',
       attachment_count: attachments.length,
       template_id: templateId,
@@ -1020,6 +1021,7 @@ export class MockMailboxStore {
       subject: 'Welcome to your mock mailbox',
       read: false,
       failure_code: '',
+      queued_reason: null,
       last_event: '',
       attachment_count: 0,
       template_id: null,
@@ -1074,6 +1076,7 @@ function summaryOf(message: MailMessage): MailMessageSummary {
     subject: message.subject,
     read: message.read,
     failure_code: message.failure_code,
+    queued_reason: message.queued_reason,
     last_event: message.last_event,
     attachment_count: message.attachment_count,
     template_id: message.template_id,
