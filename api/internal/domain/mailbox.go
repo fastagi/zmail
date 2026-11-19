@@ -701,11 +701,11 @@ type MailboxRepository interface {
 
 	// CreateMessage stores a message with its attachments. With an idempotency key that the mailbox already used it
 	// reports created=false and fills message with the stored row. A stored message joins the thread of the
-	// newest message of the same mailbox whose RFC Message-ID its In-Reply-To or References name, or starts its
-	// own thread; CreateInboundMessage does the same.
+	// oldest message of the same mailbox whose RFC Message-ID is its own or one its In-Reply-To or References
+	// name, or starts its own thread; CreateInboundMessage does the same.
 	CreateMessage(ctx context.Context, message *MailMessage) (created bool, err error)
 	FindMessageByIdempotencyKey(ctx context.Context, mailboxID uint, key string) (*MailMessage, error)
-	// FindMessageByRFCMessageID finds the newest unsealed message of the mailbox with that RFC Message-ID, or
+	// FindMessageByRFCMessageID finds the oldest unsealed message of the mailbox with that RFC Message-ID, or
 	// reports ErrMailMessageNotFound.
 	FindMessageByRFCMessageID(ctx context.Context, mailboxID uint, rfcMessageID string) (*MailMessage, error)
 	// FindOutboundMessageForOrganization finds an outbound message in any mailbox of the organization.

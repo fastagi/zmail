@@ -376,38 +376,39 @@ func (r *fakeRepository) CreateMessage(_ context.Context, message *domain.MailMe
 	return true, nil
 }
 
-// threadFor joins the thread of the newest message of the same mailbox that the message replies
-// to or references, as the database repository does, or starts the message's own thread.
+// threadFor joins the thread of the oldest message of the same mailbox that has the message's own
+// id or that the message replies to or references, as the database repository does, or starts the
+// message's own thread.
 func (r *fakeRepository) threadFor(message *domain.MailMessage) uint {
-	ids := append([]string{message.InReplyTo}, message.References...)
-	var newest *domain.MailMessage
+	ids := append([]string{message.RFCMessageID, message.InReplyTo}, message.References...)
+	var oldest *domain.MailMessage
 	for _, existing := range r.messages {
 		if existing.MailboxID != message.MailboxID || existing.RFCMessageID == "" || r.sealed(existing) ||
 			!slices.Contains(ids, existing.RFCMessageID) {
 			continue
 		}
-		if newest == nil || existing.ID > newest.ID {
-			newest = existing
+		if oldest == nil || existing.ID < oldest.ID {
+			oldest = existing
 		}
 	}
-	if newest == nil {
+	if oldest == nil {
 		return message.ID
 	}
-	return newest.ThreadID
+	return oldest.ThreadID
 }
 
 func (r *fakeRepository) FindMessageByRFCMessageID(_ context.Context, mailboxID uint, rfcMessageID string) (*domain.MailMessage, error) {
-	var newest *domain.MailMessage
+	var oldest *domain.MailMessage
 	for _, existing := range r.messages {
 		if existing.MailboxID == mailboxID && rfcMessageID != "" && existing.RFCMessageID == rfcMessageID &&
-			!r.sealed(existing) && (newest == nil || existing.ID > newest.ID) {
-			newest = existing
+			!r.sealed(existing) && (oldest == nil || existing.ID < oldest.ID) {
+			oldest = existing
 		}
 	}
-	if newest == nil {
+	if oldest == nil {
 		return nil, ErrMailMessageNotFound
 	}
-	copied := *newest
+	copied := *oldest
 	return &copied, nil
 }
 
@@ -1787,5 +1788,47 @@ func TestReplyReferencesChain(t *testing.T) {
 	}
 	if got := strings.Join(f.transport.sent[before].References, " "); got != "unknown@elsewhere.test" {
 		t.Fatalf("References for an unknown parent = %q; want just In-Reply-To", got)
+	}
+}
+
+// A message sent to its own mailbox is stored twice with one Message-ID: the inbound copy joins the
+// outbound thread, and a reply to that id joins it too.
+func TestSelfSentMessageStaysInOneThread(t *testing.T) {
+	f := newQueueFixture(t)
+	sent, _, err := f.service.SendMessage(context.Background(), f.b, f.team.ID,
+		SendInput{To: []string{f.team.Address}, Subject: "Note to self", Text: "body"})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	copied := f.receiveReply(t, f.team, sent.RFCMessageID)
+	if f.storedThread(t, copied.ID) != sent.ID {
+		t.Fatalf("inbound copy thread = %d; want the outbound thread %d", f.storedThread(t, copied.ID), sent.ID)
+	}
+	reply := f.receiveReply(t, f.team, "self-reply@sender.test", "In-Reply-To: <"+sent.RFCMessageID+">")
+	if f.storedThread(t, reply.ID) != sent.ID {
+		t.Fatalf("reply thread = %d; want %d", f.storedThread(t, reply.ID), sent.ID)
+	}
+}
+
+// A forged inbound mail that reuses one of our Message-IDs never becomes the target of later
+// replies, nor the parent whose References a reply copies.
+func TestForgedMessageIDDoesNotCaptureReplies(t *testing.T) {
+	f := newQueueFixture(t)
+	sent := f.mustSend(t, "Hello", false)
+	f.receiveReply(t, f.team, sent.RFCMessageID, "References: <evil@attacker.test>")
+
+	reply := f.receiveReply(t, f.team, "real-reply@sender.test", "In-Reply-To: <"+sent.RFCMessageID+">")
+	if f.storedThread(t, reply.ID) != sent.ID {
+		t.Fatalf("reply thread = %d; want the original thread %d", f.storedThread(t, reply.ID), sent.ID)
+	}
+
+	before := len(f.transport.sent)
+	if _, _, err := f.service.SendMessage(context.Background(), f.b, f.team.ID, SendInput{
+		To: []string{"bob@example.com"}, Subject: "Re: Hello", Text: "again", InReplyTo: sent.RFCMessageID,
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if got := strings.Join(f.transport.sent[before].References, " "); got != sent.RFCMessageID {
+		t.Fatalf("References = %q; want only the original %q, not the forged chain", got, sent.RFCMessageID)
 	}
 }

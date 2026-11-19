@@ -252,14 +252,16 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 	return true, nil
 }
 
-// findThread sets the thread of a message about to be stored: the thread of the newest message of
-// the same mailbox whose RFC Message-ID the message's In-Reply-To or References name. It leaves
-// the thread unset when none matches, for startThread.
+// findThread sets the thread of a message about to be stored: the thread of the oldest message of
+// the same mailbox whose RFC Message-ID is the message's own or one its In-Reply-To or References
+// name. It leaves the thread unset when none matches, for startThread.
 func findThread(tx *gorm.DB, po *MailMessagePO, message *domain.MailMessage) error {
 	if po.ThreadID != nil {
 		return nil
 	}
-	ids := append([]string{message.InReplyTo}, message.References...)
+	// The message's own id comes first: a second copy of a stored message, such as the inbound
+	// copy of mail sent to its own mailbox, joins the original's thread.
+	ids := append([]string{message.RFCMessageID, message.InReplyTo}, message.References...)
 	threadID, err := findThreadID(tx, message.MailboxID, ids)
 	if err != nil || threadID == 0 {
 		return err
@@ -282,8 +284,9 @@ func startThread(tx *gorm.DB, po *MailMessagePO) error {
 	return nil
 }
 
-// FindThreadID returns the thread of the newest unsealed message of the mailbox whose RFC
-// Message-ID is one of ids, or 0 when none is. Threads never cross mailboxes.
+// FindThreadID returns the thread of the oldest unsealed message of the mailbox whose RFC
+// Message-ID is one of ids, or 0 when none is. The oldest row is the original: a later row reusing
+// the id (a copy, or a forged message) never takes over the thread. Threads never cross mailboxes.
 func (r *repository) FindThreadID(ctx context.Context, mailboxID uint, ids []string) (uint, error) {
 	if r.db == nil {
 		return 0, domain.ErrServiceUnavailable
@@ -305,7 +308,7 @@ func findThreadID(db *gorm.DB, mailboxID uint, ids []string) (uint, error) {
 	err := db.Model(&MailMessagePO{}).
 		Where("mailbox_id = ? AND rfc_message_id IN ?", mailboxID, wanted).
 		Where(unsealedMessage).
-		Order("id DESC").Limit(1).
+		Order("id ASC").Limit(1).
 		Pluck("COALESCE(thread_id, id)", &threadIDs).Error
 	if err != nil || len(threadIDs) == 0 {
 		return 0, err
@@ -324,7 +327,7 @@ func (r *repository) FindMessageByRFCMessageID(ctx context.Context, mailboxID ui
 	err := r.conn(ctx).
 		Where("mailbox_id = ? AND rfc_message_id = ?", mailboxID, rfcMessageID).
 		Where(unsealedMessage).
-		Order("id DESC").
+		Order("id ASC").
 		First(&po).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
