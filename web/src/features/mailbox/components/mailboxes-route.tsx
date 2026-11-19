@@ -4,6 +4,7 @@ import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { InboxWorkspace } from '@/features/mailbox/components/inbox-workspace';
+import { mailPageClassName } from '@/features/mailbox/components/mail-organization';
 import { MAILBOX_PARAM } from '@/features/mailbox/components/mailbox-params';
 
 // One mailbox's own workspace loads only when the URL names a mailbox.
@@ -20,9 +21,11 @@ const MailboxWorkspace = lazy(async () => {
 export function MailboxesRoute() {
   const searchParams = useSearchParams();
   return searchParams.has(MAILBOX_PARAM) ? (
-    <Suspense fallback={null}>
-      <MailboxWorkspace />
-    </Suspense>
+    <div className={mailPageClassName}>
+      <Suspense fallback={null}>
+        <MailboxWorkspace />
+      </Suspense>
+    </div>
   ) : (
     <InboxWorkspace />
   );

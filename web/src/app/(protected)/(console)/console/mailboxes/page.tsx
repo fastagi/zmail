@@ -6,8 +6,9 @@ import { MailboxesRoute } from '@/features/mailbox/components/mailboxes-route';
 export default function MailboxesPage() {
   if (!isWebFeatureEnabled('mailbox')) notFound();
 
+  // The unified inbox fills the console's content area; each view sets its own frame.
   return (
-    <div className="mx-auto w-full max-w-[100rem] px-4 py-6 sm:px-6 lg:py-8">
+    <div className="h-full w-full">
       <MailboxesRoute />
     </div>
   );

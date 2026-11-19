@@ -73,14 +73,16 @@ interface DialogContentProps
   extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>,
     VariantProps<typeof dialogContentVariants> {
   hideCloseButton?: boolean
+  /** Classes for the backdrop, merged over its defaults. */
+  overlayClassName?: string
 }
 
 const DialogContent = React.forwardRef<
   React.ComponentRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, size, hideCloseButton = false, ...props }, ref) => (
+>(({ className, children, size, hideCloseButton = false, overlayClassName, ...props }, ref) => (
   <DialogPortal>
-    <DialogOverlay />
+    <DialogOverlay className={overlayClassName} />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(dialogContentVariants({ size, className }))}

@@ -1,20 +1,17 @@
 'use client';
 
-import { useState } from 'react';
-import {
-  CalendarDays,
-  ChevronDown,
-  ChevronRight,
-  Inbox,
-  Lock,
-  Send,
-  Settings2,
-  Star,
-} from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import Link from 'next/link';
+import { CalendarDays, Inbox, Lock, PenLine, Send, Settings2, Star } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Kbd } from '@/components/ui/kbd';
+import { ROUTES } from '@/constants/routes';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
+import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
+import { SendQuotaCard } from '@/features/mailbox/components/send-quota-card';
+import { mailOrganizationHref } from '@/features/mailbox/hooks/use-mail-organization';
 import type { InboxCounts, InboxView, MailRole, Mailbox } from '@/features/mailbox/types';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -28,8 +25,13 @@ const viewIcons = {
 
 const viewOrder: readonly InboxView[] = ['all', 'today', 'pending', 'sent'];
 
-const rowClass =
-  'flex w-full min-w-0 items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors focus-ring hover:bg-accent/70 hover:text-foreground';
+/** The other mail pages, linked from the sidebar footer. */
+const footerLinks = [
+  ['mail', ROUTES.CONSOLE.EMAILS],
+  ['broadcasts', ROUTES.CONSOLE.MAIL_BROADCASTS],
+  ['contacts', ROUTES.CONSOLE.MAIL_CONTACTS],
+  ['manage', ROUTES.CONSOLE.MAIL_DOMAIN],
+] as const;
 
 /** A role narrowing of the list: a role id, or `none` for the mailboxes without one. */
 export type InboxRoleFilter = number | 'none';
@@ -48,15 +50,20 @@ interface SidebarGroup {
 }
 
 /**
- * The unified inbox sidebar: the four views with the caller's counts (`all_unread` emphasized,
- * Sent without a number but with a "queued" badge while mail waits for the send limit), then
- * "Roles & mailboxes": each mail role in the API's order with its color and unread count, and
- * Ungrouped last. A role narrows the list and unfolds its mailboxes; a readable mailbox shows its
- * unread count and narrows to itself, an unreadable one (an admin's) is locked, without a number,
- * and cannot be chosen. Members see only roles holding a mailbox they can see. Owners and admins
- * get "Manage roles" beside the heading. Numbers appear once `counts` has loaded.
+ * The unified inbox sidebar (§11.0, §11.4): the organization with the `⌘K` cap, Compose, the four
+ * views with the caller's counts (`all_unread` emphasized, Sent without a number but with a
+ * "queued" badge while mail waits for the send limit), then "Roles & mailboxes": each mail role
+ * in the API's order with its color and unread count, and Ungrouped last. A role narrows the list
+ * and unfolds its mailboxes; a readable mailbox shows its unread count and narrows to itself, an
+ * unreadable one (an admin's) is locked, without a number, and cannot be chosen. Members see only
+ * roles holding a mailbox they can see. Owners and admins get "Manage roles" beside the heading.
+ * At the bottom: today's sending, links to the other mail pages, and the shortcut help.
+ *
+ * `rail` folds it to an icon rail between 1024 and 1279px wide (§11.11); the full sidebar, with
+ * the mailboxes, the quota card, and the links, shows from 1280px and in the narrow-screen sheet.
  */
 export function InboxSidebar({
+  organization,
   counts,
   mailboxes,
   roles,
@@ -64,11 +71,16 @@ export function InboxSidebar({
   view,
   box = null,
   role = null,
+  rail = false,
   onView,
   onBox,
   onRole,
   onManageRoles,
+  onCompose,
+  onShortcuts,
 }: {
+  /** The organization's name, or its picker. */
+  organization: ReactNode;
   counts: InboxCounts | undefined;
   /** Every mailbox the caller has any access to. */
   mailboxes: readonly Mailbox[];
@@ -77,12 +89,18 @@ export function InboxSidebar({
   view: InboxView;
   box?: number | null;
   role?: InboxRoleFilter | null;
+  rail?: boolean;
   onView: (view: InboxView) => void;
   onBox: (mailboxId: number) => void;
   onRole: (role: InboxRoleFilter) => void;
   onManageRoles: () => void;
+  /** Writes a new message; null when no mailbox may send. */
+  onCompose: (() => void) | null;
+  /** Opens the keyboard shortcut help. */
+  onShortcuts: () => void;
 }) {
   const t = useT('mailbox');
+  const organizationId = useMailOrganizationId();
   const views = counts?.views;
   const viewNumber: Record<InboxView, number | undefined> = {
     all: views?.all_unread,
@@ -90,8 +108,16 @@ export function InboxSidebar({
     pending: views?.pending,
     sent: undefined,
   };
+  // All mail narrowed to a role or mailbox is that role or mailbox; other views stay marked.
+  const narrowed = box !== null || role !== null;
   const unreadByMailbox = new Map(counts?.mailboxes.map(item => [item.mailbox_id, item.unread]));
   const unreadByRole = new Map(counts?.roles.map(item => [item.role_id, item.unread]));
+  // In the rail, labels stay for assistive technology and come back from 1280px.
+  const label = rail
+    ? 'sr-only xl:not-sr-only xl:min-w-0 xl:flex-1 xl:truncate'
+    : 'min-w-0 flex-1 truncate';
+  const wide = rail ? 'hidden xl:flex' : 'flex';
+  const railIcon = rail ? 'size-4 shrink-0 xl:hidden' : 'hidden';
 
   const groups = sidebarGroups(mailboxes, roles ?? [], canManage, {
     ungroupedName: t('inbox.groups.ungrouped'),
@@ -122,33 +148,70 @@ export function InboxSidebar({
   };
 
   return (
-    <>
-      <nav aria-label={t('inbox.views.label')} className="space-y-1">
+    <div className="flex min-h-full flex-col gap-0.5">
+      <div
+        className={cn(
+          'flex items-center gap-2.5 pb-[18px]',
+          rail ? 'justify-center xl:justify-start xl:px-2' : 'px-2'
+        )}
+      >
+        <ZmailMark />
+        <div className={cn('min-w-0 flex-1', rail && 'hidden xl:block')}>{organization}</div>
+        <Kbd aria-hidden="true" className={cn(rail && 'hidden xl:inline-flex')}>
+          ⌘K
+        </Kbd>
+      </div>
+
+      {onCompose ? (
+        <button
+          type="button"
+          aria-label={rail ? t('actions.compose') : undefined}
+          title={rail ? t('actions.compose') : undefined}
+          className={cn(
+            'mx-1 mb-3.5 flex h-9 shrink-0 items-center gap-2 rounded-[9px] border border-border-main bg-bg-surface px-3 text-left text-text-main shadow-xs transition-colors focus-ring hover:bg-nav-hover motion-reduce:transition-none',
+            rail && 'justify-center px-0 xl:justify-start xl:px-3'
+          )}
+          onClick={onCompose}
+        >
+          <PenLine className="size-[15px] shrink-0" aria-hidden="true" />
+          <span className={label}>{t('actions.compose')}</span>
+          <Kbd aria-hidden="true" className={cn(rail && 'hidden xl:inline-flex')}>
+            C
+          </Kbd>
+        </button>
+      ) : null}
+
+      <nav aria-label={t('inbox.views.label')} className="flex flex-col gap-0.5">
         {viewOrder.map(item => {
           const Icon = viewIcons[item];
           const name = t(`inbox.views.${item}`);
           const count = viewNumber[item];
           const queued = item === 'sent' && (views?.sent_waiting ?? 0) > 0;
-          let label: string | undefined;
-          if (queued) label = t('inbox.views.sentQueued', { name });
-          else if (item === 'all' && count) label = t('inbox.views.unreadCount', { name, count });
-          else if (count) label = t('inbox.views.count', { name, count });
+          let accessibleName: string | undefined;
+          if (queued) accessibleName = t('inbox.views.sentQueued', { name });
+          else if (item === 'all' && count) {
+            accessibleName = t('inbox.views.unreadCount', { name, count });
+          } else if (count) accessibleName = t('inbox.views.count', { name, count });
           return (
             <button
               key={item}
               type="button"
-              aria-label={label}
-              aria-current={item === view ? 'page' : undefined}
-              className={cn(
-                rowClass,
-                item === view ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground'
-              )}
+              aria-label={accessibleName}
+              aria-current={item === view && !(narrowed && item === 'all') ? 'page' : undefined}
+              title={rail ? name : undefined}
+              className={navRowClass(item === view && !(narrowed && item === 'all'), rail)}
               onClick={() => onView(item)}
             >
-              <Icon className="size-4 shrink-0" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">{name}</span>
+              <Icon className={railIcon} aria-hidden="true" />
+              <span className={label}>{name}</span>
               {queued ? (
-                <Badge variant="outline" className="shrink-0 px-1.5 text-[0.6875rem]">
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'shrink-0 px-1.5 text-[0.6875rem]',
+                    rail && 'hidden xl:inline-flex'
+                  )}
+                >
                   {t('inbox.views.queued')}
                 </Badge>
               ) : null}
@@ -157,7 +220,8 @@ export function InboxSidebar({
                   aria-hidden="true"
                   className={cn(
                     'shrink-0 text-xs tabular-nums',
-                    item === 'all' ? 'font-semibold text-primary' : 'text-muted-foreground'
+                    item === 'all' ? 'font-semibold text-brand' : 'text-text-faint',
+                    rail && 'hidden xl:inline'
                   )}
                 >
                   {count}
@@ -167,9 +231,10 @@ export function InboxSidebar({
           );
         })}
       </nav>
-      <nav aria-label={t('inbox.groups.label')} className="space-y-1">
-        <div className="flex min-h-7 items-center gap-2 px-3">
-          <p className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+
+      <nav aria-label={t('inbox.groups.label')} className="flex flex-col gap-0.5">
+        <div className={cn('items-center gap-2 pt-[18px] pr-1 pb-1.5 pl-3', wide)}>
+          <p className="min-w-0 flex-1 truncate text-[11px] tracking-[0.06em] text-text-faint">
             {t('inbox.groups.label')}
           </p>
           {canManage ? (
@@ -180,18 +245,19 @@ export function InboxSidebar({
               variant="ghost"
               aria-label={t('inbox.groups.manage')}
               title={t('inbox.groups.manage')}
+              className="text-text-faint hover:text-text-main"
               onClick={onManageRoles}
             >
               <Settings2 className="size-3.5" />
             </Button>
           ) : null}
         </div>
+        {rail ? <div className="h-4 xl:hidden" aria-hidden="true" /> : null}
         {groups.map(group => {
           const open = isOpen(group);
           const selected = role !== null && String(role) === group.key;
-          const Chevron = open ? ChevronDown : ChevronRight;
           return (
-            <div key={group.key} className="space-y-0.5">
+            <div key={group.key} className="flex flex-col gap-0.5">
               <button
                 type="button"
                 aria-expanded={open}
@@ -201,17 +267,27 @@ export function InboxSidebar({
                     ? t('inbox.groups.unread', { name: group.name, count: group.unread })
                     : undefined
                 }
-                className={cn(
-                  rowClass,
-                  selected ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground'
-                )}
+                title={rail ? group.name : undefined}
+                className={navRowClass(selected, rail)}
                 onClick={() => chooseGroup(group)}
               >
-                <Chevron className="size-3.5 shrink-0" aria-hidden="true" />
-                {group.role ? <LabelDot color={group.role.color} className="size-2" /> : null}
-                <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                {group.role ? (
+                  <LabelDot color={group.role.color} className="size-[7px] rounded-[2px]" />
+                ) : (
+                  <span
+                    aria-hidden="true"
+                    className="size-[7px] shrink-0 rounded-[2px] border border-text-faint"
+                  />
+                )}
+                <span className={label}>{group.name}</span>
                 {group.unread > 0 ? (
-                  <span aria-hidden="true" className="shrink-0 text-xs tabular-nums">
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      'shrink-0 text-xs text-text-faint tabular-nums',
+                      rail && 'hidden xl:inline'
+                    )}
+                  >
                     {group.unread}
                   </span>
                 ) : null}
@@ -224,15 +300,19 @@ export function InboxSidebar({
                         mailbox={mailbox}
                         unread={unreadByMailbox.get(mailbox.id) ?? 0}
                         selected={mailbox.id === box}
+                        className={wide}
                         onSelect={() => onBox(mailbox.id)}
                       />
                     ) : (
                       <div
                         key={mailbox.id}
-                        className="flex min-w-0 items-center gap-2 py-1.5 pr-3 pl-9 text-sm text-muted-foreground"
+                        className={cn(
+                          'h-[30px] min-w-0 items-center gap-2.5 rounded-[8px] pr-3 pl-[29px] text-[12.5px] text-text-faint',
+                          wide
+                        )}
                       >
-                        <Lock className="size-3.5 shrink-0" aria-hidden="true" />
                         <span className="min-w-0 flex-1 truncate">{mailbox.address}</span>
+                        <Lock className="size-3.5 shrink-0" aria-hidden="true" />
                         <span className="sr-only">{t('inbox.groups.locked')}</span>
                       </div>
                     )
@@ -242,7 +322,67 @@ export function InboxSidebar({
           );
         })}
       </nav>
-    </>
+
+      <div className="min-h-4 flex-1" aria-hidden="true" />
+      <div className={cn('flex-col', wide)}>
+        <SendQuotaCard canManage={canManage} sentWaiting={views?.sent_waiting ?? 0} />
+        <nav
+          aria-label={t('inbox.footer.label')}
+          className="flex flex-wrap gap-x-2.5 gap-y-1 px-2 pt-2.5 text-text-muted"
+        >
+          {footerLinks.map(([key, path]) => (
+            <Link
+              key={key}
+              href={mailOrganizationHref(path, organizationId)}
+              className="rounded-sm transition-colors focus-ring first:mr-auto hover:text-text-main motion-reduce:transition-none"
+            >
+              {t(`inbox.footer.${key}`)}
+            </Link>
+          ))}
+          <button
+            type="button"
+            className="rounded-sm transition-colors focus-ring hover:text-text-main motion-reduce:transition-none"
+            onClick={onShortcuts}
+          >
+            {t('inbox.footer.shortcuts')}
+          </button>
+        </nav>
+      </div>
+    </div>
+  );
+}
+
+/** A view or role row: 32px, radius 8px; the rail centers its icon or dot. */
+function navRowClass(selected: boolean, rail: boolean): string {
+  return cn(
+    'flex h-8 w-full min-w-0 shrink-0 items-center gap-2.5 rounded-[8px] px-3 text-left transition-colors focus-ring motion-reduce:transition-none',
+    selected
+      ? 'bg-nav-selected font-semibold text-text-main'
+      : 'text-text-subtle hover:bg-nav-hover',
+    rail && 'justify-center px-0 xl:justify-start xl:px-3'
+  );
+}
+
+/** The product mark: a 22px tile with radius 6px. */
+function ZmailMark() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className="shrink-0 text-text-main"
+    >
+      <rect width="24" height="24" rx="6" fill="currentColor" />
+      <path
+        d="M7 8h10L7 16h10"
+        className="stroke-bg-canvas"
+        strokeWidth="2"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
@@ -250,11 +390,13 @@ function MailboxRow({
   mailbox,
   unread,
   selected,
+  className,
   onSelect,
 }: {
   mailbox: Mailbox;
   unread: number;
   selected: boolean;
+  className?: string;
   onSelect: () => void;
 }) {
   const t = useT('mailbox');
@@ -266,15 +408,19 @@ function MailboxRow({
       }
       aria-current={selected ? 'page' : undefined}
       className={cn(
-        rowClass,
-        'pl-9',
-        selected ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground'
+        'h-[30px] w-full min-w-0 shrink-0 items-center gap-2.5 rounded-[8px] pr-3 pl-[29px] text-left text-[12.5px] transition-colors focus-ring motion-reduce:transition-none',
+        selected
+          ? 'bg-nav-selected font-semibold text-text-main'
+          : 'text-text-subtle hover:bg-nav-hover',
+        className
       )}
       onClick={onSelect}
     >
       <span className="min-w-0 flex-1 truncate">{mailbox.address}</span>
+      {/* The source badge slot (slice ④), empty in this slice. */}
+      <span data-slot="mailbox-source" className="empty:hidden" />
       {unread > 0 ? (
-        <span aria-hidden="true" className="shrink-0 text-xs tabular-nums">
+        <span aria-hidden="true" className="shrink-0 text-xs text-text-faint tabular-nums">
           {unread}
         </span>
       ) : null}
@@ -297,9 +443,7 @@ function sidebarGroups(
     ungroupedUnread,
   }: { ungroupedName: string; unreadByRole: Map<number, number>; ungroupedUnread: number }
 ): SidebarGroup[] {
-  const shown = roles.filter(
-    role => canManage || mailboxes.some(mailbox => mailbox.role_id === role.id)
-  );
+  const shown = visibleRoles(mailboxes, roles, canManage);
   const shownIds = new Set(shown.map(role => role.id));
   return [
     ...shown.map(role => ({
@@ -324,4 +468,13 @@ function sidebarGroups(
       unread: ungroupedUnread,
     },
   ];
+}
+
+/** The roles the sidebar lists: all for owners and admins, else those holding a listed mailbox. */
+export function visibleRoles(
+  mailboxes: readonly Mailbox[],
+  roles: readonly MailRole[],
+  canManage: boolean
+): MailRole[] {
+  return roles.filter(role => canManage || mailboxes.some(mailbox => mailbox.role_id === role.id));
 }
