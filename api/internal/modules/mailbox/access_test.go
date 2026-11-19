@@ -56,7 +56,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 	repo := newFakeRepository()
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()
-	svc := NewService(repo, memberships, repo, newFakeContacts(), &stubBroadcasts{},
+	svc := NewService(repo, memberships, repo, newFakeContacts(), &stubBroadcasts{}, nil,
 		nil, nil, nil, transport, &fakeNotifier{}, accessSettings())
 	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
@@ -68,7 +68,7 @@ func newPostgresAccessFixture(t *testing.T) *accessFixture {
 	createOwner(t, db, accessOrg)
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()
-	svc := NewService(repo, memberships, repo, repo, repo,
+	svc := NewService(repo, memberships, repo, repo, repo, repo,
 		nil, nil, nil, transport, &fakeNotifier{}, accessSettings())
 	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
@@ -162,6 +162,7 @@ func accessRouter(svc *service, viewer domain.OrganizationContext) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	handler := NewHandler(svc)
 	response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)
+	response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
 	handler.RegisterErrorMappings(response.DefaultErrorMapper)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -171,8 +172,22 @@ func accessRouter(svc *service, viewer domain.OrganizationContext) *gin.Engine {
 	router.GET("/mailboxes", handler.ListMailboxes)
 	router.POST("/mailboxes", handler.CreateMailbox)
 	router.GET("/mailboxes/:mailbox_id/messages", handler.ListMessages)
+	router.GET("/mailboxes/:mailbox_id/threads/:thread_id", handler.GetThread)
+	router.GET("/mailboxes/:mailbox_id/message-counts", handler.MessageCounts)
 	router.POST("/mailboxes/:mailbox_id/messages", handler.SendMessage)
 	router.GET("/mailboxes/:mailbox_id/messages/:message_id", handler.GetMessage)
+	router.PUT("/mailboxes/:mailbox_id/messages/:message_id", handler.UpdateMessage)
+	router.DELETE("/mailboxes/:mailbox_id/messages/:message_id", handler.DeleteMessage)
+	router.POST("/mailboxes/:mailbox_id/message-updates", handler.UpdateMessages)
+	router.POST("/mailboxes/:mailbox_id/trash-purges", handler.PurgeTrash)
+	router.GET("/mailboxes/:mailbox_id/mail-folders", handler.ListFolders)
+	router.POST("/mailboxes/:mailbox_id/mail-folders", handler.CreateFolder)
+	router.PUT("/mailboxes/:mailbox_id/mail-folders/:folder_id", handler.RenameFolder)
+	router.DELETE("/mailboxes/:mailbox_id/mail-folders/:folder_id", handler.DeleteFolder)
+	router.GET("/mailboxes/:mailbox_id/mail-labels", handler.ListLabels)
+	router.POST("/mailboxes/:mailbox_id/mail-labels", handler.CreateLabel)
+	router.PUT("/mailboxes/:mailbox_id/mail-labels/:label_id", handler.UpdateLabel)
+	router.DELETE("/mailboxes/:mailbox_id/mail-labels/:label_id", handler.DeleteLabel)
 	router.GET("/mailboxes/:mailbox_id/members", handler.ListMailboxMembers)
 	router.PUT("/mailboxes/:mailbox_id/members/:user_id", handler.SetMailboxMember)
 	router.DELETE("/mailboxes/:mailbox_id/members/:user_id", handler.RemoveMailboxMember)

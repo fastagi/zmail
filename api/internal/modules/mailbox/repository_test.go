@@ -25,7 +25,7 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{})
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{})
 	return NewRepository(db), db
 }
 
@@ -198,7 +198,7 @@ func TestRepositoryListsMessagesWithoutBodies(t *testing.T) {
 		}
 	}
 
-	inbox, total, err := repo.ListMessages(ctx, mailbox.ID, domain.MailMessageFilter{Direction: domain.MailDirectionInbound, Page: 1, PerPage: 1})
+	inbox, total, err := repo.ListMessages(ctx, mailbox.ID, 0, domain.MailMessageFilter{Direction: domain.MailDirectionInbound, Page: 1, PerPage: 1})
 	if err != nil || total != 2 || len(inbox) != 1 {
 		t.Fatalf("inbox page = %d rows, total %d, err %v", len(inbox), total, err)
 	}
@@ -208,11 +208,11 @@ func TestRepositoryListsMessagesWithoutBodies(t *testing.T) {
 	if inbox[0].To[0] != "hello@mail.example" {
 		t.Fatalf("listing lost recipients: %+v", inbox[0])
 	}
-	second, _, err := repo.ListMessages(ctx, mailbox.ID, domain.MailMessageFilter{Direction: domain.MailDirectionInbound, Page: 2, PerPage: 1})
+	second, _, err := repo.ListMessages(ctx, mailbox.ID, 0, domain.MailMessageFilter{Direction: domain.MailDirectionInbound, Page: 2, PerPage: 1})
 	if err != nil || len(second) != 1 || second[0].ID >= inbox[0].ID {
 		t.Fatalf("second page = %+v, err %v; want the older message", second, err)
 	}
-	all, total, err := repo.ListMessages(ctx, mailbox.ID, domain.MailMessageFilter{})
+	all, total, err := repo.ListMessages(ctx, mailbox.ID, 0, domain.MailMessageFilter{})
 	if err != nil || total != 3 || len(all) != 3 {
 		t.Fatalf("unfiltered = %d rows, total %d, err %v", len(all), total, err)
 	}
@@ -1021,8 +1021,7 @@ func TestRepositoryFiltersMailboxMessagesBySearchAndUnread(t *testing.T) {
 
 	list := func(filter domain.MailMessageFilter) []*domain.MailMessage {
 		t.Helper()
-		filter.ReaderMembershipID = reader
-		messages, total, err := repo.ListMessages(ctx, first.ID, filter)
+		messages, total, err := repo.ListMessages(ctx, first.ID, reader, filter)
 		if err != nil || int(total) != len(messages) {
 			t.Fatalf("ListMessages(%+v) = %d rows, total %d, err %v", filter, len(messages), total, err)
 		}
@@ -1037,8 +1036,9 @@ func TestRepositoryFiltersMailboxMessagesBySearchAndUnread(t *testing.T) {
 	if got := list(domain.MailMessageFilter{Query: "INVOICE"}); len(got) != 2 || got[0].Subject != "Invoice_paid" || got[1].Subject != "Invoice 100% due" {
 		t.Fatalf("query INVOICE = %+v; want two newest-first matches in first mailbox", got)
 	}
-	if got := list(domain.MailMessageFilter{Query: "needle"}); len(got) != 0 {
-		t.Fatalf("body text matched query: %+v", got)
+	// The search covers the text body too, though the listing never returns it.
+	if got := list(domain.MailMessageFilter{Query: "needle"}); len(got) != 3 {
+		t.Fatalf("query needle = %+v; want the three messages of the first mailbox by text body", got)
 	}
 	for query, want := range map[string]string{
 		"ALICE@sender":  "Invoice 100% due",
@@ -1068,7 +1068,7 @@ func TestRepositoryFiltersMailboxMessagesBySearchAndUnread(t *testing.T) {
 		t.Fatalf("combined filter = %+v; want Invoice_paid", got)
 	}
 
-	secondPage, total, err := repo.ListMessages(ctx, first.ID, domain.MailMessageFilter{Query: "invoice", Page: 2, PerPage: 1})
+	secondPage, total, err := repo.ListMessages(ctx, first.ID, reader, domain.MailMessageFilter{Query: "invoice", Page: 2, PerPage: 1})
 	if err != nil || total != 2 || len(secondPage) != 1 || secondPage[0].Subject != "Invoice 100% due" {
 		t.Fatalf("filtered page 2 = %+v, total %d, err %v", secondPage, total, err)
 	}
@@ -1188,5 +1188,35 @@ func TestCountOutboundSinceUsesAttemptTime(t *testing.T) {
 	stored, err := repo.FindMessage(ctx, mailbox.ID, waiting.ID)
 	if err != nil || stored.QueuedReason != domain.MailQueuedForSendLimit || stored.SendAttemptedAt != nil {
 		t.Fatalf("stored waiting = %+v, %v", stored, err)
+	}
+}
+
+// A handover seals the earlier history from the new owner, so a new message never joins a sealed
+// thread or replies with a sealed message's References.
+func TestRepositoryThreadsIgnoreSealedMessages(t *testing.T) {
+	repo, db := openRepository(t)
+	createOwner(t, db, 1)
+	mailbox := createMailbox(t, repo, "sealed-threads@mail.example")
+	ctx := context.Background()
+	old := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusSent,
+		FromAddress: mailbox.Address, To: []string{"bob@example.com"}, Subject: "Old", TextBody: "b",
+		RFCMessageID: "old@mail.example",
+	}
+	if _, err := repo.CreateMessage(ctx, old); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if found, err := repo.FindThreadID(ctx, mailbox.ID, []string{"old@mail.example"}); err != nil || found != old.ID {
+		t.Fatalf("FindThreadID before handover = %d, %v; want %d", found, err, old.ID)
+	}
+	// A handover seals the history before its boundary.
+	if err := db.Model(&MailboxPO{}).Where("id = ?", mailbox.ID).Update("sealed_before", time.Now().Add(time.Minute)).Error; err != nil {
+		t.Fatalf("seal mailbox: %v", err)
+	}
+	if found, err := repo.FindThreadID(ctx, mailbox.ID, []string{"old@mail.example"}); err != nil || found != 0 {
+		t.Fatalf("FindThreadID after handover = %d, %v; want 0", found, err)
+	}
+	if _, err := repo.FindMessageByRFCMessageID(ctx, mailbox.ID, "old@mail.example"); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("FindMessageByRFCMessageID after handover = %v; want not found", err)
 	}
 }

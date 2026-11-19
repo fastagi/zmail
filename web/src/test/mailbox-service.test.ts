@@ -151,7 +151,12 @@ describe('mailbox service boundary', () => {
 
   it('accepts a message waiting for the send limit and rejects other queue reasons', () => {
     expect(
-      parseMailMessage({ ...message(), direction: 'outbound', status: 'queued', queued_reason: 'send_limit' })
+      parseMailMessage({
+        ...message(),
+        direction: 'outbound',
+        status: 'queued',
+        queued_reason: 'send_limit',
+      })
     ).toMatchObject({ status: 'queued', queued_reason: 'send_limit' });
     expect(() => parseMailMessage({ ...message(), queued_reason: 'paused' })).toThrow(ApiError);
     const { queued_reason: _omitted, ...withoutReason } = message();
@@ -190,13 +195,12 @@ describe('mailbox service boundary', () => {
     delete withoutSummary.last_event;
     expect(mailMessageSummarySchema.safeParse(summary()).success).toBe(true);
     expect(mailMessageSummarySchema.safeParse(withoutSummary).success).toBe(false);
-    const entry = { ...summary(), mailbox_address: 'hello@mail.example.com' };
+    const entry = { ...logSummary(), mailbox_address: 'hello@mail.example.com' };
     expect(mailLogEntrySchema.safeParse(entry).success).toBe(true);
     expect(mailLogEntrySchema.safeParse({ ...entry, last_event: 'delivered' }).success).toBe(true);
-    expect(
-      mailLogEntrySchema.safeParse({ ...withoutSummary, mailbox_address: entry.mailbox_address })
-        .success
-    ).toBe(false);
+    const entryWithoutSummary: Record<string, unknown> = { ...entry };
+    delete entryWithoutSummary.last_event;
+    expect(mailLogEntrySchema.safeParse(entryWithoutSummary).success).toBe(false);
     // Only the detail carries the events.
     expect(mailMessageSummarySchema.safeParse({ ...summary(), events: [] }).success).toBe(false);
     expect(mailLogEntrySchema.safeParse({ ...entry, events: [] }).success).toBe(false);
@@ -256,7 +260,7 @@ describe('mailbox service boundary', () => {
   });
 
   it('accepts log pages with the owning address and rejects drift', () => {
-    const entry = { ...summary(), mailbox_address: 'hello@mail.example.com' };
+    const entry = { ...logSummary(), mailbox_address: 'hello@mail.example.com' };
     const page = (data: unknown[]) => ({
       code: 0,
       message: 'success',
@@ -454,7 +458,8 @@ function domain(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function summary() {
+/** A summary as the log lists it: the log does not carry placements, stars, or threads. */
+function logSummary() {
   return {
     id: 7,
     mailbox_id: 12,
@@ -471,6 +476,18 @@ function summary() {
     attachment_count: 0,
     template_id: null,
     created_at: '2026-11-16T10:00:00.123456+08:00',
+  };
+}
+
+function summary() {
+  return {
+    ...logSummary(),
+    placement: 'default',
+    folder_id: null,
+    label_ids: [] as number[],
+    starred: false,
+    thread_id: 7,
+    trashed_at: null,
   };
 }
 
@@ -696,7 +713,14 @@ function accessMailbox(overrides: Record<string, unknown> = {}) {
     awaiting_handover: false,
     sealed_before: null,
     webhooks_enabled: false,
-    access: { view: true, send: true, manage_members: true, administer: true, see_history: true },
+    access: {
+      view: true,
+      send: true,
+      manage_members: true,
+      administer: true,
+      see_history: true,
+      organize: true,
+    },
     unread_count: 0,
     created_at: now,
     ...overrides,
@@ -735,3 +759,269 @@ describe('stopping a broadcast without view on its sender', () => {
     await expect(mailboxService.controlBroadcast(3, 9, 'resumptions')).rejects.toThrow();
   });
 });
+
+describe('mailbox organize service boundary', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const folder = { id: 4, name: 'Invoices', created_at: now };
+  const label = { id: 9, name: 'Urgent', color: 'red', created_at: now };
+  const counts = {
+    placements: { default_inbound_unread: 3, archive_unread: 0 },
+    folders: [{ folder_id: 4, unread: 1 }],
+    starred: 7,
+  };
+  const pageEnvelope = (data: unknown[]) => ({
+    code: 0 as const,
+    message: 'success',
+    data,
+    meta: { current_page: 1, per_page: 20, total: data.length, last_page: 1, from: 1, to: 1 },
+    links: { first: '/a', last: '/a', prev: null, next: null },
+  });
+
+  it('calls the organize routes with the header and the documented bodies', async () => {
+    const get = vi.spyOn(request, 'get').mockImplementation(async url => {
+      if (url.endsWith('/mail-folders')) return [folder];
+      if (url.endsWith('/mail-labels')) return [label];
+      if (url.endsWith('/message-counts')) return counts;
+      if (url.includes('/threads/')) return [message()];
+      throw new Error(`unexpected ${url}`);
+    });
+    const post = vi.spyOn(request, 'post').mockImplementation(async url => {
+      if (url.endsWith('/message-updates')) return { updated: 2 };
+      if (url.endsWith('/trash-purges')) return { deleted: 5 };
+      if (url.endsWith('/mail-folders')) return folder;
+      if (url.endsWith('/mail-labels')) return label;
+      throw new Error(`unexpected ${url}`);
+    });
+    const put = vi.spyOn(request, 'put').mockImplementation(async url => {
+      if (url.includes('/mail-folders/')) return folder;
+      if (url.includes('/mail-labels/')) return label;
+      return message();
+    });
+    const remove = vi.spyOn(request, 'delete').mockResolvedValue(undefined);
+
+    await expect(
+      mailboxService.updateMessages(7, 12, {
+        message_ids: [41, 42],
+        placement: 'archive',
+        add_label_ids: [9],
+      })
+    ).resolves.toEqual({ updated: 2 });
+    await expect(mailboxService.purgeTrash(7, 12)).resolves.toEqual({ deleted: 5 });
+    await expect(mailboxService.getThread(7, 12, 7)).resolves.toHaveLength(1);
+    await expect(mailboxService.getMessageCounts(7, 12)).resolves.toEqual(counts);
+    await expect(mailboxService.listFolders(7, 12)).resolves.toEqual([folder]);
+    await expect(mailboxService.createFolder(7, 12, { name: 'Invoices' })).resolves.toEqual(folder);
+    await expect(mailboxService.renameFolder(7, 12, 4, { name: 'Invoices' })).resolves.toEqual(
+      folder
+    );
+    await mailboxService.deleteFolder(7, 12, 4);
+    await expect(mailboxService.listLabels(7, 12)).resolves.toEqual([label]);
+    await expect(
+      mailboxService.createLabel(7, 12, { name: 'Urgent', color: 'red' })
+    ).resolves.toEqual(label);
+    await expect(
+      mailboxService.updateLabel(7, 12, 9, { name: 'Urgent', color: 'red' })
+    ).resolves.toEqual(label);
+    await mailboxService.deleteLabel(7, 12, 9);
+    await mailboxService.updateMessage(7, 12, 7, { starred: true, placement: 'trash' });
+
+    expect(get.mock.calls.map(call => call[0])).toEqual([
+      '/mailboxes/12/threads/7',
+      '/mailboxes/12/message-counts',
+      '/mailboxes/12/mail-folders',
+      '/mailboxes/12/mail-labels',
+    ]);
+    expect(post.mock.calls.map(call => [call[0], call[1]])).toEqual([
+      [
+        '/mailboxes/12/message-updates',
+        { message_ids: [41, 42], placement: 'archive', add_label_ids: [9] },
+      ],
+      ['/mailboxes/12/trash-purges', undefined],
+      ['/mailboxes/12/mail-folders', { name: 'Invoices' }],
+      ['/mailboxes/12/mail-labels', { name: 'Urgent', color: 'red' }],
+    ]);
+    expect(put.mock.calls.map(call => [call[0], call[1]])).toEqual([
+      ['/mailboxes/12/mail-folders/4', { name: 'Invoices' }],
+      ['/mailboxes/12/mail-labels/9', { name: 'Urgent', color: 'red' }],
+      ['/mailboxes/12/messages/7', { starred: true, placement: 'trash' }],
+    ]);
+    expect(remove.mock.calls.map(call => call[0])).toEqual([
+      '/mailboxes/12/mail-folders/4',
+      '/mailboxes/12/mail-labels/9',
+    ]);
+    const configs = [
+      ...get.mock.calls.map(call => call[1]),
+      ...post.mock.calls.map(call => call[2]),
+      ...put.mock.calls.map(call => call[2]),
+      ...remove.mock.calls.map(call => call[1]),
+    ];
+    for (const config of configs) expect(config?.headers).toEqual({ 'Organization-Id': '7' });
+  });
+
+  it('sends the listing filters as the documented query', async () => {
+    const getEnvelope = vi
+      .spyOn(request, 'getEnvelope')
+      .mockResolvedValue(pageEnvelope([threadRow()]));
+
+    const page = await mailboxService.messages(7, 12, {
+      placement: 'folder',
+      folderId: 4,
+      direction: 'inbound',
+      group: 'thread',
+      page: 2,
+      perPage: 50,
+    });
+    expect(page.items[0].thread).toEqual(threadRow().thread);
+    await mailboxService.messages(7, 12, {
+      labelId: 9,
+      starred: true,
+      unread: false,
+      hasAttachments: true,
+      q: '  invoice  ',
+    });
+    await mailboxService.messages(7, 12, { direction: 'outbound' });
+
+    expect(getEnvelope.mock.calls.map(call => call[1]?.params)).toEqual([
+      {
+        direction: 'inbound',
+        placement: 'folder',
+        folder_id: 4,
+        group: 'thread',
+        page: 2,
+        per_page: 50,
+      },
+      {
+        label_id: 9,
+        starred: true,
+        unread: false,
+        has_attachments: true,
+        q: 'invoice',
+        page: 1,
+        per_page: 20,
+      },
+      { direction: 'outbound', page: 1, per_page: 20 },
+    ]);
+  });
+
+  it('refuses invalid ids, batches, and searches before any request', async () => {
+    const spies = [
+      vi.spyOn(request, 'get'),
+      vi.spyOn(request, 'getEnvelope'),
+      vi.spyOn(request, 'post'),
+      vi.spyOn(request, 'put'),
+      vi.spyOn(request, 'delete'),
+    ];
+    const ids = (count: number) => Array.from({ length: count }, (_, index) => index + 1);
+
+    const calls = [
+      () => mailboxService.updateMessages(7, 12, { message_ids: [], read: true }),
+      () => mailboxService.updateMessages(7, 12, { message_ids: ids(101), read: true }),
+      () => mailboxService.updateMessages(7, 12, { message_ids: [0], read: true }),
+      () => mailboxService.updateMessages(7, 0, { message_ids: [1], read: true }),
+      () => mailboxService.purgeTrash(0, 12),
+      () => mailboxService.getThread(7, 12, 0),
+      () => mailboxService.getMessageCounts(7, -1),
+      () => mailboxService.listFolders(7, 1.5),
+      () => mailboxService.renameFolder(7, 12, 0, { name: 'x' }),
+      () => mailboxService.deleteFolder(7, 12, 0),
+      () => mailboxService.updateLabel(7, 12, 0, { name: 'x', color: 'red' }),
+      () => mailboxService.deleteLabel(7, 12, Number.NaN),
+      () => mailboxService.messages(7, 12, { folderId: 0, placement: 'folder' }),
+      () => mailboxService.messages(7, 12, { q: 'x'.repeat(201) }),
+      () => mailboxService.messages(7, 12, { q: '   ' }),
+    ];
+    for (const call of calls) {
+      await expect(call()).rejects.toMatchObject({ errorCode: ClientErrorCode.INVALID_RESPONSE });
+    }
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('accepts contract-shaped organize answers and rejects drift', async () => {
+    const get = vi.spyOn(request, 'get');
+    const post = vi.spyOn(request, 'post');
+    const reject = async (call: () => Promise<unknown>) =>
+      expect(call()).rejects.toMatchObject({ errorCode: ClientErrorCode.INVALID_RESPONSE });
+
+    get.mockResolvedValueOnce([{ ...label, color: 'black' }]);
+    await reject(() => mailboxService.listLabels(7, 12));
+    get.mockResolvedValueOnce([{ ...folder, color: 'red' }]);
+    await reject(() => mailboxService.listFolders(7, 12));
+    get.mockResolvedValueOnce({ ...counts, starred: -1 });
+    await reject(() => mailboxService.getMessageCounts(7, 12));
+    get.mockResolvedValueOnce({ ...counts, placements: { default_inbound_unread: 3 } });
+    await reject(() => mailboxService.getMessageCounts(7, 12));
+    // A thread lists full messages, never summaries.
+    get.mockResolvedValueOnce([summary()]);
+    await reject(() => mailboxService.getThread(7, 12, 7));
+    post.mockResolvedValueOnce({ updated: '2' });
+    await reject(() => mailboxService.updateMessages(7, 12, { message_ids: [1], read: true }));
+    post.mockResolvedValueOnce({ deleted: 1, extra: true });
+    await reject(() => mailboxService.purgeTrash(7, 12));
+    // An answer about another folder than the one renamed is not the API's answer.
+    vi.spyOn(request, 'put').mockResolvedValueOnce({ ...folder, id: 5 });
+    await reject(() => mailboxService.renameFolder(7, 12, 4, { name: 'Invoices' }));
+  });
+
+  it('requires placements, stars, and threads on messages but not on log entries', () => {
+    expect(mailMessageSummarySchema.safeParse(summary()).success).toBe(true);
+    expect(mailMessageSummarySchema.safeParse(threadRow()).success).toBe(true);
+    expect(
+      mailMessageSchema.safeParse({ ...message(), placement: 'trash', trashed_at: now }).success
+    ).toBe(true);
+    for (const field of [
+      'placement',
+      'folder_id',
+      'label_ids',
+      'starred',
+      'thread_id',
+      'trashed_at',
+    ]) {
+      const partial: Record<string, unknown> = summary();
+      delete partial[field];
+      expect(mailMessageSummarySchema.safeParse(partial).success, field).toBe(false);
+    }
+    for (const drift of [
+      { placement: 'spam' },
+      { folder_id: 0 },
+      { label_ids: [0] },
+      { thread: { ...threadRow().thread, message_count: -1 } },
+      { thread: { ...threadRow().thread, extra: 1 } },
+    ]) {
+      expect(mailMessageSummarySchema.safeParse({ ...summary(), ...drift }).success).toBe(false);
+    }
+    // Only listings group by thread; the detail never carries `thread`.
+    expect(mailMessageSchema.safeParse({ ...message(), thread: threadRow().thread }).success).toBe(
+      false
+    );
+    expect(
+      mailLogEntrySchema.safeParse({ ...summary(), mailbox_address: 'hello@mail.example.com' })
+        .success
+    ).toBe(false);
+    // The organize flag is a required part of the access answer.
+    const withoutOrganize: Record<string, boolean> = { ...accessMailbox().access };
+    delete withoutOrganize.organize;
+    expect(mailboxListSchema.safeParse([accessMailbox({ access: withoutOrganize })]).success).toBe(
+      false
+    );
+  });
+
+  it('maps the organize error codes to local copy', () => {
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 422))
+    ).toBe('errors.searchTooBroad');
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_FOLDER_NAME_TAKEN, 409))
+    ).toBe('errors.folderNameTaken');
+    expect(
+      resolveMailboxErrorKey(new ApiError('x', ApiErrorCode.MAILBOX_LABEL_LIMIT_REACHED, 422))
+    ).toBe('errors.labelLimitReached');
+  });
+});
+
+function threadRow() {
+  return {
+    ...summary(),
+    thread: { message_count: 2, message_ids: [3, 7], unread: true, starred: false, label_ids: [9] },
+  };
+}

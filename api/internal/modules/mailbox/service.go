@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -119,7 +120,13 @@ type Service interface {
 	// ListMailboxes lists the mailboxes the viewer has any access to, with that access.
 	ListMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error)
 	DeleteMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) error
+	// ListMessages lists a mailbox's messages, or with filter.GroupThreads one row per thread, each
+	// row the newest message of its thread in the view with its Thread filled.
 	ListMessages(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
+	// GetThread returns a thread's messages outside the trash, oldest first, as message details.
+	GetThread(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint) ([]*domain.MailMessage, error)
+	// MessageCounts returns the viewer's unread and starred counts for the mailbox's navigation.
+	MessageCounts(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (domain.MailMessageCounts, error)
 	GetMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) (*domain.MailMessage, error)
 	// SendMessage reports created=false when an idempotency key replayed an earlier attempt.
 	SendMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, input SendInput) (message *domain.MailMessage, created bool, err error)
@@ -174,7 +181,21 @@ type Service interface {
 	GetAttachment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID, attachmentID uint) (*domain.MailAttachment, error)
 	GetOutboundMessage(ctx context.Context, viewer domain.OrganizationContext, messageID uint) (*domain.MailMessage, error)
 	SetMessageRead(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint, read bool) (*domain.MailMessage, error)
+	// DeleteMessage moves a message to the trash, or deletes it for good when it is already there.
 	DeleteMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) error
+	// UpdateMessage and UpdateMessages mark, star, move, or label messages; see MessageUpdate.
+	UpdateMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint, update MessageUpdate) (*domain.MailMessage, error)
+	UpdateMessages(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, ids []uint, update MessageUpdate) (int, error)
+	// PurgeTrash empties the trash of a mailbox and returns how many messages it deleted.
+	PurgeTrash(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (int, error)
+	ListFolders(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) ([]*domain.MailFolder, error)
+	CreateFolder(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, name string) (*domain.MailFolder, error)
+	RenameFolder(ctx context.Context, viewer domain.OrganizationContext, mailboxID, folderID uint, name string) (*domain.MailFolder, error)
+	DeleteFolder(ctx context.Context, viewer domain.OrganizationContext, mailboxID, folderID uint) error
+	ListLabels(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) ([]*domain.MailLabel, error)
+	CreateLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, name string, color domain.MailLabelColor) (*domain.MailLabel, error)
+	UpdateLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID, labelID uint, name string, color domain.MailLabelColor) (*domain.MailLabel, error)
+	DeleteLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID, labelID uint) error
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -197,6 +218,8 @@ type service struct {
 	contacts    domain.MailContactRepository
 	// broadcasts is the broadcast store; nil until NewService wires it.
 	broadcasts domain.MailBroadcastRepository
+	// organize stores folders, labels, placements, and stars; nil when a test does not need them.
+	organize domain.MailOrganizeRepository
 	// domains, zones, and domainProvider serve organization domains; nil when a test does not
 	// need them.
 	domains        domain.MailDomainRepository
@@ -232,6 +255,7 @@ func NewService(
 	templates domain.MailTemplateRepository,
 	contacts domain.MailContactRepository,
 	broadcasts domain.MailBroadcastRepository,
+	organize domain.MailOrganizeRepository,
 	domains domain.MailDomainRepository,
 	zones domain.MailZoneRepository,
 	domainProvider mailtransport.DomainProvider,
@@ -240,7 +264,8 @@ func NewService(
 	settings Settings,
 ) *service {
 	return &service{
-		repo: repo, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts, domains: domains, zones: zones,
+		repo: repo, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
+		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
@@ -360,7 +385,7 @@ func (s *service) ListLog(ctx context.Context, viewer domain.OrganizationContext
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := s.fillRead(ctx, viewer, messages...); err != nil {
+	if err := s.fillViewerState(ctx, viewer, messages...); err != nil {
 		return nil, 0, err
 	}
 	return messages, total, nil
@@ -445,35 +470,6 @@ func (s *service) DeleteMailbox(ctx context.Context, viewer domain.OrganizationC
 	return nil
 }
 
-func (s *service) ListMessages(
-	ctx context.Context,
-	viewer domain.OrganizationContext,
-	mailboxID uint,
-	filter domain.MailMessageFilter,
-) ([]*domain.MailMessage, int64, error) {
-	if filter.Direction != "" && !filter.Direction.Valid() {
-		return nil, 0, domain.ErrInvalidInput
-	}
-	query, ok := cleanSearchQuery(filter.Query)
-	if !ok {
-		return nil, 0, domain.ErrInvalidInput
-	}
-	filter.Query = query
-	// Unread is the viewer's own read state.
-	filter.ReaderMembershipID = viewer.MembershipID
-	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
-		return nil, 0, err
-	}
-	messages, total, err := s.repo.ListMessages(ctx, mailboxID, filter)
-	if err != nil {
-		return nil, 0, err
-	}
-	if err := s.fillRead(ctx, viewer, messages...); err != nil {
-		return nil, 0, err
-	}
-	return messages, total, nil
-}
-
 func (s *service) GetMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) (*domain.MailMessage, error) {
 	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canView); err != nil {
 		return nil, err
@@ -482,7 +478,7 @@ func (s *service) GetMessage(ctx context.Context, viewer domain.OrganizationCont
 	if err != nil {
 		return nil, err
 	}
-	if err := s.fillRead(ctx, viewer, message); err != nil {
+	if err := s.fillViewerState(ctx, viewer, message); err != nil {
 		return nil, err
 	}
 	return s.withEvents(ctx, message)
@@ -531,17 +527,10 @@ func (s *service) SetMessageRead(ctx context.Context, viewer domain.Organization
 	if err != nil {
 		return nil, err
 	}
-	if err := s.fillRead(ctx, viewer, message); err != nil {
+	if err := s.fillViewerState(ctx, viewer, message); err != nil {
 		return nil, err
 	}
 	return message, nil
-}
-
-func (s *service) DeleteMessage(ctx context.Context, viewer domain.OrganizationContext, mailboxID, messageID uint) error {
-	if _, err := s.authorizeMailbox(ctx, viewer, mailboxID, canSend); err != nil {
-		return err
-	}
-	return s.repo.DeleteMessage(ctx, mailboxID, messageID)
 }
 
 // SendMessage stores the message as queued, calls the provider, and records the real outcome.
@@ -593,6 +582,10 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 	if err := s.checkAccess(ctx, viewer, mailbox, canView, ErrMailMessageNotFound); err != nil {
 		return nil, err
 	}
+	// An API key acts for no viewing person: it sees the shared labels but never a star.
+	if err := s.fillLabels(ctx, message); err != nil {
+		return nil, err
+	}
 	return s.withEvents(ctx, message)
 }
 
@@ -619,6 +612,16 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 			return replayed, false, replayErr
 		}
 		if !errors.Is(findErr, ErrMailMessageNotFound) {
+			return nil, false, findErr
+		}
+	}
+
+	if message.InReplyTo != "" {
+		parent, findErr := s.repo.FindMessageByRFCMessageID(ctx, mailbox.ID, message.InReplyTo)
+		switch {
+		case findErr == nil:
+			message.References = replyReferences(parent)
+		case !errors.Is(findErr, ErrMailMessageNotFound):
 			return nil, false, findErr
 		}
 	}
@@ -688,7 +691,9 @@ func (s *service) deliver(
 		Subject:     message.Subject,
 		TextBody:    message.TextBody,
 		HTMLBody:    message.HTMLBody,
+		MessageID:   message.RFCMessageID,
 		InReplyTo:   message.InReplyTo,
+		References:  message.References,
 		Attachments: files,
 		Headers:     headers,
 	})
@@ -898,6 +903,14 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		fingerprint = sendFingerprint(to, cc, cleanText(subject), text, html, inReplyTo, attachmentDigest(attachments))
 	}
 
+	// The id is chosen before the message is stored, so a replay or a queued send reuses it.
+	rfcMessageID := newRFCMessageID(addressDomain(mailbox.Address))
+	// A reply references at least its parent; send extends this with the parent's own chain.
+	var references []string
+	if inReplyTo != "" {
+		references = []string{inReplyTo}
+	}
+
 	return &domain.MailMessage{
 		IdempotencyKey:         idempotencyKey,
 		IdempotencyFingerprint: fingerprint,
@@ -912,11 +925,43 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		TextBody:               text,
 		HTMLBody:               html,
 		InReplyTo:              inReplyTo,
+		References:             references,
+		RFCMessageID:           rfcMessageID,
 		Attachments:            attachments,
 		AttachmentCount:        len(attachments),
 		// Outbound mail is read for everyone.
 		Read: true,
 	}, nil
+}
+
+// newRFCMessageID returns a new RFC 5322 Message-ID at the sending domain, without angle
+// brackets: 32 lowercase hex characters from a cryptographic random source.
+func newRFCMessageID(domainName string) string {
+	var random [16]byte
+	// crypto/rand.Read always fills the buffer and never returns an error.
+	_, _ = rand.Read(random[:])
+	return hex.EncodeToString(random[:]) + "@" + domainName
+}
+
+// addressDomain returns the domain part of a mail address.
+func addressDomain(address string) string {
+	return address[strings.LastIndex(address, "@")+1:]
+}
+
+// replyReferences is the References chain of a reply to parent: the parent's References followed
+// by the parent's own Message-ID, keeping the newest maxMailReferences ids.
+func replyReferences(parent *domain.MailMessage) []string {
+	chain := make([]string, 0, len(parent.References)+1)
+	for _, id := range parent.References {
+		if id != parent.RFCMessageID {
+			chain = append(chain, id)
+		}
+	}
+	chain = append(chain, parent.RFCMessageID)
+	if len(chain) > maxMailReferences {
+		chain = chain[len(chain)-maxMailReferences:]
+	}
+	return chain
 }
 
 // ReceiveInbound verifies and stores one delivery from the mail edge. A repeated delivery of
@@ -969,8 +1014,11 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		HTMLBody:    parsed.HTMLBody,
 		MessageID:   parsed.MessageID,
 		InReplyTo:   parsed.InReplyTo,
-		DedupeKey:   inboundDedupeKey(parsed.MessageID, delivery.Raw),
-		Attachments: parsed.Attachments,
+		References:  parsed.References,
+		// Threading matches replies against the sender's Message-ID.
+		RFCMessageID: parsed.MessageID,
+		DedupeKey:    inboundDedupeKey(parsed.MessageID, delivery.Raw),
+		Attachments:  parsed.Attachments,
 	}
 	created := false
 	err = s.apply(ctx, func(tx context.Context) ([]MailNotification, error) {

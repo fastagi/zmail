@@ -6,6 +6,8 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -197,23 +199,10 @@ func (h *Handler) ListMessages(c *gin.Context) {
 	if !ok {
 		return
 	}
-	unread, ok := parseOptionalBoolQuery(c, "unread")
-	if !ok {
-		response.HandleError(c, "Invalid unread filter", domain.ErrInvalidInput)
-		return
-	}
-	if len(c.QueryArray("direction")) > 1 || len(c.QueryArray("q")) > 1 {
-		response.HandleError(c, "Invalid message filter", domain.ErrInvalidInput)
-		return
-	}
 	page := pagination.FromContext(c)
-	messages, total, err := h.service.ListMessages(c.Request.Context(), viewer, mailboxID, domain.MailMessageFilter{
-		Direction: domain.MailDirection(c.Query("direction")),
-		Query:     c.Query("q"),
-		Unread:    unread,
-		Page:      page.GetPage(),
-		PerPage:   page.GetPerPage(),
-	})
+	filter := messageFilterFromQuery(c)
+	filter.Page, filter.PerPage = page.GetPage(), page.GetPerPage()
+	messages, total, err := h.service.ListMessages(c.Request.Context(), viewer, mailboxID, filter)
 	if err != nil {
 		response.HandleError(c, "Failed to list mail messages", err)
 		return
@@ -224,26 +213,103 @@ func (h *Handler) ListMessages(c *gin.Context) {
 	response.Success(c, paginator)
 }
 
-func parseOptionalBoolQuery(c *gin.Context, name string) (*bool, bool) {
-	values, exists := c.GetQueryArray(name)
-	if !exists {
-		return nil, true
+// messageFilterFromQuery reads the listing's query. A value it cannot read is named in Malformed
+// rather than refused here, so the service still answers access and lookups first.
+func messageFilterFromQuery(c *gin.Context) domain.MailMessageFilter {
+	filter := domain.MailMessageFilter{
+		Direction: domain.MailDirection(c.Query("direction")),
+		Placement: domain.MailPlacement(c.Query("placement")),
 	}
-	if len(values) != 1 {
-		return nil, false
+	malformed := func(name string) { filter.Malformed = append(filter.Malformed, name) }
+	// A filter given twice is ambiguous, so it is refused rather than read from its first value.
+	for _, name := range []string{"direction", "placement", "folder_id", "label_id", "starred", "unread", "has_attachments", "q", "group"} {
+		if len(c.QueryArray(name)) > 1 {
+			malformed(name)
+		}
 	}
-	switch values[0] {
-	case "":
-		return nil, true
-	case "true":
-		parsed := true
-		return &parsed, true
-	case "false":
-		parsed := false
-		return &parsed, true
-	default:
-		return nil, false
+	readID := func(name string) uint {
+		raw, present := c.GetQuery(name)
+		if !present {
+			return 0
+		}
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || id == 0 {
+			malformed(name)
+			return 0
+		}
+		return uint(id)
 	}
+	readBool := func(name string) *bool {
+		raw, present := c.GetQuery(name)
+		switch {
+		case !present:
+			return nil
+		case raw == "true":
+			return new(true)
+		case raw == "false":
+			return new(false)
+		}
+		malformed(name)
+		return nil
+	}
+	filter.FolderID = readID("folder_id")
+	filter.LabelID = readID("label_id")
+	filter.Starred = readBool("starred")
+	filter.Unread = readBool("unread")
+	filter.HasAttachments = readBool("has_attachments")
+	if raw, present := c.GetQuery("q"); present {
+		filter.Query = strings.TrimSpace(raw)
+		if filter.Query == "" || utf8.RuneCountInString(raw) > domain.MaxMailSearchLength {
+			malformed("q")
+		}
+	}
+	if raw, present := c.GetQuery("group"); present {
+		if raw == "thread" {
+			filter.GroupThreads = true
+		} else {
+			malformed("group")
+		}
+	}
+	return filter
+}
+
+// GetThread returns the messages of one thread outside the trash, oldest first.
+// fastbuild:bounded-list max=100 reason=a thread returns at most domain.MaxMailThreadMessageIDs messages
+func (h *Handler) GetThread(c *gin.Context) {
+	viewer, mailboxID, ok := mailboxScope(c)
+	if !ok {
+		return
+	}
+	threadID, ok := httphandler.ParseID(c, "thread_id")
+	if !ok {
+		return
+	}
+	messages, err := h.service.GetThread(c.Request.Context(), viewer, mailboxID, threadID)
+	if err != nil {
+		response.HandleError(c, "Failed to get mail thread", err)
+		return
+	}
+	items := make([]*MailMessageResponse, 0, len(messages))
+	for _, message := range messages {
+		items = append(items, toMailMessageResponse(message))
+	}
+	privateResponse(c)
+	response.Success(c, items)
+}
+
+// MessageCounts returns the caller's unread and starred counts for a mailbox's navigation.
+func (h *Handler) MessageCounts(c *gin.Context) {
+	viewer, mailboxID, ok := mailboxScope(c)
+	if !ok {
+		return
+	}
+	counts, err := h.service.MessageCounts(c.Request.Context(), viewer, mailboxID)
+	if err != nil {
+		response.HandleError(c, "Failed to count mail messages", err)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, toMailMessageCountsResponse(counts))
 }
 
 func (h *Handler) GetMessage(c *gin.Context) {
@@ -362,9 +428,9 @@ func (h *Handler) UpdateMessage(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	message, err := h.service.SetMessageRead(c.Request.Context(), viewer, mailboxID, messageID, *req.Read)
+	message, err := h.service.UpdateMessage(c.Request.Context(), viewer, mailboxID, messageID, req.update())
 	if err != nil {
-		response.HandleError(c, "Failed to update mail message", err)
+		respondOrganizeError(c, "Failed to update mail message", err)
 		return
 	}
 	privateResponse(c)

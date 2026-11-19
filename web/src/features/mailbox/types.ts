@@ -61,6 +61,17 @@ import type {
   mailTemplateSchema,
   mailTemplateSummarySchema,
   mailTemplateTestInputSchema,
+  mailFolderInputSchema,
+  mailFolderSchema,
+  mailLabelColorSchema,
+  mailLabelInputSchema,
+  mailLabelSchema,
+  mailMessageCountsSchema,
+  mailMessageUpdatesResultSchema,
+  mailPlacementSchema,
+  mailThreadSummarySchema,
+  mailTrashPurgeSchema,
+  updateMailMessagesSchema,
 } from './schemas';
 
 export type MailboxDomain = Infer<typeof mailboxDomainSchema>;
@@ -106,6 +117,34 @@ export type MailDayStats = Infer<typeof mailDayStatsSchema>;
 export type CreateMailboxInput = Infer<typeof createMailboxSchema>;
 export type SendMailMessageInput = Infer<typeof sendMailMessageSchema>;
 export type UpdateMailMessageInput = Infer<typeof updateMailMessageSchema>;
+export type UpdateMailMessagesInput = Infer<typeof updateMailMessagesSchema>;
+export type MailPlacement = Infer<typeof mailPlacementSchema>;
+export type MailLabelColor = Infer<typeof mailLabelColorSchema>;
+export type MailThreadSummary = Infer<typeof mailThreadSummarySchema>;
+export type MailFolder = Infer<typeof mailFolderSchema>;
+export type MailFolderInput = Infer<typeof mailFolderInputSchema>;
+export type MailLabel = Infer<typeof mailLabelSchema>;
+export type MailLabelInput = Infer<typeof mailLabelInputSchema>;
+export type MailMessageCounts = Infer<typeof mailMessageCountsSchema>;
+export type MailMessageUpdatesResult = Infer<typeof mailMessageUpdatesResultSchema>;
+export type MailTrashPurge = Infer<typeof mailTrashPurgeSchema>;
+
+/**
+ * Filters of a mailbox listing, combined with AND; an absent field does not narrow it. Without
+ * `placement` every placement except the trash is listed. `group: 'thread'` is for placement views
+ * only; see `contracts/MAILBOXES.md`.
+ */
+export interface MailMessageFilters {
+  direction?: MailDirection;
+  placement?: MailPlacement;
+  folderId?: number;
+  labelId?: number;
+  starred?: boolean;
+  unread?: boolean;
+  hasAttachments?: boolean;
+  q?: string;
+  group?: 'thread';
+}
 export type MailTemplateSummary = Infer<typeof mailTemplateSummarySchema>;
 export type MailTemplate = Infer<typeof mailTemplateSchema>;
 export type MailTemplateInput = Infer<typeof mailTemplateInputSchema>;

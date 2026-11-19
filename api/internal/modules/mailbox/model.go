@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -144,8 +145,19 @@ type MailMessagePO struct {
 	SendAttemptedAt *time.Time
 	// SendLeaseUntil keeps a waiting message to one worker while it is being sent.
 	SendLeaseUntil *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// Placement is default, archive, folder, or trash; FolderID names the folder while in one.
+	Placement string `gorm:"size:16;not null;default:'default'"`
+	FolderID  *uint
+	TrashedAt *time.Time
+	// ThreadID is the id of the message that started the thread. Nullable only until every
+	// insert path sets it; the backfill migration threads the rows stored before.
+	ThreadID *uint
+	// ReferencesHeader holds the References Message-IDs, oldest first, separated by spaces.
+	ReferencesHeader string `gorm:"type:text;not null;default:''"`
+	// RFCMessageID is the RFC 5322 Message-ID threading matches In-Reply-To against.
+	RFCMessageID string `gorm:"column:rfc_message_id;size:998;not null;default:''"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 func (MailMessagePO) TableName() string {
@@ -162,6 +174,66 @@ type MailMessageReadPO struct {
 
 func (MailMessageReadPO) TableName() string {
 	return "mail_message_reads"
+}
+
+// MailMessageStarPO records that one organization membership starred one message. Like a read
+// row, the schema cascades it with the membership and the message.
+type MailMessageStarPO struct {
+	MembershipID uint `gorm:"primaryKey;autoIncrement:false"`
+	MessageID    uint `gorm:"primaryKey;autoIncrement:false"`
+	StarredAt    time.Time
+}
+
+func (MailMessageStarPO) TableName() string {
+	return "mail_message_stars"
+}
+
+// MailMessageLabelPO puts one label on one message. The schema cascades it with both.
+type MailMessageLabelPO struct {
+	MessageID uint `gorm:"primaryKey;autoIncrement:false"`
+	LabelID   uint `gorm:"primaryKey;autoIncrement:false"`
+}
+
+func (MailMessageLabelPO) TableName() string {
+	return "mail_message_labels"
+}
+
+// MailFolderPO is a folder of a mailbox; names are unique per mailbox ignoring case.
+type MailFolderPO struct {
+	ID        uint   `gorm:"primaryKey"`
+	MailboxID uint   `gorm:"not null;uniqueIndex:idx_mail_folders_name,priority:1"`
+	Name      string `gorm:"size:64;not null;uniqueIndex:idx_mail_folders_name,priority:2,expression:lower(name)"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (MailFolderPO) TableName() string {
+	return "mail_folders"
+}
+
+func (po *MailFolderPO) toDomain() *domain.MailFolder {
+	return &domain.MailFolder{ID: po.ID, MailboxID: po.MailboxID, Name: po.Name, CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt}
+}
+
+// MailLabelPO is a colored label of a mailbox; names are unique per mailbox ignoring case.
+type MailLabelPO struct {
+	ID        uint   `gorm:"primaryKey"`
+	MailboxID uint   `gorm:"not null;uniqueIndex:idx_mail_labels_name,priority:1"`
+	Name      string `gorm:"size:64;not null;uniqueIndex:idx_mail_labels_name,priority:2,expression:lower(name)"`
+	Color     string `gorm:"size:16;not null;default:'gray'"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (MailLabelPO) TableName() string {
+	return "mail_labels"
+}
+
+func (po *MailLabelPO) toDomain() *domain.MailLabel {
+	return &domain.MailLabel{
+		ID: po.ID, MailboxID: po.MailboxID, Name: po.Name, Color: domain.MailLabelColor(po.Color),
+		CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
+	}
 }
 
 func (po *MailMessagePO) toDomain() *domain.MailMessage {
@@ -204,6 +276,17 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 		message.QueuedReason = *po.QueuedReason
 	}
 	message.SendAttemptedAt = po.SendAttemptedAt
+	message.Placement = domain.MailPlacement(po.Placement)
+	if message.Placement == "" {
+		message.Placement = domain.MailPlacementDefault
+	}
+	message.FolderID = po.FolderID
+	message.TrashedAt = po.TrashedAt
+	if po.ThreadID != nil {
+		message.ThreadID = *po.ThreadID
+	}
+	message.References = strings.Fields(po.ReferencesHeader)
+	message.RFCMessageID = po.RFCMessageID
 	return message
 }
 
@@ -243,6 +326,18 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		po.QueuedReason = &reason
 	}
 	po.SendAttemptedAt = message.SendAttemptedAt
+	po.Placement = string(message.Placement)
+	if po.Placement == "" {
+		po.Placement = string(domain.MailPlacementDefault)
+	}
+	po.FolderID = message.FolderID
+	po.TrashedAt = message.TrashedAt
+	if message.ThreadID != 0 {
+		threadID := message.ThreadID
+		po.ThreadID = &threadID
+	}
+	po.ReferencesHeader = strings.Join(message.References, " ")
+	po.RFCMessageID = message.RFCMessageID
 	return po
 }
 

@@ -879,11 +879,16 @@ describe('emails console', () => {
     await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
+    // Deleting moves the message to the trash at once, with an undo instead of a confirmation.
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() =>
+      expect(state.update.mutateAsync).toHaveBeenCalledWith({ messageId: 31, placement: 'trash' })
+    );
     expect(state.removeMessage.mutateAsync).not.toHaveBeenCalled();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
-    await waitFor(() => expect(state.removeMessage.mutateAsync).toHaveBeenCalledWith(31));
-    expect(toast.success).toHaveBeenCalledWith('Message deleted');
+    expect(toast.success).toHaveBeenCalledWith(
+      'Moved to the trash',
+      expect.objectContaining({ action: expect.objectContaining({ label: 'Undo' }) })
+    );
     await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
   });
 
@@ -1419,6 +1424,13 @@ function message(overrides: Partial<MailMessage> = {}): MailMessage {
     direction: 'inbound',
     status: 'received',
     last_event: '',
+    // A message carries its placement, labels, star, and thread; the log entry it opens from does not.
+    placement: 'default',
+    folder_id: null,
+    label_ids: [],
+    starred: false,
+    thread_id: 31,
+    trashed_at: null,
     text_body: 'Plain question',
     html_body: '<p>Formatted question</p>',
     message_id: 'question-1@example.com',

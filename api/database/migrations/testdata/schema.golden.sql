@@ -162,6 +162,21 @@ TABLE mail_domains
   COLUMN mail_zone_id bigint
   COLUMN capability character varying(20) NOT NULL DEFAULT 'send_receive'::character varying
 
+TABLE mail_folders
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_folders_id_seq'::regclass)
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN name character varying(64) NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
+TABLE mail_labels
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_labels_id_seq'::regclass)
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN name character varying(64) NOT NULL
+  COLUMN color character varying(16) NOT NULL DEFAULT 'gray'::character varying
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_message_events
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_message_events_id_seq'::regclass)
   COLUMN message_id bigint NOT NULL
@@ -172,10 +187,19 @@ TABLE mail_message_events
   COLUMN occurred_at timestamp with time zone NOT NULL
   COLUMN created_at timestamp with time zone
 
+TABLE mail_message_labels
+  COLUMN message_id bigint NOT NULL
+  COLUMN label_id bigint NOT NULL
+
 TABLE mail_message_reads
   COLUMN message_id bigint NOT NULL
   COLUMN membership_id bigint NOT NULL
   COLUMN read_at timestamp with time zone NOT NULL
+
+TABLE mail_message_stars
+  COLUMN membership_id bigint NOT NULL
+  COLUMN message_id bigint NOT NULL
+  COLUMN starred_at timestamp with time zone NOT NULL
 
 TABLE mail_messages
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_messages_id_seq'::regclass)
@@ -203,6 +227,12 @@ TABLE mail_messages
   COLUMN queued_reason character varying(32)
   COLUMN send_attempted_at timestamp with time zone
   COLUMN send_lease_until timestamp with time zone
+  COLUMN placement character varying(16) NOT NULL DEFAULT 'default'::character varying
+  COLUMN folder_id bigint
+  COLUMN trashed_at timestamp with time zone
+  COLUMN thread_id bigint
+  COLUMN references_header text NOT NULL DEFAULT ''::text
+  COLUMN rfc_message_id character varying(998) NOT NULL DEFAULT ''::character varying
 
 TABLE mail_templates
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_templates_id_seq'::regclass)
@@ -577,15 +607,29 @@ CONSTRAINT mail_domains.chk_mail_domains_status CHECK (((status)::text = ANY ((A
 CONSTRAINT mail_domains.fk_mail_domains_mail_zone FOREIGN KEY (mail_zone_id) REFERENCES mail_zones(id)
 CONSTRAINT mail_domains.fk_mail_domains_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_domains.mail_domains_pkey PRIMARY KEY (id)
+CONSTRAINT mail_folders.mail_folders_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_folders.mail_folders_pkey PRIMARY KEY (id)
+CONSTRAINT mail_labels.mail_labels_color_check CHECK (((color)::text = ANY ((ARRAY['gray'::character varying, 'red'::character varying, 'orange'::character varying, 'yellow'::character varying, 'green'::character varying, 'teal'::character varying, 'blue'::character varying, 'purple'::character varying, 'pink'::character varying])::text[])))
+CONSTRAINT mail_labels.mail_labels_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_labels.mail_labels_pkey PRIMARY KEY (id)
 CONSTRAINT mail_message_events.chk_mail_message_events_type CHECK (((type)::text = ANY ((ARRAY['accepted'::character varying, 'delivered'::character varying, 'deferred'::character varying, 'bounced'::character varying, 'failed'::character varying, 'rejected'::character varying, 'complained'::character varying])::text[])))
 CONSTRAINT mail_message_events.fk_mail_message_events_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_message_events.mail_message_events_pkey PRIMARY KEY (id)
+CONSTRAINT mail_message_labels.mail_message_labels_label_id_fkey FOREIGN KEY (label_id) REFERENCES mail_labels(id) ON DELETE CASCADE
+CONSTRAINT mail_message_labels.mail_message_labels_message_id_fkey FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
+CONSTRAINT mail_message_labels.mail_message_labels_pkey PRIMARY KEY (message_id, label_id)
 CONSTRAINT mail_message_reads.mail_message_reads_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
 CONSTRAINT mail_message_reads.mail_message_reads_message_id_fkey FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
 CONSTRAINT mail_message_reads.mail_message_reads_pkey PRIMARY KEY (membership_id, message_id)
+CONSTRAINT mail_message_stars.mail_message_stars_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
+CONSTRAINT mail_message_stars.mail_message_stars_message_id_fkey FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
+CONSTRAINT mail_message_stars.mail_message_stars_pkey PRIMARY KEY (membership_id, message_id)
 CONSTRAINT mail_messages.chk_mail_messages_direction CHECK (((direction)::text = ANY ((ARRAY['inbound'::character varying, 'outbound'::character varying])::text[])))
+CONSTRAINT mail_messages.chk_mail_messages_folder CHECK ((((placement)::text <> 'folder'::text) OR (folder_id IS NOT NULL)))
+CONSTRAINT mail_messages.chk_mail_messages_placement CHECK (((placement)::text = ANY ((ARRAY['default'::character varying, 'archive'::character varying, 'folder'::character varying, 'trash'::character varying])::text[])))
 CONSTRAINT mail_messages.chk_mail_messages_status CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'queued'::character varying, 'sent'::character varying, 'failed'::character varying])::text[])))
 CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_messages.mail_messages_folder_id_fkey FOREIGN KEY (folder_id) REFERENCES mail_folders(id) ON DELETE SET NULL
 CONSTRAINT mail_messages.mail_messages_pkey PRIMARY KEY (id)
 CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_templates.mail_templates_pkey PRIMARY KEY (id)
@@ -755,15 +799,33 @@ INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
 INDEX CREATE INDEX idx_mail_domains_organization ON mail_domains USING btree (organization_id)
 INDEX CREATE UNIQUE INDEX mail_domains_pkey ON mail_domains USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_folders_name ON mail_folders USING btree (mailbox_id, lower((name)::text))
+INDEX CREATE UNIQUE INDEX mail_folders_pkey ON mail_folders USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_labels_name ON mail_labels USING btree (mailbox_id, lower((name)::text))
+INDEX CREATE UNIQUE INDEX mail_labels_pkey ON mail_labels USING btree (id)
 INDEX CREATE INDEX idx_mail_message_events_message ON mail_message_events USING btree (message_id, occurred_at, id)
 INDEX CREATE UNIQUE INDEX idx_mail_message_events_provider ON mail_message_events USING btree (provider_event_id) WHERE (provider_event_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_message_events_pkey ON mail_message_events USING btree (id)
+INDEX CREATE INDEX idx_mail_message_labels_label ON mail_message_labels USING btree (label_id, message_id)
+INDEX CREATE UNIQUE INDEX mail_message_labels_pkey ON mail_message_labels USING btree (message_id, label_id)
 INDEX CREATE UNIQUE INDEX mail_message_reads_pkey ON mail_message_reads USING btree (membership_id, message_id)
+INDEX CREATE INDEX idx_mail_message_stars_message ON mail_message_stars USING btree (message_id)
+INDEX CREATE UNIQUE INDEX mail_message_stars_pkey ON mail_message_stars USING btree (membership_id, message_id)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree (mailbox_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
+INDEX CREATE INDEX idx_mail_messages_folder ON mail_messages USING btree (folder_id) WHERE (folder_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING btree (mailbox_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
 INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (message_id) WHERE (((direction)::text = 'outbound'::text) AND ((message_id)::text <> ''::text))
+INDEX CREATE INDEX idx_mail_messages_rfc_message_id ON mail_messages USING btree (mailbox_id, rfc_message_id)
 INDEX CREATE INDEX idx_mail_messages_send_attempted ON mail_messages USING btree (send_attempted_at) WHERE ((direction)::text = 'outbound'::text)
+INDEX CREATE INDEX idx_mail_messages_threads ON mail_messages USING btree (mailbox_id, placement, thread_id, id DESC)
+INDEX CREATE INDEX idx_mail_messages_trash ON mail_messages USING btree (placement, trashed_at)
+INDEX CREATE INDEX idx_mail_messages_trgm_cc_addresses ON mail_messages USING gin (cc_addresses public.gin_trgm_ops)
+INDEX CREATE INDEX idx_mail_messages_trgm_from_address ON mail_messages USING gin (from_address public.gin_trgm_ops)
+INDEX CREATE INDEX idx_mail_messages_trgm_from_name ON mail_messages USING gin (from_name public.gin_trgm_ops)
+INDEX CREATE INDEX idx_mail_messages_trgm_subject ON mail_messages USING gin (subject public.gin_trgm_ops)
+INDEX CREATE INDEX idx_mail_messages_trgm_text_body ON mail_messages USING gin (text_body public.gin_trgm_ops)
+INDEX CREATE INDEX idx_mail_messages_trgm_to_addresses ON mail_messages USING gin (to_addresses public.gin_trgm_ops)
 INDEX CREATE INDEX idx_mail_messages_waiting ON mail_messages USING btree (id) WHERE (queued_reason IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)

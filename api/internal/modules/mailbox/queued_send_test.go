@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func newQueueFixture(t *testing.T) *queueFixture {
 	transport := &fakeTransport{}
 	notifier := &fakeNotifier{}
 	memberships := newAccessMemberships()
-	svc := NewService(repo, memberships, repo, repo, repo, nil, nil, nil, transport, notifier, accessSettings())
+	svc := NewService(repo, memberships, repo, repo, repo, repo, nil, nil, nil, transport, notifier, accessSettings())
 	f := &queueFixture{notifier: notifier, clock: time.Now().UTC().Truncate(time.Microsecond)}
 	svc.now = func() time.Time { return f.clock }
 	f.accessFixture = seedAccessFixture(t, svc, repo, transport, memberships)
@@ -182,6 +183,12 @@ func TestDeletedWaitingMessageIsNeverSent(t *testing.T) {
 	waiting := f.mustSend(t, "w1", true)
 	if err := f.service.DeleteMessage(context.Background(), f.b, f.team.ID, waiting.ID); err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
+	}
+	// Deleting moves it to the trash, which cancels the send for good.
+	if po := f.stored(t, waiting.ID); po.Placement != string(domain.MailPlacementTrash) ||
+		po.Status != string(domain.MailStatusFailed) || po.FailureCode != failureSendCanceled {
+		t.Fatalf("deleted waiting message = placement %q status %q failure %q; want trash, failed, %s",
+			po.Placement, po.Status, po.FailureCode, failureSendCanceled)
 	}
 	f.clock = start.Add(25 * time.Hour)
 	before := len(f.transport.sent)
@@ -358,4 +365,43 @@ func TestMailLogShowsWhyAMessageWaits(t *testing.T) {
 		}
 	}
 	t.Fatalf("the waiting message is not in the log")
+}
+
+func TestQueuedSendUsesStoredRFCMessageID(t *testing.T) {
+	f := newQueueFixture(t)
+	start := f.clock
+	for i := 0; i < 5; i++ {
+		f.mustSend(t, "fill", false)
+	}
+	parent := f.receiveReply(t, f.team, "parent@sender.test", "References: <root@sender.test>")
+	// A queued reply keeps the References chain built when it was stored.
+	waiting, _, err := f.service.SendMessage(context.Background(), f.b, f.team.ID, SendInput{
+		To: []string{"alice@sender.test"}, Subject: "Re: Hello", Text: "body", InReplyTo: "parent@sender.test",
+	})
+	if err != nil || waiting.QueuedReason != domain.MailQueuedForSendLimit {
+		t.Fatalf("queued reply = %+v, %v; want a waiting message", waiting, err)
+	}
+	stored := f.stored(t, waiting.ID)
+	if stored.RFCMessageID == "" || stored.RFCMessageID != waiting.RFCMessageID {
+		t.Fatalf("waiting rfc_message_id = stored %q, returned %q; want one id stored at queue time", stored.RFCMessageID, waiting.RFCMessageID)
+	}
+	if stored.ThreadID == nil || *stored.ThreadID != parent.ThreadID {
+		t.Fatalf("waiting thread_id = %v; want the parent's thread %d", stored.ThreadID, parent.ThreadID)
+	}
+
+	f.clock = start.Add(25 * time.Hour)
+	before := len(f.transport.sent)
+	if got := f.dispatch(t, 25); got != 1 {
+		t.Fatalf("dispatch processed %d; want 1", got)
+	}
+	sent := f.transport.sent[before:]
+	if len(sent) != 1 || sent[0].MessageID != stored.RFCMessageID {
+		t.Fatalf("worker sent %+v; want Message-ID %q", sent, stored.RFCMessageID)
+	}
+	if got := strings.Join(sent[0].References, " "); got != "root@sender.test parent@sender.test" || sent[0].InReplyTo != "parent@sender.test" {
+		t.Fatalf("worker sent References %q, In-Reply-To %q; want the stored chain", got, sent[0].InReplyTo)
+	}
+	if after := f.stored(t, waiting.ID); after.RFCMessageID != stored.RFCMessageID {
+		t.Fatalf("rfc_message_id after send = %q; want %q", after.RFCMessageID, stored.RFCMessageID)
+	}
 }

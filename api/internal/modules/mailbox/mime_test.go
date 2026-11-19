@@ -3,6 +3,7 @@ package mailbox
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -136,5 +137,50 @@ func TestParseMailProducesStorableText(t *testing.T) {
 func TestParseMailRejectsGarbage(t *testing.T) {
 	if _, err := parseMail([]byte("no header separator at all")); !errors.Is(err, ErrMailInboundUnparseable) {
 		t.Fatalf("error = %v; want ErrMailInboundUnparseable", err)
+	}
+}
+
+func TestParseReferencesHeader(t *testing.T) {
+	parsed, err := parseMail(crlf(
+		"From: alice@sender.test",
+		"Subject: Re: Hi",
+		"Message-ID: <m3@sender.test>",
+		"In-Reply-To: <m2@mail.example>",
+		"References: <m0@mail.example>",
+		" <m1@sender.test>\t<m0@mail.example> not-an-id <bad id@x> <m2@mail.example>",
+		"",
+		"Reply.",
+	))
+	if err != nil {
+		t.Fatalf("parseMail: %v", err)
+	}
+	want := []string{"m0@mail.example", "m1@sender.test", "m2@mail.example"}
+	if strings.Join(parsed.References, " ") != strings.Join(want, " ") {
+		t.Fatalf("References = %v; want %v (unfolded, deduplicated, invalid ids dropped)", parsed.References, want)
+	}
+
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"no brackets", "a@x.test b@x.test", []string{"a@x.test", "b@x.test"}},
+		{"commas", "<a@x.test>,<b@x.test>", []string{"a@x.test", "b@x.test"}},
+		{"garbage", "hello world", nil},
+	}
+	for _, tc := range cases {
+		if got := parseReferences(tc.raw); strings.Join(got, " ") != strings.Join(tc.want, " ") {
+			t.Fatalf("%s: parseReferences(%q) = %v; want %v", tc.name, tc.raw, got, tc.want)
+		}
+	}
+
+	var long []string
+	for i := 0; i < 30; i++ {
+		long = append(long, fmt.Sprintf("<r%d@x.test>", i))
+	}
+	got := parseReferences(strings.Join(long, " "))
+	if len(got) != maxMailReferences || got[0] != "r10@x.test" || got[len(got)-1] != "r29@x.test" {
+		t.Fatalf("long chain = %v; want the last %d ids", got, maxMailReferences)
 	}
 }

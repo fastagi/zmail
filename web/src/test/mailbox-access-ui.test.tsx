@@ -58,16 +58,28 @@ vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useMailboxDomains: () => state.domains,
   useMailboxes: () => state.mailboxes,
-  useMailMessages: (
+  useMailMessageList: (
     _organizationId: number,
     mailboxId: number,
-    direction: string,
+    filters: { direction?: string },
     page: number
   ) => {
-    state.listCalls.push({ mailboxId, direction, page });
-    return direction === 'inbound' ? state.inbox : state.sent;
+    state.listCalls.push({ mailboxId, direction: filters.direction ?? '', page });
+    return filters.direction === 'outbound' ? state.sent : state.inbox;
   },
   useMailMessage: () => state.detail,
+  useMailThread: () => ({ ...state.detail, data: [state.detail.data] }),
+  useMailMessageCounts: () => ({ data: undefined, isPending: true, error: null, refetch: vi.fn() }),
+  useMailFolders: () => ({ data: [], isPending: false, error: null, refetch: vi.fn() }),
+  useMailLabels: () => ({ data: [], isPending: false, error: null, refetch: vi.fn() }),
+  useUpdateMailMessages: () => state.update,
+  usePurgeMailTrash: () => state.update,
+  useCreateMailFolder: () => state.update,
+  useRenameMailFolder: () => state.update,
+  useDeleteMailFolder: () => state.update,
+  useCreateMailLabel: () => state.update,
+  useUpdateMailLabel: () => state.update,
+  useDeleteMailLabel: () => state.update,
   useCreateMailbox: () => state.createMailbox,
   useDeleteMailbox: () => state.deleteMailbox,
   useSendMailMessage: () => state.send,
@@ -99,6 +111,7 @@ const fullAccess = {
   manage_members: true,
   administer: true,
   see_history: true,
+  organize: true,
 };
 const adminOnly = {
   view: false,
@@ -106,6 +119,7 @@ const adminOnly = {
   manage_members: true,
   administer: true,
   see_history: true,
+  organize: false,
 };
 const viewOnly = {
   view: true,
@@ -113,7 +127,16 @@ const viewOnly = {
   manage_members: false,
   administer: false,
   see_history: false,
+  organize: false,
 };
+
+/** Mailbox administration lives in the dialog behind the mailbox switcher. */
+function openManage() {
+  fireEvent.click(screen.getByRole('button', { name: /^Switch mailbox|^Manage mailboxes$/u }));
+  const item = screen.queryByRole('button', { name: 'Manage mailboxes' });
+  if (item) fireEvent.click(item);
+  return screen.getByRole('dialog', { name: 'Manage mailboxes' });
+}
 
 describe('mailbox access in the console', () => {
   beforeEach(() => {
@@ -191,7 +214,7 @@ describe('mailbox access in the console', () => {
     ];
     renderWorkspace();
 
-    const list = screen.getByRole('list', { name: 'Mailboxes' });
+    const list = within(openManage()).getByRole('list', { name: 'Mailboxes' });
     const items = within(list).getAllByRole('listitem');
     expect(within(items[0]).getByText('Shared mailbox')).toBeInTheDocument();
     expect(within(items[0]).queryByText('No access to mail')).toBeNull();
@@ -207,13 +230,19 @@ describe('mailbox access in the console', () => {
     ];
     renderWorkspace();
 
-    expect(screen.getByText('You cannot read this mailbox')).toBeInTheDocument();
+    // A mailbox the admin cannot read is not offered in the switcher.
+    expect(screen.getByText('No mailbox to read')).toBeInTheDocument();
     expect(state.listCalls).toEqual([]);
     expect(screen.queryByRole('button', { name: 'Compose' })).toBeNull();
-    expect(screen.queryByRole('group', { name: 'Folder' })).toBeNull();
+    expect(screen.queryByRole('navigation', { name: 'Mail views' })).toBeNull();
     // The admin still reaches the access panel and the delete control.
-    expect(screen.getByRole('button', { name: 'Access to riley@mail.example.com' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Delete riley@mail.example.com' })).toBeEnabled();
+    const dialog = openManage();
+    expect(
+      within(dialog).getByRole('button', { name: 'Access to riley@mail.example.com' })
+    ).toBeEnabled();
+    expect(
+      within(dialog).getByRole('button', { name: 'Delete riley@mail.example.com' })
+    ).toBeEnabled();
   });
 
   it('hides compose, reply, and delete without send', () => {
@@ -225,7 +254,15 @@ describe('mailbox access in the console', () => {
     expect(screen.queryByRole('button', { name: 'Compose' })).toBeNull();
     // Nothing to manage or read in the access panel.
     expect(screen.queryByRole('button', { name: /^Access to/u })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
+    fireEvent.click(
+      within(
+        screen
+          .getByRole('checkbox', { name: 'Select Unread question' })
+          .closest('li') as HTMLElement
+      )
+        .getAllByRole('button')
+        .find(button => !button.hasAttribute('aria-label')) as HTMLElement
+    );
     expect(screen.getByRole('button', { name: 'Mark unread' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reply all' })).toBeNull();
@@ -236,7 +273,7 @@ describe('mailbox access in the console', () => {
   it('requires an owner for a personal mailbox and members for a shared one', async () => {
     state.createMailbox.mutateAsync.mockResolvedValue(mailbox(4, 'team'));
     renderWorkspace();
-    const form = screen.getByRole('form', { name: 'New mailbox' });
+    const form = within(openManage()).getByRole('form', { name: 'New mailbox' });
 
     fireEvent.change(within(form).getByLabelText('Address'), { target: { value: 'team' } });
     expect(within(form).getByRole('radio', { name: 'Shared' })).toBeChecked();
@@ -273,7 +310,7 @@ describe('mailbox access in the console', () => {
   it('creates a shared mailbox with each member and permission', async () => {
     state.createMailbox.mutateAsync.mockResolvedValue(mailbox(4, 'team'));
     renderWorkspace();
-    const form = screen.getByRole('form', { name: 'New mailbox' });
+    const form = within(openManage()).getByRole('form', { name: 'New mailbox' });
 
     fireEvent.change(within(form).getByLabelText('Address'), { target: { value: 'team' } });
     fireEvent.change(within(form).getByLabelText('Member 1'), { target: { value: '5' } });
@@ -378,7 +415,9 @@ describe('mailbox access in the console', () => {
       mailbox(2, 'riley', { type: 'personal', owner_user_id: 5, access: adminOnly }),
     ];
     renderWorkspace();
-    fireEvent.click(screen.getByRole('button', { name: 'Access to riley@mail.example.com' }));
+    fireEvent.click(
+      within(openManage()).getByRole('button', { name: 'Access to riley@mail.example.com' })
+    );
     const panel = screen.getByRole('dialog');
 
     expect(within(panel).getByText('Owner: Riley Chen')).toBeInTheDocument();
@@ -398,7 +437,9 @@ describe('mailbox access in the console', () => {
       }),
     ];
     renderWorkspace();
-    fireEvent.click(screen.getByRole('button', { name: 'Access to gone@mail.example.com' }));
+    fireEvent.click(
+      within(openManage()).getByRole('button', { name: 'Access to gone@mail.example.com' })
+    );
     const panel = screen.getByRole('dialog');
 
     expect(within(panel).getByText(/owner has left the organization/u)).toBeInTheDocument();
@@ -635,6 +676,12 @@ function summary() {
     attachment_count: 0,
     template_id: null,
     created_at: now,
+    placement: 'default',
+    folder_id: null,
+    label_ids: [],
+    starred: false,
+    thread_id: 11,
+    trashed_at: null,
   };
 }
 

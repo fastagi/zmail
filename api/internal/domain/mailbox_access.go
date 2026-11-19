@@ -82,11 +82,15 @@ type MailboxAccess struct {
 	Administer bool
 	// SeeHistory reads the access history.
 	SeeHistory bool
+	// Organize deletes messages for good, empties the trash, and changes the mailbox's folders and
+	// labels. Only the personal owner and manage members have it; the organization role alone never
+	// grants it, because it destroys mail the role cannot read.
+	Organize bool
 }
 
 // Any reports whether the viewer may know the mailbox exists.
 func (a MailboxAccess) Any() bool {
-	return a.View || a.Send || a.ManageMembers || a.Administer || a.SeeHistory
+	return a.View || a.Send || a.ManageMembers || a.Administer || a.SeeHistory || a.Organize
 }
 
 // MailboxAccessFor derives a viewer's access to a mailbox from the viewer's verified
@@ -112,6 +116,7 @@ func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMem
 			access.View = true
 			access.Send = true
 			access.SeeHistory = true
+			access.Organize = true
 		}
 	case MailboxTypeShared:
 		if member != nil && member.MailboxID == m.ID && viewer.MembershipID != 0 && member.MembershipID == viewer.MembershipID {
@@ -120,6 +125,7 @@ func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMem
 			if member.Permission.Includes(MailboxPermissionManage) {
 				access.ManageMembers = true
 				access.SeeHistory = true
+				access.Organize = true
 			}
 		}
 	}

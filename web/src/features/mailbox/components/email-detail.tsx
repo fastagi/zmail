@@ -36,6 +36,7 @@ export function EmailDetail({
   mailboxAddress,
   messageId,
   canSend,
+  canOrganize = false,
   onClose,
   onReply,
   onReplyAll,
@@ -46,6 +47,8 @@ export function EmailDetail({
   messageId: number;
   /** The mailbox's `access.send`; false when the mailbox is not among the user's. */
   canSend: boolean;
+  /** The mailbox's `access.organize`: restoring is `send`, deleting from the trash this. */
+  canOrganize?: boolean;
   onClose: () => void;
   onReply: (message: MailMessage) => void;
   onReplyAll?: (message: MailMessage) => void;
@@ -105,6 +108,7 @@ export function EmailDetail({
           message={message}
           mailboxAddress={mailboxAddress}
           canSend={canSend}
+          canOrganize={canOrganize}
           onReply={onReply}
           onReplyAll={onReplyAll}
           onForward={onForward}

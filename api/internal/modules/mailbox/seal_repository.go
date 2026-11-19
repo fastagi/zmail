@@ -149,7 +149,7 @@ func (r *repository) SetMailboxWebhooks(ctx context.Context, mailboxID uint, ena
 
 // DeleteSealedHistory cancels the mailbox's sealed broadcasts still running, then deletes its
 // sealed broadcasts with their recipients and its sealed messages with their attachments,
-// events, and read rows. The boundary stays.
+// events, read, star, and label rows. The boundary stays.
 func (r *repository) DeleteSealedHistory(ctx context.Context, mailboxID uint, before time.Time) (int64, int64, error) {
 	if r.db == nil {
 		return 0, 0, domain.ErrServiceUnavailable
@@ -175,7 +175,7 @@ func (r *repository) DeleteSealedHistory(ctx context.Context, mailboxID uint, be
 			Update("message_id", nil).Error; err != nil {
 			return err
 		}
-		for _, dependant := range []any{&MailAttachmentPO{}, &MailMessageEventPO{}, &MailMessageReadPO{}} {
+		for _, dependant := range []any{&MailAttachmentPO{}, &MailMessageEventPO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}} {
 			if err := tx.Where("message_id IN (?)", sealedMessages).Delete(dependant).Error; err != nil {
 				return err
 			}

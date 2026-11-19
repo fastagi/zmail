@@ -54,6 +54,13 @@ export type MailboxErrorKey =
   | 'errors.templateVariablesMissing'
   | 'errors.tooLarge'
   | 'errors.unavailable'
+  | 'errors.folderNotFound'
+  | 'errors.labelNotFound'
+  | 'errors.folderNameTaken'
+  | 'errors.labelNameTaken'
+  | 'errors.folderLimitReached'
+  | 'errors.labelLimitReached'
+  | 'errors.searchTooBroad'
   | 'errors.zoneInUse'
   | 'errors.zoneLimitReached'
   | 'errors.zoneNotFound'
@@ -110,6 +117,13 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_DOMAIN_NOT_VERIFIED]: 'errors.domainNotVerified',
   [ApiErrorCode.MAILBOX_DOMAINS_DISABLED]: 'errors.domainsDisabled',
   [ApiErrorCode.MAILBOX_DOMAIN_PROVIDER_FAILED]: 'errors.domainProviderFailed',
+  [ApiErrorCode.MAILBOX_FOLDER_NOT_FOUND]: 'errors.folderNotFound',
+  [ApiErrorCode.MAILBOX_LABEL_NOT_FOUND]: 'errors.labelNotFound',
+  [ApiErrorCode.MAILBOX_FOLDER_NAME_TAKEN]: 'errors.folderNameTaken',
+  [ApiErrorCode.MAILBOX_LABEL_NAME_TAKEN]: 'errors.labelNameTaken',
+  [ApiErrorCode.MAILBOX_FOLDER_LIMIT_REACHED]: 'errors.folderLimitReached',
+  [ApiErrorCode.MAILBOX_LABEL_LIMIT_REACHED]: 'errors.labelLimitReached',
+  [ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD]: 'errors.searchTooBroad',
   [ApiErrorCode.MAILBOX_ZONE_NOT_FOUND]: 'errors.zoneNotFound',
   [ApiErrorCode.MAILBOX_ZONE_PENDING]: 'errors.zonePending',
   [ApiErrorCode.MAILBOX_ZONE_IN_USE]: 'errors.zoneInUse',

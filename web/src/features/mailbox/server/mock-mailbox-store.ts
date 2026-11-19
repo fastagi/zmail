@@ -2,6 +2,15 @@ import 'server-only';
 
 import {
   MAILBOX_MAX_MEMBERS,
+  MAIL_FOLDERS_MAX_PER_MAILBOX,
+  MAIL_FOLDER_NAME_MAX_LENGTH,
+  MAIL_LABELS_MAX_PER_MAILBOX,
+  MAIL_LABEL_COLORS,
+  MAIL_LABEL_NAME_MAX_LENGTH,
+  MAIL_MESSAGE_UPDATES_MAX_IDS,
+  MAIL_PLACEMENTS,
+  MAIL_THREAD_MAX_MESSAGES,
+  MAIL_TRASH_RETENTION_DAYS,
   MAILBOX_MAX_PER_ORGANIZATION,
   MAILBOX_PERMISSIONS,
   MAIL_SUBJECT_MAX_LENGTH,
@@ -20,14 +29,22 @@ import type {
   CreateMailboxInput,
   MailAttachment,
   MailDayStats,
-  MailDirection,
   MailEvent,
+  MailFolder,
+  MailLabel,
+  MailLabelColor,
   MailLogEntry,
   MailLogFilters,
   MailLogPage,
   MailMessage,
+  MailMessageCounts,
+  MailMessageFilters,
   MailMessagePage,
   MailMessageSummary,
+  MailMessageUpdatesResult,
+  MailPlacement,
+  MailThreadSummary,
+  MailTrashPurge,
   Mailbox,
   MailboxAccess,
   MailboxAccessEvent,
@@ -54,7 +71,10 @@ import type { OrganizationRole } from '@/features/organization/types';
  * listings without bodies, the cross-mailbox log, and per-day counts. Access follows
  * `contracts/MAILBOXES.md`: personal and shared mailboxes, member permissions, 404 without any
  * access and 403 without the needed one, per-person read state, handover with a seal boundary,
- * the webhook switch, and the access history. Organization membership comes from the
+ * the webhook switch, and the access history. Mail is organized as the API does it: placements
+ * shared by everyone, per-person stars, threads linked by `in_reply_to`, folders and labels with
+ * their limits, a trash that keeps mail for 30 days, and a case-insensitive substring search that
+ * answers a one-character text as too broad. Organization membership comes from the
  * organization mock; a departure is noticed on the next access to the mailbox. Nothing leaves the
  * process: a "sent" message is only stored, which is what the `log` provider means.
  */
@@ -99,9 +119,14 @@ interface StoredMailbox {
 interface MailboxState {
   mailbox: StoredMailbox;
   access: MailboxAccessState;
+  /** Stored with `starred: false`; each viewer's star comes from `stars`. */
   messages: Map<number, MailMessage>;
   /** Who read each inbound message, by user id. */
   reads: Map<number, Set<number>>;
+  /** Who starred each message, by user id. */
+  stars: Map<number, Set<number>>;
+  folders: Map<number, MailFolder>;
+  labels: Map<number, MailLabel>;
   /** File content by message, then by attachment id. */
   files: Map<number, Map<number, { filename: string; content: Uint8Array }>>;
 }
@@ -136,6 +161,40 @@ export type MockMailDeleteResult =
   { ok: true } | { ok: false; error: MockAccessDenied | 'not_found' };
 
 /**
+ * Failures of the organize routes: lookups (`not_found` is a message), the folder and label
+ * rules, and a search too broad to answer. `validation` carries field errors for
+ * `COMMON.VALIDATION_FAILED`.
+ */
+export type MockOrganizeError =
+  | MockAccessDenied
+  | 'not_found'
+  | 'folder_not_found'
+  | 'label_not_found'
+  | 'folder_name_taken'
+  | 'label_name_taken'
+  | 'folder_limit'
+  | 'label_limit'
+  | 'search_too_broad';
+export type MockOrganizeResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: MockOrganizeError }
+  | { ok: false; error: 'validation'; fields: Record<string, string[]> };
+
+/**
+ * One change to one or several messages, shape-checked by the route. An absent field changes
+ * nothing; the values are judged here as the API judges them.
+ */
+export interface MockMessageChange {
+  read?: boolean;
+  starred?: boolean;
+  placement?: string;
+  folder_id?: number;
+  add_label_ids?: number[];
+  remove_label_ids?: number[];
+  label_ids?: number[];
+}
+
+/**
  * Failures of the access routes: `conflict` is `MAILBOX.ACCESS_CONFLICT`, `invalid` is
  * `MAILBOX.ACCESS_INVALID`, and `member_not_found` an absent member (`MAILBOX.NOT_FOUND`).
  */
@@ -166,11 +225,14 @@ export function mailboxAccessFor(
     manage_members: admin && access.type === 'shared',
     administer: admin,
     see_history: admin,
+    // Never from the role alone: an owner or admin who cannot read the mail cannot delete it.
+    organize: false,
   };
   if (access.type === 'personal' && access.ownerUserId === viewer.userId) {
     result.view = true;
     result.send = true;
     result.see_history = true;
+    result.organize = true;
   }
   const member = access.type === 'shared' ? access.members.get(viewer.userId) : undefined;
   if (member) {
@@ -179,6 +241,7 @@ export function mailboxAccessFor(
     if (member.permission === 'manage') {
       result.manage_members = true;
       result.see_history = true;
+      result.organize = true;
     }
   }
   return result;
@@ -198,6 +261,8 @@ export class MockMailboxStore {
   private nextAttachmentId = 1;
   private nextTemplateId = 1;
   private nextAccessEventId = 1;
+  private nextFolderId = 1;
+  private nextLabelId = 1;
   private templates = new Map<number, Map<number, MailTemplate>>();
   private organizations = new Map<number, Map<number, MailboxState>>();
   /** Every address that is or ever was a mailbox, across all organizations. */
@@ -276,6 +341,9 @@ export class MockMailboxStore {
       access,
       messages: new Map(),
       reads: new Map(),
+      stars: new Map(),
+      folders: new Map(),
+      labels: new Map(),
       files: new Map(),
     };
     for (const member of access.members.values()) member.granted_by = viewer.userId;
@@ -301,24 +369,49 @@ export class MockMailboxStore {
     return { ok: true };
   }
 
+  /**
+   * One page of a mailbox listing. `filters` were checked by the route; this judges what needs
+   * the mailbox: the folder and label must be its own, and a one-character search is too broad.
+   */
   listMessages(
     organizationId: number,
     mailboxId: number,
     viewer: MailboxViewer,
-    direction: MailDirection | null,
+    filters: MailMessageFilters,
     page: number,
     perPage: number
-  ): MockMailMessagePageResult {
+  ): MockOrganizeResult<MailMessagePage> {
     const found = this.authorize(organizationId, mailboxId, viewer, 'view');
     if (!found.ok) return found;
-    const all = this.visibleMessages(found.state)
-      .filter(message => direction === null || message.direction === direction)
-      .sort((left, right) => right.id - left.id)
-      .map(message => summaryOf(this.forViewer(found.state, message, viewer)));
-    const filter = direction === null ? '' : `direction=${direction}&`;
+    const { state } = found;
+    if (filters.folderId !== undefined && !state.folders.has(filters.folderId)) {
+      return { ok: false, error: 'folder_not_found' };
+    }
+    if (filters.labelId !== undefined && !state.labels.has(filters.labelId)) {
+      return { ok: false, error: 'label_not_found' };
+    }
+    const needle = filters.q?.trim().toLowerCase() ?? '';
+    if (Array.from(needle).length === 1) return { ok: false, error: 'search_too_broad' };
+
+    const matching = this.visibleMessages(state)
+      .map(message => this.forViewer(state, message, viewer))
+      .filter(message => matchesFilters(message, filters, needle))
+      .sort(
+        filters.placement === 'trash'
+          ? (left, right) =>
+              (right.trashed_at ?? '').localeCompare(left.trashed_at ?? '') || right.id - left.id
+          : (left, right) => right.id - left.id
+      );
+    const items: MailMessageSummary[] =
+      filters.group === 'thread' ? threadRows(matching) : matching.map(summaryOf);
     return {
       ok: true,
-      page: paginated(all, page, perPage, `/api/mailboxes/${mailboxId}/messages?${filter}`),
+      value: paginated(
+        items,
+        page,
+        perPage,
+        `/api/mailboxes/${mailboxId}/messages?${filterQuery(filters)}`
+      ),
     };
   }
 
@@ -343,7 +436,7 @@ export class MockMailboxStore {
         if (filters.status && message.status !== filters.status) continue;
         if (needle !== '' && !matchesSearch(message, needle)) continue;
         entries.push({
-          ...summaryOf(this.forViewer(state, message, viewer)),
+          ...logSummaryOf(this.forViewer(state, message, viewer)),
           mailbox_address: state.mailbox.address,
         });
       }
@@ -400,27 +493,38 @@ export class MockMailboxStore {
       : { ok: false, error: 'not_found' };
   }
 
-  /** Changes only the viewer's read state; outbound messages stay read for everyone. */
-  setRead(
+  /** Applies a change to one message and answers it as the viewer sees it. */
+  updateMessage(
     organizationId: number,
     mailboxId: number,
     messageId: number,
     viewer: MailboxViewer,
-    read: boolean
-  ): MockMailMessageResult {
-    const found = this.authorize(organizationId, mailboxId, viewer, 'view');
-    if (!found.ok) return found;
-    const message = this.visibleMessage(found.state, messageId);
-    if (!message) return { ok: false, error: 'not_found' };
-    if (message.direction === 'inbound') {
-      const readers = found.state.reads.get(messageId) ?? new Set<number>();
-      if (read) readers.add(viewer.userId);
-      else readers.delete(viewer.userId);
-      found.state.reads.set(messageId, readers);
-    }
-    return { ok: true, message: this.forViewer(found.state, message, viewer) };
+    change: MockMessageChange
+  ): MockOrganizeResult<MailMessage> {
+    const applied = this.applyChange(organizationId, mailboxId, viewer, [messageId], change, false);
+    if (!applied.ok) return applied;
+    const message = applied.value.messages.get(messageId);
+    return message
+      ? { ok: true, value: this.forViewer(applied.value, message, viewer) }
+      : { ok: false, error: 'not_found' };
   }
 
+  /** Applies one change to 1 to 100 messages, all or nothing. */
+  updateMessages(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer,
+    messageIds: number[],
+    change: MockMessageChange
+  ): MockOrganizeResult<MailMessageUpdatesResult> {
+    const applied = this.applyChange(organizationId, mailboxId, viewer, messageIds, change, true);
+    return applied.ok ? { ok: true, value: { updated: messageIds.length } } : applied;
+  }
+
+  /**
+   * Outside the trash a delete moves the message there, which needs `send`; in the trash it
+   * deletes the message for good, which needs `organize`.
+   */
   deleteMessage(
     organizationId: number,
     mailboxId: number,
@@ -429,9 +533,207 @@ export class MockMailboxStore {
   ): MockMailDeleteResult {
     const found = this.authorize(organizationId, mailboxId, viewer, 'send');
     if (!found.ok) return found;
-    if (!this.visibleMessage(found.state, messageId)) return { ok: false, error: 'not_found' };
+    const message = this.visibleMessage(found.state, messageId);
+    if (!message) return { ok: false, error: 'not_found' };
+    if (message.placement !== 'trash') {
+      found.state.messages.set(messageId, this.placed(message, 'trash', null));
+      return { ok: true };
+    }
+    if (!found.access.organize) return { ok: false, error: 'forbidden' };
     this.forget(found.state, messageId);
     return { ok: true };
+  }
+
+  /** Deletes every visible message in the trash for good; sealed mail stays. */
+  purgeTrash(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer
+  ): MockOrganizeResult<MailTrashPurge> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'organize');
+    if (!found.ok) return found;
+    let deleted = 0;
+    for (const message of this.visibleMessages(found.state)) {
+      if (message.placement !== 'trash') continue;
+      this.forget(found.state, message.id);
+      deleted += 1;
+    }
+    return { ok: true, value: { deleted } };
+  }
+
+  /** The thread's messages outside the trash, oldest first, at most the latest 100. */
+  thread(
+    organizationId: number,
+    mailboxId: number,
+    threadId: number,
+    viewer: MailboxViewer
+  ): MockOrganizeResult<MailMessage[]> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'view');
+    if (!found.ok) return found;
+    const messages = this.visibleMessages(found.state)
+      .filter(message => message.thread_id === threadId && message.placement !== 'trash')
+      .sort((left, right) => left.id - right.id)
+      .slice(-MAIL_THREAD_MAX_MESSAGES)
+      .map(message => this.forViewer(found.state, message, viewer));
+    return messages.length > 0 ? { ok: true, value: messages } : { ok: false, error: 'not_found' };
+  }
+
+  /** The viewer's own unread and starred counts; the trash never counts. */
+  counts(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer
+  ): MockOrganizeResult<MailMessageCounts> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'view');
+    if (!found.ok) return found;
+    const { state } = found;
+    const folderUnread = new Map(sortedByName(state.folders).map(folder => [folder.id, 0]));
+    const value: MailMessageCounts = {
+      placements: { default_inbound_unread: 0, archive_unread: 0 },
+      folders: [],
+      starred: 0,
+    };
+    for (const stored of this.visibleMessages(state)) {
+      if (stored.placement === 'trash') continue;
+      const message = this.forViewer(state, stored, viewer);
+      if (message.starred) value.starred += 1;
+      if (message.direction !== 'inbound' || message.read) continue;
+      if (message.placement === 'default') value.placements.default_inbound_unread += 1;
+      else if (message.placement === 'archive') value.placements.archive_unread += 1;
+      else if (message.folder_id !== null && folderUnread.has(message.folder_id)) {
+        folderUnread.set(message.folder_id, (folderUnread.get(message.folder_id) ?? 0) + 1);
+      }
+    }
+    value.folders = [...folderUnread].map(([folderId, unread]) => ({
+      folder_id: folderId,
+      unread,
+    }));
+    return { ok: true, value };
+  }
+
+  /** Every folder of the mailbox by name, ignoring case. */
+  folders(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer
+  ): MockOrganizeResult<MailFolder[]> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'view');
+    if (!found.ok) return found;
+    return { ok: true, value: sortedByName(found.state.folders).map(folder => ({ ...folder })) };
+  }
+
+  /** Creates a folder, or renames one when `folderId` is given. Needs `organize`. */
+  saveFolder(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer,
+    rawName: string,
+    folderId?: number
+  ): MockOrganizeResult<MailFolder> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'organize');
+    if (!found.ok) return found;
+    const { folders } = found.state;
+    const existing = folderId === undefined ? undefined : folders.get(folderId);
+    if (folderId !== undefined && !existing) return { ok: false, error: 'folder_not_found' };
+    const fields: Record<string, string[]> = {};
+    const name = organizeName(fields, rawName, MAIL_FOLDER_NAME_MAX_LENGTH);
+    if (Object.keys(fields).length > 0) return { ok: false, error: 'validation', fields };
+    if (!existing && folders.size >= MAIL_FOLDERS_MAX_PER_MAILBOX) {
+      return { ok: false, error: 'folder_limit' };
+    }
+    if (nameTaken(folders, name, folderId)) return { ok: false, error: 'folder_name_taken' };
+    const folder: MailFolder = existing
+      ? { ...existing, name }
+      : { id: this.nextFolderId++, name, created_at: this.timestamp() };
+    folders.set(folder.id, folder);
+    return { ok: true, value: { ...folder } };
+  }
+
+  /** Deletes a folder; its messages go back to `default`. Needs `organize`. */
+  deleteFolder(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer,
+    folderId: number
+  ): MockOrganizeResult<null> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'organize');
+    if (!found.ok) return found;
+    const { state } = found;
+    if (!state.folders.delete(folderId)) return { ok: false, error: 'folder_not_found' };
+    for (const message of state.messages.values()) {
+      if (message.folder_id === folderId) {
+        state.messages.set(message.id, this.placed(message, 'default', null));
+      }
+    }
+    return { ok: true, value: null };
+  }
+
+  /** Every label of the mailbox by name, ignoring case. */
+  labels(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer
+  ): MockOrganizeResult<MailLabel[]> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'view');
+    if (!found.ok) return found;
+    return { ok: true, value: sortedByName(found.state.labels).map(label => ({ ...label })) };
+  }
+
+  /** Creates a label, or replaces the name and color of one. Needs `organize`. */
+  saveLabel(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer,
+    input: { name: string; color: string },
+    labelId?: number
+  ): MockOrganizeResult<MailLabel> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'organize');
+    if (!found.ok) return found;
+    const { labels } = found.state;
+    const existing = labelId === undefined ? undefined : labels.get(labelId);
+    if (labelId !== undefined && !existing) return { ok: false, error: 'label_not_found' };
+    const fields: Record<string, string[]> = {};
+    const name = organizeName(fields, input.name, MAIL_LABEL_NAME_MAX_LENGTH);
+    if (!isLabelColor(input.color)) {
+      fields.color = [`must be one of: ${MAIL_LABEL_COLORS.join(', ')}`];
+    }
+    if (Object.keys(fields).length > 0) return { ok: false, error: 'validation', fields };
+    if (!existing && labels.size >= MAIL_LABELS_MAX_PER_MAILBOX) {
+      return { ok: false, error: 'label_limit' };
+    }
+    if (nameTaken(labels, name, labelId)) return { ok: false, error: 'label_name_taken' };
+    const label: MailLabel = existing
+      ? { ...existing, name, color: input.color as MailLabelColor }
+      : {
+          id: this.nextLabelId++,
+          name,
+          color: input.color as MailLabelColor,
+          created_at: this.timestamp(),
+        };
+    labels.set(label.id, label);
+    return { ok: true, value: { ...label } };
+  }
+
+  /** Deletes a label and removes it from every message. Needs `organize`. */
+  deleteLabel(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer,
+    labelId: number
+  ): MockOrganizeResult<null> {
+    const found = this.authorize(organizationId, mailboxId, viewer, 'organize');
+    if (!found.ok) return found;
+    const { state } = found;
+    if (!state.labels.delete(labelId)) return { ok: false, error: 'label_not_found' };
+    for (const message of state.messages.values()) {
+      if (message.label_ids.includes(labelId)) {
+        state.messages.set(message.id, {
+          ...message,
+          label_ids: message.label_ids.filter(id => id !== labelId),
+        });
+      }
+    }
+    return { ok: true, value: null };
   }
 
   attachment(
@@ -747,6 +1049,13 @@ export class MockMailboxStore {
     if (!attachmentsWithinLimits(drafts)) return { ok: false, error: 'invalid' };
 
     const id = this.nextMessageId++;
+    // A reply joins the thread of the message it answers, when that message is in this mailbox.
+    const replied =
+      normalized.in_reply_to === ''
+        ? undefined
+        : [...state.messages.values()].find(
+            message => message.message_id === normalized.in_reply_to
+          );
     const files = new Map<number, { filename: string; content: Uint8Array }>();
     const attachments = drafts.map((file): MailAttachment => {
       const attachmentId = this.nextAttachmentId++;
@@ -790,6 +1099,12 @@ export class MockMailboxStore {
       last_event: 'delivered',
       attachment_count: attachments.length,
       template_id: templateId,
+      placement: 'default',
+      folder_id: null,
+      label_ids: [],
+      starred: false,
+      thread_id: replied?.thread_id ?? id,
+      trashed_at: null,
       created_at: sentAt,
       text_body: normalized.text,
       html_body: normalized.html,
@@ -810,6 +1125,8 @@ export class MockMailboxStore {
     this.nextAttachmentId = 1;
     this.nextTemplateId = 1;
     this.nextAccessEventId = 1;
+    this.nextFolderId = 1;
+    this.nextLabelId = 1;
     this.templates.clear();
     this.organizations.clear();
     this.claimedAddresses.clear();
@@ -827,6 +1144,89 @@ export class MockMailboxStore {
     state.messages.delete(messageId);
     state.files.delete(messageId);
     state.reads.delete(messageId);
+    state.stars.delete(messageId);
+  }
+
+  /** The message in another placement; `trashed_at` is kept only while it stays in the trash. */
+  private placed(
+    message: MailMessage,
+    placement: MailPlacement,
+    folderId: number | null
+  ): MailMessage {
+    const trashedAt = placement !== 'trash' ? null : (message.trashed_at ?? this.timestamp());
+    return {
+      ...message,
+      placement,
+      folder_id: placement === 'folder' ? folderId : null,
+      trashed_at: trashedAt,
+    };
+  }
+
+  /**
+   * The checks of `PUT .../messages/:id` and `POST .../message-updates`, in the API's order:
+   * mailbox, permission, an over-long batch, every named message, folder, and label, then the
+   * body rules. Nothing changes unless all pass.
+   */
+  private applyChange(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer,
+    messageIds: number[],
+    change: MockMessageChange,
+    batch: boolean
+  ): MockOrganizeResult<MailboxState> {
+    const shared =
+      change.placement !== undefined ||
+      change.folder_id !== undefined ||
+      change.add_label_ids !== undefined ||
+      change.remove_label_ids !== undefined ||
+      change.label_ids !== undefined;
+    const found = this.authorize(organizationId, mailboxId, viewer, shared ? 'send' : 'view');
+    if (!found.ok) return found;
+    const { state } = found;
+    if (batch && messageIds.length > MAIL_MESSAGE_UPDATES_MAX_IDS) {
+      const fields: Record<string, string[]> = {};
+      checkIdList(fields, 'message_ids', messageIds, 1);
+      return { ok: false, error: 'validation', fields };
+    }
+    const messages = positiveDistinct(messageIds).map(id => this.visibleMessage(state, id));
+    if (messages.some(message => message === undefined)) return { ok: false, error: 'not_found' };
+    if (
+      change.folder_id !== undefined &&
+      change.folder_id !== 0 &&
+      !state.folders.has(change.folder_id)
+    ) {
+      return { ok: false, error: 'folder_not_found' };
+    }
+    const labelIds = positiveDistinct([
+      ...(change.add_label_ids ?? []),
+      ...(change.remove_label_ids ?? []),
+      ...(change.label_ids ?? []),
+    ]);
+    if (labelIds.some(id => !state.labels.has(id))) return { ok: false, error: 'label_not_found' };
+    const fields = changeErrors(messageIds, change, batch, shared);
+    if (Object.keys(fields).length > 0) return { ok: false, error: 'validation', fields };
+
+    for (const stored of messages as MailMessage[]) {
+      let message = stored;
+      if (change.read !== undefined && message.direction === 'inbound') {
+        toggle(state.reads, message.id, viewer.userId, change.read);
+      }
+      if (change.starred !== undefined) {
+        toggle(state.stars, message.id, viewer.userId, change.starred);
+      }
+      if (change.placement !== undefined) {
+        message = this.placed(message, change.placement as MailPlacement, change.folder_id ?? null);
+      }
+      if (change.label_ids !== undefined || change.add_label_ids || change.remove_label_ids) {
+        const next = new Set(change.label_ids ?? message.label_ids);
+        for (const id of change.add_label_ids ?? []) next.add(id);
+        for (const id of change.remove_label_ids ?? []) next.delete(id);
+        message = { ...message, label_ids: [...next].sort((left, right) => left - right) };
+      }
+      state.messages.set(message.id, message);
+    }
+    return { ok: true, value: state };
   }
 
   /** The access of a new mailbox, or null for `MAILBOX.ACCESS_INVALID`. */
@@ -895,6 +1295,13 @@ export class MockMailboxStore {
    */
   private sync(organizationId: number, state: MailboxState): MailboxState {
     const { access } = state;
+    // The API's worker deletes trashed mail for good after 30 days; the mock does it on access.
+    const expiry = this.dependencies.now().getTime() - MAIL_TRASH_RETENTION_DAYS * dayMilliseconds;
+    for (const message of [...state.messages.values()]) {
+      if (message.trashed_at !== null && Date.parse(message.trashed_at) <= expiry) {
+        this.forget(state, message.id);
+      }
+    }
     const isMember = (userId: number) =>
       this.dependencies.membershipOf(organizationId, userId) !== null;
     for (const userId of [...access.members.keys()]) {
@@ -976,12 +1383,13 @@ export class MockMailboxStore {
       : undefined;
   }
 
-  /** The viewer's own read flag; outbound messages are read for everyone. */
+  /** The viewer's own read flag and star; outbound messages are read for everyone. */
   private forViewer(state: MailboxState, message: MailMessage, viewer: MailboxViewer): MailMessage {
     const read =
       message.direction === 'outbound' ||
       (state.reads.get(message.id)?.has(viewer.userId) ?? false);
-    return { ...message, read };
+    const starred = state.stars.get(message.id)?.has(viewer.userId) ?? false;
+    return { ...message, read, starred };
   }
 
   private view(
@@ -989,9 +1397,11 @@ export class MockMailboxStore {
     viewer: MailboxViewer,
     access: MailboxAccess = mailboxAccessFor(state.access, viewer)
   ): Mailbox {
+    // Only the Inbox counts: inbound mail in `default` the viewer has not read.
     let unread = 0;
     if (access.view) {
       for (const message of this.visibleMessages(state)) {
+        if (message.placement !== 'default') continue;
         if (!this.forViewer(state, message, viewer).read) unread += 1;
       }
     }
@@ -1025,6 +1435,12 @@ export class MockMailboxStore {
       last_event: '',
       attachment_count: 0,
       template_id: null,
+      placement: 'default',
+      folder_id: null,
+      label_ids: [],
+      starred: false,
+      thread_id: id,
+      trashed_at: null,
       created_at: this.timestamp(),
       text_body:
         'This message was created by the development mock. No mail is sent or received until the app uses the real API.',
@@ -1066,6 +1482,19 @@ export const mockMailboxStore = new MockMailboxStore();
 
 function summaryOf(message: MailMessage): MailMessageSummary {
   return {
+    ...logSummaryOf(message),
+    placement: message.placement,
+    folder_id: message.folder_id,
+    label_ids: [...message.label_ids],
+    starred: message.starred,
+    thread_id: message.thread_id,
+    trashed_at: message.trashed_at,
+  };
+}
+
+/** A log entry carries neither placements, stars, nor threads. */
+function logSummaryOf(message: MailMessage): Omit<MailLogEntry, 'mailbox_address'> {
+  return {
     id: message.id,
     mailbox_id: message.mailbox_id,
     direction: message.direction,
@@ -1082,6 +1511,183 @@ function summaryOf(message: MailMessage): MailMessageSummary {
     template_id: message.template_id,
     created_at: message.created_at,
   };
+}
+
+/** `message` is as the viewer sees it; `needle` is the trimmed, lowercased search. */
+function matchesFilters(
+  message: MailMessage,
+  filters: MailMessageFilters,
+  needle: string
+): boolean {
+  const unread = message.direction === 'inbound' && !message.read;
+  return (
+    (filters.placement === undefined
+      ? message.placement !== 'trash'
+      : message.placement === filters.placement) &&
+    (filters.folderId === undefined || message.folder_id === filters.folderId) &&
+    (filters.direction === undefined || message.direction === filters.direction) &&
+    (filters.labelId === undefined || message.label_ids.includes(filters.labelId)) &&
+    (filters.starred === undefined || message.starred === filters.starred) &&
+    (filters.unread === undefined || unread === filters.unread) &&
+    (filters.hasAttachments === undefined ||
+      message.attachment_count > 0 === filters.hasAttachments) &&
+    (needle === '' || matchesMailboxSearch(message, needle))
+  );
+}
+
+/** Subject, sender address and name, `to` and `cc`, and the text body; `%` and `_` are literal. */
+function matchesMailboxSearch(message: MailMessage, needle: string): boolean {
+  return [
+    message.subject,
+    message.from.address,
+    message.from.name,
+    ...message.to,
+    ...message.cc,
+    message.text_body,
+  ].some(text => text.toLowerCase().includes(needle));
+}
+
+/** One row per thread: its newest message in the view, carrying the thread's summary there. */
+function threadRows(messages: MailMessage[]): MailMessageSummary[] {
+  const threads = new Map<number, MailMessage[]>();
+  for (const message of messages) {
+    threads.set(message.thread_id, [...(threads.get(message.thread_id) ?? []), message]);
+  }
+  return [...threads.values()]
+    .map(members => {
+      const ascending = [...members].sort((left, right) => left.id - right.id);
+      const newest = ascending[ascending.length - 1];
+      const thread: MailThreadSummary = {
+        message_count: ascending.length,
+        message_ids: ascending.slice(-MAIL_THREAD_MAX_MESSAGES).map(message => message.id),
+        unread: ascending.some(message => message.direction === 'inbound' && !message.read),
+        starred: ascending.some(message => message.starred),
+        label_ids: [...new Set(ascending.flatMap(message => message.label_ids))].sort(
+          (left, right) => left - right
+        ),
+      };
+      return { ...summaryOf(newest), thread };
+    })
+    .sort((left, right) => right.id - left.id);
+}
+
+/** The listing's filters as the pagination links repeat them, ready for `page=`. */
+function filterQuery(filters: MailMessageFilters): string {
+  const query = new URLSearchParams();
+  if (filters.direction) query.set('direction', filters.direction);
+  if (filters.placement) query.set('placement', filters.placement);
+  if (filters.folderId !== undefined) query.set('folder_id', String(filters.folderId));
+  if (filters.labelId !== undefined) query.set('label_id', String(filters.labelId));
+  if (filters.starred !== undefined) query.set('starred', String(filters.starred));
+  if (filters.unread !== undefined) query.set('unread', String(filters.unread));
+  if (filters.hasAttachments !== undefined) {
+    query.set('has_attachments', String(filters.hasAttachments));
+  }
+  if (filters.q !== undefined) query.set('q', filters.q);
+  if (filters.group) query.set('group', filters.group);
+  return query.size > 0 ? `${query.toString()}&` : '';
+}
+
+/** The body rules of a message change, after access and lookups, keyed as the API keys them. */
+function changeErrors(
+  messageIds: number[],
+  change: MockMessageChange,
+  batch: boolean,
+  shared: boolean
+): Record<string, string[]> {
+  const fields: Record<string, string[]> = {};
+  if (batch) checkIdList(fields, 'message_ids', messageIds, 1);
+  if (!shared && change.read === undefined && change.starred === undefined) {
+    addField(fields, 'change', 'at least one change is required');
+  }
+  if (change.placement !== undefined && !isPlacement(change.placement)) {
+    addField(fields, 'placement', `must be one of: ${MAIL_PLACEMENTS.join(', ')}`);
+  }
+  const inFolder = change.placement === 'folder';
+  if (inFolder && change.folder_id === undefined) {
+    addField(fields, 'folder_id', 'is required with placement folder');
+  } else if (!inFolder && change.folder_id !== undefined) {
+    addField(fields, 'folder_id', 'is allowed only with placement folder');
+  } else if (change.folder_id === 0) {
+    addField(fields, 'folder_id', 'must be a positive id');
+  }
+  if (change.add_label_ids) checkIdList(fields, 'add_label_ids', change.add_label_ids, 1);
+  if (change.remove_label_ids) checkIdList(fields, 'remove_label_ids', change.remove_label_ids, 1);
+  if (change.label_ids) checkIdList(fields, 'label_ids', change.label_ids, 0);
+  if (change.add_label_ids?.some(id => change.remove_label_ids?.includes(id))) {
+    addField(fields, 'add_label_ids', 'a label may not be both added and removed');
+  }
+  return fields;
+}
+
+/** `minItems` to 100 different positive ids. */
+function checkIdList(
+  fields: Record<string, string[]>,
+  field: string,
+  ids: number[],
+  minItems: number
+): void {
+  if (ids.length < minItems || ids.length > MAIL_MESSAGE_UPDATES_MAX_IDS) {
+    addField(fields, field, `must hold ${minItems} to ${MAIL_MESSAGE_UPDATES_MAX_IDS} ids`);
+  }
+  if (positiveDistinct(ids).length !== ids.length) {
+    addField(fields, field, 'must hold different positive ids');
+  }
+}
+
+function addField(fields: Record<string, string[]>, field: string, message: string): void {
+  fields[field] = [...(fields[field] ?? []), message];
+}
+
+/** Drops zero and repeated ids, keeping the first occurrence of each. */
+function positiveDistinct(ids: number[]): number[] {
+  return [...new Set(ids.filter(id => id > 0))];
+}
+
+function isPlacement(value: string): value is MailPlacement {
+  return (MAIL_PLACEMENTS as readonly string[]).includes(value);
+}
+
+function isLabelColor(value: string): value is MailLabelColor {
+  return (MAIL_LABEL_COLORS as readonly string[]).includes(value);
+}
+
+function toggle(map: Map<number, Set<number>>, messageId: number, userId: number, on: boolean) {
+  const users = map.get(messageId) ?? new Set<number>();
+  if (on) users.add(userId);
+  else users.delete(userId);
+  map.set(messageId, users);
+}
+
+/** A folder or label name trimmed, then 1 to `maxLength` characters. */
+function organizeName(fields: Record<string, string[]>, raw: string, maxLength: number): string {
+  const name = raw.trim();
+  const length = Array.from(name).length;
+  if (length < 1 || length > maxLength) {
+    addField(fields, 'name', `must be 1 to ${maxLength} characters after trimming`);
+  }
+  return name;
+}
+
+/** Names are unique in the mailbox ignoring case; an item may keep its own name. */
+function nameTaken(
+  items: Map<number, { id: number; name: string }>,
+  name: string,
+  exceptId?: number
+): boolean {
+  const lowered = name.toLowerCase();
+  return [...items.values()].some(
+    item => item.id !== exceptId && item.name.toLowerCase() === lowered
+  );
+}
+
+/** By name ignoring case, then by id. */
+function sortedByName<T extends { id: number; name: string }>(items: Map<number, T>): T[] {
+  return [...items.values()].sort((left, right) => {
+    const a = left.name.toLowerCase();
+    const b = right.name.toLowerCase();
+    return a < b ? -1 : a > b ? 1 : left.id - right.id;
+  });
 }
 
 function matchesSearch(message: MailMessage, needle: string): boolean {
@@ -1134,8 +1740,10 @@ function sortedMembers(state: MailboxState): MailboxMember[] {
     .map(member => ({ ...member }));
 }
 
+/** Someone who loses access loses their read records and stars with it. */
 function forgetReads(state: MailboxState, userId: number): void {
   for (const readers of state.reads.values()) readers.delete(userId);
+  for (const starrers of state.stars.values()) starrers.delete(userId);
 }
 
 /** The contract's template rules; null for content the API answers with `MAILBOX.TEMPLATE_INVALID`. */

@@ -14,7 +14,7 @@ cloud, registry, rollout controller, secret store, or migration orchestrator for
 | `.github/workflows/container.yml` | CI | Runs the same container verifier when API or container sources change. |
 | `fastbuild notification:work` | Optional notification starter | Processes durable email deliveries with bounded database leases. |
 | `fastbuild webhook:work` | Optional webhook starter | Processes signed outbound deliveries with bounded network calls and database leases. |
-| `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends direct sends that waited for room in the organization's send limit, oldest first, then the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit. Run it wherever the API sends mail. |
+| `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends direct sends that waited for room in the organization's send limit, oldest first, then the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit, and purges trash older than 30 days. Run it wherever the API runs. |
 | `fastbuild mail:zone:work` | Optional mailbox starter | Activates managed mail zones once their registrar delegates them, sets their pending domains up, and removes zones still pending after 14 days. |
 | `fastbuild mail:zone:release` | Optional mailbox starter | One-off operator command that removes a pending managed mail zone from Cloudflare and Zmail, so another organization can claim its apex. |
 | [`deploy/kubernetes`](../../deploy/kubernetes/README.md) | Example | Hardened kustomize reference for the API, workers, retention jobs, migration job, and Web. |
@@ -219,6 +219,10 @@ can run; each recipient is sent with an idempotency key of its broadcast and con
 that stops after the provider call does not mail that contact again. When the organization's
 24-hour send limit is reached, the broadcast shows `stop_reason` `send_limit_reached` and resumes
 when the window has room.
+
+The same worker sends direct messages that waited for the send limit and deletes for good mailbox
+trash older than 30 days. Run it wherever the API runs, even without broadcasts: without it, waiting
+messages are never sent and the trash is never purged.
 
 ## Mail Zone Worker
 

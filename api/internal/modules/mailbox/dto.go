@@ -166,9 +166,109 @@ func (r SendMailMessageRequest) input(idempotencyKey string) SendInput {
 	}
 }
 
-// UpdateMailMessageRequest changes the read state of one message.
+// UpdateMailMessageRequest marks, stars, moves, or labels one message. Every field is optional;
+// the service checks access and the referenced folder and labels before it validates the rules,
+// so binding enforces only JSON types.
 type UpdateMailMessageRequest struct {
-	Read *bool `json:"read" binding:"required"`
+	Read      *bool   `json:"read"`
+	Starred   *bool   `json:"starred"`
+	Placement *string `json:"placement"`
+	FolderID  *uint   `json:"folder_id"`
+	// LabelIDs replaces every label of the message.
+	LabelIDs *[]uint `json:"label_ids"`
+}
+
+func (r UpdateMailMessageRequest) update() MessageUpdate {
+	return MessageUpdate{
+		Read: r.Read, Starred: r.Starred, Placement: placementPointer(r.Placement), FolderID: r.FolderID, SetLabelIDs: r.LabelIDs,
+	}
+}
+
+// UpdateMailMessagesRequest applies one change to up to 100 messages. Like
+// UpdateMailMessageRequest, its rules are checked by the service.
+type UpdateMailMessagesRequest struct {
+	MessageIDs     []uint  `json:"message_ids"`
+	Read           *bool   `json:"read"`
+	Starred        *bool   `json:"starred"`
+	Placement      *string `json:"placement"`
+	FolderID       *uint   `json:"folder_id"`
+	AddLabelIDs    []uint  `json:"add_label_ids"`
+	RemoveLabelIDs []uint  `json:"remove_label_ids"`
+}
+
+func (r UpdateMailMessagesRequest) update() MessageUpdate {
+	return MessageUpdate{
+		Read: r.Read, Starred: r.Starred, Placement: placementPointer(r.Placement), FolderID: r.FolderID,
+		AddLabelIDs: r.AddLabelIDs, RemoveLabelIDs: r.RemoveLabelIDs,
+	}
+}
+
+func placementPointer(value *string) *domain.MailPlacement {
+	if value == nil {
+		return nil
+	}
+	placement := domain.MailPlacement(*value)
+	return &placement
+}
+
+// MailMessageUpdatesResponse counts the messages a batch update applied to.
+type MailMessageUpdatesResponse struct {
+	Updated int `json:"updated"`
+}
+
+// MailTrashPurgeResponse counts the messages emptying the trash deleted.
+type MailTrashPurgeResponse struct {
+	Deleted int `json:"deleted"`
+}
+
+// MailFolderRequest names a folder. The service trims and checks the name.
+type MailFolderRequest struct {
+	Name string `json:"name"`
+}
+
+// MailLabelRequest names and colors a label. The service trims the name and checks both.
+type MailLabelRequest struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// MailFolderResponse is one folder of a mailbox.
+type MailFolderResponse struct {
+	ID        uint      `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// MailLabelResponse is one label of a mailbox.
+type MailLabelResponse struct {
+	ID        uint      `json:"id"`
+	Name      string    `json:"name"`
+	Color     string    `json:"color"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func toMailFolderResponse(folder *domain.MailFolder) MailFolderResponse {
+	return MailFolderResponse{ID: folder.ID, Name: folder.Name, CreatedAt: folder.CreatedAt}
+}
+
+func toMailFolderResponses(folders []*domain.MailFolder) []MailFolderResponse {
+	responses := make([]MailFolderResponse, 0, len(folders))
+	for _, folder := range folders {
+		responses = append(responses, toMailFolderResponse(folder))
+	}
+	return responses
+}
+
+func toMailLabelResponse(label *domain.MailLabel) MailLabelResponse {
+	return MailLabelResponse{ID: label.ID, Name: label.Name, Color: string(label.Color), CreatedAt: label.CreatedAt}
+}
+
+func toMailLabelResponses(labels []*domain.MailLabel) []MailLabelResponse {
+	responses := make([]MailLabelResponse, 0, len(labels))
+	for _, label := range labels {
+		responses = append(responses, toMailLabelResponse(label))
+	}
+	return responses
 }
 
 // MailboxDomainResponse describes where a user may create addresses.
@@ -256,6 +356,7 @@ type MailboxAccessResponse struct {
 	ManageMembers bool `json:"manage_members"`
 	Administer    bool `json:"administer"`
 	SeeHistory    bool `json:"see_history"`
+	Organize      bool `json:"organize"`
 }
 
 // MailAddressResponse is one sender with an optional display name.
@@ -284,8 +385,77 @@ type MailMessageSummaryResponse struct {
 	// TemplateID names the template the message was rendered from; null when none was used.
 	TemplateID *uint `json:"template_id"`
 	// AttachmentCount is how many files the message has; the detail lists them.
-	AttachmentCount int       `json:"attachment_count"`
-	CreatedAt       time.Time `json:"created_at"`
+	AttachmentCount int `json:"attachment_count"`
+	// Placement, FolderID, LabelIDs, and TrashedAt are shared by everyone with access; Starred is
+	// the viewer's own.
+	Placement string     `json:"placement"`
+	FolderID  *uint      `json:"folder_id"`
+	LabelIDs  []uint     `json:"label_ids"`
+	Starred   bool       `json:"starred"`
+	ThreadID  uint       `json:"thread_id"`
+	TrashedAt *time.Time `json:"trashed_at"`
+	CreatedAt time.Time  `json:"created_at"`
+	// Thread summarizes the message's thread in the listed view; only group=thread sets it.
+	Thread *MailThreadSummaryResponse `json:"thread,omitempty"`
+}
+
+// MailThreadSummaryResponse is the thread of a listed message in the listed view.
+type MailThreadSummaryResponse struct {
+	MessageCount int    `json:"message_count"`
+	MessageIDs   []uint `json:"message_ids"`
+	Unread       bool   `json:"unread"`
+	Starred      bool   `json:"starred"`
+	LabelIDs     []uint `json:"label_ids"`
+}
+
+func toMailThreadSummaryResponse(thread *domain.MailThreadInfo) *MailThreadSummaryResponse {
+	if thread == nil {
+		return nil
+	}
+	ids, labelIDs := thread.MessageIDs, thread.LabelIDs
+	if ids == nil {
+		ids = []uint{}
+	}
+	if labelIDs == nil {
+		labelIDs = []uint{}
+	}
+	return &MailThreadSummaryResponse{
+		MessageCount: thread.MessageCount, MessageIDs: ids,
+		Unread: thread.Unread, Starred: thread.Starred, LabelIDs: labelIDs,
+	}
+}
+
+// MailMessageCountsResponse is the caller's counts for a mailbox's navigation.
+type MailMessageCountsResponse struct {
+	Placements MailPlacementCountsResponse `json:"placements"`
+	Folders    []MailFolderCountResponse   `json:"folders"`
+	Starred    int                         `json:"starred"`
+}
+
+// MailPlacementCountsResponse counts unread inbound messages in the Inbox and the archive.
+type MailPlacementCountsResponse struct {
+	DefaultInboundUnread int `json:"default_inbound_unread"`
+	ArchiveUnread        int `json:"archive_unread"`
+}
+
+// MailFolderCountResponse counts unread inbound messages in one folder.
+type MailFolderCountResponse struct {
+	FolderID uint `json:"folder_id"`
+	Unread   int  `json:"unread"`
+}
+
+func toMailMessageCountsResponse(counts domain.MailMessageCounts) MailMessageCountsResponse {
+	folders := make([]MailFolderCountResponse, 0, len(counts.Folders))
+	for _, folder := range counts.Folders {
+		folders = append(folders, MailFolderCountResponse{FolderID: folder.FolderID, Unread: folder.Unread})
+	}
+	return MailMessageCountsResponse{
+		Placements: MailPlacementCountsResponse{
+			DefaultInboundUnread: counts.DefaultInboundUnread, ArchiveUnread: counts.ArchiveUnread,
+		},
+		Folders: folders,
+		Starred: counts.Starred,
+	}
 }
 
 // MailMessageResponse is the full shape of a message.
@@ -391,6 +561,10 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 	if cc == nil {
 		cc = []string{}
 	}
+	labelIDs := message.LabelIDs
+	if labelIDs == nil {
+		labelIDs = []uint{}
+	}
 	return MailMessageSummaryResponse{
 		ID:              message.ID,
 		MailboxID:       message.MailboxID,
@@ -406,8 +580,46 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		LastEvent:       string(message.LastEvent),
 		AttachmentCount: message.AttachmentCount,
 		TemplateID:      templateIDOf(message),
+		Placement:       string(placementOrDefault(message.Placement)),
+		FolderID:        folderIDOf(message),
+		LabelIDs:        labelIDs,
+		Starred:         message.Starred,
+		ThreadID:        threadIDOf(message),
+		TrashedAt:       trashedAtOf(message),
 		CreatedAt:       message.CreatedAt,
+		Thread:          toMailThreadSummaryResponse(message.Thread),
 	}
+}
+
+func placementOrDefault(placement domain.MailPlacement) domain.MailPlacement {
+	if placement == "" {
+		return domain.MailPlacementDefault
+	}
+	return placement
+}
+
+// folderIDOf is the folder only while the message is in one.
+func folderIDOf(message *domain.MailMessage) *uint {
+	if message.Placement != domain.MailPlacementFolder {
+		return nil
+	}
+	return message.FolderID
+}
+
+// trashedAtOf is the trash time only while the message is in the trash.
+func trashedAtOf(message *domain.MailMessage) *time.Time {
+	if message.Placement != domain.MailPlacementTrash {
+		return nil
+	}
+	return message.TrashedAt
+}
+
+// threadIDOf falls back to the message's own id, which is the thread a message starts.
+func threadIDOf(message *domain.MailMessage) uint {
+	if message.ThreadID == 0 {
+		return message.ID
+	}
+	return message.ThreadID
 }
 
 func queuedReasonOf(message *domain.MailMessage) *string {

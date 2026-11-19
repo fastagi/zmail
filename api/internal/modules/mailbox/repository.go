@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,13 +17,15 @@ import (
 
 type repository struct {
 	db *gorm.DB
+	// searchTimeout bounds one search statement; a search that runs longer is too broad.
+	searchTimeout time.Duration
 }
 
 var _ domain.MailboxRepository = (*repository)(nil)
 
 // NewRepository creates a new repository.
 func NewRepository(db *gorm.DB) *repository {
-	return &repository{db: db}
+	return &repository{db: db, searchTimeout: MailSearchTimeout}
 }
 
 // conn returns the transaction bound to ctx, or the pool.
@@ -109,7 +112,7 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMe
 	}
 
 	// One grouped query for every mailbox, served by the (mailbox_id, direction) index: inbound
-	// mail after the seal boundary without a read row of the reader.
+	// mail in default (the Inbox) after the seal boundary without a read row of the reader.
 	var counts []struct {
 		MailboxID uint
 		Unread    int
@@ -117,7 +120,8 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMe
 	err = r.conn(ctx).Table("mail_messages").
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
 		Select("mail_messages.mailbox_id, COUNT(*) AS unread").
-		Where("mail_messages.mailbox_id IN ? AND mail_messages.direction = ?", ids, string(domain.MailDirectionInbound)).
+		Where("mail_messages.mailbox_id IN ? AND mail_messages.direction = ? AND mail_messages.placement = ?",
+			ids, string(domain.MailDirectionInbound), string(domain.MailPlacementDefault)).
 		Where(unsealedMessage).
 		Where("NOT EXISTS (SELECT 1 FROM mail_message_reads WHERE mail_message_reads.message_id = mail_messages.id AND mail_message_reads.membership_id = ?)",
 			readerMembershipID).
@@ -185,10 +189,19 @@ func (r *repository) DeleteMailbox(ctx context.Context, organizationID, id uint)
 		if err := tx.Where("message_id IN (?)", attached).Delete(&MailAttachmentPO{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("message_id IN (?)", attached).Delete(&MailMessageReadPO{}).Error; err != nil {
+		for _, dependant := range []any{&MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}} {
+			if err := tx.Where("message_id IN (?)", attached).Delete(dependant).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("mailbox_id = ?", id).Delete(&MailMessagePO{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("mailbox_id = ?", id).Delete(&MailMessagePO{}).Error
+		// The mailbox row stays soft-deleted, so its folders and labels do not cascade.
+		if err := tx.Where("mailbox_id = ?", id).Delete(&MailFolderPO{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("mailbox_id = ?", id).Delete(&MailLabelPO{}).Error
 	})
 }
 
@@ -207,6 +220,9 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 				DoNothing:   true,
 			})
 		}
+		if err := findThread(tx, po, message); err != nil {
+			return err
+		}
 		result := query.Create(po)
 		if result.Error != nil {
 			return result.Error
@@ -215,6 +231,9 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 			return nil
 		}
 		created = true
+		if err := startThread(tx, po); err != nil {
+			return err
+		}
 		return createAttachments(tx, po.ID, message.Attachments)
 	})
 	if err != nil {
@@ -229,10 +248,97 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 		return false, nil
 	}
 	message.ID = po.ID
+	message.ThreadID = *po.ThreadID
 	message.AttachmentCount = po.AttachmentCount
 	message.CreatedAt = po.CreatedAt
 	message.UpdatedAt = po.UpdatedAt
 	return true, nil
+}
+
+// findThread sets the thread of a message about to be stored: the thread of the oldest message of
+// the same mailbox whose RFC Message-ID is the message's own or one its In-Reply-To or References
+// name. It leaves the thread unset when none matches, for startThread.
+func findThread(tx *gorm.DB, po *MailMessagePO, message *domain.MailMessage) error {
+	if po.ThreadID != nil {
+		return nil
+	}
+	// The message's own id comes first: a second copy of a stored message, such as the inbound
+	// copy of mail sent to its own mailbox, joins the original's thread.
+	ids := append([]string{message.RFCMessageID, message.InReplyTo}, message.References...)
+	threadID, err := findThreadID(tx, message.MailboxID, ids)
+	if err != nil || threadID == 0 {
+		return err
+	}
+	po.ThreadID = &threadID
+	return nil
+}
+
+// startThread makes a just stored message without a thread the start of its own, inside the
+// insert transaction, so no committed row is ever without a thread.
+func startThread(tx *gorm.DB, po *MailMessagePO) error {
+	if po.ThreadID != nil {
+		return nil
+	}
+	if err := tx.Model(&MailMessagePO{}).Where("id = ?", po.ID).UpdateColumn("thread_id", po.ID).Error; err != nil {
+		return err
+	}
+	threadID := po.ID
+	po.ThreadID = &threadID
+	return nil
+}
+
+// FindThreadID returns the thread of the oldest unsealed message of the mailbox whose RFC
+// Message-ID is one of ids, or 0 when none is. The oldest row is the original: a later row reusing
+// the id (a copy, or a forged message) never takes over the thread. Threads never cross mailboxes.
+func (r *repository) FindThreadID(ctx context.Context, mailboxID uint, ids []string) (uint, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	return findThreadID(r.conn(ctx), mailboxID, ids)
+}
+
+func findThreadID(db *gorm.DB, mailboxID uint, ids []string) (uint, error) {
+	wanted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" && !slices.Contains(wanted, id) {
+			wanted = append(wanted, id)
+		}
+	}
+	if len(wanted) == 0 {
+		return 0, nil
+	}
+	var threadIDs []uint
+	err := db.Model(&MailMessagePO{}).
+		Where("mailbox_id = ? AND rfc_message_id IN ?", mailboxID, wanted).
+		Where(unsealedMessage).
+		Order("id ASC").Limit(1).
+		Pluck("COALESCE(thread_id, id)", &threadIDs).Error
+	if err != nil || len(threadIDs) == 0 {
+		return 0, err
+	}
+	return threadIDs[0], nil
+}
+
+func (r *repository) FindMessageByRFCMessageID(ctx context.Context, mailboxID uint, rfcMessageID string) (*domain.MailMessage, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	if rfcMessageID == "" {
+		return nil, ErrMailMessageNotFound
+	}
+	var po MailMessagePO
+	err := r.conn(ctx).
+		Where("mailbox_id = ? AND rfc_message_id = ?", mailboxID, rfcMessageID).
+		Where(unsealedMessage).
+		Order("id ASC").
+		First(&po).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrMailMessageNotFound
+		}
+		return nil, err
+	}
+	return po.toDomain(), nil
 }
 
 // createAttachments stores the files of a new message and fills in their identifiers.
@@ -302,6 +408,9 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 	po := newMailMessagePO(message)
 	created := false
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := findThread(tx, po, message); err != nil {
+			return err
+		}
 		result := tx.
 			Clauses(clause.OnConflict{
 				Columns:     []clause.Column{{Name: "mailbox_id"}, {Name: "dedupe_key"}},
@@ -313,6 +422,9 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 			return result.Error
 		}
 		created = true
+		if err := startThread(tx, po); err != nil {
+			return err
+		}
 		return createAttachments(tx, po.ID, message.Attachments)
 	})
 	if err != nil {
@@ -320,6 +432,7 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 	}
 	if created {
 		message.ID = po.ID
+		message.ThreadID = *po.ThreadID
 		message.AttachmentCount = po.AttachmentCount
 		message.CreatedAt = po.CreatedAt
 		message.UpdatedAt = po.UpdatedAt
@@ -352,57 +465,6 @@ func (r *repository) UpdateMessageDelivery(
 		"message_id":   messageID,
 		"failure_code": failureCode,
 	}).Error
-}
-
-func (r *repository) ListMessages(
-	ctx context.Context,
-	mailboxID uint,
-	filter domain.MailMessageFilter,
-) ([]*domain.MailMessage, int64, error) {
-	if r.db == nil {
-		return nil, 0, domain.ErrServiceUnavailable
-	}
-	page, perPage := filter.Page, filter.PerPage
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 15
-	}
-
-	query := r.conn(ctx).Model(&MailMessagePO{}).Where("mailbox_id = ?", mailboxID).Where(unsealedMessage)
-	if filter.Direction != "" {
-		query = query.Where("direction = ?", string(filter.Direction))
-	}
-	if filter.Unread != nil {
-		readByReader := "EXISTS (SELECT 1 FROM mail_message_reads WHERE mail_message_reads.message_id = mail_messages.id AND mail_message_reads.membership_id = ?)"
-		if *filter.Unread {
-			query = query.Where("direction = ? AND NOT "+readByReader, string(domain.MailDirectionInbound), filter.ReaderMembershipID)
-		} else {
-			query = query.Where("(direction = ? OR "+readByReader+")", string(domain.MailDirectionOutbound), filter.ReaderMembershipID)
-		}
-	}
-	query = whereMessageMatchesQuery(query, filter.Query)
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var rows []MailMessagePO
-	// A listing never needs the bodies; the detail endpoint returns them.
-	err := query.
-		Omit("text_body", "html_body").
-		Order("id desc").
-		Offset((page - 1) * perPage).
-		Limit(perPage).
-		Find(&rows).Error
-	if err != nil {
-		return nil, 0, err
-	}
-	messages := make([]*domain.MailMessage, 0, len(rows))
-	for i := range rows {
-		messages = append(messages, rows[i].toDomain())
-	}
-	return messages, total, nil
 }
 
 func (r *repository) FindMessage(ctx context.Context, mailboxID, id uint) (*domain.MailMessage, error) {
@@ -486,7 +548,15 @@ func (r *repository) DeleteMailboxReads(ctx context.Context, mailboxID, membersh
 	if membershipID != 0 {
 		query = query.Where("membership_id = ?", membershipID)
 	}
-	return query.Delete(&MailMessageReadPO{}).Error
+	if err := query.Delete(&MailMessageReadPO{}).Error; err != nil {
+		return err
+	}
+	// Stars are per person like reads, and leave with them.
+	stars := r.conn(ctx).Where("message_id IN (?)", messages)
+	if membershipID != 0 {
+		stars = stars.Where("membership_id = ?", membershipID)
+	}
+	return stars.Delete(&MailMessageStarPO{}).Error
 }
 
 func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) error {
@@ -501,10 +571,12 @@ func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) erro
 		if result.RowsAffected == 0 {
 			return ErrMailMessageNotFound
 		}
-		// The schema cascades too; deleting here keeps file content and read rows from outliving
-		// their message even where the foreign key is absent.
-		if err := tx.Where("message_id = ?", id).Delete(&MailMessageReadPO{}).Error; err != nil {
-			return err
+		// The schema cascades too; deleting here keeps file content, read, star, and label rows
+		// from outliving their message even where the foreign key is absent.
+		for _, dependant := range []any{&MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}} {
+			if err := tx.Where("message_id = ?", id).Delete(dependant).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Where("message_id = ?", id).Delete(&MailAttachmentPO{}).Error
 	})

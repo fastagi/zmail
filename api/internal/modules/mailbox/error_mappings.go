@@ -67,4 +67,11 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(ErrMailDNSRecordLocked, http.StatusConflict, domain.CodeMailDNSRecordLocked)
 	mapper.Register(ErrMailDNSRecordRejected, http.StatusUnprocessableEntity, domain.CodeMailDNSRecordRejected)
 	mapper.Register(ErrMailTemplateVariablesMissing, http.StatusUnprocessableEntity, domain.CodeMailTemplateVariablesMissing)
+	mapper.Register(ErrMailFolderNotFound, http.StatusNotFound, domain.CodeMailFolderNotFound)
+	mapper.Register(ErrMailLabelNotFound, http.StatusNotFound, domain.CodeMailLabelNotFound)
+	mapper.Register(ErrMailFolderNameTaken, http.StatusConflict, domain.CodeMailFolderNameTaken)
+	mapper.Register(ErrMailLabelNameTaken, http.StatusConflict, domain.CodeMailLabelNameTaken)
+	mapper.Register(ErrMailFolderLimitReached, http.StatusUnprocessableEntity, domain.CodeMailFolderLimitReached)
+	mapper.Register(ErrMailLabelLimitReached, http.StatusUnprocessableEntity, domain.CodeMailLabelLimitReached)
+	mapper.Register(ErrMailSearchTooBroad, http.StatusUnprocessableEntity, domain.CodeMailSearchTooBroad)
 }
