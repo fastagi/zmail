@@ -279,6 +279,52 @@ describe('organization mail domains', () => {
     expect(state.preview.mutateAsync).toHaveBeenCalledTimes(1);
   });
 
+  it('sends one connect for a double submit while the lookup runs', async () => {
+    let answer: (value: unknown) => void = () => undefined;
+    state.preview.mutateAsync.mockImplementation(
+      (name: string) =>
+        new Promise(resolve => {
+          answer = () =>
+            resolve({ name, apex: name, existing_mx: [], suggested_capability: 'send_receive' });
+        })
+    );
+    state.connect.mutateAsync.mockResolvedValue(pendingDomain());
+    renderPage();
+    const input = screen.getByLabelText('Domain');
+    const form = screen.getByRole('button', { name: 'Connect' }).closest('form')!;
+
+    fireEvent.change(input, { target: { value: 'mail.example.org' } });
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    // The form is held while it submits.
+    await waitFor(() => expect(screen.getByLabelText('Domain')).toBeDisabled());
+    expect(screen.getByRole('radio', { name: /Send only/u })).toBeDisabled();
+
+    answer(undefined);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Domain connected'));
+    expect(state.connect.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(within(form).queryByRole('alert')).toBeNull();
+    expect(screen.getByLabelText('Domain')).not.toBeDisabled();
+  });
+
+  it('asks to confirm a capability the lookup changed', async () => {
+    state.preview.mutateAsync.mockImplementation(async (name: string) => ({
+      name,
+      apex: name,
+      existing_mx: ['mxbiz1.qq.com'],
+      suggested_capability: 'send_only',
+    }));
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'example.org' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Connect' }).closest('form')!);
+
+    expect(
+      await screen.findByText('Review the choice above, then press Connect again.')
+    ).toBeInTheDocument();
+    expect(state.connect.mutateAsync).not.toHaveBeenCalled();
+  });
+
   it('connects at once when the lookup agrees with the chosen capability', async () => {
     state.connect.mutateAsync.mockResolvedValue(pendingDomain());
     renderPage();

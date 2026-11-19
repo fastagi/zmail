@@ -145,6 +145,11 @@ function ConnectDomainForm() {
   // The last preview, shown only while the name it was asked for is still in the field.
   const [found, setFound] = useState<{ query: string; preview: MailDomainPreview } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A lookup changed the capability on submit; the user confirms by submitting again.
+  const [confirming, setConfirming] = useState(false);
+  // Held from the start of a submit until its connect settles; the ref stops re-entry at once.
+  const submitting = useRef(false);
+  const [busy, setBusy] = useState(false);
   // The lookup in flight, shared by leaving the field and submitting.
   const lookup = useRef<{ query: string; result: Promise<MailDomainPreview | null> } | null>(null);
   // What async lookups read when they land: the name in the field and whether a choice was made.
@@ -175,6 +180,7 @@ function ConnectDomainForm() {
   };
 
   const choose = (option: MailDomainCapability) => {
+    setConfirming(false);
     latest.current.chosen = true;
     setChosen(true);
     setCapability(option);
@@ -184,6 +190,7 @@ function ConnectDomainForm() {
     const trimmed = next.trim();
     latest.current.name = trimmed;
     setName(next);
+    setConfirming(false);
     if (chosen) return;
     // A suggestion belongs to the name it was made for.
     setCapability(
@@ -193,18 +200,25 @@ function ConnectDomainForm() {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    // One submit at a time: a second click while the lookup or the connect runs is ignored.
+    if (submitting.current) return;
     setError(null);
+    setConfirming(false);
     if (value === '') {
       setError(t('errors.domainInvalid'));
       return;
     }
-    // Never connect a name nobody looked at: a mail service elsewhere would lose its mail.
-    const suggestion = await lookUp(value);
-    if (suggestion && !latest.current.chosen && suggestion.suggested_capability !== capability) {
-      // The suggestion now shows; submitting again confirms it.
-      return;
-    }
+    submitting.current = true;
+    setBusy(true);
     try {
+      // Look the name up before connecting it, so a mail service elsewhere is noticed. A failed
+      // lookup suggests nothing, and the name then connects with the selected capability.
+      const suggestion = await lookUp(value);
+      if (suggestion && !latest.current.chosen && suggestion.suggested_capability !== capability) {
+        // The suggestion now shows; submitting again confirms it.
+        setConfirming(true);
+        return;
+      }
       const domain = await connect.mutateAsync({
         name: value,
         capability:
@@ -226,6 +240,9 @@ function ConnectDomainForm() {
       );
     } catch (failure) {
       setError(t(resolveMailboxErrorKey(failure)));
+    } finally {
+      submitting.current = false;
+      setBusy(false);
     }
   };
 
@@ -255,7 +272,7 @@ function ConnectDomainForm() {
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
-            disabled={connect.isPending}
+            disabled={busy}
             placeholder={t('domain.connectPlaceholder')}
             aria-describedby="mail-domain-name-hint"
             onChange={event => changeName(event.target.value)}
@@ -263,12 +280,7 @@ function ConnectDomainForm() {
               if (value !== '') void lookUp(value);
             }}
           />
-          <Button
-            type="submit"
-            size="sm"
-            loading={connect.isPending}
-            icon={<Plus className="size-4" />}
-          >
+          <Button type="submit" size="sm" loading={busy} icon={<Plus className="size-4" />}>
             {t('domain.connectAction')}
           </Button>
         </div>
@@ -276,7 +288,7 @@ function ConnectDomainForm() {
           {t('domain.connectHint')}
         </p>
       </div>
-      <fieldset className="space-y-2" disabled={connect.isPending}>
+      <fieldset className="space-y-2" disabled={busy}>
         <legend className="text-sm font-medium">{t('domain.capabilityLabel')}</legend>
         <div className="flex flex-wrap gap-2">
           {capabilities.map(option => (
@@ -318,6 +330,11 @@ function ConnectDomainForm() {
             })}
           </AlertDescription>
         </Alert>
+      ) : null}
+      {confirming ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          {t('domain.capabilityConfirm')}
+        </p>
       ) : null}
       {error ? (
         <p role="alert" className="text-sm text-error">

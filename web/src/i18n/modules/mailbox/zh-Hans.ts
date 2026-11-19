@@ -194,6 +194,7 @@ const messages = {
     capabilitySendReceiveHint: '由 Zmail 接收发往该名称的邮件，它的 MX 记录将指向 Cloudflare。',
     capabilitySendOnly: '仅发信',
     capabilitySendOnlyHint: '发往该名称的邮件继续由你现在的邮箱服务接收。',
+    capabilityConfirm: '请核对上面的选择，然后再次点击“连接”。',
     subdomainHint:
       '{domain} 的邮件现在由 {hosts} 接收。想在 Zmail 收信又不影响现有邮箱，请使用子域名，例如 mail.{apex}。',
     sendOnlyBadge: '仅发信',

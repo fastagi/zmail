@@ -198,6 +198,7 @@ const messages = {
       'Zmail receives the mail for this name; its MX records point at Cloudflare.',
     capabilitySendOnly: 'Send only',
     capabilitySendOnlyHint: 'Mail to this name keeps going to your current mail service.',
+    capabilityConfirm: 'Review the choice above, then press Connect again.',
     subdomainHint:
       'Mail for {domain} goes to {hosts} now. To receive in Zmail without affecting that mail service, use a subdomain such as mail.{apex}.',
     sendOnlyBadge: 'Send only',
