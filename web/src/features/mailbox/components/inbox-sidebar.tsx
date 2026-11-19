@@ -57,7 +57,7 @@ interface SidebarGroup {
  * and unfolds its mailboxes; a readable mailbox shows its unread count and narrows to itself, an
  * unreadable one (an admin's) is locked, without a number, and cannot be chosen. Members see only
  * roles holding a mailbox they can see. Owners and admins get "Manage roles" beside the heading.
- * At the bottom: today's sending and links to the other mail pages.
+ * At the bottom: today's sending, links to the other mail pages, and the shortcut help.
  *
  * `rail` folds it to an icon rail between 1024 and 1279px wide (§11.11); the full sidebar, with
  * the mailboxes, the quota card, and the links, shows from 1280px and in the narrow-screen sheet.
@@ -77,6 +77,7 @@ export function InboxSidebar({
   onRole,
   onManageRoles,
   onCompose,
+  onShortcuts,
 }: {
   /** The organization's name, or its picker. */
   organization: ReactNode;
@@ -95,6 +96,8 @@ export function InboxSidebar({
   onManageRoles: () => void;
   /** Writes a new message; null when no mailbox may send. */
   onCompose: (() => void) | null;
+  /** Opens the keyboard shortcut help. */
+  onShortcuts: () => void;
 }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
@@ -336,6 +339,13 @@ export function InboxSidebar({
               {t(`inbox.footer.${key}`)}
             </Link>
           ))}
+          <button
+            type="button"
+            className="rounded-sm transition-colors focus-ring hover:text-text-main motion-reduce:transition-none"
+            onClick={onShortcuts}
+          >
+            {t('inbox.footer.shortcuts')}
+          </button>
         </nav>
       </div>
     </div>

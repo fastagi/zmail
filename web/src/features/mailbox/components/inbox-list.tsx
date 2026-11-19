@@ -1,6 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type Ref,
+} from 'react';
 import Link from 'next/link';
 import { useLocale } from 'next-intl';
 import { ExternalLink, PanelLeft, Search, X } from 'lucide-react';
@@ -79,6 +87,7 @@ export function InboxListHeader({
   mailboxHref = null,
   onClearMailbox,
   onShowSidebar,
+  searchRef,
 }: {
   title: string;
   subtitle?: string;
@@ -90,6 +99,8 @@ export function InboxListHeader({
   mailboxHref?: string | null;
   onClearMailbox?: () => void;
   onShowSidebar?: () => void;
+  /** The search field, which `/` focuses. */
+  searchRef?: Ref<HTMLInputElement>;
 }) {
   const t = useT('mailbox');
   const [search, setSearch] = useState(q);
@@ -107,6 +118,12 @@ export function InboxListHeader({
   const change = (value: string) => {
     setSearch(value);
     if (value.trim() === '' && q !== '') onSearch('');
+  };
+  /** `Esc` clears the field; an empty field leaves `Esc` to the page. */
+  const escape = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Escape' || search === '') return;
+    event.preventDefault();
+    change('');
   };
   const tab = (value: boolean, label: string, count?: number) => (
     <button
@@ -184,6 +201,7 @@ export function InboxListHeader({
           aria-hidden="true"
         />
         <Input
+          ref={searchRef}
           type="search"
           value={search}
           maxLength={MAIL_SEARCH_MAX_LENGTH}
@@ -191,6 +209,7 @@ export function InboxListHeader({
           placeholder={t('inbox.search.placeholder')}
           className="h-8 pl-8 text-[13px]"
           onChange={event => change(event.target.value)}
+          onKeyDown={escape}
         />
       </form>
       <div
@@ -259,6 +278,12 @@ export function InboxList({
     return () => observer.disconnect();
   }, [hasMore, onLoadMore, pageCount]);
 
+  // The row the keyboard moved to comes into view.
+  const list = useRef<HTMLUListElement | null>(null);
+  useEffect(() => {
+    list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
+  }, [selectedId]);
+
   const items = pages.flatMap(page => page.items);
   const focusable = items.some(item => item.id === selectedId)
     ? selectedId
@@ -281,7 +306,7 @@ export function InboxList({
 
   return (
     <div className="px-3 pb-3">
-      <ul role="listbox" aria-label={label} className="flex flex-col">
+      <ul ref={list} role="listbox" aria-label={label} className="flex flex-col">
         {items.map(item => {
           const unread = rowUnread(item);
           const selected = item.id === selectedId;

@@ -191,13 +191,14 @@ function readRow(item: InboxItem): InboxItem {
 }
 
 /**
- * Shows the row read in every cached unified inbox listing of the organization before the server
+ * Changes the row in every cached unified inbox listing of the organization before the server
  * answers. Answers the function that puts those listings back as they were, for a failed request.
  */
-export function markInboxRowRead(
+function patchInboxRow(
   queryClient: QueryClient,
   organizationId: number,
-  rowId: number
+  rowId: number,
+  change: (item: InboxItem) => InboxItem
 ): () => void {
   const queryKey = mailboxKeys.inboxes(organizationId);
   const snapshot = queryClient.getQueriesData<InboxListing>({ queryKey });
@@ -207,7 +208,7 @@ export function markInboxRowRead(
           ...listing,
           pages: listing.pages.map(page => ({
             ...page,
-            items: page.items.map(item => (item.id === rowId ? readRow(item) : item)),
+            items: page.items.map(item => (item.id === rowId ? change(item) : item)),
           })),
         }
       : listing
@@ -215,4 +216,44 @@ export function markInboxRowRead(
   return () => {
     for (const [key, listing] of snapshot) queryClient.setQueryData(key, listing);
   };
+}
+
+/** Shows the row read in every cached listing at once; answers the rollback. */
+export function markInboxRowRead(
+  queryClient: QueryClient,
+  organizationId: number,
+  rowId: number
+): () => void {
+  return patchInboxRow(queryClient, organizationId, rowId, readRow);
+}
+
+/**
+ * Stars or unstars a row of the unified inbox: the message, or every message of a thread row. The
+ * star shows in the cached listings at once and is put back if the request fails; the caller
+ * says why.
+ */
+export function useUpdateInboxMessage(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ item, starred }: { item: InboxItem; starred: boolean }): Promise<unknown> => {
+      const ids = item.thread?.message_ids ?? [item.id];
+      return ids.length === 1
+        ? mailboxService.updateMessage(organizationId, item.mailbox_id, ids[0], { starred })
+        : mailboxService.updateMessages(organizationId, item.mailbox_id, {
+            message_ids: ids,
+            starred,
+          });
+    },
+    meta: LOCAL_ERROR_HANDLING_META,
+    onMutate: ({ item, starred }) => ({
+      rollback: patchInboxRow(queryClient, organizationId, item.id, row => ({
+        ...row,
+        starred,
+        thread: row.thread && { ...row.thread, starred },
+      })),
+    }),
+    onError: (_error, _variables, context) => context?.rollback(),
+    onSettled: (_result, _error, { item }) =>
+      invalidateMail(queryClient, organizationId, item.mailbox_id),
+  });
 }

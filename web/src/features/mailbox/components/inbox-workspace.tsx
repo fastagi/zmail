@@ -1,9 +1,10 @@
 'use client';
 
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AlertCircle, Inbox, Mail, MailOpen, Settings2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -18,13 +19,16 @@ import {
   type ComposeDraft,
 } from '@/features/mailbox/components/compose-dialog';
 import { InboxList, InboxListHeader } from '@/features/mailbox/components/inbox-list';
-import type { InboxReaderNavigation } from '@/features/mailbox/components/inbox-reading-pane';
+import type {
+  InboxPaneActions,
+  InboxReaderNavigation,
+} from '@/features/mailbox/components/inbox-reading-pane';
 import {
   InboxSidebar,
   visibleRoles,
   type InboxRoleFilter,
 } from '@/features/mailbox/components/inbox-sidebar';
-import { MAILBOX_PARAM } from '@/features/mailbox/components/mailbox-params';
+import { MAILBOX_PARAM, readStoredMailboxId } from '@/features/mailbox/components/mailbox-params';
 import {
   MailOrganizationBoundary,
   MailOrganizationName,
@@ -45,6 +49,7 @@ import {
   useInboxTimezone,
   useMailRoles,
 } from '@/features/mailbox/hooks/use-inbox';
+import { useMailShortcuts, type MailShortcut } from '@/features/mailbox/hooks/use-mail-shortcuts';
 import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
 import {
   useMailOrganization,
@@ -78,6 +83,9 @@ const ManageMailboxesDialog = lazy(async () => {
 // The reading pane, with the thread and message readers, loads when a row first opens.
 const InboxReadingPane = lazy(async () => ({
   default: (await import('@/features/mailbox/components/inbox-reading-pane')).InboxReadingPane,
+}));
+const ShortcutHelpDialog = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/shortcut-help-dialog')).ShortcutHelpDialog,
 }));
 // The sidebar sheet of narrow screens loads when first opened.
 const Sheet = lazy(async () => ({ default: (await import('@/components/ui/sheet')).Sheet }));
@@ -267,6 +275,13 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     fromOptions?: readonly Mailbox[];
   } | null>(null);
   const formatter = useDateTimeFormat();
+  // Mounted from the first open on, so the dialog can animate closed.
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpMounted, setHelpMounted] = useState(false);
+  const paneActions = useRef<InboxPaneActions | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  /** `j` on the last loaded row asked for the next page: that row, whose successor opens next. */
+  const [advanceAfter, setAdvanceAfter] = useState<number | null>(null);
 
   /** Changes the URL state in place; every change of what is listed closes the open row. */
   const replaceParams = useCallback(
@@ -278,7 +293,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     },
     [pathname, router]
   );
-  const setListing = (changes: Partial<Record<(typeof filterParams)[number], string | null>>) =>
+  const setListing = (changes: Partial<Record<(typeof filterParams)[number], string | null>>) => {
+    setAdvanceAfter(null);
     replaceParams(next => {
       next.delete(OPEN_PARAM);
       for (const [name, value] of Object.entries(changes)) {
@@ -286,6 +302,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         else next.set(name, value);
       }
     });
+  };
 
   // A 400 means the inbox refused the query (§11.3). With filters in the URL they are the cause,
   // so the URL goes back to `view=all` and the open row closes; without any, only the zone can be,
@@ -316,6 +333,21 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
 
   const pages = inbox.data?.pages ?? [];
   const rows = pages.flatMap(page => page.items);
+
+  // Once the next page asked for by `j` arrives, the row after the last one opens; with no more
+  // pages, or with that row gone from the list, the wait ends.
+  const advanceIndex = advanceAfter === null ? -1 : rows.findIndex(row => row.id === advanceAfter);
+  const advanceTo = advanceIndex < 0 ? undefined : rows[advanceIndex + 1];
+  const advanceDone =
+    advanceAfter !== null && (advanceIndex < 0 || (!hasNextPage && !isFetchingNextPage));
+  useEffect(() => {
+    if (advanceTo) {
+      setAdvanceAfter(null);
+      replaceParams(next => next.set(OPEN_PARAM, String(advanceTo.id)));
+    } else if (advanceDone) {
+      setAdvanceAfter(null);
+    }
+  }, [advanceTo, advanceDone, replaceParams]);
   const rawOpen = searchParams.get(OPEN_PARAM) ?? '';
   const openId = rowIdPattern.test(rawOpen) ? Number(rawOpen) : null;
   const listed = openId === null ? undefined : rows.find(row => row.id === openId);
@@ -441,11 +473,19 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       : undefined;
   const sendable = mailboxes.data.filter(mailbox => mailbox.access.send);
   const sendableIds = new Set(sendable.map(mailbox => mailbox.id));
-  // A new message starts from the narrowed mailbox when it may send, else the first that may.
-  const composeFrom = sendable.find(mailbox => mailbox.id === urlState.box) ?? sendable[0];
-  const compose = composeFrom
-    ? () => setDraft({ mailbox: composeFrom, draft: emptyDraft, fromOptions: sendable })
-    : null;
+  // A new message starts from the narrowed mailbox when it may send, else the mailbox last
+  // opened, else the first that may (D26).
+  const compose =
+    sendable.length > 0
+      ? () => {
+          const stored = readStoredMailboxId(organizationId);
+          const from =
+            sendable.find(mailbox => mailbox.id === urlState.box) ??
+            sendable.find(mailbox => mailbox.id === stored) ??
+            sendable[0];
+          setDraft({ mailbox: from, draft: emptyDraft, fromOptions: sendable });
+        }
+      : null;
   // Rows name their role only while the list spans roles.
   const roleTags =
     urlState.box === null && urlState.role === null
@@ -459,6 +499,50 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         : urlState.view === 'all'
           ? t('inbox.empty.view')
           : t(`inbox.empty.${urlState.view}`);
+
+  /** Moves the open row by `delta`; past the last loaded row, opens the first of the next page. */
+  const step = (delta: 1 | -1) => {
+    if (rows.length === 0) return;
+    const target = openIndex < 0 ? 0 : openIndex + delta;
+    if (target >= 0 && target < rows.length) {
+      setOpenParam(rows[target].id);
+    } else if (delta > 0 && hasNextPage) {
+      setAdvanceAfter(rows[rows.length - 1].id);
+      loadMore();
+    }
+  };
+  /** An action on the open row that its mailbox's `send` allows; without it nothing is sent. */
+  const sending = (action: keyof InboxPaneActions) => () => {
+    if (!openItem) return;
+    if (!openMailbox?.access.send) {
+      toast.error(t('inbox.noSendPermission'));
+      return;
+    }
+    paneActions.current?.[action]();
+  };
+  const showHelp = () => {
+    setHelpMounted(true);
+    setHelpOpen(true);
+  };
+  const shortcuts: Partial<Record<MailShortcut, () => void>> = {
+    next: () => step(1),
+    previous: () => step(-1),
+    open: () => {
+      if (!openItem && rows.length > 0) setOpenParam(rows[0].id);
+    },
+    archive: sending('archive'),
+    trash: sending('trash'),
+    reply: sending('reply'),
+    replyAll: sending('replyAll'),
+    forward: sending('forward'),
+    star: () => paneActions.current?.star(),
+    compose: compose ?? (() => toast.error(t('inbox.noSendableMailbox'))),
+    search: () => searchRef.current?.focus(),
+    help: showHelp,
+    escape: () => {
+      if (openItem) setOpenParam(null);
+    },
+  };
 
   let list: React.ReactNode;
   if (inbox.isPending || resetting) {
@@ -528,6 +612,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     box: urlState.box,
     role: urlState.role,
     onManageRoles: () => setManagingRoles(true),
+    onShortcuts: showHelp,
   };
   const onView = (view: InboxView) =>
     setListing({ [VIEW_PARAM]: view === 'all' ? null : view, [SEARCH_PARAM]: null });
@@ -545,6 +630,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
 
   return (
     <div className="flex h-full min-h-0 bg-bg-canvas text-[13px] leading-normal antialiased">
+      <MailShortcuts bindings={shortcuts} />
       <aside className="hidden w-14 flex-none flex-col overflow-y-auto px-2 pt-[18px] pb-3.5 md:flex xl:w-[248px] xl:px-3">
         <InboxSidebar
           {...sidebarProps}
@@ -583,6 +669,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             setSidebarSheet(true);
             setSidebarOpen(true);
           }}
+          searchRef={searchRef}
         />
         <div data-scroll-pane className="min-h-0 flex-1 overflow-y-auto">
           {list}
@@ -610,6 +697,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
               }
               navigation={navigation}
               onUnavailable={refreshListing}
+              actionsRef={paneActions}
             />
           </Suspense>
         ) : (
@@ -643,6 +731,12 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         </Suspense>
       ) : null}
 
+      {helpMounted ? (
+        <Suspense fallback={null}>
+          <ShortcutHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+        </Suspense>
+      ) : null}
+
       {canManage && managingRoles ? (
         <Suspense fallback={null}>
           <ManageRolesDialog open onOpenChange={open => setManagingRoles(open)} />
@@ -660,6 +754,12 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       ) : null}
     </div>
   );
+}
+
+/** The inbox keys, bound while the three panes are on screen. */
+function MailShortcuts({ bindings }: { bindings: Partial<Record<MailShortcut, () => void>> }) {
+  useMailShortcuts(bindings, { enabled: true });
+  return null;
 }
 
 /**

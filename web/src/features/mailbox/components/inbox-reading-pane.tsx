@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { toast } from 'sonner';
@@ -15,7 +15,11 @@ import {
   ThreadView,
   type ReaderProps,
 } from '@/features/mailbox/components/thread-view';
-import { markInboxRowRead, useUpdateInboxMessages } from '@/features/mailbox/hooks/use-inbox';
+import {
+  markInboxRowRead,
+  useUpdateInboxMessage,
+  useUpdateInboxMessages,
+} from '@/features/mailbox/hooks/use-inbox';
 import {
   useMailMessage,
   useMailThread,
@@ -33,6 +37,16 @@ export type InboxReaderNavigation = Omit<
   ReaderProps,
   'mailboxId' | 'mailboxAddress' | 'canSend' | 'canOrganize'
 >;
+
+/** What the keyboard asks of the open row; the caller checks the mailbox's access first. */
+export interface InboxPaneActions {
+  archive: () => void;
+  trash: () => void;
+  star: () => void;
+  reply: () => void;
+  replyAll: () => void;
+  forward: () => void;
+}
 
 /**
  * The open mail is gone for the caller: its mailbox is no longer readable (the API answers a
@@ -65,7 +79,9 @@ function newestInbound(messages: readonly MailMessage[]): MailMessage | undefine
  * and `onUnavailable` refreshes what is listed, once per row.
  *
  * `access` is the row's mailbox access from the mailbox list, null when it is no longer listed.
- * `roleName` names the mailbox's role in the line above the subject.
+ * `roleName` names the mailbox's role in the line above the subject. While the mail can be read,
+ * `actionsRef` holds what the keyboard may ask of it; its star stars the row (every message of a
+ * thread), shown in the list at once and put back if the request fails.
  */
 export function InboxReadingPane({
   item,
@@ -73,18 +89,21 @@ export function InboxReadingPane({
   roleName = null,
   navigation,
   onUnavailable,
+  actionsRef,
 }: {
   item: InboxItem;
   access: Mailbox['access'] | null;
   roleName?: string | null;
   navigation: InboxReaderNavigation;
   onUnavailable: () => void;
+  actionsRef?: RefObject<InboxPaneActions | null>;
 }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
   const queryClient = useQueryClient();
   const markRead = useMarkMailMessageRead(organizationId);
   const updateInbox = useUpdateInboxMessages(organizationId);
+  const updateStar = useUpdateInboxMessage(organizationId);
   const readable = access?.view === true;
   const thread = useMailThread(
     organizationId,
@@ -138,10 +157,39 @@ export function InboxReadingPane({
       toast.error(t(resolveMailboxErrorKey(failure)));
     }
   };
+  const starred = item.thread?.starred ?? item.starred;
+  const toggleStar = () =>
+    updateStar.mutate(
+      { item, starred: !starred },
+      { onError: failure => toast.error(t(resolveMailboxErrorKey(failure))) }
+    );
   const messages: readonly MailMessage[] =
     (item.thread ? thread.data : detail.data ? [detail.data] : undefined) ?? [];
   const replyTarget = newestInbound(messages);
   const newest = messages.at(-1);
+  const reply = () => replyTarget && navigation.onReply(replyTarget);
+  const replyAll = () => replyTarget && navigation.onReplyAll(replyTarget);
+  const forward = () => newest && navigation.onForward(newest);
+  const pending = updateInbox.isPending;
+
+  useEffect(() => {
+    if (!actionsRef || unavailable) return;
+    actionsRef.current = {
+      archive: () => {
+        if (!pending) void move('archive');
+      },
+      trash: () => {
+        if (!pending) void move('trash');
+      },
+      star: toggleStar,
+      reply,
+      replyAll,
+      forward,
+    };
+    return () => {
+      actionsRef.current = null;
+    };
+  });
   const kicker = roleName
     ? t('inbox.reader.toRole', { address: item.mailbox_address, role: roleName })
     : t('inbox.reader.to', { address: item.mailbox_address });
@@ -206,31 +254,31 @@ export function InboxReadingPane({
               label={t('actions.reply')}
               keyCap="R"
               disabled={!replyTarget}
-              onClick={() => replyTarget && navigation.onReply(replyTarget)}
+              onClick={reply}
             />
             <ToolbarAction
               label={t('actions.replyAll')}
               keyCap="A"
               disabled={!replyTarget}
-              onClick={() => replyTarget && navigation.onReplyAll(replyTarget)}
+              onClick={replyAll}
             />
             <ToolbarAction
               label={t('actions.forward')}
               keyCap="F"
               disabled={!newest}
-              onClick={() => newest && navigation.onForward(newest)}
+              onClick={forward}
             />
             <span className="flex-1" />
             <ToolbarAction
               label={t('inbox.actions.archive')}
               keyCap="E"
-              disabled={updateInbox.isPending}
+              disabled={pending}
               onClick={() => void move('archive')}
             />
             <ToolbarAction
               label={t('inbox.actions.trash')}
               keyCap="#"
-              disabled={updateInbox.isPending}
+              disabled={pending}
               onClick={() => void move('trash')}
             />
           </div>

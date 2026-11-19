@@ -24,7 +24,11 @@ import {
   viewFilters,
   type MailView,
 } from '@/features/mailbox/components/mailbox-sidebar';
-import { MAILBOX_PARAM } from '@/features/mailbox/components/mailbox-params';
+import {
+  MAILBOX_PARAM,
+  readStoredMailboxId,
+  writeStoredMailboxId,
+} from '@/features/mailbox/components/mailbox-params';
 import { MailboxSwitcher } from '@/features/mailbox/components/mailbox-switcher';
 import { ManageFoldersDialog } from '@/features/mailbox/components/manage-folders-dialog';
 import { ManageLabelsDialog } from '@/features/mailbox/components/manage-labels-dialog';
@@ -75,27 +79,6 @@ import { cn } from '@/utils';
 export { MAILBOX_PARAM };
 const mailboxIdPattern = /^[1-9]\d{0,15}$/u;
 const searchDelayMilliseconds = 300;
-
-function storageKey(organizationId: number): string {
-  return `zmail.mailbox.${organizationId}`;
-}
-
-function readStoredMailboxId(organizationId: number): number | null {
-  try {
-    const raw = window.localStorage.getItem(storageKey(organizationId)) ?? '';
-    return mailboxIdPattern.test(raw) ? Number(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredMailboxId(organizationId: number, mailboxId: number): void {
-  try {
-    window.localStorage.setItem(storageKey(organizationId), String(mailboxId));
-  } catch {
-    // Storage may be unavailable; the URL still names the mailbox.
-  }
-}
 
 /**
  * Mailbox console, laid out as a three-pane mail client: the left rail with the mailbox switcher

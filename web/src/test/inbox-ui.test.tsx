@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MailboxesRoute } from '@/features/mailbox/components/mailboxes-route';
 import { markInboxRowRead } from '@/features/mailbox/hooks/use-inbox';
+import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import { mailboxKeys } from '@/features/mailbox/hooks/use-mailbox';
 import { settingKeys } from '@/features/setting/hooks/use-settings';
 import type { InboxFilters, InboxItem } from '@/features/mailbox/types';
@@ -1009,6 +1010,247 @@ describe('unified inbox', () => {
   });
 });
 
+describe('inbox keyboard shortcuts', () => {
+  beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    toast.success.mockReset();
+    toast.error.mockReset();
+    window.localStorage.clear();
+    window.history.replaceState(null, '', '/console/mailboxes');
+    state.organizations.data = page([organization('owner')]);
+    state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales')];
+    state.domains.data = [domain()];
+    state.stats.data = [];
+    state.inbox.data = listing([[threadRow(), singleRow()]]);
+    state.inbox.hasNextPage = false;
+    state.inbox.isFetchingNextPage = false;
+    state.inbox.fetchNextPage.mockReset();
+    state.reject = null;
+    state.counts.data = counts();
+    state.thread.data = [message({ id: 29, thread_id: 30 }), message({ id: 31, thread_id: 30 })];
+    state.thread.error = null;
+    state.detail.data = message({ id: 12, mailbox_id: 1 });
+    state.detail.error = null;
+    state.roles.data = [];
+    for (const mutation of [state.markRead, state.updateInbox, state.update, state.send]) {
+      mutation.isPending = false;
+      mutation.mutate.mockReset();
+      mutation.mutateAsync.mockReset();
+      mutation.mutateAsync.mockResolvedValue({ updated: 1 });
+    }
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('j j e archives the second row', async () => {
+    renderRoute();
+
+    press('j');
+    expect(openParam()).toBe('31');
+    press('j');
+    expect(openParam()).toBe('12');
+    await readingPaneLoaded();
+    await act(async () => press('e'));
+
+    expect(state.updateInbox.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(state.updateInbox.mutateAsync).toHaveBeenCalledWith({
+      mailboxId: 1,
+      message_ids: [12],
+      placement: 'archive',
+    });
+    // k moves back up; the arrow keys do the same as j and k.
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    press('k');
+    expect(openParam()).toBe('31');
+    press('ArrowDown');
+    expect(openParam()).toBe('12');
+  });
+
+  it('r opens reply from the row mailbox', async () => {
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+    await readingPaneLoaded();
+
+    press('r');
+
+    const dialog = await screen.findByRole('dialog', { name: 'Reply' });
+    expect(dialog).toHaveTextContent('Sent from sales@mail.example.com.');
+    expect(within(dialog).queryByLabelText('From')).not.toBeInTheDocument();
+  });
+
+  it('e on a view-only mailbox sends nothing and toasts', async () => {
+    state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales', { send: false })];
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+    await readingPaneLoaded();
+
+    for (const key of ['e', '#', 'r', 'a', 'f']) {
+      await act(async () => press(key));
+    }
+
+    expect(state.updateInbox.mutateAsync).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(toast.error).toHaveBeenCalledTimes(5);
+    expect(toast.error).toHaveBeenCalledWith('You don’t have permission to send from this mailbox.');
+  });
+
+  it('c needs a mailbox that may send', () => {
+    state.mailboxes.data = [mailbox(1, 'hello', { send: false })];
+    renderRoute();
+
+    press('c');
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(toast.error).toHaveBeenCalledWith('You don’t have a mailbox you can send from.');
+  });
+
+  it('single keys are ignored in the search box and during IME composition', () => {
+    renderRoute();
+    const search = screen.getByRole('searchbox', { name: 'Search all mail' });
+
+    search.focus();
+    press('j', search);
+    fireEvent.keyDown(document.body, { key: 'j', isComposing: true });
+    expect(openParam()).toBeNull();
+    // A modifier combination is left to the browser.
+    press('j', document.body, { ctrlKey: true });
+    expect(openParam()).toBeNull();
+
+    // `/` focuses the search box without typing into it.
+    search.blur();
+    const event = press('/');
+    expect(event.defaultPrevented).toBe(true);
+    expect(search).toHaveFocus();
+  });
+
+  it('Escape clears the search box', () => {
+    window.history.replaceState(null, '', '/console/mailboxes?q=invoice');
+    renderRoute();
+    const search = screen.getByRole('searchbox', { name: 'Search all mail' });
+    expect(search).toHaveValue('invoice');
+
+    press('Escape', search);
+
+    expect(search).toHaveValue('');
+    expect(new URLSearchParams(window.location.search).get('q')).toBeNull();
+  });
+
+  it('Escape closes the open mail', async () => {
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    await readingPaneLoaded();
+
+    press('Escape');
+
+    expect(openParam()).toBeNull();
+  });
+
+  it('s stars optimistically and rolls back on error', async () => {
+    queryClient.setQueryData(mailboxKeys.inbox(1, { view: 'all', group: 'thread', tz: 'UTC' }), {
+      pages: [{ items: [threadRow(), singleRow()], meta: meta(false) }],
+      pageParams: [undefined],
+    });
+    let reject!: (error: unknown) => void;
+    const pending = new Promise<never>((_, fail) => {
+      reject = fail;
+    });
+    const update = vi.spyOn(mailboxService, 'updateMessage').mockReturnValue(pending);
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    await readingPaneLoaded();
+
+    await act(async () => press('s'));
+
+    expect(update).toHaveBeenCalledWith(1, 1, 12, { starred: true });
+    expect(cachedRow(12)?.starred).toBe(true);
+
+    await act(async () => {
+      reject(new ApiError('down', ApiErrorCode.COMMON_SERVICE_UNAVAILABLE, 503));
+      await pending.catch(() => undefined);
+    });
+    await waitFor(() => expect(cachedRow(12)?.starred).toBe(false));
+    expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('s on a thread row stars every message of the thread', async () => {
+    const updates = vi
+      .spyOn(mailboxService, 'updateMessages')
+      .mockResolvedValue({ updated: 3 } as never);
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+    await readingPaneLoaded();
+
+    await act(async () => press('s'));
+
+    expect(updates).toHaveBeenCalledWith(1, 2, { message_ids: [29, 30, 31], starred: true });
+  });
+
+  it('j past the last loaded row loads and selects the next page', () => {
+    state.inbox.data = listing([[threadRow(), singleRow()]], true);
+    state.inbox.hasNextPage = true;
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    const { rerender } = renderRoute();
+
+    press('j');
+
+    expect(state.inbox.fetchNextPage).toHaveBeenCalledTimes(1);
+    expect(openParam()).toBe('12');
+
+    const next = {
+      ...singleRow(),
+      ...summary({ id: 40, subject: 'Renewal', created_at: '2026-11-14T09:00:00Z' }),
+    };
+    state.inbox.data = listing([[threadRow(), singleRow()], [next]], false);
+    state.inbox.hasNextPage = false;
+    rerender(wrap(<MailboxesRoute />));
+
+    expect(openParam()).toBe('40');
+    expect(rowButton('Renewal')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('c defaults the sender to the narrowed mailbox', async () => {
+    window.localStorage.setItem('zmail.mailbox.1', '1');
+    window.history.replaceState(null, '', '/console/mailboxes?box=2');
+    const { unmount } = renderRoute();
+
+    press('c');
+    expect(await screen.findByLabelText('From')).toHaveValue('2');
+    unmount();
+
+    // Unnarrowed, the remembered mailbox comes first, then the first that may send.
+    window.history.replaceState(null, '', '/console/mailboxes');
+    window.localStorage.setItem('zmail.mailbox.1', '2');
+    const second = renderRoute();
+    press('c');
+    expect(await screen.findByLabelText('From')).toHaveValue('2');
+    second.unmount();
+
+    window.localStorage.clear();
+    renderRoute();
+    press('c');
+    expect(await screen.findByLabelText('From')).toHaveValue('1');
+  });
+
+  it('? opens the shortcut help, and keys wait while it is open', async () => {
+    renderRoute();
+
+    press('?', document.body, { shiftKey: true });
+
+    const help = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(help).toHaveTextContent('Next message');
+    press('j');
+    expect(openParam()).toBeNull();
+    fireEvent.click(within(help).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    // The sidebar footer opens it too.
+    fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+  });
+});
+
 describe('markInboxRowRead', () => {
   it('marks the row read in every cached listing and puts them back on rollback', () => {
     const client = new QueryClient();
@@ -1036,6 +1278,19 @@ describe('markInboxRowRead', () => {
     expect(items(other)?.find(item => item.id === 12)?.read).toBe(false);
   });
 });
+
+/** Presses `key` on `target` (the page by default); answers the event, to see what it prevented. */
+function press(key: string, target: Element = document.body, init: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+  act(() => {
+    target.dispatchEvent(event);
+  });
+  return event;
+}
+
+function openParam() {
+  return new URLSearchParams(window.location.search).get('open');
+}
 
 function viewButton(name: RegExp) {
   const views = screen.getByRole('navigation', { name: 'Inbox views' });
