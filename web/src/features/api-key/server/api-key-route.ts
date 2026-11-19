@@ -111,7 +111,7 @@ export async function createApiKeyRoute(request: Request): Promise<NextResponse>
       path: 'api-keys',
       accessToken: authentication.accessToken,
       body: parsed.data,
-      fieldMap: { name: 'name', scopes: 'scopes', expires_at: 'expires_at' },
+      fieldMap: { name: 'name', scopes: 'scopes', expires_at: 'expires_at', mode: 'mode' },
     });
   }
 

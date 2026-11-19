@@ -220,6 +220,45 @@ function delegatesPublicTokenGuard(path: string, handler: RouteHandlerSource): b
   );
 }
 
+/**
+ * The developer console's transactional routes live in their own module but take the mailbox
+ * feature's availability (`resolveMailboxRoute`) and finish with `privateMailboxResponse`.
+ */
+const developerRouteModule = resolve(
+  process.cwd(),
+  'src/features/developer/server/developer-route.ts'
+);
+
+function isDeveloperRoute(path: string): boolean {
+  const route = relativeRoute(path);
+  return (
+    route.startsWith('transactional-mail-log/') || route.startsWith('transactional-test-sends/')
+  );
+}
+
+function delegatesDeveloperGuard(path: string, handler: RouteHandlerSource): boolean {
+  if (!isDeveloperRoute(path)) return false;
+  const source = readFileSync(developerRouteModule, 'utf8');
+  const handlers = Array.from(
+    source.matchAll(/export async function (\w+Route)\b/g),
+    match => match[1]
+  ).filter(name => new RegExp(`\\b${name}\\(`).test(handler.source));
+  const resolvers = unsafeMethods.has(handler.method)
+    ? ['resolveDeveloperMutationRoute(']
+    : ['resolveDeveloperReadRoute(', 'resolveDeveloperMutationRoute('];
+  return (
+    handlers.length > 0 &&
+    handlers.every(name => {
+      const body = exportedFunction(source, name);
+      const firstAwait = body.indexOf('await ');
+      return (
+        firstAwait >= 0 &&
+        resolvers.some(resolver => body.startsWith(resolver, firstAwait + 'await '.length))
+      );
+    })
+  );
+}
+
 function pluginRouteModuleFor(path: string): PluginRouteModule | undefined {
   const source = readRoute(path);
   return pluginRouteModules.find(routeModule =>
@@ -308,6 +347,7 @@ describe('mock BFF route contract', () => {
             !delegatesUsageGuard(path, handler) &&
             !delegatesWebhookGuard(path, handler) &&
             !delegatesPluginGuard(path, handler) &&
+            !delegatesDeveloperGuard(path, handler) &&
             !delegatesPublicTokenGuard(path, handler)
         )
         .map(handler => `${relativeRoute(path)}:${handler.method}`)
@@ -329,6 +369,7 @@ describe('mock BFF route contract', () => {
         .filter(handler => !delegatesUsageGuard(path, handler))
         .filter(handler => !delegatesWebhookGuard(path, handler))
         .filter(handler => !delegatesPluginGuard(path, handler))
+        .filter(handler => !delegatesDeveloperGuard(path, handler))
         .filter(handler => !delegatesPublicTokenGuard(path, handler))
         .filter(handler => {
           const availabilityGuard = handler.source.indexOf(productionGuard(path));
@@ -499,6 +540,32 @@ describe('mock BFF route contract', () => {
       }
     });
   }
+
+  it('keeps developer console routes ordered behind availability, origin, and authentication', () => {
+    const source = readFileSync(developerRouteModule, 'utf8');
+    for (const name of ['resolveDeveloperReadRoute', 'resolveDeveloperMutationRoute']) {
+      const resolver = internalFunction(source, name);
+      const availability = resolver.indexOf('resolveMailboxRoute(');
+      const mockGuard = resolver.indexOf('guardMockBffRoute(');
+      const authentication = resolver.indexOf('authenticateDeveloperBackend(');
+      expect(availability, name).toBeGreaterThanOrEqual(0);
+      expect(mockGuard, name).toBeGreaterThan(availability);
+      expect(authentication, name).toBeGreaterThan(mockGuard);
+      if (name === 'resolveDeveloperMutationRoute') {
+        const originGuard = resolver.indexOf('guardSameOriginMutation(');
+        expect(originGuard).toBeGreaterThan(mockGuard);
+        expect(authentication).toBeGreaterThan(originGuard);
+      }
+    }
+    const routes = listRouteFiles(appApiRoot).filter(isDeveloperRoute);
+    expect(routes.length).toBe(3);
+    for (const path of routes) {
+      for (const handler of routeHandlers(path)) {
+        expect(delegatesDeveloperGuard(path, handler), relativeRoute(path)).toBe(true);
+        expect(handler.source, relativeRoute(path)).toContain('privateMailboxResponse(');
+      }
+    }
+  });
 
   it('keeps the public unsubscribe route token-only, feature-gated, and session-free', () => {
     const source = readFileSync(publicTokenRouteModule, 'utf8');
