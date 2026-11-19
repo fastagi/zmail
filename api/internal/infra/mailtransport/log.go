@@ -31,6 +31,7 @@ func (l *Log) Send(ctx context.Context, mail Message) (Result, error) {
 		slog.Int("text_bytes", len(mail.TextBody)),
 		slog.Int("html_bytes", len(mail.HTMLBody)),
 	)
-	// Nothing is delivered, so nothing is reported per recipient.
+	// Nothing is delivered, so nothing is reported per recipient, and it never fails with an
+	// *Error (so it never reports Responded).
 	return Result{}, nil
 }

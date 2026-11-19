@@ -143,7 +143,8 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 
 	response, err := c.client.Do(request)
 	if err != nil {
-		// The provider may or may not have accepted the message; report it as retryable.
+		// The provider may or may not have accepted the message: not permanent, and without an HTTP
+		// status (Responded false), so callers must not assume it was refused.
 		return Result{}, &Error{Code: failureTransport}
 	}
 	defer response.Body.Close()
@@ -167,7 +168,7 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 		}
 		permanent := response.StatusCode >= 400 && response.StatusCode < 500 &&
 			response.StatusCode != http.StatusTooManyRequests && response.StatusCode != http.StatusRequestTimeout
-		return Result{}, &Error{Code: code, Permanent: permanent}
+		return Result{}, &Error{Code: code, Permanent: permanent, Responded: true}
 	}
 	if decodeErr != nil || parsed.Result == nil {
 		return Result{}, &Error{Code: failureInvalidResponse}
@@ -183,9 +184,9 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 		// Nobody was accepted. The result still tells the caller who was refused and why.
 		switch {
 		case len(result.Bounced) > 0:
-			return result, &Error{Code: failurePermanentBounce, Permanent: true}
+			return result, &Error{Code: failurePermanentBounce, Permanent: true, Responded: true}
 		case len(result.Suppressed) > 0:
-			return result, &Error{Code: failureSuppressed, Permanent: true}
+			return result, &Error{Code: failureSuppressed, Permanent: true, Responded: true}
 		}
 	}
 	return result, nil
