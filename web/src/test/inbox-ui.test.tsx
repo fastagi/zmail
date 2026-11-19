@@ -707,6 +707,23 @@ describe('unified inbox', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Ungrouped' })).toBeInTheDocument();
   });
 
+  it('choosing a role or a mailbox drops the search', () => {
+    window.history.replaceState(null, '', '/console/mailboxes?q=invoice');
+    state.mailboxes.data = [mailbox(1, 'hello', {}, 3), mailbox(2, 'sales')];
+    state.roles.data = [role(3, 'Design', [1], 'blue')];
+    renderRoute();
+
+    fireEvent.click(within(groupsNav()).getByRole('button', { name: /^Design/u }));
+    let params = new URLSearchParams(window.location.search);
+    expect([params.get('role'), params.get('q')]).toEqual(['3', null]);
+    expect(screen.getByRole('searchbox')).toHaveValue('');
+
+    window.history.replaceState(null, '', '/console/mailboxes?q=invoice&role=3');
+    fireEvent.click(mailboxButton(/^hello@/u));
+    params = new URLSearchParams(window.location.search);
+    expect([params.get('box'), params.get('q')]).toEqual(['1', null]);
+  });
+
   it('an admin sees unreadable mailboxes locked without a number', () => {
     state.organizations.data = page([organization('admin')]);
     state.mailboxes.data = [
