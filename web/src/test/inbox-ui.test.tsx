@@ -799,6 +799,75 @@ describe('unified inbox', () => {
     expect(toast.success).toHaveBeenCalledWith('Role updated');
   });
 
+  it('the roles dialog puts a readable mailbox in a role and the inbox follows', async () => {
+    state.mailboxes.data = [
+      mailbox(1, 'hello', { administer: true }),
+      mailbox(2, 'sales', { administer: true }, 5),
+      mailbox(3, 'ops', { administer: false }),
+    ];
+    state.roles.data = [role(5, 'Agency', [2], 'orange'), role(3, 'Design', [], 'blue')];
+    state.inbox.data = listing([[threadRow(), singleRow()]]);
+    // The server's answer, as the refetch after the write would show it.
+    state.assignRole.mutateAsync.mockImplementation(
+      async ({ mailboxId, roleId }: { mailboxId: number; roleId: number | null }) => {
+        const mailboxes = state.mailboxes.data as ReturnType<typeof mailbox>[];
+        state.mailboxes.data = mailboxes.map(item =>
+          item.id === mailboxId ? { ...item, role_id: roleId } : item
+        );
+        state.roles.data = [
+          role(5, 'Agency', mailboxId === 2 && roleId !== 5 ? [] : [2], 'orange'),
+          role(3, 'Design', roleId === 3 ? [mailboxId] : [], 'blue'),
+        ];
+        const rows = [threadRow(), singleRow()];
+        state.inbox.data = listing([
+          rows.map(row => (row.mailbox_id === mailboxId ? { ...row, role_id: roleId } : row)),
+        ]);
+        return mailbox(mailboxId, 'x', {}, roleId);
+      }
+    );
+    const view = renderRoute();
+
+    fireEvent.click(within(groupsNav()).getByRole('button', { name: 'Manage roles' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Manage roles' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mailboxes of Design' }));
+    const checklist = within(dialog).getByRole('group', { name: 'Mailboxes of Design' });
+    // Only mailboxes the caller administers; one in another role says so.
+    expect(within(checklist).queryByRole('checkbox', { name: /ops@/u })).toBeNull();
+    expect(within(checklist).getByRole('checkbox', { name: /sales@.*Agency/u })).not.toBeChecked();
+    const hello = within(checklist).getByRole('checkbox', { name: /^hello@/u });
+    expect(hello).not.toBeChecked();
+
+    await act(async () => {
+      fireEvent.click(hello);
+    });
+    expect(state.assignRole.mutateAsync).toHaveBeenCalledWith({ mailboxId: 1, roleId: 3 });
+    view.rerender(wrap(<MailboxesRoute />));
+
+    expect(within(checklist).getByRole('checkbox', { name: /^hello@/u })).toBeChecked();
+    // Once the dialog is closed, the row of hello@ carries the Design tag and the sidebar lists
+    // hello@ under Design.
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(rowButton('Invoice')).toHaveTextContent('Design');
+    expect(within(groupsNav()).queryByRole('button', { name: /^hello@/u })).toBeNull();
+    fireEvent.click(within(groupsNav()).getByRole('button', { name: /^Design/u }));
+    expect(mailboxButton(/^hello@/u)).toBeInTheDocument();
+
+    // Checking a mailbox of another role moves it; unchecking takes it out.
+    fireEvent.click(within(groupsNav()).getByRole('button', { name: 'Manage roles' }));
+    const again = await screen.findByRole('dialog', { name: 'Manage roles' });
+    fireEvent.click(within(again).getByRole('button', { name: 'Mailboxes of Design' }));
+    const list = within(again).getByRole('group', { name: 'Mailboxes of Design' });
+    await act(async () => {
+      fireEvent.click(within(list).getByRole('checkbox', { name: /sales@/u }));
+    });
+    expect(state.assignRole.mutateAsync).toHaveBeenLastCalledWith({ mailboxId: 2, roleId: 3 });
+    await act(async () => {
+      fireEvent.click(within(list).getByRole('checkbox', { name: /^hello@/u }));
+    });
+    expect(state.assignRole.mutateAsync).toHaveBeenLastCalledWith({ mailboxId: 1, roleId: null });
+  });
+
   it('narrowing to a role hides row role tags', () => {
     state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales', {}, 3)];
     state.roles.data = [role(3, 'Design', [2])];

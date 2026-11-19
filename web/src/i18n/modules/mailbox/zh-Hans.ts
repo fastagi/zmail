@@ -253,6 +253,9 @@ const messages = {
     mailboxRole: '{address} 的角色',
     noRole: '无角色',
     assigned: '角色已更新',
+    mailboxes: '{name} 的邮箱',
+    mailboxInRole: '{address}，当前属于 {role}',
+    noAdministeredMailboxes: '没有你可管理、可放入角色的邮箱。',
   },
   labelColors: {
     gray: '灰色',

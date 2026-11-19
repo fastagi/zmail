@@ -262,6 +262,9 @@ const messages = {
     mailboxRole: 'Role of {address}',
     noRole: 'No role',
     assigned: 'Role updated',
+    mailboxes: 'Mailboxes of {name}',
+    mailboxInRole: '{address}, now in {role}',
+    noAdministeredMailboxes: 'You administer no mailboxes to put in a role.',
   },
   labelColors: {
     gray: 'Gray',
