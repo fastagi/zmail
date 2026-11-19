@@ -84,6 +84,11 @@ func (r *repository) DeleteFolder(ctx context.Context, mailboxID, id uint) error
 			}
 			return err
 		}
+		// Lock the folder's messages in id order, the order a batch locks them in, before
+		// changing any of them.
+		if err := lockMessagesInOrder(tx, tx.Model(&MailMessagePO{}).Select("id").Where("folder_id = ?", id)); err != nil {
+			return err
+		}
 		if err := tx.Model(&MailMessagePO{}).
 			Where("folder_id = ? AND placement = ?", id, string(domain.MailPlacementFolder)).
 			Updates(map[string]any{"placement": string(domain.MailPlacementDefault), "folder_id": nil}).Error; err != nil {
@@ -195,14 +200,25 @@ func (r *repository) DeleteLabel(ctx context.Context, mailboxID, id uint) error 
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Where("id = ? AND mailbox_id = ?", id, mailboxID).Delete(&MailLabelPO{})
-		if result.Error != nil {
-			return result.Error
+		// Lock order: the label, then its messages in id order, then the rows. A batch that adds
+		// or removes this label holds the label FOR SHARE first; a batch that replaces labels holds
+		// its messages first and removes this label's rows only under those locks. Waiting on the
+		// messages here, before touching a row, means neither ever waits on the other in a cycle.
+		var found []uint
+		if err := tx.Model(&MailLabelPO{}).Where("id = ? AND mailbox_id = ?", id, mailboxID).
+			Clauses(clause.Locking{Strength: "UPDATE"}).Pluck("id", &found).Error; err != nil {
+			return err
 		}
-		if result.RowsAffected == 0 {
+		if len(found) == 0 {
 			return ErrMailLabelNotFound
 		}
-		return tx.Where("label_id = ?", id).Delete(&MailMessageLabelPO{}).Error
+		if err := lockMessagesInOrder(tx, tx.Model(&MailMessageLabelPO{}).Select("message_id").Where("label_id = ?", id)); err != nil {
+			return err
+		}
+		if err := tx.Where("label_id = ?", id).Delete(&MailMessageLabelPO{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ? AND mailbox_id = ?", id, mailboxID).Delete(&MailLabelPO{}).Error
 	})
 }
 
@@ -237,4 +253,12 @@ func (r *repository) CountLabels(ctx context.Context, mailboxID uint) (int64, er
 // lockMailbox takes a transaction advisory lock for one kind of per-mailbox write.
 func lockMailbox(tx *gorm.DB, kind string, mailboxID uint) error {
 	return tx.Exec(`SELECT pg_advisory_xact_lock(hashtext(?), ?)`, kind, int32(mailboxID)).Error //nolint:gosec // lock key only needs to be stable per mailbox
+}
+
+// lockMessagesInOrder locks the messages whose ids the subquery selects FOR UPDATE, in id order,
+// the order LockMessages takes them in.
+func lockMessagesInOrder(tx *gorm.DB, ids *gorm.DB) error {
+	var locked []uint
+	return tx.Model(&MailMessagePO{}).Where("id IN (?)", ids).Order("id").
+		Clauses(clause.Locking{Strength: "UPDATE"}).Pluck("id", &locked).Error
 }

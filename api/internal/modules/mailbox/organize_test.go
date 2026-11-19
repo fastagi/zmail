@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/fastagi/zmail/api/internal/domain"
 )
 
@@ -695,11 +697,7 @@ func TestBatchMoveAndFolderDeleteDoNotDeadlock(t *testing.T) {
 	}
 
 	// The deleting transaction, the batch, and the polling below each need a connection.
-	pool, err := db.DB()
-	if err != nil {
-		t.Fatalf("pool: %v", err)
-	}
-	pool.SetMaxOpenConns(4)
+	widenPool(t, db, 4)
 
 	// The deleting transaction locks the folder first, as DeleteFolder does.
 	deleting := db.Begin()
@@ -718,23 +716,7 @@ func TestBatchMoveAndFolderDeleteDoNotDeadlock(t *testing.T) {
 		done <- err
 	}()
 	// Wait until the batch is blocked behind the deleting transaction.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var blocked int
-		poll, cancel := context.WithTimeout(ctx, time.Second)
-		err := db.WithContext(poll).Raw(`SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, pid).Scan(&blocked).Error
-		cancel()
-		if err != nil {
-			t.Fatalf("blocked sessions: %v", err)
-		}
-		if blocked > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the batch never waited for the folder lock")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitUntilBlockedBy(t, db, pid)
 	// The rest of DeleteFolder: move the folder's messages out, then delete it.
 	if err := deleting.Exec(`UPDATE mail_messages SET placement = 'default', folder_id = NULL
 		WHERE folder_id = ? AND placement = 'folder'`, folder.ID).Error; err != nil {
@@ -768,4 +750,92 @@ func TestMissingMessageAnswersBeforeMissingFolderAndLabel(t *testing.T) {
 		Placement: placementPtr(domain.MailPlacementFolder), FolderID: uintPtr(999_998), AddLabelIDs: []uint{999_997},
 	})
 	expectError(t, "missing folder and label", err, ErrMailFolderNotFound)
+}
+
+// widenPool lets a test hold two transactions and still poll, and restores the pool afterwards.
+func widenPool(t *testing.T, db *gorm.DB, open int) {
+	t.Helper()
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	previous := pool.Stats().MaxOpenConnections
+	pool.SetMaxOpenConns(open)
+	t.Cleanup(func() { pool.SetMaxOpenConns(previous) })
+}
+
+// waitUntilBlockedBy waits until another session waits on the backend pid.
+func waitUntilBlockedBy(t *testing.T, db *gorm.DB, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var blocked int
+		poll, cancel := context.WithTimeout(context.Background(), time.Second)
+		err := db.WithContext(poll).Raw(`SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, pid).
+			Scan(&blocked).Error
+		cancel()
+		if err != nil {
+			t.Fatalf("blocked sessions: %v", err)
+		}
+		if blocked > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no session ever waited on the open transaction")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A batch that replaces labels removes rows of labels it never locked. Deleting one of those
+// labels at the same time waits for the batch's messages instead of deadlocking with it.
+func TestReplaceLabelsAndLabelDeleteDoNotDeadlock(t *testing.T) {
+	f := newOrganizeFixture(t)
+	ctx := context.Background()
+	db := f.repo.(*repository).db
+	box := f.team.ID
+	first, second := f.teamMessage.ID, f.receive(t, f.team, "Second").ID
+	doomed := f.label(t, f.e, box, "Doomed")
+	if _, err := f.service.UpdateMessages(ctx, f.b, box, []uint{first, second}, MessageUpdate{AddLabelIDs: []uint{doomed.ID}}); err != nil {
+		t.Fatalf("label both: %v", err)
+	}
+	widenPool(t, db, 4)
+
+	// The replacing batch, step by step: lock the messages in id order, then delete their rows
+	// of labels outside the new set, here the second message's first.
+	batch := db.Begin()
+	defer batch.Rollback()
+	var pid int
+	if err := batch.Raw(`SELECT pg_backend_pid()`).Scan(&pid).Error; err != nil {
+		t.Fatalf("backend pid: %v", err)
+	}
+	if err := batch.Exec(`SELECT id FROM mail_messages WHERE id IN ? ORDER BY id FOR UPDATE`, []uint{first, second}).Error; err != nil {
+		t.Fatalf("lock the messages: %v", err)
+	}
+	if err := batch.Exec(`DELETE FROM mail_message_labels WHERE message_id = ? AND label_id = ?`, second, doomed.ID).Error; err != nil {
+		t.Fatalf("remove the second message's label: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- f.service.DeleteLabel(ctx, f.e, box, doomed.ID) }()
+	waitUntilBlockedBy(t, db, pid)
+	if err := batch.Exec(`DELETE FROM mail_message_labels WHERE message_id = ? AND label_id = ?`, first, doomed.ID).Error; err != nil {
+		t.Fatalf("remove the first message's label: %v", err)
+	}
+	if err := batch.Commit().Error; err != nil {
+		t.Fatalf("commit the batch: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("DeleteLabel next to a replacing batch: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("DeleteLabel never finished")
+	}
+	var rows int64
+	db.Model(&MailMessageLabelPO{}).Where("label_id = ?", doomed.ID).Count(&rows)
+	if rows != 0 {
+		t.Fatalf("%d rows of the deleted label remain", rows)
+	}
 }
