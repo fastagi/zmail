@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Zmail 开发者 · 事务邮件</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;family=Noto+Serif+SC:wght@600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;-webkit-font-smoothing:antialiased}
+.dv{--bg:#FBFAF7;--surface:#FFFFFF;--ink:#16150F;--ink2:#3A3833;--muted:#77736A;--faint:#A8A49B;--line:#ECE9E3;--line2:#F3F1EC;--accent:#2F4BD8;--accent-soft:#EEF1FD;--ok:#2F6B4F;--ok-soft:#EAF2EC;--warn:#B4541F;--warn-soft:#FBF3EA;--bad:#A23B2A;--bad-soft:#FAEDEA}
+.dv button{font:inherit;color:inherit}
+.dv .serif{font-family:Newsreader,'Noto Serif SC',Georgia,serif;letter-spacing:-0.01em}
+.dv .mono{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace}
+.dv .kbd{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;font-size:10.5px;color:var(--muted);background:var(--surface)}
+.dv .nav:hover{background:#F2F0EB}
+.dv .row:hover{background:#F7F5F0}
+.dv .chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11.5px}
+</style>
+</helmet>
+<div class="dv" style="width: 1440px; height: 900px; display: flex; background: var(--bg); color: var(--ink); font-family: Inter, 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif; font-size: 13px; line-height: 1.5; overflow: hidden; position: relative">
+
+<!-- Sidebar -->
+<aside style="width: 232px; flex: none; display: flex; flex-direction: column; padding: 18px 12px 14px 12px; gap: 2px">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 8px 18px 8px">
+<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#16150F"></rect><path d="M7 8h10L7 16h10" stroke="#FBFAF7" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+<span style="font-weight: 600">ZGI 智能科技</span>
+</div>
+<div style="padding: 0 12px 6px 12px; color: var(--faint); font-size: 11px; letter-spacing: 0.06em">开发者</div>
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+<button type="button" class="nav" onClick="{{t.pick}}" style="{{t.style}}"><span style="flex: 1">{{t.label}}</span><span style="font-size: 12px; color: var(--faint)">{{t.count}}</span></button>
+</sc-for>
+<div style="flex: 1"></div>
+<div style="margin: 0 4px; padding: 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; color: var(--muted); line-height: 1.7">
+<div style="display: flex; align-items: center; gap: 8px; color: var(--ink2)"><span style="{{modeDot}}"></span><span style="flex: 1; font-weight: 500">{{modeLabel}}</span><button type="button" onClick="{{toggleMode}}" style="border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 0 8px; height: 22px; cursor: pointer; font-size: 11.5px">切换</button></div>
+<div>{{modeHint}}</div>
+</div>
+<div style="display: flex; gap: 4px; padding: 10px 8px 0 8px; color: var(--muted)"><span style="flex: 1">邮件</span><span>群发</span><span style="margin-left: 10px; color: var(--ink); font-weight: 600">开发者</span><span style="margin-left: 10px">管理</span></div>
+</aside>
+
+<main style="flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); margin: 10px 10px 10px 0; border-radius: 14px; border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(22,21,15,0.04); overflow: hidden">
+<header style="padding: 24px 32px 14px 32px; border-bottom: 1px solid var(--line2)">
+<div style="display: flex; align-items: baseline; gap: 12px"><h1 class="serif" style="margin: 0; font-size: 28px; font-weight: 600">{{title}}</h1><span style="color: var(--muted)">{{subtitle}}</span></div>
+</header>
+
+<div style="flex: 1; overflow: auto">
+
+<!-- Quick start -->
+<sc-if value="{{isStart}}" hint-placeholder-val="{{true}}">
+<div style="display: grid; grid-template-columns: 1fr 420px; gap: 28px; padding: 24px 32px">
+<div>
+<div style="display: flex; flex-direction: column; gap: 14px">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="3">
+<div style="display: flex; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 12px">
+<span style="{{s.badge}}">{{s.mark}}</span>
+<div style="flex: 1"><div style="font-weight: 600">{{s.title}}</div><div style="color: var(--muted); margin-top: 2px">{{s.desc}}</div></div>
+<span style="{{s.stateStyle}}">{{s.state}}</span>
+</div>
+</sc-for>
+</div>
+<div style="margin-top: 22px; display: flex; align-items: center; gap: 10px">
+<div style="flex: 1; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: #FAF9F6"><span style="color: var(--muted)">API 密钥</span><span class="mono" style="flex: 1">{{keyShown}}</span><span class="chip" style="background: var(--accent-soft); color: var(--accent)">mail:send · 仅事务</span></div>
+<button type="button" onClick="{{revealKey}}" style="height: 40px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); cursor: pointer">{{keyBtn}}</button>
+</div>
+<div style="margin-top: 8px; font-size: 12px; color: var(--muted)">密钥只在创建时显示一次。这把钥匙只能发事务邮件，不能群发、不能读收件箱。</div>
+</div>
+<div>
+<div style="display: flex; gap: 2px; padding: 3px; background: var(--line2); border-radius: 9px; width: max-content">
+<sc-for list="{{langs}}" as="l" hint-placeholder-count="3"><button type="button" onClick="{{l.pick}}" style="{{l.style}}">{{l.label}}</button></sc-for>
+</div>
+<pre class="mono" style="margin: 10px 0 0 0; padding: 18px; border-radius: 12px; background: #16150F; color: #E9E6DF; font-size: 12.5px; line-height: 1.75; white-space: pre-wrap; min-height: 300px">{{code}}</pre>
+<div style="display: flex; align-items: center; gap: 10px; margin-top: 12px">
+<button type="button" onClick="{{sendTest}}" style="height: 34px; padding: 0 16px; border: 0; border-radius: 9px; background: var(--ink); color: #FBFAF7; font-weight: 500; cursor: pointer">发一封试试</button>
+<span style="color: var(--muted); font-size: 12px">{{testResult}}</span>
+</div>
+</div>
+</div>
+</sc-if>
+
+<!-- Templates -->
+<sc-if value="{{isTpl}}" hint-placeholder-val="{{false}}">
+<div style="display: grid; grid-template-columns: 300px 1fr; height: 100%">
+<div style="border-right: 1px solid var(--line2); padding: 12px">
+<sc-for list="{{tpls}}" as="t" hint-placeholder-count="4">
+<div class="row" onClick="{{t.pick}}" style="{{t.style}}">
+<div style="display: flex; align-items: center; gap: 8px"><span style="font-weight: 600; flex: 1">{{t.name}}</span><span class="chip" style="{{t.kindStyle}}">{{t.kind}}</span></div>
+<div class="mono" style="font-size: 11.5px; color: var(--muted); margin-top: 2px">{{t.slug}}</div>
+<div style="font-size: 12px; color: var(--faint); margin-top: 2px">近 24 小时 {{t.sent}} 封</div>
+</div>
+</sc-for>
+<button type="button" style="margin: 8px 4px; height: 32px; width: calc(100% - 8px); border: 1px dashed var(--line); border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer">+ 新建事务模板</button>
+</div>
+<div style="padding: 24px 32px; display: grid; grid-template-columns: 1fr 360px; gap: 28px; align-content: start">
+<div>
+<div style="font-size: 12px; color: var(--muted)">主题</div>
+<div style="margin-top: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px">{{tpl.subject}}</div>
+<div style="font-size: 12px; color: var(--muted); margin-top: 16px">正文（HTML 与纯文本各一份，这里显示纯文本）</div>
+<div style="margin-top: 4px; padding: 14px; border: 1px solid var(--line); border-radius: 9px; white-space: pre-line; line-height: 1.8; color: var(--ink2)">{{tpl.body}}</div>
+<div style="font-size: 12px; color: var(--muted); margin-top: 16px">变量</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px"><sc-for list="{{tpl.vars}}" as="v" hint-placeholder-count="3"><span class="chip mono" style="{{v.style}}">{{v.text}}</span></sc-for></div>
+<div style="margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); font-size: 12.5px; line-height: 1.7">{{tpl.note}}</div>
+</div>
+<div>
+<div style="font-size: 12px; color: var(--muted)">收件人看到的样子</div>
+<div style="margin-top: 6px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden">
+<div style="padding: 12px 16px; border-bottom: 1px solid var(--line2); font-size: 12px; color: var(--muted)">来自 {{tpl.from}}</div>
+<div style="padding: 22px 20px">
+<div class="serif" style="font-size: 20px; font-weight: 600">{{tpl.previewTitle}}</div>
+<div style="margin-top: 10px; color: var(--ink2); line-height: 1.8">{{tpl.previewLead}}</div>
+<sc-if value="{{tpl.hasCode}}" hint-placeholder-val="{{true}}"><div class="mono" style="margin: 16px 0; font-size: 30px; letter-spacing: 0.3em; text-align: center; padding: 14px; background: #FAF9F6; border-radius: 10px">482 913</div></sc-if>
+<sc-if value="{{tpl.hasButton}}" hint-placeholder-val="{{false}}"><div style="margin: 16px 0"><span style="display: inline-block; padding: 10px 18px; background: var(--ink); color: #FBFAF7; border-radius: 9px">{{tpl.button}}</span></div></sc-if>
+<div style="font-size: 12px; color: var(--faint)">{{tpl.footer}}</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<!-- Logs -->
+<sc-if value="{{isLogs}}" hint-placeholder-val="{{false}}">
+<div style="padding: 16px 32px">
+<div style="display: flex; gap: 8px; margin-bottom: 12px"><sc-for list="{{filters}}" as="f" hint-placeholder-count="4"><button type="button" onClick="{{f.pick}}" style="{{f.style}}">{{f.label}} <span style="color: var(--faint)">{{f.count}}</span></button></sc-for><span style="flex: 1"></span><span style="color: var(--muted); font-size: 12px; align-self: center">只保留 30 天 · 不进任何邮箱的“已发送”</span></div>
+<table style="width: 100%; border-collapse: collapse; font-size: 12.5px">
+<thead><tr style="color: var(--muted); text-align: left"><th style="padding: 8px; font-weight: 500">时间</th><th style="padding: 8px; font-weight: 500">模板</th><th style="padding: 8px; font-weight: 500">收件人</th><th style="padding: 8px; font-weight: 500">内容</th><th style="padding: 8px; font-weight: 500">状态</th><th style="padding: 8px; font-weight: 500">幂等键</th></tr></thead>
+<tbody>
+<sc-for list="{{logs}}" as="g" hint-placeholder-count="7">
+<tr class="row" onClick="{{g.pick}}" style="{{g.style}}">
+<td style="padding: 10px 8px; color: var(--muted); font-variant-numeric: tabular-nums">{{g.time}}</td>
+<td style="padding: 10px 8px" class="mono">{{g.tpl}}</td>
+<td style="padding: 10px 8px">{{g.to}}</td>
+<td style="padding: 10px 8px; color: var(--ink2)">{{g.content}}</td>
+<td style="padding: 10px 8px"><span class="chip" style="{{g.statusStyle}}">{{g.status}}</span></td>
+<td style="padding: 10px 8px; color: var(--faint)" class="mono">{{g.key}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+<sc-if value="{{hasDetail}}" hint-placeholder-val="{{false}}">
+<div style="margin-top: 14px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px">
+<div><div style="font-weight: 600">{{detail.title}}</div><div style="color: var(--muted); margin-top: 4px; line-height: 1.8">{{detail.desc}}</div></div>
+<div><sc-for list="{{detail.events}}" as="e" hint-placeholder-count="3"><div style="display: flex; gap: 10px; padding: 4px 0"><span style="color: var(--faint); width: 60px; font-variant-numeric: tabular-nums">{{e.t}}</span><span>{{e.text}}</span></div></sc-for></div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<!-- Quota -->
+<sc-if value="{{isQuota}}" hint-placeholder-val="{{false}}">
+<div style="padding: 24px 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 28px">
+<div>
+<div class="serif" style="font-size: 18px; font-weight: 600">今日外发额度</div>
+<div style="color: var(--muted); margin-top: 4px">事务邮件走单独的优先通道：营销群发用满了，注册验证码照样能发。</div>
+<div style="margin-top: 18px; display: flex; flex-direction: column; gap: 16px">
+<sc-for list="{{lanes}}" as="q" hint-placeholder-count="3">
+<div><div style="display: flex; justify-content: space-between"><span style="font-weight: 500">{{q.name}}</span><span style="font-variant-numeric: tabular-nums; color: var(--ink2)">{{q.used}} / {{q.limit}}</span></div>
+<div style="height: 6px; border-radius: 3px; background: var(--line2); margin-top: 6px; overflow: hidden"><span style="{{q.bar}}"></span></div>
+<div style="font-size: 12px; color: var(--muted); margin-top: 4px">{{q.note}}</div></div>
+</sc-for>
+</div>
+</div>
+<div>
+<div class="serif" style="font-size: 18px; font-weight: 600">保护规则</div>
+<div style="margin-top: 14px; display: flex; flex-direction: column; gap: 10px">
+<sc-for list="{{rules}}" as="r" hint-placeholder-count="4">
+<div style="display: flex; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px"><span style="flex: 1"><span style="font-weight: 500">{{r.name}}</span><br><span style="color: var(--muted); font-size: 12.5px">{{r.desc}}</span></span><span class="mono" style="color: var(--ink2)">{{r.value}}</span></div>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+
+<!-- Webhooks -->
+<sc-if value="{{isHooks}}" hint-placeholder-val="{{false}}">
+<div style="padding: 24px 32px; display: grid; grid-template-columns: 1fr 420px; gap: 28px">
+<div>
+<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--ok)"></span><span class="mono" style="flex: 1">https://api.acme-app.com/hooks/zmail</span><span style="color: var(--muted); font-size: 12px">签名密钥 whsec_••••3f2a</span></div>
+<div style="font-size: 12px; color: var(--muted); margin: 18px 0 8px 0">订阅的事件</div>
+<sc-for list="{{events}}" as="e" hint-placeholder-count="5">
+<label style="display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line2)"><input type="checkbox" checked="{{e.on}}" onChange="{{e.toggle}}"><span class="mono" style="width: 190px">{{e.name}}</span><span style="color: var(--muted)">{{e.desc}}</span></label>
+</sc-for>
+</div>
+<div>
+<div style="font-size: 12px; color: var(--muted)">最近一次推送 · email.bounced</div>
+<pre class="mono" style="margin: 8px 0 0 0; padding: 18px; border-radius: 12px; background: #16150F; color: #E9E6DF; font-size: 12px; line-height: 1.75; white-space: pre-wrap">{
+  "type": "email.bounced",
+  "message_id": "msg_7Hq2",
+  "template": "signup-code",
+  "to": "li••@example.com",
+  "reason": "mailbox_full",
+  "permanent": false,
+  "occurred_at": "2026-11-19T14:22:08Z"
+}</pre>
+<div style="margin-top: 8px; font-size: 12px; color: var(--muted)">推送里不带验证码或正文。失败按 1、5、30 分钟重试，可在这里手动重放。</div>
+</div>
+</div>
+</sc-if>
+
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+const TABS = [['start', '快速上手', ''], ['tpl', '事务模板', '4'], ['logs', '发送日志', '1.2k'], ['quota', '额度与保护', ''], ['hooks', 'Webhook', '']];
+const TITLES = { start: ['快速上手', '三步把注册验证码接进你的应用'], tpl: ['事务模板', '验证码、欢迎信、重置密码、账单'], logs: ['发送日志', '近 24 小时 1,204 封'], quota: ['额度与保护', '事务通道和营销分开计算'], hooks: ['Webhook', '把投递结果推回你的后台'] };
+const CODE = {
+  curl: 'curl https://api.zmail.im/v1/transactional-messages \\\n  -H "Authorization: Bearer zk_live_••••" \\\n  -H "Idempotency-Key: signup-u_8812" \\\n  -d \'{\n    "template": "signup-code",\n    "to": "lilei@example.com",\n    "variables": { "code": "482913", "app": "Acme" }\n  }\'',
+  node: 'import { Zmail } from "@zmail/node";\n\nconst zmail = new Zmail(process.env.ZMAIL_KEY);\n\nawait zmail.send({\n  template: "signup-code",\n  to: user.email,\n  variables: { code, app: "Acme" },\n  idempotencyKey: `signup-${user.id}`,\n});',
+  python: 'from zmail import Zmail\n\nzmail = Zmail(os.environ["ZMAIL_KEY"])\n\nzmail.send(\n    template="signup-code",\n    to=user.email,\n    variables={"code": code, "app": "Acme"},\n    idempotency_key=f"signup-{user.id}",\n)'
+};
+const TPLS = [
+  { id: 'code', name: '注册验证码', slug: 'signup-code', kind: '含秘密', sent: 862, subject: '{{app}} 验证码：{{code}}', body: '你好，\n\n你的 {{app}} 注册验证码是 {{code}}，10 分钟内有效。\n如果不是你本人操作，忽略这封邮件即可。', vars: ['code · 秘密', 'app'], secretVars: ['code · 秘密'], note: '变量 code 标记为“秘密”：发送日志、Webhook 和 AI 都只看到 ••••••，组织成员也看不到。主题里出现秘密变量时，发件记录里的主题同样遮住。', from: 'Acme <no-reply@notify.acme-app.com>', previewTitle: '你的验证码', previewLead: '输入下面的验证码完成注册，10 分钟内有效。', hasCode: true, hasButton: false, button: '', footer: '这是一封系统邮件，请勿直接回复。' },
+  { id: 'welcome', name: '欢迎信', slug: 'welcome', kind: '普通', sent: 311, subject: '欢迎加入 {{app}}，{{name|朋友}}', body: '{{name|朋友}}，欢迎加入 {{app}}！\n\n下一步：完善资料，邀请你的同事。\n有问题直接回复这封信，我们会看到。', vars: ['name|朋友', 'app', 'dashboard_url'], secretVars: [], note: '欢迎信允许回复：回信会进入 support@ 的收件箱，并标上“欢迎信回复”。', from: 'Acme 团队 <hello@acme-app.com>', previewTitle: '欢迎加入 Acme，李雷', previewLead: '你的账号已经准备好了。花两分钟完善资料，团队就能找到你。', hasCode: false, hasButton: true, button: '打开控制台', footer: '你收到这封信，是因为刚刚注册了 Acme。' },
+  { id: 'reset', name: '重置密码', slug: 'password-reset', kind: '含秘密', sent: 27, subject: '重置你的 {{app}} 密码', body: '点击下面的链接重置密码，30 分钟内有效：\n{{reset_url}}\n\n如果不是你本人操作，请忽略。', vars: ['reset_url · 秘密', 'app'], secretVars: ['reset_url · 秘密'], note: '重置链接是秘密变量：日志里只显示域名，不显示完整链接。', from: 'Acme <no-reply@notify.acme-app.com>', previewTitle: '重置密码', previewLead: '我们收到了重置密码的请求，30 分钟内有效。', hasCode: false, hasButton: true, button: '重置密码', footer: '不是你本人操作？忽略即可，密码不会改变。' },
+  { id: 'bill', name: '账单提醒', slug: 'invoice-ready', kind: '普通', sent: 4, subject: '{{month}} 账单已生成', body: '你 {{month}} 的账单已生成，金额 {{amount}}。\n查看详情：{{invoice_url}}', vars: ['month', 'amount', 'invoice_url'], secretVars: [], note: '账单类事务邮件不带退订链接，但仍会检查永久退信和投诉名单。', from: 'Acme 账单 <billing@acme-app.com>', previewTitle: '11 月账单已生成', previewLead: '本月金额 ¥ 1,280.00，将于 12 月 1 日自动扣款。', hasCode: false, hasButton: true, button: '查看账单', footer: '账单问题请回复这封邮件。' }
+];
+const LOGS = [
+  { id: 1, time: '14:22:08', tpl: 'signup-code', to: 'li••@example.com', content: 'Acme 验证码：••••••', status: '已投递', st: 'ok', key: 'signup-u_8812', events: [['14:22:08', '接受请求，排入事务通道'], ['14:22:09', 'Cloudflare 已接受'], ['14:22:11', '对方服务器已投递']], desc: '验证码已遮住。需要排查时，只能看到“是否发出、何时投递”，看不到验证码本身。' },
+  { id: 2, time: '14:21:55', tpl: 'signup-code', to: 'li••@example.com', content: '同一幂等键，已忽略', status: '重复请求', st: 'muted', key: 'signup-u_8812', events: [['14:21:55', '幂等键已存在，返回第一次的结果']], desc: '用户连点了两次“发送验证码”。同一个幂等键 24 小时内只发一封。' },
+  { id: 3, time: '14:19:40', tpl: 'welcome', to: 'zh••@acme-trade.cn', content: '欢迎加入 Acme，张敏', status: '已投递', st: 'ok', key: 'welcome-u_8790', events: [['14:19:40', '接受请求'], ['14:19:41', 'Cloudflare 已接受'], ['14:19:44', '对方服务器已投递']], desc: '普通模板，内容可见。' },
+  { id: 4, time: '14:12:03', tpl: 'signup-code', to: 'wa••@qq.com', content: 'Acme 验证码：••••••', status: '退信', st: 'bad', key: 'signup-u_8777', events: [['14:12:03', '接受请求'], ['14:12:04', 'Cloudflare 已接受'], ['14:12:20', '退信：邮箱已满（临时）']], desc: '临时退信不会进抑制名单；Webhook 已推送 email.bounced。' },
+  { id: 5, time: '14:05:17', tpl: 'password-reset', to: 'ch••@gmail.com', content: '重置你的 Acme 密码 · acme-app.com/••••', status: '已投递', st: 'ok', key: 'reset-u_8102', events: [['14:05:17', '接受请求'], ['14:05:18', 'Cloudflare 已接受'], ['14:05:21', '对方服务器已投递']], desc: '重置链接只显示域名。' },
+  { id: 6, time: '13:58:44', tpl: 'signup-code', to: 'te••@test.zmail.im', content: '测试模式 · 未真实发出', status: '测试', st: 'accent', key: 'signup-test-1', events: [['13:58:44', '测试密钥：渲染成功，未投递，不占额度']], desc: '测试模式的密钥只渲染不投递，也可以发到 @test.zmail.im 模拟退信和投诉。' },
+  { id: 7, time: '13:41:09', tpl: 'signup-code', to: 'ab••@bad-domain.xyz', content: 'Acme 验证码：••••••', status: '已拦截', st: 'warn', key: 'signup-u_8655', events: [['13:41:09', '收件人在永久退信名单，未发送，不占额度']], desc: '这个地址上个月永久退信。为了保护发信信誉，事务邮件也不再发给它。' }
+];
+const STATUS = { ok: 'background: var(--ok-soft); color: var(--ok)', bad: 'background: var(--bad-soft); color: var(--bad)', warn: 'background: var(--warn-soft); color: var(--warn)', accent: 'background: var(--accent-soft); color: var(--accent)', muted: 'background: var(--line2); color: var(--muted)' };
+const EVENTS = [['email.sent', '已交给发信服务'], ['email.delivered', '对方服务器已投递'], ['email.bounced', '退信（区分临时 / 永久）'], ['email.complained', '收件人标记为垃圾邮件'], ['email.suppressed', '在退信或投诉名单，未发送']];
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { tab: 'start', lang: 'curl', key: false, test: '', tpl: 'code', filter: 'all', sel: 1, live: true, ev: [true, true, true, true, false] }; }
+  renderVals() {
+    const s = this.state;
+    const navBase = 'width: 100%; height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border: 0; border-radius: 8px; text-align: left; cursor: pointer; ';
+    const on = (a) => a ? 'background: #EFEDE7; font-weight: 600; color: var(--ink)' : 'background: transparent; color: var(--ink2)';
+    const tpl = TPLS.find((t) => t.id === s.tpl);
+    const fmap = { all: () => true, ok: (g) => g.st === 'ok', bad: (g) => g.st === 'bad' || g.st === 'warn', test: (g) => g.st === 'accent' };
+    const logs = LOGS.filter(fmap[s.filter]);
+    const sel = LOGS.find((g) => g.id === s.sel);
+    const stepState = (done) => done ? ['已完成', 'font-size: 12px; color: var(--ok)'] : ['待完成', 'font-size: 12px; color: var(--muted)'];
+    const steps = [
+      ['1', '验证发信域名', 'notify.acme-app.com · SPF、DKIM、DMARC 都通过', true],
+      ['2', '创建只能发事务邮件的密钥', '权限 mail:send，用途“事务”，不能群发、不能读信', true],
+      ['3', '从你的后端发第一封', '用模板 + 变量调用，带上幂等键防止重复发送', !!s.test]
+    ];
+    return {
+      tabs: TABS.map((t) => ({ label: t[1], count: t[2], style: navBase + on(s.tab === t[0]), pick: () => this.setState({ tab: t[0] }) })),
+      title: TITLES[s.tab][0], subtitle: TITLES[s.tab][1],
+      isStart: s.tab === 'start', isTpl: s.tab === 'tpl', isLogs: s.tab === 'logs', isQuota: s.tab === 'quota', isHooks: s.tab === 'hooks',
+      modeLabel: s.live ? '正式模式' : '测试模式', modeDot: 'width: 8px; height: 8px; border-radius: 50%; background: ' + (s.live ? 'var(--ok)' : 'var(--accent)'),
+      modeHint: s.live ? '真实投递，计入事务额度。' : '只渲染不投递，不占额度，可模拟退信。',
+      toggleMode: () => this.setState({ live: !s.live }),
+      steps: steps.map((x) => { const st = stepState(x[3]); return { mark: x[3] ? '✓' : x[0], title: x[1], desc: x[2], state: st[0], stateStyle: st[1], badge: 'width: 26px; height: 26px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; ' + (x[3] ? 'background: var(--ok-soft); color: var(--ok)' : 'background: var(--line2); color: var(--muted)') }; }),
+      keyShown: s.key ? 'zk_live_3c9f2a7d1e8b4f60a2c5' : 'zk_live_••••••••••••a2c5', keyBtn: s.key ? '已复制' : '显示并复制', revealKey: () => this.setState({ key: true }),
+      langs: [['curl', 'curl'], ['node', 'Node.js'], ['python', 'Python']].map((l) => ({ label: l[1], pick: () => this.setState({ lang: l[0] }), style: 'border: 0; height: 28px; padding: 0 12px; border-radius: 7px; cursor: pointer; ' + (s.lang === l[0] ? 'background: var(--surface); font-weight: 600; box-shadow: 0 1px 2px rgba(22,21,15,0.08)' : 'background: transparent; color: var(--muted)') })),
+      code: CODE[s.lang],
+      sendTest: () => this.setState({ test: s.live ? '已发到 xishu@zgi.ai · 2 秒后投递 · 计入事务额度 1 封' : '测试模式：渲染成功，未真实发出' }), testResult: s.test || '会发到你自己的邮箱',
+      tpls: TPLS.map((t) => ({ name: t.name, slug: t.slug, kind: t.kind, sent: t.sent, pick: () => this.setState({ tpl: t.id }),
+        kindStyle: t.kind === '含秘密' ? 'background: var(--warn-soft); color: var(--warn)' : 'background: var(--line2); color: var(--muted)',
+        style: 'padding: 12px; border-radius: 10px; cursor: pointer; margin-bottom: 4px; ' + (s.tpl === t.id ? 'background: #F3F1EC' : '') })),
+      tpl: { subject: tpl.subject, body: tpl.body, note: tpl.note, from: tpl.from, previewTitle: tpl.previewTitle, previewLead: tpl.previewLead, hasCode: tpl.hasCode, hasButton: tpl.hasButton, button: tpl.button, footer: tpl.footer,
+        vars: tpl.vars.map((v) => ({ text: '{{' + v.split(' · ')[0] + '}}' + (tpl.secretVars.includes(v) ? ' · 秘密' : ''), style: tpl.secretVars.includes(v) ? 'background: var(--warn-soft); color: var(--warn)' : 'background: var(--accent-soft); color: var(--accent)' })) },
+      filters: [['all', '全部', LOGS.length], ['ok', '已投递', LOGS.filter(fmap.ok).length], ['bad', '退信 / 拦截', LOGS.filter(fmap.bad).length], ['test', '测试', LOGS.filter(fmap.test).length]].map((f) => ({ label: f[1], count: String(f[2]), pick: () => this.setState({ filter: f[0] }),
+        style: 'height: 28px; padding: 0 12px; border-radius: 999px; cursor: pointer; border: 1px solid ' + (s.filter === f[0] ? 'var(--ink); background: var(--ink); color: #FBFAF7' : 'var(--line); background: var(--surface)') })),
+      logs: logs.map((g) => ({ time: g.time, tpl: g.tpl, to: g.to, content: g.content, status: g.status, key: g.key, statusStyle: STATUS[g.st], pick: () => this.setState({ sel: g.id }),
+        style: 'cursor: pointer; border-top: 1px solid var(--line2); ' + (s.sel === g.id ? 'background: #F7F5F0' : '') })),
+      hasDetail: !!sel, detail: sel ? { title: sel.tpl + ' → ' + sel.to, desc: sel.desc, events: sel.events.map((e) => ({ t: e[0], text: e[1] })) } : { title: '', desc: '', events: [] },
+      lanes: [
+        ['事务邮件（验证码、欢迎信）', 1204, 5000, 'var(--ink)', '优先发送；营销用满也不影响。超出后按密钥限速排队，不丢弃。'],
+        ['营销群发', 4800, 5000, '#B9B4AA', '快用满了。群发会排队到明天，事务通道不受影响。'],
+        ['日常收发（员工手写的信）', 18, 200, '#D9D4CA', '给员工保留，不被群发和事务占用。']
+      ].map((q) => ({ name: q[0], used: q[1].toLocaleString(), limit: q[2].toLocaleString(), note: q[4], bar: 'display: block; height: 100%; width: ' + Math.round(q[1] / q[2] * 100) + '%; background: ' + q[3] })),
+      rules: [
+        ['同一收件人限频', '同一地址 1 分钟内最多 3 封验证码，防止被刷', '3 / 分钟'],
+        ['单个密钥限速', '超出后返回 429，并告诉你多久后重试', '20 / 秒'],
+        ['幂等键', '同一个键 24 小时内只发一封，重复请求返回第一次的结果', '24 小时'],
+        ['退信与投诉名单', '永久退信、投诉过的地址自动拦截，不计额度', '自动'],
+        ['秘密变量', '标记为秘密的变量在日志、Webhook、AI 中一律遮住', '••••••']
+      ].map((r) => ({ name: r[0], desc: r[1], value: r[2] })),
+      events: EVENTS.map((e, i) => ({ name: e[0], desc: e[1], on: s.ev[i], toggle: () => { const ev = s.ev.slice(); ev[i] = !ev[i]; this.setState({ ev }); } }))
+    };
+  }
+}
+</script>
+</body>
+</html>

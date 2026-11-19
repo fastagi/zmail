@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Zmail 收件箱 v2</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Newsreader:opsz,wght@6..72,500;6..72,600&amp;family=Noto+Serif+SC:wght@600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.v2{--bg:#FBFAF7;--surface:#FFFFFF;--ink:#16150F;--ink2:#3A3833;--muted:#77736A;--faint:#A8A49B;--line:#ECE9E3;--line2:#F3F1EC;--accent:#2F4BD8;--accent-soft:#EEF1FD;--warn:#B4541F}
+.v2 button{font:inherit;color:inherit}
+.v2 .serif{font-family:Newsreader,'Noto Serif SC',Georgia,serif;letter-spacing:-0.01em}
+.v2 .kbd{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;font-size:10.5px;color:var(--muted);background:var(--surface);font-family:Inter,sans-serif}
+.v2 .nav:hover{background:#F2F0EB}
+.v2 .row:hover{background:#F7F5F0}
+.v2 .row:hover .hint{opacity:1}
+.v2 .hint{opacity:0;transition:opacity .12s}
+</style>
+</helmet>
+<div class="v2" style="width: 1440px; height: 900px; display: flex; background: var(--bg); color: var(--ink); font-family: Inter, 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif; font-size: 13px; line-height: 1.5; overflow: hidden; position: relative; -webkit-font-smoothing: antialiased">
+
+<!-- Sidebar -->
+<aside style="width: 248px; flex: none; display: flex; flex-direction: column; padding: 18px 12px 14px 12px; gap: 2px">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 8px 18px 8px">
+<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#16150F"></rect><path d="M7 8h10L7 16h10" stroke="#FBFAF7" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+<span style="font-weight: 600; letter-spacing: -0.01em">ZGI 智能科技</span>
+<span style="flex: 1"></span>
+<button type="button" onClick="{{openPalette}}" aria-label="命令面板" style="border: 0; background: transparent; padding: 0; cursor: pointer"><span class="kbd">⌘K</span></button>
+</div>
+
+<button type="button" style="height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 12px; margin: 0 4px 14px 4px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); cursor: pointer; box-shadow: 0 1px 0 rgba(22,21,15,0.04)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg><span style="flex: 1; text-align: left">写邮件</span><span class="kbd">C</span></button>
+
+<sc-for list="{{views}}" as="v" hint-placeholder-count="4">
+<button type="button" class="nav" onClick="{{v.pick}}" style="{{v.style}}"><span style="flex: 1">{{v.label}}</span><span style="{{v.countStyle}}">{{v.count}}</span></button>
+</sc-for>
+
+<div style="padding: 18px 12px 6px 12px; color: var(--faint); font-size: 11px; letter-spacing: 0.06em">角色与邮箱</div>
+<sc-for list="{{roles}}" as="r" hint-placeholder-count="3">
+<div>
+<button type="button" class="nav" onClick="{{r.pick}}" style="{{r.style}}"><span style="{{r.dotStyle}}"></span><span style="flex: 1">{{r.name}}</span><span style="{{r.countStyle}}">{{r.count}}</span></button>
+<sc-if value="{{r.open}}" hint-placeholder-val="{{false}}">
+<sc-for list="{{r.boxes}}" as="b" hint-placeholder-count="2">
+<button type="button" class="nav" onClick="{{b.pick}}" style="{{b.style}}"><span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{b.addr}}</span><span style="{{b.srcStyle}}">{{b.src}}</span></button>
+</sc-for>
+</sc-if>
+</div>
+</sc-for>
+
+<div style="flex: 1"></div>
+<div style="margin: 0 4px; padding: 10px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; color: var(--muted); line-height: 1.6">
+<div style="display: flex; justify-content: space-between; color: var(--ink2)"><span>今日外发</span><span>108 / 200</span></div>
+<div style="height: 3px; border-radius: 2px; background: var(--line2); margin: 6px 0; overflow: hidden; display: flex"><span style="width: 9%; background: var(--ink)"></span><span style="width: 45%; background: #B9B4AA"></span></div>
+<div>日常 18 · 群发 90 · 留给回信 40</div>
+</div>
+<div style="display: flex; gap: 4px; padding: 10px 8px 0 8px; color: var(--muted)"><span style="flex: 1">邮件</span><span>群发</span><span style="margin-left: 10px">联系人</span><span style="margin-left: 10px">管理</span></div>
+</aside>
+
+<!-- List -->
+<section aria-label="邮件列表" style="width: 470px; flex: none; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--line); border-right: 1px solid var(--line); margin: 10px 0; border-radius: 14px 0 0 14px; box-shadow: 0 1px 2px rgba(22,21,15,0.04)">
+<div style="padding: 22px 24px 10px 24px">
+<div style="display: flex; align-items: baseline; gap: 10px"><h1 class="serif" style="margin: 0; font-size: 28px; font-weight: 600">{{title}}</h1><span style="color: var(--muted)">{{subtitle}}</span></div>
+<div style="display: flex; gap: 18px; margin-top: 14px; border-bottom: 1px solid var(--line2)">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3"><button type="button" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}} <span style="color: var(--faint)">{{t.count}}</span></button></sc-for>
+</div>
+</div>
+<div style="flex: 1; overflow: auto; padding: 0 12px 12px 12px">
+<sc-if value="{{showAiNote}}" hint-placeholder-val="{{true}}">
+<div style="margin: 6px 12px 10px 12px; font-size: 12px; color: var(--muted)">AI 按"需要你回复、有期限、只需知道"排好了。分错了可以按 <span class="kbd">F</span> 纠正，它会记住。</div>
+</sc-if>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div class="row" onClick="{{r.pick}}" style="{{r.style}}">
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="{{r.dot}}"></span>
+<span style="{{r.fromStyle}}">{{r.from}}</span>
+<span style="{{r.roleStyle}}">{{r.role}}</span>
+<span style="flex: 1"></span>
+<span class="hint" style="display: flex; gap: 4px"><span class="kbd">E</span><span class="kbd">#</span></span>
+<span style="color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums">{{r.time}}</span>
+</div>
+<div style="{{r.subjStyle}}">{{r.subject}}</div>
+<div style="color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.snippet}}</div>
+<sc-if value="{{r.hasWhy}}" hint-placeholder-val="{{false}}"><div style="margin-top: 4px; font-size: 12px; color: var(--accent)">{{r.why}}</div></sc-if>
+</div>
+</sc-for>
+</div>
+</section>
+
+<!-- Reader -->
+<main aria-label="阅读窗格" style="flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); margin: 10px 10px 10px 0; border-radius: 0 14px 14px 0; border-right: 1px solid var(--line); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line)">
+<div style="height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 28px; border-bottom: 1px solid var(--line2); color: var(--muted); font-size: 12px">
+<span>回复 <span class="kbd">R</span></span><span>全部回复 <span class="kbd">A</span></span><span>转发 <span class="kbd">F</span></span><span style="flex: 1"></span><span>归档 <span class="kbd">E</span></span><span>稍后 <span class="kbd">H</span></span><span>删除 <span class="kbd">#</span></span>
+</div>
+<div style="flex: 1; overflow: auto; padding: 34px 0">
+<article style="max-width: 640px; margin: 0 auto; padding: 0 28px">
+<div style="display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px"><span>{{sel.toLine}}</span></div>
+<h2 class="serif" style="margin: 8px 0 18px 0; font-size: 30px; line-height: 1.25; font-weight: 600">{{sel.subject}}</h2>
+<sc-if value="{{sel.locked}}" hint-placeholder-val="{{false}}">
+<div style="padding: 28px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; color: var(--muted); line-height: 1.8"><div style="font-size: 22px">● ● ● ● ● ●</div>验证码已隐藏。只有这个邮箱的成员能看，AI 和管理员看不到。<br><button type="button" style="margin-top: 10px; height: 32px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer">显示验证码</button></div>
+</sc-if>
+<sc-if value="{{sel.notLocked}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px"><span style="width: 34px; height: 34px; border-radius: 50%; background: #F1EEE8; display: flex; align-items: center; justify-content: center; font-weight: 600; color: var(--ink2)">{{sel.initial}}</span><div style="flex: 1"><div style="font-weight: 600">{{sel.from}}</div><div style="color: var(--muted); font-size: 12px">{{sel.addr}}</div></div><span style="color: var(--faint); font-size: 12px">{{sel.time}}</span></div>
+<div style="font-size: 15.5px; line-height: 1.8; color: var(--ink2); white-space: pre-line">{{sel.body}}</div>
+<sc-if value="{{sel.hasAi}}" hint-placeholder-val="{{true}}">
+<div style="margin-top: 28px; border-top: 1px solid var(--line2); padding-top: 20px">
+<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; color: var(--muted)"><span style="width: 6px; height: 6px; border-radius: 50%; background: var(--accent)"></span>AI 回复草稿 · 依据：价格说明 2026、你 11 月 3 日的回信<span style="flex: 1"></span><span>改写 <span class="kbd">⌘J</span></span></div>
+<div style="padding: 16px 18px; border-radius: 12px; background: #FAF9F6; border: 1px solid var(--line); font-size: 14.5px; line-height: 1.8; color: var(--ink2)">{{sel.draft}}</div>
+<div style="display: flex; align-items: center; gap: 10px; margin-top: 12px"><button type="button" style="height: 34px; padding: 0 16px; border: 0; border-radius: 9px; background: var(--ink); color: #FBFAF7; font-weight: 500; cursor: pointer">发送 <span style="opacity: 0.6; margin-left: 6px">⌘↵</span></button><span style="color: var(--muted); font-size: 12px">以 {{sel.sendAs}} 发出</span></div>
+</div>
+</sc-if>
+</sc-if>
+</article>
+</div>
+</main>
+
+<!-- Command palette -->
+<sc-if value="{{palette}}" hint-placeholder-val="{{false}}">
+<div onClick="{{closePalette}}" style="position: absolute; inset: 0; background: rgba(22,21,15,0.18); backdrop-filter: blur(2px)"></div>
+<div role="dialog" aria-label="命令面板" style="position: absolute; left: 50%; top: 140px; transform: translateX(-50%); width: 600px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 30px 80px rgba(22,21,15,0.22); overflow: hidden">
+<div style="display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line2)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#77736A" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><input aria-label="输入命令或搜索" value="medium" style="border: 0; outline: 0; flex: 1; font: inherit; font-size: 15px"><span class="kbd">esc</span></div>
+<div style="padding: 8px; font-size: 13px">
+<div style="padding: 6px 10px; color: var(--faint); font-size: 11px; letter-spacing: 0.06em">邮箱与角色</div>
+<div style="display: flex; padding: 9px 10px; border-radius: 8px; background: var(--accent-soft)"><span style="flex: 1">milo@zgi.app · 设计编辑部 · 注册了 Medium</span><span class="kbd">↵</span></div>
+<div style="padding: 6px 10px; color: var(--faint); font-size: 11px; letter-spacing: 0.06em">邮件</div>
+<div style="display: flex; padding: 9px 10px"><span style="flex: 1">Medium · 验证你的邮箱地址</span><span style="color: var(--faint)">11 月 18 日</span></div>
+<div style="display: flex; padding: 9px 10px"><span style="flex: 1">Medium Partner Program · 收入报告</span><span style="color: var(--faint)">11 月 2 日</span></div>
+<div style="padding: 6px 10px; color: var(--faint); font-size: 11px; letter-spacing: 0.06em">操作</div>
+<div style="display: flex; padding: 9px 10px"><span style="flex: 1">为 Medium 新建一个注册地址</span></div>
+<div style="display: flex; padding: 9px 10px"><span style="flex: 1">问 AI："Medium 账号是谁在管？"</span></div>
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+const ROLES = [
+  { id: 'brand', name: 'Zmail 官方', color: '#16150F', boxes: [{ id: 'news', addr: 'news@zgi.ai', src: '' }, { id: 'biz', addr: 'business@zgi.ai', src: '' }] },
+  { id: 'design', name: '设计编辑部', color: '#B4541F', boxes: [{ id: 'milo', addr: 'milo@zgi.app', src: '' }, { id: 'studio', addr: 'studio.zgi@gmail.com', src: 'Gmail' }] },
+  { id: 'me', name: '我（私人）', color: '#2F4BD8', boxes: [{ id: 'xishu', addr: 'xishu@zgi.ai', src: '' }] }
+];
+const MAIL = [
+  { id: 1, box: 'news', role: 'Zmail 官方', from: 'Ann Lee', addr: 'ann@example.com', time: '14:22', subject: '专业版能不能扩到 20 个成员？', snippet: '我们团队下个月要扩人，想确认价格和数据是否保留。', tri: 'reply', unread: true, why: '需要你回复 · 你是这个客户的负责人', body: 'Hi，\n\n文件夹功能很好用。想问一下专业版能不能加到 20 个成员？我们团队下个月要扩人，也想确认升级后历史邮件和文件夹设置是否保留。\n\nAnn', draft: 'Hi Ann，可以的。专业版每增加 10 个成员按团队版价格计费，20 人的报价附在下面；现在升级会保留全部历史邮件和文件夹设置。需要的话我们约 15 分钟电话。' },
+  { id: 2, box: 'biz', role: 'Zmail 官方', from: '张敏 · 北风贸易', addr: 'zhangmin@acme-trade.cn', time: '13:40', subject: '经销协议第二版：分成调整到 18%', snippet: '请在周五前确认，附件为修订稿。', tri: 'deadline', unread: true, why: '周五 18:00 前确认', body: '您好，\n\n根据上次沟通，我们把分成比例调整到 18%，其他条款不变。请在周五前确认，附件为修订稿。\n\n张敏', draft: '张总您好，修订稿已收到，我们内部周四给您答复。' },
+  { id: 3, box: 'milo', role: '设计编辑部', from: 'Medium', addr: 'noreply@medium.com', time: '11:05', subject: '你的 Medium 验证码', snippet: '验证码已隐藏', tri: 'reply', unread: true, locked: true, why: '平台注册 · 等待小王确认开通' },
+  { id: 4, box: 'studio', role: '设计编辑部', from: 'Behance', addr: 'team@behance.net', time: '10:12', subject: '你的作品集被收录到「本周精选」', snippet: '恭喜，你的作品在 11 月 19 日被精选。', tri: 'fyi', unread: false, body: '恭喜，你的作品在 11 月 19 日被精选，曝光会持续一周。' },
+  { id: 5, box: 'xishu', role: '我（私人）', from: '李雷', addr: 'lilei@zgi.ai', time: '09:30', subject: '下周出差安排', snippet: '机票我来订，酒店你看一下。', tri: 'fyi', unread: false, body: '好的，机票我来订，酒店你看一下离会场近的那家。' },
+  { id: 6, box: 'news', role: 'Zmail 官方', from: 'Cloudflare', addr: 'billing@cloudflare.com', time: '08:02', subject: '11 月账单已生成', snippet: '扣款成功，金额与上月一致。', tri: 'fyi', unread: false, body: '感谢你的付款。本月账单与上月一致。' }
+];
+const VIEWS = [['all', '全部收件', 9], ['today', '今日新到', 14], ['todo', '待办', 3], ['sent', '已发送', '']];
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { view: 'all', scope: null, tab: 'reply', sel: 1, openRole: 'design', palette: false }; }
+  renderVals() {
+    const s = this.state;
+    const navBase = 'width: 100%; height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border: 0; border-radius: 8px; text-align: left; cursor: pointer; ';
+    const on = (a) => a ? 'background: #EFEDE7; font-weight: 600; color: var(--ink)' : 'background: transparent; color: var(--ink2)';
+    const roleOf = (boxId) => ROLES.find((r) => r.boxes.some((b) => b.id === boxId));
+    let list = MAIL;
+    if (s.scope && s.scope.kind === 'role') list = list.filter((m) => roleOf(m.box).id === s.scope.id);
+    if (s.scope && s.scope.kind === 'box') list = list.filter((m) => m.box === s.scope.id);
+    const tabList = list.filter((m) => m.tri === s.tab);
+    const count = (t) => list.filter((m) => m.tri === t).length;
+    const sel = MAIL.find((m) => m.id === s.sel) || MAIL[0];
+    const box = ROLES.flatMap((r) => r.boxes).find((b) => b.id === sel.box);
+    const scopeName = !s.scope ? '全部收件' : s.scope.kind === 'role' ? ROLES.find((r) => r.id === s.scope.id).name : ROLES.flatMap((r) => r.boxes).find((b) => b.id === s.scope.id).addr;
+    return {
+      openPalette: () => this.setState({ palette: true }), closePalette: () => this.setState({ palette: false }), palette: s.palette,
+      views: VIEWS.map((v) => ({ label: v[1], count: v[2] === '' ? '' : String(v[2]), countStyle: 'font-size: 12px; color: ' + (v[0] === 'all' ? 'var(--accent); font-weight: 600' : 'var(--faint)'), style: navBase + on(!s.scope && s.view === v[0]), pick: () => this.setState({ view: v[0], scope: null }) })),
+      roles: ROLES.map((r) => {
+        const c = MAIL.filter((m) => roleOf(m.box).id === r.id && m.unread).length;
+        return { name: r.name, open: s.openRole === r.id, count: c ? String(c) : '', countStyle: 'font-size: 12px; color: var(--faint)',
+          dotStyle: 'width: 7px; height: 7px; border-radius: 2px; background: ' + r.color,
+          style: navBase + on(s.scope && s.scope.kind === 'role' && s.scope.id === r.id),
+          pick: () => this.setState({ openRole: s.openRole === r.id ? null : r.id, scope: { kind: 'role', id: r.id } }),
+          boxes: r.boxes.map((b) => ({ addr: b.addr, src: b.src, srcStyle: b.src ? 'font-size: 10.5px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted)' : 'display: none',
+            style: navBase + 'height: 30px; padding-left: 29px; font-size: 12.5px; ' + on(s.scope && s.scope.kind === 'box' && s.scope.id === b.id), pick: () => this.setState({ scope: { kind: 'box', id: b.id } }) })) };
+      }),
+      title: s.scope ? scopeName : '收件',
+      subtitle: s.scope ? '' : '6 个邮箱 · 2 个角色 · 1 个外部邮箱',
+      tabs: [['reply', '需要回复'], ['deadline', '有期限'], ['fyi', '只需知道']].map((t) => ({ label: t[1], count: String(count(t[0])), pick: () => this.setState({ tab: t[0] }),
+        style: 'border: 0; background: transparent; padding: 0 0 10px 0; cursor: pointer; margin-bottom: -1px; ' + (s.tab === t[0] ? 'border-bottom: 2px solid var(--ink); font-weight: 600; color: var(--ink)' : 'border-bottom: 2px solid transparent; color: var(--muted)') })),
+      showAiNote: s.tab === 'reply',
+      rows: tabList.map((m) => ({ from: m.from, role: m.role, time: m.time, subject: m.subject, snippet: m.snippet, hasWhy: !!m.why, why: m.why || '',
+        dot: 'width: 6px; height: 6px; flex: none; border-radius: 50%; background: ' + (m.unread ? 'var(--accent)' : 'transparent'),
+        fromStyle: 'font-size: 13.5px; ' + (m.unread ? 'font-weight: 600' : 'color: var(--ink2)'),
+        roleStyle: s.scope ? 'display: none' : 'font-size: 11px; color: var(--muted); padding: 0 7px; border-radius: 999px; background: #F3F1EC',
+        subjStyle: 'margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; ' + (m.unread ? 'font-weight: 600; color: var(--ink)' : 'color: var(--ink2)'),
+        style: 'padding: 12px 12px; border-radius: 10px; cursor: pointer; ' + (s.sel === m.id ? 'background: #F3F1EC' : ''),
+        pick: () => this.setState({ sel: m.id }) })),
+      sel: { subject: sel.subject, from: sel.from, addr: sel.addr, time: sel.time, initial: sel.from.slice(0, 1), body: sel.body || '', draft: sel.draft || '', hasAi: !!sel.draft, locked: !!sel.locked, notLocked: !sel.locked,
+        toLine: '发到 ' + box.addr + ' · ' + sel.role + (box.src ? ' · 来自 ' + box.src : ''), sendAs: box.addr }
+    };
+  }
+}
+</script>
+</body>
+</html>
