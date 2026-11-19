@@ -359,3 +359,60 @@ func TestSendOnlySkipsRouting(t *testing.T) {
 		t.Fatalf("status = %s, records = %+v", mailDomain.Status, mailDomain.Records)
 	}
 }
+
+func TestSendOnlyMailboxesGetNoRoutingRule(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.org", CloudflareZoneID: "cf-own", Status: domain.MailZoneStatusActive,
+	})
+	fixture.zones.zones["example.org"] = "cf-own"
+	sendOnly, err := fixture.service.ConnectMailDomain(ctx, 7, testCreator, "example.org", domain.MailDomainSendOnly)
+	if err != nil || sendOnly.Status != domain.MailDomainStatusVerified {
+		t.Fatalf("send-only domain = %+v, %v", sendOnly, err)
+	}
+	// Any call to Email Routing fails the test.
+	fixture.zones.ruleErr = errors.New("email routing called for a send-only domain")
+
+	mailbox, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "hello", "", "example.org")
+	if err != nil || mailbox.Address != "hello@example.org" || mailbox.RoutingRuleID != "" {
+		t.Fatalf("mailbox = %+v, %v", mailbox, err)
+	}
+	if len(fixture.zones.rules) != 0 {
+		t.Fatalf("rules = %v", fixture.zones.rules)
+	}
+	if deleteErr := fixture.service.DeleteMailbox(ctx, 7, mailbox.ID); deleteErr != nil {
+		t.Fatalf("DeleteMailbox: %v", deleteErr)
+	}
+
+	// A domain that receives still routes each address to the Email Worker.
+	fixture.zones.ruleErr = nil
+	fixture.connect(t, "news.example.com")
+	routed, err := fixture.service.CreateMailbox(ctx, 7, testCreator, "hello", "", "news.example.com")
+	if err != nil || routed.RoutingRuleID == "" || fixture.zones.rules[routed.RoutingRuleID] != "hello@news.example.com" {
+		t.Fatalf("routed mailbox = %+v, %v, rules = %v", routed, err, fixture.zones.rules)
+	}
+}
+
+func TestDiscardKeepsAZoneThatIsNoLongerPending(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	zone := fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.org", CloudflareZoneID: "cf-own", Status: domain.MailZoneStatusPending,
+	})
+	// The zone became active before the failed connect cleaned up.
+	fixture.mailZones.zones[zone.ID].Status = domain.MailZoneStatusActive
+	fixture.service.discardManagedZone(ctx, zone)
+	if _, kept := fixture.mailZones.zones[zone.ID]; !kept || len(fixture.zones.deletedZones) != 0 {
+		t.Fatalf("active zone discarded: stored %v, deleted %v", fixture.mailZones.zones, fixture.zones.deletedZones)
+	}
+
+	// A concurrent connect that joined the pending zone keeps it as well.
+	fixture.mailZones.zones[zone.ID].Status = domain.MailZoneStatusPending
+	zoneID := zone.ID
+	fixture.domains.domains[99] = &domain.MailDomain{ID: 99, OrganizationID: 7, Name: "mail.example.org", MailZoneID: &zoneID}
+	fixture.service.discardManagedZone(ctx, zone)
+	if _, kept := fixture.mailZones.zones[zone.ID]; !kept || len(fixture.zones.deletedZones) != 0 {
+		t.Fatalf("zone in use discarded: stored %v, deleted %v", fixture.mailZones.zones, fixture.zones.deletedZones)
+	}
+}

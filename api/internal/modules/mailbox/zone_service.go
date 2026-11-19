@@ -111,11 +111,23 @@ func (s *service) createManagedZone(ctx context.Context, organizationID, created
 }
 
 // discardManagedZone removes a managed zone this request created when its domain could not be
-// stored, so the zone does not count against the organization's limit.
+// stored, so the zone does not count against the organization's limit. A zone that is no longer
+// pending, or that a concurrent connect already put a domain in, is kept.
 func (s *service) discardManagedZone(ctx context.Context, zone *domain.MailZone) {
-	if err := s.zones.DeleteZone(context.WithoutCancel(ctx), zone.OrganizationID, zone.ID); err != nil {
-		slog.WarnContext(ctx, "unused mail zone was not removed",
-			slog.String("zone", zone.Name), slog.String("error", err.Error()))
+	cleanupContext := context.WithoutCancel(ctx)
+	current, err := s.zones.FindZone(cleanupContext, zone.OrganizationID, zone.ID)
+	if err != nil || current.Status != domain.MailZoneStatusPending {
+		if err != nil && !errors.Is(err, ErrMailZoneNotFound) {
+			slog.WarnContext(ctx, "unused mail zone was not removed",
+				slog.String("zone", zone.Name), slog.String("error", err.Error()))
+		}
+		return
+	}
+	if err := s.zones.DeleteZone(cleanupContext, zone.OrganizationID, zone.ID); err != nil {
+		if !errors.Is(err, ErrMailZoneInUse) {
+			slog.WarnContext(ctx, "unused mail zone was not removed",
+				slog.String("zone", zone.Name), slog.String("error", err.Error()))
+		}
 		return
 	}
 	s.deleteProviderZone(ctx, zone.Name, zone.CloudflareZoneID)

@@ -334,11 +334,14 @@ func (s *service) CreateMailbox(ctx context.Context, organizationID, createdBy u
 		} else if !errors.Is(err, ErrMailboxNotFound) {
 			return nil, err
 		}
-		ruleID, err := s.domainProvider.CreateRoutingRule(ctx, connected.ZoneID, mailbox.Address, s.settings.EmailWorker)
-		if err != nil {
-			return nil, providerError(err)
+		// A send-only domain receives elsewhere, so Email Routing is never used for its addresses.
+		if receives(connected) {
+			ruleID, err := s.domainProvider.CreateRoutingRule(ctx, connected.ZoneID, mailbox.Address, s.settings.EmailWorker)
+			if err != nil {
+				return nil, providerError(err)
+			}
+			mailbox.RoutingRuleID = ruleID
 		}
-		mailbox.RoutingRuleID = ruleID
 	}
 	if err := s.repo.CreateMailbox(ctx, mailbox, domain.MaxMailboxesPerOrganization); err != nil {
 		if connected != nil {

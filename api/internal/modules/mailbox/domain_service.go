@@ -514,6 +514,10 @@ func (s *service) removeRoutingRule(ctx context.Context, mailbox *domain.Mailbox
 	_, domainName, _ := strings.Cut(mailbox.Address, "@")
 	mailDomain, err := s.domains.FindDomainByName(ctx, domainName)
 	if err == nil {
+		if !receives(mailDomain) {
+			// Email Routing is never used for a send-only domain.
+			return
+		}
 		err = s.domainProvider.DeleteRoutingRule(ctx, mailDomain.ZoneID, mailbox.RoutingRuleID)
 	}
 	if err != nil {
