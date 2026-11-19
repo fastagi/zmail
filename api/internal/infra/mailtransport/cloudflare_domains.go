@@ -103,7 +103,8 @@ type DomainProvider interface {
 	ScanRecords(ctx context.Context, zoneID string) error
 	// ListZoneRecords lists every record in the zone.
 	ListZoneRecords(ctx context.Context, zoneID string) ([]DNSRecord, error)
-	// UpdateRecord rewrites the record with record.ID.
+	// UpdateRecord rewrites the record with record.ID. Callers send the full record; TTL <= 0
+	// means automatic.
 	UpdateRecord(ctx context.Context, zoneID string, record DNSRecord) error
 	DeleteRecord(ctx context.Context, zoneID, recordID string) error
 }
@@ -406,6 +407,10 @@ func (c *CloudflareDomains) ListRecords(ctx context.Context, zoneID, name string
 
 func (c *CloudflareDomains) CreateRecord(ctx context.Context, zoneID string, record DNSRecord) (DNSRecord, error) {
 	body := recordBody(record)
+	if record.Proxied {
+		proxied := true
+		body.Proxied = &proxied
+	}
 	var created cloudflareRecord
 	if err := c.call(ctx, "create record", http.MethodPost, recordsPath(zoneID), nil, body, &created); err != nil {
 		return DNSRecord{}, err

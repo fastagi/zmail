@@ -386,3 +386,16 @@ func TestUnconfiguredDomainsRejectZoneManagement(t *testing.T) {
 		t.Fatalf("ListZoneRecords = %v", err)
 	}
 }
+
+func TestCreateRecordSendsProxied(t *testing.T) {
+	client, fake := newDomainsServer(t, map[string]string{
+		"POST /zones/zone-1/dns_records": cfResult(`{"id":"rec-6","type":"A","name":"www.example.com","content":"192.0.2.7","ttl":1,"proxied":true}`),
+	})
+	record, err := client.CreateRecord(context.Background(), "zone-1", DNSRecord{Type: "A", Name: "www.example.com", Content: "192.0.2.7", Proxied: true})
+	if err != nil || record.ID != "rec-6" || !record.Proxied {
+		t.Fatalf("record = %+v, %v", record, err)
+	}
+	if want := `{"type":"A","name":"www.example.com","content":"192.0.2.7","ttl":1,"proxied":true}`; fake.calls[0].Body != want {
+		t.Fatalf("body = %s", fake.calls[0].Body)
+	}
+}
