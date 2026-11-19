@@ -1219,7 +1219,16 @@ function BroadcastDetail({
     }
   };
 
-  const stats: [string, number][] = [
+  const attempted = counts.sent + counts.failed;
+  const percentage = (value: number, total: number) =>
+    total > 0
+      ? new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 2 }).format(
+          value / total
+        )
+      : '—';
+  const stats: [string, number | string][] = [
+    [t('broadcasts.queueProgress'), percentage(counts.total - counts.pending, counts.total)],
+    [t('broadcasts.sendSuccessRate'), percentage(counts.sent, attempted)],
     [t('broadcasts.total'), counts.total],
     [t('broadcasts.sent'), counts.sent],
     [t('broadcasts.failed'), counts.failed],
@@ -1326,7 +1335,7 @@ function BroadcastDetail({
       {broadcast.safety_override ? (
         <p className="text-sm text-warning">{t('broadcasts.overrideNote')}</p>
       ) : null}
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
         {stats.map(([label, value]) => (
           <div key={label} className="rounded-md border px-3 py-2">
             <dt className="text-xs text-muted-foreground">{label}</dt>
