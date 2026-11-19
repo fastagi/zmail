@@ -268,8 +268,9 @@ func (r *repository) PurgeExpiredTrash(ctx context.Context, before time.Time, li
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		var found []uint
 		// Workers running at once skip each other's rows instead of waiting for them.
+		// Sealed handover history is never purged: only the sealed-history delete removes it.
 		if err := tx.Raw(`SELECT id FROM mail_messages
-			WHERE placement = ? AND trashed_at <= ?
+			WHERE placement = ? AND trashed_at <= ? AND `+unsealedMessage+`
 			ORDER BY trashed_at, id
 			LIMIT ?
 			FOR UPDATE SKIP LOCKED`, string(domain.MailPlacementTrash), before, limit).Scan(&found).Error; err != nil {

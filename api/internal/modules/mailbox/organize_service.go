@@ -132,6 +132,12 @@ func (s *service) updateMessages(
 	if s.organize == nil {
 		return domain.ErrServiceUnavailable
 	}
+	// An over-long list is refused before anything is looked up or locked.
+	if batch && len(ids) > MaxMessageIDs {
+		invalid := &ValidationError{}
+		validateIDList(invalid, "message_ids", ids, 1)
+		return invalid
+	}
 	return s.repo.InTransaction(ctx, func(tx context.Context) error {
 		if err := s.lockReferences(tx, mailboxID, ids, update); err != nil {
 			return err
@@ -147,18 +153,17 @@ func (s *service) updateMessages(
 // lockReferences checks that every message, the folder, and every label the update names belong
 // to the mailbox, and holds them until the transaction ends. Ids that are not positive are left
 // to validation.
+//
+// The folder and the labels are locked before the messages, the same order DeleteFolder and
+// DeleteLabel take (folder or label row, then the messages or label rows under it), so the two
+// never wait on each other in a cycle. Every lookup runs before any is reported, so a missing
+// message still answers before a missing folder or label, as the contract orders them.
 func (s *service) lockReferences(ctx context.Context, mailboxID uint, ids []uint, update MessageUpdate) error {
-	wanted := positiveDistinct(ids)
-	messages, err := s.organize.LockMessages(ctx, mailboxID, wanted)
-	if err != nil {
-		return err
-	}
-	if len(messages) != len(wanted) {
-		return ErrMailMessageNotFound
-	}
+	var folderErr error
 	if update.FolderID != nil && *update.FolderID != 0 {
-		if _, err = s.organize.LockFolder(ctx, mailboxID, *update.FolderID); err != nil {
-			return err
+		if _, folderErr = s.organize.LockFolder(ctx, mailboxID, *update.FolderID); folderErr != nil &&
+			!errors.Is(folderErr, ErrMailFolderNotFound) {
+			return folderErr
 		}
 	}
 	labelIDs := update.labelIDs()
@@ -166,7 +171,17 @@ func (s *service) lockReferences(ctx context.Context, mailboxID uint, ids []uint
 	if err != nil {
 		return err
 	}
-	if len(labels) != len(labelIDs) {
+	wanted := positiveDistinct(ids)
+	messages, err := s.organize.LockMessages(ctx, mailboxID, wanted)
+	if err != nil {
+		return err
+	}
+	switch {
+	case len(messages) != len(wanted):
+		return ErrMailMessageNotFound
+	case folderErr != nil:
+		return folderErr
+	case len(labels) != len(labelIDs):
 		return ErrMailLabelNotFound
 	}
 	return nil

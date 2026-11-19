@@ -627,3 +627,145 @@ func TestUpdateValidationKeys(t *testing.T) {
 		t.Fatalf("batch archive = %d %v; want 200 updated 1", recorder.Code, body)
 	}
 }
+
+// Sealed handover history is never purged by the trash worker, however long it sat in the trash:
+// only the sealed-history delete removes it.
+func TestPurgeExpiredTrashKeepsSealedMessages(t *testing.T) {
+	f := newOrganizeFixture(t)
+	ctx := context.Background()
+	db := f.repo.(*repository).db
+	sealed := f.personalMessage.ID
+	f.leave(t, f.b, tick())
+	f.handOver(t, f.personal.ID)
+	expired := time.Now().UTC().Add(-40 * 24 * time.Hour)
+	if err := db.Model(&MailMessagePO{}).Where("id = ?", sealed).
+		Updates(map[string]any{"placement": string(domain.MailPlacementTrash), "trashed_at": expired}).Error; err != nil {
+		t.Fatalf("trash the sealed message: %v", err)
+	}
+	purged, err := f.service.PurgeExpiredTrash(ctx, time.Now().UTC(), 10)
+	if err != nil || purged != 0 {
+		t.Fatalf("PurgeExpiredTrash = %d, %v; want nothing purged", purged, err)
+	}
+	if !f.messageExists(t, sealed) {
+		t.Fatal("the purge deleted sealed handover history")
+	}
+}
+
+// lockSpy counts the message locks a service takes.
+type lockSpy struct {
+	domain.MailOrganizeRepository
+	messageLocks int
+}
+
+func (s *lockSpy) LockMessages(ctx context.Context, mailboxID uint, ids []uint) ([]*domain.MailMessage, error) {
+	s.messageLocks++
+	return s.MailOrganizeRepository.LockMessages(ctx, mailboxID, ids)
+}
+
+// Over 100 ids is refused before any message is looked up or locked.
+func TestBatchOverLimitIsRefusedBeforeLocking(t *testing.T) {
+	f := newOrganizeFixture(t)
+	spy := &lockSpy{MailOrganizeRepository: f.service.organize}
+	f.service.organize = spy
+	ids := make([]uint, MaxMessageIDs+1)
+	for i := range ids {
+		ids[i] = uint(1_000_000 + i)
+	}
+	_, err := f.service.UpdateMessages(context.Background(), f.b, f.team.ID, ids, MessageUpdate{Read: boolPtr(true)})
+	expectValidation(t, err, "message_ids")
+	if spy.messageLocks != 0 {
+		t.Fatalf("%d message locks taken for an over-limit batch; want none", spy.messageLocks)
+	}
+	// Access still comes first.
+	_, err = f.service.UpdateMessages(context.Background(), f.c, f.team.ID, ids, MessageUpdate{Placement: placementPtr(domain.MailPlacementArchive)})
+	expectError(t, "view member over-limit move", err, domain.ErrPermissionDenied)
+}
+
+// A batch that moves messages into a folder while the folder is being deleted waits for the
+// delete instead of deadlocking with it: both lock the folder before its messages.
+func TestBatchMoveAndFolderDeleteDoNotDeadlock(t *testing.T) {
+	f := newOrganizeFixture(t)
+	ctx := context.Background()
+	db := f.repo.(*repository).db
+	box, message := f.team.ID, f.teamMessage.ID
+	folder := f.folder(t, f.e, box, "Invoices")
+	into := MessageUpdate{Placement: placementPtr(domain.MailPlacementFolder), FolderID: uintPtr(folder.ID)}
+	if _, err := f.service.UpdateMessages(ctx, f.b, box, []uint{message}, into); err != nil {
+		t.Fatalf("move into the folder: %v", err)
+	}
+
+	// The deleting transaction, the batch, and the polling below each need a connection.
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	pool.SetMaxOpenConns(4)
+
+	// The deleting transaction locks the folder first, as DeleteFolder does.
+	deleting := db.Begin()
+	defer deleting.Rollback()
+	var pid int
+	if err := deleting.Raw(`SELECT pg_backend_pid()`).Scan(&pid).Error; err != nil {
+		t.Fatalf("backend pid: %v", err)
+	}
+	if err := deleting.Exec(`SELECT id FROM mail_folders WHERE id = ? FOR UPDATE`, folder.ID).Error; err != nil {
+		t.Fatalf("lock the folder: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.service.UpdateMessages(ctx, f.b, box, []uint{message}, into)
+		done <- err
+	}()
+	// Wait until the batch is blocked behind the deleting transaction.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var blocked int
+		poll, cancel := context.WithTimeout(ctx, time.Second)
+		err := db.WithContext(poll).Raw(`SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))`, pid).Scan(&blocked).Error
+		cancel()
+		if err != nil {
+			t.Fatalf("blocked sessions: %v", err)
+		}
+		if blocked > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the batch never waited for the folder lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The rest of DeleteFolder: move the folder's messages out, then delete it.
+	if err := deleting.Exec(`UPDATE mail_messages SET placement = 'default', folder_id = NULL
+		WHERE folder_id = ? AND placement = 'folder'`, folder.ID).Error; err != nil {
+		t.Fatalf("delete moves the folder's messages: %v", err)
+	}
+	if err := deleting.Exec(`DELETE FROM mail_folders WHERE id = ?`, folder.ID).Error; err != nil {
+		t.Fatalf("delete the folder: %v", err)
+	}
+	if err := deleting.Commit().Error; err != nil {
+		t.Fatalf("commit the delete: %v", err)
+	}
+	select {
+	case err := <-done:
+		expectError(t, "batch into a folder deleted meanwhile", err, ErrMailFolderNotFound)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the batch never finished")
+	}
+	if po := f.stored(t, message); po.Placement != string(domain.MailPlacementDefault) || po.FolderID != nil {
+		t.Fatalf("message after the delete = placement %q folder %v; want default without folder", po.Placement, po.FolderID)
+	}
+}
+
+// Locking the folder and labels first does not change which 404 answers: a missing message wins.
+func TestMissingMessageAnswersBeforeMissingFolderAndLabel(t *testing.T) {
+	f := newOrganizeFixture(t)
+	_, err := f.service.UpdateMessages(context.Background(), f.b, f.team.ID, []uint{999_999}, MessageUpdate{
+		Placement: placementPtr(domain.MailPlacementFolder), FolderID: uintPtr(999_998), AddLabelIDs: []uint{999_997},
+	})
+	expectError(t, "missing message, folder, and label", err, ErrMailMessageNotFound)
+	_, err = f.service.UpdateMessages(context.Background(), f.b, f.team.ID, []uint{f.teamMessage.ID}, MessageUpdate{
+		Placement: placementPtr(domain.MailPlacementFolder), FolderID: uintPtr(999_998), AddLabelIDs: []uint{999_997},
+	})
+	expectError(t, "missing folder and label", err, ErrMailFolderNotFound)
+}
