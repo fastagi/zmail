@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
     data: ['webhook.test'],
     error: null as unknown,
     isError: false,
+    isPending: false,
   },
   create: asyncMutationState(),
   update: asyncMutationState(),
@@ -55,6 +56,7 @@ describe('webhook management workflow', () => {
     state.eventTypes.data = ['webhook.test'];
     state.eventTypes.error = null;
     state.eventTypes.isError = false;
+    state.eventTypes.isPending = false;
     for (const mutation of [state.create, state.update, state.remove, state.rotate]) {
       mutation.error = null;
       mutation.isPending = false;
@@ -162,6 +164,12 @@ describe('webhook management workflow', () => {
     expect(screen.getByLabelText('email.sent')).toBeChecked();
     expect(screen.queryByLabelText('mail.message.sent')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('webhook.test')).not.toBeInTheDocument();
+  });
+
+  it('keeps Create enabled while event types load when no prefix is set', () => {
+    state.eventTypes.isPending = true;
+    renderWithMessages(<WebhookManagement organizationId={7} />);
+    expect(screen.getByRole('button', { name: 'Create endpoint' })).toBeEnabled();
   });
 
   it('keeps an edited endpoint subscription outside the prefix visible', () => {

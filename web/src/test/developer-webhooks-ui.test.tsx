@@ -64,7 +64,15 @@ describe('developer webhooks tab', () => {
     state.deliveries.data = page([]);
     state.attempts.data = page([]);
     state.eventTypes.data = ['mail.message.sent', 'webhook.test', ...EMAIL_EVENTS];
+    state.eventTypes.isPending = false;
     state.create.mutateAsync.mockReset();
+  });
+
+  it('keeps Create disabled while the event types load', () => {
+    state.eventTypes.data = undefined;
+    state.eventTypes.isPending = true;
+    renderWithMessages(<DeveloperWebhooksTab organizationId={1} />);
+    expect(screen.getByRole('button', { name: 'Create endpoint' })).toBeDisabled();
   });
 
   it('webhooks tab offers only email events', async () => {
@@ -128,8 +136,9 @@ describe('developer webhooks tab', () => {
   it('describes the contract retry schedule, not the prototype one', () => {
     renderWithMessages(<DeveloperWebhooksTab organizationId={1} />);
     const note = screen.getByText(/retried after about 1 minute, 5 minutes, 15 minutes, 1 hour/u);
-    expect(note.textContent).toMatch(/24 hours/u);
-    expect(note.textContent).not.toMatch(/30 minutes/u);
+    expect(note.textContent).toMatch(/up to 24 hours apart, over about three days/u);
+    expect(note.textContent).toMatch(/only an operator can replay it/u);
+    expect(note.textContent).not.toMatch(/30 minutes|delivery list/u);
   });
 });
 
@@ -137,6 +146,7 @@ describe('mock webhook event catalog', () => {
   it('lists the six transactional email events', () => {
     const eventTypes = new MockWebhookStore().eventTypes();
     expect(eventTypes).toContain('webhook.test');
+    expect(eventTypes).toContain('mail.message.sent');
     for (const eventType of EMAIL_EVENTS) expect(eventTypes).toContain(eventType);
   });
 });

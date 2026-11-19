@@ -138,7 +138,7 @@ export function WebhookManagement({
           type="button"
           size="sm"
           icon={<Plus className="size-4" />}
-          disabled={eventTypes.isError}
+          disabled={eventTypes.isError || (Boolean(eventTypePrefix) && eventTypes.isPending)}
           onClick={() => setEditor('create')}
         >
           {t('actions.create')}

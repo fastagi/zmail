@@ -141,7 +141,7 @@ const messages = {
     sampleNote:
       'The payload never contains the subject, the body, or any variable, secret or not. The recipient is given in full so your endpoint can match the outcome to its user.',
     retryNote:
-      'A failed push is retried after about 1 minute, 5 minutes, 15 minutes, 1 hour, and on up to 24 hours, at most 10 attempts. You can replay it from the delivery list.',
+      'A failed push is retried after about 1 minute, 5 minutes, 15 minutes, 1 hour, and then at longer gaps up to 24 hours apart, over about three days and at most 10 attempts. After that, only an operator can replay it.',
   },
   placeholder: {
     title: 'Coming soon',
