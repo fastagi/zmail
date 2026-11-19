@@ -1118,7 +1118,7 @@ export interface paths {
         post?: never;
         /**
          * Move a message to the trash, or delete it from the trash for good
-         * @description A message outside the trash moves to the trash and needs `send`; a queued message that waits for the send limit is then never sent. A message already in the trash is deleted for good, with its files, and needs `organize`.
+         * @description A message outside the trash moves to the trash and needs `send`; a queued message that waits for the send limit is then never sent. A message already in the trash is deleted for good, with its files, and needs `organize`. A caller without `send` gets 403 before the message is looked up; a missing message is then 404; a message in the trash without `organize` is then 403.
          */
         delete: operations["deleteMailMessage"];
         options?: never;
@@ -7863,7 +7863,7 @@ export interface operations {
                 per_page?: components["parameters"]["PerPage"];
                 /** @description Keep only one placement. Without it every placement except `trash` is listed. `folder` needs `folder_id`. */
                 placement?: components["schemas"]["MailPlacement"];
-                /** @description Search, trimmed; empty after trimming or over 200 characters is `400 COMMON.INVALID_INPUT`. Case-insensitive substring match on the subject, the sender address and name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches every placement except `trash`. A search the database cannot finish within 2 seconds is `422 MAILBOX.SEARCH_TOO_BROAD`. */
+                /** @description Search. At most 200 characters as sent; the value is then trimmed, and one that is empty after trimming is `400 COMMON.INVALID_INPUT`. Case-insensitive substring match on the subject, the sender address and name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches every placement except `trash`. A search the database cannot finish within 2 seconds is `422 MAILBOX.SEARCH_TOO_BROAD`. */
                 q?: string;
                 /** @description Keep only messages the caller starred (`true`) or did not star (`false`). */
                 starred?: boolean;

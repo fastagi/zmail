@@ -400,7 +400,8 @@ shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DI
 
 ## Messages
 
-Listing returns summaries, newest first, without bodies. Without `placement` it lists every
+Listing returns summaries without bodies, newest first, except the trash, which is ordered by when
+messages were trashed. Without `placement` it lists every
 placement except the trash, so a client that knows nothing of placements sees what it saw before
 they existed. See [Listing And Search](#listing-and-search) for the filters.
 
@@ -550,6 +551,14 @@ Every message route of a mailbox answers in this order, and the first failing ch
 
 A malformed path, query, or JSON body is `400 COMMON.INVALID_INPUT` before any of these.
 
+`DELETE .../messages/:message_id` is the exception, because the permission it needs depends on
+where the message is:
+
+1. The mailbox exists for the caller, otherwise `404 MAILBOX.NOT_FOUND`.
+2. The caller has `send`, otherwise `403 PERMISSION.DENIED`.
+3. The message exists in the mailbox, otherwise `404 MAILBOX.MESSAGE_NOT_FOUND`.
+4. When the message is in the trash, the caller has `organize`, otherwise `403 PERMISSION.DENIED`.
+
 ### Threads
 
 A thread is a conversation within one mailbox, linked by RFC 5322 `Message-ID`, `In-Reply-To`, and
@@ -588,13 +597,13 @@ replies in Sent.
 | `starred` | `true` for messages the caller starred, `false` for the others |
 | `unread` | `true` for inbound messages the caller has not read (outbound messages are always read, so never match), `false` for the others |
 | `has_attachments` | `true` for messages with files, `false` for the others |
-| `q` | Search; trimmed, then 1 to 200 characters |
+| `q` | Search; at most 200 characters as sent, then trimmed and not empty |
 | `group` | `thread` lists one row per thread |
 | `page`, `per_page` | Pagination |
 
 An unknown value, `folder_id` without `placement=folder`, `placement=folder` without `folder_id`,
-`q` with `placement=trash`, a `q` that is empty after trimming or longer than 200 characters (as on
-the log route), or `group` outside the rules below is `400 COMMON.INVALID_INPUT`. An unknown folder
+`q` with `placement=trash`, a `q` longer than 200 characters as sent, a `q` that is empty after
+trimming, or `group` outside the rules below is `400 COMMON.INVALID_INPUT`. An unknown folder
 or label is `404 MAILBOX.FOLDER_NOT_FOUND` or `404 MAILBOX.LABEL_NOT_FOUND`.
 
 The trash (`placement=trash`) is ordered by `trashed_at`, newest first, then by id, highest first.
