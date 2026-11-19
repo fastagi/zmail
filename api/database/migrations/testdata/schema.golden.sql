@@ -236,6 +236,16 @@ TABLE mail_messages
   COLUMN rfc_message_id character varying(998) NOT NULL DEFAULT ''::character varying
   COLUMN send_lane character varying(16) NOT NULL DEFAULT 'personal'::character varying
 
+TABLE mail_roles
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_roles_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN name character varying(64) NOT NULL
+  COLUMN color character varying(16) NOT NULL DEFAULT 'gray'::character varying
+  COLUMN description character varying(280) NOT NULL DEFAULT ''::character varying
+  COLUMN owner_user_id bigint
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_templates
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_templates_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -302,6 +312,7 @@ TABLE mailboxes
   COLUMN owner_left_at timestamp with time zone
   COLUMN sealed_before timestamp with time zone
   COLUMN webhooks_enabled boolean NOT NULL DEFAULT false
+  COLUMN role_id bigint
 
 TABLE migrations
   COLUMN id integer NOT NULL DEFAULT nextval('migrations_id_seq'::regclass)
@@ -640,6 +651,11 @@ CONSTRAINT mail_messages.chk_mail_messages_status CHECK (((status)::text = ANY (
 CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_messages.mail_messages_folder_id_fkey FOREIGN KEY (folder_id) REFERENCES mail_folders(id) ON DELETE SET NULL
 CONSTRAINT mail_messages.mail_messages_pkey PRIMARY KEY (id)
+CONSTRAINT mail_roles.mail_roles_color_check CHECK (((color)::text = ANY ((ARRAY['gray'::character varying, 'red'::character varying, 'orange'::character varying, 'yellow'::character varying, 'green'::character varying, 'teal'::character varying, 'blue'::character varying, 'purple'::character varying, 'pink'::character varying])::text[])))
+CONSTRAINT mail_roles.mail_roles_name_check CHECK (((char_length(btrim((name)::text)) >= 1) AND (char_length(btrim((name)::text)) <= 64)))
+CONSTRAINT mail_roles.mail_roles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_roles.mail_roles_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_roles.mail_roles_pkey PRIMARY KEY (id)
 CONSTRAINT mail_templates.chk_mail_templates_kind CHECK (((kind)::text = ANY ((ARRAY['standard'::character varying, 'transactional'::character varying])::text[])))
 CONSTRAINT mail_templates.chk_mail_templates_transactional_fields CHECK (((((kind)::text = 'transactional'::text) AND (template_key IS NOT NULL) AND (from_address IS NOT NULL)) OR (((kind)::text = 'standard'::text) AND (template_key IS NULL) AND (from_address IS NULL) AND ((from_name)::text = ''::text) AND (variable_definitions = '[]'::jsonb))))
 CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -659,6 +675,7 @@ CONSTRAINT mailboxes.chk_mailboxes_type CHECK (((type)::text = ANY ((ARRAY['pers
 CONSTRAINT mailboxes.fk_mailboxes_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
+CONSTRAINT mailboxes.mailboxes_role_id_fkey FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL
 CONSTRAINT migrations.migrations_pkey PRIMARY KEY (id)
 CONSTRAINT notification_deliveries.fk_notifications_deliveries FOREIGN KEY (notification_id) REFERENCES notifications(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT notification_deliveries.notification_deliveries_channel_check CHECK (((channel)::text = ANY ((ARRAY['in_app'::character varying, 'email'::character varying])::text[])))
@@ -825,6 +842,7 @@ INDEX CREATE UNIQUE INDEX mail_message_stars_pkey ON mail_message_stars USING bt
 INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree (mailbox_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_folder ON mail_messages USING btree (folder_id) WHERE (folder_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING btree (mailbox_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
+INDEX CREATE INDEX idx_mail_messages_inbox_time ON mail_messages USING btree (mailbox_id, direction, created_at DESC, id DESC)
 INDEX CREATE INDEX idx_mail_messages_lane_attempted ON mail_messages USING btree (send_lane, send_attempted_at) WHERE ((direction)::text = 'outbound'::text)
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
 INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (message_id) WHERE (((direction)::text = 'outbound'::text) AND ((message_id)::text <> ''::text))
@@ -839,6 +857,9 @@ INDEX CREATE INDEX idx_mail_messages_trgm_text_body ON mail_messages USING gin (
 INDEX CREATE INDEX idx_mail_messages_trgm_to_addresses ON mail_messages USING gin (to_addresses public.gin_trgm_ops)
 INDEX CREATE INDEX idx_mail_messages_waiting ON mail_messages USING btree (id) WHERE (queued_reason IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_roles_name ON mail_roles USING btree (organization_id, lower((name)::text))
+INDEX CREATE INDEX idx_mail_roles_owner ON mail_roles USING btree (owner_user_id) WHERE (owner_user_id IS NOT NULL)
+INDEX CREATE UNIQUE INDEX mail_roles_pkey ON mail_roles USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
 INDEX CREATE UNIQUE INDEX mail_templates_key_idx ON mail_templates USING btree (organization_id, template_key) WHERE (template_key IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
@@ -853,6 +874,7 @@ INDEX CREATE UNIQUE INDEX mailbox_members_pkey ON mailbox_members USING btree (m
 INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address)
 INDEX CREATE INDEX idx_mailboxes_organization ON mailboxes USING btree (organization_id, id) WHERE (deleted_at IS NULL)
 INDEX CREATE INDEX idx_mailboxes_owner ON mailboxes USING btree (organization_id, owner_user_id) WHERE ((deleted_at IS NULL) AND ((type)::text = 'personal'::text))
+INDEX CREATE INDEX idx_mailboxes_role ON mailboxes USING btree (role_id) WHERE (role_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mailboxes_pkey ON mailboxes USING btree (id)
 INDEX CREATE UNIQUE INDEX migrations_pkey ON migrations USING btree (id)
 INDEX CREATE INDEX idx_notification_deliveries_leased ON notification_deliveries USING btree (channel, status, lease_expires_at)

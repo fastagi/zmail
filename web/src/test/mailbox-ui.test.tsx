@@ -116,6 +116,11 @@ const templateState = vi.hoisted(() => ({ data: [] as unknown[] }));
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
   useMailTemplates: () => templateState,
 }));
+// Mailbox administration offers each mailbox's mail role; these tests have no roles.
+vi.mock('@/features/mailbox/hooks/use-inbox', () => ({
+  useMailRoles: () => ({ data: [], isPending: false, error: null }),
+  useAssignMailboxRole: () => ({ isPending: false, mutateAsync: vi.fn() }),
+}));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
   const scoped = <T,>(organizationId: number, result: T): T => {
     state.organizationIds.push(organizationId);

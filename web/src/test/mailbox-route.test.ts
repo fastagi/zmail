@@ -2992,6 +2992,761 @@ describe('mailbox browser route boundary', () => {
     expect(getSessionUser).not.toHaveBeenCalled();
   });
 
+  it('forwards only whitelisted inbox parameters', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () =>
+      Response.json({
+        code: 0,
+        message: 'success',
+        data: [],
+        meta: { per_page: 15, has_more: false, next_cursor: null },
+      })
+    );
+    const route = await loadRoute();
+    activeOrganization = '7';
+    const cursor = inboxCursor('1763532000123456789', 42);
+    const inbox = (query: string) =>
+      route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`));
+
+    const first = await inbox('?view=all&group=thread&foo=1');
+    expect(first.status).toBe(200);
+    expect(first.headers.get('cache-control')).toBe('private, no-store');
+    await inbox('');
+    await inbox(
+      `?per_page=500&tz=Asia%2FShanghai&unread=false&mailbox_id=12&role_id=none&view=sent&cursor=${cursor}&sort=subject`
+    );
+    await inbox('?q=%20100%25%20off%20&role_id=3&per_page=0&user_id=9');
+    await inbox('?view=pending&unread=true&per_page=%2B5');
+    await inbox('?per_page=99999999999999999999');
+    await inbox('?per_page=-99999999999999999999');
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const target = new URL(String(url));
+      return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/inbox-messages?view=all&group=thread&per_page=15',
+      'GET /v1/inbox-messages?per_page=15',
+      `GET /v1/inbox-messages?view=sent&role_id=none&mailbox_id=12&unread=false&tz=Asia%2FShanghai&cursor=${cursor}&per_page=100`,
+      'GET /v1/inbox-messages?role_id=3&q=100%25+off&per_page=1',
+      'GET /v1/inbox-messages?view=pending&unread=true&per_page=5',
+      'GET /v1/inbox-messages?per_page=100',
+      'GET /v1/inbox-messages?per_page=1',
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('organization-id')).toBe('7');
+    }
+    expect(getSessionUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects page and repeated parameters without calling upstream', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    const route = await loadRoute();
+    const cursor = inboxCursor('1763532000123456789', 42);
+
+    for (const query of [
+      // Offset paging does not exist here, and every parameter appears at most once.
+      '?page=1',
+      '?page=',
+      '?view=all&view=all',
+      '?role_id=1&role_id=2',
+      '?mailbox_id=1&mailbox_id=1',
+      '?unread=true&unread=true',
+      '?q=a&q=b',
+      '?group=thread&group=thread',
+      '?tz=UTC&tz=UTC',
+      `?cursor=${cursor}&cursor=${cursor}`,
+      '?per_page=5&per_page=5',
+      // Unknown or empty values.
+      '?view=spam',
+      '?view=',
+      '?role_id=0',
+      '?role_id=-1',
+      '?role_id=abc',
+      '?role_id=',
+      '?mailbox_id=0',
+      '?mailbox_id=1.5',
+      '?mailbox_id=',
+      '?unread=yes',
+      '?unread=',
+      '?q=',
+      '?q=%20%20',
+      `?q=${'a'.repeat(201)}`,
+      `?q=%20${'a'.repeat(200)}`,
+      '?q=a%01b',
+      '?group=mailbox',
+      '?group=',
+      '?tz=',
+      '?tz=Local',
+      '?tz=Mars%2FOlympus',
+      `?tz=${'A'.repeat(65)}`,
+      '?cursor=',
+      '?cursor=%21%21',
+      `?cursor=${cursor}%3D`,
+      `?cursor=${inboxCursor('01', 42)}`,
+      `?cursor=${inboxCursor('5', 0)}`,
+      `?cursor=${Buffer.from('5').toString('base64url')}`,
+      `?cursor=${'A'.repeat(129)}`,
+      '?per_page=abc',
+      '?per_page=1.5',
+      '?per_page=',
+      // Combinations outside the contract's rules.
+      '?view=today&q=invoice',
+      '?view=sent&q=invoice',
+      '?view=today&group=thread',
+      '?view=pending&group=thread',
+      '?group=thread&unread=true',
+      '?group=thread&q=invoice',
+    ]) {
+      await expectError(
+        await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`)),
+        400,
+        'COMMON.INVALID_INPUT'
+      );
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("mock inbox hides another member's personal mailbox and pages by cursor", async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const created = async (body: Record<string, unknown>) =>
+      (await (await create(route, body)).json()).data as { id: number; address: string };
+    // demo-admin (user 1) owns the organization but reads only its own and shared mailboxes.
+    const riley = await created({ local_part: 'riley', type: 'personal', owner_user_id: 3 });
+    const mine = await created({ local_part: 'mine', type: 'personal', owner_user_id: 1 });
+    const team = await created({
+      local_part: 'team',
+      type: 'shared',
+      members: [
+        { user_id: 1, permission: 'manage' },
+        { user_id: 3, permission: 'view' },
+      ],
+    });
+    const ops = await created({
+      local_part: 'ops',
+      type: 'shared',
+      members: [{ user_id: 1, permission: 'view' }],
+    });
+    const inbox = async (query = '') => {
+      const response = await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      expect(response.headers.get('vary')).toContain('Organization-Id');
+      return response.json();
+    };
+    const ids = async (query = '') =>
+      (await inbox(query)).data.map((item: { id: number }) => item.id);
+
+    // Three welcome messages, newest first; riley@ is not readable by demo-admin.
+    const everything = await inbox();
+    expect(everything.data.map((item: { mailbox_id: number }) => item.mailbox_id)).toEqual([
+      ops.id,
+      team.id,
+      mine.id,
+    ]);
+    expect(everything.meta).toEqual({ per_page: 15, has_more: false, next_cursor: null });
+    expect(everything.data[0]).toMatchObject({
+      mailbox_address: ops.address,
+      role_id: null,
+      direction: 'inbound',
+      placement: 'default',
+      snippet:
+        'This message was created by the development mock. No mail is sent or received until the app uses the real API.',
+    });
+    for (const item of everything.data) {
+      expect(item).not.toHaveProperty('text_body');
+      expect(item).not.toHaveProperty('html_body');
+      expect(item).not.toHaveProperty('thread');
+    }
+
+    // Two pages by cursor: no repeats, and the last page has no cursor.
+    const first = await inbox('?per_page=2');
+    expect(first.data).toHaveLength(2);
+    expect(first.meta).toMatchObject({ per_page: 2, has_more: true });
+    expect(typeof first.meta.next_cursor).toBe('string');
+    const second = await inbox(`?per_page=2&cursor=${first.meta.next_cursor}`);
+    expect(second.meta).toEqual({ per_page: 2, has_more: false, next_cursor: null });
+    expect([...first.data, ...second.data].map((item: { id: number }) => item.id)).toEqual(
+      everything.data.map((item: { id: number }) => item.id)
+    );
+
+    // Filters that name an unreadable, missing, or role-bound mailbox match nothing.
+    expect(await ids(`?mailbox_id=${riley.id}`)).toEqual([]);
+    expect(await ids('?mailbox_id=9999')).toEqual([]);
+    expect(await ids('?role_id=1')).toEqual([]);
+    expect(await ids(`?mailbox_id=${team.id}`)).toHaveLength(1);
+    expect(await ids('?role_id=none')).toHaveLength(3);
+
+    // Sent lists outbound mail; grouping by thread carries the thread summary.
+    const reply = (
+      await (
+        await send(route, mine.id, {
+          to: ['bob@example.com'],
+          subject: 'Hi',
+          text: '  Hello\n\n  Bob  ',
+        })
+      ).json()
+    ).data;
+    const sent = await inbox('?view=sent&group=thread');
+    expect(sent.data.map((item: { id: number }) => item.id)).toEqual([reply.id]);
+    expect(sent.data[0]).toMatchObject({
+      mailbox_address: mine.address,
+      snippet: 'Hello Bob',
+      thread: { message_count: 1, message_ids: [reply.id], unread: false },
+    });
+    const grouped = await inbox('?group=thread');
+    expect(grouped.data.map((item: { thread: { unread: boolean } }) => item.thread.unread)).toEqual(
+      [true, true, true]
+    );
+
+    // demo-member reads riley@ and team@, never mine@ or ops@.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect((await inbox()).data.map((item: { mailbox_id: number }) => item.mailbox_id)).toEqual([
+      team.id,
+      riley.id,
+    ]);
+
+    // Another organization sees none of it, even when naming the mailbox.
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    activeOrganization = await secondOrganization();
+    expect(await ids(`?mailbox_id=${mine.id}`)).toEqual([]);
+  });
+
+  it('mock inbox lists today by the zone, pending, unread, and search outside the trash', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      process.env.MOCK_BFF_ENABLED = 'true';
+      getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+      const route = await loadRoute();
+      const inbox = async (query: string) => {
+        const response = await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`));
+        expect(response.status).toBe(200);
+        return (await response.json()).data.map((item: { id: number }) => item.id) as number[];
+      };
+      const update = (mailboxId: number, messageId: number, body: unknown) =>
+        route.updateMailMessageRoute(
+          request(`/api/mailboxes/${mailboxId}/messages/${messageId}`, {
+            method: 'PUT',
+            body: JSON.stringify(body),
+          }),
+          String(mailboxId),
+          String(messageId)
+        );
+
+      // 23:30 on the 18th in Shanghai: desk@ gets its welcome message.
+      vi.setSystemTime(new Date('2026-11-18T15:30:00Z'));
+      const desk = (await (await create(route, { local_part: 'desk' })).json()).data;
+      // 00:30 on the 19th in Shanghai, still the 18th in UTC: sales@ gets one, desk@ sends one.
+      vi.setSystemTime(new Date('2026-11-18T16:30:00Z'));
+      const sales = (await (await create(route, { local_part: 'sales' })).json()).data;
+      const sent = (
+        await (
+          await send(route, desk.id, {
+            to: ['bob@example.com'],
+            subject: 'Quarterly Invoice',
+            text: 'Body',
+          })
+        ).json()
+      ).data;
+      vi.setSystemTime(new Date('2026-11-18T17:00:00Z'));
+      const [salesWelcome, deskWelcome] = await inbox('');
+
+      expect(await inbox('?view=today')).toEqual([salesWelcome, deskWelcome]);
+      expect(await inbox('?view=today&tz=Asia%2FShanghai')).toEqual([salesWelcome]);
+      expect(await inbox('?view=today&tz=America%2FLos_Angeles')).toEqual([
+        salesWelcome,
+        deskWelcome,
+      ]);
+
+      // Pending is the viewer's stars in both directions; unread leaves read mail out.
+      expect((await update(desk.id, deskWelcome, { starred: true, read: true })).status).toBe(200);
+      expect((await update(desk.id, sent.id, { starred: true })).status).toBe(200);
+      expect(await inbox('?view=pending')).toEqual([sent.id, deskWelcome]);
+      expect(await inbox('?unread=true')).toEqual([salesWelcome]);
+      expect(await inbox('?unread=false')).toEqual([deskWelcome]);
+
+      // Search ignores case, spans both directions, and narrows with the other filters.
+      expect(await inbox('?q=INVOICE')).toEqual([sent.id]);
+      expect(await inbox('?q=desk%40')).toEqual([sent.id, deskWelcome]);
+      expect(await inbox(`?q=desk%40&mailbox_id=${sales.id}`)).toEqual([]);
+      expect(await inbox('?q=welcome&unread=true')).toEqual([salesWelcome]);
+      await expectError(
+        await route.listInboxMessagesRoute(request('/api/inbox-messages?q=%20x%20')),
+        422,
+        'MAILBOX.SEARCH_TOO_BROAD'
+      );
+
+      // The trash is in no view and no search; archived mail leaves pending but stays today.
+      expect((await update(desk.id, deskWelcome, { placement: 'archive' })).status).toBe(200);
+      expect(await inbox('?view=pending')).toEqual([sent.id]);
+      expect(await inbox('?view=today')).toEqual([salesWelcome, deskWelcome]);
+      expect((await update(desk.id, deskWelcome, { placement: 'trash' })).status).toBe(200);
+      expect(await inbox('?view=today')).toEqual([salesWelcome]);
+      expect(await inbox('?q=desk%40')).toEqual([sent.id]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('counts forward only tz', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () =>
+      Response.json({ code: 0, message: 'success', data: {} })
+    );
+    const route = await loadRoute();
+    activeOrganization = '7';
+    const counts = (query: string) =>
+      route.getInboxMessageCountsRoute(request(`/api/inbox-message-counts${query}`));
+
+    const first = await counts('?tz=Asia%2FShanghai&view=today&mailbox_id=3&page=2');
+    expect(first.status).toBe(200);
+    expect(first.headers.get('cache-control')).toBe('private, no-store');
+    await counts('');
+    for (const query of ['?tz=', '?tz=Local', '?tz=Mars%2FOlympus', '?tz=UTC&tz=UTC']) {
+      await expectError(await counts(query), 400, 'COMMON.INVALID_INPUT');
+    }
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const target = new URL(String(url));
+      return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/inbox-message-counts?tz=Asia%2FShanghai',
+      'GET /v1/inbox-message-counts',
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('organization-id')).toBe('7');
+    }
+  });
+
+  it('mock counts satisfy all_unread equal to the sum over mailboxes', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      process.env.MOCK_BFF_ENABLED = 'true';
+      getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+      const route = await loadRoute();
+      const counts = async (query = '') => {
+        const response = await route.getInboxMessageCountsRoute(
+          request(`/api/inbox-message-counts${query}`)
+        );
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('private, no-store');
+        expect(response.headers.get('vary')).toContain('Organization-Id');
+        return (await response.json()).data;
+      };
+      vi.setSystemTime(new Date('2026-11-18T15:30:00Z'));
+      expect(await counts()).toEqual({
+        views: { all_unread: 0, today: 0, today_unread: 0, pending: 0, sent_waiting: 0 },
+        roles: [],
+        ungrouped_unread: 0,
+        mailboxes: [],
+        today_starts_at: '2026-11-18T00:00:00Z',
+        today_ends_at: '2026-11-19T00:00:00Z',
+      });
+
+      const created = async (body: Record<string, unknown>) =>
+        (await (await create(route, body)).json()).data as { id: number };
+      // riley@ is readable only by demo-member; demo-admin reads the other three.
+      const riley = await created({ local_part: 'riley', type: 'personal', owner_user_id: 3 });
+      const hello = await created({ local_part: 'hello' });
+      vi.setSystemTime(new Date('2026-11-18T16:30:00Z'));
+      const sales = await created({ local_part: 'sales' });
+      const ops = await created({ local_part: 'ops' });
+      const welcome = async (mailboxId: number) =>
+        (
+          await (
+            await route.listMailMessagesRoute(
+              request(`/api/mailboxes/${mailboxId}/messages?direction=inbound`),
+              String(mailboxId)
+            )
+          ).json()
+        ).data[0].id as number;
+      await route.updateMailMessageRoute(
+        request(`/api/mailboxes/${ops.id}/messages/${await welcome(ops.id)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ read: true, starred: true }),
+        }),
+        String(ops.id),
+        String(await welcome(ops.id))
+      );
+
+      const shanghai = await counts('?tz=Asia%2FShanghai');
+      expect(shanghai).toEqual({
+        views: { all_unread: 2, today: 2, today_unread: 1, pending: 1, sent_waiting: 0 },
+        roles: [],
+        ungrouped_unread: 2,
+        mailboxes: [
+          { mailbox_id: hello.id, unread: 1 },
+          { mailbox_id: sales.id, unread: 1 },
+          { mailbox_id: ops.id, unread: 0 },
+        ],
+        today_starts_at: '2026-11-18T16:00:00Z',
+        today_ends_at: '2026-11-19T16:00:00Z',
+      });
+      // Each mailbox's count is its unread_count in the mailbox list.
+      const listed = (await (await route.listMailboxesRoute(request('/api/mailboxes'))).json())
+        .data as { id: number; unread_count: number; access: { view: boolean } }[];
+      expect(
+        listed
+          .filter(mailbox => mailbox.access.view)
+          .map(mailbox => ({ mailbox_id: mailbox.id, unread: mailbox.unread_count }))
+          .sort((left, right) => left.mailbox_id - right.mailbox_id)
+      ).toEqual(shanghai.mailboxes);
+      expect(shanghai.views.all_unread).toBe(
+        shanghai.mailboxes.reduce((sum: number, item: { unread: number }) => sum + item.unread, 0)
+      );
+      expect(listed.map(mailbox => mailbox.id)).toContain(riley.id);
+      expect((await counts()).views).toMatchObject({ today: 3, today_unread: 2 });
+
+      getSessionUser.mockResolvedValue(mockUser('demo-member'));
+      expect(
+        (await counts()).mailboxes.map((item: { mailbox_id: number }) => item.mailbox_id)
+      ).toEqual([riley.id, hello.id, sales.id, ops.id]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('mock counts leave queued mail in the trash out of sent_waiting', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const { mockMailboxStore } = await import('@/features/mailbox/server/mock-mailbox-store');
+    const desk = (await (await create(route, { local_part: 'desk' })).json()).data;
+    const sendQueued = async (subject: string) => {
+      const sent = (
+        await (
+          await send(route, desk.id, { to: ['bob@example.com'], subject, text: 'Body' })
+        ).json()
+      ).data;
+      // The mock never runs out of send limit; hold the message as the API would.
+      const state = mockMailboxStore['organizations'].get(1)?.get(desk.id);
+      const stored = state?.messages.get(sent.id);
+      if (!state || !stored) throw new Error('message not stored');
+      state.messages.set(sent.id, { ...stored, status: 'queued', queued_reason: 'send_limit' });
+      return sent.id as number;
+    };
+    const waiting = async () =>
+      (await (await route.getInboxMessageCountsRoute(request('/api/inbox-message-counts'))).json())
+        .data.views.sent_waiting;
+
+    await sendQueued('One');
+    const trashed = await sendQueued('Two');
+    expect(await waiting()).toBe(2);
+    const moved = await route.updateMailMessageRoute(
+      request(`/api/mailboxes/${desk.id}/messages/${trashed}`, {
+        method: 'PUT',
+        body: JSON.stringify({ placement: 'trash' }),
+      }),
+      String(desk.id),
+      String(trashed)
+    );
+    expect(moved.status).toBe(200);
+    expect(await waiting()).toBe(1);
+  });
+
+  it('mock role writes: member 403, duplicate 409, 51st 422, delete ungroups', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const write = (method: string, path: string, body?: unknown) =>
+      request(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const createRole = (body: unknown) =>
+      route.createMailRoleRoute(write('POST', '/api/mail-roles', body));
+    const updateRole = (roleId: number | string, body: unknown) =>
+      route.updateMailRoleRoute(write('PUT', `/api/mail-roles/${roleId}`, body), String(roleId));
+    const deleteRole = (roleId: number | string) =>
+      route.deleteMailRoleRoute(write('DELETE', `/api/mail-roles/${roleId}`), String(roleId));
+    const assign = (mailboxId: number, body: unknown) =>
+      route.setMailboxRoleRoute(
+        write('PUT', `/api/mailboxes/${mailboxId}/role-assignment`, body),
+        String(mailboxId)
+      );
+    const listRoles = async () => {
+      const response = await route.listMailRolesRoute(request('/api/mail-roles'));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      return (await response.json()).data as { id: number; name: string; mailbox_ids: number[] }[];
+    };
+
+    const created = await createRole({ name: '  Design desk ', color: 'orange', owner_user_id: 3 });
+    expect(created.status).toBe(201);
+    expect(created.headers.get('vary')).toContain('Organization-Id');
+    const design = (await created.json()).data;
+    expect(design).toMatchObject({
+      name: 'Design desk',
+      color: 'orange',
+      description: '',
+      owner_user_id: 3,
+      mailbox_ids: [],
+    });
+    // The defaults: gray, no description, no owner.
+    const plain = (await (await createRole({ name: 'Billing' })).json()).data;
+    expect(plain).toMatchObject({ color: 'gray', description: '', owner_user_id: null });
+
+    await expectError(await createRole({ name: 'DESIGN DESK' }), 409, 'MAILBOX.ROLE_NAME_TAKEN');
+    await expectError(
+      await updateRole(plain.id, { name: 'design desk' }),
+      409,
+      'MAILBOX.ROLE_NAME_TAKEN'
+    );
+    for (const body of [
+      { name: '   ' },
+      { name: 'x'.repeat(65) },
+      { name: 'Ok', color: 'black' },
+      { name: 'Ok', description: 'd'.repeat(281) },
+      { name: 'Ok', description: 'bad\u0007bell' },
+      { name: 'Ok', owner_user_id: 999 },
+      { name: 7 },
+      { name: 'Ok', owner_user_id: 'x' },
+    ]) {
+      await expectError(await createRole(body), 422, 'COMMON.VALIDATION_FAILED');
+    }
+    await expectError(
+      await route.createMailRoleRoute(request('/api/mail-roles', { method: 'POST', body: '{' })),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+    await expectError(
+      await route.createMailRoleRoute(
+        write('POST', '/api/mail-roles', { name: 'Big', description: 'x'.repeat(5_000) })
+      ),
+      413,
+      'COMMON.REQUEST_TOO_LARGE'
+    );
+    await expectError(await updateRole(9999, { name: 'Gone' }), 404, 'MAILBOX.ROLE_NOT_FOUND');
+    await expectError(await updateRole('abc', { name: 'Bad' }), 400, 'COMMON.INVALID_INPUT');
+
+    // team@ is readable by demo-member; vault@ is not, though demo-admin administers it.
+    const team = (
+      await (
+        await create(route, {
+          local_part: 'team',
+          type: 'shared',
+          members: [
+            { user_id: 1, permission: 'manage' },
+            { user_id: 3, permission: 'view' },
+          ],
+        })
+      ).json()
+    ).data;
+    const vault = (
+      await (
+        await create(route, {
+          local_part: 'vault',
+          type: 'shared',
+          members: [{ user_id: 1, permission: 'manage' }],
+        })
+      ).json()
+    ).data;
+    const assigned = await assign(team.id, { role_id: design.id });
+    expect(assigned.status).toBe(200);
+    await expect(assigned.json()).resolves.toMatchObject({
+      data: { id: team.id, role_id: design.id },
+    });
+    // Assigning the same role again changes nothing and succeeds.
+    expect((await assign(team.id, { role_id: design.id })).status).toBe(200);
+    expect((await assign(vault.id, { role_id: plain.id })).status).toBe(200);
+    await expectError(await assign(team.id, { role_id: 9999 }), 404, 'MAILBOX.ROLE_NOT_FOUND');
+    await expectError(await assign(team.id, {}), 422, 'COMMON.VALIDATION_FAILED');
+    await expectError(await assign(team.id, { role_id: 0 }), 422, 'COMMON.VALIDATION_FAILED');
+    await expectError(await assign(9999, { role_id: null }), 404, 'MAILBOX.NOT_FOUND');
+
+    expect((await listRoles()).map(role => [role.name, role.mailbox_ids])).toEqual([
+      ['Billing', [vault.id]],
+      ['Design desk', [team.id]],
+    ]);
+    const inboxIds = async (query: string) =>
+      (
+        await (await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`))).json()
+      ).data.map((item: { mailbox_id: number; role_id: number | null }) => [
+        item.mailbox_id,
+        item.role_id,
+      ]);
+    expect(await inboxIds(`?role_id=${design.id}`)).toEqual([[team.id, design.id]]);
+    expect(await inboxIds('?role_id=none')).toEqual([]);
+    const counts = async () =>
+      (await (await route.getInboxMessageCountsRoute(request('/api/inbox-message-counts'))).json())
+        .data;
+    expect(await counts()).toMatchObject({
+      roles: [
+        { role_id: design.id, unread: 1 },
+        { role_id: plain.id, unread: 1 },
+      ],
+      ungrouped_unread: 0,
+    });
+
+    // A member reads roles holding a mailbox they can see, and only those mailboxes.
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    expect((await listRoles()).map(role => [role.name, role.mailbox_ids])).toEqual([
+      ['Design desk', [team.id]],
+    ]);
+    await expectError(await createRole({ name: 'Mine' }), 403, 'PERMISSION.DENIED');
+    await expectError(await updateRole(design.id, { name: 'Mine' }), 403, 'PERMISSION.DENIED');
+    await expectError(await deleteRole(design.id), 403, 'PERMISSION.DENIED');
+    await expectError(await assign(team.id, { role_id: null }), 403, 'PERMISSION.DENIED');
+    await expectError(await assign(vault.id, { role_id: null }), 404, 'MAILBOX.NOT_FOUND');
+
+    // Deleting a role ungroups its mailboxes; a second delete finds nothing.
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    expect((await deleteRole(design.id)).status).toBe(204);
+    await expectError(await deleteRole(design.id), 404, 'MAILBOX.ROLE_NOT_FOUND');
+    const mailboxes = (await (await route.listMailboxesRoute(request('/api/mailboxes'))).json())
+      .data as { id: number; role_id: number | null }[];
+    expect(mailboxes.find(mailbox => mailbox.id === team.id)?.role_id).toBeNull();
+    expect(await inboxIds('?role_id=none')).toEqual([[team.id, null]]);
+    expect(await counts()).toMatchObject({
+      roles: [{ role_id: plain.id, unread: 1 }],
+      ungrouped_unread: 1,
+    });
+
+    // At most 50 roles per organization; the limit is judged before the name.
+    for (let index = 1; index <= 49; index += 1) {
+      expect((await createRole({ name: `Role ${index}` })).status).toBe(201);
+    }
+    await expectError(await createRole({ name: 'One more' }), 422, 'MAILBOX.ROLE_LIMIT_REACHED');
+    await expectError(await createRole({ name: 'billing' }), 422, 'MAILBOX.ROLE_LIMIT_REACHED');
+    expect((await updateRole(plain.id, { name: 'Finance', color: 'teal' })).status).toBe(200);
+
+    // Another organization sees none of these roles.
+    activeOrganization = await secondOrganization();
+    expect(await listRoles()).toEqual([]);
+    await expectError(
+      await updateRole(plain.id, { name: 'Elsewhere' }),
+      404,
+      'MAILBOX.ROLE_NOT_FOUND'
+    );
+    await expectError(await deleteRole(plain.id), 404, 'MAILBOX.ROLE_NOT_FOUND');
+  });
+
+  it('proxy role routes use the right upstream method and path', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async (_url, init) =>
+      init?.method === 'DELETE'
+        ? new Response(null, { status: 204 })
+        : Response.json({ code: 0, message: 'success', data: {} })
+    );
+    const route = await loadRoute();
+    activeOrganization = '7';
+    const write = (method: string, path: string, body?: unknown) =>
+      request(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+
+    await route.listMailRolesRoute(request('/api/mail-roles?owner=1'));
+    await route.createMailRoleRoute(
+      write('POST', '/api/mail-roles', { name: 'Design', color: 'orange', id: 9, extra: true })
+    );
+    await route.updateMailRoleRoute(
+      write('PUT', '/api/mail-roles/3', {
+        name: 'Design',
+        description: 'Agency accounts',
+        owner_user_id: 7,
+      }),
+      '3'
+    );
+    const removed = await route.deleteMailRoleRoute(write('DELETE', '/api/mail-roles/3'), '3');
+    expect(removed.status).toBe(204);
+    await route.setMailboxRoleRoute(
+      write('PUT', '/api/mailboxes/12/role-assignment', { role_id: 3, mailbox_id: 1 }),
+      '12'
+    );
+    await route.setMailboxRoleRoute(
+      write('PUT', '/api/mailboxes/12/role-assignment', { role_id: null }),
+      '12'
+    );
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const target = new URL(String(url));
+      return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/mail-roles',
+      'POST /v1/mail-roles',
+      'PUT /v1/mail-roles/3',
+      'DELETE /v1/mail-roles/3',
+      'PUT /v1/mailboxes/12/role-assignment',
+      'PUT /v1/mailboxes/12/role-assignment',
+    ]);
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      init?.body === undefined ? undefined : JSON.parse(String(init.body))
+    );
+    expect(bodies).toEqual([
+      undefined,
+      { name: 'Design', color: 'orange', description: '', owner_user_id: null },
+      { name: 'Design', color: 'gray', description: 'Agency accounts', owner_user_id: 7 },
+      undefined,
+      { role_id: 3 },
+      { role_id: null },
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('organization-id')).toBe('7');
+    }
+
+    // Malformed ids, bodies, and oversized bodies never reach the API.
+    fetchMock.mockClear();
+    await expectError(
+      await route.updateMailRoleRoute(write('PUT', '/api/mail-roles/0', { name: 'x' }), '0'),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+    await expectError(
+      await route.deleteMailRoleRoute(write('DELETE', '/api/mail-roles/x'), 'x'),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+    await expectError(
+      await route.createMailRoleRoute(
+        write('POST', '/api/mail-roles', { name: 'Big', description: 'x'.repeat(5_000) })
+      ),
+      413,
+      'COMMON.REQUEST_TOO_LARGE'
+    );
+    await expectError(
+      await route.setMailboxRoleRoute(
+        write('PUT', '/api/mailboxes/12/role-assignment', { role_id: 'three' }),
+        '12'
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('role writes reject cross-origin requests', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const options = { body: '{', origin: 'https://evil.example' };
+
+    const responses = await Promise.all([
+      route.createMailRoleRoute(request('/api/mail-roles', { ...options, method: 'POST' })),
+      route.updateMailRoleRoute(request('/api/mail-roles/1', { ...options, method: 'PUT' }), '1'),
+      route.deleteMailRoleRoute(
+        request('/api/mail-roles/1', { ...options, method: 'DELETE' }),
+        '1'
+      ),
+      route.setMailboxRoleRoute(
+        request('/api/mailboxes/1/role-assignment', { ...options, method: 'PUT' }),
+        '1'
+      ),
+    ]);
+
+    for (const response of responses) {
+      expect(response.status).toBe(403);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+    }
+    expect(getSessionUser).not.toHaveBeenCalled();
+  });
+
   it('rejects an invalid log or statistics query before it reaches the API', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
@@ -4823,6 +5578,11 @@ function request(
 
 function mockUser(id: string) {
   return { id, email: `${id}@example.com`, name: id };
+}
+
+/** A cursor as the API spells it: base64url of `<unix nanoseconds>.<id>` without padding. */
+function inboxCursor(nanoseconds: string, id: number): string {
+  return Buffer.from(`${nanoseconds}.${id}`).toString('base64url');
 }
 
 function base64(value: string): string {

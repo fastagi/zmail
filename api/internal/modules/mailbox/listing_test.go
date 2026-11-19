@@ -411,7 +411,7 @@ func TestSearchEscapesWildcards(t *testing.T) {
 func TestSearchTimeoutMapsToTooBroad(t *testing.T) {
 	f := newOrganizeFixture(t)
 	repo := f.repo.(*repository)
-	widenPool(t, repo.db, 4)
+	widenPool(t, repo.db)
 	repo.searchTimeout = 100 * time.Millisecond
 
 	holder := repo.db.Begin()

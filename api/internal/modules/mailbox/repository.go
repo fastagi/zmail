@@ -111,33 +111,47 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMe
 		return mailboxes, nil
 	}
 
-	// One grouped query for every mailbox, served by the (mailbox_id, direction) index: inbound
-	// mail in default (the Inbox) after the seal boundary without a read row of the reader.
+	unread, err := scanUnreadCounts(inboxUnreadCounts(r.conn(ctx), ids, readerMembershipID))
+	if err != nil {
+		return nil, err
+	}
+	for _, mailbox := range mailboxes {
+		mailbox.UnreadCount = unread[mailbox.ID]
+	}
+	return mailboxes, nil
+}
+
+// inboxUnreadCounts is one grouped query for the given mailboxes, served by the (mailbox_id,
+// direction) index idx_mail_messages_listing: inbound mail in default (the Inbox) after the seal
+// boundary without a read row of the reader. ListMailboxes and the unified inbox counts share it,
+// so their numbers agree.
+func inboxUnreadCounts(db *gorm.DB, mailboxIDs []uint, readerMembershipID uint) *gorm.DB {
+	return db.Table("mail_messages").
+		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
+		Select("mail_messages.mailbox_id, COUNT(*) AS unread").
+		Where("mail_messages.mailbox_id IN ? AND mail_messages.direction = ? AND mail_messages.placement = ?",
+			mailboxIDs, string(domain.MailDirectionInbound), string(domain.MailPlacementDefault)).
+		Where(unsealedMessage).
+		Where("NOT EXISTS (SELECT 1 FROM mail_message_reads WHERE mail_message_reads.message_id = mail_messages.id AND mail_message_reads.membership_id = ?)",
+			readerMembershipID).
+		Group("mail_messages.mailbox_id")
+}
+
+// scanUnreadCounts runs an inboxUnreadCounts query into a map from mailbox id to its count; a
+// mailbox without unread mail is absent.
+func scanUnreadCounts(query *gorm.DB) (map[uint]int, error) {
 	var counts []struct {
 		MailboxID uint
 		Unread    int
 	}
-	err = r.conn(ctx).Table("mail_messages").
-		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
-		Select("mail_messages.mailbox_id, COUNT(*) AS unread").
-		Where("mail_messages.mailbox_id IN ? AND mail_messages.direction = ? AND mail_messages.placement = ?",
-			ids, string(domain.MailDirectionInbound), string(domain.MailPlacementDefault)).
-		Where(unsealedMessage).
-		Where("NOT EXISTS (SELECT 1 FROM mail_message_reads WHERE mail_message_reads.message_id = mail_messages.id AND mail_message_reads.membership_id = ?)",
-			readerMembershipID).
-		Group("mail_messages.mailbox_id").
-		Scan(&counts).Error
-	if err != nil {
+	if err := query.Scan(&counts).Error; err != nil {
 		return nil, err
 	}
 	unread := make(map[uint]int, len(counts))
 	for _, count := range counts {
 		unread[count.MailboxID] = count.Unread
 	}
-	for _, mailbox := range mailboxes {
-		mailbox.UnreadCount = unread[mailbox.ID]
-	}
-	return mailboxes, nil
+	return unread, nil
 }
 
 func (r *repository) FindMailbox(ctx context.Context, organizationID, id uint) (*domain.Mailbox, error) {

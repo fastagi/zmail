@@ -95,7 +95,7 @@ export function EmptyState({
 }: {
   icon: ReactNode;
   title: string;
-  description: string;
+  description?: string;
   action?: ReactNode;
 }) {
   return (
@@ -104,7 +104,9 @@ export function EmptyState({
         {icon}
       </div>
       <p className="mt-3 text-sm font-medium">{title}</p>
-      <p className="mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
+      {description ? (
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
+      ) : null}
       {action ? <div className="mt-4">{action}</div> : null}
     </div>
   );

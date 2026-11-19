@@ -25,7 +25,7 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{})
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{})
 	return NewRepository(db), db
 }
 

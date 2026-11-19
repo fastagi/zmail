@@ -69,6 +69,9 @@ var (
 	ErrMailLabelNotFound         = errors.New("mail label not found")
 	ErrMailLabelNameTaken        = errors.New("mail label name is already taken")
 	ErrMailLabelLimitReached     = errors.New("mail label limit reached")
+	ErrMailRoleNotFound          = errors.New("mail role not found")
+	ErrMailRoleNameTaken         = errors.New("mail role name is already taken")
+	ErrMailRoleLimitReached      = errors.New("mail role limit reached")
 	// ErrMailSearchTooBroad is a search the database could not finish within its time limit.
 	ErrMailSearchTooBroad     = errors.New("mail search is too broad")
 	ErrMailZoneNotFound       = errors.New("mail zone not found")

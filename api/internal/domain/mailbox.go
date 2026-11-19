@@ -280,8 +280,11 @@ type Mailbox struct {
 	// UnreadCount is the number of unread inbound messages in default (the Inbox). Only listings
 	// fill it, and only for a viewer who may read the mailbox.
 	UnreadCount int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// RoleID is the mail role the mailbox is grouped under; nil when it is ungrouped. A mail role
+	// groups mailboxes for display and grants nothing.
+	RoleID    *uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // MailMessage is one stored inbound or outbound message.

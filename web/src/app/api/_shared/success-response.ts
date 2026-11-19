@@ -52,6 +52,21 @@ export function apiPaginatedResponse<T>(
   }, { headers });
 }
 
+export interface ApiCursorPageMeta {
+  per_page: number;
+  has_more: boolean;
+  next_cursor: string | null;
+}
+
+/** A cursor page: `meta.next_cursor` reads the next, older page and is null on the last one. */
+export function apiCursorPageResponse<T>(
+  items: readonly T[],
+  meta: ApiCursorPageMeta,
+  headers?: HeadersInit
+): NextResponse {
+  return NextResponse.json({ code: 0, message: 'success', data: items, meta }, { headers });
+}
+
 export function apiNoContentResponse(headers?: HeadersInit): NextResponse {
   return new NextResponse(null, { status: 204, headers });
 }

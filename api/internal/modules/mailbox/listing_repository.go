@@ -235,8 +235,42 @@ func (r *repository) ListThreads(
 		byID[messages[i].ID] = messages[i].toDomain()
 	}
 
+	infos, err := threadInfos(db, mailboxID, membershipID, view, threadIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	summaries := make([]domain.MailThreadSummary, 0, len(rows))
+	for _, row := range rows {
+		message, ok := byID[row.ID]
+		if !ok {
+			// Deleted between the two reads; the next page load settles it.
+			continue
+		}
+		info, ok := infos[row.ThreadID]
+		if !ok {
+			info = domain.MailThreadInfo{MessageIDs: []uint{}, LabelIDs: []uint{}}
+		}
+		summaries = append(summaries, domain.MailThreadSummary{Latest: message, MailThreadInfo: info})
+	}
+	return summaries, total, nil
+}
+
+// threadInfos summarizes the given threads of one mailbox over the view: how many of their
+// messages it holds, the newest MaxMailThreadMessageIDs of their ids ascending, whether the
+// membership has not read or starred any of them, and every label on them. A thread without a
+// message in the view is absent.
+func threadInfos(
+	db *gorm.DB,
+	mailboxID, membershipID uint,
+	view domain.MailMessageFilter,
+	threadIDs []uint,
+) (map[uint]domain.MailThreadInfo, error) {
+	infos := make(map[uint]domain.MailThreadInfo, len(threadIDs))
+	if len(threadIDs) == 0 {
+		return infos, nil
+	}
 	var stats []threadStats
-	err = messageView(db, mailboxID, membershipID, view).
+	err := messageView(db, mailboxID, membershipID, view).
 		Select(`mail_messages.thread_id, COUNT(*) AS message_count,
 			bool_or(`+unreadByMember+`) AS unread,
 			bool_or(`+starredByMember+`) AS starred,
@@ -246,11 +280,7 @@ func (r *repository) ListThreads(
 		Group("mail_messages.thread_id").
 		Scan(&stats).Error
 	if err != nil {
-		return nil, 0, err
-	}
-	byThread := make(map[uint]threadStats, len(stats))
-	for _, stat := range stats {
-		byThread[stat.ThreadID] = stat
+		return nil, err
 	}
 
 	var labels []struct {
@@ -264,39 +294,29 @@ func (r *repository) ListThreads(
 		Order("mail_message_labels.label_id").
 		Scan(&labels).Error
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	labelsOf := make(map[uint][]uint, len(threadIDs))
 	for _, label := range labels {
 		labelsOf[label.ThreadID] = append(labelsOf[label.ThreadID], label.LabelID)
 	}
 
-	summaries := make([]domain.MailThreadSummary, 0, len(rows))
-	for _, row := range rows {
-		message, ok := byID[row.ID]
-		if !ok {
-			// Deleted between the two reads; the next page load settles it.
-			continue
-		}
-		stat := byThread[row.ThreadID]
+	for _, stat := range stats {
 		ids, err := parseIDList(stat.IDs)
 		if err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		slices.Sort(ids)
-		labelIDs := labelsOf[row.ThreadID]
+		labelIDs := labelsOf[stat.ThreadID]
 		if labelIDs == nil {
 			labelIDs = []uint{}
 		}
-		summaries = append(summaries, domain.MailThreadSummary{
-			Latest: message,
-			MailThreadInfo: domain.MailThreadInfo{
-				MessageCount: stat.MessageCount, MessageIDs: ids,
-				Unread: stat.Unread, Starred: stat.Starred, LabelIDs: labelIDs,
-			},
-		})
+		infos[stat.ThreadID] = domain.MailThreadInfo{
+			MessageCount: stat.MessageCount, MessageIDs: ids,
+			Unread: stat.Unread, Starred: stat.Starred, LabelIDs: labelIDs,
+		}
 	}
-	return summaries, total, nil
+	return infos, nil
 }
 
 func parseIDList(raw string) ([]uint, error) {

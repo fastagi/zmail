@@ -308,6 +308,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/inbox-message-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count the caller's unified inbox views, mail roles, and mailboxes
+         * @description Live counts of the caller's own read and star state over the mailboxes they have `view` on. Sealed messages and the trash are never counted. Only `tz` is accepted; any other or repeated parameter is `400 COMMON.INVALID_INPUT`.
+         */
+        get: operations["getInboxMessageCounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/inbox-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's mail across every mailbox they may read, newest first
+         * @description The unified inbox. Only mailboxes the caller has `view` on are read; a mailbox, a mail role, or an id the caller cannot read, or one of another organization, matches nothing instead of answering `403` or `404`. Sealed messages and the trash never appear. Each parameter may appear at most once; a repeated parameter, `page`, an unknown value, a malformed cursor, an unknown `tz`, or a combination outside the mailbox contract's rules is `400 COMMON.INVALID_INPUT`.
+         */
+        get: operations["listInboxMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/login": {
         parameters: {
             query?: never;
@@ -746,6 +786,54 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's mail roles
+         * @description Owners and admins see every mail role with every mailbox in it. Members see only the roles holding at least one mailbox they can see, with only those mailboxes. A mail role groups mailboxes for navigation and grants nothing.
+         */
+        get: operations["listMailRoles"];
+        put?: never;
+        /**
+         * Create a mail role
+         * @description Needs the `owner` or `admin` organization role. The body is at most 4 KiB; a larger or malformed body is `400 COMMON.INVALID_INPUT`.
+         */
+        post: operations["createMailRole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-roles/{role_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace a mail role
+         * @description Needs the `owner` or `admin` organization role. Replaces every field; an omitted field takes its default. The last write wins.
+         */
+        put: operations["updateMailRole"];
+        post?: never;
+        /**
+         * Delete a mail role
+         * @description Needs the `owner` or `admin` organization role. Its mailboxes become ungrouped in the same statement; no mailbox access changes.
+         */
+        delete: operations["deleteMailRole"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1268,6 +1356,26 @@ export interface paths {
          */
         get: operations["downloadMailAttachment"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/role-assignment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put a mailbox in a mail role or take it out
+         * @description Needs `administer` on the mailbox. Setting the current value succeeds and changes nothing. The assignment grants and revokes no access and writes no access event.
+         */
+        put: operations["setMailboxRoleAssignment"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2888,7 +2996,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -2944,6 +3052,109 @@ export interface components {
             data: components["schemas"]["InboundMailMessage"];
             message: string;
         };
+        /** @description The caller's own counts over the mailboxes they may read. Sealed messages and the trash are never counted. */
+        InboxCounts: {
+            /** @description One entry per mailbox the caller may read, by `mailbox_id` ascending. Each `unread` equals that mailbox's `unread_count`. */
+            mailboxes: {
+                mailbox_id: components["schemas"]["PositiveID"];
+                unread: number;
+            }[];
+            /** @description One entry per mail role with at least one mailbox the caller may read, by `role_id` ascending. */
+            roles: {
+                role_id: components["schemas"]["PositiveID"];
+                /** @description The `all_unread` of the role's readable mailboxes. */
+                unread: number;
+            }[];
+            /**
+             * Format: date-time
+             * @description The start of the next day in the requested time zone, in UTC; exclusive.
+             */
+            today_ends_at: string;
+            /**
+             * Format: date-time
+             * @description The start of today in the requested time zone, in UTC; inclusive.
+             */
+            today_starts_at: string;
+            /** @description The `all_unread` of the readable mailboxes without a mail role. */
+            ungrouped_unread: number;
+            views: {
+                /** @description Inbound messages in `default` the caller has not read; the sum of `mailboxes`. */
+                all_unread: number;
+                /** @description Messages the caller starred outside `archive` and the trash, both directions. */
+                pending: number;
+                /** @description Outbound messages waiting for room in the organization's send limit. */
+                sent_waiting: number;
+                /** @description Inbound messages outside the trash that arrived today. */
+                today: number;
+                /** @description The messages of `today` the caller has not read. */
+                today_unread: number;
+            };
+        };
+        InboxCountsResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["InboxCounts"];
+            message: string;
+        };
+        InboxCursorPageResponse: {
+            /** @constant */
+            code: 0;
+            /** @description Message summaries, newest first. With `group=thread` each item is the latest message of one thread in the view and carries `thread`. */
+            data: components["schemas"]["InboxItem"][];
+            message: string;
+            meta: components["schemas"]["CursorPageMeta"];
+        };
+        /** @description A message summary of the single-mailbox list with the owning mailbox's address and mail role and a short text snippet. */
+        InboxItem: {
+            /** @description How many files the message has; the detail lists them. */
+            attachment_count: number;
+            cc: string[];
+            /** Format: date-time */
+            created_at: string;
+            direction: components["schemas"]["MailDirection"];
+            /** @description Stable provider or transport reason when `status` is `failed`; empty otherwise. */
+            failure_code: string;
+            /** @description The folder that holds the message when `placement` is `folder`; null otherwise. */
+            folder_id: components["schemas"]["PositiveID"] | null;
+            from: components["schemas"]["MailAddress"];
+            id: components["schemas"]["PositiveID"];
+            /** @description The ids of the mailbox labels on the message, ascending; shared by every member. */
+            label_ids: components["schemas"]["PositiveID"][];
+            last_event: components["schemas"]["MailEventSummary"];
+            /** @description Address of the mailbox the message belongs to. */
+            mailbox_address: string;
+            mailbox_id: components["schemas"]["PositiveID"];
+            placement: components["schemas"]["MailPlacement"];
+            /**
+             * @description `send_limit` while a queued message waits for room in the organization's send limit; otherwise null.
+             * @enum {string|null}
+             */
+            queued_reason: "send_limit" | null;
+            /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
+            read: boolean;
+            /** @description The mail role the mailbox belongs to now; null when it has none. */
+            role_id: components["schemas"]["PositiveID"] | null;
+            /** @description The start of the text body with whitespace runs collapsed to one space, trimmed, at most 140 characters; empty for a message without a text body. */
+            snippet: string;
+            /** @description Whether the caller starred the message; per person. */
+            starred: boolean;
+            status: components["schemas"]["MailStatus"];
+            subject: string;
+            /** @description The template the message was rendered from; null when none was used. */
+            template_id: components["schemas"]["PositiveID"] | null;
+            /** @description Present only with `group=thread`; summarizes the message's thread in the view, as in the single-mailbox list. */
+            thread?: components["schemas"]["MailThreadSummary"];
+            /** @description The thread the message belongs to in its mailbox; the id of the message that started it. */
+            thread_id: components["schemas"]["PositiveID"];
+            to: string[];
+            /** @description Always null; the unified inbox never lists the trash. */
+            trashed_at: string | null;
+        };
+        /**
+         * @description A unified inbox view. `all` is inbound mail in `default`; `today` is inbound mail outside the trash that arrived today; `pending` is mail the caller starred outside `archive` and the trash, both directions; `sent` is outbound mail in `default`.
+         * @enum {string}
+         */
+        InboxView: "all" | "today" | "pending" | "sent";
         MailAddress: {
             address: string;
             name: string;
@@ -2975,6 +3186,8 @@ export interface components {
             id: components["schemas"]["PositiveID"];
             /** @description The owner of a personal mailbox; null for a shared one or a personal one whose owner left. */
             owner_user_id: components["schemas"]["PositiveID"] | null;
+            /** @description The mail role the mailbox belongs to; null when it has none. A mail role groups mailboxes for navigation and grants nothing. */
+            role_id: components["schemas"]["PositiveID"] | null;
             /** @description Messages and broadcasts created before this instant are sealed and invisible on every surface; set once at handover, null when nothing is sealed. */
             sealed_before: string | null;
             type: components["schemas"]["MailboxType"];
@@ -3096,6 +3309,10 @@ export interface components {
             code: 0;
             data: components["schemas"]["Mailbox"];
             message: string;
+        };
+        MailboxRoleAssignment: {
+            /** @description The mail role to put the mailbox in, or null to take it out of its role. */
+            role_id: components["schemas"]["PositiveID"] | null;
         };
         MailboxSealedDeletion: {
             deleted_broadcasts: number;
@@ -3731,6 +3948,44 @@ export interface components {
          * @enum {string}
          */
         MailPlacement: "default" | "archive" | "folder" | "trash";
+        /** @description An organization-level grouping of mailboxes by business identity. It grants nothing. */
+        MailRole: {
+            color: components["schemas"]["MailLabelColor"];
+            /** Format: date-time */
+            created_at: string;
+            description: string;
+            id: components["schemas"]["PositiveID"];
+            /** @description The role's mailboxes the caller can see, ascending. */
+            mailbox_ids: components["schemas"]["PositiveID"][];
+            name: string;
+            /** @description The member responsible for the role, for display only; null when none is set or the user is no longer a member. */
+            owner_user_id: components["schemas"]["PositiveID"] | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description Unknown fields are ignored. */
+        MailRoleInput: {
+            /** @description Defaults to `gray`. */
+            color?: components["schemas"]["MailLabelColor"];
+            /** @description Trimmed; at most 280 characters afterwards, without control characters. Defaults to empty. */
+            description?: string;
+            /** @description Trimmed; 1 to 64 characters afterwards, unique in the organization ignoring case. */
+            name: string;
+            /** @description A current member of the organization, or null for none. Defaults to null. */
+            owner_user_id?: components["schemas"]["PositiveID"] | null;
+        };
+        MailRoleListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailRole"][];
+            message: string;
+        };
+        MailRoleResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailRole"];
+            message: string;
+        };
         /**
          * @description `received` for inbound messages. Outbound messages are `queued` while the provider call is in flight, then `sent` or `failed`.
          * @enum {string}
@@ -5226,6 +5481,8 @@ export interface components {
         CSRFToken: string;
         /** @description Entity tag of the version the caller read; required for optimistic concurrency. */
         IfMatch: string;
+        /** @description Opaque position from `meta.next_cursor`, passed back unchanged; absent requests the newest page. A malformed cursor is `400 COMMON.INVALID_INPUT`. */
+        InboxCursor: string;
         /** @description Positive mail attachment identifier. */
         MailAttachmentID: components["schemas"]["PositiveID"];
         /** @description Positive mailbox identifier. */
@@ -5250,6 +5507,8 @@ export interface components {
         MailLabelID: components["schemas"]["PositiveID"];
         /** @description Positive mail message identifier. */
         MailMessageID: components["schemas"]["PositiveID"];
+        /** @description Positive mail role identifier. */
+        MailRoleID: components["schemas"]["PositiveID"];
         /** @description Positive mail template identifier. */
         MailTemplateID: components["schemas"]["PositiveID"];
         /** @description Positive mail thread identifier, the `thread_id` of its messages. */
@@ -6040,6 +6299,91 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    getInboxMessageCounts: {
+        parameters: {
+            query?: {
+                /** @description The IANA time zone that defines today, at most 64 characters. Defaults to `UTC`. `Local` and an empty value are `400 COMMON.INVALID_INPUT`. */
+                tz?: string;
+            };
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxCountsResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listInboxMessages: {
+        parameters: {
+            query?: {
+                /** @description Opaque position from `meta.next_cursor`, passed back unchanged; absent requests the newest page. A malformed cursor is `400 COMMON.INVALID_INPUT`. */
+                cursor?: components["parameters"]["InboxCursor"];
+                /** @description `thread` lists one item per thread and mailbox. Only with `view` `all` or `sent`, and without `unread` and `q`. */
+                group?: "thread";
+                /** @description Keep only one mailbox. A mailbox the caller may not read, or another organization's, matches nothing. */
+                mailbox_id?: components["schemas"]["PositiveID"];
+                /** @description Requested page size, capped by the API. */
+                per_page?: components["parameters"]["PerPage"];
+                /** @description Search, only with `view=all`. At most 200 characters as sent; the value is then trimmed, and one that is empty after trimming or contains a control character is `400 COMMON.INVALID_INPUT`. Matches like the single-mailbox search and searches every placement except the trash, both directions. A search the database cannot finish within 2 seconds is `422 MAILBOX.SEARCH_TOO_BROAD`. */
+                q?: string;
+                /** @description Keep only the mailboxes of one mail role, or `none` for the mailboxes without a role. A role the caller cannot see matches nothing. */
+                role_id?: components["schemas"]["PositiveID"] | "none";
+                /** @description The IANA time zone that defines today for `view=today`, at most 64 characters. Defaults to `UTC`. `Local` and an empty value are `400 COMMON.INVALID_INPUT`. */
+                tz?: string;
+                /** @description `true` keeps only inbound messages the caller has not read; outbound messages are always read and never match. `false` keeps the others. Read state is the caller's own. */
+                unread?: boolean;
+                /** @description `all` is inbound mail in `default` (every Inbox). `today` is inbound mail outside the trash that arrived since the start of today in `tz`. `pending` is mail of both directions the caller starred, outside `archive` and the trash. `sent` is outbound mail in `default` (every Sent). Defaults to `all`. */
+                view?: components["schemas"]["InboxView"];
+            };
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of message summaries without bodies, ordered by `created_at`, newest first, then by id, highest first. With `group=thread`, one page of threads, each as its latest message in the view. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxCursorPageResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description The search could not finish within 2 seconds; a longer `q` is needed (`MAILBOX.SEARCH_TOO_BROAD`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     login: {
@@ -7382,6 +7726,173 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailRoles: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description At most 50 mail roles by name ignoring case, then by id. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailRoleListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createMailRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailRoleInput"];
+            };
+        };
+        responses: {
+            /** @description The created mail role, with no mailboxes. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailRoleResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Another mail role of the organization has the name, ignoring case (`MAILBOX.ROLE_NAME_TAKEN`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A field failed validation (`COMMON.VALIDATION_FAILED` with `errors` keyed `name`, `color`, `description`, or `owner_user_id`), or the organization has 50 mail roles (`MAILBOX.ROLE_LIMIT_REACHED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail role identifier. */
+                role_id: components["parameters"]["MailRoleID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailRoleInput"];
+            };
+        };
+        responses: {
+            /** @description The mail role after the change, with the mailboxes the caller can see. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailRoleResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the mail role (`MAILBOX.ROLE_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Another mail role of the organization has the name, ignoring case (`MAILBOX.ROLE_NAME_TAKEN`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailRole: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail role identifier. */
+                role_id: components["parameters"]["MailRoleID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The mail role is deleted and its mailboxes have no role. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the mail role (`MAILBOX.ROLE_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -9183,6 +9694,50 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    setMailboxRoleAssignment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailboxRoleAssignment"];
+            };
+        };
+        responses: {
+            /** @description The mailbox after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The mailbox (`MAILBOX.NOT_FOUND`) or the mail role (`MAILBOX.ROLE_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

@@ -134,6 +134,13 @@ This file is the canonical glossary for the whole repository. Use these terms wh
   starter. Access roles attach to organization memberships. They do not replace the membership
   roles (`owner`, `admin`, `member`) that govern organization lifecycle and ownership.
 
+**Mail role**
+: An organization-level grouping of mailboxes by business identity (a brand, a column, a person),
+  owned by the optional `mailbox` starter. A mailbox belongs to at most one mail role; a mailbox
+  without one is ungrouped. A mail role is not an organization role (`owner`, `admin`, `member`),
+  not an access role, and grants or revokes nothing: mailbox access still comes only from personal
+  ownership and mailbox membership. User copy calls it a role; code and contracts say `mail role`.
+
 **Permission key**
 : A code-owned lowercase dotted capability such as `projects.read`. Permission checks are exact,
   allow-only, request-scoped to a verified organization membership, and default-deny. Permission
@@ -313,6 +320,9 @@ This file is the canonical glossary for the whole repository. Use these terms wh
 - **API key scope vs role/permission**: API key scopes constrain one credential. Organization roles
   describe membership lifecycle; access roles and dotted permission keys belong to the optional
   `permission` starter. Resource-instance ownership still belongs to the owning business policy.
+- **mail role vs organization role/access role**: A mail role groups mailboxes for navigation and
+  display only. It never changes who may read or send mail; organization roles and access roles
+  keep their own meanings.
 - **notification vs delivery/message**: A notification is the immutable user event. A notification
   delivery is one channel execution ledger entry. Provider messages, receipts, and callback payloads
   are adapter details and must not create a second global meaning for notification.

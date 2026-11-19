@@ -24,9 +24,11 @@ type MailboxPO struct {
 	OwnerLeftAt     *time.Time
 	SealedBefore    *time.Time
 	WebhooksEnabled bool `gorm:"not null;default:false"`
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       gorm.DeletedAt
+	// RoleID is the mail role the mailbox is grouped under; nil when it is ungrouped.
+	RoleID    *uint
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt gorm.DeletedAt
 }
 
 func (MailboxPO) TableName() string {
@@ -50,8 +52,32 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 		SealedBefore:   po.SealedBefore,
 		// WebhooksEnabled is only meaningful for shared mailboxes; the schema enforces it too.
 		WebhooksEnabled: po.WebhooksEnabled,
+		RoleID:          po.RoleID,
 		CreatedAt:       po.CreatedAt,
 		UpdatedAt:       po.UpdatedAt,
+	}
+}
+
+// MailRolePO is an organization's mail role; names are unique per organization ignoring case.
+type MailRolePO struct {
+	ID             uint   `gorm:"primaryKey"`
+	OrganizationID uint   `gorm:"not null;uniqueIndex:idx_mail_roles_name,priority:1"`
+	Name           string `gorm:"size:64;not null;uniqueIndex:idx_mail_roles_name,priority:2,expression:lower(name)"`
+	Color          string `gorm:"size:16;not null;default:'gray'"`
+	Description    string `gorm:"size:280;not null;default:''"`
+	OwnerUserID    *uint
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func (MailRolePO) TableName() string {
+	return "mail_roles"
+}
+
+func (po *MailRolePO) toDomain() *domain.MailRole {
+	return &domain.MailRole{
+		ID: po.ID, OrganizationID: po.OrganizationID, Name: po.Name, Color: domain.MailLabelColor(po.Color),
+		Description: po.Description, OwnerUserID: po.OwnerUserID, CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
 	}
 }
 

@@ -1,6 +1,11 @@
 import type { z } from 'zod/mini';
 
 import {
+  INBOX_CURSOR_MAX_LENGTH,
+  INBOX_TIME_ZONE_MAX_LENGTH,
+  INBOX_VIEWS,
+  inboxCountsSchema,
+  inboxPageEnvelopeSchema,
   MAILBOX_ACCESS_EVENTS_MAX_PAGE_SIZE,
   MAIL_LOG_QUERY_MAX_LENGTH,
   MAIL_MESSAGE_UPDATES_MAX_IDS,
@@ -42,6 +47,8 @@ import {
   mailFolderSchema,
   mailLabelListSchema,
   mailLabelSchema,
+  mailRoleListSchema,
+  mailRoleSchema,
   mailMessageCountsSchema,
   mailMessageUpdatesResultSchema,
   mailThreadSchema,
@@ -49,6 +56,9 @@ import {
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
+  InboxCounts,
+  InboxFilters,
+  InboxPage,
   MailAttachment,
   MailBroadcast,
   MailBroadcastInput,
@@ -96,6 +106,8 @@ import type {
   MailFolderInput,
   MailLabel,
   MailLabelInput,
+  MailRole,
+  MailRoleInput,
   MailMessageCounts,
   MailMessageFilters,
   MailMessageUpdatesResult,
@@ -403,6 +415,69 @@ export const mailboxService = {
     return parsed.data;
   },
 
+  /**
+   * The organization's mail roles in the API's order. Owners and admins get every role; members
+   * only those holding a mailbox they can see, with only those mailboxes.
+   */
+  async listRoles(organizationId: number): Promise<MailRole[]> {
+    const parsed = mailRoleListSchema.safeParse(
+      await request.get<unknown>('/mail-roles', { headers: organizationHeaders(organizationId) })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** Owners and admins only. */
+  async createRole(organizationId: number, input: MailRoleInput): Promise<MailRole> {
+    const headers = organizationHeaders(organizationId);
+    return parseOrganizeItem(
+      mailRoleSchema,
+      await request.post<unknown, MailRoleInput>('/mail-roles', input, { headers })
+    );
+  },
+
+  /** Replaces every field of the role; an omitted field takes its default. */
+  async updateRole(
+    organizationId: number,
+    roleId: number,
+    input: MailRoleInput
+  ): Promise<MailRole> {
+    const headers = organizationHeaders(organizationId);
+    validId(roleId);
+    return parseOrganizeItem(
+      mailRoleSchema,
+      await request.put<unknown, MailRoleInput>(`/mail-roles/${roleId}`, input, { headers }),
+      roleId
+    );
+  },
+
+  /** Its mailboxes become ungrouped; no access changes. */
+  async deleteRole(organizationId: number, roleId: number): Promise<void> {
+    const headers = organizationHeaders(organizationId);
+    validId(roleId);
+    await request.delete<void>(`/mail-roles/${roleId}`, { headers });
+  },
+
+  /** Puts the mailbox in a role, or takes it out with null; needs `administer`. */
+  async assignRole(
+    organizationId: number,
+    mailboxId: number,
+    roleId: number | null
+  ): Promise<Mailbox> {
+    const headers = organizationHeaders(organizationId);
+    validId(mailboxId);
+    if (roleId !== null) validId(roleId);
+    const parsed = mailboxSchema.safeParse(
+      await request.put<unknown, { role_id: number | null }>(
+        `/mailboxes/${mailboxId}/role-assignment`,
+        { role_id: roleId },
+        { headers }
+      )
+    );
+    if (!parsed.success || parsed.data.id !== mailboxId) throw invalidResponse();
+    return parsed.data;
+  },
+
   /** Turns organization webhooks for a shared mailbox on or off; answers the mailbox. */
   async setWebhooks(organizationId: number, mailboxId: number, enabled: boolean): Promise<Mailbox> {
     const headers = organizationHeaders(organizationId);
@@ -468,6 +543,71 @@ export const mailboxService = {
     const parsed = mailLogPageEnvelopeSchema.safeParse(value);
     if (!parsed.success) throw invalidResponse();
     return { items: parsed.data.data, meta: parsed.data.meta, links: parsed.data.links };
+  },
+
+  /**
+   * One cursor page of the unified inbox, newest first; `cursor` is the previous page's
+   * `meta.next_cursor`. Without `perPage` the API's default applies. The API refuses filter
+   * combinations the contract does not allow.
+   */
+  async listInbox(
+    organizationId: number,
+    { view, roleId, mailboxId, unread, q, group, tz }: InboxFilters,
+    cursor?: string,
+    perPage?: number
+  ): Promise<InboxPage> {
+    const headers = organizationHeaders(organizationId);
+    if (!(INBOX_VIEWS as readonly string[]).includes(view)) throw invalidResponse();
+    if (roleId !== undefined && roleId !== 'none') validId(roleId);
+    if (mailboxId !== undefined) validId(mailboxId);
+    const query = q?.trim();
+    if (
+      query !== undefined &&
+      (query === '' || Array.from(q ?? '').length > MAIL_SEARCH_MAX_LENGTH)
+    ) {
+      throw invalidResponse();
+    }
+    if (tz === '' || tz.length > INBOX_TIME_ZONE_MAX_LENGTH) throw invalidResponse();
+    if (cursor !== undefined && (cursor === '' || cursor.length > INBOX_CURSOR_MAX_LENGTH)) {
+      throw invalidResponse();
+    }
+    if (
+      perPage !== undefined &&
+      (!Number.isSafeInteger(perPage) || perPage < 1 || perPage > MAIL_PAGE_MAX_SIZE)
+    ) {
+      throw invalidResponse();
+    }
+    const value = await request.getEnvelope<unknown>('/inbox-messages', {
+      headers,
+      params: {
+        view,
+        ...(roleId === undefined ? {} : { role_id: roleId }),
+        ...(mailboxId === undefined ? {} : { mailbox_id: mailboxId }),
+        ...(unread === undefined ? {} : { unread }),
+        ...(query === undefined ? {} : { q: query }),
+        ...(group ? { group } : {}),
+        tz,
+        ...(cursor === undefined ? {} : { cursor }),
+        ...(perPage === undefined ? {} : { per_page: perPage }),
+      },
+    });
+    const parsed = inboxPageEnvelopeSchema.safeParse(value);
+    if (!parsed.success) throw invalidResponse();
+    return { items: parsed.data.data, meta: parsed.data.meta };
+  },
+
+  /**
+   * The caller's own unified inbox counts: the views, each mail role, the mailboxes without one,
+   * and each readable mailbox. `tz` is the IANA zone whose day `today` counts.
+   */
+  async inboxCounts(organizationId: number, tz: string): Promise<InboxCounts> {
+    const headers = organizationHeaders(organizationId);
+    if (tz === '' || tz.length > INBOX_TIME_ZONE_MAX_LENGTH) throw invalidResponse();
+    const parsed = inboxCountsSchema.safeParse(
+      await request.get<unknown>('/inbox-message-counts', { headers, params: { tz } })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
   },
 
   /** One entry per UTC day for the last `days` days, oldest first, empty days included. */
@@ -1238,6 +1378,12 @@ assertContract<
   Accepts<z.input<typeof mailLogPageEnvelopeSchema>, ContractResponse<'listMailLog', 200>>
 >();
 assertContract<
+  Accepts<z.input<typeof inboxPageEnvelopeSchema>, ContractResponse<'listInboxMessages', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof inboxCountsSchema>, ContractData<'getInboxMessageCounts', 200>>
+>();
+assertContract<
   Accepts<z.input<typeof mailDayStatsListSchema>, ContractData<'listMailMessageStats', 200>>
 >();
 assertContract<
@@ -1324,6 +1470,15 @@ assertContract<Accepts<z.input<typeof mailFolderSchema>, ContractData<'renameMai
 assertContract<Sends<MailFolderInput, ContractRequest<'createMailFolder'>>>();
 assertContract<Sends<MailFolderInput, ContractRequest<'renameMailFolder'>>>();
 assertContract<Accepts<z.input<typeof mailLabelListSchema>, ContractData<'listMailLabels', 200>>>();
+assertContract<Accepts<z.input<typeof mailRoleListSchema>, ContractData<'listMailRoles', 200>>>();
+assertContract<Accepts<z.input<typeof mailRoleSchema>, ContractData<'createMailRole', 201>>>();
+assertContract<Accepts<z.input<typeof mailRoleSchema>, ContractData<'updateMailRole', 200>>>();
+assertContract<Sends<MailRoleInput, ContractRequest<'createMailRole'>>>();
+assertContract<Sends<MailRoleInput, ContractRequest<'updateMailRole'>>>();
+assertContract<
+  Accepts<z.input<typeof mailboxSchema>, ContractData<'setMailboxRoleAssignment', 200>>
+>();
+assertContract<Sends<{ role_id: number | null }, ContractRequest<'setMailboxRoleAssignment'>>>();
 assertContract<Accepts<z.input<typeof mailLabelSchema>, ContractData<'createMailLabel', 201>>>();
 assertContract<Accepts<z.input<typeof mailLabelSchema>, ContractData<'updateMailLabel', 200>>>();
 assertContract<Sends<MailLabelInput, ContractRequest<'createMailLabel'>>>();
