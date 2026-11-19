@@ -260,6 +260,7 @@ func TestDNSRecordValidation(t *testing.T) {
 		{"MX without priority", `{"type":"MX","name":"sub","content":"mx.example.net"}`, "priority"},
 		{"proxied TXT", `{"type":"TXT","name":"proxy","content":"hello","proxied":true}`, "proxied"},
 		{"TTL 30", `{"type":"A","name":"api","content":"192.0.2.7","ttl":30}`, "ttl"},
+		{"TTL 0", `{"type":"A","name":"api","content":"192.0.2.7","ttl":0}`, "ttl"},
 		{"unknown type", `{"type":"SRV","name":"api","content":"1 1 1 a.example.com"}`, "type"},
 	}
 	for _, tc := range cases {
@@ -434,21 +435,128 @@ func TestDNSRecordsMemberReadOnly(t *testing.T) {
 }
 
 func TestLockReason(t *testing.T) {
-	domains := []*domain.MailDomain{{Name: "example.com"}}
+	receiving := &domain.MailDomain{Name: "example.com", Capability: domain.MailDomainSendReceive}
+	sendOnly := &domain.MailDomain{
+		Name: "news.example.com", Capability: domain.MailDomainSendOnly,
+		Records: []domain.MailDomainRecord{
+			{Purpose: domain.MailDomainRecordSending, Type: "TXT", Name: "cf-bounce.news.example.com", Content: "v=spf1 include:_spf.mx.cloudflare.net ~all"},
+			{Purpose: domain.MailDomainRecordSending, Type: "MX", Name: "cf-bounce.news.example.com", Content: "route1.mx.cloudflare.net", Priority: 5},
+		},
+	}
+	domains := []*domain.MailDomain{receiving, sendOnly}
 	cases := []struct {
 		record mailtransport.DNSRecord
 		want   string
 	}{
-		{mailtransport.DNSRecord{Type: "MX", Name: "Example.com.", Content: "mx.other.example"}, "mail_receiving"},
+		{mailtransport.DNSRecord{Type: "MX", Name: "Example.com.", Content: "Route2.mx.cloudflare.net."}, "mail_receiving"},
+		{mailtransport.DNSRecord{Type: "MX", Name: "example.com", Content: "mx.oldprovider.example"}, ""},
 		{mailtransport.DNSRecord{Type: "TXT", Name: "example.com", Content: "V=SPF1 -all"}, "mail_spf"},
 		{mailtransport.DNSRecord{Type: "TXT", Name: "example.com", Content: "verification=1"}, ""},
+		{mailtransport.DNSRecord{Type: "MX", Name: "news.example.com", Content: "mx.oldprovider.example"}, ""},
+		{mailtransport.DNSRecord{Type: "TXT", Name: "news.example.com", Content: "v=spf1 include:old.example -all"}, ""},
 		{mailtransport.DNSRecord{Type: "CNAME", Name: "_dmarc.example.com", Content: "dmarc.example.net"}, "mail_dmarc"},
-		{mailtransport.DNSRecord{Type: "TXT", Name: "s1._domainkey.example.com", Content: "v=DKIM1"}, "mail_dkim"},
+		{mailtransport.DNSRecord{Type: "TXT", Name: "s1._domainkey.news.example.com", Content: "v=DKIM1"}, "mail_dkim"},
+		{mailtransport.DNSRecord{Type: "TXT", Name: "cf-bounce.news.example.com", Content: "v=spf1 include:other.example ~all"}, "mail_sending"},
+		{mailtransport.DNSRecord{Type: "MX", Name: "cf-bounce.news.example.com", Content: "mx.other.example"}, "mail_sending"},
+		{mailtransport.DNSRecord{Type: "TXT", Name: "cf-bounce.news.example.com", Content: "hello"}, ""},
 		{mailtransport.DNSRecord{Type: "MX", Name: "sub.example.com", Content: "mx.other.example"}, ""},
 	}
 	for _, tc := range cases {
 		if got := lockReason(tc.record, domains); got != tc.want {
 			t.Fatalf("lockReason(%+v) = %q, want %q", tc.record, got, tc.want)
 		}
+	}
+
+	// A new MX at a receiving domain is refused; at a send-only domain it is the organization's.
+	if got := targetLockReason(mailtransport.DNSRecord{Type: "MX", Name: "example.com", Content: "mx.other.example"}, domains); got != "mail_receiving" {
+		t.Fatalf("target MX at a receiving domain = %q", got)
+	}
+	if got := targetLockReason(mailtransport.DNSRecord{Type: "MX", Name: "news.example.com", Content: "mx.other.example"}, domains); got != "" {
+		t.Fatalf("target MX at a send-only domain = %q", got)
+	}
+}
+
+func TestSendOnlyDomainKeepsItsOwnMXAndSPF(t *testing.T) {
+	fixture := newDNSFixture(t, domain.OrganizationRoleAdmin)
+	fixture.dns.put(mailtransport.DNSRecord{ID: "recoldmx", Type: "MX", Name: "news.example.com", Content: "mx.oldprovider.example", Priority: 10, TTL: 1})
+	fixture.dns.put(mailtransport.DNSRecord{ID: "recoldspf", Type: "TXT", Name: "news.example.com", Content: "v=spf1 include:old.example -all", TTL: 1})
+
+	_, body := fixture.do(http.MethodGet, fixture.recordsPath(), "")
+	items, _ := body["data"].([]any)
+	for _, id := range []string{"recoldmx", "recoldspf"} {
+		if item := findRecordItem(items, id); item == nil || item["locked"] != false {
+			t.Fatalf("%s = %v", id, item)
+		}
+	}
+	if recorder, body := fixture.do(http.MethodPatch, fixture.recordPath("recoldspf"), `{"content":"v=spf1 include:new.example -all"}`); recorder.Code != http.StatusOK {
+		t.Fatalf("edit own SPF = %d %v", recorder.Code, body)
+	}
+	if recorder, body := fixture.do(http.MethodDelete, fixture.recordPath("recoldmx"), ""); recorder.Code != http.StatusNoContent {
+		t.Fatalf("delete own MX = %d %v", recorder.Code, body)
+	}
+	if recorder, body := fixture.do(http.MethodPost, fixture.recordsPath(),
+		`{"type":"MX","name":"news.example.com","content":"mx.newprovider.example","priority":10}`); recorder.Code != http.StatusCreated {
+		t.Fatalf("create own MX = %d %v", recorder.Code, body)
+	}
+}
+
+func TestReceivingDomainFreesAForeignMX(t *testing.T) {
+	fixture := newDNSFixture(t, domain.OrganizationRoleAdmin)
+	fixture.dns.put(mailtransport.DNSRecord{ID: "recoldmx", Type: "MX", Name: "example.com", Content: "mx.oldprovider.example", Priority: 10, TTL: 1})
+
+	_, body := fixture.do(http.MethodGet, fixture.recordsPath(), "")
+	items, _ := body["data"].([]any)
+	if item := findRecordItem(items, "recoldmx"); item == nil || item["locked"] != false {
+		t.Fatalf("foreign MX = %v", item)
+	}
+	if item := findRecordItem(items, "recmx"); item["locked"] != true || item["locked_reason"] != "mail_receiving" {
+		t.Fatalf("routing MX = %v", item)
+	}
+	// Moving the foreign MX elsewhere in the zone is fine; it may not stay an MX at the domain.
+	if recorder, body := fixture.do(http.MethodPatch, fixture.recordPath("recoldmx"), `{"content":"mx.newprovider.example"}`); recorder.Code != http.StatusConflict ||
+		body["error_code"] != domain.CodeMailDNSRecordLocked {
+		t.Fatalf("re-point foreign MX = %d %v", recorder.Code, body)
+	}
+	if recorder, body := fixture.do(http.MethodDelete, fixture.recordPath("recoldmx"), ""); recorder.Code != http.StatusNoContent {
+		t.Fatalf("delete foreign MX = %d %v", recorder.Code, body)
+	}
+	if recorder, body := fixture.do(http.MethodDelete, fixture.recordPath("recmx"), ""); recorder.Code != http.StatusConflict {
+		t.Fatalf("delete routing MX = %d %v", recorder.Code, body)
+	}
+	if recorder, body := fixture.do(http.MethodPost, fixture.recordsPath(),
+		`{"type":"MX","name":"@","content":"mx.newprovider.example","priority":10}`); recorder.Code != http.StatusConflict ||
+		body["error_code"] != domain.CodeMailDNSRecordLocked {
+		t.Fatalf("create MX at a receiving domain = %d %v", recorder.Code, body)
+	}
+}
+
+func TestSecondSPFAtSendingNameRefused(t *testing.T) {
+	fixture := newDNSFixture(t, domain.OrganizationRoleAdmin)
+
+	recorder, body := fixture.do(http.MethodPost, fixture.recordsPath(),
+		`{"type":"TXT","name":"cf-bounce.news.example.com","content":"v=spf1 include:other.example ~all"}`)
+	if recorder.Code != http.StatusConflict || body["error_code"] != domain.CodeMailDNSRecordLocked {
+		t.Fatalf("second SPF at a sending name = %d %v", recorder.Code, body)
+	}
+	recorder, body = fixture.do(http.MethodPost, fixture.recordsPath(),
+		`{"type":"MX","name":"cf-bounce.news.example.com","content":"mx.other.example","priority":1}`)
+	if recorder.Code != http.StatusConflict || body["error_code"] != domain.CodeMailDNSRecordLocked {
+		t.Fatalf("second MX at a sending name = %d %v", recorder.Code, body)
+	}
+}
+
+func TestPatchRefusesANonEditableRecord(t *testing.T) {
+	fixture := newDNSFixture(t, domain.OrganizationRoleAdmin)
+	fixture.dns.put(mailtransport.DNSRecord{ID: "recsrv", Type: "SRV", Name: "_sip._tcp.example.com", Content: "1 1 5060 sip.example.com", TTL: 1})
+
+	recorder, body := fixture.do(http.MethodPatch, fixture.recordPath("recsrv"), `{"type":"A","content":"192.0.2.5"}`)
+	if recorder.Code != http.StatusUnprocessableEntity || body["error_code"] != domain.CodeMailDNSRecordInvalid {
+		t.Fatalf("patch SRV = %d %v", recorder.Code, body)
+	}
+	if fields, _ := body["errors"].(map[string]any); fields["type"] == nil {
+		t.Fatalf("errors = %v", body["errors"])
+	}
+	if fixture.dns.writes != 0 || fixture.dns.byID["recsrv"].Type != "SRV" {
+		t.Fatalf("the SRV record changed")
 	}
 }

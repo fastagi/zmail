@@ -277,12 +277,18 @@ admins may create, change, and delete them. A zone of another organization is
   only, `proxied`, `locked`, and `locked_reason` when `locked` is true. A zone holds at most 3500
   records, Cloudflare's quota; a longer list is cut at 3500.
 - A record is locked when Zmail mail relies on it. For each mail domain `d` in the zone:
-  `mail_receiving` is an MX record at `d`; `mail_spf` a TXT record at `d` starting `v=spf1`;
-  `mail_dmarc` any record at `_dmarc.d`; `mail_dkim` any record under `._domainkey.d`; and
-  `mail_sending` a record matching, by type, name, and content, one of the sending records of `d`. A
-  locked record cannot be changed or deleted, and no record may be created or changed into one that
-  would be locked: both are `409 MAILBOX.DNS_RECORD_LOCKED`. To change one, first remove the mail
-  domain.
+  `mail_receiving` is an MX record at `d` pointing at Cloudflare Email Routing
+  (`*.mx.cloudflare.net`); `mail_spf` a TXT record at `d` starting `v=spf1` when `d` is
+  `send_receive`; `mail_dmarc` any record at `_dmarc.d`; `mail_dkim` any record under
+  `._domainkey.d`; and `mail_sending`, at the name of any sending record of `d`, every TXT record
+  starting `v=spf1` and every MX record, plus any record matching a sending record by type, name, and
+  content. A locked record cannot be changed or deleted, and no record may be created or changed into
+  one that would be locked: both are `409 MAILBOX.DNS_RECORD_LOCKED`. Neither may an MX record be
+  created at, or changed into an MX at, a `send_receive` domain, where Email Routing owns the MX. To
+  change a locked record, first remove the mail domain.
+- Everything else is the organization's: an MX of another mail service at `d`, such as one the zone
+  imported, can be deleted so `d` verifies, and a `send_only` domain's own MX and SPF records can be
+  created, changed, and deleted.
 - `POST /v1/mail-zones/:zone_id/dns-records` takes `type`, `name`, `content`, and optional `ttl`,
   `priority`, and `proxied`, and answers `201` with the record. A `PATCH` of
   `/v1/mail-zones/:zone_id/dns-records/:record_id` takes any of those fields; an omitted field keeps
@@ -296,7 +302,7 @@ admins may create, change, and delete them. A zone of another organization is
   is an IPv4 address and `AAAA` content an IPv6 address; `TXT` content is at most 2048 characters;
   a `CNAME` is never at the apex and never shares its name with another record, nor another record
   with a `CNAME`; `MX` needs a `priority` from 0 to 65535; `proxied` is allowed only on `A`, `AAAA`,
-  and `CNAME`; `ttl` is `1` (automatic, the default) or 60 to 86400. `priority` is ignored on other
+  and `CNAME`; `ttl` is `1` (automatic, the default when omitted on create) or 60 to 86400, so `0` is invalid. `priority` is ignored on other
   types.
 - A write Cloudflare refuses is `422 MAILBOX.DNS_RECORD_REJECTED`, with Cloudflare's reason in
   `error`. A failed read is `502 MAILBOX.DOMAIN_PROVIDER_FAILED`.

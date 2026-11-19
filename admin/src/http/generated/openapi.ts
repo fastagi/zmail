@@ -926,7 +926,7 @@ export interface paths {
         head?: never;
         /**
          * Change a DNS record in a managed zone
-         * @description Applies the given fields onto the record as Cloudflare has it, validates the result, and writes the whole record. Neither the record nor the result may be one Zmail mail relies on. Only owners and admins may.
+         * @description Applies the given fields onto the record as Cloudflare has it, validates the result, and writes the whole record. Only A, AAAA, CNAME, TXT, and MX records can be changed, and neither the record nor the result may be one Zmail mail relies on. Only owners and admins may.
          */
         patch: operations["updateMailDNSRecord"];
         trace?: never;

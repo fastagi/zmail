@@ -88,19 +88,22 @@ func invalidRecord(field, reason string) error {
 	return &DNSRecordInvalidError{Field: field, Reason: reason}
 }
 
-// lockReason tells why Zmail mail relies on a record, or "" when it does not: for each mail domain
-// d of the zone, the MX at d, an SPF TXT at d, anything at _dmarc.d or under _domainkey.d, and the
-// sending records stored on d.
+// lockReason tells why Zmail mail relies on an existing record, or "" when it does not. For each
+// mail domain d of the zone: an MX at d pointing at Cloudflare Email Routing; an SPF TXT at d when
+// d receives through Zmail; anything at _dmarc.d or under _domainkey.d; an SPF TXT or MX at the
+// name of a sending record of d; and any record matching a sending record of d. A send-only
+// domain's own MX and SPF, and an MX of another mail service, belong to the organization.
 func lockReason(record mailtransport.DNSRecord, domains []*domain.MailDomain) string {
 	recordType := strings.ToUpper(record.Type)
 	name := normalizeDNSName(record.Name)
+	spf := recordType == "TXT" && recordTag(normalizeRecordContent("TXT", record.Content)) == "v=spf1"
 	for _, mailDomain := range domains {
 		domainName := normalizeDNSName(mailDomain.Name)
 		switch {
-		case recordType == "MX" && name == domainName:
+		case recordType == "MX" && name == domainName &&
+			strings.HasSuffix(normalizeRecordContent("MX", record.Content), routingMXSuffix):
 			return dnsLockReceiving
-		case recordType == "TXT" && name == domainName &&
-			recordTag(normalizeRecordContent("TXT", record.Content)) == "v=spf1":
+		case spf && name == domainName && receives(mailDomain):
 			return dnsLockSPF
 		case name == "_dmarc."+domainName:
 			return dnsLockDMARC
@@ -108,10 +111,29 @@ func lockReason(record mailtransport.DNSRecord, domains []*domain.MailDomain) st
 			return dnsLockDKIM
 		}
 		for _, required := range mailDomain.Records {
-			if required.Purpose == domain.MailDomainRecordSending && strings.EqualFold(required.Type, recordType) &&
-				normalizeDNSName(required.Name) == name &&
-				normalizeRecordContent(recordType, required.Content) == normalizeRecordContent(recordType, record.Content) {
+			if required.Purpose != domain.MailDomainRecordSending || normalizeDNSName(required.Name) != name {
+				continue
+			}
+			if spf || recordType == "MX" || (strings.EqualFold(required.Type, recordType) &&
+				normalizeRecordContent(recordType, required.Content) == normalizeRecordContent(recordType, record.Content)) {
 				return dnsLockSending
+			}
+		}
+	}
+	return ""
+}
+
+// targetLockReason tells why a record may not be created, or changed into: it would be locked, or
+// it is an MX at a mail domain that receives through Zmail, where Email Routing owns the MX.
+func targetLockReason(record mailtransport.DNSRecord, domains []*domain.MailDomain) string {
+	if reason := lockReason(record, domains); reason != "" {
+		return reason
+	}
+	if strings.EqualFold(record.Type, "MX") {
+		name := normalizeDNSName(record.Name)
+		for _, mailDomain := range domains {
+			if receives(mailDomain) && name == normalizeDNSName(mailDomain.Name) {
+				return dnsLockReceiving
 			}
 		}
 	}
@@ -204,7 +226,7 @@ func (s *service) CreateMailDNSRecord(ctx context.Context, organizationID, zoneI
 	if record, err = zone.validate(record, input.Priority); err != nil {
 		return nil, err
 	}
-	if lockReason(record, zone.domains) != "" {
+	if targetLockReason(record, zone.domains) != "" {
 		return nil, ErrMailDNSRecordLocked
 	}
 	created, err := s.domainProvider.CreateRecord(ctx, zone.zone.CloudflareZoneID, record)
@@ -226,6 +248,9 @@ func (s *service) UpdateMailDNSRecord(ctx context.Context, organizationID, zoneI
 	current, err := zone.find(recordID)
 	if err != nil {
 		return nil, err
+	}
+	if !editableDNSTypes[strings.ToUpper(current.Type)] {
+		return nil, invalidRecord("type", "only A, AAAA, CNAME, TXT, and MX records can be changed")
 	}
 	if lockReason(current, zone.domains) != "" {
 		return nil, ErrMailDNSRecordLocked
@@ -256,7 +281,7 @@ func (s *service) UpdateMailDNSRecord(ctx context.Context, organizationID, zoneI
 	if target, err = zone.validate(target, priority); err != nil {
 		return nil, err
 	}
-	if lockReason(target, zone.domains) != "" {
+	if targetLockReason(target, zone.domains) != "" {
 		return nil, ErrMailDNSRecordLocked
 	}
 	if err := s.domainProvider.UpdateRecord(ctx, zone.zone.CloudflareZoneID, target); err != nil {
@@ -291,7 +316,7 @@ func (s *service) DeleteMailDNSRecord(ctx context.Context, organizationID, zoneI
 }
 
 // validate checks a record before it is written and returns it with its name fully qualified
-// and its priority set for MX only. TTL 0 is automatic.
+// and its priority set for MX only. TTL 1 is automatic.
 func (z *dnsZone) validate(record mailtransport.DNSRecord, priority *int) (mailtransport.DNSRecord, error) {
 	if !editableDNSTypes[record.Type] {
 		return record, invalidRecord("type", "must be one of A, AAAA, CNAME, TXT, MX")
@@ -316,9 +341,6 @@ func (z *dnsZone) validate(record mailtransport.DNSRecord, priority *int) (mailt
 	}
 	if record.Proxied && !proxiableDNSTypes[record.Type] {
 		return record, invalidRecord("proxied", "is only allowed on A, AAAA, and CNAME records")
-	}
-	if record.TTL == 0 {
-		record.TTL = automaticTTL
 	}
 	if record.TTL != automaticTTL && (record.TTL < minDNSTTL || record.TTL > maxDNSTTL) {
 		return record, invalidRecord("ttl", "must be 1 (automatic) or between 60 and 86400")
