@@ -130,6 +130,35 @@ func TestInboxAccessRowsListMemberRowsWithoutCounts(t *testing.T) {
 	}
 }
 
+// Access rows carry each mailbox's mail role, which the inbox filters and groups by.
+func TestInboxAccessRowsCarryRoleID(t *testing.T) {
+	f := newInboxFixture(t)
+	ctx := context.Background()
+	repo := f.inboxRepo()
+	role := &domain.MailRole{OrganizationID: accessOrg, Name: "Team", Color: domain.MailLabelColorTeal}
+	if err := repo.CreateMailRole(ctx, role, domain.MaxMailRolesPerOrganization); err != nil {
+		t.Fatalf("CreateMailRole: %v", err)
+	}
+	if err := repo.AssignMailboxRole(ctx, accessOrg, f.team.ID, &role.ID); err != nil {
+		t.Fatalf("AssignMailboxRole: %v", err)
+	}
+
+	rows, err := repo.ListMailboxAccessRows(ctx, accessOrg, f.c.MembershipID)
+	if err != nil {
+		t.Fatalf("ListMailboxAccessRows: %v", err)
+	}
+	roles := map[uint]*uint{}
+	for _, row := range rows {
+		roles[row.Mailbox.ID] = row.Mailbox.RoleID
+	}
+	if got := roles[f.team.ID]; got == nil || *got != role.ID {
+		t.Fatalf("team@ role = %v; want %d", got, role.ID)
+	}
+	if got, listed := roles[f.personal.ID]; !listed || got != nil {
+		t.Fatalf("b@ role = %v (listed %t); want listed and ungrouped", got, listed)
+	}
+}
+
 func TestInboxListMergesMailboxesNewestFirst(t *testing.T) {
 	f := newInboxFixture(t)
 	p1 := f.deliverAt(t, f.personal, delivery{subject: "p1"}, minutes(1))
