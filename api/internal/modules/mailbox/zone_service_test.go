@@ -86,7 +86,7 @@ func (z *fakeMailZones) FindZoneByName(_ context.Context, name string) (*domain.
 func (z *fakeMailZones) ListZones(_ context.Context, organizationID uint) ([]*domain.MailZone, error) {
 	var zones []*domain.MailZone
 	for id := uint(1); id <= z.nextID; id++ {
-		if zone, ok := z.zones[id]; ok && zone.OrganizationID == organizationID {
+		if zone, ok := z.zones[id]; ok && zone.OrganizationID == organizationID && !isZoneReservation(zone) {
 			copied := *zone
 			zones = append(zones, &copied)
 		}
@@ -112,6 +112,16 @@ func (z *fakeMailZones) UpdateZone(_ context.Context, zone *domain.MailZone) err
 	}
 	stored := *zone
 	z.zones[zone.ID] = &stored
+	return nil
+}
+
+func (z *fakeMailZones) CompleteZone(_ context.Context, zone *domain.MailZone) error {
+	existing, ok := z.zones[zone.ID]
+	if !ok || !isZoneReservation(existing) {
+		return ErrMailZoneNotFound
+	}
+	existing.CloudflareZoneID = zone.CloudflareZoneID
+	existing.NameServers, existing.OriginalNameServers = zone.NameServers, zone.OriginalNameServers
 	return nil
 }
 
@@ -315,8 +325,9 @@ func TestConnectCreatesZoneOnceUnderRace(t *testing.T) {
 	if _, err := fixture.service.ConnectMailDomain(context.Background(), 7, testCreator, "mail.example.org", ""); !errors.Is(err, ErrMailDomainTaken) {
 		t.Fatalf("connect = %v", err)
 	}
-	if !slices.Equal(fixture.zones.deletedZones, []string{"cf-zone-1"}) {
-		t.Fatalf("deleted zones = %v", fixture.zones.deletedZones)
+	// The apex is reserved before Cloudflare is asked, so the losing request creates no zone there.
+	if len(fixture.zones.createdZones) != 0 || len(fixture.zones.deletedZones) != 0 {
+		t.Fatalf("created zones = %v, deleted zones = %v", fixture.zones.createdZones, fixture.zones.deletedZones)
 	}
 	if len(fixture.domains.domains) != 0 {
 		t.Fatalf("domains = %v", fixture.domains.domains)
@@ -836,4 +847,57 @@ func (z *fakeMailZones) ListUncheckedDomainsInActiveZones(_ context.Context, lim
 		}
 	}
 	return domains, nil
+}
+
+// While one organization's managed zone is being created, the apex is already its own: another
+// organization that connects a name under it meanwhile finds the zone at Cloudflare but never
+// lands in it as if the operator had added it.
+func TestConnectDuringAnotherOrganizationsZoneCreationIsTaken(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	var intruderErr error
+	fixture.zones.createZoneHook = func() {
+		_, intruderErr = fixture.service.ConnectMailDomain(ctx, 8, testCreator, "news.example.org", "")
+	}
+
+	owned := fixture.connect(t, "mail.example.org")
+	if !errors.Is(intruderErr, ErrMailDomainTaken) {
+		t.Fatalf("connect by another organization during the zone creation = %v; want taken", intruderErr)
+	}
+	for _, stored := range fixture.domains.domains {
+		if stored.OrganizationID != 7 {
+			t.Fatalf("another organization stored %+v in the zone being created", stored)
+		}
+	}
+	zone := fixture.mailZones.zones[*owned.MailZoneID]
+	if zone.CloudflareZoneID != "cf-zone-1" || owned.ZoneID != "cf-zone-1" || !slices.Equal(zone.NameServers, fakeNameServers) {
+		t.Fatalf("zone = %+v, domain zone = %s", zone, owned.ZoneID)
+	}
+	listed, err := fixture.service.ListMailZones(ctx, 7)
+	if err != nil || len(listed) != 1 || listed[0].CloudflareZoneID != "cf-zone-1" {
+		t.Fatalf("listed = %+v, %v", listed, err)
+	}
+}
+
+// A reservation that outlived any zone creation, such as after a crash, gives the apex back; a
+// recent one is left to the request that holds it. Neither is looked up at Cloudflare.
+func TestCheckPendingZonesReleasesAnAbandonedReservation(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	abandoned := fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.org", CloudflareZoneID: newZoneReservation(), Status: domain.MailZoneStatusPending,
+		CreatedAt: fixture.now.Add(-zoneReservationLifetime - time.Minute),
+	})
+	recent := fixture.mailZones.store(domain.MailZone{
+		OrganizationID: 7, Name: "example.net", CloudflareZoneID: newZoneReservation(), Status: domain.MailZoneStatusPending,
+	})
+	if _, err := fixture.service.CheckPendingZones(ctx, 100); err != nil {
+		t.Fatalf("CheckPendingZones: %v", err)
+	}
+	if fixture.mailZones.zones[abandoned.ID] != nil || fixture.mailZones.zones[recent.ID] == nil {
+		t.Fatalf("zones left = %v; want only the recent reservation", fixture.mailZones.zones)
+	}
+	if len(fixture.zones.deletedZones) != 0 {
+		t.Fatalf("deleted at the provider = %v", fixture.zones.deletedZones)
+	}
 }

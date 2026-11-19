@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,26 @@ const zoneCleanupTimeout = 30 * time.Second
 // pendingZoneLifetime is how long a managed zone may wait for its registrar delegation. Nobody
 // delegates to a zone that never became active, so removing it later affects no one.
 const pendingZoneLifetime = 14 * 24 * time.Hour
+
+// A reservation holds an apex in mail_zones while its provider zone is created: the row stands in
+// for the zone with a placeholder provider ID, so no other organization can claim the apex, or a
+// name under it, in that window.
+const (
+	zoneReservationPrefix = "reserved:"
+	// zoneReservationLifetime is how long a reservation may wait for its provider zone. A zone
+	// creation takes seconds; an older reservation was abandoned, such as by a crash.
+	zoneReservationLifetime = 10 * time.Minute
+)
+
+// newZoneReservation returns a unique placeholder provider ID for a reservation.
+func newZoneReservation() string {
+	return zoneReservationPrefix + rand.Text()
+}
+
+// isZoneReservation reports whether the zone is a reservation whose provider zone is not created.
+func isZoneReservation(zone *domain.MailZone) bool {
+	return strings.HasPrefix(zone.CloudflareZoneID, zoneReservationPrefix)
+}
 
 // providerZoneActive is the provider status of a zone the registrar delegates to it.
 const providerZoneActive = "active"
@@ -59,7 +80,9 @@ func (s *service) resolveZone(ctx context.Context, organizationID, createdBy uin
 	managed, err := s.zones.FindZoneByName(ctx, apex)
 	switch {
 	case err == nil:
-		if managed.OrganizationID != organizationID {
+		if managed.OrganizationID != organizationID || isZoneReservation(managed) {
+			// A reservation of the organization's own is a zone another of its requests is
+			// creating; the domain can be connected once it exists.
 			return domainZone{}, ErrMailDomainTaken
 		}
 		return domainZone{providerID: managed.CloudflareZoneID, name: managed.Name, managed: managed}, nil
@@ -80,20 +103,24 @@ func (s *service) resolveZone(ctx context.Context, organizationID, createdBy uin
 	return domainZone{providerID: managed.CloudflareZoneID, name: managed.Name, managed: managed, created: true}, nil
 }
 
-// createManagedZone adds apex to the provider account and stores it as a pending managed zone.
-// The limit is checked before the provider call so a refused request leaves no zone behind; the
-// repository checks it again under its lock.
+// createManagedZone reserves apex for the organization, adds it to the provider account, and
+// stores it as a pending managed zone. The reservation comes first, under the repository's limit
+// check, so a refused request leaves no zone at the provider and no other organization can claim
+// the apex while the provider creates the zone.
 func (s *service) createManagedZone(ctx context.Context, organizationID, createdBy uint, apex string) (*domain.MailZone, error) {
-	limit := s.settings.MaxZonesPerOrganization
-	owned, err := s.zones.ListZones(ctx, organizationID)
-	if err != nil {
-		return nil, err
+	zone := &domain.MailZone{
+		OrganizationID:   organizationID,
+		Name:             apex,
+		CloudflareZoneID: newZoneReservation(),
+		Status:           domain.MailZoneStatusPending,
+		CreatedBy:        createdBy,
 	}
-	if len(owned) >= limit {
-		return nil, ErrMailZoneLimitReached
+	if err := s.zones.CreateZone(ctx, zone, s.settings.MaxZonesPerOrganization); err != nil {
+		return nil, err
 	}
 	details, err := s.domainProvider.CreateZone(ctx, apex)
 	if err != nil {
+		s.releaseZoneReservation(ctx, zone)
 		if errors.Is(err, mailtransport.ErrZoneExists) {
 			// Another provider account holds the domain; this one can never manage it.
 			return nil, ErrMailDomainTaken
@@ -105,20 +132,26 @@ func (s *service) createManagedZone(ctx context.Context, organizationID, created
 		slog.WarnContext(ctx, "existing records of a new mail zone were not imported",
 			slog.String("zone", apex), slog.String("error", err.Error()))
 	}
-	zone := &domain.MailZone{
-		OrganizationID:      organizationID,
-		Name:                apex,
-		CloudflareZoneID:    details.ID,
-		Status:              domain.MailZoneStatusPending,
-		NameServers:         details.NameServers,
-		OriginalNameServers: details.OriginalNameServers,
-		CreatedBy:           createdBy,
-	}
-	if err := s.zones.CreateZone(ctx, zone, limit); err != nil {
+	zone.CloudflareZoneID = details.ID
+	zone.NameServers = details.NameServers
+	zone.OriginalNameServers = details.OriginalNameServers
+	if err := s.zones.CompleteZone(context.WithoutCancel(ctx), zone); err != nil {
 		s.deleteProviderZone(ctx, apex, details.ID)
+		s.releaseZoneReservation(ctx, zone)
 		return nil, err
 	}
 	return zone, nil
+}
+
+// releaseZoneReservation removes a reservation whose provider zone was not created or not
+// stored. A failure leaves the reservation for the zone poller to release.
+func (s *service) releaseZoneReservation(ctx context.Context, zone *domain.MailZone) {
+	err := s.zones.DeleteZone(context.WithoutCancel(ctx), zone.OrganizationID, zone.ID,
+		func(context.Context, *domain.MailZone) error { return nil })
+	if err != nil && !errors.Is(err, ErrMailZoneNotFound) {
+		slog.WarnContext(ctx, "mail zone reservation was not released",
+			slog.String("zone", zone.Name), slog.String("error", err.Error()))
+	}
 }
 
 // errZoneNoLongerPending keeps a zone that became active before an unused-zone cleanup ran.
@@ -228,6 +261,9 @@ func (s *service) setUpLeftBehindDomains(ctx context.Context, limit int) {
 }
 
 func (s *service) checkPendingZone(ctx context.Context, zone *domain.MailZone) error {
+	if isZoneReservation(zone) {
+		return s.checkZoneReservation(ctx, zone)
+	}
 	active, err := s.refreshZone(ctx, zone)
 	switch {
 	case providerZoneGone(err):
@@ -242,6 +278,26 @@ func (s *service) checkPendingZone(ctx context.Context, zone *domain.MailZone) e
 	case s.now().UTC().Sub(zone.CreatedAt) > pendingZoneLifetime:
 		return s.expireZone(ctx, zone)
 	}
+	return nil
+}
+
+// checkZoneReservation releases a reservation that waited past zoneReservationLifetime for its
+// provider zone. The provider is not touched: the reservation has no provider zone ID, and a
+// zone of that name in the account may be the operator's. A provider zone the abandoned request
+// did create shows up in the operator's Cloudflare account and the log below.
+func (s *service) checkZoneReservation(ctx context.Context, zone *domain.MailZone) error {
+	if s.now().UTC().Sub(zone.CreatedAt) <= zoneReservationLifetime {
+		return nil
+	}
+	err := s.zones.DeletePendingZone(ctx, zone.ID, func(context.Context) error { return nil })
+	if err != nil {
+		if errors.Is(err, ErrMailZoneNotFound) {
+			return nil
+		}
+		return err
+	}
+	slog.WarnContext(ctx, "abandoned mail zone reservation released; check the provider account for a zone of this name",
+		slog.String("zone", zone.Name))
 	return nil
 }
 

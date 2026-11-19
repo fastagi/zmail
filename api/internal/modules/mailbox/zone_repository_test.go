@@ -408,3 +408,39 @@ func TestZoneRepositoryListsUncheckedDomainsInActiveZones(t *testing.T) {
 		t.Fatalf("limit 0 = %+v, %v", limited, err)
 	}
 }
+
+// A reservation holds the apex while Cloudflare creates the zone: it takes the name for every
+// organization, stays out of the organization's list, and becomes the zone once completed.
+func TestZoneRepositoryCompletesAReservation(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	reserved := &domain.MailZone{OrganizationID: 1, Name: "example.com", CloudflareZoneID: newZoneReservation(), CreatedBy: 1}
+	if err := repo.CreateZone(ctx, reserved, 3); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if err := repo.CreateZone(ctx, newZone(2, "example.com"), 3); !errors.Is(err, ErrMailDomainTaken) {
+		t.Fatalf("same apex while reserved = %v", err)
+	}
+	if found, err := repo.FindZoneByName(ctx, "example.com"); err != nil || found.OrganizationID != 1 {
+		t.Fatalf("reserved by name = %+v, %v", found, err)
+	}
+	if listed, err := repo.ListZones(ctx, 1); err != nil || len(listed) != 0 {
+		t.Fatalf("listed while reserved = %+v, %v", listed, err)
+	}
+
+	reserved.CloudflareZoneID = "cf-example"
+	reserved.NameServers = []string{"ada.ns.cloudflare.com"}
+	reserved.OriginalNameServers = []string{"ns1.registrar.test"}
+	if err := repo.CompleteZone(ctx, reserved); err != nil {
+		t.Fatalf("CompleteZone: %v", err)
+	}
+	listed, err := repo.ListZones(ctx, 1)
+	if err != nil || len(listed) != 1 || listed[0].CloudflareZoneID != "cf-example" ||
+		len(listed[0].NameServers) != 1 || len(listed[0].OriginalNameServers) != 1 {
+		t.Fatalf("listed = %+v, %v", listed, err)
+	}
+	// Only a reservation is completed.
+	if err := repo.CompleteZone(ctx, reserved); !errors.Is(err, ErrMailZoneNotFound) {
+		t.Fatalf("complete a zone twice = %v", err)
+	}
+}

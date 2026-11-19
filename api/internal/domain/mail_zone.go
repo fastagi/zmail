@@ -45,10 +45,15 @@ type MailZoneRepository interface {
 	CreateZone(ctx context.Context, zone *MailZone, limit int) error
 	FindZone(ctx context.Context, organizationID, id uint) (*MailZone, error)
 	FindZoneByName(ctx context.Context, name string) (*MailZone, error)
+	// ListZones lists the organization's zones, leaving out reservations whose provider zone is
+	// still being created.
 	ListZones(ctx context.Context, organizationID uint) ([]*MailZone, error)
 	// ListPendingZones returns pending zones, least recently checked first.
 	ListPendingZones(ctx context.Context, limit int) ([]*MailZone, error)
 	UpdateZone(ctx context.Context, zone *MailZone) error
+	// CompleteZone stores the provider zone ID and name servers of a reserved zone. A zone that is
+	// not a reservation, or no longer exists, is ErrMailZoneNotFound.
+	CompleteZone(ctx context.Context, zone *MailZone) error
 	// ActivateZone moves a pending zone to active at the given time. It reports false, without an
 	// error, when the zone is no longer pending, so exactly one caller wins each activation.
 	ActivateZone(ctx context.Context, id uint, at time.Time) (bool, error)

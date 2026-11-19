@@ -174,8 +174,8 @@ func (r *repository) ListZones(ctx context.Context, organizationID uint) ([]*dom
 		return nil, domain.ErrServiceUnavailable
 	}
 	var rows []MailZonePO
-	if err := r.conn(ctx).Where("organization_id = ?", organizationID).Order("name asc").
-		Limit(domain.MaxMailZonesPerOrganization).Find(&rows).Error; err != nil {
+	if err := r.conn(ctx).Where("organization_id = ? AND cloudflare_zone_id NOT LIKE ?", organizationID, zoneReservationPrefix+"%").
+		Order("name asc").Limit(domain.MaxMailZonesPerOrganization).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return mailZones(rows), nil
@@ -223,6 +223,36 @@ func (r *repository) UpdateZone(ctx context.Context, zone *domain.MailZone) erro
 			"updated_at":            time.Now(),
 		})
 	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrMailZoneNotFound
+	}
+	return nil
+}
+
+// CompleteZone replaces the placeholder provider ID of a reservation with the zone Cloudflare
+// created, in one conditional update.
+func (r *repository) CompleteZone(ctx context.Context, zone *domain.MailZone) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	po, err := mailZonePO(zone)
+	if err != nil {
+		return err
+	}
+	result := r.conn(ctx).Model(&MailZonePO{}).
+		Where("id = ? AND cloudflare_zone_id LIKE ?", zone.ID, zoneReservationPrefix+"%").
+		Updates(map[string]any{
+			"cloudflare_zone_id":    po.CloudflareZoneID,
+			"name_servers":          po.NameServers,
+			"original_name_servers": po.OriginalNameServers,
+			"updated_at":            time.Now(),
+		})
+	if result.Error != nil {
+		if isUniqueViolation(result.Error) {
+			return ErrMailDomainTaken
+		}
 		return result.Error
 	}
 	if result.RowsAffected == 0 {

@@ -36,6 +36,9 @@ type fakeZones struct {
 	activationChecks []string
 	activationErr    error
 	deleteZoneErr    error
+	// createZoneHook, when set, runs once CreateZone added a zone to the account and before it
+	// returns, such as to connect a domain from another request meanwhile.
+	createZoneHook func()
 	// ensureSendingHook, when set, runs at the start of every EnsureSending, such as to hold a
 	// setup open.
 	ensureSendingHook func()
@@ -140,6 +143,10 @@ func (z *fakeZones) CreateZone(_ context.Context, name string) (mailtransport.Zo
 	z.createdZones = append(z.createdZones, name)
 	id := fmt.Sprintf("cf-zone-%d", len(z.createdZones))
 	z.zones[name] = id
+	if hook := z.createZoneHook; hook != nil {
+		z.createZoneHook = nil
+		hook()
+	}
 	return mailtransport.ZoneDetails{
 		ID: id, Name: name, Status: "pending",
 		NameServers: fakeNameServers, OriginalNameServers: []string{"ns1.registrar.test", "ns2.registrar.test"},
