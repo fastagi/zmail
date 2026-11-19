@@ -108,23 +108,27 @@ export default async function ConsoleHomePage() {
         </Button>
       </header>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        {quickLinks.map(({ title, description, href, icon: Icon }) => (
-          <Card key={href} className="transition-colors hover:border-primary/40">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {quickLinks.map(({ title, description, href, icon: Icon }, index) => (
+          <Card
+            key={href}
+            className="animate-enter group transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md"
+            style={{ animationDelay: `${index * 40}ms` }}
+          >
             <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
               <div>
                 <CardTitle className="text-base">{title}</CardTitle>
                 <CardDescription className="mt-1">{description}</CardDescription>
               </div>
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Icon className="h-4.5 w-4.5" />
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors duration-200 group-hover:bg-primary group-hover:text-primary-foreground">
+                <Icon className="h-4.5 w-4.5 transition-transform duration-200 group-hover:scale-105" />
               </div>
             </CardHeader>
             <CardContent>
               <Button asChild variant="ghost" size="sm" className="-ml-2">
                 <Link href={href} aria-label={`${t('home.open')} ${title}`}>
                   {t('home.open')}
-                  <ArrowUpRight className="ml-1 h-3.5 w-3.5" />
+                  <ArrowUpRight className="ml-1 h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                 </Link>
               </Button>
             </CardContent>
@@ -132,16 +136,35 @@ export default async function ConsoleHomePage() {
         ))}
       </section>
 
-      <section className="mt-10 rounded-xl border bg-bg-surface p-6">
+      <section
+        className="animate-enter mt-10 rounded-xl border bg-bg-surface p-6"
+        style={{ animationDelay: `${quickLinks.length * 40}ms` }}
+      >
         <div className="flex items-start gap-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
             <Rocket className="h-5 w-5" />
           </div>
           <div>
             <h2 className="text-base font-semibold">{t('home.gettingStartedTitle')}</h2>
-            <ol className="mt-2 list-decimal space-y-1 pl-4 text-sm text-text-muted">
-              {(['domain', 'mailbox', 'contacts', 'template', 'broadcast'] as const).map(step => (
-                <li key={step}>{t(`home.gettingStarted.${step}`)}</li>
+            <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-sm text-text-muted">
+              {(
+                [
+                  ['domain', ROUTES.CONSOLE.MAIL_DOMAIN],
+                  ['mailbox', ROUTES.CONSOLE.MAILBOXES],
+                  ['contacts', ROUTES.CONSOLE.MAIL_CONTACTS],
+                  ['template', ROUTES.CONSOLE.MAIL_TEMPLATES],
+                  ['broadcast', ROUTES.CONSOLE.MAIL_BROADCASTS],
+                ] as const
+              ).map(([step, href]) => (
+                <li key={step}>
+                  <Link
+                    href={href}
+                    className="inline-flex items-center gap-1 transition-colors hover:text-foreground hover:underline"
+                  >
+                    <span>{t(`home.gettingStarted.${step}`)}</span>
+                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
+                  </Link>
+                </li>
               ))}
             </ol>
           </div>

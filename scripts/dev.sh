@@ -18,7 +18,8 @@ ADMIN_PORT="${FASTBUILD_ADMIN_PORT:-4173}"
 export FASTBUILD_DB_PORT="${FASTBUILD_DB_PORT:-55432}"
 SERVICES="${FASTBUILD_DEV_SERVICES:-api,web,admin}"
 STARTERS="${FASTBUILD_DEV_STARTERS:-organization,permission,notification,asset,setting,usage,webhook,operator,mailbox}"
-WEB_FEATURES="${FASTBUILD_DEV_WEB_FEATURES:-organization,permission,notification,asset,setting,usage,webhook,mailbox}"
+WEB_FEATURES="${FASTBUILD_DEV_WEB_FEATURES:-organization,permission,notification,setting,webhook,mailbox}"
+WEB_DEVTOOLS="${FASTBUILD_DEV_DEVTOOLS:-false}"
 ADMIN_FEATURES="${FASTBUILD_DEV_ADMIN_FEATURES:-operator,organization,webhook,notification}"
 
 print_usage() {
@@ -195,6 +196,7 @@ up() {
       NEXT_PUBLIC_API_URL=/api \
       NEXT_PUBLIC_APP_URL="http://localhost:${WEB_PORT}" \
       NEXT_PUBLIC_OPTIONAL_FEATURES="${WEB_FEATURES}" \
+      NEXT_PUBLIC_DEVTOOLS_ENABLED="${WEB_DEVTOOLS}" \
       API_ADAPTER_ENABLED=true \
       API_UPSTREAM_URL="http://127.0.0.1:${API_PORT}/v1" \
       MOCK_BFF_ENABLED=false \

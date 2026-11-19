@@ -120,6 +120,7 @@ describe('mailbox workspace', () => {
     toast.error.mockReset();
     templateState.data = [];
     navigation.replace.mockClear();
+    window.sessionStorage.clear();
     window.history.replaceState(null, '', '/console/mailboxes');
     state.organizations.data = organizations(organization(1, 'Acme', 'owner'));
     state.organizationIds = [];
@@ -232,6 +233,7 @@ describe('mailbox workspace', () => {
       organization(5, 'Globex', 'member')
     );
     for (const search of ['?org=9', '?org=abc', '?org=0', '?org=', '?other=1']) {
+      window.sessionStorage.clear();
       window.history.replaceState(null, '', `/console/mailboxes${search}`);
       state.organizationIds = [];
       const view = renderWorkspace();
@@ -243,6 +245,36 @@ describe('mailbox workspace', () => {
     }
     // Other parameters of the page are kept when the organization is written.
     expect(window.location.search).toBe('?other=1&org=4');
+  });
+
+  it('restores the last chosen organization from sessionStorage when navigating without ?org=', () => {
+    state.organizations.data = organizations(
+      organization(1, 'Acme', 'owner'),
+      organization(2, 'Globex', 'member')
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?org=2');
+    const firstVisit = renderWorkspace();
+    expect(window.sessionStorage.getItem('zmail.activeOrganizationId')).toBe('2');
+    firstVisit.unmount();
+
+    navigation.replace.mockClear();
+    state.organizationIds = [];
+    window.history.replaceState(null, '', '/console/mailboxes');
+    const sidebarVisit = renderWorkspace();
+
+    expect(screen.getByLabelText('Organization')).toHaveValue('2');
+    expect(navigation.replace).toHaveBeenCalledWith('/console/mailboxes?org=2', { scroll: false });
+    expect(window.location.search).toBe('?org=2');
+    expect(new Set(state.organizationIds)).toEqual(new Set([2]));
+    sidebarVisit.unmount();
+
+    // An explicit ?org= in the URL still overrides sessionStorage and updates it.
+    state.organizationIds = [];
+    window.history.replaceState(null, '', '/console/mailboxes?org=1');
+    renderWorkspace();
+    expect(screen.getByLabelText('Organization')).toHaveValue('1');
+    expect(window.sessionStorage.getItem('zmail.activeOrganizationId')).toBe('1');
+    expect(new Set(state.organizationIds)).toEqual(new Set([1]));
   });
 
   it('lets an owner and an admin manage mailboxes and shows a member a read-only list', () => {
@@ -471,6 +503,56 @@ describe('mailbox workspace', () => {
     expect(state.detailCalls.at(-1)).toBe(11);
     expect(state.update.mutate).toHaveBeenCalledTimes(1);
     expect(state.update.mutate).toHaveBeenCalledWith({ messageId: 11, read: true });
+  });
+
+  it('steps through messages with Previous and Next and marks unread inbound mail read', () => {
+    state.inbox.data = page([
+      summary({ id: 13, subject: 'Newest unread', read: false }),
+      summary({ id: 12, subject: 'Middle read', read: true }),
+      summary({ id: 11, subject: 'Oldest unread', read: false }),
+    ]);
+    renderWorkspace();
+
+    // Start on the middle read message so neither unread neighbor has been opened yet.
+    const middleRow = screen.getByRole('button', { name: /Middle read/u });
+    fireEvent.click(middleRow);
+    expect(middleRow).toHaveAttribute('aria-current', 'true');
+    expect(state.detailCalls.at(-1)).toBe(12);
+    expect(state.update.mutate).not.toHaveBeenCalled();
+
+    const prevButton = screen.getByRole('button', { name: 'Previous message' });
+    const nextButton = screen.getByRole('button', { name: 'Next message' });
+    expect(prevButton).toBeEnabled();
+    expect(nextButton).toBeEnabled();
+
+    // Stepping forward opens the older unread message and marks it read.
+    fireEvent.click(nextButton);
+    expect(state.detailCalls.at(-1)).toBe(11);
+    expect(screen.getByRole('button', { name: /Oldest unread/u })).toHaveAttribute(
+      'aria-current',
+      'true'
+    );
+    expect(middleRow).not.toHaveAttribute('aria-current');
+    expect(state.update.mutate).toHaveBeenCalledTimes(1);
+    expect(state.update.mutate).toHaveBeenCalledWith({ messageId: 11, read: true });
+    expect(nextButton).toBeDisabled();
+    expect(prevButton).toBeEnabled();
+
+    // Stepping back twice returns through the read message to the newest unread message.
+    fireEvent.click(prevButton);
+    expect(state.detailCalls.at(-1)).toBe(12);
+    expect(state.update.mutate).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(prevButton);
+    expect(state.detailCalls.at(-1)).toBe(13);
+    expect(screen.getByRole('button', { name: /Newest unread/u })).toHaveAttribute(
+      'aria-current',
+      'true'
+    );
+    expect(state.update.mutate).toHaveBeenCalledTimes(2);
+    expect(state.update.mutate).toHaveBeenLastCalledWith({ messageId: 13, read: true });
+    expect(prevButton).toBeDisabled();
+    expect(nextButton).toBeEnabled();
   });
 
   it('renders sender HTML only inside a fully sandboxed frame', () => {

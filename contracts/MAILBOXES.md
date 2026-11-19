@@ -376,8 +376,17 @@ shared one. Without it every `/v1/mail-domains` route is `404 MAILBOX.DOMAINS_DI
 
 ## Messages
 
-Listing returns summaries, newest first, without bodies. `direction=inbound` is the inbox and
-`direction=outbound` is the sent folder; any other value is `400 COMMON.INVALID_INPUT`.
+`GET /v1/mailboxes/:mailbox_id/messages` returns summaries, newest first, without bodies.
+
+| Query | Meaning |
+|---|---|
+| `direction` | `inbound` (the inbox) or `outbound` (the sent folder) |
+| `q` | Case-insensitive match on the subject, the sender address, or a recipient address; at most 200 characters. `%` and `_` match literally. |
+| `unread` | `true` for unread messages (`read` is `false`), `false` for read messages (`read` is `true`); omitted returns both. Read state is the caller's own, so outbound mail is always read. |
+| `page`, `per_page` | Pagination |
+
+An unknown `direction`, a non-boolean `unread`, or an over-long or control-character `q` is
+`400 COMMON.INVALID_INPUT`.
 
 | Field | Meaning |
 |---|---|

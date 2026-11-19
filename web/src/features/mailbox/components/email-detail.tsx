@@ -38,6 +38,8 @@ export function EmailDetail({
   canSend,
   onClose,
   onReply,
+  onReplyAll,
+  onForward,
 }: {
   mailboxId: number;
   mailboxAddress: string;
@@ -46,6 +48,8 @@ export function EmailDetail({
   canSend: boolean;
   onClose: () => void;
   onReply: (message: MailMessage) => void;
+  onReplyAll?: (message: MailMessage) => void;
+  onForward?: (message: MailMessage) => void;
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
@@ -97,7 +101,15 @@ export function EmailDetail({
     <article className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {back}
-        <MessageActions message={message} canSend={canSend} onReply={onReply} onClose={onClose} />
+        <MessageActions
+          message={message}
+          mailboxAddress={mailboxAddress}
+          canSend={canSend}
+          onReply={onReply}
+          onReplyAll={onReplyAll}
+          onForward={onForward}
+          onClose={onClose}
+        />
       </div>
 
       <div className="space-y-4 rounded-md border p-4">

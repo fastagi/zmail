@@ -287,6 +287,109 @@ describe('mail templates console', () => {
     expect(toast.success).toHaveBeenCalledWith('Test sent');
   });
 
+  it('auto-saves unsaved edits before opening the test dialog', async () => {
+    const updated = template({ subject: 'Updated welcome, {{first_name|friend}}' });
+    state.save.mutateAsync.mockResolvedValue(updated);
+    state.test.mutateAsync.mockResolvedValue({});
+    renderTemplates();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Welcome' }));
+    fireEvent.change(screen.getByLabelText('Subject'), {
+      target: { value: 'Updated welcome, {{first_name|friend}}' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(state.save.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        templateId: 4,
+        input: expect.objectContaining({
+          subject: 'Updated welcome, {{first_name|friend}}',
+        }),
+      })
+    );
+    expect(toast.success).toHaveBeenCalledWith('Template saved');
+    expect(within(dialog).queryByText('Save your changes before sending a test.')).toBeNull();
+
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'qa@example.com' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send test' }));
+    await waitFor(() =>
+      expect(state.test.mutateAsync).toHaveBeenCalledWith({
+        templateId: 4,
+        input: { mailbox_id: 2, to: ['qa@example.com'] },
+      })
+    );
+  });
+
+  it('validates and auto-saves a new template when Send test is clicked', async () => {
+    state.save.mutateAsync.mockResolvedValue(template({ id: 12, name: 'Quick test' }));
+    state.test.mutateAsync.mockResolvedValue({});
+    renderTemplates();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New template' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
+    expect(
+      screen.getByText(
+        'Check the template: a name, a one-line subject, an HTML or text body, and well-formed placeholders are required.'
+      )
+    ).toBeInTheDocument();
+    expect(state.save.mutateAsync).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Welcome' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Quick test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send test' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(state.save.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ name: 'Quick test' }),
+      })
+    );
+    expect(toast.success).toHaveBeenCalledWith('Template created');
+
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'qa@example.com' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send test' }));
+    await waitFor(() =>
+      expect(state.test.mutateAsync).toHaveBeenCalledWith({
+        templateId: 12,
+        input: { mailbox_id: 2, to: ['qa@example.com'] },
+      })
+    );
+  });
+
+  it('prompts before discarding unsaved edits when navigating back', () => {
+    renderTemplates();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Welcome' }));
+
+    const cleanUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(cleanUnload);
+    expect(cleanUnload.defaultPrevented).toBe(false);
+
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Draft edit' } });
+
+    const dirtyUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(dirtyUnload);
+    expect(dirtyUnload.defaultPrevented).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to templates' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Discard unsaved changes?')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('Your edits to this template have not been saved yet.')
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByLabelText('Subject')).toHaveValue('Draft edit');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to templates' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard changes' })
+    );
+    expect(screen.getByRole('button', { name: 'New template' })).toBeInTheDocument();
+  });
+
   it('deletes a template after confirmation and returns to the list', async () => {
     state.remove.mutateAsync.mockResolvedValue(undefined);
     renderTemplates();
