@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -362,6 +363,7 @@ func (r *fakeRepository) CreateMessage(_ context.Context, message *domain.MailMe
 		}
 	}
 	message.ID = r.id()
+	message.ThreadID = r.threadFor(message)
 	message.AttachmentCount = len(message.Attachments)
 	for i := range message.Attachments {
 		message.Attachments[i].ID, message.Attachments[i].MessageID = r.id(), message.ID
@@ -372,6 +374,41 @@ func (r *fakeRepository) CreateMessage(_ context.Context, message *domain.MailMe
 	stored.Attachments = nil
 	r.messages[message.ID] = &stored
 	return true, nil
+}
+
+// threadFor joins the thread of the newest message of the same mailbox that the message replies
+// to or references, as the database repository does, or starts the message's own thread.
+func (r *fakeRepository) threadFor(message *domain.MailMessage) uint {
+	ids := append([]string{message.InReplyTo}, message.References...)
+	var newest *domain.MailMessage
+	for _, existing := range r.messages {
+		if existing.MailboxID != message.MailboxID || existing.RFCMessageID == "" || r.sealed(existing) ||
+			!slices.Contains(ids, existing.RFCMessageID) {
+			continue
+		}
+		if newest == nil || existing.ID > newest.ID {
+			newest = existing
+		}
+	}
+	if newest == nil {
+		return message.ID
+	}
+	return newest.ThreadID
+}
+
+func (r *fakeRepository) FindMessageByRFCMessageID(_ context.Context, mailboxID uint, rfcMessageID string) (*domain.MailMessage, error) {
+	var newest *domain.MailMessage
+	for _, existing := range r.messages {
+		if existing.MailboxID == mailboxID && rfcMessageID != "" && existing.RFCMessageID == rfcMessageID &&
+			!r.sealed(existing) && (newest == nil || existing.ID > newest.ID) {
+			newest = existing
+		}
+	}
+	if newest == nil {
+		return nil, ErrMailMessageNotFound
+	}
+	copied := *newest
+	return &copied, nil
 }
 
 func (r *fakeRepository) ListMessageAttachments(_ context.Context, messageID uint) ([]domain.MailAttachment, error) {
@@ -1543,5 +1580,212 @@ func TestSummarizeMailEventsUsesEachRecipientsLatestState(t *testing.T) {
 		if got := domain.SummarizeMailEvents(test.events); got != test.want {
 			t.Fatalf("%s: summary = %q; want %q", test.name, got, test.want)
 		}
+	}
+}
+
+var ownMessageIDPattern = regexp.MustCompile(`^[0-9a-f]{32}@example\.com$`)
+
+func TestOutboundGetsOwnRFCMessageID(t *testing.T) {
+	fixture := newServiceFixture(t)
+	fixture.service.settings.Domain = "example.com"
+	mailbox := fixture.mailbox(t, 1, "hello")
+	var sentID, storedAtSend string
+	fixture.service.transport = transportFunc(func(_ context.Context, mail mailtransport.Message) error {
+		sentID = mail.MessageID
+		for _, stored := range fixture.repo.messages {
+			if stored.Direction == domain.MailDirectionOutbound && stored.Status == domain.MailStatusQueued {
+				storedAtSend = stored.RFCMessageID
+			}
+		}
+		return nil
+	})
+
+	message, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID,
+		SendInput{To: []string{"bob@example.org"}, Subject: "Hi", Text: "Hello"})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if !ownMessageIDPattern.MatchString(message.RFCMessageID) {
+		t.Fatalf("rfc_message_id = %q; want 32 lowercase hex characters at the sending domain", message.RFCMessageID)
+	}
+	if storedAtSend != message.RFCMessageID {
+		t.Fatalf("stored before the provider call = %q; want %q", storedAtSend, message.RFCMessageID)
+	}
+	if sentID != message.RFCMessageID {
+		t.Fatalf("provider got Message-ID %q; want %q", sentID, message.RFCMessageID)
+	}
+	if message.ThreadID != message.ID || fixture.repo.messages[message.ID].ThreadID != message.ID {
+		t.Fatalf("thread_id = %d; want a new thread %d", message.ThreadID, message.ID)
+	}
+
+	other, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID,
+		SendInput{To: []string{"bob@example.org"}, Subject: "Hi", Text: "Hello"})
+	if err != nil {
+		t.Fatalf("second SendMessage: %v", err)
+	}
+	if other.RFCMessageID == message.RFCMessageID || !ownMessageIDPattern.MatchString(other.RFCMessageID) {
+		t.Fatalf("second rfc_message_id = %q; want a new id", other.RFCMessageID)
+	}
+}
+
+func TestNewRFCMessageIDUsesTheSendingDomain(t *testing.T) {
+	id := newRFCMessageID("example.com")
+	if !ownMessageIDPattern.MatchString(id) {
+		t.Fatalf("newRFCMessageID = %q", id)
+	}
+}
+
+func TestIdempotentReplayKeepsRFCMessageID(t *testing.T) {
+	fixture := newServiceFixture(t)
+	mailbox := fixture.mailbox(t, 1, "hello")
+	input := SendInput{To: []string{"bob@example.org"}, Subject: "Hi", Text: "Hello", IdempotencyKey: "replay-1"}
+
+	first, created, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, input)
+	if err != nil || !created || first.RFCMessageID == "" {
+		t.Fatalf("first = %+v, created %v, err %v; want a stored message with its own id", first, created, err)
+	}
+	replayed, created, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, input)
+	if err != nil || created || replayed.RFCMessageID != first.RFCMessageID {
+		t.Fatalf("replay rfc_message_id = %q, created %v, err %v; want %q", replayed.RFCMessageID, created, err, first.RFCMessageID)
+	}
+	// A concurrent request that stored the message first is answered from the stored row too.
+	fixture.repo.hideIdempotencyLookup = true
+	raced, created, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, input)
+	if err != nil || created || raced.RFCMessageID != first.RFCMessageID {
+		t.Fatalf("raced rfc_message_id = %q, created %v, err %v; want %q", raced.RFCMessageID, created, err, first.RFCMessageID)
+	}
+	if len(fixture.transport.sent) != 1 {
+		t.Fatalf("provider calls = %d; want 1", len(fixture.transport.sent))
+	}
+}
+
+// receiveReply delivers one signed inbound message to the mailbox through the service.
+func (f *queueFixture) receiveReply(t *testing.T, mailbox *domain.Mailbox, messageID string, headers ...string) *domain.MailMessage {
+	t.Helper()
+	lines := []string{
+		"From: Alice <alice@sender.test>", "To: " + mailbox.Address, "Subject: Re: Hello", "Message-ID: <" + messageID + ">",
+	}
+	lines = append(lines, headers...)
+	lines = append(lines, "", "Reply body.")
+	raw := crlf(lines...)
+	message, created, err := f.service.ReceiveInbound(context.Background(), InboundDelivery{
+		Recipient: mailbox.Address, Signature: signedHeader(f.clock, mailbox.Address, raw), Raw: raw,
+	})
+	if err != nil || !created {
+		t.Fatalf("ReceiveInbound(%s) = created %v, err %v", messageID, created, err)
+	}
+	return message
+}
+
+func (f *queueFixture) storedThread(t *testing.T, id uint) uint {
+	t.Helper()
+	stored := f.stored(t, id)
+	if stored.ThreadID == nil {
+		t.Fatalf("message %d has no thread_id", id)
+	}
+	return *stored.ThreadID
+}
+
+func TestInboundReplyToOutboundJoinsThread(t *testing.T) {
+	f := newQueueFixture(t)
+	sent := f.mustSend(t, "Hello", false)
+	if sent.RFCMessageID == "" || f.storedThread(t, sent.ID) != sent.ID {
+		t.Fatalf("outbound = rfc %q, thread %d; want its own id and a new thread", sent.RFCMessageID, f.storedThread(t, sent.ID))
+	}
+	if stored := f.stored(t, sent.ID); stored.RFCMessageID != sent.RFCMessageID {
+		t.Fatalf("stored rfc_message_id = %q; want %q", stored.RFCMessageID, sent.RFCMessageID)
+	}
+
+	reply := f.receiveReply(t, f.team, "reply-1@sender.test", "In-Reply-To: <"+sent.RFCMessageID+">")
+	if reply.ThreadID != sent.ID || f.storedThread(t, reply.ID) != sent.ID {
+		t.Fatalf("reply thread = %d; want the outbound thread %d", reply.ThreadID, sent.ID)
+	}
+	if stored := f.stored(t, reply.ID); stored.RFCMessageID != "reply-1@sender.test" {
+		t.Fatalf("inbound rfc_message_id = %q; want the sender's Message-ID", stored.RFCMessageID)
+	}
+
+	// A reply that names the thread only in References joins it too.
+	viaReferences := f.receiveReply(t, f.team, "reply-2@sender.test",
+		"In-Reply-To: <unknown@elsewhere.test>", "References: <"+sent.RFCMessageID+"> <unknown@elsewhere.test>")
+	if f.storedThread(t, viaReferences.ID) != sent.ID {
+		t.Fatalf("References-only reply thread = %d; want %d", f.storedThread(t, viaReferences.ID), sent.ID)
+	}
+
+	// The same subject alone never joins a thread.
+	fresh := f.receiveReply(t, f.team, "fresh@sender.test")
+	if f.storedThread(t, fresh.ID) != fresh.ID {
+		t.Fatalf("unrelated message thread = %d; want a new thread %d", f.storedThread(t, fresh.ID), fresh.ID)
+	}
+}
+
+// Review Focus 2: a reply naming a message of another mailbox starts its own thread.
+func TestInboundReplyToOtherMailboxStartsNewThread(t *testing.T) {
+	f := newQueueFixture(t)
+	sent := f.mustSend(t, "Hello", false)
+	reply := f.receiveReply(t, f.personal, "cross@sender.test",
+		"In-Reply-To: <"+sent.RFCMessageID+">", "References: <"+sent.RFCMessageID+">")
+	if f.storedThread(t, reply.ID) != reply.ID || reply.ThreadID != reply.ID {
+		t.Fatalf("cross-mailbox reply thread = %d; want a new thread %d, not team's %d",
+			f.storedThread(t, reply.ID), reply.ID, sent.ID)
+	}
+	found, err := f.repo.(*repository).FindThreadID(context.Background(), f.personal.ID, []string{sent.RFCMessageID})
+	if err != nil || found != 0 {
+		t.Fatalf("FindThreadID in another mailbox = %d, %v; want 0", found, err)
+	}
+}
+
+func TestReplyReferencesChain(t *testing.T) {
+	f := newQueueFixture(t)
+	sent := f.mustSend(t, "Hello", false)
+	reply := f.receiveReply(t, f.team, "reply-1@sender.test",
+		"In-Reply-To: <"+sent.RFCMessageID+">", "References: <"+sent.RFCMessageID+">")
+
+	before := len(f.transport.sent)
+	answer, _, err := f.service.SendMessage(context.Background(), f.b, f.team.ID, SendInput{
+		To: []string{"alice@sender.test"}, Subject: "Re: Hello", Text: "Thanks", InReplyTo: "<reply-1@sender.test>",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	wantChain := sent.RFCMessageID + " reply-1@sender.test"
+	if got := strings.Join(f.transport.sent[before].References, " "); got != wantChain {
+		t.Fatalf("References sent = %q; want the parent's References plus its Message-ID %q", got, wantChain)
+	}
+	if f.transport.sent[before].InReplyTo != "reply-1@sender.test" {
+		t.Fatalf("In-Reply-To sent = %q", f.transport.sent[before].InReplyTo)
+	}
+	if stored := f.stored(t, answer.ID); stored.ReferencesHeader != wantChain {
+		t.Fatalf("stored References = %q; want %q", stored.ReferencesHeader, wantChain)
+	}
+	if f.storedThread(t, answer.ID) != sent.ID || f.storedThread(t, reply.ID) != sent.ID {
+		t.Fatalf("answer thread = %d; want %d", f.storedThread(t, answer.ID), sent.ID)
+	}
+
+	// A long chain keeps only the newest ids, ending with the parent.
+	var long []string
+	for i := 0; i < 25; i++ {
+		long = append(long, fmt.Sprintf("<old-%d@sender.test>", i))
+	}
+	f.receiveReply(t, f.team, "long@sender.test", "References: "+strings.Join(long, " "))
+	before = len(f.transport.sent)
+	if _, _, err := f.service.SendMessage(context.Background(), f.b, f.team.ID, SendInput{
+		To: []string{"alice@sender.test"}, Subject: "Re: Long", Text: "Thanks", InReplyTo: "long@sender.test",
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	chain := f.transport.sent[before].References
+	if len(chain) != 20 || chain[len(chain)-1] != "long@sender.test" || chain[0] != "old-6@sender.test" {
+		t.Fatalf("long References = %v; want the last 20 ids ending with the parent", chain)
+	}
+
+	// A reply to a message this mailbox does not have still references it.
+	before = len(f.transport.sent)
+	if _, _, err := f.service.SendMessage(context.Background(), f.b, f.team.ID, SendInput{
+		To: []string{"alice@sender.test"}, Subject: "Re: ?", Text: "Thanks", InReplyTo: "unknown@elsewhere.test",
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if got := strings.Join(f.transport.sent[before].References, " "); got != "unknown@elsewhere.test" {
+		t.Fatalf("References for an unknown parent = %q; want just In-Reply-To", got)
 	}
 }

@@ -25,6 +25,7 @@ func NewLog(logger *slog.Logger) *Log {
 func (l *Log) Send(ctx context.Context, mail Message) (Result, error) {
 	l.logger.InfoContext(ctx, "mailbox outbound mail recorded by the log transport",
 		slog.String("from", mail.FromAddress),
+		slog.String("message_id", mail.MessageID),
 		slog.Int("to_count", len(mail.To)),
 		slog.Int("cc_count", len(mail.Cc)),
 		slog.Int("text_bytes", len(mail.TextBody)),

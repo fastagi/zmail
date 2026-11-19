@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -564,6 +565,16 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		}
 	}
 
+	if message.InReplyTo != "" {
+		parent, findErr := s.repo.FindMessageByRFCMessageID(ctx, mailbox.ID, message.InReplyTo)
+		switch {
+		case findErr == nil:
+			message.References = replyReferences(parent)
+		case !errors.Is(findErr, ErrMailMessageNotFound):
+			return nil, false, findErr
+		}
+	}
+
 	sent, err := s.repo.CountOutboundSince(ctx, mailbox.OrganizationID, s.now().Add(-sendLimitWindow))
 	if err != nil {
 		return nil, false, err
@@ -629,7 +640,9 @@ func (s *service) deliver(
 		Subject:     message.Subject,
 		TextBody:    message.TextBody,
 		HTMLBody:    message.HTMLBody,
+		MessageID:   message.RFCMessageID,
 		InReplyTo:   message.InReplyTo,
+		References:  message.References,
 		Attachments: files,
 		Headers:     headers,
 	})
@@ -839,6 +852,14 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		fingerprint = sendFingerprint(to, cc, cleanText(subject), text, html, inReplyTo, attachmentDigest(attachments))
 	}
 
+	// The id is chosen before the message is stored, so a replay or a queued send reuses it.
+	rfcMessageID := newRFCMessageID(addressDomain(mailbox.Address))
+	// A reply references at least its parent; send extends this with the parent's own chain.
+	var references []string
+	if inReplyTo != "" {
+		references = []string{inReplyTo}
+	}
+
 	return &domain.MailMessage{
 		IdempotencyKey:         idempotencyKey,
 		IdempotencyFingerprint: fingerprint,
@@ -853,11 +874,43 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 		TextBody:               text,
 		HTMLBody:               html,
 		InReplyTo:              inReplyTo,
+		References:             references,
+		RFCMessageID:           rfcMessageID,
 		Attachments:            attachments,
 		AttachmentCount:        len(attachments),
 		// Outbound mail is read for everyone.
 		Read: true,
 	}, nil
+}
+
+// newRFCMessageID returns a new RFC 5322 Message-ID at the sending domain, without angle
+// brackets: 32 lowercase hex characters from a cryptographic random source.
+func newRFCMessageID(domainName string) string {
+	var random [16]byte
+	// crypto/rand.Read always fills the buffer and never returns an error.
+	_, _ = rand.Read(random[:])
+	return hex.EncodeToString(random[:]) + "@" + domainName
+}
+
+// addressDomain returns the domain part of a mail address.
+func addressDomain(address string) string {
+	return address[strings.LastIndex(address, "@")+1:]
+}
+
+// replyReferences is the References chain of a reply to parent: the parent's References followed
+// by the parent's own Message-ID, keeping the newest maxMailReferences ids.
+func replyReferences(parent *domain.MailMessage) []string {
+	chain := make([]string, 0, len(parent.References)+1)
+	for _, id := range parent.References {
+		if id != parent.RFCMessageID {
+			chain = append(chain, id)
+		}
+	}
+	chain = append(chain, parent.RFCMessageID)
+	if len(chain) > maxMailReferences {
+		chain = chain[len(chain)-maxMailReferences:]
+	}
+	return chain
 }
 
 // ReceiveInbound verifies and stores one delivery from the mail edge. A repeated delivery of
@@ -910,8 +963,11 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		HTMLBody:    parsed.HTMLBody,
 		MessageID:   parsed.MessageID,
 		InReplyTo:   parsed.InReplyTo,
-		DedupeKey:   inboundDedupeKey(parsed.MessageID, delivery.Raw),
-		Attachments: parsed.Attachments,
+		References:  parsed.References,
+		// Threading matches replies against the sender's Message-ID.
+		RFCMessageID: parsed.MessageID,
+		DedupeKey:    inboundDedupeKey(parsed.MessageID, delivery.Raw),
+		Attachments:  parsed.Attachments,
 	}
 	created := false
 	err = s.apply(ctx, func(tx context.Context) ([]MailNotification, error) {

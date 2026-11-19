@@ -19,8 +19,13 @@ type Message struct {
 	Subject     string
 	TextBody    string
 	HTMLBody    string
+	// MessageID is the RFC 5322 Message-ID Zmail chose for the message, without angle brackets.
+	MessageID string
 	// InReplyTo is an RFC 5322 message identifier without angle brackets.
 	InReplyTo string
+	// References are the RFC 5322 message identifiers of the thread, oldest first, without
+	// angle brackets.
+	References []string
 	// Attachments are files sent with the message.
 	Attachments []Attachment
 	// Headers are extra headers such as List-Unsubscribe.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -216,6 +217,9 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 				DoNothing:   true,
 			})
 		}
+		if err := findThread(tx, po, message); err != nil {
+			return err
+		}
 		result := query.Create(po)
 		if result.Error != nil {
 			return result.Error
@@ -224,6 +228,9 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 			return nil
 		}
 		created = true
+		if err := startThread(tx, po); err != nil {
+			return err
+		}
 		return createAttachments(tx, po.ID, message.Attachments)
 	})
 	if err != nil {
@@ -238,10 +245,94 @@ func (r *repository) CreateMessage(ctx context.Context, message *domain.MailMess
 		return false, nil
 	}
 	message.ID = po.ID
+	message.ThreadID = *po.ThreadID
 	message.AttachmentCount = po.AttachmentCount
 	message.CreatedAt = po.CreatedAt
 	message.UpdatedAt = po.UpdatedAt
 	return true, nil
+}
+
+// findThread sets the thread of a message about to be stored: the thread of the newest message of
+// the same mailbox whose RFC Message-ID the message's In-Reply-To or References name. It leaves
+// the thread unset when none matches, for startThread.
+func findThread(tx *gorm.DB, po *MailMessagePO, message *domain.MailMessage) error {
+	if po.ThreadID != nil {
+		return nil
+	}
+	ids := append([]string{message.InReplyTo}, message.References...)
+	threadID, err := findThreadID(tx, message.MailboxID, ids)
+	if err != nil || threadID == 0 {
+		return err
+	}
+	po.ThreadID = &threadID
+	return nil
+}
+
+// startThread makes a just stored message without a thread the start of its own, inside the
+// insert transaction, so no committed row is ever without a thread.
+func startThread(tx *gorm.DB, po *MailMessagePO) error {
+	if po.ThreadID != nil {
+		return nil
+	}
+	if err := tx.Model(&MailMessagePO{}).Where("id = ?", po.ID).UpdateColumn("thread_id", po.ID).Error; err != nil {
+		return err
+	}
+	threadID := po.ID
+	po.ThreadID = &threadID
+	return nil
+}
+
+// FindThreadID returns the thread of the newest unsealed message of the mailbox whose RFC
+// Message-ID is one of ids, or 0 when none is. Threads never cross mailboxes.
+func (r *repository) FindThreadID(ctx context.Context, mailboxID uint, ids []string) (uint, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	return findThreadID(r.conn(ctx), mailboxID, ids)
+}
+
+func findThreadID(db *gorm.DB, mailboxID uint, ids []string) (uint, error) {
+	wanted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id != "" && !slices.Contains(wanted, id) {
+			wanted = append(wanted, id)
+		}
+	}
+	if len(wanted) == 0 {
+		return 0, nil
+	}
+	var threadIDs []uint
+	err := db.Model(&MailMessagePO{}).
+		Where("mailbox_id = ? AND rfc_message_id IN ?", mailboxID, wanted).
+		Where(unsealedMessage).
+		Order("id DESC").Limit(1).
+		Pluck("COALESCE(thread_id, id)", &threadIDs).Error
+	if err != nil || len(threadIDs) == 0 {
+		return 0, err
+	}
+	return threadIDs[0], nil
+}
+
+func (r *repository) FindMessageByRFCMessageID(ctx context.Context, mailboxID uint, rfcMessageID string) (*domain.MailMessage, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	if rfcMessageID == "" {
+		return nil, ErrMailMessageNotFound
+	}
+	var po MailMessagePO
+	err := r.conn(ctx).
+		Where("mailbox_id = ? AND rfc_message_id = ?", mailboxID, rfcMessageID).
+		Where(unsealedMessage).
+		Order("id DESC").
+		First(&po).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrMailMessageNotFound
+		}
+		return nil, err
+	}
+	return po.toDomain(), nil
 }
 
 // createAttachments stores the files of a new message and fills in their identifiers.
@@ -311,6 +402,9 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 	po := newMailMessagePO(message)
 	created := false
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := findThread(tx, po, message); err != nil {
+			return err
+		}
 		result := tx.
 			Clauses(clause.OnConflict{
 				Columns:     []clause.Column{{Name: "mailbox_id"}, {Name: "dedupe_key"}},
@@ -322,6 +416,9 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 			return result.Error
 		}
 		created = true
+		if err := startThread(tx, po); err != nil {
+			return err
+		}
 		return createAttachments(tx, po.ID, message.Attachments)
 	})
 	if err != nil {
@@ -329,6 +426,7 @@ func (r *repository) CreateInboundMessage(ctx context.Context, message *domain.M
 	}
 	if created {
 		message.ID = po.ID
+		message.ThreadID = *po.ThreadID
 		message.AttachmentCount = po.AttachmentCount
 		message.CreatedAt = po.CreatedAt
 		message.UpdatedAt = po.UpdatedAt

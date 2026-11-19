@@ -126,19 +126,7 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 			Disposition: "attachment",
 		})
 	}
-	if len(mail.Headers) > 0 {
-		body.Headers = make(map[string]string, len(mail.Headers)+2)
-		for name, value := range mail.Headers {
-			body.Headers[name] = value
-		}
-	}
-	if mail.InReplyTo != "" {
-		reference := "<" + mail.InReplyTo + ">"
-		if body.Headers == nil {
-			body.Headers = map[string]string{}
-		}
-		body.Headers["In-Reply-To"], body.Headers["References"] = reference, reference
-	}
+	body.Headers = sendHeaders(mail)
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return Result{}, fmt.Errorf("encode mail request: %w", err)
@@ -201,6 +189,40 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 		}
 	}
 	return result, nil
+}
+
+// sendHeaders lists the extra headers of a message. The threading headers always come from the
+// message's own fields, never from a caller header of the same name.
+func sendHeaders(mail Message) map[string]string {
+	headers := make(map[string]string, len(mail.Headers)+3)
+	for name, value := range mail.Headers {
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "message-id", "in-reply-to", "references":
+			continue
+		}
+		headers[name] = value
+	}
+	if mail.MessageID != "" {
+		headers["Message-ID"] = "<" + mail.MessageID + ">"
+	}
+	references := mail.References
+	if mail.InReplyTo != "" {
+		headers["In-Reply-To"] = "<" + mail.InReplyTo + ">"
+		if len(references) == 0 {
+			references = []string{mail.InReplyTo}
+		}
+	}
+	if len(references) > 0 {
+		bracketed := make([]string, 0, len(references))
+		for _, id := range references {
+			bracketed = append(bracketed, "<"+id+">")
+		}
+		headers["References"] = strings.Join(bracketed, " ")
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	return headers
 }
 
 // normalizeProviderMessageID strips angle brackets and rejects anything that is not a short

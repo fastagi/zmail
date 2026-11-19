@@ -22,6 +22,8 @@ const (
 	maxMIMEParts = 100
 	// maxMIMEPartBytes bounds how much of one part is decoded before truncation to the stored limit.
 	maxMIMEPartBytes = 4 * domain.MaxMailBodyBytes
+	// maxMailReferences bounds the References ids stored for a message and sent with a reply.
+	maxMailReferences = 20
 )
 
 // parsedMail is the subset of an RFC 5322 message the mailbox stores.
@@ -33,8 +35,10 @@ type parsedMail struct {
 	Subject     string
 	MessageID   string
 	InReplyTo   string
-	TextBody    string
-	HTMLBody    string
+	// References are the parsed References header ids, oldest first.
+	References []string
+	TextBody   string
+	HTMLBody   string
 	// Attachments are the files of the message, at most domain.MaxMailAttachments of them.
 	Attachments []domain.MailAttachment
 }
@@ -60,6 +64,7 @@ func parseMail(raw []byte) (*parsedMail, error) {
 	if id, ok := normalizeMessageID(firstField(message.Header.Get("In-Reply-To"))); ok {
 		parsed.InReplyTo = id
 	}
+	parsed.References = parseReferences(message.Header.Get("References"))
 
 	parser := mail.AddressParser{WordDecoder: headerDecoder}
 	if from, err := parser.Parse(message.Header.Get("From")); err == nil {
@@ -256,6 +261,48 @@ func headerAddresses(header mail.Header, key string) []string {
 		addresses = append(addresses, strings.ToLower(entry.Address))
 	}
 	return addresses
+}
+
+// parseReferences reads the message identifiers of a References header, oldest first. Invalid
+// and repeated ids are dropped, and only the newest maxMailReferences are kept. Ids without
+// angle brackets, separated by spaces or commas, are accepted from senders that write them so.
+func parseReferences(raw string) []string {
+	var tokens []string
+	if strings.Contains(raw, "<") {
+		for rest := raw; ; {
+			start := strings.Index(rest, "<")
+			if start < 0 {
+				break
+			}
+			end := strings.Index(rest[start:], ">")
+			if end < 0 {
+				break
+			}
+			tokens = append(tokens, rest[start:start+end+1])
+			rest = rest[start+end+1:]
+		}
+	} else {
+		tokens = strings.FieldsFunc(raw, func(char rune) bool {
+			return char == ',' || char == ' ' || char == '\t' || char == '\r' || char == '\n'
+		})
+	}
+	var ids []string
+	seen := map[string]struct{}{}
+	for _, token := range tokens {
+		id, ok := normalizeMessageID(token)
+		if !ok || id == "" {
+			continue
+		}
+		if _, repeated := seen[id]; repeated {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) > maxMailReferences {
+		ids = ids[len(ids)-maxMailReferences:]
+	}
+	return ids
 }
 
 func firstField(raw string) string {

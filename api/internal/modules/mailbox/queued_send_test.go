@@ -359,3 +359,31 @@ func TestMailLogShowsWhyAMessageWaits(t *testing.T) {
 	}
 	t.Fatalf("the waiting message is not in the log")
 }
+
+func TestQueuedSendUsesStoredRFCMessageID(t *testing.T) {
+	f := newQueueFixture(t)
+	start := f.clock
+	for i := 0; i < 5; i++ {
+		f.mustSend(t, "fill", false)
+	}
+	waiting := f.mustSend(t, "w1", true)
+	stored := f.stored(t, waiting.ID)
+	if stored.RFCMessageID == "" || stored.RFCMessageID != waiting.RFCMessageID {
+		t.Fatalf("waiting rfc_message_id = stored %q, returned %q; want one id stored at queue time", stored.RFCMessageID, waiting.RFCMessageID)
+	}
+	if stored.ThreadID == nil || *stored.ThreadID != waiting.ID {
+		t.Fatalf("waiting thread_id = %v; want %d", stored.ThreadID, waiting.ID)
+	}
+
+	f.clock = start.Add(25 * time.Hour)
+	before := len(f.transport.sent)
+	if got := f.dispatch(t, 25); got != 1 {
+		t.Fatalf("dispatch processed %d; want 1", got)
+	}
+	if sent := f.transport.sent[before:]; len(sent) != 1 || sent[0].MessageID != stored.RFCMessageID {
+		t.Fatalf("worker sent %+v; want Message-ID %q", sent, stored.RFCMessageID)
+	}
+	if after := f.stored(t, waiting.ID); after.RFCMessageID != stored.RFCMessageID {
+		t.Fatalf("rfc_message_id after send = %q; want %q", after.RFCMessageID, stored.RFCMessageID)
+	}
+}

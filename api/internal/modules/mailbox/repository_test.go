@@ -1093,3 +1093,33 @@ func TestCountOutboundSinceUsesAttemptTime(t *testing.T) {
 		t.Fatalf("stored waiting = %+v, %v", stored, err)
 	}
 }
+
+// A handover seals the earlier history from the new owner, so a new message never joins a sealed
+// thread or replies with a sealed message's References.
+func TestRepositoryThreadsIgnoreSealedMessages(t *testing.T) {
+	repo, db := openRepository(t)
+	createOwner(t, db, 1)
+	mailbox := createMailbox(t, repo, "sealed-threads@mail.example")
+	ctx := context.Background()
+	old := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusSent,
+		FromAddress: mailbox.Address, To: []string{"bob@example.com"}, Subject: "Old", TextBody: "b",
+		RFCMessageID: "old@mail.example",
+	}
+	if _, err := repo.CreateMessage(ctx, old); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if found, err := repo.FindThreadID(ctx, mailbox.ID, []string{"old@mail.example"}); err != nil || found != old.ID {
+		t.Fatalf("FindThreadID before handover = %d, %v; want %d", found, err, old.ID)
+	}
+	// A handover seals the history before its boundary.
+	if err := db.Model(&MailboxPO{}).Where("id = ?", mailbox.ID).Update("sealed_before", time.Now().Add(time.Minute)).Error; err != nil {
+		t.Fatalf("seal mailbox: %v", err)
+	}
+	if found, err := repo.FindThreadID(ctx, mailbox.ID, []string{"old@mail.example"}); err != nil || found != 0 {
+		t.Fatalf("FindThreadID after handover = %d, %v; want 0", found, err)
+	}
+	if _, err := repo.FindMessageByRFCMessageID(ctx, mailbox.ID, "old@mail.example"); !errors.Is(err, ErrMailMessageNotFound) {
+		t.Fatalf("FindMessageByRFCMessageID after handover = %v; want not found", err)
+	}
+}

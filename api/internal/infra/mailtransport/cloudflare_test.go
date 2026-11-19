@@ -195,3 +195,48 @@ func TestCloudflareSendsAttachmentsAsBase64(t *testing.T) {
 		t.Fatalf("attachment = %v", first)
 	}
 }
+
+func TestCloudflareSendsMessageIDAndReferences(t *testing.T) {
+	var body map[string]any
+	transport := cloudflareAgainst(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{"message_id":"<provider@cf.example>","delivered":["bob@example.com"]}}`))
+	})
+
+	_, err := transport.Send(context.Background(), Message{
+		FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Subject: "Re: Hi", TextBody: "text",
+		MessageID:  "0123456789abcdef0123456789abcdef@mail.example",
+		InReplyTo:  "parent@example.com",
+		References: []string{"root@example.com", "middle@example.com", "parent@example.com"},
+		// A caller header never replaces the threading headers.
+		Headers: map[string]string{"Message-ID": "<forged@evil.test>", "List-Unsubscribe": "<https://u.example>"},
+	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	headers, _ := body["headers"].(map[string]any)
+	if headers["Message-ID"] != "<0123456789abcdef0123456789abcdef@mail.example>" {
+		t.Fatalf("Message-ID = %v; want our own id in angle brackets", headers["Message-ID"])
+	}
+	if headers["In-Reply-To"] != "<parent@example.com>" {
+		t.Fatalf("In-Reply-To = %v", headers["In-Reply-To"])
+	}
+	if headers["References"] != "<root@example.com> <middle@example.com> <parent@example.com>" {
+		t.Fatalf("References = %v; want the whole chain, oldest first", headers["References"])
+	}
+	if headers["List-Unsubscribe"] != "<https://u.example>" {
+		t.Fatalf("headers = %v; want caller headers kept", headers)
+	}
+
+	// Without an id or a reply, no threading header is sent.
+	body = nil
+	if _, err := transport.Send(context.Background(), Message{
+		FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Subject: "Hi", TextBody: "text",
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, present := body["headers"]; present {
+		t.Fatalf("headers = %v; want none", body["headers"])
+	}
+}

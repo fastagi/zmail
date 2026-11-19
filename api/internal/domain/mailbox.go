@@ -700,9 +700,14 @@ type MailboxRepository interface {
 	ListMailboxAccessEvents(ctx context.Context, mailboxID uint, page, size int) ([]*MailboxAccessEvent, int64, error)
 
 	// CreateMessage stores a message with its attachments. With an idempotency key that the mailbox already used it
-	// reports created=false and fills message with the stored row.
+	// reports created=false and fills message with the stored row. A stored message joins the thread of the
+	// newest message of the same mailbox whose RFC Message-ID its In-Reply-To or References name, or starts its
+	// own thread; CreateInboundMessage does the same.
 	CreateMessage(ctx context.Context, message *MailMessage) (created bool, err error)
 	FindMessageByIdempotencyKey(ctx context.Context, mailboxID uint, key string) (*MailMessage, error)
+	// FindMessageByRFCMessageID finds the newest unsealed message of the mailbox with that RFC Message-ID, or
+	// reports ErrMailMessageNotFound.
+	FindMessageByRFCMessageID(ctx context.Context, mailboxID uint, rfcMessageID string) (*MailMessage, error)
 	// FindOutboundMessageForOrganization finds an outbound message in any mailbox of the organization.
 	FindOutboundMessageForOrganization(ctx context.Context, organizationID, id uint) (*MailMessage, error)
 	// CreateInboundMessage stores an inbound message with its attachments once per mailbox and dedupe key. It
