@@ -11,6 +11,17 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Transactional message storage
+
+### Low — New tables for transactional messages and the suppression list
+
+Run migrations: `2026_11_23_110000_create_transactional_messages` adds `transactional_messages`
+and `transactional_message_events`; `2026_11_23_120000_create_mail_suppressions` adds
+`mail_suppressions` and fills it from contacts suppressed with reason `bounced` or `complained`
+(lowercased, source `backfill`). Rolling back drops the tables: transactional records (kept 30
+days) and the suppression list are lost; contacts keep their own status. In Go, the mailbox
+repository implements the new `domain.TransactionalMailRepository`.
+
 ## Unreleased — API key modes
 
 ### Medium — API keys are live or test; scoped routes refuse test keys

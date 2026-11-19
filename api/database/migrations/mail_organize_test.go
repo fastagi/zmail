@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,9 +60,14 @@ func TestMailOrganizeMigrationUpDown(t *testing.T) {
 
 	rollBackMailOrganize(t, db)
 	rolledBack := dumpSchema(t, db)
-	for _, gone := range []string{"TABLE mail_folders", "TABLE mail_labels", "TABLE mail_message_labels", "TABLE mail_message_stars",
-		"COLUMN placement", "COLUMN folder_id", "COLUMN thread_id", "COLUMN rfc_message_id", "COLUMN references_header", "COLUMN trashed_at", "gin_trgm_ops"} {
+	for _, gone := range []string{"TABLE mail_folders", "TABLE mail_labels", "TABLE mail_message_labels", "TABLE mail_message_stars", "gin_trgm_ops"} {
 		assert.NotContains(t, rolledBack, gone)
+	}
+	// Other tables (transactional_messages) have an rfc_message_id too, so look at mail_messages only.
+	mailMessages := rolledBack[strings.Index(rolledBack, "TABLE mail_messages\n"):]
+	mailMessages = mailMessages[:strings.Index(mailMessages, "\n\n")]
+	for _, gone := range []string{"COLUMN placement", "COLUMN folder_id", "COLUMN thread_id", "COLUMN rfc_message_id", "COLUMN references_header", "COLUMN trashed_at"} {
+		assert.NotContains(t, mailMessages, gone)
 	}
 	var messages int64
 	require.NoError(t, db.Raw(`SELECT COUNT(*) FROM mail_messages`).Scan(&messages).Error)
