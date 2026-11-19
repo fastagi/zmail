@@ -272,7 +272,7 @@
 
 - [ ] **Step 1: Write failing tests** (service with fake repo + `fakeTransport` and the real Postgres repo where noted):
   - `TestMaskSecret` (`482913` → `••••••`; `https://u:p@reset.acme.com/t?code=1` → `reset.acme.com/••••`; `reset.acme.com/t` → `••••••`) — Review Focus 2; `TestMaskRecipient` (`lilei@` → `li••@`, `ab@` → `a••@`).
-  - `TestSecretNeverStoredInClear` (Postgres): send `code=482913` → no column but `payload_ciphertext` contains `482913` after decrypt; `subject_masked == "Acme 验证码：••••••"`.
+  - `TestSecretNeverStoredInClear` (Postgres): send `code=482913` → no column but `payload_ciphertext` contains `482913` after decrypt; `subject_masked == "Acme verification code: ••••••"`.
   - `TestIdempotentReplayReturnsFirstMessage` (200, same id, one row); `TestIdempotencyConflictOnDifferentContent` (409); `TestExpiredKeyIsReleasedAndReused` (25 h later → new id, old key NULL); `TestLiveAndTestKeysHaveSeparateIdempotency` and `TestKeyReadsOnlyItsOwnMode` (Review Focus 3).
   - `TestRecipientNormalizedEverywhere` (`" LiLei@Example.COM "` hits a suppression on `lilei@example.com`, same fingerprint as lower case) — Review Focus 1.
   - `TestEmptyRequiredValueIsMissing` (Review Focus 4); `TestUndeclaredVariableRefused` (422 `MAILBOX.MESSAGE_INVALID`, field `variables.extra`); `TestUnknownSimulatorLocalPartRefused`.
