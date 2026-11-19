@@ -5,6 +5,7 @@ import { Hammer, PlugZap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DeveloperWebhooksTab } from '@/features/developer/components/developer-webhooks-tab';
 import { QuickStartTab } from '@/features/developer/components/quick-start-tab';
 import { SendLogTab } from '@/features/developer/components/send-log-tab';
 import { TransactionalTemplatesTab } from '@/features/developer/components/transactional-templates-tab';
@@ -131,6 +132,8 @@ function DeveloperTabs({
             <TransactionalTemplatesTab organization={organization} />
           ) : item === 'logs' ? (
             <SendLogTab organization={organization} />
+          ) : item === 'webhooks' ? (
+            <DeveloperWebhooksTab organizationId={organization.id} />
           ) : (
             <EmptyState
               icon={<Hammer className="size-5" aria-hidden="true" />}

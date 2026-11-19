@@ -30,6 +30,18 @@ interface DeliveryListOptions extends ListOptions {
   status?: WebhookDelivery['status'];
 }
 
+// The catalog the real API lists: the starter test event plus the transactional mail events of
+// contracts/MAILBOXES.md "Transactional Mail Events".
+const MOCK_WEBHOOK_EVENT_TYPES = [
+  'webhook.test',
+  'email.sent',
+  'email.delivered',
+  'email.bounced',
+  'email.complained',
+  'email.suppressed',
+  'email.failed',
+] as const;
+
 export class MockWebhookStore {
   private endpoints: WebhookEndpoint[] = [];
   private deliveries: WebhookDelivery[] = [];
@@ -57,8 +69,8 @@ export class MockWebhookStore {
     this.nextDeliveryId = 1;
   }
 
-  eventTypes(): readonly ['webhook.test'] {
-    return ['webhook.test'];
+  eventTypes(): readonly string[] {
+    return [...MOCK_WEBHOOK_EVENT_TYPES];
   }
 
   listEndpoints(

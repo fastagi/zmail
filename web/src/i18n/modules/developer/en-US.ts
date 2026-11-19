@@ -126,6 +126,23 @@ const messages = {
     rejected: 'Not sent',
     complained: 'Marked as spam by the recipient',
   },
+  webhooks: {
+    eventsTitle: 'Events',
+    eventsDescription: 'Endpoints created here subscribe to transactional mail events.',
+    events: {
+      sent: 'The provider accepted the message, or a test or simulated message finished.',
+      delivered: "The recipient's mail server accepted the message.",
+      bounced: "The recipient's mail server refused it: bounce_type is permanent or temporary.",
+      complained: 'The recipient reported the message as spam.',
+      suppressed: 'The recipient is on a suppression list, so nothing was sent.',
+      failed: 'Sending failed for good, for example after the retries ran out.',
+    },
+    sampleTitle: 'Sample payload · email.bounced',
+    sampleNote:
+      'The payload never contains the subject, the body, or any variable, secret or not. The recipient is given in full so your endpoint can match the outcome to its user.',
+    retryNote:
+      'A failed push is retried after about 1 minute, 5 minutes, 15 minutes, 1 hour, and on up to 24 hours, at most 10 attempts. You can replay it from the delivery list.',
+  },
   placeholder: {
     title: 'Coming soon',
     description: 'This section is not available yet.',

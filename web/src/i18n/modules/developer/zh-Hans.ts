@@ -124,6 +124,23 @@ const messages = {
     rejected: '未发送',
     complained: '收件人标记为垃圾邮件',
   },
+  webhooks: {
+    eventsTitle: '事件',
+    eventsDescription: '在这里创建的端点订阅事务邮件事件。',
+    events: {
+      sent: '服务商已接受这封邮件，或测试、模拟邮件已完成。',
+      delivered: '收件方邮件服务器已接收。',
+      bounced: '收件方邮件服务器拒收：bounce_type 为 permanent（永久）或 temporary（临时）。',
+      complained: '收件人把邮件标记为垃圾邮件。',
+      suppressed: '收件人在抑制名单上，没有发送。',
+      failed: '发送最终失败，例如重试次数已用完。',
+    },
+    sampleTitle: '推送示例 · email.bounced',
+    sampleNote:
+      '推送里不带主题、正文，也不带任何变量（无论是否秘密）。收件人是完整地址，方便你的端点把结果对应到用户。',
+    retryNote:
+      '推送失败后约在 1 分钟、5 分钟、15 分钟、1 小时……直到 24 小时后重试，最多 10 次；也可以在投递记录里手动重放。',
+  },
   placeholder: {
     title: '即将推出',
     description: '这个部分暂未开放。',
