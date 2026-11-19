@@ -31,7 +31,81 @@ const (
 	MaxMailContactListsPerOrganization = 100
 	// MaxMailContactProperties bounds the custom properties of one contact.
 	MaxMailContactProperties = 50
+	// MaxMailFoldersPerMailbox bounds how many folders one mailbox keeps.
+	MaxMailFoldersPerMailbox = 100
+	// MaxMailLabelsPerMailbox bounds how many labels one mailbox keeps.
+	MaxMailLabelsPerMailbox = 100
+	// MaxMailFolderNameLength and MaxMailLabelNameLength bound a trimmed folder or label name.
+	MaxMailFolderNameLength = 64
+	MaxMailLabelNameLength  = 64
 )
+
+// MailPlacement is where a message of a mailbox sits. Every message is in exactly one placement,
+// shared by everyone with access to the mailbox.
+type MailPlacement string
+
+const (
+	// MailPlacementDefault is where a message starts: the Inbox for inbound, Sent for outbound.
+	MailPlacementDefault MailPlacement = "default"
+	MailPlacementArchive MailPlacement = "archive"
+	// MailPlacementFolder is a message in the folder FolderID.
+	MailPlacementFolder MailPlacement = "folder"
+	// MailPlacementTrash is a message moved to the trash at TrashedAt.
+	MailPlacementTrash MailPlacement = "trash"
+)
+
+// Valid reports whether the placement is a known value.
+func (p MailPlacement) Valid() bool {
+	switch p {
+	case MailPlacementDefault, MailPlacementArchive, MailPlacementFolder, MailPlacementTrash:
+		return true
+	}
+	return false
+}
+
+// MailLabelColor is a color of the fixed label palette.
+type MailLabelColor string
+
+const (
+	MailLabelColorGray   MailLabelColor = "gray"
+	MailLabelColorRed    MailLabelColor = "red"
+	MailLabelColorOrange MailLabelColor = "orange"
+	MailLabelColorYellow MailLabelColor = "yellow"
+	MailLabelColorGreen  MailLabelColor = "green"
+	MailLabelColorTeal   MailLabelColor = "teal"
+	MailLabelColorBlue   MailLabelColor = "blue"
+	MailLabelColorPurple MailLabelColor = "purple"
+	MailLabelColorPink   MailLabelColor = "pink"
+)
+
+// Valid reports whether the color is in the palette.
+func (c MailLabelColor) Valid() bool {
+	switch c {
+	case MailLabelColorGray, MailLabelColorRed, MailLabelColorOrange, MailLabelColorYellow, MailLabelColorGreen,
+		MailLabelColorTeal, MailLabelColorBlue, MailLabelColorPurple, MailLabelColorPink:
+		return true
+	}
+	return false
+}
+
+// MailFolder is a flat folder of a mailbox. Names are unique in the mailbox ignoring case.
+type MailFolder struct {
+	ID        uint
+	MailboxID uint
+	Name      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// MailLabel is a colored label of a mailbox. Names are unique in the mailbox ignoring case.
+type MailLabel struct {
+	ID        uint
+	MailboxID uint
+	Name      string
+	Color     MailLabelColor
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
 
 // MailDirection tells whether a message arrived at or left a mailbox.
 type MailDirection string
@@ -213,6 +287,22 @@ type MailMessage struct {
 	// sender's value; outbound messages get one only when the provider reports it.
 	MessageID string
 	InReplyTo string
+	// References are the Message-IDs of the References header, oldest first, without angle brackets.
+	References []string
+	// RFCMessageID is the RFC 5322 Message-ID threading matches In-Reply-To against within the
+	// mailbox. Empty when the message has none.
+	RFCMessageID string
+	// ThreadID is the thread of the message in its mailbox: the id of the message that started it.
+	ThreadID uint
+	// Placement is where the message sits; FolderID names the folder while it is in one.
+	Placement MailPlacement
+	FolderID  *uint
+	// TrashedAt is when the message moved to the trash; nil outside it.
+	TrashedAt *time.Time
+	// LabelIDs are the ids of the mailbox labels on the message, ascending. Shared by everyone.
+	LabelIDs []uint
+	// Starred is whether the viewer starred the message. Star state is per person.
+	Starred bool
 	// DedupeKey makes inbound delivery idempotent for one mailbox. Empty for outbound.
 	DedupeKey   string
 	FailureCode string
@@ -561,6 +651,27 @@ type MailDayStats struct {
 	Received int
 }
 
+// MailOrganizeRepository persists the folders and labels of a mailbox.
+type MailOrganizeRepository interface {
+	// CreateFolder stores a folder unless the mailbox already has limit folders
+	// (ErrMailFolderLimitReached) or one with the same name ignoring case (ErrMailFolderNameTaken).
+	CreateFolder(ctx context.Context, folder *MailFolder, limit int) error
+	RenameFolder(ctx context.Context, mailboxID, id uint, name string) (*MailFolder, error)
+	// DeleteFolder deletes a folder and moves the messages in it to default. Messages already in
+	// the trash stay there.
+	DeleteFolder(ctx context.Context, mailboxID, id uint) error
+	// ListFolders lists the mailbox's folders by name ignoring case.
+	ListFolders(ctx context.Context, mailboxID uint) ([]*MailFolder, error)
+	CountFolders(ctx context.Context, mailboxID uint) (int64, error)
+	CreateLabel(ctx context.Context, label *MailLabel, limit int) error
+	// UpdateLabel replaces the name and color of a label and fills label with the stored row.
+	UpdateLabel(ctx context.Context, label *MailLabel) error
+	// DeleteLabel deletes a label and removes it from every message.
+	DeleteLabel(ctx context.Context, mailboxID, id uint) error
+	ListLabels(ctx context.Context, mailboxID uint) ([]*MailLabel, error)
+	CountLabels(ctx context.Context, mailboxID uint) (int64, error)
+}
+
 // MailboxRepository defines persistence for mailboxes and their messages.
 type MailboxRepository interface {
 	CreateMailbox(ctx context.Context, mailbox *Mailbox, limit int) error
@@ -606,8 +717,8 @@ type MailboxRepository interface {
 	SetMessageRead(ctx context.Context, mailboxID, id, membershipID uint, read bool, at time.Time) error
 	// ReadMessages reports which of the given messages the membership has read.
 	ReadMessages(ctx context.Context, membershipID uint, messageIDs []uint) (map[uint]bool, error)
-	// DeleteMailboxReads removes a membership's read rows of every message of a mailbox; membership
-	// id 0 removes everyone's.
+	// DeleteMailboxReads removes a membership's read and star rows of every message of a mailbox;
+	// membership id 0 removes everyone's.
 	DeleteMailboxReads(ctx context.Context, mailboxID, membershipID uint) error
 	DeleteMessage(ctx context.Context, mailboxID, id uint) error
 	CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error)

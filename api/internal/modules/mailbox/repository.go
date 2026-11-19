@@ -185,10 +185,19 @@ func (r *repository) DeleteMailbox(ctx context.Context, organizationID, id uint)
 		if err := tx.Where("message_id IN (?)", attached).Delete(&MailAttachmentPO{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("message_id IN (?)", attached).Delete(&MailMessageReadPO{}).Error; err != nil {
+		for _, dependant := range []any{&MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}} {
+			if err := tx.Where("message_id IN (?)", attached).Delete(dependant).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("mailbox_id = ?", id).Delete(&MailMessagePO{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("mailbox_id = ?", id).Delete(&MailMessagePO{}).Error
+		// The mailbox row stays soft-deleted, so its folders and labels do not cascade.
+		if err := tx.Where("mailbox_id = ?", id).Delete(&MailFolderPO{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("mailbox_id = ?", id).Delete(&MailLabelPO{}).Error
 	})
 }
 
@@ -477,7 +486,15 @@ func (r *repository) DeleteMailboxReads(ctx context.Context, mailboxID, membersh
 	if membershipID != 0 {
 		query = query.Where("membership_id = ?", membershipID)
 	}
-	return query.Delete(&MailMessageReadPO{}).Error
+	if err := query.Delete(&MailMessageReadPO{}).Error; err != nil {
+		return err
+	}
+	// Stars are per person like reads, and leave with them.
+	stars := r.conn(ctx).Where("message_id IN (?)", messages)
+	if membershipID != 0 {
+		stars = stars.Where("membership_id = ?", membershipID)
+	}
+	return stars.Delete(&MailMessageStarPO{}).Error
 }
 
 func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) error {
@@ -492,10 +509,12 @@ func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) erro
 		if result.RowsAffected == 0 {
 			return ErrMailMessageNotFound
 		}
-		// The schema cascades too; deleting here keeps file content and read rows from outliving
-		// their message even where the foreign key is absent.
-		if err := tx.Where("message_id = ?", id).Delete(&MailMessageReadPO{}).Error; err != nil {
-			return err
+		// The schema cascades too; deleting here keeps file content, read, star, and label rows
+		// from outliving their message even where the foreign key is absent.
+		for _, dependant := range []any{&MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}} {
+			if err := tx.Where("message_id = ?", id).Delete(dependant).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Where("message_id = ?", id).Delete(&MailAttachmentPO{}).Error
 	})

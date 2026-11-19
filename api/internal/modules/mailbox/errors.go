@@ -57,6 +57,12 @@ var (
 	ErrMailDomainNotVerified     = errors.New("mail domain is not verified")
 	ErrMailDomainsDisabled       = errors.New("organization mail domains are not enabled")
 	ErrMailDomainProviderFailed  = errors.New("the DNS provider rejected the request")
+	ErrMailFolderNotFound        = errors.New("mail folder not found")
+	ErrMailFolderNameTaken       = errors.New("mail folder name is already taken")
+	ErrMailFolderLimitReached    = errors.New("mail folder limit reached")
+	ErrMailLabelNotFound         = errors.New("mail label not found")
+	ErrMailLabelNameTaken        = errors.New("mail label name is already taken")
+	ErrMailLabelLimitReached     = errors.New("mail label limit reached")
 )
 
 // Access errors that answer with an existing public code.
