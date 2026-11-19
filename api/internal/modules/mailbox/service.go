@@ -196,6 +196,9 @@ type Service interface {
 	CreateLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, name string, color domain.MailLabelColor) (*domain.MailLabel, error)
 	UpdateLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID, labelID uint, name string, color domain.MailLabelColor) (*domain.MailLabel, error)
 	DeleteLabel(ctx context.Context, viewer domain.OrganizationContext, mailboxID, labelID uint) error
+	// ListInbox lists one page of the unified inbox: the viewer's mail across every mailbox they
+	// may read.
+	ListInbox(ctx context.Context, viewer domain.OrganizationContext, request InboxRequest) (InboxPage, error)
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -220,6 +223,8 @@ type service struct {
 	broadcasts domain.MailBroadcastRepository
 	// organize stores folders, labels, placements, and stars; nil when a test does not need them.
 	organize domain.MailOrganizeRepository
+	// inbox reads the unified inbox; nil when repo does not implement it.
+	inbox domain.MailInboxRepository
 	// domains, zones, and domainProvider serve organization domains; nil when a test does not
 	// need them.
 	domains        domain.MailDomainRepository
@@ -263,8 +268,12 @@ func NewService(
 	notifier mailNotifier,
 	settings Settings,
 ) *service {
+	var inbox domain.MailInboxRepository
+	if seam, ok := repo.(domain.MailInboxRepository); ok {
+		inbox = seam
+	}
 	return &service{
-		repo: repo, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
+		repo: repo, inbox: inbox, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
 		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },

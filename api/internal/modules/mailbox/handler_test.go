@@ -3,6 +3,7 @@ package mailbox
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -26,13 +27,16 @@ type handlerFixture struct {
 	router  *gin.Engine
 	service *service
 	repo    *fakeRepository
+	// inbox is repo with the unified inbox seam, the repository the service runs with.
+	inbox *inboxRecorder
 }
 
 func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *handlerFixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	repo := newFakeRepository()
-	svc := NewService(repo, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
+	inbox := newInboxRecorder()
+	repo := inbox.fakeRepository
+	svc := NewService(inbox, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
 		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5,
 	})
 	handler := NewHandler(svc)
@@ -56,11 +60,12 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	router.GET("/mailboxes/:mailbox_id/messages", handler.ListMessages)
 	router.POST("/mailboxes/:mailbox_id/messages", handler.SendMessage)
 	router.GET("/mail-messages", handler.ListLog)
+	router.GET("/inbox-messages", handler.ListInboxMessages)
 	router.POST("/mail-broadcasts/:broadcast_id/sends", handler.SendBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/cancellations", handler.CancelBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/pauses", handler.PauseBroadcast)
 	router.POST("/mail-broadcasts/:broadcast_id/resumptions", handler.ResumeBroadcast)
-	return &handlerFixture{router: router, service: svc, repo: repo}
+	return &handlerFixture{router: router, service: svc, repo: repo, inbox: inbox}
 }
 
 func (f *handlerFixture) do(method, path, body string) (*httptest.ResponseRecorder, map[string]any) {
@@ -194,6 +199,7 @@ func TestMailboxRoutesRequireAnOrganizationContext(t *testing.T) {
 		{http.MethodPost, "/mailboxes"}, {http.MethodDelete, "/mailboxes/1"},
 		{http.MethodGet, "/mailboxes/1/messages"},
 		{http.MethodPost, "/mailboxes/1/messages"}, {http.MethodGet, "/mail-messages"},
+		{http.MethodGet, "/inbox-messages"},
 	} {
 		recorder, body := fixture.do(request[0], request[1], `{}`)
 		if recorder.Code != http.StatusBadRequest || body["error_code"] != domain.CodeOrganizationContextRequired {
@@ -310,6 +316,154 @@ func TestListMessagesFiltersBySearchAndUnread(t *testing.T) {
 	other, body := fixture.do(http.MethodGet, "/mailboxes/"+string(rune('0'+foreign.ID))+"/messages?unread=true&q=invoice", "")
 	if other.Code != http.StatusNotFound || body["error_code"] != domain.CodeMailboxNotFound {
 		t.Fatalf("other organization mailbox list = %d %v; want 404 %s", other.Code, body, domain.CodeMailboxNotFound)
+	}
+}
+
+func TestInboxRequestValidation(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	encode := func(raw string) string { return base64.RawURLEncoding.EncodeToString([]byte(raw)) }
+	for _, query := range []string{
+		"view=bogus",
+		"view=",
+		"view=all&view=sent",
+		"page=1",
+		"view=today&q=x",
+		"view=sent&q=x",
+		"group=thread&unread=true",
+		"group=thread&q=x",
+		"group=thread&view=today",
+		"group=thread&view=pending",
+		"group=threads",
+		"q=" + strings.Repeat("q", 201),
+		"q=%20%20",
+		"q=bad%00char",
+		"tz=Mars/Base",
+		"tz=Local",
+		"tz=",
+		"tz=" + strings.Repeat("A", 65),
+		"tz=../../etc/passwd",
+		"tz=UTC&tz=UTC",
+		"per_page=abc",
+		"per_page=",
+		"per_page=1.5",
+		"role_id=0",
+		"role_id=-1",
+		"role_id=abc",
+		"role_id=",
+		"mailbox_id=0",
+		"mailbox_id=x",
+		"unread=1",
+		"cursor=" + encode("x.y"),
+		"cursor=" + strings.Repeat("A", 129),
+		"cursor=",
+		"cursor=%%%",
+	} {
+		recorder, body := fixture.do(http.MethodGet, "/inbox-messages?"+query, "")
+		if recorder.Code != http.StatusBadRequest || body["error_code"] != domain.CodeInvalidInput {
+			t.Fatalf("GET /inbox-messages?%s = %d %v; want 400 %s", query, recorder.Code, body, domain.CodeInvalidInput)
+		}
+	}
+	if len(fixture.inbox.queries) != 0 {
+		t.Fatalf("inbox queries = %+v; a refused request must read nothing", fixture.inbox.queries)
+	}
+
+	for query, want := range map[string]float64{
+		"per_page=0": 1, "per_page=-3": 1, "per_page=101": 100, "per_page=99999999999999999999": 100, "per_page=7": 7, "": 15,
+		"role_id=none": 15, "view=sent&group=thread": 15, "tz=Asia/Shanghai": 15,
+	} {
+		recorder, body := fixture.do(http.MethodGet, "/inbox-messages?"+query, "")
+		meta, _ := body["meta"].(map[string]any)
+		if recorder.Code != http.StatusOK || meta["per_page"] != want {
+			t.Fatalf("GET /inbox-messages?%s = %d %v; want 200 with per_page %v", query, recorder.Code, body, want)
+		}
+	}
+}
+
+func TestInboxItemShape(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	viewer := *membership(domain.OrganizationRoleMember)
+	mailbox, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk"))
+	if err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	received := &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
+		FromAddress: "ann@example.com", To: []string{mailbox.Address}, Subject: "Seats",
+		TextBody: "Hi,\n\n  more   seats?", DedupeKey: "seats", CreatedAt: time.Unix(1_800_000_000, 0).UTC(),
+	}
+	if _, err = fixture.repo.CreateInboundMessage(t.Context(), received); err != nil {
+		t.Fatalf("CreateInboundMessage: %v", err)
+	}
+	if _, err = fixture.service.SetMessageRead(t.Context(), viewer, mailbox.ID, received.ID, true); err != nil {
+		t.Fatalf("SetMessageRead: %v", err)
+	}
+	if _, err = fixture.repo.CreateMessage(t.Context(), &domain.MailMessage{
+		MailboxID: mailbox.ID, Direction: domain.MailDirectionOutbound, Status: domain.MailStatusSent,
+		FromAddress: mailbox.Address, To: []string{"ann@example.com"}, Subject: "Re: Seats",
+		CreatedAt: time.Unix(1_800_000_100, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	only := func(path string) (*httptest.ResponseRecorder, map[string]any, map[string]any) {
+		t.Helper()
+		recorder, body := fixture.do(http.MethodGet, path, "")
+		items, _ := body["data"].([]any)
+		if recorder.Code != http.StatusOK || len(items) != 1 {
+			t.Fatalf("GET %s = %d %v; want one item", path, recorder.Code, body)
+		}
+		item, _ := items[0].(map[string]any)
+		return recorder, body, item
+	}
+
+	recorder, body, item := only("/inbox-messages")
+	if recorder.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("Cache-Control = %q; want private, no-store", recorder.Header().Get("Cache-Control"))
+	}
+	meta, _ := body["meta"].(map[string]any)
+	if nextCursor, present := meta["next_cursor"]; !present || nextCursor != nil || meta["has_more"] != false {
+		t.Fatalf("meta = %v; the last page has has_more false and next_cursor null", meta)
+	}
+	roleID, hasRole := item["role_id"]
+	if item["mailbox_address"] != "helpdesk@mail.example" || !hasRole || roleID != nil ||
+		item["snippet"] != "Hi, more seats?" || item["read"] != true || item["starred"] != false ||
+		item["subject"] != "Seats" || item["direction"] != "inbound" {
+		t.Fatalf("item = %v; want the inbound summary with mailbox_address, role_id null, snippet, own state", item)
+	}
+	if _, grouped := item["thread"]; grouped {
+		t.Fatalf("item = %v; thread only appears with group=thread", item)
+	}
+	for _, field := range []string{"text_body", "html_body", "message_id", "in_reply_to"} {
+		if _, present := item[field]; present {
+			t.Fatalf("item = %v; it must not carry %s", item, field)
+		}
+	}
+
+	_, _, sent := only("/inbox-messages?view=sent")
+	if sent["direction"] != "outbound" || sent["read"] != true || sent["snippet"] != "" {
+		t.Fatalf("sent item = %v; outbound mail is always read", sent)
+	}
+
+	_, _, grouped := only("/inbox-messages?group=thread")
+	if thread, _ := grouped["thread"].(map[string]any); thread["message_count"] != float64(1) {
+		t.Fatalf("grouped item = %v; want its thread", grouped)
+	}
+
+	// A page that is not the last carries the cursor of its last item.
+	fixture.inbox.messages[received.ID+100] = &domain.MailMessage{
+		ID: received.ID + 100, MailboxID: mailbox.ID, Direction: domain.MailDirectionInbound,
+		Status: domain.MailStatusReceived, Subject: "Later", CreatedAt: received.CreatedAt.Add(time.Minute),
+	}
+	_, body, _ = only("/inbox-messages?per_page=1")
+	meta, _ = body["meta"].(map[string]any)
+	next, _ := meta["next_cursor"].(string)
+	cursor, err := decodeInboxCursor(next)
+	if meta["has_more"] != true || err != nil || cursor.ID != received.ID+100 {
+		t.Fatalf("meta = %v (%v); want the cursor of the newest message", meta, err)
+	}
+	_, _, last := only("/inbox-messages?per_page=1&cursor=" + next)
+	if last["id"] != float64(received.ID) {
+		t.Fatalf("second page = %v; want the older message", last)
 	}
 }
 

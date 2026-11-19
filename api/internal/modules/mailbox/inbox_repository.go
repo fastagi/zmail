@@ -15,6 +15,20 @@ import (
 // TOASTed value decompresses only the slice it returns, so the full body is never read.
 const inboxSnippetSource = 400
 
+// The service takes the inbox seam from its repository by type assertion; this keeps the real
+// repository from silently losing it.
+var _ domain.MailInboxRepository = (*repository)(nil)
+
+// CountUnreadByMailboxIDs is a placeholder until the inbox count queries land (plan Task 6).
+func (r *repository) CountUnreadByMailboxIDs(context.Context, uint, uint, []uint) (map[uint]int, error) {
+	return nil, fmt.Errorf("%w: inbox unread counts are not implemented yet", domain.ErrServiceUnavailable)
+}
+
+// CountInboxViews is a placeholder until the inbox count queries land (plan Task 6).
+func (r *repository) CountInboxViews(context.Context, uint, []uint, time.Time, time.Time) (domain.InboxViewCounts, error) {
+	return domain.InboxViewCounts{}, fmt.Errorf("%w: inbox view counts are not implemented yet", domain.ErrServiceUnavailable)
+}
+
 // ListMailboxAccessRows is bounded by the organization's mailbox limit.
 func (r *repository) ListMailboxAccessRows(ctx context.Context, organizationID, membershipID uint) ([]domain.MailboxAccessRow, error) {
 	if r.db == nil {

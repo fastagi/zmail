@@ -41,6 +41,7 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 
 		auth.GET("/mail-messages", h.ListLog).Name("mail_messages.index")
 		auth.GET("/mail-message-stats", h.ListStats).Name("mail_message_stats.index")
+		auth.GET("/inbox-messages", h.ListInboxMessages).Name("inbox_messages.index")
 
 		auth.GET("/mail-templates", h.ListTemplates).Name("mail_templates.index")
 		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store")

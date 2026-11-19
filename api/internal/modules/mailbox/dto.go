@@ -660,3 +660,26 @@ func templateIDOf(message *domain.MailMessage) *uint {
 	id := message.TemplateID
 	return &id
 }
+
+// InboxItemResponse is a unified inbox row: the single-mailbox listing item with the owning
+// mailbox's address, its mail role, and a short text snippet.
+type InboxItemResponse struct {
+	MailMessageSummaryResponse
+	MailboxAddress string `json:"mailbox_address"`
+	// RoleID is the mailbox's mail role now; null when it has none.
+	RoleID  *uint  `json:"role_id"`
+	Snippet string `json:"snippet"`
+}
+
+func toInboxItemResponses(items []InboxItem) []InboxItemResponse {
+	responses := make([]InboxItemResponse, 0, len(items))
+	for _, item := range items {
+		responses = append(responses, InboxItemResponse{
+			MailMessageSummaryResponse: toMailMessageSummary(item.Message),
+			MailboxAddress:             item.Message.MailboxAddress,
+			RoleID:                     item.RoleID,
+			Snippet:                    item.Snippet,
+		})
+	}
+	return responses
+}
