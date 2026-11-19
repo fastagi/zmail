@@ -16,6 +16,7 @@ import {
 import { getMailZoneDnsRoute } from '@/constants/routes';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { CopyButton } from '@/features/mailbox/components/mail-shared';
+import { mailOrganizationHref } from '@/features/mailbox/hooks/use-mail-organization';
 import { useListDnsRecords } from '@/features/mailbox/hooks/use-mailbox';
 import type { MailZone } from '@/features/mailbox/types';
 import { useT } from '@/i18n';
@@ -139,7 +140,8 @@ export function MailZoneNameservers({
 
 function ImportedRecords({ zone }: { zone: MailZone }) {
   const t = useT('mailbox');
-  const records = useListDnsRecords(useMailOrganizationId(), zone.id);
+  const organizationId = useMailOrganizationId();
+  const records = useListDnsRecords(organizationId, zone.id);
   const titleId = `mail-zone-${zone.id}-imported`;
   const shown = records.data?.slice(0, IMPORTED_PREVIEW_LIMIT) ?? [];
   const more = (records.data?.length ?? 0) - shown.length;
@@ -151,7 +153,9 @@ function ImportedRecords({ zone }: { zone: MailZone }) {
           {t('domain.importedTitle')}
         </h5>
         <Button asChild size="sm" variant="outline">
-          <Link href={getMailZoneDnsRoute(zone.id)}>{t('domain.reviewRecords')}</Link>
+          <Link href={mailOrganizationHref(getMailZoneDnsRoute(zone.id), organizationId)}>
+            {t('domain.reviewRecords')}
+          </Link>
         </Button>
       </div>
       <p className="text-sm text-muted-foreground">{t('domain.importedDescription')}</p>

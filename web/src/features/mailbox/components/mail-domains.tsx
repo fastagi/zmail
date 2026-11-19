@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { Globe, Inbox, ListTree, Plus, RefreshCw, Trash2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
@@ -51,6 +51,7 @@ import type {
   MailDomainRecord,
   MailZone,
 } from '@/features/mailbox/types';
+import { mailOrganizationHref } from '@/features/mailbox/hooks/use-mail-organization';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -139,22 +140,55 @@ function ConnectDomainForm() {
   const preview = usePreviewMailDomain(organizationId);
   const [name, setName] = useState('');
   const [capability, setCapability] = useState<MailDomainCapability>('send_receive');
+  // True once the user picked a capability; a lookup then never overrides it.
+  const [chosen, setChosen] = useState(false);
   // The last preview, shown only while the name it was asked for is still in the field.
   const [found, setFound] = useState<{ query: string; preview: MailDomainPreview } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The lookup in flight, shared by leaving the field and submitting.
+  const lookup = useRef<{ query: string; result: Promise<MailDomainPreview | null> } | null>(null);
+  // What async lookups read when they land: the name in the field and whether a choice was made.
+  const latest = useRef({ name: '', chosen: false });
   const value = name.trim();
   const current = found && found.query === value ? found.preview : null;
 
-  const lookUp = async () => {
-    if (value === '' || current) return;
-    try {
-      const result = await preview.mutateAsync(value);
-      setFound({ query: value, preview: result });
-      setCapability(result.suggested_capability);
-    } catch {
+  /** Looks the name up once; the suggestion applies unless the user picked a capability. */
+  const lookUp = (query: string): Promise<MailDomainPreview | null> => {
+    if (found && found.query === query) return Promise.resolve(found.preview);
+    if (lookup.current?.query === query) return lookup.current.result;
+    const result = preview.mutateAsync(query).then(
+      answer => {
+        if (latest.current.name === query) {
+          setFound({ query, preview: answer });
+          if (!latest.current.chosen) setCapability(answer.suggested_capability);
+        }
+        return answer;
+      },
       // The preview only suggests; connecting reports a bad name itself.
-      setFound(null);
-    }
+      () => null
+    );
+    lookup.current = { query, result };
+    void result.finally(() => {
+      if (lookup.current?.result === result) lookup.current = null;
+    });
+    return result;
+  };
+
+  const choose = (option: MailDomainCapability) => {
+    latest.current.chosen = true;
+    setChosen(true);
+    setCapability(option);
+  };
+
+  const changeName = (next: string) => {
+    const trimmed = next.trim();
+    latest.current.name = trimmed;
+    setName(next);
+    if (chosen) return;
+    // A suggestion belongs to the name it was made for.
+    setCapability(
+      found && found.query === trimmed ? found.preview.suggested_capability : 'send_receive'
+    );
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -164,10 +198,22 @@ function ConnectDomainForm() {
       setError(t('errors.domainInvalid'));
       return;
     }
+    // Never connect a name nobody looked at: a mail service elsewhere would lose its mail.
+    const suggestion = await lookUp(value);
+    if (suggestion && !latest.current.chosen && suggestion.suggested_capability !== capability) {
+      // The suggestion now shows; submitting again confirms it.
+      return;
+    }
     try {
-      const domain = await connect.mutateAsync({ name: value, capability });
+      const domain = await connect.mutateAsync({
+        name: value,
+        capability:
+          suggestion && !latest.current.chosen ? suggestion.suggested_capability : capability,
+      });
       setName('');
       setFound(null);
+      setChosen(false);
+      latest.current = { name: '', chosen: false };
       setCapability('send_receive');
       toast.success(
         t(
@@ -212,8 +258,10 @@ function ConnectDomainForm() {
             disabled={connect.isPending}
             placeholder={t('domain.connectPlaceholder')}
             aria-describedby="mail-domain-name-hint"
-            onChange={event => setName(event.target.value)}
-            onBlur={() => void lookUp()}
+            onChange={event => changeName(event.target.value)}
+            onBlur={() => {
+              if (value !== '') void lookUp(value);
+            }}
           />
           <Button
             type="submit"
@@ -245,7 +293,9 @@ function ConnectDomainForm() {
                 value={option.value}
                 checked={capability === option.value}
                 className="mt-0.5 accent-primary"
-                onChange={() => setCapability(option.value)}
+                // Clicking the checked option is a choice too, though nothing changes.
+                onClick={() => choose(option.value)}
+                onChange={() => choose(option.value)}
               />
               <span className="space-y-0.5">
                 <span className="block font-medium">{option.label}</span>
@@ -356,7 +406,9 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
         <div className="ml-auto flex flex-wrap gap-2">
           {domain.zone ? (
             <Button asChild size="sm" variant="outline">
-              <Link href={getMailZoneDnsRoute(domain.zone.id)}>
+              <Link
+                href={mailOrganizationHref(getMailZoneDnsRoute(domain.zone.id), organizationId)}
+              >
                 <ListTree className="size-4" aria-hidden="true" />
                 {t('domain.dnsRecords')}
               </Link>
@@ -580,7 +632,8 @@ function EnableReceivingDialog({ domain, onClose }: { domain: MailDomain; onClos
  */
 function ZoneCard({ zone, canManage }: { zone: MailZone; canManage: boolean }) {
   const t = useT('mailbox');
-  const remove = useDeleteMailZone(useMailOrganizationId());
+  const organizationId = useMailOrganizationId();
+  const remove = useDeleteMailZone(organizationId);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const headingId = `mail-zone-${zone.id}`;
@@ -630,7 +683,7 @@ function ZoneCard({ zone, canManage }: { zone: MailZone; canManage: boolean }) {
         </Badge>
         <div className="ml-auto flex flex-wrap gap-2">
           <Button asChild size="sm" variant="outline">
-            <Link href={getMailZoneDnsRoute(zone.id)}>
+            <Link href={mailOrganizationHref(getMailZoneDnsRoute(zone.id), organizationId)}>
               <ListTree className="size-4" aria-hidden="true" />
               {t('domain.dnsRecords')}
             </Link>

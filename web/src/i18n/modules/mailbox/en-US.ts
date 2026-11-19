@@ -356,6 +356,8 @@ const messages = {
     fieldTtlHint: 'Leave empty for automatic, or use 60 to 86400.',
     fieldPriority: 'Priority',
     fieldProxied: 'Proxy through Cloudflare',
+    ttlInvalid: 'Use a whole number from 60 to 86400, or leave it empty.',
+    priorityInvalid: 'Enter a whole number from 0 to 65535.',
     fieldInvalid: 'Check this value.',
     save: 'Save',
     created: 'Record added',

@@ -116,6 +116,16 @@ function refreshDomains(queryClient: QueryClient, organizationId: number) {
   ]);
 }
 
+/**
+ * Puts a domain the API just answered with into the cached list, so its card shows the answer at
+ * once instead of waiting for the list to be read again.
+ */
+function storeDomain(queryClient: QueryClient, organizationId: number, domain: MailDomain) {
+  queryClient.setQueryData<MailDomain[]>(mailboxKeys.mailDomains(organizationId), current =>
+    current?.map(item => (item.id === domain.id ? domain : item))
+  );
+}
+
 export function useConnectMailDomain(organizationId: number) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -131,6 +141,7 @@ export function useRefreshMailDomain(organizationId: number) {
     mutationFn: ({ domain, action }: { domain: MailDomain; action: 'setups' | 'checks' }) =>
       mailboxService.refreshMailDomain(organizationId, domain.id, action),
     meta: LOCAL_ERROR_HANDLING_META,
+    onSuccess: domain => storeDomain(queryClient, organizationId, domain),
     onSettled: () => refreshDomains(queryClient, organizationId),
   });
 }
@@ -157,6 +168,7 @@ export function useEnableReceiving(organizationId: number) {
   return useMutation({
     mutationFn: (domainId: number) => mailboxService.enableReceiving(organizationId, domainId),
     meta: LOCAL_ERROR_HANDLING_META,
+    onSuccess: domain => storeDomain(queryClient, organizationId, domain),
     onSettled: () => refreshDomains(queryClient, organizationId),
   });
 }

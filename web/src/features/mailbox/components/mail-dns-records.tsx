@@ -44,7 +44,10 @@ import {
   useMailZone,
   useUpdateDnsRecord,
 } from '@/features/mailbox/hooks/use-mailbox';
-import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
+import {
+  mailOrganizationHref,
+  useMailOrganization,
+} from '@/features/mailbox/hooks/use-mail-organization';
 import {
   MAIL_DNS_RECORD_CONTENT_MAX_LENGTH,
   MAIL_DNS_RECORD_NAME_MAX_LENGTH,
@@ -95,6 +98,12 @@ const contentPlaceholder: Record<MailDnsRecordType, string> = {
 
 type RecordField = 'type' | 'name' | 'content' | 'ttl' | 'priority' | 'proxied';
 
+/** A whole number written with digits only, or null; `''`, `1.5`, and `soon` are not. */
+function wholeNumber(raw: string): number | null {
+  const value = raw.trim();
+  return /^\d{1,9}$/u.test(value) ? Number(value) : null;
+}
+
 function isEditableType(type: string): type is MailDnsRecordType {
   return (editableTypes as readonly string[]).includes(type);
 }
@@ -110,7 +119,13 @@ export function MailDnsRecordsPage({ zoneId }: { zoneId: number }) {
     <div className="space-y-5">
       <MailPageHeader title={t('dns.title')} description={t('dns.description')} scope={scope}>
         <Button asChild size="sm" variant="outline">
-          <Link href={ROUTES.CONSOLE.MAIL_DOMAIN}>
+          <Link
+            href={
+              scope.status === 'ready'
+                ? mailOrganizationHref(ROUTES.CONSOLE.MAIL_DOMAIN, scope.organization.id)
+                : ROUTES.CONSOLE.MAIL_DOMAIN
+            }
+          >
             <ArrowLeft className="size-4" aria-hidden="true" />
             {t('dns.back')}
           </Link>
@@ -347,7 +362,8 @@ function RecordDialog({
   );
   const [proxied, setProxied] = useState(record?.proxied ?? false);
   const [error, setError] = useState<string | null>(null);
-  const [invalid, setInvalid] = useState<ReadonlySet<RecordField>>(new Set());
+  // Each invalid field with the message shown under it.
+  const [invalid, setInvalid] = useState<ReadonlyMap<RecordField, string>>(new Map());
   const pending = create.isPending || update.isPending;
   const proxiable = proxiableTypes.includes(type);
 
@@ -367,13 +383,24 @@ function RecordDialog({
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-    setInvalid(new Set());
+    // Numbers are checked here: an empty or malformed one must never reach the API as 0 or null.
+    const problems = new Map<RecordField, string>();
+    const ttlValue = ttl.trim() === '' ? 1 : wholeNumber(ttl);
+    if (ttlValue === null || (ttlValue !== 1 && (ttlValue < 60 || ttlValue > 86_400))) {
+      problems.set('ttl', t('dns.ttlInvalid'));
+    }
+    const priorityValue = wholeNumber(priority);
+    if (type === 'MX' && (priorityValue === null || priorityValue > 65_535)) {
+      problems.set('priority', t('dns.priorityInvalid'));
+    }
+    setInvalid(problems);
+    if (problems.size > 0 || ttlValue === null) return;
     const input: MailDnsRecordInput = {
       type,
       name: name.trim(),
       content: content.trim(),
-      ttl: ttl.trim() === '' ? 1 : Number(ttl),
-      ...(type === 'MX' ? { priority: Number(priority) } : {}),
+      ttl: ttlValue,
+      ...(type === 'MX' && priorityValue !== null ? { priority: priorityValue } : {}),
       proxied: proxiable && proxied,
     };
     try {
@@ -387,7 +414,14 @@ function RecordDialog({
       onClose();
     } catch (failure) {
       if (failure instanceof ApiError && failure.fieldErrors) {
-        setInvalid(new Set(Object.keys(failure.fieldErrors) as RecordField[]));
+        setInvalid(
+          new Map(
+            Object.keys(failure.fieldErrors).map(field => [
+              field as RecordField,
+              t('dns.fieldInvalid'),
+            ])
+          )
+        );
       }
       setError(explain(failure));
     }
@@ -396,7 +430,7 @@ function RecordDialog({
   const fieldError = (field: RecordField) =>
     invalid.has(field) ? (
       <p id={`mail-dns-${field}-error`} className="text-xs text-error">
-        {t('dns.fieldInvalid')}
+        {invalid.get(field)}
       </p>
     ) : null;
   const described = (field: RecordField, hint?: string) =>

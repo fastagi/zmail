@@ -98,6 +98,13 @@ describe('organization mail domains', () => {
       mutation.mutateAsync.mockReset();
       mutation.isPending = false;
     }
+    // By default a name has no mail service elsewhere.
+    state.preview.mutateAsync.mockImplementation(async (name: string) => ({
+      name,
+      apex: name,
+      existing_mx: [],
+      suggested_capability: 'send_receive',
+    }));
   });
 
   it('lists each record a connected domain needs with its status', () => {
@@ -242,6 +249,97 @@ describe('organization mail domains', () => {
     );
   });
 
+  it('looks a name up before connecting it when the field was never left', async () => {
+    state.preview.mutateAsync.mockImplementation(async (name: string) => ({
+      name,
+      apex: name,
+      existing_mx: ['mxbiz1.qq.com'],
+      suggested_capability: 'send_only',
+    }));
+    state.connect.mutateAsync.mockResolvedValue(pendingDomain());
+    renderPage();
+
+    // Typing and pressing Enter submits without a blur.
+    fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'example.org' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Connect' }).closest('form')!);
+
+    await waitFor(() => expect(state.preview.mutateAsync).toHaveBeenCalledWith('example.org'));
+    expect(await screen.findByRole('radio', { name: /Send only/u })).toBeChecked();
+    expect(screen.getByTestId('mail-domain-subdomain-hint')).toHaveTextContent('mxbiz1.qq.com');
+    expect(state.connect.mutateAsync).not.toHaveBeenCalled();
+
+    // A second submit confirms the suggestion.
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() =>
+      expect(state.connect.mutateAsync).toHaveBeenCalledWith({
+        name: 'example.org',
+        capability: 'send_only',
+      })
+    );
+    expect(state.preview.mutateAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it('connects at once when the lookup agrees with the chosen capability', async () => {
+    state.connect.mutateAsync.mockResolvedValue(pendingDomain());
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'mail.example.org' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Connect' }).closest('form')!);
+
+    await waitFor(() =>
+      expect(state.connect.mutateAsync).toHaveBeenCalledWith({
+        name: 'mail.example.org',
+        capability: 'send_receive',
+      })
+    );
+  });
+
+  it('keeps an explicit capability choice over the lookup', async () => {
+    state.preview.mutateAsync.mockImplementation(async (name: string) => ({
+      name,
+      apex: name,
+      existing_mx: ['mxbiz1.qq.com'],
+      suggested_capability: 'send_only',
+    }));
+    state.connect.mutateAsync.mockResolvedValue(pendingDomain());
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText('Domain'), { target: { value: 'example.org' } });
+    fireEvent.click(screen.getByRole('radio', { name: /Send and receive/u }));
+    fireEvent.submit(screen.getByRole('button', { name: 'Connect' }).closest('form')!);
+
+    await waitFor(() =>
+      expect(state.connect.mutateAsync).toHaveBeenCalledWith({
+        name: 'example.org',
+        capability: 'send_receive',
+      })
+    );
+  });
+
+  it('drops a suggested capability when the name changes', async () => {
+    state.preview.mutateAsync.mockImplementation(async (name: string) => ({
+      name,
+      apex: 'example.org',
+      existing_mx: name === 'example.org' ? ['mxbiz1.qq.com'] : [],
+      suggested_capability: name === 'example.org' ? 'send_only' : 'send_receive',
+    }));
+    renderPage();
+    const input = screen.getByLabelText('Domain');
+
+    fireEvent.change(input, { target: { value: 'example.org' } });
+    fireEvent.blur(input);
+    expect(await screen.findByRole('radio', { name: /Send only/u })).toBeChecked();
+
+    fireEvent.change(input, { target: { value: 'mail.example.org' } });
+    expect(screen.getByRole('radio', { name: /Send and receive/u })).toBeChecked();
+    expect(screen.queryByTestId('mail-domain-subdomain-hint')).toBeNull();
+
+    // A capability the user picked stays when the name changes.
+    fireEvent.click(screen.getByRole('radio', { name: /Send only/u }));
+    fireEvent.change(input, { target: { value: 'news.example.org' } });
+    expect(screen.getByRole('radio', { name: /Send only/u })).toBeChecked();
+  });
+
   it('shows nameservers and opens matching registrar guide', () => {
     state.mailDomains.data = [zonePendingDomain()];
     renderPage();
@@ -263,9 +361,14 @@ describe('organization mail domains', () => {
 
     const imported = within(card).getByRole('table', { name: 'Imported records' });
     expect(within(imported).getByText('192.0.2.10')).toBeInTheDocument();
+    // Links keep the organization the user works in.
     expect(within(card).getByRole('link', { name: 'Review records' })).toHaveAttribute(
       'href',
-      '/console/mail-domain/9/dns'
+      '/console/mail-domain/9/dns?org=1'
+    );
+    expect(within(card).getByRole('link', { name: 'DNS records' })).toHaveAttribute(
+      'href',
+      '/console/mail-domain/9/dns?org=1'
     );
     // A pending zone has nothing to set up yet.
     expect(within(card).queryByRole('button', { name: 'Set up again' })).toBeNull();
@@ -331,6 +434,10 @@ describe('organization mail domains', () => {
     renderPage();
 
     const zone = screen.getByRole('article', { name: 'example.org' });
+    expect(within(zone).getByRole('link', { name: 'DNS records' })).toHaveAttribute(
+      'href',
+      '/console/mail-domain/9/dns?org=1'
+    );
     fireEvent.click(within(zone).getByRole('button', { name: 'Remove from Zmail' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove from Zmail' }));
@@ -374,6 +481,15 @@ describe('organization mail domains', () => {
     expect(screen.getByRole('button', { name: 'Add record' })).toBeInTheDocument();
   });
 
+  it('links back to the domains of the same organization', () => {
+    renderDnsPage();
+
+    expect(screen.getByRole('link', { name: 'Back to domains' })).toHaveAttribute(
+      'href',
+      '/console/mail-domain?org=1'
+    );
+  });
+
   it('member cannot add DNS records', () => {
     state.organizations.data = page([organization('member')]);
     renderDnsPage();
@@ -414,6 +530,51 @@ describe('organization mail domains', () => {
     );
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
       'Cloudflare refused the record: Content for A record is invalid.'
+    );
+  });
+
+  it('checks the TTL and the MX priority before saving', async () => {
+    renderDnsPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add record' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Type'), { target: { value: 'MX' } });
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: '@' } });
+    fireEvent.change(within(dialog).getByLabelText('Mail server'), {
+      target: { value: 'mx.example.net' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Priority'), { target: { value: '' } });
+    fireEvent.change(within(dialog).getByLabelText('TTL (seconds)'), {
+      target: { value: 'soon' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    expect(within(dialog).getByLabelText('Priority')).toHaveAttribute('aria-invalid', 'true');
+    expect(within(dialog).getByLabelText('TTL (seconds)')).toHaveAttribute('aria-invalid', 'true');
+    expect(within(dialog).getByText('Enter a whole number from 0 to 65535.')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('Use a whole number from 60 to 86400, or leave it empty.')
+    ).toBeInTheDocument();
+    expect(state.createRecord.mutateAsync).not.toHaveBeenCalled();
+
+    fireEvent.change(within(dialog).getByLabelText('Priority'), { target: { value: '70000' } });
+    fireEvent.change(within(dialog).getByLabelText('TTL (seconds)'), { target: { value: '300' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(within(dialog).getByLabelText('Priority')).toHaveAttribute('aria-invalid', 'true');
+    expect(within(dialog).getByLabelText('TTL (seconds)')).not.toHaveAttribute('aria-invalid');
+    expect(state.createRecord.mutateAsync).not.toHaveBeenCalled();
+
+    fireEvent.change(within(dialog).getByLabelText('Priority'), { target: { value: '5' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(state.createRecord.mutateAsync).toHaveBeenCalledWith({
+        type: 'MX',
+        name: '@',
+        content: 'mx.example.net',
+        ttl: 300,
+        priority: 5,
+        proxied: false,
+      })
     );
   });
 

@@ -346,6 +346,8 @@ const messages = {
     fieldTtlHint: '留空表示自动，或填写 60 到 86400。',
     fieldPriority: '优先级',
     fieldProxied: '通过 Cloudflare 代理',
+    ttlInvalid: '请填写 60 到 86400 之间的整数，或留空。',
+    priorityInvalid: '请填写 0 到 65535 之间的整数。',
     fieldInvalid: '请检查此值。',
     save: '保存',
     created: '记录已添加',
