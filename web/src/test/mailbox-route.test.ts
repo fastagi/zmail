@@ -702,6 +702,22 @@ describe('mailbox browser route boundary', () => {
       String(sent.id)
     );
     expect(removed.status).toBe(204);
+    // The first delete moves the message to the trash; deleting it there removes it for good.
+    const trashed = (
+      await (
+        await route.getMailMessageRoute(request(`${path}/${sent.id}`), id, String(sent.id))
+      ).json()
+    ).data;
+    expect(trashed.placement).toBe('trash');
+    expect(
+      (
+        await route.deleteMailMessageRoute(
+          request(`${path}/${sent.id}`, { method: 'DELETE' }),
+          id,
+          String(sent.id)
+        )
+      ).status
+    ).toBe(204);
     await expectError(
       await route.getMailMessageRoute(request(`${path}/${sent.id}`), id, String(sent.id)),
       404,
@@ -2625,11 +2641,25 @@ describe('mailbox browser route boundary', () => {
       expect(seen.map(item => [item.address, item.access])).toEqual([
         [
           rileyBox.address,
-          { view: true, send: true, manage_members: false, administer: false, see_history: true },
+          {
+            view: true,
+            send: true,
+            manage_members: false,
+            administer: false,
+            see_history: true,
+            organize: true,
+          },
         ],
         [
           viewBox.address,
-          { view: true, send: false, manage_members: false, administer: false, see_history: false },
+          {
+            view: true,
+            send: false,
+            manage_members: false,
+            administer: false,
+            see_history: false,
+            organize: false,
+          },
         ],
       ]);
       expect((await inbox(route, rileyBox.id)).status).toBe(200);
@@ -3079,6 +3109,963 @@ describe('mailbox browser route boundary', () => {
       422,
       'COMMON.VALIDATION_FAILED'
     );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  describe('mailbox organize in the mock', () => {
+    // Seeded organization 1: user 1 demo-admin (owner), 2 demo-operator (admin), 3 demo-member.
+    const as = (user: 'demo-admin' | 'demo-operator' | 'demo-member') =>
+      getSessionUser.mockResolvedValue(mockUser(user));
+
+    beforeEach(() => {
+      process.env.MOCK_BFF_ENABLED = 'true';
+      as('demo-admin');
+    });
+
+    type Item = { id: number; [key: string]: unknown };
+    const data = async (response: Response) => (await response.json()).data;
+    const ids = async (response: Response) =>
+      ((await data(response)) as Item[]).map(item => item.id);
+    const fields = async (response: Response) => {
+      const body = await response.json();
+      return {
+        status: response.status,
+        error_code: body.error_code,
+        keys: Object.keys(body.errors ?? {}).sort(),
+      };
+    };
+    const box = async (route: MailboxRoute, body: Record<string, unknown> = {}) =>
+      (await data(await create(route, { local_part: 'team', ...body }))) as Item & {
+        message_id?: string;
+      };
+    const list = (route: MailboxRoute, id: number, query = '') =>
+      route.listMailMessagesRoute(request(`/api/mailboxes/${id}/messages${query}`), String(id));
+    const get = (route: MailboxRoute, id: number, messageId: number) =>
+      route.getMailMessageRoute(
+        request(`/api/mailboxes/${id}/messages/${messageId}`),
+        String(id),
+        String(messageId)
+      );
+    const update = (route: MailboxRoute, id: number, messageId: number, body: unknown) =>
+      route.updateMailMessageRoute(
+        request(`/api/mailboxes/${id}/messages/${messageId}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        }),
+        String(id),
+        String(messageId)
+      );
+    const remove = (route: MailboxRoute, id: number, messageId: number) =>
+      route.deleteMailMessageRoute(
+        request(`/api/mailboxes/${id}/messages/${messageId}`, { method: 'DELETE' }),
+        String(id),
+        String(messageId)
+      );
+    const updates = (route: MailboxRoute, id: number, body: unknown) =>
+      route.updateMailMessagesRoute(
+        request(`/api/mailboxes/${id}/message-updates`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }),
+        String(id)
+      );
+    const purge = (route: MailboxRoute, id: number) =>
+      route.purgeMailTrashRoute(
+        request(`/api/mailboxes/${id}/trash-purges`, { method: 'POST' }),
+        String(id)
+      );
+    const thread = (route: MailboxRoute, id: number, threadId: number) =>
+      route.getMailThreadRoute(
+        request(`/api/mailboxes/${id}/threads/${threadId}`),
+        String(id),
+        String(threadId)
+      );
+    const counts = (route: MailboxRoute, id: number) =>
+      route.getMailMessageCountsRoute(request(`/api/mailboxes/${id}/message-counts`), String(id));
+    const folders = (route: MailboxRoute, id: number) =>
+      route.listMailFoldersRoute(request(`/api/mailboxes/${id}/mail-folders`), String(id));
+    const createFolder = (route: MailboxRoute, id: number, body: unknown) =>
+      route.createMailFolderRoute(
+        request(`/api/mailboxes/${id}/mail-folders`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }),
+        String(id)
+      );
+    const renameFolder = (route: MailboxRoute, id: number, folderId: number, body: unknown) =>
+      route.renameMailFolderRoute(
+        request(`/api/mailboxes/${id}/mail-folders/${folderId}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        }),
+        String(id),
+        String(folderId)
+      );
+    const deleteFolder = (route: MailboxRoute, id: number, folderId: number) =>
+      route.deleteMailFolderRoute(
+        request(`/api/mailboxes/${id}/mail-folders/${folderId}`, { method: 'DELETE' }),
+        String(id),
+        String(folderId)
+      );
+    const labels = (route: MailboxRoute, id: number) =>
+      route.listMailLabelsRoute(request(`/api/mailboxes/${id}/mail-labels`), String(id));
+    const createLabel = (route: MailboxRoute, id: number, body: unknown) =>
+      route.createMailLabelRoute(
+        request(`/api/mailboxes/${id}/mail-labels`, {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }),
+        String(id)
+      );
+    const updateLabel = (route: MailboxRoute, id: number, labelId: number, body: unknown) =>
+      route.updateMailLabelRoute(
+        request(`/api/mailboxes/${id}/mail-labels/${labelId}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        }),
+        String(id),
+        String(labelId)
+      );
+    const deleteLabel = (route: MailboxRoute, id: number, labelId: number) =>
+      route.deleteMailLabelRoute(
+        request(`/api/mailboxes/${id}/mail-labels/${labelId}`, { method: 'DELETE' }),
+        String(id),
+        String(labelId)
+      );
+    const unreadCount = async (route: MailboxRoute, id: number) =>
+      ((await data(await route.listMailboxesRoute(request('/api/mailboxes')))) as Item[]).find(
+        item => item.id === id
+      )?.unread_count;
+    const welcomeOf = async (route: MailboxRoute, id: number) =>
+      ((await data(await list(route, id, '?direction=inbound'))) as Item[])[0];
+    const sendText = async (route: MailboxRoute, id: number, body: Record<string, unknown> = {}) =>
+      (await data(
+        await send(route, id, { to: ['bob@example.com'], subject: 'Hi', text: 'Body', ...body })
+      )) as Item & { message_id: string };
+
+    it('moves messages between placements and trashes them in two steps', async () => {
+      const route = await loadRoute();
+      const mailbox = await box(route);
+      const welcome = await welcomeOf(route, mailbox.id);
+      expect(welcome).toMatchObject({
+        placement: 'default',
+        folder_id: null,
+        label_ids: [],
+        starred: false,
+        thread_id: welcome.id,
+        trashed_at: null,
+      });
+      const sent = await sendText(route, mailbox.id);
+      expect(sent).toMatchObject({ placement: 'default', thread_id: sent.id, starred: false });
+      expect(await unreadCount(route, mailbox.id)).toBe(1);
+
+      const archived = await update(route, mailbox.id, welcome.id, { placement: 'archive' });
+      expect(archived.status).toBe(200);
+      expect(await data(archived)).toMatchObject({ placement: 'archive', read: false });
+      // Only unread inbound mail in the Inbox counts.
+      expect(await unreadCount(route, mailbox.id)).toBe(0);
+      expect(
+        await ids(await list(route, mailbox.id, '?placement=default&direction=inbound'))
+      ).toEqual([]);
+      expect(await ids(await list(route, mailbox.id, '?placement=archive'))).toEqual([welcome.id]);
+      expect(await ids(await list(route, mailbox.id))).toEqual([sent.id, welcome.id]);
+
+      expect((await remove(route, mailbox.id, sent.id)).status).toBe(204);
+      const trashed = await data(await get(route, mailbox.id, sent.id));
+      expect(trashed.placement).toBe('trash');
+      expect(trashed.trashed_at).toEqual(expect.any(String));
+      expect(await ids(await list(route, mailbox.id))).toEqual([welcome.id]);
+      expect(await ids(await list(route, mailbox.id, '?placement=trash'))).toEqual([sent.id]);
+
+      const restored = await data(
+        await update(route, mailbox.id, sent.id, { placement: 'default' })
+      );
+      expect(restored).toMatchObject({ placement: 'default', trashed_at: null });
+      const again = await data(await update(route, mailbox.id, sent.id, { placement: 'trash' }));
+      expect(again.trashed_at).toEqual(expect.any(String));
+      expect((await remove(route, mailbox.id, sent.id)).status).toBe(204);
+      await expectError(await get(route, mailbox.id, sent.id), 404, 'MAILBOX.MESSAGE_NOT_FOUND');
+
+      expect(await fields(await update(route, mailbox.id, welcome.id, {}))).toEqual({
+        status: 422,
+        error_code: 'COMMON.VALIDATION_FAILED',
+        keys: ['change'],
+      });
+      expect(
+        await fields(await update(route, mailbox.id, welcome.id, { placement: 'folder' }))
+      ).toEqual({ status: 422, error_code: 'COMMON.VALIDATION_FAILED', keys: ['folder_id'] });
+      expect(
+        await fields(await update(route, mailbox.id, welcome.id, { placement: 'spam' }))
+      ).toEqual({ status: 422, error_code: 'COMMON.VALIDATION_FAILED', keys: ['placement'] });
+      expect(await fields(await update(route, mailbox.id, welcome.id, { starred: 'yes' }))).toEqual(
+        {
+          status: 422,
+          error_code: 'COMMON.VALIDATION_FAILED',
+          keys: ['starred'],
+        }
+      );
+    });
+
+    it('keeps stars and read state per person and counts them', async () => {
+      const route = await loadRoute();
+      const mailbox = await box(route, {
+        type: 'shared',
+        members: [
+          { user_id: 1, permission: 'manage' },
+          { user_id: 3, permission: 'view' },
+        ],
+      });
+      const welcome = await welcomeOf(route, mailbox.id);
+      const starred = await data(await update(route, mailbox.id, welcome.id, { starred: true }));
+      expect(starred).toMatchObject({ starred: true, read: false });
+      expect(await data(await counts(route, mailbox.id))).toEqual({
+        placements: { default_inbound_unread: 1, archive_unread: 0 },
+        folders: [],
+        starred: 1,
+      });
+      expect(await ids(await list(route, mailbox.id, '?starred=true'))).toEqual([welcome.id]);
+      expect(await ids(await list(route, mailbox.id, '?unread=true'))).toEqual([welcome.id]);
+
+      as('demo-member');
+      expect(await data(await get(route, mailbox.id, welcome.id))).toMatchObject({
+        starred: false,
+      });
+      expect(await ids(await list(route, mailbox.id, '?starred=true'))).toEqual([]);
+      expect((await data(await counts(route, mailbox.id))).starred).toBe(0);
+      expect(
+        await data(await update(route, mailbox.id, welcome.id, { starred: true, read: true }))
+      ).toMatchObject({ starred: true, read: true });
+      expect(await ids(await list(route, mailbox.id, '?unread=true'))).toEqual([]);
+      expect(await unreadCount(route, mailbox.id)).toBe(0);
+
+      as('demo-admin');
+      expect(await unreadCount(route, mailbox.id)).toBe(1);
+      const unstarred = await data(await update(route, mailbox.id, welcome.id, { starred: false }));
+      expect(unstarred.starred).toBe(false);
+      as('demo-member');
+      expect((await data(await get(route, mailbox.id, welcome.id))).starred).toBe(true);
+    });
+
+    it('creates, renames, and deletes folders and labels within their limits', async () => {
+      const route = await loadRoute();
+      const mailbox = await box(route);
+      const welcome = await welcomeOf(route, mailbox.id);
+      expect(await data(await folders(route, mailbox.id))).toEqual([]);
+
+      const created = await createFolder(route, mailbox.id, { name: '  Invoices ' });
+      expect(created.status).toBe(201);
+      const invoices = await data(created);
+      expect(invoices).toEqual({
+        id: expect.any(Number),
+        name: 'Invoices',
+        created_at: expect.any(String),
+      });
+      await expectError(
+        await createFolder(route, mailbox.id, { name: 'INVOICES' }),
+        409,
+        'MAILBOX.FOLDER_NAME_TAKEN'
+      );
+      for (const name of ['   ', 'x'.repeat(65)]) {
+        expect(await fields(await createFolder(route, mailbox.id, { name }))).toEqual({
+          status: 422,
+          error_code: 'COMMON.VALIDATION_FAILED',
+          keys: ['name'],
+        });
+      }
+      const alpha = await data(await createFolder(route, mailbox.id, { name: 'alpha' }));
+      const renamed = await renameFolder(route, mailbox.id, invoices.id, { name: 'Bills' });
+      expect(renamed.status).toBe(200);
+      expect(await data(renamed)).toMatchObject({ id: invoices.id, name: 'Bills' });
+      // A folder may keep its own name in another case.
+      expect((await renameFolder(route, mailbox.id, invoices.id, { name: 'BILLS' })).status).toBe(
+        200
+      );
+      await expectError(
+        await renameFolder(route, mailbox.id, invoices.id, { name: 'Alpha' }),
+        409,
+        'MAILBOX.FOLDER_NAME_TAKEN'
+      );
+      await expectError(
+        await renameFolder(route, mailbox.id, 999, { name: 'Gone' }),
+        404,
+        'MAILBOX.FOLDER_NOT_FOUND'
+      );
+      expect(
+        ((await data(await folders(route, mailbox.id))) as Item[]).map(folder => folder.name)
+      ).toEqual(['alpha', 'BILLS']);
+
+      const moved = await data(
+        await update(route, mailbox.id, welcome.id, { placement: 'folder', folder_id: invoices.id })
+      );
+      expect(moved).toMatchObject({ placement: 'folder', folder_id: invoices.id });
+      expect(
+        await ids(await list(route, mailbox.id, `?placement=folder&folder_id=${invoices.id}`))
+      ).toEqual([welcome.id]);
+      expect((await data(await counts(route, mailbox.id))).folders).toEqual([
+        { folder_id: alpha.id, unread: 0 },
+        { folder_id: invoices.id, unread: 1 },
+      ]);
+      expect((await deleteFolder(route, mailbox.id, invoices.id)).status).toBe(204);
+      expect(await data(await get(route, mailbox.id, welcome.id))).toMatchObject({
+        placement: 'default',
+        folder_id: null,
+      });
+      await expectError(
+        await deleteFolder(route, mailbox.id, invoices.id),
+        404,
+        'MAILBOX.FOLDER_NOT_FOUND'
+      );
+
+      const urgent = await createLabel(route, mailbox.id, { name: 'Urgent', color: 'red' });
+      expect(urgent.status).toBe(201);
+      const label = await data(urgent);
+      expect(label).toMatchObject({ name: 'Urgent', color: 'red' });
+      const later = await data(
+        await createLabel(route, mailbox.id, { name: 'Later', color: 'gray' })
+      );
+      expect(
+        await fields(await createLabel(route, mailbox.id, { name: 'X', color: 'black' }))
+      ).toEqual({ status: 422, error_code: 'COMMON.VALIDATION_FAILED', keys: ['color'] });
+      await expectError(
+        await createLabel(route, mailbox.id, { name: 'urgent', color: 'blue' }),
+        409,
+        'MAILBOX.LABEL_NAME_TAKEN'
+      );
+      expect(
+        await data(await updateLabel(route, mailbox.id, label.id, { name: 'Now', color: 'teal' }))
+      ).toMatchObject({ id: label.id, name: 'Now', color: 'teal' });
+      expect(
+        ((await data(await labels(route, mailbox.id))) as Item[]).map(item => item.name)
+      ).toEqual(['Later', 'Now']);
+      const labeled = await data(
+        await update(route, mailbox.id, welcome.id, { label_ids: [later.id, label.id].reverse() })
+      );
+      expect(labeled.label_ids).toEqual([label.id, later.id].sort((a, b) => a - b));
+      expect(await ids(await list(route, mailbox.id, `?label_id=${label.id}`))).toEqual([
+        welcome.id,
+      ]);
+      expect((await deleteLabel(route, mailbox.id, label.id)).status).toBe(204);
+      expect((await data(await get(route, mailbox.id, welcome.id))).label_ids).toEqual([later.id]);
+      await expectError(
+        await list(route, mailbox.id, `?label_id=${label.id}`),
+        404,
+        'MAILBOX.LABEL_NOT_FOUND'
+      );
+      await expectError(
+        await update(route, mailbox.id, welcome.id, { label_ids: [label.id] }),
+        404,
+        'MAILBOX.LABEL_NOT_FOUND'
+      );
+
+      // At most 100 folders and 100 labels per mailbox.
+      for (let index = 0; index < 98; index += 1) {
+        expect((await createFolder(route, mailbox.id, { name: `Folder ${index}` })).status).toBe(
+          201
+        );
+        expect(
+          (await createLabel(route, mailbox.id, { name: `Label ${index}`, color: 'blue' })).status
+        ).toBe(201);
+      }
+      expect((await createFolder(route, mailbox.id, { name: 'Last' })).status).toBe(201);
+      await expectError(
+        await createFolder(route, mailbox.id, { name: 'One more' }),
+        422,
+        'MAILBOX.FOLDER_LIMIT_REACHED'
+      );
+      expect((await createLabel(route, mailbox.id, { name: 'Last', color: 'pink' })).status).toBe(
+        201
+      );
+      await expectError(
+        await createLabel(route, mailbox.id, { name: 'One more', color: 'pink' }),
+        422,
+        'MAILBOX.LABEL_LIMIT_REACHED'
+      );
+
+      // Another mailbox's folder is not found here.
+      const other = await box(route, { local_part: 'other' });
+      const foreign = await data(await createFolder(route, other.id, { name: 'Foreign' }));
+      await expectError(
+        await update(route, mailbox.id, welcome.id, { placement: 'folder', folder_id: foreign.id }),
+        404,
+        'MAILBOX.FOLDER_NOT_FOUND'
+      );
+    });
+
+    it('applies one change to several messages, all or nothing', async () => {
+      const route = await loadRoute();
+      const mailbox = await box(route);
+      const welcome = await welcomeOf(route, mailbox.id);
+      const sent = await sendText(route, mailbox.id);
+      const label = await data(
+        await createLabel(route, mailbox.id, { name: 'Done', color: 'green' })
+      );
+      const folder = await data(await createFolder(route, mailbox.id, { name: 'Done' }));
+
+      const applied = await updates(route, mailbox.id, {
+        message_ids: [welcome.id, sent.id],
+        placement: 'archive',
+        add_label_ids: [label.id],
+        ignored: true,
+      });
+      expect(applied.status).toBe(200);
+      expect(await data(applied)).toEqual({ updated: 2 });
+      expect(await ids(await list(route, mailbox.id, '?placement=archive'))).toEqual([
+        sent.id,
+        welcome.id,
+      ]);
+      expect((await data(await get(route, mailbox.id, sent.id))).label_ids).toEqual([label.id]);
+      expect(
+        await data(
+          await updates(route, mailbox.id, { message_ids: [sent.id], remove_label_ids: [label.id] })
+        )
+      ).toEqual({ updated: 1 });
+      expect((await data(await get(route, mailbox.id, sent.id))).label_ids).toEqual([]);
+
+      await expectError(
+        await updates(route, mailbox.id, { message_ids: [welcome.id, 999], placement: 'default' }),
+        404,
+        'MAILBOX.MESSAGE_NOT_FOUND'
+      );
+      await expectError(
+        await updates(route, mailbox.id, { message_ids: [welcome.id], add_label_ids: [999] }),
+        404,
+        'MAILBOX.LABEL_NOT_FOUND'
+      );
+      // Nothing changed.
+      expect((await data(await get(route, mailbox.id, welcome.id))).placement).toBe('archive');
+
+      const ids101 = Array.from({ length: 101 }, (_, index) => index + 1);
+      for (const [body, key] of [
+        [{ message_ids: ids101, read: true }, 'message_ids'],
+        [{ message_ids: [], read: true }, 'message_ids'],
+        [{ message_ids: [welcome.id, welcome.id], read: true }, 'message_ids'],
+        [{ message_ids: [welcome.id] }, 'change'],
+        [{ message_ids: [welcome.id], folder_id: folder.id }, 'folder_id'],
+        [
+          { message_ids: [welcome.id], add_label_ids: [label.id], remove_label_ids: [label.id] },
+          'add_label_ids',
+        ],
+        [{ message_ids: 'all', read: true }, 'message_ids'],
+        [{ message_ids: [welcome.id], read: 1 }, 'read'],
+      ] as const) {
+        expect(await fields(await updates(route, mailbox.id, body)), key).toEqual({
+          status: 422,
+          error_code: 'COMMON.VALIDATION_FAILED',
+          keys: [key],
+        });
+      }
+    });
+
+    it('links replies into threads and groups placement views by thread', async () => {
+      const route = await loadRoute();
+      const mailbox = await box(route);
+      const welcome = (await data(
+        await get(route, mailbox.id, (await welcomeOf(route, mailbox.id)).id)
+      )) as Item & { message_id: string };
+      const reply = await sendText(route, mailbox.id, { in_reply_to: `<${welcome.message_id}>` });
+      const unrelated = await sendText(route, mailbox.id, { subject: 'Other' });
+      expect(reply.thread_id).toBe(welcome.id);
+      expect(unrelated.thread_id).toBe(unrelated.id);
+
+      const conversation = await data(await thread(route, mailbox.id, welcome.id));
+      expect(conversation.map((item: Item) => item.id)).toEqual([welcome.id, reply.id]);
+      expect(conversation[0].text_body).toEqual(expect.any(String));
+
+      const sentView = await (
+        await list(route, mailbox.id, '?placement=default&direction=outbound&group=thread')
+      ).json();
+      expect(sentView.data.map((item: Item) => [item.id, item.thread])).toEqual([
+        [
+          unrelated.id,
+          {
+            message_count: 1,
+            message_ids: [unrelated.id],
+            unread: false,
+            starred: false,
+            label_ids: [],
+          },
+        ],
+        [
+          reply.id,
+          {
+            message_count: 1,
+            message_ids: [reply.id],
+            unread: false,
+            starred: false,
+            label_ids: [],
+          },
+        ],
+      ]);
+      // Without grouping a row is one message and carries no thread summary.
+      expect((await data(await list(route, mailbox.id)))[0]).not.toHaveProperty('thread');
+
+      await updates(route, mailbox.id, {
+        message_ids: [welcome.id, reply.id],
+        placement: 'archive',
+      });
+      const archive = await (
+        await list(route, mailbox.id, '?placement=archive&group=thread')
+      ).json();
+      expect(archive.meta.total).toBe(1);
+      expect(archive.data[0]).toMatchObject({
+        id: reply.id,
+        thread: {
+          message_count: 2,
+          message_ids: [welcome.id, reply.id],
+          unread: true,
+          starred: false,
+          label_ids: [],
+        },
+      });
+
+      await remove(route, mailbox.id, reply.id);
+      expect(
+        ((await data(await thread(route, mailbox.id, welcome.id))) as Item[]).map(item => item.id)
+      ).toEqual([welcome.id]);
+      await remove(route, mailbox.id, welcome.id);
+      await expectError(
+        await thread(route, mailbox.id, welcome.id),
+        404,
+        'MAILBOX.MESSAGE_NOT_FOUND'
+      );
+
+      for (const query of [
+        '?group=thread',
+        '?group=thread&placement=default',
+        '?group=thread&placement=trash',
+        '?group=thread&placement=archive&starred=true',
+        '?group=thread&placement=archive&q=hello',
+        '?group=threads&placement=archive',
+      ]) {
+        await expectError(await list(route, mailbox.id, query), 400, 'COMMON.INVALID_INPUT');
+      }
+    });
+
+    it('searches every placement but the trash and refuses a search that is too broad', async () => {
+      const route = await loadRoute();
+      const mailbox = await box(route);
+      const welcome = await welcomeOf(route, mailbox.id);
+      const invoice = await sendText(route, mailbox.id, {
+        to: ['Carol@Example.com'],
+        subject: 'Invoice 100%',
+        text: 'Please find the receipt attached',
+        attachments: [{ filename: 'a.txt', content_type: 'text/plain', content: base64('a') }],
+      });
+      const other = await sendText(route, mailbox.id, { subject: 'Lunch' });
+
+      expect(await ids(await list(route, mailbox.id, '?q=INVOICE'))).toEqual([invoice.id]);
+      expect(await ids(await list(route, mailbox.id, '?q=%20receipt%20'))).toEqual([invoice.id]);
+      expect(await ids(await list(route, mailbox.id, '?q=carol'))).toEqual([invoice.id]);
+      expect(await ids(await list(route, mailbox.id, '?q=100%25'))).toEqual([invoice.id]);
+      expect(await ids(await list(route, mailbox.id, '?q=mock%20mail'))).toEqual([welcome.id]);
+      expect(await ids(await list(route, mailbox.id, '?has_attachments=true'))).toEqual([
+        invoice.id,
+      ]);
+      expect(await ids(await list(route, mailbox.id, '?has_attachments=false'))).toEqual([
+        other.id,
+        welcome.id,
+      ]);
+      await remove(route, mailbox.id, invoice.id);
+      expect(await ids(await list(route, mailbox.id, '?q=invoice'))).toEqual([]);
+
+      await expectError(await list(route, mailbox.id, '?q=x'), 422, 'MAILBOX.SEARCH_TOO_BROAD');
+      for (const query of [
+        `?q=${'x'.repeat(201)}`,
+        '?q=%20%20',
+        '?q=invoice&placement=trash',
+        '?placement=spam',
+        '?placement=folder',
+        '?folder_id=1',
+        '?starred=yes',
+        '?unread=1',
+        '?label_id=0',
+        '?placement=archive&placement=default',
+      ]) {
+        await expectError(await list(route, mailbox.id, query), 400, 'COMMON.INVALID_INPUT');
+      }
+      await expectError(
+        await list(route, mailbox.id, '?placement=folder&folder_id=999'),
+        404,
+        'MAILBOX.FOLDER_NOT_FOUND'
+      );
+    });
+
+    it('needs view to read and star, send to move, and organize to delete or arrange', async () => {
+      const route = await loadRoute();
+      const shared = await box(route, {
+        type: 'shared',
+        members: [
+          { user_id: 1, permission: 'manage' },
+          { user_id: 3, permission: 'view' },
+        ],
+      });
+      const personal = await box(route, {
+        local_part: 'riley',
+        type: 'personal',
+        owner_user_id: 3,
+      });
+      const welcome = await welcomeOf(route, shared.id);
+      const folder = await data(await createFolder(route, shared.id, { name: 'Kept' }));
+      const label = await data(
+        await createLabel(route, shared.id, { name: 'Kept', color: 'gray' })
+      );
+      const access = async () =>
+        Object.fromEntries(
+          ((await data(await route.listMailboxesRoute(request('/api/mailboxes')))) as Item[]).map(
+            item => [item.id, (item.access as Record<string, boolean>).organize]
+          )
+        );
+      expect(await access()).toEqual({ [shared.id]: true, [personal.id]: false });
+      as('demo-operator');
+      // Owners and admins never organize a mailbox they are not a member of.
+      expect(await access()).toEqual({ [shared.id]: false, [personal.id]: false });
+
+      as('demo-member');
+      expect(await access()).toEqual({ [shared.id]: false, [personal.id]: true });
+      expect((await update(route, shared.id, welcome.id, { starred: true })).status).toBe(200);
+      expect((await list(route, shared.id, '?q=welcome')).status).toBe(200);
+      expect((await counts(route, shared.id)).status).toBe(200);
+      expect((await folders(route, shared.id)).status).toBe(200);
+      expect((await labels(route, shared.id)).status).toBe(200);
+      expect((await thread(route, shared.id, welcome.id)).status).toBe(200);
+      const viewDenied = [
+        await update(route, shared.id, welcome.id, { placement: 'archive' }),
+        await update(route, shared.id, welcome.id, { read: true, label_ids: [label.id] }),
+        await updates(route, shared.id, { message_ids: [welcome.id], add_label_ids: [label.id] }),
+        await remove(route, shared.id, welcome.id),
+      ];
+      for (const response of viewDenied) await expectError(response, 403, 'PERMISSION.DENIED');
+      // A refused shared change changes nothing, not even the caller's own state.
+      expect((await data(await get(route, shared.id, welcome.id))).read).toBe(false);
+
+      as('demo-admin');
+      await route.setMailboxMemberRoute(
+        request(`/api/mailboxes/${shared.id}/members/3`, {
+          method: 'PUT',
+          body: JSON.stringify({ permission: 'send' }),
+        }),
+        String(shared.id),
+        '3'
+      );
+      as('demo-member');
+      expect((await update(route, shared.id, welcome.id, { label_ids: [label.id] })).status).toBe(
+        200
+      );
+      expect((await remove(route, shared.id, welcome.id)).status).toBe(204);
+      const sendDenied = [
+        await remove(route, shared.id, welcome.id),
+        await purge(route, shared.id),
+        await createFolder(route, shared.id, { name: 'New' }),
+        await renameFolder(route, shared.id, folder.id, { name: 'New' }),
+        await deleteFolder(route, shared.id, folder.id),
+        await createLabel(route, shared.id, { name: 'New', color: 'red' }),
+        await updateLabel(route, shared.id, label.id, { name: 'New', color: 'red' }),
+        await deleteLabel(route, shared.id, label.id),
+      ];
+      for (const response of sendDenied) await expectError(response, 403, 'PERMISSION.DENIED');
+      expect((await data(await get(route, shared.id, welcome.id))).placement).toBe('trash');
+
+      // The personal owner organizes their own mailbox.
+      expect((await createFolder(route, personal.id, { name: 'Mine' })).status).toBe(201);
+      as('demo-operator');
+      await expectError(await counts(route, personal.id), 403, 'PERMISSION.DENIED');
+      for (const response of [
+        await counts(route, 999),
+        await folders(route, 999),
+        await purge(route, 999),
+        await thread(route, 999, 1),
+        await updates(route, 999, { message_ids: [1], read: true }),
+      ]) {
+        await expectError(response, 404, 'MAILBOX.NOT_FOUND');
+      }
+    });
+
+    it('empties the trash for good', async () => {
+      const route = await loadRoute();
+      const mailbox = await box(route);
+      const welcome = await welcomeOf(route, mailbox.id);
+      const sent = await sendText(route, mailbox.id);
+      const kept = await sendText(route, mailbox.id, { subject: 'Kept' });
+      await updates(route, mailbox.id, { message_ids: [welcome.id, sent.id], placement: 'trash' });
+
+      const purged = await purge(route, mailbox.id);
+      expect(purged.status).toBe(200);
+      expect(await data(purged)).toEqual({ deleted: 2 });
+      expect(await ids(await list(route, mailbox.id, '?placement=trash'))).toEqual([]);
+      expect(await ids(await list(route, mailbox.id))).toEqual([kept.id]);
+      expect(await data(await purge(route, mailbox.id))).toEqual({ deleted: 0 });
+    });
+  });
+
+  it('forwards the organize routes to the fixed API paths with the whitelisted query', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async () => Response.json({ code: 0, message: 'ok', data: [] }));
+    const route = await loadRoute();
+    const body = (method: string, value?: unknown) => ({
+      method,
+      ...(value === undefined ? {} : { body: JSON.stringify(value) }),
+    });
+
+    await route.listMailMessagesRoute(
+      request(
+        '/api/mailboxes/12/messages?group=thread&folder_id=4&placement=folder&direction=inbound&evil=1'
+      ),
+      '12'
+    );
+    await route.listMailMessagesRoute(
+      request(
+        '/api/mailboxes/12/messages?q=%20invoice%20&has_attachments=true&unread=false&starred=true&label_id=9'
+      ),
+      '12'
+    );
+    await route.updateMailMessagesRoute(
+      request(
+        '/api/mailboxes/12/message-updates',
+        body('POST', { message_ids: [41, 42], placement: 'folder', folder_id: 4, extra: 1 })
+      ),
+      '12'
+    );
+    await route.updateMailMessagesRoute(
+      request(
+        '/api/mailboxes/12/message-updates',
+        body('POST', {
+          message_ids: [41],
+          read: true,
+          starred: false,
+          add_label_ids: [9],
+          remove_label_ids: [8],
+        })
+      ),
+      '12'
+    );
+    await route.purgeMailTrashRoute(request('/api/mailboxes/12/trash-purges', body('POST')), '12');
+    await route.getMailThreadRoute(request('/api/mailboxes/12/threads/34'), '12', '34');
+    await route.getMailMessageCountsRoute(request('/api/mailboxes/12/message-counts'), '12');
+    await route.listMailFoldersRoute(request('/api/mailboxes/12/mail-folders'), '12');
+    await route.createMailFolderRoute(
+      request('/api/mailboxes/12/mail-folders', body('POST', { name: 'Invoices', id: 3 })),
+      '12'
+    );
+    await route.renameMailFolderRoute(
+      request('/api/mailboxes/12/mail-folders/4', body('PUT', { name: 'Bills' })),
+      '12',
+      '4'
+    );
+    await route.deleteMailFolderRoute(
+      request('/api/mailboxes/12/mail-folders/4', body('DELETE')),
+      '12',
+      '4'
+    );
+    await route.listMailLabelsRoute(request('/api/mailboxes/12/mail-labels'), '12');
+    await route.createMailLabelRoute(
+      request('/api/mailboxes/12/mail-labels', body('POST', { name: 'Urgent', color: 'red' })),
+      '12'
+    );
+    await route.updateMailLabelRoute(
+      request('/api/mailboxes/12/mail-labels/9', body('PUT', { name: 'Now', color: 'teal' })),
+      '12',
+      '9'
+    );
+    await route.deleteMailLabelRoute(
+      request('/api/mailboxes/12/mail-labels/9', body('DELETE')),
+      '12',
+      '9'
+    );
+    await route.updateMailMessageRoute(
+      request(
+        '/api/mailboxes/12/messages/34',
+        body('PUT', { starred: true, placement: 'folder', folder_id: 4, label_ids: [9], x: 1 })
+      ),
+      '12',
+      '34'
+    );
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const target = new URL(String(url));
+      return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/mailboxes/12/messages?page=1&per_page=15&direction=inbound&placement=folder&folder_id=4&group=thread',
+      'GET /v1/mailboxes/12/messages?page=1&per_page=15&label_id=9&starred=true&unread=false&has_attachments=true&q=invoice',
+      'POST /v1/mailboxes/12/message-updates',
+      'POST /v1/mailboxes/12/message-updates',
+      'POST /v1/mailboxes/12/trash-purges',
+      'GET /v1/mailboxes/12/threads/34',
+      'GET /v1/mailboxes/12/message-counts',
+      'GET /v1/mailboxes/12/mail-folders',
+      'POST /v1/mailboxes/12/mail-folders',
+      'PUT /v1/mailboxes/12/mail-folders/4',
+      'DELETE /v1/mailboxes/12/mail-folders/4',
+      'GET /v1/mailboxes/12/mail-labels',
+      'POST /v1/mailboxes/12/mail-labels',
+      'PUT /v1/mailboxes/12/mail-labels/9',
+      'DELETE /v1/mailboxes/12/mail-labels/9',
+      'PUT /v1/mailboxes/12/messages/34',
+    ]);
+    const bodies = fetchMock.mock.calls.map(([, init]) =>
+      init?.body === undefined ? undefined : JSON.parse(String(init.body))
+    );
+    expect(bodies).toEqual([
+      undefined,
+      undefined,
+      { message_ids: [41, 42], placement: 'folder', folder_id: 4 },
+      { message_ids: [41], read: true, starred: false, add_label_ids: [9], remove_label_ids: [8] },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { name: 'Invoices' },
+      { name: 'Bills' },
+      undefined,
+      undefined,
+      { name: 'Urgent', color: 'red' },
+      { name: 'Now', color: 'teal' },
+      undefined,
+      { starred: true, placement: 'folder', folder_id: 4, label_ids: [9] },
+    ]);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('organization-id')).toBe('1');
+    }
+  });
+
+  it('passes the API decision on organize routes through unchanged', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    const answer = (status: number, errorCode: string, errors?: Record<string, string[]>) =>
+      fetchMock.mockImplementationOnce(async () =>
+        Response.json(
+          { code: status, error_code: errorCode, message: 'upstream detail', errors },
+          { status }
+        )
+      );
+    const route = await loadRoute();
+
+    answer(403, 'PERMISSION.DENIED');
+    await expectError(
+      await route.purgeMailTrashRoute(
+        request('/api/mailboxes/12/trash-purges', { method: 'POST' }),
+        '12'
+      ),
+      403,
+      'PERMISSION.DENIED'
+    );
+    answer(422, 'MAILBOX.SEARCH_TOO_BROAD');
+    await expectError(
+      await route.listMailMessagesRoute(request('/api/mailboxes/12/messages?q=ab'), '12'),
+      422,
+      'MAILBOX.SEARCH_TOO_BROAD'
+    );
+    answer(404, 'MAILBOX.NOT_FOUND');
+    await expectError(
+      await route.getMailMessageCountsRoute(request('/api/mailboxes/12/message-counts'), '12'),
+      404,
+      'MAILBOX.NOT_FOUND'
+    );
+    answer(409, 'MAILBOX.LABEL_NAME_TAKEN');
+    await expectError(
+      await route.createMailLabelRoute(
+        request('/api/mailboxes/12/mail-labels', {
+          method: 'POST',
+          body: JSON.stringify({ name: 'Urgent', color: 'red' }),
+        }),
+        '12'
+      ),
+      409,
+      'MAILBOX.LABEL_NAME_TAKEN'
+    );
+    answer(422, 'COMMON.VALIDATION_FAILED', { change: ['at least one change is required'] });
+    const invalid = await route.updateMailMessagesRoute(
+      request('/api/mailboxes/12/message-updates', {
+        method: 'POST',
+        body: JSON.stringify({ message_ids: [1] }),
+      }),
+      '12'
+    );
+    expect(invalid.status).toBe(422);
+    const invalidBody = await invalid.json();
+    expect(invalidBody).toMatchObject({ error_code: 'COMMON.VALIDATION_FAILED' });
+    expect(Object.keys(invalidBody.errors)).toEqual(['change']);
+    expect(JSON.stringify(invalidBody)).not.toContain('upstream detail');
+  });
+
+  it('rejects malformed organize input before it reaches the API', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    const route = await loadRoute();
+
+    await expectError(
+      await route.getMailThreadRoute(request('/api/mailboxes/12/threads/x'), '12', 'x'),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+    await expectError(
+      await route.deleteMailFolderRoute(
+        request('/api/mailboxes/12/mail-folders/0', { method: 'DELETE' }),
+        '12',
+        '0'
+      ),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+    for (const query of [
+      '?placement=folder',
+      '?q=a&placement=trash',
+      '?group=thread',
+      '?unread=no',
+    ]) {
+      await expectError(
+        await route.listMailMessagesRoute(request(`/api/mailboxes/12/messages${query}`), '12'),
+        400,
+        'COMMON.INVALID_INPUT'
+      );
+    }
+    await expectError(
+      await route.updateMailMessagesRoute(
+        request('/api/mailboxes/12/message-updates', { method: 'POST', body: '[1]' }),
+        '12'
+      ),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+    await expectError(
+      await route.updateMailMessagesRoute(
+        request('/api/mailboxes/12/message-updates', {
+          method: 'POST',
+          body: JSON.stringify({ message_ids: [1], placement: 7 }),
+        }),
+        '12'
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    await expectError(
+      await route.createMailLabelRoute(
+        request('/api/mailboxes/12/mail-labels', {
+          method: 'POST',
+          body: JSON.stringify({ name: ['Urgent'], color: 'red' }),
+        }),
+        '12'
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    const crossOrigin = { method: 'POST', body: '{}', origin: 'https://evil.example' };
+    for (const response of [
+      await route.purgeMailTrashRoute(request('/api/mailboxes/12/trash-purges', crossOrigin), '12'),
+      await route.updateMailMessagesRoute(
+        request('/api/mailboxes/12/message-updates', crossOrigin),
+        '12'
+      ),
+      await route.createMailFolderRoute(
+        request('/api/mailboxes/12/mail-folders', crossOrigin),
+        '12'
+      ),
+    ]) {
+      expect(response.status).toBe(403);
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

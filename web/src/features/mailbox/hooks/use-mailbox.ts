@@ -14,9 +14,14 @@ import type {
   CreateMailboxInput,
   MailDomain,
   MailDirection,
+  MailFolderInput,
+  MailLabelInput,
   MailLogFilters,
+  MailMessageFilters,
   MailboxPermission,
   SendMailMessageInput,
+  UpdateMailMessageInput,
+  UpdateMailMessagesInput,
 } from '@/features/mailbox/types';
 
 export const MAIL_PAGE_SIZE = 20;
@@ -39,8 +44,40 @@ export const mailboxKeys = {
     [...mailboxKeys.mailbox(organizationId, mailboxId), 'messages'] as const,
   page: (organizationId: number, mailboxId: number, direction: MailDirection, page: number) =>
     [...mailboxKeys.messages(organizationId, mailboxId), direction, page] as const,
+  filteredPage: (
+    organizationId: number,
+    mailboxId: number,
+    filters: MailMessageFilters,
+    page: number
+  ) =>
+    [
+      ...mailboxKeys.messages(organizationId, mailboxId),
+      'filtered',
+      filters.direction ?? '',
+      filters.placement ?? '',
+      filters.folderId ?? 0,
+      filters.labelId ?? 0,
+      filters.starred ?? '',
+      filters.unread ?? '',
+      filters.hasAttachments ?? '',
+      filters.q ?? '',
+      filters.group ?? '',
+      page,
+    ] as const,
+  messageDetails: (organizationId: number, mailboxId: number) =>
+    [...mailboxKeys.mailbox(organizationId, mailboxId), 'message'] as const,
   message: (organizationId: number, mailboxId: number, messageId: number) =>
-    [...mailboxKeys.mailbox(organizationId, mailboxId), 'message', messageId] as const,
+    [...mailboxKeys.messageDetails(organizationId, mailboxId), messageId] as const,
+  threads: (organizationId: number, mailboxId: number) =>
+    [...mailboxKeys.mailbox(organizationId, mailboxId), 'thread'] as const,
+  thread: (organizationId: number, mailboxId: number, threadId: number) =>
+    [...mailboxKeys.threads(organizationId, mailboxId), threadId] as const,
+  counts: (organizationId: number, mailboxId: number) =>
+    [...mailboxKeys.mailbox(organizationId, mailboxId), 'counts'] as const,
+  folders: (organizationId: number, mailboxId: number) =>
+    [...mailboxKeys.mailbox(organizationId, mailboxId), 'folders'] as const,
+  labels: (organizationId: number, mailboxId: number) =>
+    [...mailboxKeys.mailbox(organizationId, mailboxId), 'labels'] as const,
   members: (organizationId: number, mailboxId: number) =>
     [...mailboxKeys.mailbox(organizationId, mailboxId), 'members'] as const,
   accessEvents: (organizationId: number, mailboxId: number) =>
@@ -70,6 +107,28 @@ function invalidateLog(queryClient: QueryClient, organizationId: number, withSta
     ...(withStats
       ? [queryClient.invalidateQueries({ queryKey: mailboxKeys.stats(organizationId) })]
       : []),
+  ]);
+}
+
+/**
+ * Every change to a mailbox's mail: its listings, threads, and details, the caller's counts, the
+ * unread count in the mailbox list, and the log. Statistics only move when mail is deleted.
+ */
+function invalidateMail(
+  queryClient: QueryClient,
+  organizationId: number,
+  mailboxId: number,
+  withStats = false
+) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.messages(organizationId, mailboxId) }),
+    queryClient.invalidateQueries({
+      queryKey: mailboxKeys.messageDetails(organizationId, mailboxId),
+    }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.threads(organizationId, mailboxId) }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.counts(organizationId, mailboxId) }),
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+    invalidateLog(queryClient, organizationId, withStats),
   ]);
 }
 
@@ -241,34 +300,44 @@ export function useSendMailMessage(organizationId: number, mailboxId: number) {
     mutationFn: (input: SendMailMessageInput) =>
       mailboxService.send(organizationId, mailboxId, input),
     meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: mailboxKeys.messages(organizationId, mailboxId),
-        }),
-        invalidateLog(queryClient, organizationId),
-      ]),
+    // A reply joins the thread it answers.
+    onSettled: () => invalidateMail(queryClient, organizationId, mailboxId, true),
   });
 }
 
+/** Read state, star, placement, folder, or the complete set of labels of one message. */
 export function useUpdateMailMessage(organizationId: number, mailboxId: number) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ messageId, read }: { messageId: number; read: boolean }) =>
-      mailboxService.setRead(organizationId, mailboxId, messageId, read),
+    mutationFn: ({ messageId, ...input }: { messageId: number } & UpdateMailMessageInput) =>
+      mailboxService.updateMessage(organizationId, mailboxId, messageId, input),
     meta: LOCAL_ERROR_HANDLING_META,
     onSuccess: message => {
       queryClient.setQueryData(mailboxKeys.message(organizationId, mailboxId, message.id), message);
     },
-    // Read state changes the unread count shown in the mailbox list.
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: mailboxKeys.messages(organizationId, mailboxId),
-        }),
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
-        invalidateLog(queryClient, organizationId, false),
-      ]),
+    // Read state and placement change the counts and the unread count in the mailbox list.
+    onSettled: () => invalidateMail(queryClient, organizationId, mailboxId),
+  });
+}
+
+/** One change for 1 to 100 messages; a thread row sends its `thread.message_ids`. */
+export function useUpdateMailMessages(organizationId: number, mailboxId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateMailMessagesInput) =>
+      mailboxService.updateMessages(organizationId, mailboxId, input),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: () => invalidateMail(queryClient, organizationId, mailboxId),
+  });
+}
+
+/** Deletes everything in the trash for good; needs `organize`. */
+export function usePurgeMailTrash(organizationId: number, mailboxId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => mailboxService.purgeTrash(organizationId, mailboxId),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: () => invalidateMail(queryClient, organizationId, mailboxId, true),
   });
 }
 
@@ -286,16 +355,14 @@ export function useMarkMailMessageRead(organizationId: number) {
       queryClient.setQueryData(mailboxKeys.message(organizationId, mailboxId, message.id), message);
     },
     onSettled: (_message, _error, { mailboxId }) =>
-      Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: mailboxKeys.messages(organizationId, mailboxId),
-        }),
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
-        invalidateLog(queryClient, organizationId, false),
-      ]),
+      invalidateMail(queryClient, organizationId, mailboxId),
   });
 }
 
+/**
+ * Moves a message to the trash, or deletes one already there for good (`organize`). Either way it
+ * leaves the counts and, when unread in the Inbox, the unread count in the mailbox list.
+ */
 export function useDeleteMailMessage(organizationId: number, mailboxId: number) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -307,16 +374,141 @@ export function useDeleteMailMessage(organizationId: number, mailboxId: number) 
         queryKey: mailboxKeys.message(organizationId, mailboxId, messageId),
       });
     },
-    // Deleting an unread message lowers the unread count shown in the mailbox list.
+    onSettled: () => invalidateMail(queryClient, organizationId, mailboxId, true),
+  });
+}
+
+/**
+ * One page of a mailbox listing with the organize filters; `group: 'thread'` lists one row per
+ * thread of a placement view.
+ */
+export function useMailMessageList(
+  organizationId: number,
+  mailboxId: number,
+  filters: MailMessageFilters,
+  page: number
+) {
+  return useQuery({
+    queryKey: mailboxKeys.filteredPage(organizationId, mailboxId, filters, page),
+    queryFn: () =>
+      mailboxService.messages(organizationId, mailboxId, {
+        ...filters,
+        page,
+        perPage: MAIL_PAGE_SIZE,
+      }),
+    enabled: validId(organizationId) && validId(mailboxId),
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+/** A thread's messages outside the trash, oldest first; only asked for once one is open. */
+export function useMailThread(organizationId: number, mailboxId: number, threadId: number | null) {
+  return useQuery({
+    queryKey: mailboxKeys.thread(organizationId, mailboxId, threadId ?? 0),
+    queryFn: () => mailboxService.getThread(organizationId, mailboxId, threadId ?? 0),
+    enabled: validId(organizationId) && validId(mailboxId) && threadId !== null,
+    staleTime: 15_000,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+/** The caller's own unread and starred counts for the mailbox's navigation. */
+export function useMailMessageCounts(organizationId: number, mailboxId: number, enabled = true) {
+  return useQuery({
+    queryKey: mailboxKeys.counts(organizationId, mailboxId),
+    queryFn: () => mailboxService.getMessageCounts(organizationId, mailboxId),
+    enabled: enabled && validId(organizationId) && validId(mailboxId),
+    staleTime: 15_000,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+export function useMailFolders(organizationId: number, mailboxId: number, enabled = true) {
+  return useQuery({
+    queryKey: mailboxKeys.folders(organizationId, mailboxId),
+    queryFn: () => mailboxService.listFolders(organizationId, mailboxId),
+    enabled: enabled && validId(organizationId) && validId(mailboxId),
+    staleTime: 60_000,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+export function useMailLabels(organizationId: number, mailboxId: number, enabled = true) {
+  return useQuery({
+    queryKey: mailboxKeys.labels(organizationId, mailboxId),
+    queryFn: () => mailboxService.listLabels(organizationId, mailboxId),
+    enabled: enabled && validId(organizationId) && validId(mailboxId),
+    staleTime: 60_000,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+/**
+ * Folder and label changes need `organize`. Deleting a folder moves its mail to `default` and
+ * deleting a label removes it from every message, so the mail is refreshed with them.
+ */
+function useOrganizeMutation<Variables, Result>(
+  organizationId: number,
+  mailboxId: number,
+  kind: 'folders' | 'labels',
+  mutationFn: (variables: Variables) => Promise<Result>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    meta: LOCAL_ERROR_HANDLING_META,
     onSettled: () =>
       Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: mailboxKeys.messages(organizationId, mailboxId),
-        }),
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
-        invalidateLog(queryClient, organizationId),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys[kind](organizationId, mailboxId) }),
+        invalidateMail(queryClient, organizationId, mailboxId),
       ]),
   });
+}
+
+export function useCreateMailFolder(organizationId: number, mailboxId: number) {
+  return useOrganizeMutation(organizationId, mailboxId, 'folders', (input: MailFolderInput) =>
+    mailboxService.createFolder(organizationId, mailboxId, input)
+  );
+}
+
+export function useRenameMailFolder(organizationId: number, mailboxId: number) {
+  return useOrganizeMutation(
+    organizationId,
+    mailboxId,
+    'folders',
+    ({ folderId, ...input }: { folderId: number } & MailFolderInput) =>
+      mailboxService.renameFolder(organizationId, mailboxId, folderId, input)
+  );
+}
+
+export function useDeleteMailFolder(organizationId: number, mailboxId: number) {
+  return useOrganizeMutation(organizationId, mailboxId, 'folders', (folderId: number) =>
+    mailboxService.deleteFolder(organizationId, mailboxId, folderId)
+  );
+}
+
+export function useCreateMailLabel(organizationId: number, mailboxId: number) {
+  return useOrganizeMutation(organizationId, mailboxId, 'labels', (input: MailLabelInput) =>
+    mailboxService.createLabel(organizationId, mailboxId, input)
+  );
+}
+
+export function useUpdateMailLabel(organizationId: number, mailboxId: number) {
+  return useOrganizeMutation(
+    organizationId,
+    mailboxId,
+    'labels',
+    ({ labelId, ...input }: { labelId: number } & MailLabelInput) =>
+      mailboxService.updateLabel(organizationId, mailboxId, labelId, input)
+  );
+}
+
+export function useDeleteMailLabel(organizationId: number, mailboxId: number) {
+  return useOrganizeMutation(organizationId, mailboxId, 'labels', (labelId: number) =>
+    mailboxService.deleteLabel(organizationId, mailboxId, labelId)
+  );
 }
 
 export const MAILBOX_ACCESS_EVENTS_PAGE_SIZE = 20;

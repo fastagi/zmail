@@ -34,6 +34,17 @@ export const MAIL_BODY_MAX_BYTES = 256 * 1_024;
 export const MAIL_MESSAGE_ID_MAX_LENGTH = 900;
 export const MAIL_PAGE_MAX_SIZE = 100;
 export const MAIL_LOG_QUERY_MAX_LENGTH = 200;
+/** A mailbox search is at most this many characters as sent, then trimmed and not empty. */
+export const MAIL_SEARCH_MAX_LENGTH = 200;
+export const MAIL_FOLDER_NAME_MAX_LENGTH = 64;
+export const MAIL_LABEL_NAME_MAX_LENGTH = 64;
+export const MAIL_FOLDERS_MAX_PER_MAILBOX = 100;
+export const MAIL_LABELS_MAX_PER_MAILBOX = 100;
+/** The most messages one `message-updates` call or one `label_ids` set names. */
+export const MAIL_MESSAGE_UPDATES_MAX_IDS = 100;
+/** A thread lists at most its latest messages; a thread row names at most this many ids. */
+export const MAIL_THREAD_MAX_MESSAGES = 100;
+export const MAIL_TRASH_RETENTION_DAYS = 30;
 export const MAIL_STATS_DEFAULT_DAYS = 7;
 export const MAIL_STATS_MAX_DAYS = 90;
 export const MAIL_MAX_ATTACHMENTS = 10;
@@ -171,6 +182,8 @@ export const mailboxAccessSchema = strictObject({
   manage_members: boolean(),
   administer: boolean(),
   see_history: boolean(),
+  // Delete mail for good, empty the trash, and arrange folders and labels.
+  organize: boolean(),
 });
 
 export const mailboxSchema = strictObject({
@@ -193,7 +206,40 @@ export const mailboxListSchema = array(mailboxSchema);
 
 const mailAddressSchema = strictObject({ address: string(), name: string() });
 
-const summaryShape = {
+/** Where a message is; `default` is the Inbox for inbound and Sent for outbound mail. */
+export const mailPlacementSchema = union([
+  literal('default'),
+  literal('archive'),
+  literal('folder'),
+  literal('trash'),
+]);
+export const MAIL_PLACEMENTS = ['default', 'archive', 'folder', 'trash'] as const;
+
+export const mailLabelColorSchema = union([
+  literal('gray'),
+  literal('red'),
+  literal('orange'),
+  literal('yellow'),
+  literal('green'),
+  literal('teal'),
+  literal('blue'),
+  literal('purple'),
+  literal('pink'),
+]);
+export const MAIL_LABEL_COLORS = [
+  'gray',
+  'red',
+  'orange',
+  'yellow',
+  'green',
+  'teal',
+  'blue',
+  'purple',
+  'pink',
+] as const;
+
+/** The fields every listing shares, the log included. */
+const logSummaryShape = {
   id: safeIdSchema,
   mailbox_id: safeIdSchema,
   direction: mailDirectionSchema,
@@ -212,6 +258,27 @@ const summaryShape = {
   created_at: timestampSchema,
 };
 
+/** Placement, labels, and the thread are shared; `starred` and `read` are the caller's own. */
+const organizeShape = {
+  placement: mailPlacementSchema,
+  folder_id: nullable(safeIdSchema),
+  label_ids: array(safeIdSchema),
+  starred: boolean(),
+  thread_id: safeIdSchema,
+  trashed_at: nullable(timestampSchema),
+};
+
+/** With `group=thread`: the thread's messages in the listed view only. */
+export const mailThreadSummarySchema = strictObject({
+  message_count: positiveIntegerSchema,
+  message_ids: array(safeIdSchema),
+  unread: boolean(),
+  starred: boolean(),
+  label_ids: array(safeIdSchema),
+});
+
+const summaryShape = { ...logSummaryShape, ...organizeShape };
+
 /** An attached file as listed in a message; the bytes are downloaded separately. */
 export const mailAttachmentSchema = strictObject({
   id: safeIdSchema,
@@ -228,7 +295,10 @@ export const mailEventSchema = strictObject({
   occurred_at: timestampSchema,
 });
 
-export const mailMessageSummarySchema = strictObject(summaryShape);
+export const mailMessageSummarySchema = strictObject({
+  ...summaryShape,
+  thread: optional(mailThreadSummarySchema),
+});
 
 export const mailMessageSchema = strictObject({
   ...summaryShape,
@@ -265,7 +335,7 @@ export const mailMessagePageEnvelopeSchema = strictObject({
 });
 
 /** A log entry is a summary plus the address of the mailbox that owns it. */
-export const mailLogEntrySchema = strictObject({ ...summaryShape, mailbox_address: string() });
+export const mailLogEntrySchema = strictObject({ ...logSummaryShape, mailbox_address: string() });
 
 export const mailLogPageEnvelopeSchema = strictObject({
   code: literal(0),
@@ -274,6 +344,37 @@ export const mailLogPageEnvelopeSchema = strictObject({
   meta: pageMetaSchema,
   links: pageLinksSchema,
 });
+
+/** A thread's messages outside the trash, oldest first, with their bodies. */
+export const mailThreadSchema = array(mailMessageSchema);
+
+export const mailFolderSchema = strictObject({
+  id: safeIdSchema,
+  name: string(),
+  created_at: timestampSchema,
+});
+export const mailFolderListSchema = array(mailFolderSchema);
+
+export const mailLabelSchema = strictObject({
+  id: safeIdSchema,
+  name: string(),
+  color: mailLabelColorSchema,
+  created_at: timestampSchema,
+});
+export const mailLabelListSchema = array(mailLabelSchema);
+
+/** The caller's own counts for a mailbox's navigation; the trash and sealed mail never count. */
+export const mailMessageCountsSchema = strictObject({
+  placements: strictObject({
+    default_inbound_unread: nonnegativeIntegerSchema,
+    archive_unread: nonnegativeIntegerSchema,
+  }),
+  folders: array(strictObject({ folder_id: safeIdSchema, unread: nonnegativeIntegerSchema })),
+  starred: nonnegativeIntegerSchema,
+});
+
+export const mailMessageUpdatesResultSchema = strictObject({ updated: nonnegativeIntegerSchema });
+export const mailTrashPurgeSchema = strictObject({ deleted: nonnegativeIntegerSchema });
 
 /** One UTC calendar day of the statistics window. */
 export const mailDayStatsSchema = strictObject({
@@ -618,7 +719,29 @@ export const mailBroadcastSendInputSchema = strictObject({
   scheduled_at: optional(nullable(string())),
 });
 
-export const updateMailMessageSchema = strictObject({ read: boolean() });
+/** At least one field; `folder_id` goes only with `placement` `folder`. */
+export const updateMailMessageSchema = strictObject({
+  read: optional(boolean()),
+  starred: optional(boolean()),
+  placement: optional(mailPlacementSchema),
+  folder_id: optional(safeIdSchema),
+  // The complete set of the message's labels, replacing the current one.
+  label_ids: optional(array(safeIdSchema)),
+});
+
+/** One change for 1 to 100 messages; a label may not be both added and removed. */
+export const updateMailMessagesSchema = strictObject({
+  message_ids: array(safeIdSchema),
+  read: optional(boolean()),
+  starred: optional(boolean()),
+  placement: optional(mailPlacementSchema),
+  folder_id: optional(safeIdSchema),
+  add_label_ids: optional(array(safeIdSchema)),
+  remove_label_ids: optional(array(safeIdSchema)),
+});
+
+export const mailFolderInputSchema = strictObject({ name: string() });
+export const mailLabelInputSchema = strictObject({ name: string(), color: mailLabelColorSchema });
 
 export type NormalizedLocalPart =
   { ok: true; value: string } | { ok: false; reason: 'invalid' | 'reserved' };

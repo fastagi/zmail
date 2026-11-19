@@ -40,6 +40,8 @@ import {
   MAIL_TEMPLATE_DESIGN_MAX_BYTES,
   MAIL_LOG_QUERY_MAX_LENGTH,
   MAIL_MAX_RECIPIENTS,
+  MAIL_PLACEMENTS,
+  MAIL_SEARCH_MAX_LENGTH,
   MAIL_MESSAGE_ID_MAX_LENGTH,
   MAIL_PAGE_MAX_SIZE,
   MAIL_STATS_DEFAULT_DAYS,
@@ -70,6 +72,9 @@ import {
   type MockAccessResult,
   type MockMailSendResult,
   type MockMailTemplateResult,
+  type MockMessageChange,
+  type MockOrganizeError,
+  type MockOrganizeResult,
 } from '@/features/mailbox/server/mock-mailbox-store';
 import { mockOrganizationStore } from '@/features/organization/server/mock-organization-store';
 import { parseOrganizationId } from '@/features/organization/server/organization-route';
@@ -78,6 +83,8 @@ import type {
   CreateMailboxInput,
   MailDirection,
   MailLogFilters,
+  MailMessageFilters,
+  MailPlacement,
   MailStatus,
   MailBroadcastInput,
   MailRecipientStatus,
@@ -133,7 +140,8 @@ type Parsed<T> = { ok: true; value: T } | { ok: false; response: NextResponse };
 const routeIdPattern = /^[1-9]\d{0,15}$/u;
 const defaultPerPage = 15;
 const maxMailboxBodyBytes = 8 * 1_024;
-const maxReadStateBodyBytes = 1_024;
+const maxMessageChangeBodyBytes = 16 * 1_024;
+const maxOrganizeBodyBytes = 4 * 1_024;
 const maxAccessBodyBytes = 1_024;
 // Two 256 KiB bodies and 4 MiB of files as base64; JSON escaping needs headroom.
 const maxSendBodyBytes = 8 * 1_024 * 1_024;
@@ -408,8 +416,8 @@ export async function listMailMessagesRoute(
   const mailboxId = parseRouteId(rawMailboxId);
   if (!mailboxId.ok) return mailboxId.response;
   const query = new URL(request.url).searchParams;
-  const direction = parseDirection(query.getAll('direction'));
-  if (!direction.ok) return direction.response;
+  const filters = parseMessageFilters(query);
+  if (!filters.ok) return filters.response;
   const page = positiveInteger(query.get('page'), 1);
   const perPage = Math.min(
     positiveInteger(query.get('per_page'), defaultPerPage),
@@ -417,9 +425,9 @@ export async function listMailMessagesRoute(
   );
 
   if (target.backend === 'go-api') {
-    // Only these three parameters reach the API; anything else in the query is dropped.
+    // Only the documented parameters reach the API; anything else in the query is dropped.
     const searchParams = new URLSearchParams({ page: String(page), per_page: String(perPage) });
-    if (direction.value !== null) searchParams.set('direction', direction.value);
+    for (const [name, value] of messageFilterParams(filters.value)) searchParams.set(name, value);
     return forwardAuthenticatedGoApi(request, {
       method: 'GET',
       path: `mailboxes/${mailboxId.value}/messages`,
@@ -432,12 +440,12 @@ export async function listMailMessagesRoute(
     target.organizationId,
     mailboxId.value,
     viewerOf(target),
-    direction.value,
+    filters.value,
     page,
     perPage
   );
-  if (!result.ok) return missing(result.error);
-  const { items, meta, links } = result.page;
+  if (!result.ok) return organizeFailure(result);
+  const { items, meta, links } = result.value;
   return apiPaginatedResponse(items, meta, links, privateMailboxHeaders());
 }
 
@@ -1467,6 +1475,7 @@ function attachmentHeaders(filename: string): Headers {
   return headers;
 }
 
+/** Read state and star for the caller; placement, folder, and labels for everyone. */
 export async function updateMailMessageRoute(
   request: Request,
   rawMailboxId: string,
@@ -1476,7 +1485,7 @@ export async function updateMailMessageRoute(
   if (!target.available) return target.response;
   const ids = parseMessageIds(rawMailboxId, rawMessageId);
   if (!ids.ok) return ids.response;
-  const input = await readStateBody(request);
+  const input = await messageChangeBody(request, false);
   if (!input.ok) return input.response;
 
   if (target.backend === 'go-api') {
@@ -1485,20 +1494,369 @@ export async function updateMailMessageRoute(
       path: `mailboxes/${ids.value.mailboxId}/messages/${ids.value.messageId}`,
       accessToken: target.accessToken,
       organizationId: String(target.organizationId),
-      body: input.value,
-      fieldMap: { read: 'read' },
+      body: input.value.change,
+      fieldMap: messageChangeFieldMap,
     });
   }
-  const result = mockMailboxStore.setRead(
-    target.organizationId,
-    ids.value.mailboxId,
-    ids.value.messageId,
-    viewerOf(target),
-    input.value.read
+  return organizeResponse(
+    mockMailboxStore.updateMessage(
+      target.organizationId,
+      ids.value.mailboxId,
+      ids.value.messageId,
+      viewerOf(target),
+      input.value.change
+    )
   );
-  return result.ok ? success(result.message) : missing(result.error);
 }
 
+/** One change for 1 to 100 messages of the mailbox, applied all or nothing. */
+export async function updateMailMessagesRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const input = await messageChangeBody(request, true);
+  if (!input.ok) return input.response;
+  const messageIds = input.value.messageIds ?? [];
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mailboxes/${mailboxId.value}/message-updates`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { message_ids: messageIds, ...input.value.change },
+      fieldMap: messageChangeFieldMap,
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.updateMessages(
+      target.organizationId,
+      mailboxId.value,
+      viewerOf(target),
+      messageIds,
+      input.value.change
+    )
+  );
+}
+
+/** Deletes every message in the trash for good; needs `organize`. */
+export async function purgeMailTrashRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+
+  if (target.backend === 'go-api') {
+    // The API reads no body here, so none is forwarded.
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mailboxes/${mailboxId.value}/trash-purges`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.purgeTrash(target.organizationId, mailboxId.value, viewerOf(target))
+  );
+}
+
+/** A thread's messages outside the trash, oldest first, with their bodies. */
+export async function getMailThreadRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawThreadId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawThreadId);
+  if (!ids.ok) return ids.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${ids.value.mailboxId}/threads/${ids.value.messageId}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.thread(
+      target.organizationId,
+      ids.value.mailboxId,
+      ids.value.messageId,
+      viewerOf(target)
+    )
+  );
+}
+
+/** The caller's own unread and starred counts for the mailbox's navigation. */
+export async function getMailMessageCountsRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${mailboxId.value}/message-counts`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.counts(target.organizationId, mailboxId.value, viewerOf(target))
+  );
+}
+
+export async function listMailFoldersRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${mailboxId.value}/mail-folders`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.folders(target.organizationId, mailboxId.value, viewerOf(target))
+  );
+}
+
+/** Creates a folder; needs `organize`. */
+export async function createMailFolderRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const input = await organizeBody(request, false);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mailboxes/${mailboxId.value}/mail-folders`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { name: input.value.name },
+      fieldMap: organizeFieldMap,
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.saveFolder(
+      target.organizationId,
+      mailboxId.value,
+      viewerOf(target),
+      input.value.name
+    ),
+    201
+  );
+}
+
+/** Renames a folder; needs `organize`. */
+export async function renameMailFolderRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawFolderId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawFolderId);
+  if (!ids.ok) return ids.response;
+  const input = await organizeBody(request, false);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mailboxes/${ids.value.mailboxId}/mail-folders/${ids.value.messageId}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { name: input.value.name },
+      fieldMap: organizeFieldMap,
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.saveFolder(
+      target.organizationId,
+      ids.value.mailboxId,
+      viewerOf(target),
+      input.value.name,
+      ids.value.messageId
+    )
+  );
+}
+
+/** Deletes a folder; its messages return to `default`. Needs `organize`. */
+export async function deleteMailFolderRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawFolderId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawFolderId);
+  if (!ids.ok) return ids.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mailboxes/${ids.value.mailboxId}/mail-folders/${ids.value.messageId}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const result = mockMailboxStore.deleteFolder(
+    target.organizationId,
+    ids.value.mailboxId,
+    viewerOf(target),
+    ids.value.messageId
+  );
+  return result.ok ? apiNoContentResponse(privateMailboxHeaders()) : organizeFailure(result);
+}
+
+export async function listMailLabelsRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${mailboxId.value}/mail-labels`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.labels(target.organizationId, mailboxId.value, viewerOf(target))
+  );
+}
+
+/** Creates a label; needs `organize`. */
+export async function createMailLabelRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const input = await organizeBody(request, true);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mailboxes/${mailboxId.value}/mail-labels`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: organizeFieldMap,
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.saveLabel(
+      target.organizationId,
+      mailboxId.value,
+      viewerOf(target),
+      input.value
+    ),
+    201
+  );
+}
+
+/** Replaces the name and color of a label; needs `organize`. */
+export async function updateMailLabelRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawLabelId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawLabelId);
+  if (!ids.ok) return ids.response;
+  const input = await organizeBody(request, true);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mailboxes/${ids.value.mailboxId}/mail-labels/${ids.value.messageId}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: organizeFieldMap,
+    });
+  }
+  return organizeResponse(
+    mockMailboxStore.saveLabel(
+      target.organizationId,
+      ids.value.mailboxId,
+      viewerOf(target),
+      input.value,
+      ids.value.messageId
+    )
+  );
+}
+
+/** Deletes a label and removes it from every message; needs `organize`. */
+export async function deleteMailLabelRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawLabelId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawLabelId);
+  if (!ids.ok) return ids.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mailboxes/${ids.value.mailboxId}/mail-labels/${ids.value.messageId}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const result = mockMailboxStore.deleteLabel(
+    target.organizationId,
+    ids.value.mailboxId,
+    viewerOf(target),
+    ids.value.messageId
+  );
+  return result.ok ? apiNoContentResponse(privateMailboxHeaders()) : organizeFailure(result);
+}
+
+/**
+ * Outside the trash this moves the message there (`send`); in the trash it deletes the message
+ * for good (`organize`).
+ */
 export async function deleteMailMessageRoute(
   request: Request,
   rawMailboxId: string,
@@ -1769,6 +2127,40 @@ function accessFailure(error: MockAccessError): NextResponse {
       return mailboxNotFound();
     default:
       return missing(error);
+  }
+}
+
+function organizeResponse<T>(result: MockOrganizeResult<T>, status: 200 | 201 = 200): NextResponse {
+  return result.ok ? success(result.value, status) : organizeFailure(result);
+}
+
+function organizeFailure(
+  result:
+    | { ok: false; error: MockOrganizeError }
+    | { ok: false; error: 'validation'; fields: Record<string, string[]> }
+): NextResponse {
+  if (result.error === 'validation' && 'fields' in result) return validationFailed(result.fields);
+  switch (result.error) {
+    case 'folder_not_found':
+      return failure(404, ApiErrorCode.MAILBOX_FOLDER_NOT_FOUND, 'Mail folder not found');
+    case 'label_not_found':
+      return failure(404, ApiErrorCode.MAILBOX_LABEL_NOT_FOUND, 'Mail label not found');
+    case 'folder_name_taken':
+      return failure(409, ApiErrorCode.MAILBOX_FOLDER_NAME_TAKEN, 'Mail folder name is taken');
+    case 'label_name_taken':
+      return failure(409, ApiErrorCode.MAILBOX_LABEL_NAME_TAKEN, 'Mail label name is taken');
+    case 'folder_limit':
+      return failure(422, ApiErrorCode.MAILBOX_FOLDER_LIMIT_REACHED, 'Mail folder limit reached');
+    case 'label_limit':
+      return failure(422, ApiErrorCode.MAILBOX_LABEL_LIMIT_REACHED, 'Mail label limit reached');
+    case 'search_too_broad':
+      return failure(422, ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 'Search is too broad');
+    case 'mailbox_not_found':
+    case 'forbidden':
+    case 'not_found':
+      return missing(result.error);
+    default:
+      return validationFailed({});
   }
 }
 
@@ -2129,14 +2521,96 @@ function attachmentList(value: unknown): value is AttachmentInput[] {
   );
 }
 
-async function readStateBody(request: Request): Promise<Parsed<{ read: boolean }>> {
-  const body = await jsonObject(request, maxReadStateBodyBytes);
+/** Upstream field errors of the message change routes, under the same keys. */
+const messageChangeFieldMap = {
+  change: 'change',
+  message_ids: 'message_ids',
+  read: 'read',
+  starred: 'starred',
+  placement: 'placement',
+  folder_id: 'folder_id',
+  label_ids: 'label_ids',
+  add_label_ids: 'add_label_ids',
+  remove_label_ids: 'remove_label_ids',
+} as const;
+
+const organizeFieldMap = { name: 'name', color: 'color' } as const;
+
+/**
+ * Shape checks only: each field the right JSON type, ids non-negative integers. Whether the
+ * change is complete, the folder rule, the id counts, and the placement value are judged by the
+ * API or the mock after access and lookups, as the contract orders them. Unknown keys and nulls
+ * are dropped.
+ */
+async function messageChangeBody(
+  request: Request,
+  batch: boolean
+): Promise<Parsed<{ messageIds?: number[]; change: MockMessageChange }>> {
+  const body = await jsonObject(request, maxMessageChangeBodyBytes);
   if (!body.ok) return body;
-  const { read } = body.value;
-  if (typeof read !== 'boolean') {
-    return { ok: false, response: validationFailed({ read: ['The read field is required'] }) };
+  const value = body.value;
+  const errors: Record<string, string[]> = {};
+  const present = (key: string) => value[key] !== undefined && value[key] !== null;
+  const change: MockMessageChange = {};
+  for (const key of ['read', 'starred'] as const) {
+    if (!present(key)) continue;
+    if (typeof value[key] === 'boolean') change[key] = value[key];
+    else errors[key] = [`The ${key} field must be a boolean`];
   }
-  return { ok: true, value: { read } };
+  if (present('placement')) {
+    if (boundedString(value.placement, 32)) change.placement = value.placement;
+    else errors.placement = ['The placement field must be a string'];
+  }
+  if (present('folder_id')) {
+    if (routeIdOrZero(value.folder_id)) change.folder_id = value.folder_id;
+    else errors.folder_id = ['The folder_id field must be an id'];
+  }
+  const lists = batch ? (['add_label_ids', 'remove_label_ids'] as const) : (['label_ids'] as const);
+  for (const key of lists) {
+    if (!present(key)) continue;
+    if (idList(value[key])) change[key] = value[key];
+    else errors[key] = [`The ${key} field must be a list of ids`];
+  }
+  let messageIds: number[] | undefined;
+  if (batch) {
+    if (idList(value.message_ids)) messageIds = value.message_ids;
+    else errors.message_ids = ['The message_ids field must be a list of ids'];
+  }
+  if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
+  return { ok: true, value: { messageIds, change } };
+}
+
+/** A folder `{ name }` or a label `{ name, color }`; a missing string is sent as empty. */
+async function organizeBody(
+  request: Request,
+  withColor: true
+): Promise<Parsed<{ name: string; color: string }>>;
+async function organizeBody(request: Request, withColor: false): Promise<Parsed<{ name: string }>>;
+async function organizeBody(
+  request: Request,
+  withColor: boolean
+): Promise<Parsed<{ name: string; color?: string }>> {
+  const body = await jsonObject(request, maxOrganizeBodyBytes);
+  if (!body.ok) return body;
+  const { name = '', color = '' } = body.value;
+  const errors: Record<string, string[]> = {};
+  if (typeof name !== 'string') errors.name = ['The name field must be a string'];
+  if (withColor && typeof color !== 'string') errors.color = ['The color field must be a string'];
+  if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
+  return {
+    ok: true,
+    value: withColor ? { name: name as string, color: color as string } : { name: name as string },
+  };
+}
+
+/** A JSON id the API can bind; zero is left to the backend's own rule. */
+function routeIdOrZero(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Bounded so a list cannot grow past what the API would read; counts are judged upstream. */
+function idList(value: unknown): value is number[] {
+  return Array.isArray(value) && value.length <= 1_000 && value.every(routeIdOrZero);
 }
 
 function boundedString(value: unknown, maxLength: number): value is string {
@@ -2169,14 +2643,118 @@ function parseMessageIds(
   return { ok: true, value: { mailboxId: mailboxId.value, messageId: messageId.value } };
 }
 
-/** Absent means every message; any value other than the two folders is invalid input. */
-function parseDirection(values: string[]): Parsed<MailDirection | null> {
-  if (values.length === 0) return { ok: true, value: null };
-  const [value] = values;
-  if (values.length === 1 && (value === 'inbound' || value === 'outbound')) {
-    return { ok: true, value };
+/**
+ * The listing's query, as `contracts/MAILBOXES.md` allows it: each parameter at most once, known
+ * values only, `folder_id` exactly with `placement=folder`, a search of at most 200 characters as
+ * sent that is not empty after trimming and not in the trash, and `group=thread` only for
+ * placement views. Anything else is invalid input; the API checks the same again.
+ */
+function parseMessageFilters(query: URLSearchParams): Parsed<MailMessageFilters> {
+  const invalid = (message: string): Parsed<MailMessageFilters> => ({
+    ok: false,
+    response: invalidInput(message),
+  });
+  const names = [
+    'direction',
+    'placement',
+    'folder_id',
+    'label_id',
+    'starred',
+    'unread',
+    'has_attachments',
+    'q',
+    'group',
+  ];
+  for (const name of names) {
+    if (query.getAll(name).length > 1) return invalid(`Repeated ${name} filter`);
   }
-  return { ok: false, response: invalidInput('Invalid message direction') };
+  const filters: MailMessageFilters = {};
+  const direction = query.get('direction');
+  if (direction !== null) {
+    if (!isOneOf(logDirections, direction)) return invalid('Invalid message direction');
+    filters.direction = direction;
+  }
+  const placement = query.get('placement');
+  if (placement !== null) {
+    if (!isOneOf<MailPlacement>(MAIL_PLACEMENTS, placement)) return invalid('Invalid placement');
+    filters.placement = placement;
+  }
+  for (const [name, key] of [
+    ['folder_id', 'folderId'],
+    ['label_id', 'labelId'],
+  ] as const) {
+    const raw = query.get(name);
+    if (raw === null) continue;
+    const id = parseRouteId(raw);
+    if (!id.ok) return invalid(`Invalid ${name} filter`);
+    filters[key] = id.value;
+  }
+  for (const [name, key] of [
+    ['starred', 'starred'],
+    ['unread', 'unread'],
+    ['has_attachments', 'hasAttachments'],
+  ] as const) {
+    const raw = query.get(name);
+    if (raw === null) continue;
+    if (raw !== 'true' && raw !== 'false') return invalid(`Invalid ${name} filter`);
+    filters[key] = raw === 'true';
+  }
+  const rawSearch = query.get('q');
+  if (rawSearch !== null) {
+    const q = rawSearch.trim();
+    if (q === '' || Array.from(rawSearch).length > MAIL_SEARCH_MAX_LENGTH) {
+      return invalid('Invalid search');
+    }
+    filters.q = q;
+  }
+  const group = query.get('group');
+  if (group !== null) {
+    if (group !== 'thread') return invalid('Invalid grouping');
+    filters.group = group;
+  }
+
+  if ((filters.placement === 'folder') !== (filters.folderId !== undefined)) {
+    return invalid('folder_id goes exactly with placement=folder');
+  }
+  if (filters.q !== undefined && filters.placement === 'trash') {
+    return invalid('The trash cannot be searched');
+  }
+  if (filters.group === 'thread') {
+    const view = filters.placement;
+    if (view !== 'default' && view !== 'archive' && view !== 'folder') {
+      return invalid('group=thread needs a placement view');
+    }
+    if (view === 'default' && filters.direction === undefined) {
+      return invalid('group=thread on default needs direction');
+    }
+    if (
+      filters.labelId !== undefined ||
+      filters.starred !== undefined ||
+      filters.unread !== undefined ||
+      filters.hasAttachments !== undefined ||
+      filters.q !== undefined
+    ) {
+      return invalid('group=thread lists placement views only');
+    }
+  }
+  return { ok: true, value: filters };
+}
+
+/** The filters as the API's query, in a fixed order. */
+function messageFilterParams(filters: MailMessageFilters): [string, string][] {
+  const params: [string, string][] = [];
+  if (filters.direction) params.push(['direction', filters.direction]);
+  if (filters.placement) params.push(['placement', filters.placement]);
+  if (filters.folderId !== undefined) params.push(['folder_id', String(filters.folderId)]);
+  if (filters.labelId !== undefined) params.push(['label_id', String(filters.labelId)]);
+  if (filters.starred !== undefined) params.push(['starred', String(filters.starred)]);
+  if (filters.unread !== undefined) params.push(['unread', String(filters.unread)]);
+  if (filters.hasAttachments !== undefined) {
+    params.push(['has_attachments', String(filters.hasAttachments)]);
+  }
+  if (filters.q !== undefined) params.push(['q', filters.q]);
+  if (filters.group) params.push(['group', filters.group]);
+  return params;
 }
 
 const logDirections: readonly MailDirection[] = ['inbound', 'outbound'];

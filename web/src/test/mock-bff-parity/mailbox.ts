@@ -33,6 +33,7 @@ export async function runServiceParity(context: { organizationId: number }): Pro
     manage_members: true,
     administer: true,
     see_history: true,
+    organize: true,
   });
   expect(mailbox.address).toBe(`parity@${domain.domain}`);
   expect((await mailboxService.list(organizationId)).map(item => item.id)).toEqual([mailbox.id]);
@@ -74,6 +75,67 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   expect(sent.items.map(item => item.id)).toEqual([second.id]);
   expect(sent.items[0].last_event).toBe('delivered');
   expect(sent.meta).toMatchObject({ total: 2, last_page: 2 });
+
+  // Placements, stars, folders, labels, threads, counts, search, and the trash.
+  expect(second.thread_id).toBe(welcome.id);
+  const folder = await mailboxService.createFolder(organizationId, mailbox.id, { name: 'Kept' });
+  expect(
+    await mailboxService.renameFolder(organizationId, mailbox.id, folder.id, { name: 'Saved' })
+  ).toMatchObject({ id: folder.id, name: 'Saved' });
+  expect(await mailboxService.listFolders(organizationId, mailbox.id)).toHaveLength(1);
+  const label = await mailboxService.createLabel(organizationId, mailbox.id, {
+    name: 'Urgent',
+    color: 'red',
+  });
+  expect(
+    await mailboxService.updateLabel(organizationId, mailbox.id, label.id, {
+      name: 'Later',
+      color: 'blue',
+    })
+  ).toMatchObject({ id: label.id, color: 'blue' });
+  expect(await mailboxService.listLabels(organizationId, mailbox.id)).toHaveLength(1);
+  expect(
+    await mailboxService.updateMessage(organizationId, mailbox.id, welcome.id, {
+      starred: true,
+      placement: 'folder',
+      folder_id: folder.id,
+      label_ids: [label.id],
+    })
+  ).toMatchObject({
+    starred: true,
+    placement: 'folder',
+    folder_id: folder.id,
+    label_ids: [label.id],
+  });
+  expect(
+    await mailboxService.updateMessages(organizationId, mailbox.id, {
+      message_ids: [first.id, second.id],
+      placement: 'archive',
+      add_label_ids: [label.id],
+    })
+  ).toEqual({ updated: 2 });
+  const archived = await mailboxService.messages(organizationId, mailbox.id, {
+    placement: 'archive',
+    group: 'thread',
+  });
+  expect(archived.items.map(item => item.thread?.message_count)).toEqual([1, 1]);
+  expect(
+    (await mailboxService.messages(organizationId, mailbox.id, { q: 'second' })).items
+  ).toHaveLength(1);
+  expect(
+    (await mailboxService.getThread(organizationId, mailbox.id, welcome.id)).map(item => item.id)
+  ).toEqual([welcome.id, second.id]);
+  expect(await mailboxService.getMessageCounts(organizationId, mailbox.id)).toEqual({
+    placements: { default_inbound_unread: 0, archive_unread: 0 },
+    folders: [{ folder_id: folder.id, unread: 0 }],
+    starred: 1,
+  });
+  await mailboxService.deleteLabel(organizationId, mailbox.id, label.id);
+  await mailboxService.deleteFolder(organizationId, mailbox.id, folder.id);
+  await mailboxService.updateMessages(organizationId, mailbox.id, {
+    message_ids: [first.id, second.id],
+    placement: 'default',
+  });
 
   // The log spans every mailbox, names the owner of each entry, and filters like the API.
   const other = await mailboxService.create(organizationId, {
@@ -141,7 +203,9 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   ).toEqual({ deleted_messages: 1, deleted_broadcasts: 0 });
 
   await mailboxService.remove(organizationId, other.id);
+  // The first delete moves the message to the trash; emptying the trash deletes it for good.
   await mailboxService.removeMessage(organizationId, mailbox.id, first.id);
+  expect(await mailboxService.purgeTrash(organizationId, mailbox.id)).toEqual({ deleted: 1 });
   await mailboxService.remove(organizationId, mailbox.id);
   expect(await mailboxService.list(organizationId)).toEqual([]);
 }
