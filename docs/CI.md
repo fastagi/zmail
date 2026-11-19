@@ -10,7 +10,7 @@ compatible with supported runners, and reviewable without trusting a movable act
 | `ci.yml` | Root governance, OpenAPI lint/generation/route/breaking gates, API build/lint/test/runtime-route/race gates, PostgreSQL 15-18 compatibility, plus Next.js Web and Admin Console type/lint/test/build gates | `contents: read` |
 | `container.yml` | API image identity, smoke test, SBOM/scan evidence, and local Compose lifecycle | `contents: read` |
 | `e2e.yml` | Starts PostgreSQL, the API, and one browser shell with `make dev`, then runs Playwright smoke tests: the operator flow in the Admin Console and sign-in through the API adapter in the Web application | `contents: read` |
-| `perf.yml` | Weekly and on demand: a release build against PostgreSQL under the k6 baseline, failing when a hot path leaves its p95 or error budget; k6 is a checksum-pinned release | `contents: read` |
+| `perf.yml` | On demand: a release build against PostgreSQL under the k6 baseline, failing when a hot path leaves its p95 or error budget; k6 is a checksum-pinned release | `contents: read` |
 | `dependency-security.yml` | Scheduled and change-triggered OSV lockfile scan plus CycloneDX SBOM artifact | `contents: read` |
 | `release.yml` | On a `vX.Y.Z` tag: requires the tag on `main` with a changelog section, builds and scans the API, Web, and Admin images, attests the SBOMs, and publishes the GitHub release | `contents: read`; the job elevates to `contents: write`, `id-token: write`, `attestations: write` |
 | `skill-self-test.yml` | Starter-module skill validators in one job (Skill metadata is validated by `make governance`) | `contents: read` |
@@ -25,32 +25,30 @@ permission-policy entry in `check-ci-actions.py` and a role in the table above.
 
 ## When Checks Run
 
-A pull request runs only what its change can break; everything else runs after merge, weekly,
-and before a release, so coverage is unchanged while a typical pull request runs five to eight checks.
-Draft pull requests run nothing: open a draft while iterating, and checks start when it is marked
-ready for review. Scheduled runs happen once a week, on Monday between 02:41 and 05:17 UTC.
+CI is kept to a minimal pull request gate so it never stalls delivery. A pull request runs only the
+halves it changes; nothing reruns after merge and nothing runs on a schedule. Draft pull requests run
+nothing: open a draft while iterating, and checks start when it is marked ready for review.
 
-| Check | Pull request (not draft) | Push to `main` | Weekly | Release tag |
-|---|---|---|---|---|
-| Governance | Always | Yes | Yes | Via `make release-check` |
-| HTTP contracts, API (PostgreSQL 16), Web, Admin | When `contracts/`, `api/`, `web/`, `admin/`, `registry/`, or CI changes, per area | Yes | Yes | Via `make release-check` |
-| Web and Admin on Node 24 | No | Yes | Yes | Via `make release-check` |
-| PostgreSQL 15, 17, 18 compatibility | No | Yes | Yes | — |
-| Initialized project (`scripts/verify-init-project.sh`; passes without running in a checkout that is already an initialized project) | When `project:init`, ignore rules, root docs, or repository scripts change | Yes | Yes | — |
-| API, Web, and Admin containers | When an image input changes (Dockerfile, dependency manifests, container scripts) | No | Yes | Built and scanned by `release.yml` |
-| End-to-end | When a browser shell, sign-in, the operator flow, or the dev stack changes | No | Yes | — |
-| Dependency security | When a dependency manifest changes | No | Yes | — |
-| Skill self-test | When starter modules or skills change | No | — | — |
-| Plugins | When the registry or plugin machinery changes | No | Yes | — |
-| Performance baseline | — | — | Yes | — |
+| Check | Pull request (not draft) | Manual run (`workflow_dispatch`) | Release tag |
+|---|---|---|---|
+| Governance (inside the Changed areas job) | Always | Yes | Via `make release-check` |
+| API and HTTP contracts (PostgreSQL 16) | When `api/`, `contracts/`, `Makefile`, or CI changes | Yes | Via `make release-check` |
+| Web, Admin (Node 22) | When `web/`, `admin/`, `contracts/`, or CI changes, per area | Yes | Via `make release-check` |
+| Web and Admin on Node 24, PostgreSQL 15, 17, 18 compatibility | No | Yes (`ci.yml`) | — |
+| API, Web, and Admin containers | No | Yes (own workflows) | Built and scanned by `release.yml` |
+| End-to-end, dependency security, plugins, skill self-test, performance | No | Yes (own workflows) | — |
 
-Every workflow also has `workflow_dispatch`, so any check can be run on demand from the Actions tab.
-A scheduled failure is fixed like a failing pull request: open a fix before the next release.
+Run the manual workflows from the Actions tab before a risky dependency, container, or sign-in change
+lands, and before cutting a release. The initialized-project check is not part of CI; run
+`scripts/verify-init-project.sh` by hand when changing what `project:init` produces.
 
 ## Runner Contract
 
 Workflows default to `ubuntu-latest`. An installation may set repository variable
-`CI_RUNNER_LABELS` to a JSON array of labels for a compatible self-hosted runner.
+`CI_RUNNER_LABELS` to a JSON array of labels for a compatible self-hosted runner. On a runner
+host shared by several repositories, give the repository its own pool label (for example
+`["self-hosted","fe5-zmail"]`) with its own runner cap, so its jobs do not queue behind other
+repositories.
 
 The reviewed JavaScript actions use the Node 24 action runtime. Self-hosted runners must run GitHub
 Actions Runner `v2.327.1` or newer. `actions/checkout` intentionally remains on the latest reviewed
@@ -98,7 +96,9 @@ the real configured runtime, emits schema-versioned JSON, validates its closed s
 and requires core plus default-starter routes. Route inventory therefore cannot pass CI from a
 parallel source parser that omits health, conditional metrics, or optional starter registration.
 
-The complete API gate runs on PostgreSQL 16. A separate compatibility matrix uses immutable images
+The complete API gate runs on PostgreSQL 16. Every CI PostgreSQL service keeps its data directory
+on tmpfs: test databases are disposable, and disk writes on the shared self-hosted runners made the
+API job take more than 20 minutes. A separate compatibility matrix uses immutable images
 for PostgreSQL 15, 17, and 18 and runs `make test-postgres-compatibility`. That focused command owns
 migrations, repositories, transaction and locking behavior, optional starter persistence, and
 PostgreSQL durable tasks without repeating unrelated browser or pure-Go checks. On every supported

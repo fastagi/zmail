@@ -6,19 +6,8 @@ name: End-to-End
 
 # Pull requests run this when a browser shell, sign-in, the operator flow, or the dev stack
 # changes; the whole stack runs weekly.
+# Manual only: CI keeps the pull request gate minimal. Run from the Actions tab when needed.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "admin/**"
-      - "web/**"
-      - "api/internal/modules/user/**"
-      - "api/internal/modules/operator/**"
-      - "scripts/dev.sh"
-      - "compose.dev.yaml"
-      - ".github/workflows/e2e.yml"
-  schedule:
-    - cron: "37 3 * * 1"
   workflow_dispatch:
 
 permissions:
