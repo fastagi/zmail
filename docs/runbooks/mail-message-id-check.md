@@ -32,7 +32,7 @@ threading logic, not what the provider puts on the wire.
    SELECT m.id, m.rfc_message_id, m.message_id AS provider_message_id, m.status, m.created_at
    FROM mail_messages m
    JOIN mailboxes b ON b.id = m.mailbox_id
-   WHERE b.address = '<mailbox address>'
+   WHERE lower(b.address) = lower('<mailbox address>')
      AND m.direction = 'outbound'
      AND m.subject = '<the unique subject>'
    ORDER BY m.id DESC

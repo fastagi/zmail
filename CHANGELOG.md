@@ -8,6 +8,18 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Mailbox organize.** Every message has a placement: `default` (Inbox or Sent), `archive`,
+  a mailbox `folder`, or `trash`, where it is deleted for good after 30 days by
+  `mail:broadcast:work`. Mailboxes gain up to 100 shared folders and 100 shared colored labels
+  (`/v1/mailboxes/{mailbox_id}/mail-folders` and `/mail-labels`), per-person stars, conversation
+  threads (`group=thread` on the message list and `GET /v1/mailboxes/{mailbox_id}/threads/{thread_id}`),
+  updates of up to 100 messages at once (`POST .../message-updates`), emptying the trash
+  (`POST .../trash-purges`), and unread and starred counts per placement and folder
+  (`GET .../message-counts`). Messages gain `placement`, `folder_id`, `label_ids`, `starred`,
+  `thread_id`, and `trashed_at`; mailboxes gain `access.organize`. Outbound mail carries its own
+  `Message-ID` and the `References` of the message it answers. Migrations
+  `2026_11_21_090000_add_mail_organize` (requires `pg_trgm`) and
+  `2026_11_21_090100_backfill_mail_threads`.
 - **Message search and unread filter in a mailbox.** `GET /v1/mailboxes/{mailbox_id}/messages`
   takes `q` and `unread`. `q` matches the subject, the sender address and name, the `to` and `cc`
   addresses, and the text body, outside the trash; a search the database cannot finish within 2
@@ -37,6 +49,18 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
   page describes Zmail, drops the inactive GitHub button, and replaces sign-up with an invitation
   hint when the web runs with `AUTH_REGISTRATION_ENABLED=false`; `/register` then redirects to
   `/login`.
+
+### Changed
+
+- **Deleting a message moves it to the trash.** `DELETE /v1/mailboxes/{mailbox_id}/messages/{message_id}`
+  trashes a message (needs `send`); only a message already in the trash is deleted for good (needs
+  `organize`), as is everything in the trash on `POST .../trash-purges`.
+- **`unread_count` counts only the Inbox.** A mailbox's `unread_count` counts inbound mail in the
+  `default` placement that the caller has not read; archived, foldered, and trashed mail no longer
+  counts.
+- **A failed background refresh keeps the mailbox on screen.** When a poll of the list or of an open
+  message fails, the console keeps what it showed with a short notice instead of replacing it with
+  an error.
 
 ### Fixed
 

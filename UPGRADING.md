@@ -11,6 +11,87 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mailbox organize
+
+### High — `DELETE` on a message moves it to the trash
+
+`DELETE /v1/mailboxes/:mailbox_id/messages/:message_id` no longer erases a message. The first call
+moves it to the trash (`placement: "trash"`, `trashed_at` set; needs `send`), and the message stays
+there for 30 days unless it is restored. Only a message that is already in the trash is deleted for
+good by `DELETE` (needs `organize`), and `POST /v1/mailboxes/:mailbox_id/trash-purges` empties the
+whole trash (needs `organize`). Code that used `DELETE` to erase mail, for retention or privacy,
+calls it twice or empties the trash afterwards. Trashing a message that waits for the send limit
+cancels its send (`failed`, `send.canceled`); restoring it does not send it.
+
+`organize` is a new flag in `access`: the owner of a personal mailbox and `manage` members of a
+shared one have it. Organization owners and admins do not get it from their role.
+
+### High — Run `mail:broadcast:work` to purge the trash
+
+`fastbuild mail:broadcast:work` now also deletes trash older than 30 days, with what is left of each
+batch after waiting sends and broadcast recipients. Without the worker, the trash is never purged.
+Run it wherever the API runs, as `api/docs/DEPLOYMENT.md` describes, even if no broadcasts are sent.
+
+### High — The migration needs `pg_trgm` and locks `mail_messages` while it builds indexes
+
+Run migrations: `2026_11_21_090000_add_mail_organize` adds placements, folders, labels, stars, and
+threading columns, and `2026_11_21_090100_backfill_mail_threads` threads the existing mail. The
+first one:
+
+- runs `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public`. The migration role needs the
+  CREATE privilege on the database (`pg_trgm` is a trusted extension from PostgreSQL 13), or an
+  operator with the rights creates the extension beforehand. On managed PostgreSQL, allow the
+  extension first if the provider lists extensions.
+- builds six trigram GIN indexes, including one on `text_body`, inside the migration's single
+  transaction. On a large `mail_messages` table this blocks inbound delivery and sends until the
+  build ends.
+
+A large installation builds the trigram indexes beforehand, without blocking writes, and the
+migration then skips them (it creates each one with `IF NOT EXISTS`). Run this before the migration,
+outside a transaction (each `CONCURRENTLY` statement on its own), as a role that may create the
+extension and owns `mail_messages`:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_trgm_subject
+  ON mail_messages USING gin (subject public.gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_trgm_from_address
+  ON mail_messages USING gin (from_address public.gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_trgm_from_name
+  ON mail_messages USING gin (from_name public.gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_trgm_to_addresses
+  ON mail_messages USING gin (to_addresses public.gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_trgm_cc_addresses
+  ON mail_messages USING gin (cc_addresses public.gin_trgm_ops);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_trgm_text_body
+  ON mail_messages USING gin (text_body public.gin_trgm_ops);
+```
+
+If a `CONCURRENTLY` build fails, it leaves an invalid index of that name, which the migration would
+then skip; drop it (`DROP INDEX CONCURRENTLY idx_mail_messages_trgm_<column>;`) and build it again
+before migrating. The other new indexes (`idx_mail_messages_threads`, `_rfc_message_id`, `_trash`,
+`_folder`) are on columns the migration adds, so they are built inside it; they are B-tree indexes
+and build much faster than the trigram ones.
+
+### Medium — `unread_count` counts only the Inbox
+
+A mailbox's `unread_count` is the number of inbound messages in the `default` placement (the Inbox)
+that the caller has not read. Archived messages, messages in a folder, and messages in the trash no
+longer count. `GET /v1/mailboxes/:mailbox_id/message-counts` gives the unread counts of the other
+placements and folders and the starred count.
+
+### Medium — Deploy the API before the web app
+
+The web app requires `placement`, `folder_id`, `label_ids`, `starred`, `thread_id`, and
+`trashed_at` on every message and `access.organize` on every mailbox, and fails to read message lists
+and mailboxes from an API that does not send them yet.
+
+### Low — Search in Chinese and other non-Latin scripts depends on the database locale
+
+`pg_trgm` takes trigrams from non-ASCII text only when the database's `LC_CTYPE` classifies those
+characters as letters (for example `en_US.UTF-8` or `C.UTF-8`). Under the `C` locale such searches
+cannot use the trigram indexes and a large mailbox can answer `422 MAILBOX.SEARCH_TOO_BROAD`.
+
 ## Unreleased — Queued sends at the send limit
 
 ### High — A send at the limit answers `202` and waits instead of `429`
