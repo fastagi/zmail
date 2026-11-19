@@ -342,12 +342,17 @@ func TestInboxRefusesQueriesItDoesNotServe(t *testing.T) {
 	f := newInboxFixture(t)
 	ctx := context.Background()
 	base := domain.InboxQuery{MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, View: domain.InboxViewAll, Limit: 10}
+	today := func(q *domain.InboxQuery) {
+		q.View, q.DayStart, q.DayEnd = domain.InboxViewToday, minutes(0), minutes(24*60)
+	}
 	refused := map[string]func(*domain.InboxQuery){
-		"unknown view": func(q *domain.InboxQuery) { q.View = "bogus" },
-		"today":        func(q *domain.InboxQuery) { q.View = domain.InboxViewToday },
-		"pending":      func(q *domain.InboxQuery) { q.View = domain.InboxViewPending },
-		"unread":       func(q *domain.InboxQuery) { q.Unread = boolPtr(true) },
-		"search":       func(q *domain.InboxQuery) { q.Query = "quote" },
+		"unknown view":          func(q *domain.InboxQuery) { q.View = "bogus" },
+		"today without its day": func(q *domain.InboxQuery) { q.View = domain.InboxViewToday },
+		"search outside all":    func(q *domain.InboxQuery) { q.View, q.Query = domain.InboxViewSent, "quote" },
+		"grouped today":         func(q *domain.InboxQuery) { today(q); q.GroupThreads = true },
+		"grouped pending":       func(q *domain.InboxQuery) { q.View, q.GroupThreads = domain.InboxViewPending, true },
+		"grouped unread":        func(q *domain.InboxQuery) { q.Unread, q.GroupThreads = boolPtr(true), true },
+		"grouped search":        func(q *domain.InboxQuery) { q.Query, q.GroupThreads = "quote", true },
 	}
 	for name, change := range refused {
 		query := base
@@ -364,5 +369,330 @@ func TestInboxRefusesQueriesItDoesNotServe(t *testing.T) {
 	}
 	if _, err := (&repository{}).ListInbox(ctx, base); !errors.Is(err, domain.ErrServiceUnavailable) {
 		t.Fatalf("ListInbox without a database error = %v; want ErrServiceUnavailable", err)
+	}
+}
+
+// trash moves messages to the trash directly, as the retention tests do.
+func (f *accessFixture) trash(t *testing.T, ids ...uint) {
+	t.Helper()
+	if err := f.inboxRepo().db.Exec(`UPDATE mail_messages SET placement = 'trash', trashed_at = now() WHERE id IN ?`, ids).Error; err != nil {
+		t.Fatalf("trash messages %v: %v", ids, err)
+	}
+}
+
+// seal hides the mailbox's messages created before at.
+func (f *accessFixture) seal(t *testing.T, mailbox *domain.Mailbox, at time.Time) {
+	t.Helper()
+	if err := f.inboxRepo().db.Exec(`UPDATE mailboxes SET sealed_before = ? WHERE id = ?`, at, mailbox.ID).Error; err != nil {
+		t.Fatalf("seal mailbox %d: %v", mailbox.ID, err)
+	}
+}
+
+// queue marks outbound messages as waiting for the send limit, as a send over the limit would.
+func (f *accessFixture) queue(t *testing.T, ids ...uint) {
+	t.Helper()
+	if err := f.inboxRepo().db.Exec(`UPDATE mail_messages SET status = 'queued', queued_reason = 'send_limit' WHERE id IN ?`, ids).Error; err != nil {
+		t.Fatalf("queue messages %v: %v", ids, err)
+	}
+}
+
+// pages lists the query page by page, limit rows at a time, and returns every row in order.
+func (f *accessFixture) pages(t *testing.T, query domain.InboxQuery, limit int) []uint {
+	t.Helper()
+	query.Limit = limit
+	ids := []uint{}
+	for range 20 {
+		rows := f.inbox(t, query)
+		ids = append(ids, idsOf(rows)...)
+		if len(rows) < limit {
+			return ids
+		}
+		last := rows[len(rows)-1]
+		query.After = &domain.InboxCursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	t.Fatalf("paging %+v never ended", query)
+	return nil
+}
+
+func TestInboxTodayIncludesArchivedNotTrash(t *testing.T) {
+	f := newInboxFixture(t)
+	dayStart, dayEnd := minutes(60), minutes(60+24*60)
+	f.deliverAt(t, f.team, delivery{subject: "yesterday"}, minutes(30))
+	atStart := f.deliverAt(t, f.team, delivery{subject: "at start"}, dayStart)
+	archived := f.deliverAt(t, f.team, delivery{subject: "archived"}, minutes(90))
+	trashed := f.deliverAt(t, f.team, delivery{subject: "trashed"}, minutes(100))
+	folder := f.folder(t, f.e, f.team.ID, "Invoices")
+	filed := f.deliverAt(t, f.team, delivery{subject: "filed"}, minutes(110))
+	mine := f.deliverAt(t, f.personal, delivery{subject: "mine"}, minutes(120))
+	f.sendAt(t, f.team, "sent today", minutes(130))
+	f.deliverAt(t, f.team, delivery{subject: "at end"}, dayEnd)
+	f.move(t, domain.MailPlacementArchive, 0, archived.ID)
+	f.move(t, domain.MailPlacementFolder, folder.ID, filed.ID)
+	f.trash(t, trashed.ID)
+
+	query := domain.InboxQuery{
+		MailboxIDs: []uint{f.personal.ID, f.team.ID}, MembershipID: f.b.MembershipID,
+		View: domain.InboxViewToday, DayStart: dayStart, DayEnd: dayEnd, Limit: 10,
+	}
+	expectIDs(t, "today", idsOf(f.inbox(t, query)), mine.ID, filed.ID, archived.ID, atStart.ID)
+	expectIDs(t, "today page by page", f.pages(t, query, 1), mine.ID, filed.ID, archived.ID, atStart.ID)
+
+	query.Unread = boolPtr(true)
+	f.change(t, f.b, f.team.ID, MessageUpdate{Read: boolPtr(true)}, archived.ID)
+	expectIDs(t, "today unread", idsOf(f.inbox(t, query)), mine.ID, filed.ID, atStart.ID)
+}
+
+func TestInboxPendingIsMyStarsOutsideArchiveAndTrash(t *testing.T) {
+	f := newInboxFixture(t)
+	starredIn := f.deliverAt(t, f.team, delivery{subject: "in"}, minutes(1))
+	starredOut := f.sendAt(t, f.team, "out", minutes(2))
+	folder := f.folder(t, f.e, f.team.ID, "Invoices")
+	starredFiled := f.deliverAt(t, f.team, delivery{subject: "filed"}, minutes(3))
+	starredArchived := f.deliverAt(t, f.team, delivery{subject: "archived"}, minutes(4))
+	starredTrashed := f.deliverAt(t, f.team, delivery{subject: "trashed"}, minutes(5))
+	theirs := f.deliverAt(t, f.team, delivery{subject: "their star"}, minutes(6))
+	f.deliverAt(t, f.team, delivery{subject: "not starred"}, minutes(7))
+	star := MessageUpdate{Starred: boolPtr(true)}
+	f.change(t, f.c, f.team.ID, star, starredIn.ID, starredOut.ID, starredFiled.ID, starredArchived.ID, starredTrashed.ID, f.teamMessage.ID)
+	f.change(t, f.b, f.team.ID, star, theirs.ID)
+	f.move(t, domain.MailPlacementFolder, folder.ID, starredFiled.ID)
+	f.move(t, domain.MailPlacementArchive, 0, starredArchived.ID)
+	f.trash(t, starredTrashed.ID)
+	// The seal hides the starred seeded message.
+	f.seal(t, f.team, inboxBase)
+
+	query := domain.InboxQuery{MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, View: domain.InboxViewPending, Limit: 10}
+	expectIDs(t, "pending", idsOf(f.inbox(t, query)), starredFiled.ID, starredOut.ID, starredIn.ID)
+	expectIDs(t, "pending page by page", f.pages(t, query, 2), starredFiled.ID, starredOut.ID, starredIn.ID)
+
+	// A star in a mailbox outside the given ids never lists.
+	query.MailboxIDs = []uint{f.personal.ID}
+	expectIDs(t, "pending outside the mailboxes", idsOf(f.inbox(t, query)))
+}
+
+func TestInboxSearchSpansPlacementsButTrash(t *testing.T) {
+	f := newInboxFixture(t)
+	alpha := f.deliverAt(t, f.team, delivery{subject: "Quote alpha"}, minutes(1))
+	beta := f.deliverAt(t, f.team, delivery{subject: "Quote beta"}, minutes(2))
+	folder := f.folder(t, f.e, f.team.ID, "Invoices")
+	gamma := f.deliverAt(t, f.team, delivery{subject: "Quote gamma"}, minutes(3))
+	delta := f.sendAt(t, f.team, "Quote delta", minutes(4))
+	trashed := f.deliverAt(t, f.team, delivery{subject: "Quote trashed"}, minutes(5))
+	f.deliverAt(t, f.team, delivery{subject: "Other"}, minutes(6))
+	f.deliverAt(t, f.personal, delivery{subject: "Quote elsewhere"}, minutes(7))
+	f.move(t, domain.MailPlacementArchive, 0, beta.ID)
+	f.move(t, domain.MailPlacementFolder, folder.ID, gamma.ID)
+	f.trash(t, trashed.ID)
+
+	query := domain.InboxQuery{MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, View: domain.InboxViewAll, Query: "quote", Limit: 10}
+	expectIDs(t, "search", idsOf(f.inbox(t, query)), delta.ID, gamma.ID, beta.ID, alpha.ID)
+	expectIDs(t, "search page by page", f.pages(t, query, 3), delta.ID, gamma.ID, beta.ID, alpha.ID)
+
+	f.change(t, f.c, f.team.ID, MessageUpdate{Read: boolPtr(true)}, alpha.ID)
+	query.Unread = boolPtr(true)
+	expectIDs(t, "unread search", idsOf(f.inbox(t, query)), gamma.ID, beta.ID)
+	query.Unread = boolPtr(false)
+	expectIDs(t, "read search", idsOf(f.inbox(t, query)), delta.ID, alpha.ID)
+
+	// The search text matches literally: a wildcard matches only itself.
+	query.Unread, query.Query = nil, "%"
+	expectIDs(t, "wildcard search", idsOf(f.inbox(t, query)))
+}
+
+func TestInboxSearchTimeoutIsTooBroad(t *testing.T) {
+	f := newInboxFixture(t)
+	repo := f.inboxRepo()
+	widenPool(t, repo.db, 4)
+	repo.searchTimeout = 50 * time.Millisecond
+
+	holder := repo.db.Begin()
+	// A failing assertion must still release the table, or dropping the test schema waits forever.
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			if err := holder.Rollback().Error; err != nil {
+				t.Errorf("release mail_messages: %v", err)
+			}
+		}
+	}
+	t.Cleanup(release)
+	if err := holder.Exec(`LOCK TABLE mail_messages IN ACCESS EXCLUSIVE MODE`).Error; err != nil {
+		t.Fatalf("lock mail_messages: %v", err)
+	}
+	query := domain.InboxQuery{MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, View: domain.InboxViewAll, Query: "Team", Limit: 10}
+	_, err := repo.ListInbox(context.Background(), query)
+	expectError(t, "an inbox search that times out", err, ErrMailSearchTooBroad)
+	release()
+
+	expectIDs(t, "the same search once the table is free", idsOf(f.inbox(t, query)), f.teamMessage.ID)
+}
+
+func TestInboxUnreadNeverListsOutbound(t *testing.T) {
+	f := newInboxFixture(t)
+	unread := f.deliverAt(t, f.team, delivery{subject: "unread"}, minutes(1))
+	read := f.deliverAt(t, f.team, delivery{subject: "read"}, minutes(2))
+	sent := f.sendAt(t, f.team, "sent", minutes(3))
+	f.change(t, f.c, f.team.ID, MessageUpdate{Read: boolPtr(true)}, read.ID, f.teamMessage.ID)
+	f.change(t, f.c, f.team.ID, MessageUpdate{Starred: boolPtr(true)}, unread.ID, read.ID, sent.ID)
+
+	base := domain.InboxQuery{MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, Limit: 10}
+	cases := []struct {
+		name   string
+		view   domain.InboxView
+		unread bool
+		want   []uint
+	}{
+		{"all unread", domain.InboxViewAll, true, []uint{unread.ID}},
+		{"all read", domain.InboxViewAll, false, []uint{read.ID, f.teamMessage.ID}},
+		{"today unread", domain.InboxViewToday, true, []uint{unread.ID}},
+		{"pending unread", domain.InboxViewPending, true, []uint{unread.ID}},
+		{"pending read", domain.InboxViewPending, false, []uint{sent.ID, read.ID}},
+		{"sent unread", domain.InboxViewSent, true, nil},
+		{"sent read", domain.InboxViewSent, false, []uint{sent.ID}},
+	}
+	for _, tc := range cases {
+		query := base
+		query.View, query.Unread = tc.view, boolPtr(tc.unread)
+		if tc.view == domain.InboxViewToday {
+			query.DayStart, query.DayEnd = minutes(0), minutes(24*60)
+		}
+		expectIDs(t, tc.name, idsOf(f.inbox(t, query)), tc.want...)
+	}
+}
+
+func TestInboxCountUnreadOnlyGivenMailboxes(t *testing.T) {
+	f := newInboxFixture(t)
+	ctx := context.Background()
+	repo := f.inboxRepo()
+	createOwner(t, repo.db, 99)
+	foreign := &domain.Mailbox{OrganizationID: 99, Address: "foreign@mail.example", Type: domain.MailboxTypeShared}
+	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
+		t.Fatalf("create foreign mailbox: %v", err)
+	}
+	f.deliver(t, foreign, delivery{subject: "foreign"})
+	f.deliver(t, f.personal, delivery{subject: "mine"})
+
+	counts, err := repo.CountUnreadByMailboxIDs(ctx, accessOrg, f.b.MembershipID, []uint{f.personal.ID, foreign.ID})
+	if err != nil {
+		t.Fatalf("CountUnreadByMailboxIDs: %v", err)
+	}
+	if len(counts) != 1 || counts[f.personal.ID] != 2 {
+		t.Fatalf("counts = %v; want only b@ with 2", counts)
+	}
+
+	counts, err = repo.CountUnreadByMailboxIDs(ctx, accessOrg, f.b.MembershipID, []uint{f.team.ID})
+	if err != nil {
+		t.Fatalf("CountUnreadByMailboxIDs: %v", err)
+	}
+	if len(counts) != 1 || counts[f.team.ID] != 1 {
+		t.Fatalf("counts = %v; want only team@ with 1", counts)
+	}
+
+	empty, err := (&repository{}).CountUnreadByMailboxIDs(ctx, 1, 1, nil)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("CountUnreadByMailboxIDs(nil) = %v, %v; want an empty map", empty, err)
+	}
+	if _, err := (&repository{}).CountUnreadByMailboxIDs(ctx, 1, 1, []uint{1}); !errors.Is(err, domain.ErrServiceUnavailable) {
+		t.Fatalf("CountUnreadByMailboxIDs without a database error = %v; want ErrServiceUnavailable", err)
+	}
+}
+
+func TestInboxCountUnreadMatchesListMailboxes(t *testing.T) {
+	f := newInboxFixture(t)
+	ctx := context.Background()
+	repo := f.inboxRepo()
+	folder := f.folder(t, f.e, f.team.ID, "Invoices")
+	read := f.deliverAt(t, f.team, delivery{subject: "read by C"}, minutes(1))
+	archived := f.deliverAt(t, f.team, delivery{subject: "archived"}, minutes(2))
+	filed := f.deliverAt(t, f.team, delivery{subject: "filed"}, minutes(3))
+	trashed := f.deliverAt(t, f.team, delivery{subject: "trashed"}, minutes(4))
+	f.deliverAt(t, f.team, delivery{subject: "unread"}, minutes(5))
+	f.sendAt(t, f.team, "sent", minutes(6))
+	f.deliverAt(t, f.personal, delivery{subject: "mine"}, minutes(7))
+	f.change(t, f.c, f.team.ID, MessageUpdate{Read: boolPtr(true)}, read.ID)
+	f.move(t, domain.MailPlacementArchive, 0, archived.ID)
+	f.move(t, domain.MailPlacementFolder, folder.ID, filed.ID)
+	f.trash(t, trashed.ID)
+	f.seal(t, f.team, inboxBase)
+
+	for _, viewer := range []domain.OrganizationContext{f.b, f.c} {
+		listed, err := repo.ListMailboxes(ctx, accessOrg, viewer.MembershipID)
+		if err != nil {
+			t.Fatalf("ListMailboxes: %v", err)
+		}
+		ids := make([]uint, 0, len(listed))
+		for _, mailbox := range listed {
+			ids = append(ids, mailbox.ID)
+		}
+		counts, err := repo.CountUnreadByMailboxIDs(ctx, accessOrg, viewer.MembershipID, ids)
+		if err != nil {
+			t.Fatalf("CountUnreadByMailboxIDs: %v", err)
+		}
+		for _, mailbox := range listed {
+			if counts[mailbox.ID] != mailbox.UnreadCount {
+				t.Fatalf("membership %d, mailbox %d: count %d; ListMailboxes has %d",
+					viewer.MembershipID, mailbox.ID, counts[mailbox.ID], mailbox.UnreadCount)
+			}
+		}
+	}
+	counts, err := repo.CountUnreadByMailboxIDs(ctx, accessOrg, f.c.MembershipID, []uint{f.team.ID})
+	if err != nil || counts[f.team.ID] != 1 {
+		t.Fatalf("C's team@ count = %v, %v; want 1, the unread Inbox message after the seal", counts, err)
+	}
+}
+
+func TestInboxCountViews(t *testing.T) {
+	f := newInboxFixture(t)
+	ctx := context.Background()
+	repo := f.inboxRepo()
+	dayStart, dayEnd := minutes(60), minutes(60+24*60)
+	ids := []uint{f.personal.ID, f.team.ID}
+
+	// Today: inbound outside the trash within [dayStart, dayEnd).
+	f.deliverAt(t, f.team, delivery{subject: "yesterday"}, minutes(30))
+	unread := f.deliverAt(t, f.team, delivery{subject: "unread"}, dayStart)
+	read := f.deliverAt(t, f.team, delivery{subject: "read"}, minutes(70))
+	archived := f.deliverAt(t, f.team, delivery{subject: "archived"}, minutes(80))
+	trashed := f.deliverAt(t, f.team, delivery{subject: "trashed"}, minutes(90))
+	f.deliverAt(t, f.personal, delivery{subject: "mine"}, minutes(100))
+	sent := f.sendAt(t, f.team, "sent today", minutes(110))
+	f.deliverAt(t, f.team, delivery{subject: "tomorrow"}, dayEnd)
+	f.change(t, f.b, f.team.ID, MessageUpdate{Read: boolPtr(true)}, read.ID)
+	f.move(t, domain.MailPlacementArchive, 0, archived.ID)
+	f.trash(t, trashed.ID)
+
+	// Pending: B's stars outside the archive and the trash, either direction, unsealed.
+	f.change(t, f.b, f.team.ID, MessageUpdate{Starred: boolPtr(true)}, unread.ID, sent.ID, archived.ID, f.teamMessage.ID)
+	f.change(t, f.c, f.team.ID, MessageUpdate{Starred: boolPtr(true)}, read.ID)
+
+	// Waiting: queued for the send limit and unsealed.
+	waitingTeam := f.sendAt(t, f.team, "waiting", minutes(120))
+	waitingMine := f.sendAt(t, f.personal, "waiting mine", minutes(130))
+	sealedWaiting := f.sendAt(t, f.team, "sealed waiting", inboxBase.Add(-30*time.Minute))
+	f.queue(t, waitingTeam.ID, waitingMine.ID, sealedWaiting.ID)
+	f.seal(t, f.team, inboxBase)
+
+	counts, err := repo.CountInboxViews(ctx, f.b.MembershipID, ids, dayStart, dayEnd)
+	if err != nil {
+		t.Fatalf("CountInboxViews: %v", err)
+	}
+	want := domain.InboxViewCounts{Today: 4, TodayUnread: 3, Pending: 2, SentWaiting: 2}
+	if counts != want {
+		t.Fatalf("counts = %+v; want %+v", counts, want)
+	}
+
+	counts, err = repo.CountInboxViews(ctx, f.b.MembershipID, []uint{f.personal.ID}, dayStart, dayEnd)
+	if err != nil {
+		t.Fatalf("CountInboxViews: %v", err)
+	}
+	want = domain.InboxViewCounts{Today: 1, TodayUnread: 1, Pending: 0, SentWaiting: 1}
+	if counts != want {
+		t.Fatalf("b@ counts = %+v; want %+v", counts, want)
+	}
+
+	empty, err := (&repository{}).CountInboxViews(ctx, 1, nil, dayStart, dayEnd)
+	if err != nil || empty != (domain.InboxViewCounts{}) {
+		t.Fatalf("CountInboxViews(nil) = %+v, %v; want zero counts", empty, err)
 	}
 }
