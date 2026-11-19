@@ -224,7 +224,7 @@ describe('unified inbox', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the unified inbox by default and the mailbox workspace for ?mailbox=', () => {
+  it('renders the unified inbox by default and the mailbox workspace for ?mailbox=', async () => {
     // A remembered mailbox no longer takes a bare /console/mailboxes to that mailbox.
     window.localStorage.setItem('zmail.mailbox.1', '2');
     const { unmount } = renderRoute();
@@ -252,7 +252,8 @@ describe('unified inbox', () => {
 
     window.history.replaceState(null, '', '/console/mailboxes?mailbox=2');
     renderRoute();
-    expect(screen.getByTestId('mailbox-workspace')).toBeInTheDocument();
+    // The mailbox workspace loads on demand.
+    expect(await screen.findByTestId('mailbox-workspace')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 1, name: 'Inbox' })).not.toBeInTheDocument();
   });
 
@@ -740,7 +741,8 @@ describe('unified inbox', () => {
     renderRoute();
 
     fireEvent.click(within(groupsNav()).getByRole('button', { name: 'Manage roles' }));
-    const dialog = screen.getByRole('dialog', { name: 'Manage roles' });
+    // The dialog loads when it is first opened.
+    const dialog = await screen.findByRole('dialog', { name: 'Manage roles' });
     const form = within(dialog).getByRole('form', { name: 'New role' });
     const name = within(form).getByRole('textbox', { name: 'Name' });
 
@@ -787,7 +789,7 @@ describe('unified inbox', () => {
     renderRoute();
 
     fireEvent.click(screen.getByRole('button', { name: 'Manage mailboxes' }));
-    const select = screen.getByRole('combobox', { name: 'Role of hello@mail.example.com' });
+    const select = await screen.findByRole('combobox', { name: 'Role of hello@mail.example.com' });
     expect(select).toHaveValue('');
     await act(async () => {
       fireEvent.change(select, { target: { value: '3' } });

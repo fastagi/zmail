@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AlertCircle, Inbox, Mail, MailOpen, Settings2 } from 'lucide-react';
@@ -22,10 +22,7 @@ import {
   type InboxReaderNavigation,
 } from '@/features/mailbox/components/inbox-reading-pane';
 import { InboxSidebar, type InboxRoleFilter } from '@/features/mailbox/components/inbox-sidebar';
-import { MailboxAccessPanel } from '@/features/mailbox/components/mailbox-access-panel';
-import { MAILBOX_PARAM } from '@/features/mailbox/components/mailbox-workspace';
-import { ManageMailboxesDialog } from '@/features/mailbox/components/manage-mailboxes-dialog';
-import { ManageRolesDialog } from '@/features/mailbox/components/manage-roles-dialog';
+import { MAILBOX_PARAM } from '@/features/mailbox/components/mailbox-params';
 import {
   MailOrganizationBoundary,
   MailPageHeader,
@@ -61,6 +58,20 @@ import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
+
+// Administration dialogs load when opened, not with the mail page.
+const ManageRolesDialog = lazy(async () => {
+  const feature = await import('@/features/mailbox/components/manage-roles-dialog');
+  return { default: feature.ManageRolesDialog };
+});
+const ManageMailboxesDialog = lazy(async () => {
+  const feature = await import('@/features/mailbox/components/manage-mailboxes-dialog');
+  return { default: feature.ManageMailboxesDialog };
+});
+const MailboxAccessPanel = lazy(async () => {
+  const feature = await import('@/features/mailbox/components/mailbox-access-panel');
+  return { default: feature.MailboxAccessPanel };
+});
 
 /** Query parameter naming the open row of the unified inbox, so a reload keeps it open. */
 export const OPEN_PARAM = 'open';
@@ -493,7 +504,9 @@ function UnifiedInbox({ canManage }: { canManage: boolean }) {
       </div>
 
       {canManage && managingRoles ? (
-        <ManageRolesDialog open onOpenChange={open => setManagingRoles(open)} />
+        <Suspense fallback={null}>
+          <ManageRolesDialog open onOpenChange={open => setManagingRoles(open)} />
+        </Suspense>
       ) : null}
 
       {draft && draft.mailbox.access.send ? (
@@ -540,27 +553,29 @@ function ManageMailboxesAction({
       >
         {t('switcher.manage')}
       </Button>
-      {open ? (
-        <ManageMailboxesDialog
-          open
-          mailboxes={mailboxes}
-          domain={domain}
-          domains={domainList}
-          onClose={() => setOpen(false)}
-          onCreated={() => setOpen(false)}
-          onOpenAccess={mailbox => {
-            setOpen(false);
-            setAccessTargetId(mailbox.id);
-          }}
-        />
-      ) : null}
-      {accessTarget ? (
-        <MailboxAccessPanel
-          mailbox={accessTarget}
-          onClose={() => setAccessTargetId(null)}
-          onRefresh={onRefresh}
-        />
-      ) : null}
+      <Suspense fallback={null}>
+        {open ? (
+          <ManageMailboxesDialog
+            open
+            mailboxes={mailboxes}
+            domain={domain}
+            domains={domainList}
+            onClose={() => setOpen(false)}
+            onCreated={() => setOpen(false)}
+            onOpenAccess={mailbox => {
+              setOpen(false);
+              setAccessTargetId(mailbox.id);
+            }}
+          />
+        ) : null}
+        {accessTarget ? (
+          <MailboxAccessPanel
+            mailbox={accessTarget}
+            onClose={() => setAccessTargetId(null)}
+            onRefresh={onRefresh}
+          />
+        ) : null}
+      </Suspense>
     </>
   );
 }
