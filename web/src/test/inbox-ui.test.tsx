@@ -25,6 +25,7 @@ const state = vi.hoisted(() => {
     organizations: query(),
     mailboxes: query(),
     domains: query(),
+    stats: query(),
     inbox: {
       ...query(),
       isFetching: false,
@@ -111,6 +112,7 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', async importOriginal => ({
   ...(await importOriginal<typeof import('@/features/mailbox/hooks/use-mailbox')>()),
   useMailboxes: () => state.mailboxes,
   useMailboxDomains: () => state.domains,
+  useMailStats: () => state.stats,
   useMailThread: (_organizationId: number, mailboxId: number, threadId: number | null) => {
     state.threadCalls.push({ mailboxId, threadId });
     return threadId === null ? { ...state.thread, data: undefined, error: null } : state.thread;
@@ -170,6 +172,7 @@ describe('unified inbox', () => {
     state.organizations.data = page([organization('owner')]);
     state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales')];
     state.domains.data = [domain()];
+    state.stats.data = [{ day: '2026-11-16', sent: 7, failed: 1, received: 3 }];
     state.inbox.data = listing([[threadRow(), singleRow()]]);
     state.reject = null;
     state.counts.data = counts();
@@ -185,6 +188,7 @@ describe('unified inbox', () => {
       state.organizations,
       state.mailboxes,
       state.domains,
+      state.stats,
       state.inbox,
       state.counts,
       state.thread,
@@ -257,7 +261,7 @@ describe('unified inbox', () => {
     expect(screen.queryByRole('heading', { level: 1, name: 'Inbox' })).not.toBeInTheDocument();
   });
 
-  it('opening a thread row loads the thread and marks it read', () => {
+  it('opening a thread row loads the thread and marks it read', async () => {
     queryClient.setQueryData(mailboxKeys.inbox(1, { view: 'all', group: 'thread', tz: 'UTC' }), {
       pages: [{ items: [threadRow(), singleRow()], meta: meta(false) }],
       pageParams: [undefined],
@@ -265,6 +269,7 @@ describe('unified inbox', () => {
     renderRoute();
 
     fireEvent.click(rowButton('Launch plan'));
+    await readingPaneLoaded();
 
     expect(new URLSearchParams(window.location.search).get('open')).toBe('31');
     expect(state.threadCalls).toContainEqual({ mailboxId: 2, threadId: 30 });
@@ -287,10 +292,11 @@ describe('unified inbox', () => {
     expect(toast.error).toHaveBeenCalled();
   });
 
-  it('opening an unread single message marks it read with the single-message update', () => {
+  it('opening an unread single message marks it read with the single-message update', async () => {
     renderRoute();
 
     fireEvent.click(rowButton('Invoice'));
+    await readingPaneLoaded();
 
     expect(state.detailCalls).toContainEqual({ mailboxId: 1, messageId: 12 });
     expect(state.markRead.mutate).toHaveBeenCalledWith(
@@ -300,11 +306,12 @@ describe('unified inbox', () => {
     expect(state.updateInbox.mutate).not.toHaveBeenCalled();
   });
 
-  it('keeps the row named by ?open= open after a reload', () => {
+  it('keeps the row named by ?open= open after a reload', async () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
     renderRoute();
+    await readingPaneLoaded();
 
-    expect(rowButton('Launch plan')).toHaveAttribute('aria-current', 'true');
+    expect(rowButton('Launch plan')).toHaveAttribute('aria-selected', 'true');
     expect(state.threadCalls).toContainEqual({ mailboxId: 2, threadId: 30 });
   });
 
@@ -312,7 +319,7 @@ describe('unified inbox', () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
     renderRoute();
 
-    const toolbar = screen.getByRole('toolbar', { name: 'Conversation actions' });
+    const toolbar = await screen.findByRole('toolbar', { name: 'Conversation actions' });
     await act(async () => {
       fireEvent.click(within(toolbar).getByRole('button', { name: 'Archive' }));
     });
@@ -330,9 +337,9 @@ describe('unified inbox', () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=12');
     renderRoute();
 
-    const toolbar = screen.getByRole('toolbar', { name: 'Conversation actions' });
+    const toolbar = await screen.findByRole('toolbar', { name: 'Conversation actions' });
     await act(async () => {
-      fireEvent.click(within(toolbar).getByRole('button', { name: 'Move to trash' }));
+      fireEvent.click(within(toolbar).getByRole('button', { name: 'Delete' }));
     });
 
     expect(state.updateInbox.mutateAsync).toHaveBeenCalledWith({
@@ -342,10 +349,11 @@ describe('unified inbox', () => {
     });
   });
 
-  it('archive and trash are hidden without send', () => {
+  it('archive and trash are hidden without send', async () => {
     state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales', { send: false })];
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
     renderRoute();
+    await readingPaneLoaded();
 
     expect(screen.getByRole('list', { name: 'Conversation' })).toBeInTheDocument();
     expect(screen.queryByRole('toolbar', { name: 'Conversation actions' })).not.toBeInTheDocument();
@@ -375,12 +383,13 @@ describe('unified inbox', () => {
     expect(screen.getByText('No mail yet')).toBeInTheDocument();
   });
 
-  it('a row whose mailbox became unreadable shows the unavailable notice and refetches list and mailboxes', () => {
+  it('a row whose mailbox became unreadable shows the unavailable notice and refetches list and mailboxes', async () => {
     state.thread.data = undefined;
     state.thread.error = new ApiError('gone', ApiErrorCode.MAILBOX_NOT_FOUND, 404);
     const { rerender } = renderRoute();
 
     fireEvent.click(rowButton('Launch plan'));
+    await readingPaneLoaded();
 
     expect(screen.getByText(/no longer available to you/u)).toBeInTheDocument();
     expect(state.inbox.refetch).toHaveBeenCalledTimes(1);
@@ -397,11 +406,12 @@ describe('unified inbox', () => {
     expect(state.mailboxes.refetch).toHaveBeenCalledTimes(1);
   });
 
-  it('a row whose mailbox the mailbox list already shows unreadable shows the notice and refetches the list once', () => {
+  it('a row whose mailbox the mailbox list already shows unreadable shows the notice and refetches the list once', async () => {
     state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales', { view: false })];
     const { rerender } = renderRoute();
 
     fireEvent.click(rowButton('Launch plan'));
+    await readingPaneLoaded();
 
     expect(screen.getByText(/no longer available to you/u)).toBeInTheDocument();
     expect(state.threadCalls).not.toContainEqual({ mailboxId: 2, threadId: 30 });
@@ -440,7 +450,9 @@ describe('unified inbox', () => {
     const { rerender } = renderRoute();
 
     const live = () =>
-      observers.filter(observer => !observer.disconnected && observer.target?.tagName === 'LI');
+      observers.filter(
+        observer => !observer.disconnected && observer.target?.hasAttribute('data-list-end')
+      );
     expect(live()).toHaveLength(1);
     act(() =>
       live()[0].callback(
@@ -495,7 +507,7 @@ describe('unified inbox', () => {
     expect(new URLSearchParams(window.location.search).get('view')).toBe('today');
     expect(state.inboxCalls.at(-1)).toEqual({ view: 'today', tz: 'Asia/Shanghai' });
     expect(viewButton(/^Today/u)).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('heading', { level: 2, name: 'Today' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Today' })).toBeInTheDocument();
   });
 
   it('Sent shows the queued badge when sent_waiting is positive', () => {
@@ -560,7 +572,7 @@ describe('unified inbox', () => {
     });
     expect(mailboxButton(/^sales@/u)).toHaveAttribute('aria-current', 'page');
     expect(
-      screen.getByRole('heading', { level: 2, name: 'sales@mail.example.com' })
+      screen.getByRole('heading', { level: 1, name: 'sales@mail.example.com' })
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open in mailbox' })).toHaveAttribute(
       'href',
@@ -678,7 +690,7 @@ describe('unified inbox', () => {
       'true'
     );
     expect(mailboxButton(/^sales@/u)).toHaveAccessibleName('sales@mail.example.com: 3 unread');
-    expect(screen.getByRole('heading', { level: 2, name: 'Agency' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Agency' })).toBeInTheDocument();
 
     // A mailbox of the role narrows to that mailbox instead.
     fireEvent.click(mailboxButton(/^sales@/u));
@@ -691,7 +703,7 @@ describe('unified inbox', () => {
     expect([params.get('box'), params.get('role')]).toEqual([null, 'none']);
     expect(state.inboxCalls.at(-1)).toMatchObject({ roleId: 'none' });
     expect(mailboxButton(/^ops@/u)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 2, name: 'Ungrouped' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Ungrouped' })).toBeInTheDocument();
   });
 
   it('an admin sees unreadable mailboxes locked without a number', () => {
@@ -910,6 +922,91 @@ describe('unified inbox', () => {
     expect(state.inboxCalls.some(filters => filters.tz === 'UTC')).toBe(false);
     expect(rowButton('Launch plan')).toBeInTheDocument();
   });
+
+  it('quota card shows own stats to members and the organization limit only to admins', () => {
+    const { unmount } = renderRoute();
+
+    let card = screen.getByRole('region', { name: 'Sent today' });
+    expect(card).toHaveTextContent('Mailboxes you can see: sent 7 · failed 1 (UTC day)');
+    expect(card).toHaveTextContent('Organization limit 200 / rolling 24 hours');
+    // No progress bar, no breakdown, and nothing queued.
+    expect(within(card).queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(within(card).queryByRole('link')).not.toBeInTheDocument();
+    unmount();
+
+    state.organizations.data = page([organization('member')]);
+    renderRoute();
+    card = screen.getByRole('region', { name: 'Sent today' });
+    expect(card).toHaveTextContent('Mailboxes you can see: sent 7 · failed 1 (UTC day)');
+    expect(card).not.toHaveTextContent('Organization limit');
+  });
+
+  it('quota card shows queued and links to sent when sent_waiting is positive', () => {
+    state.organizations.data = page([organization('member')]);
+    state.counts.data = counts({ sent_waiting: 3 });
+    renderRoute();
+
+    const card = screen.getByRole('region', { name: 'Sent today' });
+    const queued = within(card).getByRole('link', { name: 'Limit reached, queued' });
+    expect(new URL(queued.getAttribute('href') ?? '', 'http://x').searchParams.get('view')).toBe(
+      'sent'
+    );
+    // The number of queued messages is not shown.
+    expect(card).not.toHaveTextContent('3');
+  });
+
+  it('reading pane toolbar hides send actions without send', async () => {
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    const { unmount } = renderRoute();
+
+    const toolbar = await screen.findByRole('toolbar', { name: 'Conversation actions' });
+    for (const name of ['Reply', 'Reply all', 'Forward', 'Archive', 'Delete']) {
+      expect(within(toolbar).getByRole('button', { name })).toBeInTheDocument();
+    }
+    // The reading column is an article with the subject and the mailbox the mail came to.
+    const article = screen.getByRole('article');
+    expect(within(article).getByRole('heading', { level: 2, name: 'Launch plan' })).toBeVisible();
+    expect(article).toHaveTextContent('To sales@mail.example.com');
+    unmount();
+
+    state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales', { send: false })];
+    renderRoute();
+    await readingPaneLoaded();
+    expect(screen.queryByRole('toolbar', { name: 'Conversation actions' })).not.toBeInTheDocument();
+    for (const name of ['Reply', 'Reply all', 'Forward', 'Archive', 'Delete']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole('list', { name: 'Conversation' })).toBeInTheDocument();
+  });
+
+  it('rows expose listbox and option roles with aria-selected', () => {
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+
+    const listbox = screen.getByRole('listbox');
+    const options = within(listbox).getAllByRole('option');
+    expect(options).toHaveLength(2);
+    expect(rowButton('Launch plan')).toHaveAttribute('aria-selected', 'true');
+    expect(rowButton('Invoice')).toHaveAttribute('aria-selected', 'false');
+
+    fireEvent.click(rowButton('Invoice'));
+    expect(rowButton('Invoice')).toHaveAttribute('aria-selected', 'true');
+    expect(rowButton('Launch plan')).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('narrow layout shows a back button from the reading pane', async () => {
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+
+    // Below 1024px one pane shows at a time: the list gives way to the open mail.
+    const list = screen.getByRole('listbox').closest('section');
+    expect(list).toHaveClass('max-lg:hidden');
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to list' }));
+
+    expect(new URLSearchParams(window.location.search).get('open')).toBeNull();
+    expect(screen.getByRole('listbox').closest('section')).not.toHaveClass('max-lg:hidden');
+    expect(screen.queryByRole('button', { name: 'Back to list' })).not.toBeInTheDocument();
+  });
 });
 
 describe('markInboxRowRead', () => {
@@ -1010,8 +1107,13 @@ function counts(views: Record<string, number> = {}) {
   };
 }
 
+/** The reading pane loads on demand; resolves once its bar is on screen. */
+async function readingPaneLoaded() {
+  await screen.findByRole('button', { name: 'Previous message' });
+}
+
 function rowButton(subject: string) {
-  return screen.getByRole('button', { name: new RegExp(subject, 'u') });
+  return screen.getByRole('option', { name: new RegExp(subject, 'u') });
 }
 
 function cachedRow(id: number) {

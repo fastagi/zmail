@@ -109,6 +109,20 @@ const messages = {
   inbox: {
     title: '收件',
     description: '你能阅读的所有邮箱的邮件，最新的在前。',
+    subtitle: '{mailboxes} 个邮箱 · {roles} 个角色',
+    showSidebar: '显示邮箱',
+    readingPane: '阅读窗格',
+    footer: {
+      label: '邮件页面',
+      mail: '邮件',
+      broadcasts: '群发',
+      contacts: '联系人',
+      manage: '管理',
+    },
+    reader: {
+      to: '发到 {address}',
+      toRole: '发到 {address} · {role}',
+    },
     groups: {
       label: '角色与邮箱',
       ungrouped: '未分组',
@@ -158,8 +172,14 @@ const messages = {
     actions: {
       label: '会话操作',
       archive: '归档',
-      trash: '移入回收站',
+      trash: '删除',
     },
+  },
+  quota: {
+    title: '今日外发',
+    own: '你可见的邮箱：已发 {sent} · 失败 {failed}（UTC 日）',
+    limit: '组织上限 {limit} 次 / 滚动 24 小时',
+    queued: '额度已满，排队中',
   },
   manage: {
     title: '管理邮箱',

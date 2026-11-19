@@ -113,6 +113,21 @@ const messages = {
   inbox: {
     title: 'Inbox',
     description: 'Mail from every mailbox you read, newest first.',
+    subtitle:
+      '{mailboxes, plural, one {# mailbox} other {# mailboxes}} · {roles, plural, one {# role} other {# roles}}',
+    showSidebar: 'Show mailboxes',
+    readingPane: 'Reading pane',
+    footer: {
+      label: 'Mail pages',
+      mail: 'Mail',
+      broadcasts: 'Broadcasts',
+      contacts: 'Contacts',
+      manage: 'Manage',
+    },
+    reader: {
+      to: 'To {address}',
+      toRole: 'To {address} · {role}',
+    },
     groups: {
       label: 'Roles & mailboxes',
       ungrouped: 'Ungrouped',
@@ -163,8 +178,14 @@ const messages = {
     actions: {
       label: 'Conversation actions',
       archive: 'Archive',
-      trash: 'Move to trash',
+      trash: 'Delete',
     },
+  },
+  quota: {
+    title: 'Sent today',
+    own: 'Mailboxes you can see: sent {sent} · failed {failed} (UTC day)',
+    limit: 'Organization limit {limit} / rolling 24 hours',
+    queued: 'Limit reached, queued',
   },
   manage: {
     title: 'Manage mailboxes',
