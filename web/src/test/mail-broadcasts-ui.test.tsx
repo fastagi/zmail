@@ -128,6 +128,10 @@ describe('mail broadcasts console', () => {
       design: null,
       created_at: now(),
       updated_at: now(),
+      kind: 'standard',
+      key: null,
+      from: null,
+      variable_definitions: [],
     };
     state.lists.data = [{ id: 4, name: 'Customers', contact_count: 12, created_at: now() }];
     state.broadcasts.data = page([

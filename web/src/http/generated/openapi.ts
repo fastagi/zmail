@@ -643,7 +643,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a connected domain
-         * @description Allowed only when no mailbox uses the domain. Zmail forgets the domain and leaves its DNS and Cloudflare settings as they are. Only owners and admins may.
+         * @description Allowed only when no mailbox uses the domain and no transactional template sends from it. Zmail forgets the domain and leaves its DNS and Cloudflare settings as they are. Only owners and admins may.
          */
         delete: operations["deleteMailDomain"];
         options?: never;
@@ -2781,7 +2781,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -3619,14 +3619,19 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             design: components["schemas"]["MailTemplateDesign"];
+            from: components["schemas"]["MailTemplateSender"];
             html_body: string;
             id: components["schemas"]["PositiveID"];
+            key: string | null;
+            kind: components["schemas"]["MailTemplateKind"];
             name: string;
             sample_variables: components["schemas"]["MailTemplateVariables"];
             subject: string;
             text_body: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description The declared variables of a transactional template; empty for a standard template. */
+            variable_definitions: components["schemas"]["MailTemplateVariableDefinition"][];
             variables: string[];
         };
         /** @description The visual editor's document that `html` and `text` were rendered from, stored as given. The API checks only that it is an object of at most 256 KiB with a positive integer `version`; sending always uses the bodies. Null or absent means the template is written in HTML, and a replace without it clears the stored design. */
@@ -3635,6 +3640,11 @@ export interface components {
         } & {
             [key: string]: unknown;
         }) | null;
+        /**
+         * @description `standard` templates serve mailbox sends, template tests, and broadcasts; `transactional` templates serve only transactional messages. Fixed when the template is created.
+         * @enum {string}
+         */
+        MailTemplateKind: "standard" | "transactional";
         MailTemplateListResponse: {
             /** @constant */
             code: 0;
@@ -3664,13 +3674,22 @@ export interface components {
         };
         MailTemplateRequest: {
             design?: components["schemas"]["MailTemplateDesign"];
+            /** @description Required for a transactional template and refused for a standard one. A bare address whose domain is a verified domain of the organization (or, with the `log` provider, the instance mail domain). Stored in lowercase. */
+            from_address?: string;
+            /** @description Optional display name of a transactional template's sender. */
+            from_name?: string;
             /** @description At least one of `html` and `text` is required. */
             html?: string;
+            /** @description Required for a transactional template and refused for a standard one. Unique in the organization; the API refers to the template by it. */
+            key?: string;
+            kind?: components["schemas"]["MailTemplateKind"];
             name: string;
             sample_variables?: components["schemas"]["MailTemplateVariables"];
             /** @description May use `{{name}}` and `{{name|fallback}}` placeholders, as may both bodies. */
             subject: string;
             text?: string;
+            /** @description Required for a transactional template and refused for a standard one. Every placeholder must be declared and every declaration used. A secret variable must be required; a required variable must have no fallback and an optional one must have one. */
+            variable_definitions?: components["schemas"]["MailTemplateVariableDefinition"][];
         };
         MailTemplateResponse: {
             /** @constant */
@@ -3678,6 +3697,11 @@ export interface components {
             data: components["schemas"]["MailTemplate"];
             message: string;
         };
+        /** @description The sender of a transactional template; null for a standard template. */
+        MailTemplateSender: {
+            address: string;
+            name: string;
+        } | null;
         /** @description Sends a stored template in place of `subject`, `text`, and `html`. Only these values fill variables; sample values are never used for a real send. */
         MailTemplateSendInput: {
             id: components["schemas"]["PositiveID"];
@@ -3686,11 +3710,16 @@ export interface components {
         MailTemplateSummary: {
             /** Format: date-time */
             created_at: string;
+            from: components["schemas"]["MailTemplateSender"];
             id: components["schemas"]["PositiveID"];
+            key: string | null;
+            kind: components["schemas"]["MailTemplateKind"];
             name: string;
             subject: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description The declared variables of a transactional template; empty for a standard template. */
+            variable_definitions: components["schemas"]["MailTemplateVariableDefinition"][];
             /** @description Every variable the template uses, sorted. */
             variables: string[];
         };
@@ -3698,6 +3727,12 @@ export interface components {
             mailbox_id: components["schemas"]["PositiveID"];
             to: string[];
             variables?: components["schemas"]["MailTemplateVariables"];
+        };
+        MailTemplateVariableDefinition: {
+            name: string;
+            required: boolean;
+            /** @description A secret value is stored encrypted and masked when shown. */
+            secret: boolean;
         };
         /** @description Values by variable name; names are a letter followed by letters, digits, or underscores. */
         MailTemplateVariables: {
@@ -5847,7 +5882,7 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description A field failed validation, or the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`). */
+            /** @description A field failed validation, the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6198,7 +6233,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A field failed validation, `scheduled_at` is more than a year ahead (`MAILBOX.BROADCAST_INVALID`), or the list has no subscribed contact (`MAILBOX.BROADCAST_NO_RECIPIENTS`). */
+            /** @description A field failed validation, `scheduled_at` is more than a year ahead (`MAILBOX.BROADCAST_INVALID`), the list has no subscribed contact (`MAILBOX.BROADCAST_NO_RECIPIENTS`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6885,7 +6920,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description A mailbox still uses the domain (`MAILBOX.DOMAIN_IN_USE`). */
+            /** @description A mailbox still uses the domain, or a transactional template sends from it (`MAILBOX.DOMAIN_IN_USE`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7119,7 +7154,10 @@ export interface operations {
     };
     listMailTemplates: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only templates of this kind. Absent lists every template. */
+                kind?: components["schemas"]["MailTemplateKind"];
+            };
             header: {
                 /** @description Active organization for organization-scoped routes; verified against membership. */
                 "Organization-Id": components["parameters"]["OrganizationContext"];
@@ -7129,7 +7167,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every template of the organization by name, without bodies. */
+            /** @description Every template of the organization (of the requested kind) by name, without bodies. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7171,8 +7209,17 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            /** @description A member tried to write a transactional template; only owners and admins may (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             404: components["responses"]["NotFound"];
-            /** @description The name is taken in the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`) or the organization has 200 templates (`MAILBOX.TEMPLATE_LIMIT_REACHED`). */
+            /** @description The name is taken in the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`), the key is taken in the organization (`MAILBOX.TEMPLATE_KEY_TAKEN`), or the organization has 200 templates (`MAILBOX.TEMPLATE_LIMIT_REACHED`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7182,7 +7229,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, or the name, subject, body, sample values, or placeholder syntax is unusable (`MAILBOX.TEMPLATE_INVALID`). */
+            /** @description A field failed validation; the name, subject, body, sample values, or placeholder syntax is unusable, or a transactional template's key, sender, or variable definitions break the template rules (`MAILBOX.TEMPLATE_INVALID`); or a transactional template's sender domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7254,8 +7301,17 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            /** @description A member tried to write a transactional template; only owners and admins may (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             404: components["responses"]["NotFound"];
-            /** @description The name is taken by another template of the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`). */
+            /** @description The name or key is taken by another template of the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`, `MAILBOX.TEMPLATE_KEY_TAKEN`), or the request changes the template's `kind` (`MAILBOX.TEMPLATE_KIND_IMMUTABLE`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7265,7 +7321,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, or the name, subject, body, sample values, or placeholder syntax is unusable (`MAILBOX.TEMPLATE_INVALID`). */
+            /** @description A field failed validation; the name, subject, body, sample values, or placeholder syntax is unusable, or a transactional template's key, sender, or variable definitions break the template rules (`MAILBOX.TEMPLATE_INVALID`); or a transactional template's sender domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7301,6 +7357,15 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            /** @description A member tried to delete a transactional template; only owners and admins may (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -7345,7 +7410,7 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description A field failed validation, the recipients are unusable (`MAILBOX.MESSAGE_INVALID`), or variables without a value or fallback remain (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, with one field error per variable). */
+            /** @description A field failed validation, the recipients are unusable (`MAILBOX.MESSAGE_INVALID`), variables without a value or fallback remain (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, with one field error per variable), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8669,7 +8734,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, the recipients, subject, body, or reply reference are unusable (`MAILBOX.MESSAGE_INVALID`), or the `Idempotency-Key` is not 1 to 255 printable ASCII characters (`MAILBOX.IDEMPOTENCY_KEY_INVALID`). */
+            /** @description A field failed validation, the recipients, subject, body, or reply reference are unusable (`MAILBOX.MESSAGE_INVALID`), the `Idempotency-Key` is not 1 to 255 printable ASCII characters (`MAILBOX.IDEMPOTENCY_KEY_INVALID`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10617,7 +10682,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, the message is unusable (`MAILBOX.MESSAGE_INVALID`), or the `Idempotency-Key` is malformed (`MAILBOX.IDEMPOTENCY_KEY_INVALID`). */
+            /** @description A field failed validation, the message is unusable (`MAILBOX.MESSAGE_INVALID`), the `Idempotency-Key` is malformed (`MAILBOX.IDEMPOTENCY_KEY_INVALID`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;

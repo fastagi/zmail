@@ -417,7 +417,8 @@ route is `404 MAILBOX.DOMAINS_DISABLED`.
   not Cloudflare Email Routing's (`*.mx.cloudflare.net`), else `send_receive`. A failed lookup,
   including a name without MX records, answers `existing_mx: []` and `send_receive`. An unusable
   name is `422 MAILBOX.DOMAIN_INVALID`, and the shared domain `409 MAILBOX.DOMAIN_TAKEN`.
-- Removing a domain that a mailbox still uses is `409 MAILBOX.DOMAIN_IN_USE`. Removing forgets the
+- Removing a domain that a mailbox still uses, or that a transactional template sends from, is
+  `409 MAILBOX.DOMAIN_IN_USE`. Removing forgets the
   domain and leaves its DNS and Cloudflare settings as they are, including a managed zone, which is
   removed on its own (see Managed Zones).
 - Any owner or admin may connect any domain in a zone the operator added to the account. The token
@@ -920,8 +921,9 @@ their metadata; they cannot download files.
 ### Templates
 
 A template is reusable content of an organization: a `name`, a `subject`, and an `html` and `text`
-body, at least one of which is not empty. Every member reads and edits the organization's
-templates; an organization keeps at most 200, and names are unique within it.
+body, at least one of which is not empty. Every member reads the organization's templates and
+edits its standard ones (transactional templates below need an owner or admin); an organization
+keeps at most 200, and names are unique within it.
 
 Placeholders may appear in the subject and both bodies:
 
@@ -963,6 +965,43 @@ stores the rendered content and `template_id`; editing or deleting the template 
 it. The idempotency fingerprint covers the rendered content.
 
 A template of another organization is `404 MAILBOX.TEMPLATE_NOT_FOUND`.
+
+#### Transactional templates
+
+Every template has a `kind`: `standard` (the default, everything above) or `transactional`. The kind
+is fixed when the template is created; a replace that changes it is
+`409 MAILBOX.TEMPLATE_KIND_IMMUTABLE`. `GET /v1/mail-templates?kind=standard|transactional` lists one
+kind; without `kind` it lists every template.
+
+A transactional template also has:
+
+| Field | Rule |
+|---|---|
+| `key` | Required. `^[a-z][a-z0-9-]{0,63}$`, unique within the organization (`409 MAILBOX.TEMPLATE_KEY_TAKEN`). The API names the template by it. |
+| `from_address` | Required. A bare address, stored lowercased, whose domain is a `verified` domain of the organization (`send_receive` or `send_only`). With the `log` provider the instance's own `MAILBOX_DOMAIN` is also allowed. Otherwise `422 MAILBOX.DOMAIN_NOT_VERIFIED`. |
+| `from_name` | Optional display name, at most 100 characters. |
+| `variable_definitions` | Required, at most 100 items of `{ name, secret, required }`, names unique and following the placeholder name rule. |
+
+The variable definitions must match the content exactly, or the save is
+`422 MAILBOX.TEMPLATE_INVALID` with a field error naming the problem:
+
+- every placeholder in the subject and bodies is declared, and every declared variable is used;
+- a `required` variable has no fallback, and every placeholder of an optional variable has one;
+- a `secret` variable is `required`, so it never has a fallback.
+
+A `standard` template must not carry `key`, `from_address`, `from_name`, or `variable_definitions`
+(`422 MAILBOX.TEMPLATE_INVALID`). Responses always carry `kind`, `key` (null for standard), `from`
+(`{ address, name }`, null for standard), and `variable_definitions` (empty for standard).
+`sample_variables` may hold example values for secret variables too; they are used only by previews.
+
+Every member reads every template and writes standard ones. Creating, replacing, or deleting a
+transactional template needs an owner or admin; a member is `403 PERMISSION.DENIED`.
+
+A transactional template serves only transactional messages. Naming one in a mailbox send
+(`template`), a template test (`POST /v1/mail-templates/{id}/tests`), or a broadcast (create or send)
+is `422 MAILBOX.TEMPLATE_KIND_MISMATCH`. A broadcast copies its template when it starts, so a
+running broadcast is not affected. If the sender domain later loses verification, the template is
+kept and sends from it are refused.
 
 ### Contacts
 
@@ -1384,6 +1423,9 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.TEMPLATE_LIMIT_REACHED` | 409 |
 | `MAILBOX.TEMPLATE_INVALID` | 422 |
 | `MAILBOX.TEMPLATE_VARIABLES_MISSING` | 422 |
+| `MAILBOX.TEMPLATE_KEY_TAKEN` | 409 |
+| `MAILBOX.TEMPLATE_KIND_IMMUTABLE` | 409 |
+| `MAILBOX.TEMPLATE_KIND_MISMATCH` | 422 |
 | `MAILBOX.CONTACT_NOT_FOUND` | 404 |
 | `MAILBOX.CONTACT_LIST_NOT_FOUND` | 404 |
 | `MAILBOX.CONTACT_EXISTS` | 409 |

@@ -943,6 +943,62 @@ describe('mailbox browser route boundary', () => {
     );
   });
 
+  it('stores transactional template fields in the mock and keeps the kind fixed', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const template = {
+      name: 'Signup code',
+      subject: 'Your code',
+      text: 'Code {{code}}',
+      kind: 'transactional',
+      key: 'signup-code',
+      from_address: 'No-Reply@Example.com',
+      from_name: 'Acme',
+      variable_definitions: [{ name: 'code', secret: true, required: true }],
+    };
+    const created = await route.createMailTemplateRoute(
+      request('/api/mail-templates', { method: 'POST', body: JSON.stringify(template) })
+    );
+    expect(created.status).toBe(201);
+    const stored = (await created.json()).data;
+    expect(stored).toMatchObject({
+      kind: 'transactional',
+      key: 'signup-code',
+      from: { address: 'no-reply@example.com', name: 'Acme' },
+      variable_definitions: [{ name: 'code', secret: true, required: true }],
+    });
+
+    await expectError(
+      await route.createMailTemplateRoute(
+        request('/api/mail-templates', {
+          method: 'POST',
+          body: JSON.stringify({ ...template, name: 'Other' }),
+        })
+      ),
+      409,
+      'MAILBOX.TEMPLATE_KEY_TAKEN'
+    );
+    await expectError(
+      await route.updateMailTemplateRoute(
+        request(`/api/mail-templates/${stored.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name: 'Signup code', subject: 'Your code', text: 'Code' }),
+        }),
+        String(stored.id)
+      ),
+      409,
+      'MAILBOX.TEMPLATE_KIND_IMMUTABLE'
+    );
+    const invalid = await route.createMailTemplateRoute(
+      request('/api/mail-templates', {
+        method: 'POST',
+        body: JSON.stringify({ ...template, name: 'Bad', key: 'Bad Key' }),
+      })
+    );
+    expect(invalid.status).toBe(422);
+  });
+
   it('keeps templates per organization in the mock and sends with them', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockUser('demo-admin'));
@@ -966,6 +1022,10 @@ describe('mailbox browser route boundary', () => {
       variables: ['code', 'first_name'],
       sample_variables: { first_name: 'Ann', code: '1' },
       design: null,
+      kind: 'standard',
+      key: null,
+      from: null,
+      variable_definitions: [],
     });
     const designed = await route.createMailTemplateRoute(
       request('/api/mail-templates', {

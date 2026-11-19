@@ -598,6 +598,17 @@ export function attachmentsWithinLimits(
   return true;
 }
 
+export const mailTemplateKindSchema = union([literal('standard'), literal('transactional')]);
+
+export const mailTemplateVariableDefinitionSchema = strictObject({
+  name: string(),
+  secret: boolean(),
+  required: boolean(),
+});
+
+/** The sender of a transactional template; null for a standard template. */
+export const mailTemplateSenderSchema = strictObject({ address: string(), name: string() });
+
 export const mailTemplateSummarySchema = strictObject({
   id: safeIdSchema,
   name: string(),
@@ -605,6 +616,10 @@ export const mailTemplateSummarySchema = strictObject({
   variables: array(string()),
   created_at: timestampSchema,
   updated_at: timestampSchema,
+  kind: mailTemplateKindSchema,
+  key: nullable(string()),
+  from: nullable(mailTemplateSenderSchema),
+  variable_definitions: array(mailTemplateVariableDefinitionSchema),
 });
 export const mailTemplateListSchema = array(mailTemplateSummarySchema);
 
@@ -623,6 +638,10 @@ export const mailTemplateSchema = strictObject({
   sample_variables: templateVariablesSchema,
   // The visual editor reads it with its own parser; the API stores it as given.
   design: nullable(mailTemplateDesignSchema),
+  kind: mailTemplateKindSchema,
+  key: nullable(string()),
+  from: nullable(mailTemplateSenderSchema),
+  variable_definitions: array(mailTemplateVariableDefinitionSchema),
 });
 
 export const mailTemplateInputSchema = strictObject({
@@ -632,6 +651,11 @@ export const mailTemplateInputSchema = strictObject({
   text: optional(string()),
   sample_variables: optional(templateVariablesSchema),
   design: optional(nullable(mailTemplateDesignSchema)),
+  kind: optional(mailTemplateKindSchema),
+  key: optional(string()),
+  from_address: optional(string()),
+  from_name: optional(string()),
+  variable_definitions: optional(array(mailTemplateVariableDefinitionSchema)),
 });
 
 export const mailTemplateTestInputSchema = strictObject({

@@ -426,6 +426,10 @@ function summary() {
     variables: ['code', 'first_name'],
     created_at: now(),
     updated_at: now(),
+    kind: 'standard',
+    key: null,
+    from: null,
+    variable_definitions: [],
   };
 }
 

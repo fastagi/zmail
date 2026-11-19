@@ -3539,8 +3539,9 @@ paths:
     delete:
       operationId: deleteMailDomain
       summary: Remove a connected domain
-      description: Allowed only when no mailbox uses the domain. Zmail forgets the domain and leaves its DNS
-        and Cloudflare settings as they are. Only owners and admins may.
+      description: Allowed only when no mailbox uses the domain and no transactional template sends from it.
+        Zmail forgets the domain and leaves its DNS and Cloudflare settings as they are. Only owners and
+        admins may.
       tags:
         - Mailboxes
       security:
@@ -3560,7 +3561,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: A mailbox still uses the domain (`MAILBOX.DOMAIN_IN_USE`).
+          description: A mailbox still uses the domain, or a transactional template sends from it
+            (`MAILBOX.DOMAIN_IN_USE`).
           content:
             application/json:
               schema:
@@ -4069,7 +4071,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: A field failed validation, or the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`).
+          description: A field failed validation, the name or unsubscribe label is unusable
+            (`MAILBOX.BROADCAST_INVALID`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`).
           content:
             application/json:
               schema:
@@ -4216,7 +4219,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: A field failed validation, `scheduled_at` is more than a year ahead (`MAILBOX.BROADCAST_INVALID`), or the list has no subscribed contact (`MAILBOX.BROADCAST_NO_RECIPIENTS`).
+          description: A field failed validation, `scheduled_at` is more than a year ahead
+            (`MAILBOX.BROADCAST_INVALID`), the list has no subscribed contact (`MAILBOX.BROADCAST_NO_RECIPIENTS`),
+            or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`).
           content:
             application/json:
               schema:
@@ -4787,9 +4792,14 @@ paths:
         - bearerSession: []
       parameters:
         - $ref: '#/components/parameters/OrganizationContext'
+        - name: kind
+          in: query
+          description: Only templates of this kind. Absent lists every template.
+          schema:
+            $ref: '#/components/schemas/MailTemplateKind'
       responses:
         '200':
-          description: Every template of the organization by name, without bodies.
+          description: Every template of the organization (of the requested kind) by name, without bodies.
           content:
             application/json:
               schema:
@@ -4828,10 +4838,18 @@ paths:
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: A member tried to write a transactional template; only owners and admins may (`PERMISSION.DENIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The name is taken in the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`) or the organization has 200 templates (`MAILBOX.TEMPLATE_LIMIT_REACHED`).
+          description: The name is taken in the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`), the key is
+            taken in the organization (`MAILBOX.TEMPLATE_KEY_TAKEN`), or the organization has 200 templates
+            (`MAILBOX.TEMPLATE_LIMIT_REACHED`).
           content:
             application/json:
               schema:
@@ -4839,7 +4857,10 @@ paths:
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '422':
-          description: A field failed validation, or the name, subject, body, sample values, or placeholder syntax is unusable (`MAILBOX.TEMPLATE_INVALID`).
+          description: A field failed validation; the name, subject, body, sample values, or placeholder
+            syntax is unusable, or a transactional template's key, sender, or variable definitions break the
+            template rules (`MAILBOX.TEMPLATE_INVALID`); or a transactional template's sender domain is not
+            verified (`MAILBOX.DOMAIN_NOT_VERIFIED`).
           content:
             application/json:
               schema:
@@ -4901,10 +4922,18 @@ paths:
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: A member tried to write a transactional template; only owners and admins may (`PERMISSION.DENIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The name is taken by another template of the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`).
+          description: The name or key is taken by another template of the organization
+            (`MAILBOX.TEMPLATE_NAME_TAKEN`, `MAILBOX.TEMPLATE_KEY_TAKEN`), or the request changes the
+            template's `kind` (`MAILBOX.TEMPLATE_KIND_IMMUTABLE`).
           content:
             application/json:
               schema:
@@ -4912,7 +4941,10 @@ paths:
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '422':
-          description: A field failed validation, or the name, subject, body, sample values, or placeholder syntax is unusable (`MAILBOX.TEMPLATE_INVALID`).
+          description: A field failed validation; the name, subject, body, sample values, or placeholder
+            syntax is unusable, or a transactional template's key, sender, or variable definitions break the
+            template rules (`MAILBOX.TEMPLATE_INVALID`); or a transactional template's sender domain is not
+            verified (`MAILBOX.DOMAIN_NOT_VERIFIED`).
           content:
             application/json:
               schema:
@@ -4938,6 +4970,12 @@ paths:
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: A member tried to delete a transactional template; only owners and admins may (`PERMISSION.DENIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           $ref: '#/components/responses/NotFound'
         '503':
@@ -4979,7 +5017,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: A field failed validation, the recipients are unusable (`MAILBOX.MESSAGE_INVALID`), or variables without a value or fallback remain (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, with one field error per variable).
+          description: A field failed validation, the recipients are unusable (`MAILBOX.MESSAGE_INVALID`),
+            variables without a value or fallback remain (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, with one
+            field error per variable), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`).
           content:
             application/json:
               schema:
@@ -5633,8 +5673,9 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '422':
           description: A field failed validation, the recipients, subject, body, or reply reference are
-            unusable (`MAILBOX.MESSAGE_INVALID`), or the `Idempotency-Key` is not 1 to 255 printable
-            ASCII characters (`MAILBOX.IDEMPOTENCY_KEY_INVALID`).
+            unusable (`MAILBOX.MESSAGE_INVALID`), the `Idempotency-Key` is not 1 to 255 printable
+            ASCII characters (`MAILBOX.IDEMPOTENCY_KEY_INVALID`), or the template is transactional
+            (`MAILBOX.TEMPLATE_KIND_MISMATCH`).
           content:
             application/json:
               schema:
@@ -6394,8 +6435,9 @@ paths:
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '422':
-          description: A field failed validation, the message is unusable (`MAILBOX.MESSAGE_INVALID`), or the
-            `Idempotency-Key` is malformed (`MAILBOX.IDEMPOTENCY_KEY_INVALID`).
+          description: A field failed validation, the message is unusable (`MAILBOX.MESSAGE_INVALID`), the
+            `Idempotency-Key` is malformed (`MAILBOX.IDEMPOTENCY_KEY_INVALID`), or the template is
+            transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`).
           content:
             application/json:
               schema:
@@ -7341,6 +7383,9 @@ components:
         - MAILBOX.TEMPLATE_NAME_TAKEN
         - MAILBOX.TEMPLATE_LIMIT_REACHED
         - MAILBOX.TEMPLATE_VARIABLES_MISSING
+        - MAILBOX.TEMPLATE_KEY_TAKEN
+        - MAILBOX.TEMPLATE_KIND_IMMUTABLE
+        - MAILBOX.TEMPLATE_KIND_MISMATCH
         - MAILBOX.CONTACT_NOT_FOUND
         - MAILBOX.CONTACT_EXISTS
         - MAILBOX.CONTACT_INVALID
@@ -12050,6 +12095,72 @@ components:
           $ref: '#/components/schemas/MailTemplateVariables'
         design:
           $ref: '#/components/schemas/MailTemplateDesign'
+        kind:
+          $ref: '#/components/schemas/MailTemplateKind'
+        key:
+          type: string
+          description: Required for a transactional template and refused for a standard one. Unique in the
+            organization; the API refers to the template by it.
+          pattern: '^[a-z][a-z0-9-]{0,63}$'
+          maxLength: 64
+        from_address:
+          type: string
+          description: Required for a transactional template and refused for a standard one. A bare address
+            whose domain is a verified domain of the organization (or, with the `log` provider, the instance
+            mail domain). Stored in lowercase.
+          minLength: 3
+          maxLength: 320
+        from_name:
+          type: string
+          description: Optional display name of a transactional template's sender.
+          maxLength: 100
+        variable_definitions:
+          type: array
+          description: Required for a transactional template and refused for a standard one. Every
+            placeholder must be declared and every declaration used. A secret variable must be required;
+            a required variable must have no fallback and an optional one must have one.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailTemplateVariableDefinition'
+    MailTemplateKind:
+      type: string
+      description: '`standard` templates serve mailbox sends, template tests, and broadcasts;
+        `transactional` templates serve only transactional messages. Fixed when the template is created.'
+      enum:
+        - standard
+        - transactional
+    MailTemplateVariableDefinition:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - secret
+        - required
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9_]{0,63}$'
+        secret:
+          type: boolean
+          description: A secret value is stored encrypted and masked when shown.
+        required:
+          type: boolean
+    MailTemplateSender:
+      type:
+        - object
+        - 'null'
+      additionalProperties: false
+      description: The sender of a transactional template; null for a standard template.
+      required:
+        - address
+        - name
+      properties:
+        address:
+          type: string
+          maxLength: 320
+        name:
+          type: string
+          maxLength: 100
     MailTemplateDesign:
       type:
         - object
@@ -12075,6 +12186,10 @@ components:
         - variables
         - created_at
         - updated_at
+        - kind
+        - key
+        - from
+        - variable_definitions
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -12095,6 +12210,21 @@ components:
         updated_at:
           type: string
           format: date-time
+        kind:
+          $ref: '#/components/schemas/MailTemplateKind'
+        key:
+          type:
+            - string
+            - 'null'
+          maxLength: 64
+        from:
+          $ref: '#/components/schemas/MailTemplateSender'
+        variable_definitions:
+          type: array
+          description: The declared variables of a transactional template; empty for a standard template.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailTemplateVariableDefinition'
     MailTemplate:
       type: object
       additionalProperties: false
@@ -12109,6 +12239,10 @@ components:
         - text_body
         - sample_variables
         - design
+        - kind
+        - key
+        - from
+        - variable_definitions
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -12138,6 +12272,21 @@ components:
           $ref: '#/components/schemas/MailTemplateVariables'
         design:
           $ref: '#/components/schemas/MailTemplateDesign'
+        kind:
+          $ref: '#/components/schemas/MailTemplateKind'
+        key:
+          type:
+            - string
+            - 'null'
+          maxLength: 64
+        from:
+          $ref: '#/components/schemas/MailTemplateSender'
+        variable_definitions:
+          type: array
+          description: The declared variables of a transactional template; empty for a standard template.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailTemplateVariableDefinition'
     MailTemplateResponse:
       type: object
       additionalProperties: false
