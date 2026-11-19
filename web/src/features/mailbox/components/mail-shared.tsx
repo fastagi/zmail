@@ -30,7 +30,7 @@ export function MailHtmlFrame({ html, title }: { html: string; title: string }) 
       srcDoc={frameContentPolicy + html}
       title={title}
       referrerPolicy="no-referrer"
-      className="h-96 w-full rounded-md border bg-white"
+      className="animate-fade h-96 w-full rounded-md border bg-white"
     />
   );
 }
@@ -45,7 +45,7 @@ export function ErrorAlert({
   onRetry: () => void;
 }) {
   return (
-    <Alert variant="destructive">
+    <Alert variant="destructive" className="animate-pop">
       <AlertCircle className="size-4" aria-hidden="true" />
       <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
         <span>{message}</span>
@@ -75,8 +75,8 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center rounded-md border border-dashed px-6 py-10 text-center">
-      <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+    <div className="animate-enter flex flex-col items-center rounded-md border border-dashed px-6 py-10 text-center">
+      <div className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground transition-transform duration-200 hover:scale-105">
         {icon}
       </div>
       <p className="mt-3 text-sm font-medium">{title}</p>

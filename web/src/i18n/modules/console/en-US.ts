@@ -27,7 +27,7 @@ const messages = {
     quickLinks: {
       emails: {
         title: 'Emails',
-        description: 'Read the inbox, reply, and send mail.',
+        description: 'Search every sent and received message, delivery events, and 7-day volume.',
       },
       broadcasts: {
         title: 'Broadcasts',
@@ -36,7 +36,7 @@ const messages = {
       },
       contacts: {
         title: 'Contacts',
-        description: 'Import contacts into groups; unsubscribes apply on their own.',
+        description: 'Import contacts into lists; unsubscribes apply on their own.',
       },
       templates: {
         title: 'Templates',
@@ -44,7 +44,7 @@ const messages = {
       },
       mailboxes: {
         title: 'Mailboxes',
-        description: 'Create sending addresses for people and purposes.',
+        description: 'Create team addresses, read the inbox, reply, and send mail.',
       },
       domain: {
         title: 'Domain',
@@ -52,7 +52,7 @@ const messages = {
       },
       apiAccess: {
         title: 'API access',
-        description: 'Manage user-owned API keys and starter preferences.',
+        description: 'Manage user-owned API keys and account settings.',
       },
       styleguide: {
         title: 'Styleguide',
@@ -76,10 +76,10 @@ const messages = {
     gettingStarted: {
       domain: 'Connect your domain under Domain, or use the shared domain.',
       mailbox: 'Create a sending address under Mailboxes, such as hello@your-domain.',
-      contacts: 'Create a group under Contacts and import contacts.',
+      contacts: 'Create a list under Contacts and import contacts.',
       template: 'Save a product update under Templates.',
       broadcast:
-        'Under Broadcasts, pick the domain, mailbox, template, and group; send a test wave before everyone.',
+        'Under Broadcasts, pick the domain, mailbox, template, and list; send a test wave before everyone.',
     },
   },
 } as const;

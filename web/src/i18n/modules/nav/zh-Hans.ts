@@ -13,7 +13,7 @@ const messages = {
   analytics: '数据分析',
   styleguide: '设计规范',
   mailboxes: '邮箱',
-  emails: '邮件',
+  emails: '收发记录',
   mailBroadcasts: '群发',
   mailContacts: '联系人',
   mailTemplates: '模板',

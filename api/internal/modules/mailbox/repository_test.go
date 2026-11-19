@@ -977,6 +977,103 @@ func TestRepositoryImportsContacts(t *testing.T) {
 	}
 }
 
+func TestRepositoryFiltersMailboxMessagesBySearchAndUnread(t *testing.T) {
+	repo, db := openRepository(t)
+	ctx := context.Background()
+	createOwner(t, db, 1)
+	createOwner(t, db, 2)
+	first := createMailbox(t, repo, "first@mail.example")
+	second := createMailbox(t, repo, "second@mail.example")
+	foreign := &domain.Mailbox{OrganizationID: 2, Address: "foreign@mail.example"}
+	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+
+	readAt := time.Now().UTC().Truncate(time.Microsecond)
+	reader := as(1).MembershipID
+	otherReader := reader + 1
+	// readBy marks an inbound message read by those members; outbound mail is always read.
+	add := func(mailboxID uint, direction domain.MailDirection, from string, to, cc []string, subject string, readBy ...uint) {
+		status := domain.MailStatusReceived
+		if direction == domain.MailDirectionOutbound {
+			status = domain.MailStatusSent
+		}
+		message := &domain.MailMessage{
+			MailboxID: mailboxID, Direction: direction, Status: status,
+			FromAddress: from, To: to, Cc: cc, Subject: subject,
+			TextBody: "secret body containing needle", HTMLBody: "<p>needle</p>",
+		}
+		if _, err := repo.CreateMessage(ctx, message); err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+		for _, member := range readBy {
+			if err := repo.SetMessageRead(ctx, mailboxID, message.ID, member, true, readAt); err != nil {
+				t.Fatalf("SetMessageRead: %v", err)
+			}
+		}
+	}
+
+	add(first.ID, domain.MailDirectionInbound, "alice@sender.test", []string{"first@mail.example"}, nil, "Invoice 100% due", otherReader)
+	add(first.ID, domain.MailDirectionInbound, "billing@sender.test", []string{"first@mail.example"}, nil, "Invoice_paid", reader)
+	add(first.ID, domain.MailDirectionOutbound, "first@mail.example", []string{"bob@example.com"}, []string{"carol@example.org"}, "Receipt")
+	add(second.ID, domain.MailDirectionInbound, "alice@sender.test", []string{"second@mail.example"}, nil, "Invoice in another mailbox")
+	add(foreign.ID, domain.MailDirectionInbound, "alice@sender.test", []string{"foreign@mail.example"}, nil, "Invoice in another organization")
+
+	list := func(filter domain.MailMessageFilter) []*domain.MailMessage {
+		t.Helper()
+		messages, total, err := repo.ListMessages(ctx, first.ID, reader, filter)
+		if err != nil || int(total) != len(messages) {
+			t.Fatalf("ListMessages(%+v) = %d rows, total %d, err %v", filter, len(messages), total, err)
+		}
+		for _, message := range messages {
+			if message.TextBody != "" || message.HTMLBody != "" {
+				t.Fatalf("listing returned a body: %+v", message)
+			}
+		}
+		return messages
+	}
+
+	if got := list(domain.MailMessageFilter{Query: "INVOICE"}); len(got) != 2 || got[0].Subject != "Invoice_paid" || got[1].Subject != "Invoice 100% due" {
+		t.Fatalf("query INVOICE = %+v; want two newest-first matches in first mailbox", got)
+	}
+	// The search covers the text body too, though the listing never returns it.
+	if got := list(domain.MailMessageFilter{Query: "needle"}); len(got) != 3 {
+		t.Fatalf("query needle = %+v; want the three messages of the first mailbox by text body", got)
+	}
+	for query, want := range map[string]string{
+		"ALICE@sender":  "Invoice 100% due",
+		"BOB@EXAMPLE":   "Receipt",
+		"CAROL@example": "Receipt",
+		"100%":          "Invoice 100% due",
+		"%":             "Invoice 100% due",
+		"_":             "Invoice_paid",
+	} {
+		if got := list(domain.MailMessageFilter{Query: query}); len(got) != 1 || got[0].Subject != want {
+			t.Fatalf("query %q = %+v; want %q", query, got, want)
+		}
+	}
+	if got := list(domain.MailMessageFilter{Query: "[]"}); len(got) != 0 {
+		t.Fatalf("empty cc_addresses JSON matched []: %+v", got)
+	}
+
+	unreadOnly := true
+	if got := list(domain.MailMessageFilter{Unread: &unreadOnly}); len(got) != 1 || got[0].Subject != "Invoice 100% due" {
+		t.Fatalf("unread=true = %+v; want only unread message (another member's read does not count)", got)
+	}
+	readOnly := false
+	if got := list(domain.MailMessageFilter{Unread: &readOnly}); len(got) != 2 || got[0].Subject != "Receipt" || got[1].Subject != "Invoice_paid" {
+		t.Fatalf("unread=false = %+v; want two read messages", got)
+	}
+	if got := list(domain.MailMessageFilter{Direction: domain.MailDirectionInbound, Unread: &readOnly, Query: "invoice"}); len(got) != 1 || got[0].Subject != "Invoice_paid" {
+		t.Fatalf("combined filter = %+v; want Invoice_paid", got)
+	}
+
+	secondPage, total, err := repo.ListMessages(ctx, first.ID, reader, domain.MailMessageFilter{Query: "invoice", Page: 2, PerPage: 1})
+	if err != nil || total != 2 || len(secondPage) != 1 || secondPage[0].Subject != "Invoice 100% due" {
+		t.Fatalf("filtered page 2 = %+v, total %d, err %v", secondPage, total, err)
+	}
+}
+
 // sameJSON compares two JSON documents by content; jsonb does not keep key order or spacing.
 func sameJSON(a, b string) bool {
 	var left, right any

@@ -1,7 +1,17 @@
 'use client';
 
 import { useDeferredValue, useId, useState, type FormEvent } from 'react';
-import { AlertCircle, Pencil, Plus, Search, Trash2, Upload, Users, X } from 'lucide-react';
+import {
+  AlertCircle,
+  Download,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+  Users,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -125,6 +135,20 @@ function ContactsWorkspace() {
   const contacts = useMailContacts(organizationId, filters, page);
   const allLists = lists.data ?? [];
   const selectedList = allLists.find(list => list.id === listId) ?? null;
+  const hasSearchOrStatus = query.trim() !== '' || status !== undefined;
+  const hasDeferredSearchOrStatus = deferredQuery !== '' || status !== undefined;
+  const isFilteredEmpty =
+    !contacts.isPending &&
+    !contacts.error &&
+    contacts.data !== undefined &&
+    contacts.data.items.length === 0 &&
+    hasDeferredSearchOrStatus;
+
+  const clearFilters = () => {
+    setQuery('');
+    setStatus(undefined);
+    setPage(1);
+  };
 
   if (contacts.error && isOrganizationLost(contacts.error)) return <OrganizationLostState />;
 
@@ -143,6 +167,7 @@ function ContactsWorkspace() {
         <ContactsToolbar
           query={query}
           status={status}
+          showClearFilters={hasSearchOrStatus && !isFilteredEmpty}
           onQuery={value => {
             setQuery(value);
             setPage(1);
@@ -151,11 +176,13 @@ function ContactsWorkspace() {
             setStatus(value);
             setPage(1);
           }}
+          onClearFilters={clearFilters}
           onAdd={() => setEditing('new')}
           onImport={() => setImporting(true)}
         />
         {selectedList ? (
           <SelectedListActions
+            key={selectedList.id}
             list={selectedList}
             onDeleted={() => {
               setListId(undefined);
@@ -166,7 +193,9 @@ function ContactsWorkspace() {
         <ContactsTable
           query={contacts}
           lists={allLists}
-          filtered={Object.keys(filters).length > 0}
+          selectedListId={listId}
+          filtered={hasDeferredSearchOrStatus}
+          onClearFilters={clearFilters}
           onEdit={contact => setEditing(contact)}
           onAdd={() => setEditing('new')}
           onPage={setPage}
@@ -228,7 +257,14 @@ function ListsPanel({
         onClick={() => onSelect(id)}
       >
         <span className="min-w-0 truncate">{label}</span>
-        {count === null ? null : <span className="text-xs text-muted-foreground">{count}</span>}
+        {count === null ? null : (
+          <Badge
+            variant={selectedId === id ? 'secondary' : 'outline'}
+            className="shrink-0 px-1.5 py-0 text-xs tabular-nums"
+          >
+            {count}
+          </Badge>
+        )}
       </button>
     </li>
   );
@@ -242,6 +278,8 @@ function ListsPanel({
         </h2>
         {loading ? (
           <Skeleton className="h-16 w-full" aria-hidden="true" />
+        ) : lists.length === 0 ? (
+          <p className="px-3 py-1.5 text-xs text-muted-foreground">{t('contacts.noLists')}</p>
         ) : (
           <ul className="space-y-0.5">
             {lists.map(list => item(list.name, list.contact_count, list.id))}
@@ -266,7 +304,7 @@ function ListsPanel({
           variant="outline"
           isIcon
           loading={save.isPending}
-          icon={<Plus className="size-4" />}
+          icon={<Plus className="size-4" aria-hidden="true" />}
           aria-label={t('contacts.addList')}
         />
       </form>
@@ -321,10 +359,17 @@ function SelectedListActions({
           </Label>
           <Input
             id={inputId}
+            autoFocus
             value={name}
             maxLength={MAIL_CONTACT_LIST_NAME_MAX_LENGTH}
             disabled={save.isPending}
             onChange={event => setName(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                setRenaming(false);
+              }
+            }}
           />
           <Button type="submit" size="sm" loading={save.isPending}>
             {t('contacts.save')}
@@ -335,13 +380,18 @@ function SelectedListActions({
         </form>
       ) : (
         <>
-          <span className="font-medium">{list.name}</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-medium">{list.name}</span>
+            <Badge variant="secondary" className="shrink-0 text-xs tabular-nums">
+              {list.contact_count}
+            </Badge>
+          </div>
           <div className="flex gap-2">
             <Button
               type="button"
               size="sm"
               variant="outline"
-              icon={<Pencil className="size-3.5" />}
+              icon={<Pencil className="size-3.5" aria-hidden="true" />}
               onClick={() => {
                 setName(list.name);
                 setRenaming(true);
@@ -353,7 +403,7 @@ function SelectedListActions({
               type="button"
               size="sm"
               variant="outline"
-              icon={<Trash2 className="size-3.5" />}
+              icon={<Trash2 className="size-3.5" aria-hidden="true" />}
               onClick={() => setDeleting(true)}
             >
               {t('contacts.deleteList')}
@@ -377,15 +427,19 @@ function SelectedListActions({
 function ContactsToolbar({
   query,
   status,
+  showClearFilters,
   onQuery,
   onStatus,
+  onClearFilters,
   onAdd,
   onImport,
 }: {
   query: string;
   status: MailContactStatus | undefined;
+  showClearFilters: boolean;
   onQuery: (value: string) => void;
   onStatus: (value: MailContactStatus | undefined) => void;
+  onClearFilters: () => void;
   onAdd: () => void;
   onImport: () => void;
 }) {
@@ -409,6 +463,12 @@ function ContactsToolbar({
           className="pl-9"
           placeholder={t('contacts.searchPlaceholder')}
           onChange={event => onQuery(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Escape' && query !== '') {
+              event.preventDefault();
+              onQuery('');
+            }
+          }}
         />
       </div>
       <div>
@@ -433,15 +493,26 @@ function ContactsToolbar({
           ))}
         </select>
       </div>
+      {showClearFilters ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          icon={<X className="size-3.5" aria-hidden="true" />}
+          onClick={onClearFilters}
+        >
+          {t('emails.clearFilters')}
+        </Button>
+      ) : null}
       <Button
         type="button"
         variant="outline"
-        icon={<Upload className="size-4" />}
+        icon={<Upload className="size-4" aria-hidden="true" />}
         onClick={onImport}
       >
         {t('contacts.import')}
       </Button>
-      <Button type="button" icon={<Plus className="size-4" />} onClick={onAdd}>
+      <Button type="button" icon={<Plus className="size-4" aria-hidden="true" />} onClick={onAdd}>
         {t('contacts.add')}
       </Button>
     </div>
@@ -460,14 +531,18 @@ function StatusBadge({ status }: { status: MailContactStatus }) {
 function ContactsTable({
   query,
   lists,
+  selectedListId,
   filtered,
+  onClearFilters,
   onEdit,
   onAdd,
   onPage,
 }: {
   query: ReturnType<typeof useMailContacts>;
   lists: MailContactList[];
+  selectedListId: number | undefined;
   filtered: boolean;
+  onClearFilters: () => void;
   onEdit: (contact: MailContact) => void;
   onAdd: () => void;
   onPage: (page: number) => void;
@@ -490,17 +565,32 @@ function ContactsTable({
   if (items.length === 0) {
     return filtered ? (
       <EmptyState
-        icon={<Search className="size-5" />}
+        icon={<Search className="size-5" aria-hidden="true" />}
         title={t('contacts.noMatchTitle')}
         description={t('contacts.noMatchDescription')}
+        action={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            icon={<X className="size-3.5" aria-hidden="true" />}
+            onClick={onClearFilters}
+          >
+            {t('emails.clearFilters')}
+          </Button>
+        }
       />
     ) : (
       <EmptyState
-        icon={<Users className="size-5" />}
+        icon={<Users className="size-5" aria-hidden="true" />}
         title={t('contacts.emptyTitle')}
         description={t('contacts.emptyDescription')}
         action={
-          <Button type="button" icon={<Plus className="size-4" />} onClick={onAdd}>
+          <Button
+            type="button"
+            icon={<Plus className="size-4" aria-hidden="true" />}
+            onClick={onAdd}
+          >
             {t('contacts.add')}
           </Button>
         }
@@ -522,42 +612,53 @@ function ContactsTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {items.map(contact => (
-              <TableRow key={contact.id}>
-                <TableCell className="max-w-64 truncate">
-                  <button
-                    type="button"
-                    className="max-w-full truncate text-left hover:underline focus-ring"
-                    aria-label={t('contacts.edit', { email: contact.email })}
-                    onClick={() => onEdit(contact)}
-                  >
-                    {contact.email}
-                  </button>
-                </TableCell>
-                <TableCell className="max-w-48 truncate text-muted-foreground">
-                  {[contact.first_name, contact.last_name].filter(Boolean).join(' ')}
-                </TableCell>
-                <TableCell>
-                  <StatusBadge status={contact.status} />
-                </TableCell>
-                <TableCell>
-                  <span className="flex flex-wrap gap-1">
-                    {contact.list_ids.map(id =>
-                      listNames.has(id) ? (
-                        <Badge key={id} variant="outline" className="text-xs">
-                          {listNames.get(id)}
-                        </Badge>
-                      ) : null
+            {items.map(contact => {
+              const assignedLists = contact.list_ids.filter(id => listNames.has(id));
+              return (
+                <TableRow key={contact.id}>
+                  <TableCell className="max-w-64 truncate">
+                    <button
+                      type="button"
+                      className="max-w-full truncate rounded-xs text-left hover:underline focus-ring"
+                      aria-label={t('contacts.edit', { email: contact.email })}
+                      onClick={() => onEdit(contact)}
+                    >
+                      {contact.email}
+                    </button>
+                  </TableCell>
+                  <TableCell className="max-w-48 truncate text-muted-foreground">
+                    {[contact.first_name, contact.last_name].filter(Boolean).join(' ')}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={contact.status} />
+                  </TableCell>
+                  <TableCell>
+                    {assignedLists.length > 0 ? (
+                      <span className="flex flex-wrap gap-1">
+                        {assignedLists.map(id => (
+                          <Badge
+                            key={id}
+                            variant={selectedListId === id ? 'secondary' : 'outline'}
+                            className="max-w-40 truncate text-xs"
+                          >
+                            {listNames.get(id)}
+                          </Badge>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground" aria-hidden="true">
+                        —
+                      </span>
                     )}
-                  </span>
-                </TableCell>
-                <TableCell className="text-right whitespace-nowrap text-muted-foreground">
-                  <time dateTime={contact.created_at}>
-                    {formatter.format(new Date(contact.created_at))}
-                  </time>
-                </TableCell>
-              </TableRow>
-            ))}
+                  </TableCell>
+                  <TableCell className="text-right whitespace-nowrap text-muted-foreground">
+                    <time dateTime={contact.created_at}>
+                      {formatter.format(new Date(contact.created_at))}
+                    </time>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
@@ -865,6 +966,24 @@ function ContactDialog({
   );
 }
 
+const sampleContactsCsv =
+  'email,first_name,last_name,company,code\nann@example.com,Ann,Lee,Acme,VIP20\nbob@example.com,Bob,Chen,Globex,\n';
+const sampleContactsFilename = 'contacts-sample.csv';
+
+function downloadSampleCsv() {
+  const blob = new Blob([sampleContactsCsv], { type: 'text/csv;charset=utf-8' });
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = sampleContactsFilename;
+    anchor.rel = 'noopener noreferrer';
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 function ImportDialog({
   lists,
   defaultListId,
@@ -927,7 +1046,19 @@ function ImportDialog({
           <form onSubmit={submit}>
             <DialogBody className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor={ids.file}>{t('contacts.importFile')}</Label>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label htmlFor={ids.file}>{t('contacts.importFile')}</Label>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    disabled={importContacts.isPending}
+                    icon={<Download className="size-3.5" aria-hidden="true" />}
+                    onClick={downloadSampleCsv}
+                  >
+                    {t('contacts.importSample')}
+                  </Button>
+                </div>
                 <Input
                   id={ids.file}
                   type="file"

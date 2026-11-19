@@ -5121,8 +5121,9 @@ paths:
         - name: unread
           in: query
           required: false
-          description: '`true` keeps only inbound messages the caller has not read; outbound messages are
-            always read and never match. `false` keeps the others.'
+          description: '`true` keeps only inbound messages the caller has not read (`read` is `false`); outbound
+            messages are always read and never match. `false` keeps the others (`read` is `true`). Read state
+            is the caller''s own.'
           schema:
             type: boolean
         - name: has_attachments
@@ -5135,7 +5136,7 @@ paths:
           in: query
           required: false
           description: Search. At most 200 characters as sent; the value is then trimmed, and one that is
-            empty after trimming is `400 COMMON.INVALID_INPUT`. Case-insensitive substring match on the subject, the sender address and
+            empty after trimming or contains a control character is `400 COMMON.INVALID_INPUT`. Case-insensitive substring match on the subject, the sender address and
             name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches
             every placement except `trash`. A search the database cannot finish within 2 seconds is
             `422 MAILBOX.SEARCH_TOO_BROAD`.

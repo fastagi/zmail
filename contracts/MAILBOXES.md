@@ -595,15 +595,17 @@ replies in Sent.
 | `folder_id` | The folder; required with `placement=folder` and allowed only with it |
 | `label_id` | Messages with this label |
 | `starred` | `true` for messages the caller starred, `false` for the others |
-| `unread` | `true` for inbound messages the caller has not read (outbound messages are always read, so never match), `false` for the others |
+| `unread` | `true` for inbound messages the caller has not read (`read` is `false`; outbound messages are always read, so never match), `false` for the others (`read` is `true`). Read state is the caller's own: another member reading a message does not change it. |
 | `has_attachments` | `true` for messages with files, `false` for the others |
-| `q` | Search; at most 200 characters as sent, then trimmed and not empty |
+| `q` | Search; at most 200 characters as sent, then trimmed and not empty, without control characters |
 | `group` | `thread` lists one row per thread |
 | `page`, `per_page` | Pagination |
 
-An unknown value, `folder_id` without `placement=folder`, `placement=folder` without `folder_id`,
-`q` with `placement=trash`, a `q` longer than 200 characters as sent, a `q` that is empty after
-trimming, or `group` outside the rules below is `400 COMMON.INVALID_INPUT`. An unknown folder
+An unknown value (including a non-boolean `starred`, `unread`, or `has_attachments`), a filter
+given more than once, `folder_id` without `placement=folder`, `placement=folder` without
+`folder_id`, `q` with `placement=trash`, a `q` longer than 200 characters as sent, a `q` that is
+empty after trimming or contains a control character, or `group` outside the rules below is
+`400 COMMON.INVALID_INPUT`. An unknown folder
 or label is `404 MAILBOX.FOLDER_NOT_FOUND` or `404 MAILBOX.LABEL_NOT_FOUND`.
 
 The trash (`placement=trash`) is ordered by `trashed_at`, newest first, then by id, highest first.

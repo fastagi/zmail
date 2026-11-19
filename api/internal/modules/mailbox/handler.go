@@ -221,6 +221,12 @@ func messageFilterFromQuery(c *gin.Context) domain.MailMessageFilter {
 		Placement: domain.MailPlacement(c.Query("placement")),
 	}
 	malformed := func(name string) { filter.Malformed = append(filter.Malformed, name) }
+	// A filter given twice is ambiguous, so it is refused rather than read from its first value.
+	for _, name := range []string{"direction", "placement", "folder_id", "label_id", "starred", "unread", "has_attachments", "q", "group"} {
+		if len(c.QueryArray(name)) > 1 {
+			malformed(name)
+		}
+	}
 	readID := func(name string) uint {
 		raw, present := c.GetQuery(name)
 		if !present {

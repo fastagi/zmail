@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -116,7 +117,9 @@ func validateMessageFilter(filter domain.MailMessageFilter) error {
 		return invalid("placement folder needs folder_id")
 	case filter.Placement != domain.MailPlacementFolder && filter.FolderID != 0:
 		return invalid("folder_id is only allowed with placement folder")
-	case filter.Query != strings.TrimSpace(filter.Query) || utf8.RuneCountInString(filter.Query) > domain.MaxMailSearchLength:
+	case filter.Query != strings.TrimSpace(filter.Query) || !utf8.ValidString(filter.Query) ||
+		utf8.RuneCountInString(filter.Query) > domain.MaxMailSearchLength ||
+		strings.IndexFunc(filter.Query, unicode.IsControl) >= 0:
 		return invalid("q")
 	case filter.Query != "" && filter.Placement == domain.MailPlacementTrash:
 		return invalid("the trash cannot be searched")

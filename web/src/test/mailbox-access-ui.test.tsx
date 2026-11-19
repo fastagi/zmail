@@ -228,6 +228,8 @@ describe('mailbox access in the console', () => {
     fireEvent.click(screen.getByRole('button', { name: /Unread question/u }));
     expect(screen.getByRole('button', { name: 'Mark unread' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reply' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reply all' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Forward' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
   });
 

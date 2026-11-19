@@ -7863,11 +7863,11 @@ export interface operations {
                 per_page?: components["parameters"]["PerPage"];
                 /** @description Keep only one placement. Without it every placement except `trash` is listed. `folder` needs `folder_id`. */
                 placement?: components["schemas"]["MailPlacement"];
-                /** @description Search. At most 200 characters as sent; the value is then trimmed, and one that is empty after trimming is `400 COMMON.INVALID_INPUT`. Case-insensitive substring match on the subject, the sender address and name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches every placement except `trash`. A search the database cannot finish within 2 seconds is `422 MAILBOX.SEARCH_TOO_BROAD`. */
+                /** @description Search. At most 200 characters as sent; the value is then trimmed, and one that is empty after trimming or contains a control character is `400 COMMON.INVALID_INPUT`. Case-insensitive substring match on the subject, the sender address and name, the `to` and `cc` addresses, and the text body; `%` and `_` match literally. Searches every placement except `trash`. A search the database cannot finish within 2 seconds is `422 MAILBOX.SEARCH_TOO_BROAD`. */
                 q?: string;
                 /** @description Keep only messages the caller starred (`true`) or did not star (`false`). */
                 starred?: boolean;
-                /** @description `true` keeps only inbound messages the caller has not read; outbound messages are always read and never match. `false` keeps the others. */
+                /** @description `true` keeps only inbound messages the caller has not read (`read` is `false`); outbound messages are always read and never match. `false` keeps the others (`read` is `true`). Read state is the caller's own. */
                 unread?: boolean;
             };
             header: {

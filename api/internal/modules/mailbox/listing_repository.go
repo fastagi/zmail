@@ -28,10 +28,10 @@ func searchPattern(query string) string {
 }
 
 // searchCondition matches the subject, the sender address and name, the to and cc addresses, and
-// the text body. Each column has a trigram index, so the planner can combine them for a text of
-// three characters or more.
+// the text body; an empty cc list never matches. Each column has a trigram index, so the planner
+// can combine them for a text of three characters or more.
 const searchCondition = `(subject ILIKE @p ESCAPE '\' OR from_address ILIKE @p ESCAPE '\' OR from_name ILIKE @p ESCAPE '\'
-	OR to_addresses ILIKE @p ESCAPE '\' OR cc_addresses ILIKE @p ESCAPE '\' OR text_body ILIKE @p ESCAPE '\')`
+	OR to_addresses ILIKE @p ESCAPE '\' OR (cc_addresses <> '[]' AND cc_addresses ILIKE @p ESCAPE '\') OR text_body ILIKE @p ESCAPE '\')`
 
 const unreadByMember = `mail_messages.direction = 'inbound' AND NOT EXISTS (SELECT 1 FROM mail_message_reads
 	WHERE mail_message_reads.message_id = mail_messages.id AND mail_message_reads.membership_id = @m)`

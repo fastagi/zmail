@@ -761,13 +761,7 @@ func (r *repository) ListMessagesForOrganization(
 	if filter.MailboxID != 0 {
 		query = query.Where("mail_messages.mailbox_id = ?", filter.MailboxID)
 	}
-	if filter.Query != "" {
-		pattern := "%" + escapeLike(filter.Query) + "%"
-		query = query.Where(
-			`(mail_messages.subject ILIKE ? ESCAPE '\' OR mail_messages.from_address ILIKE ? ESCAPE '\' OR mail_messages.to_addresses ILIKE ? ESCAPE '\')`,
-			pattern, pattern, pattern,
-		)
-	}
+	query = whereMessageMatchesQuery(query, filter.Query)
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -995,6 +989,17 @@ func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, provid
 		mailbox.OrganizationID = *row.OrganizationID
 	}
 	return message, mailbox, nil
+}
+
+func whereMessageMatchesQuery(query *gorm.DB, raw string) *gorm.DB {
+	if raw == "" {
+		return query
+	}
+	pattern := "%" + escapeLike(raw) + "%"
+	return query.Where(
+		`(mail_messages.subject ILIKE ? ESCAPE '\' OR mail_messages.from_address ILIKE ? ESCAPE '\' OR mail_messages.to_addresses ILIKE ? ESCAPE '\' OR (mail_messages.cc_addresses <> '[]' AND mail_messages.cc_addresses ILIKE ? ESCAPE '\'))`,
+		pattern, pattern, pattern, pattern,
+	)
 }
 
 // escapeLike makes user text match literally inside a LIKE pattern.

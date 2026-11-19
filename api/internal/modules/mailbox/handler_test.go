@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5,
 	})
 	handler := NewHandler(svc)
+	response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
 	response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)
 	response.DefaultErrorMapper.Register(
 		domain.ErrOrganizationContextRequired, http.StatusBadRequest, domain.CodeOrganizationContextRequired)
@@ -46,6 +48,7 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	router.GET("/mailboxes", handler.ListMailboxes)
 	router.POST("/mailboxes", handler.CreateMailbox)
 	router.DELETE("/mailboxes/:mailbox_id", handler.DeleteMailbox)
+	router.GET("/mailboxes/:mailbox_id/messages", handler.ListMessages)
 	router.POST("/mailboxes/:mailbox_id/messages", handler.SendMessage)
 	router.GET("/mail-messages", handler.ListLog)
 	router.POST("/mail-broadcasts/:broadcast_id/sends", handler.SendBroadcast)
@@ -184,12 +187,124 @@ func TestMailboxRoutesRequireAnOrganizationContext(t *testing.T) {
 	for _, request := range [][2]string{
 		{http.MethodGet, "/mailbox-domains"}, {http.MethodGet, "/mailboxes"},
 		{http.MethodPost, "/mailboxes"}, {http.MethodDelete, "/mailboxes/1"},
+		{http.MethodGet, "/mailboxes/1/messages"},
 		{http.MethodPost, "/mailboxes/1/messages"}, {http.MethodGet, "/mail-messages"},
 	} {
 		recorder, body := fixture.do(request[0], request[1], `{}`)
 		if recorder.Code != http.StatusBadRequest || body["error_code"] != domain.CodeOrganizationContextRequired {
 			t.Fatalf("%s %s = %d %v; want 400 %s", request[0], request[1], recorder.Code, body, domain.CodeOrganizationContextRequired)
 		}
+	}
+}
+
+func TestListMessagesFiltersBySearchAndUnread(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	fixture.service.settings.InboundSecret = testInboundSecret
+	fixture.service.now = func() time.Time { return time.Unix(1_800_000_000, 0).UTC() }
+
+	viewer := *membership(domain.OrganizationRoleMember)
+	// The handler user sends; a second member reads, with read state of their own.
+	mine, err := fixture.service.CreateMailbox(t.Context(), as(7), CreateMailboxInput{
+		LocalPart: "helpdesk", DisplayName: "Helpdesk", Type: domain.MailboxTypeShared,
+		Members: []MailboxMemberInput{
+			{UserID: handlerUser, Permission: domain.MailboxPermissionSend},
+			{UserID: testCreator, Permission: domain.MailboxPermissionView},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	foreign, err := fixture.service.CreateMailbox(t.Context(), as(8), sharedInput("elsewhere", "", ""))
+	if err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+
+	deliver := func(messageID, from, subject string) *domain.MailMessage {
+		t.Helper()
+		raw := crlf(
+			"From: "+from,
+			"To: helpdesk@mail.example",
+			"Subject: "+subject,
+			"Message-ID: <"+messageID+">",
+			"",
+			"Body text.",
+		)
+		stored, _, deliverErr := fixture.service.ReceiveInbound(t.Context(), InboundDelivery{
+			Recipient: "helpdesk@mail.example",
+			Signature: signedHeader(fixture.service.now(), "helpdesk@mail.example", raw),
+			Raw:       raw,
+		})
+		if deliverErr != nil {
+			t.Fatalf("ReceiveInbound: %v", deliverErr)
+		}
+		return stored
+	}
+
+	invoice := deliver("m-1@sender.test", "Alice <alice@sender.test>", "Invoice 100% due")
+	welcome := deliver("m-2@sender.test", "Carol <carol@sender.test>", "Welcome aboard")
+	if _, err := fixture.service.SetMessageRead(t.Context(), viewer, mine.ID, welcome.ID, true); err != nil {
+		t.Fatalf("SetMessageRead: %v", err)
+	}
+	// Read state is per person: another member reading the invoice leaves it unread here.
+	if _, err := fixture.service.SetMessageRead(t.Context(), as(7), mine.ID, invoice.ID, true); err != nil {
+		t.Fatalf("SetMessageRead(other member): %v", err)
+	}
+	if _, _, err := fixture.service.SendMessage(t.Context(), viewer, mine.ID, SendInput{
+		To: []string{"bob@example.com"}, Cc: []string{"dan@example.org"}, Subject: "Receipt", Text: "Paid",
+	}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	subjects := func(path string) []string {
+		t.Helper()
+		recorder, body := fixture.do(http.MethodGet, path, "")
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d %v", path, recorder.Code, body)
+		}
+		items, _ := body["data"].([]any)
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			row, _ := item.(map[string]any)
+			subject, _ := row["subject"].(string)
+			out = append(out, subject)
+		}
+		return out
+	}
+
+	if got := subjects("/mailboxes/1/messages?unread=true"); len(got) != 1 || got[0] != "Invoice 100% due" {
+		t.Fatalf("unread=true = %v; want [Invoice 100%% due]", got)
+	}
+	if got := subjects("/mailboxes/1/messages?unread=false"); len(got) != 2 || got[0] != "Receipt" || got[1] != "Welcome aboard" {
+		t.Fatalf("unread=false = %v; want [Receipt Welcome aboard]", got)
+	}
+	if got := subjects("/mailboxes/1/messages?q=%20%20INVOICE%20%20"); len(got) != 1 || got[0] != "Invoice 100% due" {
+		t.Fatalf("q=INVOICE = %v; want [Invoice 100%% due]", got)
+	}
+	if got := subjects("/mailboxes/1/messages?direction=outbound&q=dan@example.org"); len(got) != 1 || got[0] != "Receipt" {
+		t.Fatalf("outbound cc search = %v; want [Receipt]", got)
+	}
+	if got := subjects("/mailboxes/1/messages?direction=inbound&unread=true&q=welcome"); len(got) != 0 {
+		t.Fatalf("combined non-matching filter = %v; want empty", got)
+	}
+
+	for _, query := range []string{
+		"direction=sideways",
+		"unread=maybe",
+		"unread=1",
+		"unread=true&unread=false",
+		"q=" + strings.Repeat("q", 201),
+		"q=bad%00char",
+		"q=a&q=b",
+	} {
+		recorder, body := fixture.do(http.MethodGet, "/mailboxes/1/messages?"+query, "")
+		if recorder.Code != http.StatusBadRequest || body["error_code"] != domain.CodeInvalidInput {
+			t.Fatalf("GET /mailboxes/1/messages?%s = %d %v; want 400 %s", query, recorder.Code, body, domain.CodeInvalidInput)
+		}
+	}
+
+	other, body := fixture.do(http.MethodGet, "/mailboxes/"+string(rune('0'+foreign.ID))+"/messages?unread=true&q=invoice", "")
+	if other.Code != http.StatusNotFound || body["error_code"] != domain.CodeMailboxNotFound {
+		t.Fatalf("other organization mailbox list = %d %v; want 404 %s", other.Code, body, domain.CodeMailboxNotFound)
 	}
 }
 

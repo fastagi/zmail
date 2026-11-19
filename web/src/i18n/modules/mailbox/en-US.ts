@@ -29,7 +29,7 @@ const messages = {
     localPartHint:
       'Lowercase letters and digits, with single dots, underscores, or hyphens inside.',
     displayName: 'Display name (optional)',
-    displayNamePlaceholder: 'Hello Team',
+    displayNamePlaceholder: 'Customer Support',
     limitReached:
       'This organization has reached the limit of {max} mailboxes. Delete one to create another.',
     displayNameInvalid:
@@ -90,6 +90,8 @@ const messages = {
     viewLabel: 'Message format',
     viewHtml: 'Formatted',
     viewText: 'Plain text',
+    previous: 'Previous message',
+    next: 'Next message',
   },
   deleteMessage: {
     title: 'Delete message',
@@ -100,6 +102,7 @@ const messages = {
     descriptionPick: 'Choose the mailbox to send from.',
     title: 'New message',
     replyTitle: 'Reply',
+    forwardTitle: 'Forward message',
     description: 'Sent from {address}.',
     to: 'To',
     toPlaceholder: 'bob@example.com, carol@example.com',
@@ -111,6 +114,9 @@ const messages = {
     attachHint: 'Up to 10 files, 4 MB in total.',
     removeAttachment: 'Remove {name}',
     replySubject: 'Re: {subject}',
+    forwardSubject: 'Fwd: {subject}',
+    quotedHeader: 'On {date}, {sender} wrote:',
+    forwardedHeader: '---------- Forwarded message ----------',
     template: 'Template',
     templateNone: 'None, write the message',
     templateHint: 'An empty variable uses the fallback written in the template.',
@@ -348,6 +354,8 @@ const messages = {
     compose: 'Compose',
     send: 'Send',
     reply: 'Reply',
+    replyAll: 'Reply all',
+    forward: 'Forward',
     markUnread: 'Mark unread',
     delete: 'Delete',
     cancel: 'Cancel',
@@ -421,6 +429,9 @@ const messages = {
     testSent: 'Test sent',
     testNeedsSave: 'Save your changes before sending a test.',
     testNeedsMailbox: 'Create a mailbox before you send a test.',
+    unsavedTitle: 'Discard unsaved changes?',
+    unsavedDescription: 'Your edits to this template have not been saved yet.',
+    discard: 'Discard changes',
     // Starter wording. [[name|fallback]] becomes a template placeholder.
     starters: {
       welcomeSubject: 'Welcome to [[company|our team]], [[first_name|there]]',
@@ -573,6 +584,7 @@ const messages = {
     importDescription:
       'Upload a UTF-8 CSV file with a header row. An email column is required; first_name, last_name, and other columns become fields. Existing contacts are updated and keep their status.',
     importFile: 'CSV file',
+    importSample: 'Download sample CSV',
     importList: 'Add to list',
     importNoList: 'No list',
     importRun: 'Import',
@@ -670,8 +682,16 @@ const messages = {
       placeholder: "Each contact's own value",
       fallback: 'Leave empty to use "{value}"',
       required:
-        'No value and no fallback: contacts without a "{name}" field will not get this broadcast.',
+        'No value and no fallback: contacts without the "{name}" field will not get this broadcast.',
     },
+    previewTitle: 'Preview',
+    previewHint:
+      'Rendered with the shared template values above; contact fields use sample or fallback text.',
+    timezoneHint: 'Local time ({zone})',
+    schedulePast: 'Choose a future time to schedule this broadcast.',
+    unsavedTitle: 'Discard unsaved changes?',
+    unsavedDescription: 'Your edits to this broadcast draft have not been saved yet.',
+    discard: 'Discard changes',
     save: 'Save draft',
     created: 'Draft created',
     saved: 'Draft saved',
@@ -732,7 +752,7 @@ const messages = {
     accessConflict: 'This mailbox changed in the meantime. Refresh to see its current access.',
     broadcastNotFound: 'This broadcast does not exist or was deleted.',
     broadcastInvalid:
-      'Check the broadcast: a name, a mailbox, a template, and a list are required.',
+      'Check the broadcast: a name, a mailbox, a template, a list, and valid template values are required.',
     broadcastNotEditable: 'The broadcast changed state. Reload to see where it stands.',
     broadcastNoRecipients: 'The list has no subscribed contacts, so there is no one to send to.',
     broadcastDisabled:
