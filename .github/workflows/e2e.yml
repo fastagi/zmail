@@ -64,7 +64,9 @@ jobs:
         working-directory: admin
         run: |
           pnpm install --frozen-lockfile
-          pnpm exec playwright install --with-deps chromium
+          # A runner that cannot reach the Ubuntu mirrors still has the system libraries from an
+          # earlier run; fall back to the browser alone instead of failing the job.
+          pnpm exec playwright install --with-deps chromium || pnpm exec playwright install chromium
 
       - name: Start the stack with make dev
         run: |
@@ -129,7 +131,9 @@ jobs:
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
-          pnpm exec playwright install --with-deps chromium
+          # A runner that cannot reach the Ubuntu mirrors still has the system libraries from an
+          # earlier run; fall back to the browser alone instead of failing the job.
+          pnpm exec playwright install --with-deps chromium || pnpm exec playwright install chromium
 
       - name: Start the stack with make dev
         run: |
