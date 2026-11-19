@@ -773,3 +773,67 @@ func TestPendingZoneMissingAtProviderExpiresAtOnce(t *testing.T) {
 		t.Fatalf("zones %v, domains %v", fixture.mailZones.zones, fixture.domains.domains)
 	}
 }
+
+// An activation whose setups were lost, such as to a worker that stopped right after it, leaves
+// pending domains that were never checked in an active zone. The next pass sets them up; a domain
+// that was already checked is left to its owner.
+func TestCheckPendingZonesSetsUpDomainsAnActivationLeftBehind(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	lost := fixture.connect(t, "mail.example.org")
+	checked := fixture.connect(t, "news.example.org")
+	zone := fixture.pendingZoneOf(t, lost)
+	fixture.mailZones.zones[zone.ID].Status = domain.MailZoneStatusActive
+	earlier := fixture.now.Add(-time.Hour)
+	fixture.domains.domains[checked.ID].CheckedAt = &earlier
+
+	if _, err := fixture.service.CheckPendingZones(ctx, 100); err != nil {
+		t.Fatalf("CheckPendingZones: %v", err)
+	}
+	if stored := fixture.domains.domains[lost.ID]; stored.Status != domain.MailDomainStatusVerified {
+		t.Fatalf("left-behind domain = %s, %q; want it set up", stored.Status, stored.LastError)
+	}
+	if stored := fixture.domains.domains[checked.ID]; stored.Status != domain.MailDomainStatusPending ||
+		!stored.CheckedAt.Equal(earlier) {
+		t.Fatalf("checked domain = %+v; want it untouched", stored)
+	}
+	if !slices.Equal(fixture.zones.routingFor, []string{"mail.example.org"}) {
+		t.Fatalf("routing = %v", fixture.zones.routingFor)
+	}
+}
+
+func TestWaitForSetupsWaitsForBackgroundSetups(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	var pending []func()
+	fixture.service.background = func(run func()) { pending = append(pending, run) }
+	fixture.connect(t, "news.example.com")
+	if len(pending) != 1 {
+		t.Fatalf("runs = %d", len(pending))
+	}
+
+	short, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if err := fixture.service.WaitForSetups(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaitForSetups while a setup runs = %v", err)
+	}
+	pending[0]()
+	if err := fixture.service.WaitForSetups(ctx); err != nil {
+		t.Fatalf("WaitForSetups after the setup = %v", err)
+	}
+}
+
+func (z *fakeMailZones) ListUncheckedDomainsInActiveZones(_ context.Context, limit int) ([]*domain.MailDomain, error) {
+	var domains []*domain.MailDomain
+	for id := uint(1); id <= z.domains.nextID && len(domains) < limit; id++ {
+		mailDomain, ok := z.domains.domains[id]
+		if !ok || mailDomain.MailZoneID == nil || mailDomain.Status != domain.MailDomainStatusPending || mailDomain.CheckedAt != nil {
+			continue
+		}
+		if zone, ok := z.zones[*mailDomain.MailZoneID]; ok && zone.Status == domain.MailZoneStatusActive {
+			copied := *mailDomain
+			domains = append(domains, &copied)
+		}
+	}
+	return domains, nil
+}

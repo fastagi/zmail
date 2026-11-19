@@ -371,3 +371,40 @@ func TestDeletePendingZoneCommitsOnlyAfterTheProvider(t *testing.T) {
 		t.Fatalf("DeletePendingZone on an active zone = %v, provider called %v", err, called)
 	}
 }
+
+func TestZoneRepositoryListsUncheckedDomainsInActiveZones(t *testing.T) {
+	repo := openZoneRepository(t)
+	ctx := context.Background()
+	active, pending := newZone(1, "example.com"), newZone(1, "example.org")
+	for _, zone := range []*domain.MailZone{active, pending} {
+		if err := repo.CreateZone(ctx, zone, 3); err != nil {
+			t.Fatalf("CreateZone: %v", err)
+		}
+	}
+	if activated, err := repo.ActivateZone(ctx, active.ID, time.Now()); err != nil || !activated {
+		t.Fatalf("ActivateZone = %v, %v", activated, err)
+	}
+	create := func(name string, zone *domain.MailZone) *domain.MailDomain {
+		mailDomain := &domain.MailDomain{OrganizationID: 1, Name: name, ZoneID: zone.CloudflareZoneID, ZoneName: zone.Name, MailZoneID: &zone.ID, CreatedBy: 1}
+		if err := repo.CreateDomain(ctx, mailDomain, 10); err != nil {
+			t.Fatalf("CreateDomain(%s): %v", name, err)
+		}
+		return mailDomain
+	}
+	unchecked := create("mail.example.com", active)
+	checked := create("news.example.com", active)
+	create("mail.example.org", pending)
+	now := time.Now()
+	checked.CheckedAt = &now
+	if err := repo.UpdateDomain(ctx, checked); err != nil {
+		t.Fatalf("UpdateDomain: %v", err)
+	}
+
+	found, err := repo.ListUncheckedDomainsInActiveZones(ctx, 10)
+	if err != nil || len(found) != 1 || found[0].ID != unchecked.ID {
+		t.Fatalf("unchecked = %+v, %v; want only %s", found, err, unchecked.Name)
+	}
+	if limited, err := repo.ListUncheckedDomainsInActiveZones(ctx, 0); err != nil || len(limited) != 0 {
+		t.Fatalf("limit 0 = %+v, %v", limited, err)
+	}
+}

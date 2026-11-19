@@ -15,6 +15,14 @@ import (
 type countingZoneChecker struct {
 	calls  int
 	limits []int
+	// waits records each WaitForSetups call and whether its context still had time left.
+	waits []bool
+}
+
+func (c *countingZoneChecker) WaitForSetups(ctx context.Context) error {
+	_, bounded := ctx.Deadline()
+	c.waits = append(c.waits, bounded && ctx.Err() == nil)
+	return nil
 }
 
 func (c *countingZoneChecker) CheckPendingZones(_ context.Context, limit int) (int, error) {
@@ -58,6 +66,20 @@ func TestMailZoneWorkerAlwaysWaitsForThePoll(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Equal(t, 1, checker.calls)
 	assert.Equal(t, []int{5}, checker.limits)
+}
+
+// The worker waits, with a bound, for the setups an activation started before it exits, also when
+// it was stopped: --once and a deploy would otherwise end them halfway.
+func TestMailZoneWorkerWaitsForSetupsBeforeExiting(t *testing.T) {
+	checker := &countingZoneChecker{}
+	require.NoError(t, runMailZoneWorker(context.Background(), checker, webhookWorkerConfig{Batch: 5, Poll: time.Hour, Once: true}))
+	assert.Equal(t, 1, checker.calls)
+	assert.Equal(t, []bool{true}, checker.waits)
+
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.NoError(t, runMailZoneWorker(stopped, checker, webhookWorkerConfig{Batch: 5, Poll: time.Hour}))
+	assert.Equal(t, []bool{true, true}, checker.waits, "a stopped worker still waits for its setups")
 }
 
 func TestWorkerArgumentErrorsNameTheWorker(t *testing.T) {

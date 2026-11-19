@@ -151,7 +151,11 @@ func (s *service) startSetUp(ctx context.Context, mailDomain *domain.MailDomain)
 		}
 	} else {
 		target := *mailDomain
-		s.background(func() { s.runSetUps(ctx, run, &target) })
+		s.setups.Add(1)
+		s.background(func() {
+			defer s.setups.Done()
+			s.runSetUps(ctx, run, &target)
+		})
 	}
 	current, err := s.domains.FindDomain(ctx, mailDomain.OrganizationID, mailDomain.ID)
 	if err != nil {
@@ -649,5 +653,21 @@ func (s *service) removeRoutingRule(ctx context.Context, mailbox *domain.Mailbox
 	if err != nil {
 		slog.WarnContext(ctx, "routing rule of a deleted mailbox was not removed",
 			slog.String("address", mailbox.Address), slog.String("error", err.Error()))
+	}
+}
+
+// WaitForSetups waits until no domain setup runs in the background, or until ctx ends. A worker
+// calls it before it exits, so an activation's setups are not cut off with the process.
+func (s *service) WaitForSetups(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.setups.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

@@ -64,4 +64,8 @@ type MailZoneRepository interface {
 	// longer pending is ErrMailZoneNotFound, and removeAtProvider is not called.
 	DeletePendingZone(ctx context.Context, id uint, removeAtProvider func(context.Context) error) error
 	ListDomainsInZone(ctx context.Context, zoneID uint) ([]*MailDomain, error)
+	// ListUncheckedDomainsInActiveZones returns up to limit pending domains that were never
+	// checked although their managed zone is active: domains whose setup an activation started
+	// but did not finish.
+	ListUncheckedDomainsInActiveZones(ctx context.Context, limit int) ([]*MailDomain, error)
 }

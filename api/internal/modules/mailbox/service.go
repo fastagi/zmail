@@ -181,6 +181,8 @@ type service struct {
 	// setupMu guards domainSetups, the setups running in the background by domain ID.
 	setupMu      sync.Mutex
 	domainSetups map[uint]*domainSetupRun
+	// setups counts the background setups that have not ended, for WaitForSetups.
+	setups sync.WaitGroup
 	// background runs domain setups off the request path; tests make it synchronous.
 	background func(func())
 	// setupClaimHook, when set, runs right after a request found a running setup of its domain;

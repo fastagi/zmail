@@ -185,8 +185,10 @@ func (s *service) attachZones(ctx context.Context, organizationID uint, domains 
 
 // CheckPendingZones checks up to limit pending managed zones, the least recently checked first:
 // a zone the provider now serves becomes active and its pending domains are set up, and a zone
-// that stayed pending past pendingZoneLifetime is removed with its domains. One zone's failure is
-// logged and does not stop the others. It returns how many zones it checked.
+// that stayed pending past pendingZoneLifetime is removed with its domains. It then starts the
+// setup of up to limit domains an earlier activation left behind: pending and never checked in an
+// active zone, such as when the worker stopped before their setup ran. One failure is logged and
+// does not stop the others. It returns how many zones it checked.
 func (s *service) CheckPendingZones(ctx context.Context, limit int) (int, error) {
 	if !s.domainsEnabled() {
 		// Without custom domains there are no managed zones to check.
@@ -202,7 +204,27 @@ func (s *service) CheckPendingZones(ctx context.Context, limit int) (int, error)
 				slog.String("zone", zone.Name), slog.String("error", err.Error()))
 		}
 	}
+	s.setUpLeftBehindDomains(ctx, limit)
 	return len(zones), nil
+}
+
+// setUpLeftBehindDomains starts the setup of pending, never-checked domains in active zones. A
+// domain whose setup already runs, such as one this pass activated, is left to that run.
+func (s *service) setUpLeftBehindDomains(ctx context.Context, limit int) {
+	domains, err := s.zones.ListUncheckedDomainsInActiveZones(ctx, limit)
+	if err != nil {
+		slog.WarnContext(ctx, "left-behind mail domains were not listed", slog.String("error", err.Error()))
+		return
+	}
+	for _, mailDomain := range domains {
+		if s.setupRunning(mailDomain.ID) {
+			continue
+		}
+		if _, err := s.startSetUp(ctx, mailDomain); err != nil {
+			slog.WarnContext(ctx, "mail domain setup did not start",
+				slog.String("domain", mailDomain.Name), slog.String("error", err.Error()))
+		}
+	}
 }
 
 func (s *service) checkPendingZone(ctx context.Context, zone *domain.MailZone) error {

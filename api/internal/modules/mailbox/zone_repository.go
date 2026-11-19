@@ -360,3 +360,27 @@ func (r *repository) ListDomainsInZone(ctx context.Context, zoneID uint) ([]*dom
 	}
 	return domains, nil
 }
+
+// ListUncheckedDomainsInActiveZones returns pending, never-checked domains of active zones, oldest
+// first. Every setup stores when it checked, so a domain leaves this list after one setup.
+func (r *repository) ListUncheckedDomainsInActiveZones(ctx context.Context, limit int) ([]*domain.MailDomain, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	if limit <= 0 {
+		return []*domain.MailDomain{}, nil
+	}
+	var rows []MailDomainPO
+	if err := r.conn(ctx).Model(&MailDomainPO{}).
+		Joins("JOIN mail_zones ON mail_zones.id = mail_domains.mail_zone_id").
+		Where("mail_zones.status = ? AND mail_domains.status = ? AND mail_domains.checked_at IS NULL",
+			string(domain.MailZoneStatusActive), string(domain.MailDomainStatusPending)).
+		Order("mail_domains.id ASC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	domains := make([]*domain.MailDomain, 0, len(rows))
+	for i := range rows {
+		domains = append(domains, rows[i].toDomain())
+	}
+	return domains, nil
+}

@@ -499,6 +499,8 @@ type MailBroadcastDispatcher interface {
 // provider now serves and removes the ones that waited too long. It returns how many it checked.
 type MailZoneChecker interface {
 	CheckPendingZones(ctx context.Context, limit int) (int, error)
+	// WaitForSetups waits until the domain setups an activation started have ended, or ctx ends.
+	WaitForSetups(ctx context.Context) error
 }
 
 // MailTemplateRepository stores templates. Every lookup is scoped to an organization.
