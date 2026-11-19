@@ -701,7 +701,7 @@ func TestBatchMoveAndFolderDeleteDoNotDeadlock(t *testing.T) {
 	}
 
 	// The deleting transaction, the batch, and the polling below each need a connection.
-	widenPool(t, db, 4)
+	widenPool(t, db)
 
 	// The deleting transaction locks the folder first, as DeleteFolder does.
 	deleting := db.Begin()
@@ -756,15 +756,15 @@ func TestMissingMessageAnswersBeforeMissingFolderAndLabel(t *testing.T) {
 	expectError(t, "missing folder and label", err, ErrMailFolderNotFound)
 }
 
-// widenPool lets a test hold two transactions and still poll, and restores the pool afterwards.
-func widenPool(t *testing.T, db *gorm.DB, open int) {
+// widenPool raises the pool to four connections so a test can hold two transactions and still poll, and restores it afterwards.
+func widenPool(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	pool, err := db.DB()
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}
 	previous := pool.Stats().MaxOpenConnections
-	pool.SetMaxOpenConns(open)
+	pool.SetMaxOpenConns(4)
 	t.Cleanup(func() { pool.SetMaxOpenConns(previous) })
 }
 
@@ -803,7 +803,7 @@ func TestReplaceLabelsAndLabelDeleteDoNotDeadlock(t *testing.T) {
 	if _, err := f.service.UpdateMessages(ctx, f.b, box, []uint{first, second}, MessageUpdate{AddLabelIDs: []uint{doomed.ID}}); err != nil {
 		t.Fatalf("label both: %v", err)
 	}
-	widenPool(t, db, 4)
+	widenPool(t, db)
 
 	// The replacing batch, step by step: lock the messages in id order, then delete their rows
 	// of labels outside the new set, here the second message's first.

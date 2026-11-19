@@ -502,7 +502,7 @@ func TestInboxSearchSpansPlacementsButTrash(t *testing.T) {
 func TestInboxSearchTimeoutIsTooBroad(t *testing.T) {
 	f := newInboxFixture(t)
 	repo := f.inboxRepo()
-	widenPool(t, repo.db, 4)
+	widenPool(t, repo.db)
 	repo.searchTimeout = 50 * time.Millisecond
 
 	holder := repo.db.Begin()
