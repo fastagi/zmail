@@ -5457,6 +5457,49 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/role-assignment:
+    put:
+      operationId: setMailboxRoleAssignment
+      summary: Put a mailbox in a mail role or take it out
+      description: Needs `administer` on the mailbox. Setting the current value succeeds and changes
+        nothing. The assignment grants and revokes no access and writes no access event.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailboxRoleAssignment'
+      responses:
+        '200':
+          description: The mailbox after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The mailbox (`MAILBOX.NOT_FOUND`) or the mail role (`MAILBOX.ROLE_NOT_FOUND`) is not
+            found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/messages:
     get:
       operationId: listMailMessages
@@ -6530,6 +6573,309 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/inbox-messages:
+    get:
+      operationId: listInboxMessages
+      summary: List the caller's mail across every mailbox they may read, newest first
+      description: The unified inbox. Only mailboxes the caller has `view` on are read; a mailbox, a
+        mail role, or an id the caller cannot read, or one of another organization, matches nothing
+        instead of answering `403` or `404`. Sealed messages and the trash never appear. Each parameter
+        may appear at most once; a repeated parameter, `page`, an unknown value, a malformed cursor, an
+        unknown `tz`, or a combination outside the mailbox contract's rules is `400 COMMON.INVALID_INPUT`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: view
+          in: query
+          required: false
+          description: '`all` is inbound mail in `default` (every Inbox). `today` is inbound mail outside the
+            trash that arrived since the start of today in `tz`. `pending` is mail of both directions the
+            caller starred, outside `archive` and the trash. `sent` is outbound mail in `default` (every
+            Sent). Defaults to `all`.'
+          schema:
+            $ref: '#/components/schemas/InboxView'
+        - name: role_id
+          in: query
+          required: false
+          description: Keep only the mailboxes of one mail role, or `none` for the mailboxes without a role.
+            A role the caller cannot see matches nothing.
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/PositiveID'
+              - type: string
+                enum:
+                  - none
+        - name: mailbox_id
+          in: query
+          required: false
+          description: Keep only one mailbox. A mailbox the caller may not read, or another organization's,
+            matches nothing.
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: unread
+          in: query
+          required: false
+          description: '`true` keeps only inbound messages the caller has not read; outbound messages are
+            always read and never match. `false` keeps the others. Read state is the caller''s own.'
+          schema:
+            type: boolean
+        - name: q
+          in: query
+          required: false
+          description: Search, only with `view=all`. At most 200 characters as sent; the value is then
+            trimmed, and one that is empty after trimming or contains a control character is
+            `400 COMMON.INVALID_INPUT`. Matches like the single-mailbox search and searches every placement
+            except the trash, both directions. A search the database cannot finish within 2 seconds is
+            `422 MAILBOX.SEARCH_TOO_BROAD`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: group
+          in: query
+          required: false
+          description: '`thread` lists one item per thread and mailbox. Only with `view` `all` or `sent`,
+            and without `unread` and `q`.'
+          schema:
+            type: string
+            enum:
+              - thread
+        - name: tz
+          in: query
+          required: false
+          description: The IANA time zone that defines today for `view=today`, at most 64 characters.
+            Defaults to `UTC`. `Local` and an empty value are `400 COMMON.INVALID_INPUT`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+            default: UTC
+        - $ref: '#/components/parameters/InboxCursor'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: One page of message summaries without bodies, ordered by `created_at`, newest first,
+            then by id, highest first. With `group=thread`, one page of threads, each as its latest message
+            in the view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboxCursorPageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The search could not finish within 2 seconds; a longer `q` is needed
+            (`MAILBOX.SEARCH_TOO_BROAD`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/inbox-message-counts:
+    get:
+      operationId: getInboxMessageCounts
+      summary: Count the caller's unified inbox views, mail roles, and mailboxes
+      description: Live counts of the caller's own read and star state over the mailboxes they have
+        `view` on. Sealed messages and the trash are never counted. Only `tz` is accepted; any other or
+        repeated parameter is `400 COMMON.INVALID_INPUT`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: tz
+          in: query
+          required: false
+          description: The IANA time zone that defines today, at most 64 characters. Defaults to `UTC`.
+            `Local` and an empty value are `400 COMMON.INVALID_INPUT`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+            default: UTC
+      responses:
+        '200':
+          description: The counts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboxCountsResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-roles:
+    get:
+      operationId: listMailRoles
+      summary: List the organization's mail roles
+      description: Owners and admins see every mail role with every mailbox in it. Members see only the
+        roles holding at least one mailbox they can see, with only those mailboxes. A mail role groups
+        mailboxes for navigation and grants nothing.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: At most 50 mail roles by name ignoring case, then by id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailRoleListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailRole
+      summary: Create a mail role
+      description: Needs the `owner` or `admin` organization role. The body is at most 4 KiB; a larger or
+        malformed body is `400 COMMON.INVALID_INPUT`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailRoleInput'
+      responses:
+        '201':
+          description: The created mail role, with no mailboxes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailRoleResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Another mail role of the organization has the name, ignoring case
+            (`MAILBOX.ROLE_NAME_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: A field failed validation (`COMMON.VALIDATION_FAILED` with `errors` keyed `name`,
+            `color`, `description`, or `owner_user_id`), or the organization has 50 mail roles
+            (`MAILBOX.ROLE_LIMIT_REACHED`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-roles/{role_id}:
+    put:
+      operationId: updateMailRole
+      summary: Replace a mail role
+      description: Needs the `owner` or `admin` organization role. Replaces every field; an omitted field
+        takes its default. The last write wins.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailRoleID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailRoleInput'
+      responses:
+        '200':
+          description: The mail role after the change, with the mailboxes the caller can see.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailRoleResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the mail role (`MAILBOX.ROLE_NOT_FOUND`)
+            is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another mail role of the organization has the name, ignoring case
+            (`MAILBOX.ROLE_NAME_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailRole
+      summary: Delete a mail role
+      description: Needs the `owner` or `admin` organization role. Its mailboxes become ungrouped in the
+        same statement; no mailbox access changes.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailRoleID'
+      responses:
+        '204':
+          description: The mail role is deleted and its mailboxes have no role.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the mail role (`MAILBOX.ROLE_NOT_FOUND`)
+            is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-delivery-events:
     post:
       operationId: receiveMailDeliveryEvent
@@ -6934,6 +7280,22 @@ components:
       in: path
       required: true
       description: Positive mail label identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    InboxCursor:
+      name: cursor
+      in: query
+      description: Opaque position from `meta.next_cursor`, passed back unchanged; absent requests the
+        newest page. A malformed cursor is `400 COMMON.INVALID_INPUT`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    MailRoleID:
+      name: role_id
+      in: path
+      required: true
+      description: Positive mail role identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
     MailIdempotencyKey:
@@ -7371,6 +7733,9 @@ components:
         - MAILBOX.FOLDER_LIMIT_REACHED
         - MAILBOX.LABEL_LIMIT_REACHED
         - MAILBOX.SEARCH_TOO_BROAD
+        - MAILBOX.ROLE_NOT_FOUND
+        - MAILBOX.ROLE_NAME_TAKEN
+        - MAILBOX.ROLE_LIMIT_REACHED
         - MAILBOX.ZONE_NOT_FOUND
         - MAILBOX.ZONE_PENDING
         - MAILBOX.ZONE_IN_USE
@@ -10074,6 +10439,7 @@ components:
         - access
         - unread_count
         - created_at
+        - role_id
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -10115,6 +10481,12 @@ components:
         created_at:
           type: string
           format: date-time
+        role_id:
+          description: The mail role the mailbox belongs to; null when it has none. A mail role groups
+            mailboxes for navigation and grants nothing.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
     CreateMailboxRequest:
       type: object
       additionalProperties: false
@@ -10914,6 +11286,380 @@ components:
           type: string
         data:
           $ref: '#/components/schemas/MailMessageCounts'
+    InboxView:
+      type: string
+      description: A unified inbox view. `all` is inbound mail in `default`; `today` is inbound mail outside
+        the trash that arrived today; `pending` is mail the caller starred outside `archive` and the
+        trash, both directions; `sent` is outbound mail in `default`.
+      enum:
+        - all
+        - today
+        - pending
+        - sent
+    InboxItem:
+      type: object
+      additionalProperties: false
+      description: A message summary of the single-mailbox list with the owning mailbox's address and mail
+        role and a short text snippet.
+      required:
+        - id
+        - mailbox_id
+        - mailbox_address
+        - role_id
+        - direction
+        - status
+        - from
+        - to
+        - cc
+        - subject
+        - snippet
+        - read
+        - failure_code
+        - queued_reason
+        - last_event
+        - attachment_count
+        - template_id
+        - created_at
+        - placement
+        - folder_id
+        - label_ids
+        - starred
+        - thread_id
+        - trashed_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_address:
+          type: string
+          description: Address of the mailbox the message belongs to.
+          maxLength: 320
+        role_id:
+          description: The mail role the mailbox belongs to now; null when it has none.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        direction:
+          $ref: '#/components/schemas/MailDirection'
+        status:
+          $ref: '#/components/schemas/MailStatus'
+        from:
+          $ref: '#/components/schemas/MailAddress'
+        to:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
+        cc:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 320
+        subject:
+          type: string
+          maxLength: 998
+        snippet:
+          type: string
+          description: The start of the text body with whitespace runs collapsed to one space, trimmed, at
+            most 140 characters; empty for a message without a text body.
+          maxLength: 140
+        read:
+          type: boolean
+          description: Whether the caller has read the message; per person. Outbound messages are always read.
+        failure_code:
+          type: string
+          description: Stable provider or transport reason when `status` is `failed`; empty otherwise.
+          maxLength: 120
+        queued_reason:
+          type:
+            - string
+            - 'null'
+          enum:
+            - send_limit
+            - null
+          description: '`send_limit` while a queued message waits for room in the organization''s send limit; otherwise null.'
+        last_event:
+          $ref: '#/components/schemas/MailEventSummary'
+        attachment_count:
+          type: integer
+          description: How many files the message has; the detail lists them.
+          minimum: 0
+          maximum: 10
+        template_id:
+          description: The template the message was rendered from; null when none was used.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        placement:
+          $ref: '#/components/schemas/MailPlacement'
+        folder_id:
+          description: The folder that holds the message when `placement` is `folder`; null otherwise.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        label_ids:
+          type: array
+          description: The ids of the mailbox labels on the message, ascending; shared by every member.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PositiveID'
+        starred:
+          type: boolean
+          description: Whether the caller starred the message; per person.
+        thread_id:
+          description: The thread the message belongs to in its mailbox; the id of the message that started it.
+          allOf:
+            - $ref: '#/components/schemas/PositiveID'
+        trashed_at:
+          description: Always null; the unified inbox never lists the trash.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+        thread:
+          description: Present only with `group=thread`; summarizes the message's thread in the view, as in
+            the single-mailbox list.
+          $ref: '#/components/schemas/MailThreadSummary'
+    InboxCursorPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          description: Message summaries, newest first. With `group=thread` each item is the latest message
+            of one thread in the view and carries `thread`.
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/InboxItem'
+        meta:
+          $ref: '#/components/schemas/CursorPageMeta'
+    InboxCounts:
+      type: object
+      additionalProperties: false
+      description: The caller's own counts over the mailboxes they may read. Sealed messages and the trash
+        are never counted.
+      required:
+        - views
+        - roles
+        - ungrouped_unread
+        - mailboxes
+        - today_starts_at
+        - today_ends_at
+      properties:
+        views:
+          type: object
+          additionalProperties: false
+          required:
+            - all_unread
+            - today
+            - today_unread
+            - pending
+            - sent_waiting
+          properties:
+            all_unread:
+              type: integer
+              description: Inbound messages in `default` the caller has not read; the sum of `mailboxes`.
+              minimum: 0
+            today:
+              type: integer
+              description: Inbound messages outside the trash that arrived today.
+              minimum: 0
+            today_unread:
+              type: integer
+              description: The messages of `today` the caller has not read.
+              minimum: 0
+            pending:
+              type: integer
+              description: Messages the caller starred outside `archive` and the trash, both directions.
+              minimum: 0
+            sent_waiting:
+              type: integer
+              description: Outbound messages waiting for room in the organization's send limit.
+              minimum: 0
+        roles:
+          type: array
+          description: One entry per mail role with at least one mailbox the caller may read, by `role_id`
+            ascending.
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - role_id
+              - unread
+            properties:
+              role_id:
+                $ref: '#/components/schemas/PositiveID'
+              unread:
+                type: integer
+                description: The `all_unread` of the role's readable mailboxes.
+                minimum: 0
+        ungrouped_unread:
+          type: integer
+          description: The `all_unread` of the readable mailboxes without a mail role.
+          minimum: 0
+        mailboxes:
+          type: array
+          description: One entry per mailbox the caller may read, by `mailbox_id` ascending. Each `unread`
+            equals that mailbox's `unread_count`.
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - mailbox_id
+              - unread
+            properties:
+              mailbox_id:
+                $ref: '#/components/schemas/PositiveID'
+              unread:
+                type: integer
+                minimum: 0
+        today_starts_at:
+          type: string
+          format: date-time
+          description: The start of today in the requested time zone, in UTC; inclusive.
+        today_ends_at:
+          type: string
+          format: date-time
+          description: The start of the next day in the requested time zone, in UTC; exclusive.
+    InboxCountsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/InboxCounts'
+    MailRole:
+      type: object
+      additionalProperties: false
+      description: An organization-level grouping of mailboxes by business identity. It grants nothing.
+      required:
+        - id
+        - name
+        - color
+        - description
+        - owner_user_id
+        - mailbox_ids
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        color:
+          $ref: '#/components/schemas/MailLabelColor'
+        description:
+          type: string
+          maxLength: 280
+        owner_user_id:
+          description: The member responsible for the role, for display only; null when none is set or
+            the user is no longer a member.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        mailbox_ids:
+          type: array
+          description: The role's mailboxes the caller can see, ascending.
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/PositiveID'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MailRoleInput:
+      type: object
+      description: Unknown fields are ignored.
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: Trimmed; 1 to 64 characters afterwards, unique in the organization ignoring case.
+          minLength: 1
+          maxLength: 400
+        color:
+          description: Defaults to `gray`.
+          $ref: '#/components/schemas/MailLabelColor'
+        description:
+          type: string
+          description: Trimmed; at most 280 characters afterwards, without control characters. Defaults to
+            empty.
+        owner_user_id:
+          description: A current member of the organization, or null for none. Defaults to null.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+    MailRoleResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailRole'
+    MailRoleListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/MailRole'
+    MailboxRoleAssignment:
+      type: object
+      additionalProperties: false
+      required:
+        - role_id
+      properties:
+        role_id:
+          description: The mail role to put the mailbox in, or null to take it out of its role.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
     MailAttachment:
       type: object
       additionalProperties: false

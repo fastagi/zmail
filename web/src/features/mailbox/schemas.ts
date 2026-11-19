@@ -291,6 +291,8 @@ export const mailboxSchema = strictObject({
   // The caller's own unread count; 0 without `view`.
   unread_count: nonnegativeIntegerSchema,
   created_at: timestampSchema,
+  // The mail role the mailbox belongs to; null when ungrouped. Optional until every API emits it.
+  role_id: optional(nullable(safeIdSchema)),
 });
 export const mailboxListSchema = array(mailboxSchema);
 

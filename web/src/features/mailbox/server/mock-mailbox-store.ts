@@ -1414,6 +1414,7 @@ export class MockMailboxStore {
       webhooks_enabled: state.access.webhooksEnabled,
       access,
       unread_count: unread,
+      role_id: null,
     };
   }
 

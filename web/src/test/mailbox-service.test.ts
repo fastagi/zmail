@@ -141,6 +141,17 @@ describe('mailbox service boundary', () => {
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
   });
 
+  it('parses mailboxes with and without role_id', async () => {
+    const get = vi
+      .spyOn(request, 'get')
+      .mockResolvedValueOnce([accessMailbox({ role_id: 3 }), accessMailbox({ id: 13 })]);
+    const mailboxes = await mailboxService.list(7);
+    expect(mailboxes.map(mailbox => mailbox.role_id)).toEqual([3, undefined]);
+
+    get.mockResolvedValueOnce([accessMailbox({ role_id: 0 })]);
+    await expect(mailboxService.list(7)).rejects.toBeInstanceOf(ApiError);
+  });
+
   it('accepts contract-shaped messages and rejects drift', () => {
     expect(parseMailMessage(message(), 7)).toMatchObject({ id: 7, status: 'received' });
     expect(() => parseMailMessage(message(), 8)).toThrow(ApiError);
