@@ -42,6 +42,7 @@ import {
   ErrorAlert,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import type { PaletteCommand } from '@/features/mailbox/components/command-palette';
 import { ListSkeleton } from '@/features/mailbox/components/message-list';
 import {
   useInboxCounts,
@@ -86,6 +87,9 @@ const InboxReadingPane = lazy(async () => ({
 }));
 const ShortcutHelpDialog = lazy(async () => ({
   default: (await import('@/features/mailbox/components/shortcut-help-dialog')).ShortcutHelpDialog,
+}));
+const CommandPalette = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/command-palette')).CommandPalette,
 }));
 // The sidebar sheet of narrow screens loads when first opened.
 const Sheet = lazy(async () => ({ default: (await import('@/components/ui/sheet')).Sheet }));
@@ -278,6 +282,9 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   // Mounted from the first open on, so the dialog can animate closed.
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpMounted, setHelpMounted] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteMounted, setPaletteMounted] = useState(false);
+  const [managingMailboxes, setManagingMailboxes] = useState(false);
   const paneActions = useRef<InboxPaneActions | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   /** `j` on the last loaded row asked for the next page: that row, whose successor opens next. */
@@ -539,6 +546,10 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     compose: compose ?? (() => toast.error(t('inbox.noSendableMailbox'))),
     search: () => searchRef.current?.focus(),
     help: showHelp,
+    palette: () => {
+      setPaletteMounted(true);
+      setPaletteOpen(open => !open);
+    },
     escape: () => {
       if (openItem) setOpenParam(null);
     },
@@ -620,6 +631,41 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     setListing({ [BOX_PARAM]: String(mailboxId), [ROLE_PARAM]: null });
   const onRole = (role: InboxRoleFilter) =>
     setListing({ [ROLE_PARAM]: String(role), [BOX_PARAM]: null });
+  const runCommand = (command: PaletteCommand) => {
+    switch (command.kind) {
+      case 'mailbox':
+        onBox(command.mailboxId);
+        break;
+      case 'role':
+        onRole(command.roleId);
+        break;
+      case 'mail':
+        // The chosen mail shows at once; the search lists it with its neighbours.
+        setAdvanceAfter(null);
+        setHeld(command.item);
+        replaceParams(next => {
+          for (const name of filterParams) next.delete(name);
+          next.set(SEARCH_PARAM, command.q);
+          next.set(OPEN_PARAM, String(command.item.id));
+        });
+        break;
+      case 'compose':
+        compose?.();
+        break;
+      case 'view':
+        onView(command.view);
+        break;
+      case 'help':
+        showHelp();
+        break;
+      case 'manageMailboxes':
+        setManagingMailboxes(true);
+        break;
+      case 'manageRoles':
+        setManagingRoles(true);
+        break;
+    }
+  };
   /** In the sheet, every choice also closes it. */
   const closing =
     <A extends unknown[]>(action: (...args: A) => void) =>
@@ -737,6 +783,31 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         </Suspense>
       ) : null}
 
+      {paletteMounted ? (
+        <Suspense fallback={null}>
+          <CommandPalette
+            open={paletteOpen}
+            onOpenChange={setPaletteOpen}
+            organizationId={organizationId}
+            timeZone={timeZone}
+            mailboxes={mailboxes.data}
+            roles={visibleRoles(mailboxes.data, roleList, canManage)}
+            canManage={canManage}
+            canCompose={compose !== null}
+            onCommand={runCommand}
+          />
+        </Suspense>
+      ) : null}
+
+      {canManage ? (
+        <ManageMailboxesFlow
+          open={managingMailboxes}
+          onOpenChange={setManagingMailboxes}
+          mailboxes={mailboxes.data}
+          onRefresh={() => void mailboxes.refetch()}
+        />
+      ) : null}
+
       {canManage && managingRoles ? (
         <Suspense fallback={null}>
           <ManageRolesDialog open onOpenChange={open => setManagingRoles(open)} />
@@ -777,10 +848,6 @@ function ManageMailboxesAction({
   const organizationId = useMailOrganizationId();
   const domains = useMailboxDomains(organizationId);
   const [open, setOpen] = useState(false);
-  const [accessTargetId, setAccessTargetId] = useState<number | null>(null);
-  const domainList = domains.data ?? [];
-  const domain = domainList.find(item => item.kind === 'shared') ?? domainList[0] ?? null;
-  const accessTarget = mailboxes.find(item => item.id === accessTargetId) ?? null;
 
   return (
     <>
@@ -794,30 +861,59 @@ function ManageMailboxesAction({
       >
         {t('switcher.manage')}
       </Button>
-      <Suspense fallback={null}>
-        {open ? (
-          <ManageMailboxesDialog
-            open
-            mailboxes={mailboxes}
-            domain={domain}
-            domains={domainList}
-            onClose={() => setOpen(false)}
-            onCreated={() => setOpen(false)}
-            onOpenAccess={mailbox => {
-              setOpen(false);
-              setAccessTargetId(mailbox.id);
-            }}
-          />
-        ) : null}
-        {accessTarget ? (
-          <MailboxAccessPanel
-            mailbox={accessTarget}
-            onClose={() => setAccessTargetId(null)}
-            onRefresh={onRefresh}
-          />
-        ) : null}
-      </Suspense>
+      <ManageMailboxesFlow
+        open={open}
+        onOpenChange={setOpen}
+        mailboxes={mailboxes}
+        onRefresh={onRefresh}
+      />
     </>
+  );
+}
+
+/** Manage mailboxes, then the access panel of the mailbox it opens; each loads when first shown. */
+function ManageMailboxesFlow({
+  open,
+  onOpenChange,
+  mailboxes,
+  onRefresh,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  mailboxes: Mailbox[];
+  onRefresh: () => void;
+}) {
+  const organizationId = useMailOrganizationId();
+  const domains = useMailboxDomains(organizationId);
+  const [accessTargetId, setAccessTargetId] = useState<number | null>(null);
+  const domainList = domains.data ?? [];
+  const domain = domainList.find(item => item.kind === 'shared') ?? domainList[0] ?? null;
+  const accessTarget = mailboxes.find(item => item.id === accessTargetId) ?? null;
+
+  return (
+    <Suspense fallback={null}>
+      {open && domains.data ? (
+        <ManageMailboxesDialog
+          open
+          mailboxes={mailboxes}
+          domain={domain}
+          domains={domainList}
+          onClose={() => onOpenChange(false)}
+          onCreated={() => onOpenChange(false)}
+          onOpenAccess={mailbox => {
+            onOpenChange(false);
+            setAccessTargetId(mailbox.id);
+          }}
+        />
+      ) : null}
+      {accessTarget ? (
+        <MailboxAccessPanel
+          mailbox={accessTarget}
+          onClose={() => setAccessTargetId(null)}
+          onRefresh={onRefresh}
+        />
+      ) : null}
+    </Suspense>
   );
 }
 

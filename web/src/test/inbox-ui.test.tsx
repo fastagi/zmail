@@ -1251,6 +1251,147 @@ describe('inbox keyboard shortcuts', () => {
   });
 });
 
+describe('command palette', () => {
+  beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    toast.success.mockReset();
+    toast.error.mockReset();
+    window.localStorage.clear();
+    window.history.replaceState(null, '', '/console/mailboxes');
+    state.organizations.data = page([organization('owner')]);
+    state.mailboxes.data = [
+      mailbox(1, 'hello'),
+      mailbox(2, 'sales', {}, 7),
+      mailbox(3, 'board', { view: false, send: false }),
+    ];
+    state.domains.data = [domain()];
+    state.stats.data = [];
+    state.inbox.data = listing([[threadRow(), singleRow()]]);
+    state.inbox.hasNextPage = false;
+    state.inbox.isFetchingNextPage = false;
+    state.reject = null;
+    state.counts.data = counts();
+    state.thread.data = [message({ id: 29, thread_id: 30 }), message({ id: 31, thread_id: 30 })];
+    state.detail.data = message({ id: 12, mailbox_id: 1 });
+    state.roles.data = [role(7, 'Sales', [2], 'green')];
+    vi.spyOn(mailboxService, 'listInbox').mockResolvedValue({ items: [], meta: meta(false) });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  async function openPalette(init: KeyboardEventInit = { metaKey: true }) {
+    const event = press('k', document.body, init);
+    expect(event.defaultPrevented).toBe(true);
+    const palette = await screen.findByRole('dialog', { name: 'Command palette' });
+    return { palette, input: within(palette).getByRole('combobox') };
+  }
+
+  it('⌘K and Ctrl+K open the palette with its actions', async () => {
+    renderRoute();
+
+    const { palette, input } = await openPalette();
+    expect(input).toHaveFocus();
+    const actions = within(palette).getByRole('group', { name: 'Actions' });
+    expect(within(actions).getByRole('option', { name: /New message/ })).toBeInTheDocument();
+    expect(within(actions).getByRole('option', { name: /Manage mailboxes/ })).toBeInTheDocument();
+    expect(within(actions).getByRole('option', { name: /Manage roles/ })).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    await openPalette({ ctrlKey: true });
+  });
+
+  it('a member sees no management actions', async () => {
+    state.organizations.data = page([organization('member')]);
+    renderRoute();
+
+    const { palette } = await openPalette();
+    expect(within(palette).getByRole('option', { name: /New message/ })).toBeInTheDocument();
+    expect(within(palette).queryByRole('option', { name: /Manage mailboxes/ })).toBeNull();
+    expect(within(palette).queryByRole('option', { name: /Manage roles/ })).toBeNull();
+  });
+
+  it('lists an unreadable mailbox locked and does not select it', async () => {
+    renderRoute();
+    const { palette, input } = await openPalette();
+
+    fireEvent.change(input, { target: { value: 'board@' } });
+    const locked = within(palette).getByRole('option', { name: /board@mail\.example\.com/ });
+    expect(locked).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(locked);
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(new URLSearchParams(window.location.search).get('box')).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
+  });
+
+  it('arrow keys and Enter run the highlighted result', async () => {
+    renderRoute();
+    const { palette, input } = await openPalette();
+
+    fireEvent.change(input, { target: { value: 'sa' } });
+    const options = within(palette).getAllByRole('option');
+    // The mailbox whose address starts with the query comes first, then the role.
+    expect(options[0]).toHaveAccessibleName(/sales@mail\.example\.com/);
+    expect(input).toHaveAttribute('aria-activedescendant', options[0].id);
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input).toHaveAttribute('aria-activedescendant', options[1].id);
+    expect(options[1]).toHaveAccessibleName(/Sales/);
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(new URLSearchParams(window.location.search).get('role')).toBe('7');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('searches mail 250 ms after typing stops, five results at most, and opens one', async () => {
+    const search = vi.spyOn(mailboxService, 'listInbox').mockResolvedValue({
+      items: [singleRow()],
+      meta: meta(false),
+    } as never);
+    renderRoute();
+    const { palette, input } = await openPalette();
+
+    vi.useFakeTimers();
+    fireEvent.change(input, { target: { value: 'inv' } });
+    act(() => vi.advanceTimersByTime(200));
+    fireEvent.change(input, { target: { value: 'invoice' } });
+    act(() => vi.advanceTimersByTime(249));
+    expect(search).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(1));
+    vi.useRealTimers();
+
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(search).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ view: 'all', q: 'invoice' }),
+      undefined,
+      5
+    );
+    const mail = await within(palette).findByRole('group', { name: 'Mail' });
+    fireEvent.click(within(mail).getByRole('option', { name: /Invoice/ }));
+
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get('q')).toBe('invoice');
+    expect(params.get('open')).toBe('12');
+  });
+
+  it('asks for a longer keyword when the search is too broad', async () => {
+    vi.spyOn(mailboxService, 'listInbox').mockRejectedValue(
+      new ApiError('broad', ApiErrorCode.MAILBOX_SEARCH_TOO_BROAD, 422)
+    );
+    renderRoute();
+    const { palette, input } = await openPalette();
+
+    fireEvent.change(input, { target: { value: 'a' } });
+
+    const mail = await within(palette).findByRole('group', { name: 'Mail' }, { timeout: 2000 });
+    await waitFor(() => expect(mail).toHaveTextContent('Enter a longer keyword'));
+  });
+});
+
 describe('markInboxRowRead', () => {
   it('marks the row read in every cached listing and puts them back on rollback', () => {
     const client = new QueryClient();

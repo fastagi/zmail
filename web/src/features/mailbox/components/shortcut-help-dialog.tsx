@@ -13,7 +13,7 @@ import type { MailShortcut } from '@/features/mailbox/hooks/use-mail-shortcuts';
 import { useT } from '@/i18n';
 
 /** Each listed shortcut with its key caps, in the order of §11.7. */
-const rows: readonly (readonly [Exclude<MailShortcut, 'palette'>, readonly string[]])[] = [
+const rows: readonly (readonly [MailShortcut, readonly string[]])[] = [
   ['next', ['J', '↓']],
   ['previous', ['K', '↑']],
   ['open', ['↵']],
@@ -26,6 +26,7 @@ const rows: readonly (readonly [Exclude<MailShortcut, 'palette'>, readonly strin
   ['compose', ['C']],
   ['search', ['/']],
   ['help', ['?']],
+  ['palette', ['⌘K', 'Ctrl K']],
   ['escape', ['Esc']],
 ];
 
