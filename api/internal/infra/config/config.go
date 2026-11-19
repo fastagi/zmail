@@ -13,7 +13,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/pkg/env"
 )
 
@@ -432,6 +431,10 @@ const (
 	// MailboxProviderCloudflare delivers through the Cloudflare Email Sending REST API.
 	MailboxProviderCloudflare = "cloudflare"
 
+	// MaxMailboxZonesPerOrganization is the highest MAILBOX_MAX_ZONES_PER_ORGANIZATION accepted. It
+	// equals domain.MaxMailZonesPerOrganization; config may not import domain, so a mailbox test
+	// keeps the two in step.
+	MaxMailboxZonesPerOrganization = 20
 	// DefaultMailboxDomain is the development-only address domain.
 	DefaultMailboxDomain = "mail.localhost"
 	// DefaultMailboxRequestTimeout caps one outbound provider call.
@@ -469,7 +472,7 @@ type MailboxConfig struct {
 	// deliver to; the same Worker that posts to the inbound route.
 	CloudflareEmailWorker string
 	// MaxZonesPerOrganization bounds the zones Zmail adds to the Cloudflare account for one
-	// organization's apex domains, between 1 and domain.MaxMailZonesPerOrganization.
+	// organization's apex domains, between 1 and MaxMailboxZonesPerOrganization.
 	MaxZonesPerOrganization int
 }
 
@@ -1336,8 +1339,8 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 		if !mailboxWorkerPattern.MatchString(resolved.CloudflareEmailWorker) {
 			return fmt.Errorf("MAILBOX_CLOUDFLARE_EMAIL_WORKER must name the Email Worker when MAILBOX_CUSTOM_DOMAINS_ENABLED is true")
 		}
-		if resolved.MaxZonesPerOrganization < 1 || resolved.MaxZonesPerOrganization > domain.MaxMailZonesPerOrganization {
-			return fmt.Errorf("MAILBOX_MAX_ZONES_PER_ORGANIZATION must be between 1 and %d", domain.MaxMailZonesPerOrganization)
+		if resolved.MaxZonesPerOrganization < 1 || resolved.MaxZonesPerOrganization > MaxMailboxZonesPerOrganization {
+			return fmt.Errorf("MAILBOX_MAX_ZONES_PER_ORGANIZATION must be between 1 and %d", MaxMailboxZonesPerOrganization)
 		}
 	}
 	return nil
