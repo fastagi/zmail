@@ -50,6 +50,9 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.PUT("/mail-roles/:role_id", h.UpdateMailRole).Name("mail_roles.update").WhereNumber("role_id")
 		auth.DELETE("/mail-roles/:role_id", h.DeleteMailRole).Name("mail_roles.destroy").WhereNumber("role_id")
 
+		auth.GET("/transactional-mail-log", h.ListTransactionalLog).Name("transactional_mail_log.index")
+		auth.GET("/transactional-mail-log/:message_id", h.GetTransactionalLogEntry).
+			Name("transactional_mail_log.show").WhereNumber("message_id")
 		auth.POST("/transactional-test-sends", h.SendTransactionalTest).
 			Name("transactional_test_sends.store").Middleware(middleware.BodyLimit(maxTransactionalBodyBytes))
 

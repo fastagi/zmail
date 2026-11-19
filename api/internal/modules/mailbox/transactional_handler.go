@@ -2,8 +2,10 @@ package mailbox
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -197,6 +199,89 @@ func (h *Handler) GetTransactional(c *gin.Context) {
 	}
 	privateResponse(c)
 	response.Success(c, toTransactionalMessageResponse(message))
+}
+
+// ListTransactionalLog lists the organization's transactional messages for the console; any
+// member may read it.
+func (h *Handler) ListTransactionalLog(c *gin.Context) {
+	viewer, ok := organizationScope(c)
+	if !ok {
+		return
+	}
+	// URL.Query drops a pair it cannot decode, which would turn a malformed filter into none.
+	query, err := url.ParseQuery(c.Request.URL.RawQuery)
+	if err != nil {
+		response.HandleError(c, "Invalid transactional log query", fmt.Errorf("%w: malformed query string", domain.ErrInvalidInput))
+		return
+	}
+	filter, err := parseTransactionalLogQuery(query)
+	if err != nil {
+		response.HandleError(c, "Invalid transactional log query", err)
+		return
+	}
+	page, err := h.service.ListTransactionalLog(c.Request.Context(), viewer.OrganizationID, filter)
+	if err != nil {
+		response.HandleError(c, "Failed to list transactional messages", err)
+		return
+	}
+	privateResponse(c)
+	response.SuccessWithMeta(c, toTransactionalLogEntries(page.Items), toTransactionalLogMeta(page))
+}
+
+// GetTransactionalLogEntry reads one transactional message of the organization, of either mode,
+// with its timeline; any member may read it.
+func (h *Handler) GetTransactionalLogEntry(c *gin.Context) {
+	viewer, messageID, ok := viewerScope(c, "message_id")
+	if !ok {
+		return
+	}
+	message, err := h.service.GetTransactionalLogEntry(c.Request.Context(), viewer.OrganizationID, messageID)
+	if err != nil {
+		response.HandleError(c, "Failed to get transactional message", err)
+		return
+	}
+	privateResponse(c)
+	response.Success(c, toTransactionalLogEntryDetail(message))
+}
+
+// parseTransactionalLogQuery reads the log's query parameters. Enumerations and ranges are
+// checked by the service; this only rejects values that do not parse.
+func parseTransactionalLogQuery(query url.Values) (domain.TransactionalLogFilter, error) {
+	invalid := func(reason string) (domain.TransactionalLogFilter, error) {
+		return domain.TransactionalLogFilter{}, fmt.Errorf("%w: %s", domain.ErrInvalidInput, reason)
+	}
+	filter := domain.TransactionalLogFilter{
+		Mode:        domain.APIKeyMode(query.Get("mode")),
+		Status:      query.Get("status"),
+		LastEvent:   query.Get("last_event"),
+		Outcome:     query.Get("outcome"),
+		TemplateKey: query.Get("template"),
+		To:          query.Get("to"),
+	}
+	for name, target := range map[string]*time.Time{"since": &filter.Since, "until": &filter.Until} {
+		if raw := query.Get(name); raw != "" {
+			parsed, err := time.Parse(time.RFC3339Nano, raw)
+			if err != nil {
+				return invalid(name + " is not a date-time")
+			}
+			*target = parsed.UTC()
+		}
+	}
+	if raw := query.Get("cursor"); raw != "" {
+		cursor, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || cursor < 1 {
+			return invalid("malformed cursor")
+		}
+		filter.Cursor = uint(cursor)
+	}
+	if raw, present := query["per_page"]; present {
+		perPage, err := strconv.Atoi(raw[0])
+		if err != nil || perPage < 1 {
+			return invalid("per_page out of range")
+		}
+		filter.PerPage = perPage
+	}
+	return filter, nil
 }
 
 // SendTransactionalTest sends a transactional template to the signed-in member's own address.

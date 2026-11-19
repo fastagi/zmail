@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -797,4 +798,83 @@ func toInboxCountsResponse(counts InboxCounts) InboxCountsResponse {
 		TodayStartsAt:   counts.TodayStartsAt.UTC(),
 		TodayEndsAt:     counts.TodayEndsAt.UTC(),
 	}
+}
+
+// TransactionalLogEntryResponse is a transactional message as the console log lists it: the
+// masked recipient and subject, never the full recipient or the variables.
+type TransactionalLogEntryResponse struct {
+	ID             uint       `json:"id"`
+	Mode           string     `json:"mode"`
+	Simulated      bool       `json:"simulated"`
+	Template       string     `json:"template"`
+	ToMasked       string     `json:"to_masked"`
+	Subject        string     `json:"subject"`
+	Status         string     `json:"status"`
+	QueuedReason   *string    `json:"queued_reason"`
+	FailureCode    *string    `json:"failure_code"`
+	LastEvent      *string    `json:"last_event"`
+	IdempotencyKey *string    `json:"idempotency_key"`
+	CreatedAt      time.Time  `json:"created_at"`
+	SentAt         *time.Time `json:"sent_at"`
+}
+
+// TransactionalLogEntryDetailResponse adds the sender, the masked variables, and the events to
+// a log entry. It still has no full recipient.
+type TransactionalLogEntryDetailResponse struct {
+	TransactionalLogEntryResponse
+	From      TransactionalSenderResponse  `json:"from"`
+	Variables map[string]string            `json:"variables"`
+	Events    []TransactionalEventResponse `json:"events"`
+}
+
+// TransactionalLogMetaResponse is the meta of a log page.
+type TransactionalLogMetaResponse struct {
+	NextCursor *string `json:"next_cursor"`
+	Total24h   int64   `json:"total_24h"`
+}
+
+func toTransactionalLogEntry(message *domain.TransactionalMessage) TransactionalLogEntryResponse {
+	full := toTransactionalMessageResponse(message)
+	return TransactionalLogEntryResponse{
+		ID:             full.ID,
+		Mode:           full.Mode,
+		Simulated:      full.Simulated,
+		Template:       full.Template,
+		ToMasked:       full.ToMasked,
+		Subject:        full.Subject,
+		Status:         full.Status,
+		QueuedReason:   full.QueuedReason,
+		FailureCode:    full.FailureCode,
+		LastEvent:      full.LastEvent,
+		IdempotencyKey: full.IdempotencyKey,
+		CreatedAt:      full.CreatedAt,
+		SentAt:         full.SentAt,
+	}
+}
+
+func toTransactionalLogEntries(messages []*domain.TransactionalMessage) []TransactionalLogEntryResponse {
+	entries := make([]TransactionalLogEntryResponse, 0, len(messages))
+	for _, message := range messages {
+		entries = append(entries, toTransactionalLogEntry(message))
+	}
+	return entries
+}
+
+func toTransactionalLogEntryDetail(message *domain.TransactionalMessage) TransactionalLogEntryDetailResponse {
+	full := toTransactionalMessageResponse(message)
+	return TransactionalLogEntryDetailResponse{
+		TransactionalLogEntryResponse: toTransactionalLogEntry(message),
+		From:                          full.From,
+		Variables:                     full.Variables,
+		Events:                        full.Events,
+	}
+}
+
+func toTransactionalLogMeta(page TransactionalLogPage) TransactionalLogMetaResponse {
+	meta := TransactionalLogMetaResponse{Total24h: page.Total24h}
+	if page.NextCursor != nil {
+		cursor := strconv.FormatUint(uint64(*page.NextCursor), 10)
+		meta.NextCursor = &cursor
+	}
+	return meta
 }

@@ -255,6 +255,10 @@ type Service interface {
 	GetTransactional(ctx context.Context, organizationID uint, mode domain.APIKeyMode, id uint) (*domain.TransactionalMessage, error)
 	// SendTransactionalTest sends a transactional template to the caller's own account address.
 	SendTransactionalTest(ctx context.Context, viewer domain.OrganizationContext, input TransactionalTestInput) (*domain.TransactionalMessage, error)
+	// ListTransactionalLog lists the organization's transactional messages for the console.
+	ListTransactionalLog(ctx context.Context, organizationID uint, filter domain.TransactionalLogFilter) (TransactionalLogPage, error)
+	// GetTransactionalLogEntry reads one transactional message of the organization, of either mode.
+	GetTransactionalLogEntry(ctx context.Context, organizationID, id uint) (*domain.TransactionalMessage, error)
 	// RecordDeliveryEvent stores one signed provider event about an outbound message. It
 	// reports recorded=false when the event was already stored.
 	RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (message *domain.MailMessage, event domain.MailEvent, recorded bool, err error)
