@@ -15,13 +15,15 @@ import (
 // fakeZones behaves like a Cloudflare account with the zones it lists: enabling routing adds the
 // routing records, enabling sending returns records the zone may or may not have yet.
 type fakeZones struct {
-	zones       map[string]string // zone name -> zone ID
-	records     map[string][]mailtransport.DNSRecord
-	sending     map[string]string // domain name -> tag
-	sendingDNS  []mailtransport.DNSRecord
-	rules       map[string]string // rule ID -> address
-	routingErr  error
-	ruleErr     error
+	zones      map[string]string // zone name -> zone ID
+	records    map[string][]mailtransport.DNSRecord
+	sending    map[string]string // domain name -> tag
+	sendingDNS []mailtransport.DNSRecord
+	rules      map[string]string // rule ID -> address
+	routingErr error
+	ruleErr    error
+	// ruleErrFor fails the routing rule of one address only.
+	ruleErrFor  map[string]error
 	created     []mailtransport.DNSRecord
 	routingFor  []string
 	nextRuleNum int
@@ -123,6 +125,9 @@ func (z *fakeZones) CreateRecord(_ context.Context, _ string, record mailtranspo
 func (z *fakeZones) CreateRoutingRule(_ context.Context, _, address, worker string) (string, error) {
 	if z.ruleErr != nil {
 		return "", z.ruleErr
+	}
+	if err := z.ruleErrFor[address]; err != nil {
+		return "", err
 	}
 	if worker != "zmail-email-worker" {
 		return "", fmt.Errorf("unexpected worker %q", worker)

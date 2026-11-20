@@ -3,6 +3,7 @@ package organization
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -311,4 +312,54 @@ func forUpdate(tx *gorm.DB) *gorm.DB {
 		return tx
 	}
 	return tx.Clauses(clause.Locking{Strength: "UPDATE"})
+}
+
+// membershipLookupChunk bounds the values of one IN list, well below PostgreSQL's parameter limit.
+const membershipLookupChunk = 1000
+
+// FindMembershipsByEmails matches account emails of the organization's members only, in chunks.
+// It is the one read that returns member emails; only server-side mailbox imports and exports use it.
+func (r *repository) FindMembershipsByEmails(ctx context.Context, organizationID uint, emails []string) ([]*domain.OrganizationMembership, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(emails))
+	lowered := make([]string, 0, len(emails))
+	for _, email := range emails {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if _, duplicate := seen[email]; email == "" || duplicate {
+			continue
+		}
+		seen[email] = struct{}{}
+		lowered = append(lowered, email)
+	}
+	found := make([]*domain.OrganizationMembership, 0, len(lowered))
+	for start := 0; start < len(lowered); start += membershipLookupChunk {
+		chunk := lowered[start:min(start+membershipLookupChunk, len(lowered))]
+		var rows []*OrganizationMembershipPO
+		if err := db.Model(&OrganizationMembershipPO{}).
+			Joins("JOIN users AS member_users ON member_users.id = organization_memberships.user_id AND member_users.deleted_at IS NULL").
+			Where("organization_memberships.organization_id = ? AND LOWER(member_users.email) IN ?", organizationID, chunk).
+			Preload("User").
+			Order("organization_memberships.user_id ASC").
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		found = append(found, withEmails(rows)...)
+	}
+	return found, nil
+}
+
+// withEmails converts memberships and keeps each user's account email, which toDomain leaves out.
+func withEmails(rows []*OrganizationMembershipPO) []*domain.OrganizationMembership {
+	memberships := make([]*domain.OrganizationMembership, 0, len(rows))
+	for _, row := range rows {
+		membership := row.toDomain()
+		if membership.User != nil {
+			membership.User.Email = row.User.Email
+		}
+		memberships = append(memberships, membership)
+	}
+	return memberships
 }

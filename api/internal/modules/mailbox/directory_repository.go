@@ -103,3 +103,16 @@ func (r *repository) UpdateMailboxDisplayName(ctx context.Context, organizationI
 	}
 	return nil
 }
+
+// MailboxAddressUsed counts deleted mailboxes too: a deleted mailbox keeps its address reserved.
+func (r *repository) MailboxAddressUsed(ctx context.Context, address string) (bool, error) {
+	if r.db == nil {
+		return false, domain.ErrServiceUnavailable
+	}
+	var count int64
+	if err := r.conn(ctx).Unscoped().Model(&MailboxPO{}).
+		Where("address = ?", strings.ToLower(strings.TrimSpace(address))).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}

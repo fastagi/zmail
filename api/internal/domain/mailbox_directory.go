@@ -32,4 +32,6 @@ type MailboxDirectoryRepository interface {
 	ListMailboxDirectory(ctx context.Context, organizationID uint, filter MailboxDirectoryFilter, sentSince time.Time) ([]*MailboxDirectoryEntry, error)
 	// CountMailboxes counts the organization's live mailboxes.
 	CountMailboxes(ctx context.Context, organizationID uint) (int64, error)
+	// MailboxAddressUsed reports whether any mailbox, deleted ones included, holds the address.
+	MailboxAddressUsed(ctx context.Context, address string) (bool, error)
 }

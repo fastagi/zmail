@@ -151,6 +151,8 @@ type Service interface {
 	MailboxDirectory(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailboxDirectoryFilter) (*MailboxDirectoryPage, error)
 	// RenameMailbox changes a mailbox's display name; only owners and admins may.
 	RenameMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, displayName string) (*domain.Mailbox, error)
+	// ImportMailboxes checks or creates shared mailboxes row by row; only owners and admins may.
+	ImportMailboxes(ctx context.Context, viewer domain.OrganizationContext, rows []MailboxImportRow, dryRun bool) (*MailboxImportResult, error)
 	// ListMessages lists a mailbox's messages, or with filter.GroupThreads one row per thread, each
 	// row the newest message of its thread in the view with its Thread filled.
 	ListMessages(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)

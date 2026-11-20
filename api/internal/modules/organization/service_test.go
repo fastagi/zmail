@@ -187,3 +187,7 @@ func TestServiceAccountDeletionGuardRequiresMembershipExit(t *testing.T) {
 	err := newOrganizationService(repo).CheckAccountDeletion(context.Background(), 17)
 	require.ErrorIs(t, err, domain.ErrOrganizationMembershipExitRequired)
 }
+
+func (r *fakeRepository) FindMembershipsByEmails(context.Context, uint, []string) ([]*domain.OrganizationMembership, error) {
+	return nil, nil
+}

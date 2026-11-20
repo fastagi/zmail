@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,33 @@ func (f *fakeMemberships) FindForUser(_ context.Context, organizationID, userID 
 	return &domain.OrganizationMembership{
 		ID: id, OrganizationID: organizationID, UserID: userID, Role: domain.OrganizationRoleMember,
 	}, nil
+}
+
+// FindMembershipsByEmails finds user n by u<n>@people.test, ignoring case, unless n is absent.
+// Every other email, other@people.test of organization 8 included, belongs to no member here.
+func (f *fakeMemberships) FindMembershipsByEmails(ctx context.Context, organizationID uint, emails []string) ([]*domain.OrganizationMembership, error) {
+	found := make([]*domain.OrganizationMembership, 0, len(emails))
+	for _, email := range emails {
+		email = strings.ToLower(strings.TrimSpace(email))
+		digits, ok := strings.CutPrefix(email, "u")
+		if !ok {
+			continue
+		}
+		if digits, ok = strings.CutSuffix(digits, "@people.test"); !ok {
+			continue
+		}
+		userID, err := strconv.ParseUint(digits, 10, 32)
+		if err != nil || userID == 0 {
+			continue
+		}
+		membership, err := f.FindForUser(ctx, organizationID, uint(userID))
+		if err != nil {
+			continue
+		}
+		membership.User = &domain.User{ID: uint(userID), Email: email}
+		found = append(found, membership)
+	}
+	return found, nil
 }
 
 // fakeRepository is an in-memory domain.MailboxRepository for service tests.
@@ -326,6 +354,16 @@ func (r *fakeRepository) CountMailboxes(_ context.Context, organizationID uint) 
 		}
 	}
 	return count, nil
+}
+
+func (r *fakeRepository) MailboxAddressUsed(_ context.Context, address string) (bool, error) {
+	address = strings.ToLower(strings.TrimSpace(address))
+	for _, mailbox := range r.mailboxes {
+		if mailbox.Address == address {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *fakeRepository) FindMailbox(_ context.Context, organizationID, id uint) (*domain.Mailbox, error) {

@@ -139,6 +139,10 @@ type OrganizationRepository interface {
 	TransferOwnership(ctx context.Context, organizationID, userID, newOwnerMemberID uint, now time.Time) (*OrganizationOwnershipTransfer, error)
 	Update(ctx context.Context, organization *Organization) error
 	CountMembershipsForUser(ctx context.Context, userID uint) (total, owned int64, err error)
+	// FindMembershipsByEmails returns the organization's memberships whose user's account email
+	// equals one of emails ignoring case, with User (and its Email) loaded. Members of other
+	// organizations are never returned.
+	FindMembershipsByEmails(ctx context.Context, organizationID uint, emails []string) ([]*OrganizationMembership, error)
 }
 
 // OrganizationInvitationRepository owns invitation persistence and atomic acceptance.
