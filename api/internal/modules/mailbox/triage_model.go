@@ -166,7 +166,7 @@ var (
 	// fakeDeadline matches "<date> before" in Chinese, or "before"/"by" followed by a date.
 	fakeDeadline = regexp.MustCompile(`(?i)(\d{4}-\d{2}-\d{2})\s*\x{524d}|\b(?:before|by)\s+(\d{4}-\d{2}-\d{2})`)
 	// fakeQuestion holds the question marks and "can you" phrases (Chinese "neng bu neng").
-	fakeQuestion = []string{"?", "？", "能不能", "can you"}
+	fakeQuestion = []string{"?", "\uff1f", "\u80fd\u4e0d\u80fd", "can you"}
 )
 
 func (fakeTriageModel) Classify(_ context.Context, input TriageInput) (TriageOutput, error) {

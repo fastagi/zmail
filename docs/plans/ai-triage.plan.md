@@ -30,7 +30,11 @@ Admin is unchanged apart from regenerated contract types.
 | R14 | Drafts (D2): never stored. Input is the masked thread (newest 10 messages, oldest first) plus the organization's standard template names; `basis` items `{kind: message|template, id, label}` are kept only when they name an input item. A draft daily cap waits for §9 item 2. |
 | R15 | Worker command `mail:triage:work [--batch=20] [--poll=5s] [--once]` (repository naming convention instead of the spec's `mail:triage-worker`). It is not added to Compose while the provider is `disabled`. |
 | R16 | A handover (personal to shared) turns the mailbox switch off: the previous owner's consent does not carry over. Enqueue also requires a personal mailbox's owner to still be a member. |
-| R17 | The `fake` model: `?`/`？`/"能不能"/"can you" → `reply`; "前"/"before"/"by" followed by a date → `deadline` (due date parsed when it is `YYYY-MM-DD`); otherwise `fyi`. Its draft quotes nothing from the body. |
+| R17 | The `fake` model: `?`, the full-width question mark, the Chinese for "can you" (`\u80fd\u4e0d\u80fd`), or "can you" → `reply`; a date followed by the Chinese for "before" (`\u524d`), or "before"/"by" followed by a date → `deadline` (due date parsed when it is `YYYY-MM-DD`); otherwise `fyi`. Its draft quotes nothing from the body. |
+| R18 | Web: the new response fields (`Mailbox.ai_triage_enabled`, inbox row `triage`, counts `triage`) are optional in the strict Zod schemas, following the `role_id` precedent, so an older API still parses; a missing value reads as off. |
+| R19 | Web: the override menu opens with Shift+F (shown as `⇧F`), because `f` is already Forward. The menu offers reply/deadline/fyi only. |
+| R20 | Web: three triage tabs ("needs your reply" = `reply`+`review`, "has a deadline", "just so you know") plus "everything", only for `all`/`today` without a search, and only while counts carry `triage`; a tab lists single messages (no thread grouping). The URL keeps the tab as `triage=`. "Reply with this draft" opens the quoted reply with the draft above the quote. |
+| R21 | Mock BFF: it stands in for the `fake` provider (`available: true`) and computes results when read, from subject and snippet, so it also covers mail received before the switches were turned on; a reader's override wins. The org settings page and mailbox switch UI (spec §7 "management") are left for after a provider is confirmed; the BFF routes and services for them exist. |
 
 ## Tasks
 
