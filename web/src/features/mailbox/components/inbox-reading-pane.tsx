@@ -37,13 +37,13 @@ import { cn } from '@/utils';
 
 /**
  * What the reading pane does besides the row's own mailbox: moving through the list, replying, and
- * `onLeave`, which opens the row after `item` (or goes back to the list) once it was archived or
+ * `onRowLeft`, which opens the row after `item` (or goes back to the list) once it was archived or
  * deleted.
  */
 export type InboxReaderNavigation = Omit<
   ReaderProps,
-  'mailboxId' | 'mailboxAddress' | 'canSend' | 'canOrganize'
-> & { onLeave: (item: InboxItem) => void };
+  'mailboxId' | 'mailboxAddress' | 'canSend' | 'canOrganize' | 'onLeave'
+> & { onRowLeft: (item: InboxItem) => void };
 
 /**
  * The AI triage block of the pane, given only while the organization's triage is on: the override
@@ -177,7 +177,7 @@ export function InboxReadingPane({
     const messageIds = rowMessageIds(target);
     const origin = originOf(target);
     const rollback = removeInboxRow(queryClient, organizationId, target.id);
-    navigation.onLeave(target);
+    navigation.onRowLeft(target);
     try {
       await updateInbox.mutateAsync({
         mailboxId: target.mailbox_id,
@@ -244,9 +244,9 @@ export function InboxReadingPane({
       </div>
     );
   } else {
-    const { onLeave: _onLeave, ...readerNavigation } = navigation;
+    // `onRowLeft` rides along unused: moves live in this pane's toolbar, not in the article.
     const reader: ReaderProps = {
-      ...readerNavigation,
+      ...navigation,
       mailboxId: item.mailbox_id,
       mailboxAddress: item.mailbox_address,
       canSend: access.send,

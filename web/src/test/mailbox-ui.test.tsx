@@ -670,6 +670,10 @@ describe('mailbox workspace', () => {
     expect(frame.getAttribute('srcdoc')).toContain('<p id="from-sender">Hi</p>');
     expect(frame.getAttribute('srcdoc')).toContain("default-src 'none'");
     expect(frame.hasAttribute('src')).toBe(false);
+    // The frame keeps a fixed height that grows with the window, and scrolls inside: sizing it to
+    // the content would need the sandbox loosened.
+    expect(frame.className).toContain('h-[min(70vh,40rem)]');
+    expect(frame.getAttribute('scrolling')).toBeNull();
     // Nothing from the sender is parsed into the application document.
     expect(container.querySelector('#from-sender')).toBeNull();
     expect(document.querySelector('script')).toBeNull();

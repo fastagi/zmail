@@ -499,7 +499,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         : null,
     onClose: () => setOpenParam(null),
     // An archived or deleted row hands the pane to the row after it, or back to the list.
-    onLeave: (left: InboxItem) => {
+    onRowLeft: (left: InboxItem) => {
       const index = rows.findIndex(row => row.id === left.id);
       const next = index >= 0 ? rows[index + 1] : undefined;
       setOpenParam(next ? next.id : null);
