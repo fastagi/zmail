@@ -31,6 +31,14 @@ export const featureManifest = {
     kind: 'optional',
     routes: ['/console/organizations/$organizationId'],
   },
+  mailOperations: {
+    kind: 'optional',
+    routes: [
+      '/console/operations',
+      '/console/operations/organizations',
+      '/console/operations/messages',
+    ],
+  },
   notificationDeliveries: {
     kind: 'optional',
     routes: ['/console/notifications'],

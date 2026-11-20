@@ -4,7 +4,8 @@ import { type LucideIcon, LogOut, Moon, RefreshCw, Search, Sun } from 'lucide-re
 import { type KeyboardEvent, useEffect, useId, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { navigationItems } from '@/components/layout/navigation';
+import { visibleNavigationItems } from '@/components/layout/navigation';
+import { useOperatorCapabilities } from '@/features/operator-session/hooks/use-operator-session';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { isFeatureEnabled } from '@/config/env';
@@ -32,6 +33,7 @@ export function CommandPalette() {
   const setTheme = usePreferencesStore((state) => state.setTheme);
   const { mutate: signOut } = useSignOut();
   const [open, setOpen] = useState(false);
+  const granted = useOperatorCapabilities();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const listId = useId();
@@ -49,7 +51,7 @@ export function CommandPalette() {
   }, []);
 
   const commands = useMemo<Command[]>(() => {
-    const destinations = navigationItems.map((item) => ({
+    const destinations = visibleNavigationItems(granted).map((item) => ({
       id: item.to,
       group: 'navigate' as const,
       label: t(item.labelKey),
@@ -88,7 +90,7 @@ export function CommandPalette() {
       });
     }
     return [...destinations, ...actions];
-  }, [dark, navigate, queryClient, setTheme, signOut, t]);
+  }, [dark, granted, navigate, queryClient, setTheme, signOut, t]);
 
   const needle = query.trim().toLowerCase();
   const matches = needle

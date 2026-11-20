@@ -29,7 +29,13 @@ const integerFromString = (fallback: number, minimum: number, maximum: number) =
   );
 
 // Optional features mirror API optional starters and are selected at build time.
-const optionalFeatureNames = ['operator', 'organization', 'webhook', 'notification'] as const;
+const optionalFeatureNames = [
+  'operator',
+  'organization',
+  'webhook',
+  'notification',
+  'mailbox',
+] as const;
 export type OptionalFeature = (typeof optionalFeatureNames)[number];
 
 const optionalFeatures = z.string().transform((value, context) => {
