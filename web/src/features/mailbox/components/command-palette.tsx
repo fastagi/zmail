@@ -130,8 +130,8 @@ export function CommandPalette({ open, onOpenChange, ...props }: CommandPaletteP
       <DialogContent
         hideCloseButton
         aria-describedby={undefined}
-        overlayClassName="bg-[rgba(22,21,15,0.18)] backdrop-blur-[2px]"
-        className="top-[140px] max-h-[calc(100vh-180px)] max-w-[min(600px,calc(100vw-2rem))] translate-y-0 gap-0 overflow-hidden rounded-[14px] border-border-main bg-bg-surface p-0 shadow-[0_30px_80px_rgba(22,21,15,0.22)] data-[state=closed]:slide-out-to-top-0 data-[state=open]:slide-in-from-top-0 sm:rounded-[14px]"
+        overlayClassName="bg-[oklch(from_var(--shadow-color)_l_c_h/0.18)] backdrop-blur-[2px]"
+        className="top-[140px] max-h-[calc(100vh-180px)] max-w-[min(600px,calc(100vw-2rem))] translate-y-0 gap-0 overflow-hidden rounded-[14px] border-border-main bg-bg-surface p-0 shadow-[0_30px_80px_oklch(from_var(--shadow-color)_l_c_h/0.22)] data-[state=closed]:slide-out-to-top-0 data-[state=open]:slide-in-from-top-0 sm:rounded-[14px]"
       >
         <DialogTitle className="sr-only">{t('palette.title')}</DialogTitle>
         <DialogDescription className="sr-only">{t('palette.description')}</DialogDescription>

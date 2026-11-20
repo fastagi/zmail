@@ -11,6 +11,29 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Unread count index
+
+### Medium — The migration locks `mail_messages` while it builds the unread index
+
+Run migrations: `2026_11_24_090000_add_mail_unread_index` adds `idx_mail_messages_unread`, a partial
+B-tree index on `(mailbox_id, id) INCLUDE (created_at)` for inbound Inbox mail. Unread counts (the
+mailbox list and the unified inbox sidebar) read it instead of scanning all of `mail_messages`, so
+they no longer slow down as other mailboxes and organizations grow. It is built inside the
+migration's transaction, so on a large `mail_messages` table it blocks inbound delivery and sends
+until the build ends.
+
+A large installation builds the index beforehand, without blocking writes, and the migration then
+skips it. Run this before the migration, outside a transaction, as a role that owns `mail_messages`:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_unread
+  ON mail_messages (mailbox_id, id) INCLUDE (created_at)
+  WHERE direction = 'inbound' AND placement = 'default';
+```
+
+If the `CONCURRENTLY` build fails, drop the invalid index
+(`DROP INDEX CONCURRENTLY idx_mail_messages_unread;`) and build it again before migrating.
+
 ## Unreleased — Transactional mail
 
 Backend services can send one-off messages such as verification codes and password resets through

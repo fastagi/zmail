@@ -1094,6 +1094,20 @@ CREATE INDEX IF NOT EXISTS idx_mail_messages_inbox_time
 - 目标：`view=all&group=thread` 首页与第 20 页 p95 < 200 ms；`today`、`pending`、`sent` 首页 p95 < 200 ms；`unread=true` 首页 p95 < 300 ms；计数 p95 < 300 ms（未读计数只对 10 个可读邮箱经 `CountUnreadByMailboxIDs` 计算；把不可读邮箱从 5 万封增到 50 万封，计数 p95 变化不超过 10%）；3 字符以上搜索 p95 < 500 ms。
 - 不达标时的处理顺序：先看执行计划确认使用 `idx_mail_messages_inbox_time`；`unread=true` 若超标，改为按邮箱 LATERAL 内 `LIMIT` 加读表反连接的写法并复测；不引入缓存。
 
+实测（2026-11-20，Apple M3 Max，本地 PostgreSQL，`-benchtime 30x`，`inbox_bench_test.go`）：
+
+| 基准 | p95 | 目标 |
+|---|---|---|
+| `all&group=thread` 首页 / 第 20 页 | 15.8 / 16.4 ms | < 200 ms |
+| `today` / `pending` / `sent` | 3.7 / 4.3 / 24.1 ms | < 200 ms |
+| `unread=true` | 5.4 ms | < 300 ms |
+| 3 字符搜索 | 27.9 ms | < 500 ms |
+| 计数；不可读邮箱 5 万 → 50 万后 | 38.5 → 37.8 ms | < 300 ms；变化 ≤ 10% |
+
+首轮未达标的一项：计数在不可读邮箱增长后 p50 慢 34%。执行计划显示未读计数对整张 `mail_messages` 做顺序扫描（含不可读邮箱，也含其它组织）。新增部分索引 `idx_mail_messages_unread`（`(mailbox_id, id) INCLUDE (created_at) WHERE direction = 'inbound' AND placement = 'default'`，迁移 `2026_11_24_090000_add_mail_unread_index`）后改为只读可读邮箱的仅索引扫描，计数也快约 40%。按邮箱 LATERAL 的写法实测更慢（130–170 ms），未采用。
+
+UI-11（2026-11-20）：1440×900 下逐项比对 §11.0 数值，栏宽、圆角、内边距、标题与正文字号、行结构、键帽、侧栏与额度卡片位置一致；与原型的差异为控制台外壳（顶栏与左侧导航）和列表标题下的搜索框（Task 9 要求），以及角色默认收起（§11.0 规定点击角色才展开）。命令面板遮罩与阴影原为固定色，已改用 `--shadow-color` 令牌。对比度：正文 ≥ 4.5:1，弱文字浅色 3.3–3.4:1、深色 3.3:1，满足 D22 的 ≥ 3:1。
+
 ### 14.4 验证命令（按 `AGENTS.md` 验证矩阵）
 
 ```bash

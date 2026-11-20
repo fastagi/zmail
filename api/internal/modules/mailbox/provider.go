@@ -80,6 +80,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_23_100000_add_transactional_templates",
 			"2026_11_23_110000_create_transactional_messages",
 			"2026_11_23_120000_create_mail_suppressions",
+			"2026_11_24_090000_add_mail_unread_index",
 		),
 	)
 }
