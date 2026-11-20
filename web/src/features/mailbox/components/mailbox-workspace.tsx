@@ -320,6 +320,13 @@ function MailboxView({
     document.querySelector<HTMLElement>(`[data-row-id="${String(closed)}"]`)?.focus();
   }, [open]);
 
+  // Another row starts the reader at its top, not where the last one was scrolled to.
+  const readerPane = useRef<HTMLElement | null>(null);
+  const openRowId = open?.rowId ?? null;
+  useEffect(() => {
+    if (openRowId !== null && readerPane.current) readerPane.current.scrollTop = 0;
+  }, [openRowId]);
+
   const openRow = (row: MailMessageSummary) => {
     setOpen(
       grouped
@@ -466,6 +473,7 @@ function MailboxView({
           />
         </section>
         <section
+          ref={readerPane}
           data-reading-pane=""
           className={cn(
             'animate-enter min-h-0 min-w-0 lg:overflow-y-auto xl:border-l xl:pl-4',

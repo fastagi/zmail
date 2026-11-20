@@ -754,6 +754,20 @@ describe('mailbox workspace', () => {
     expect(star).not.toHaveClass('hover:text-accent-foreground');
   });
 
+  it('starts the reader at its top when another row opens', () => {
+    state.detail.data = message({ html_body: '' });
+    const { container } = renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+    const pane = container.querySelector<HTMLElement>('[data-reading-pane]');
+    if (!pane) throw new Error('no reading pane');
+    pane.scrollTop = 400;
+    expect(pane.scrollTop).toBe(400);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next message' }));
+
+    expect(pane.scrollTop).toBe(0);
+  });
+
   it('shows no code panel for a message with nothing masked', () => {
     state.detail.data = message({ html_body: '' });
     renderWorkspace();
