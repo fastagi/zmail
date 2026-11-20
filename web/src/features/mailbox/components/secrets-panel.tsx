@@ -45,7 +45,7 @@ export function SecretsPanel({
         variant="outline"
         size="sm"
         className="mt-2.5"
-        disabled={pending}
+        loading={pending}
         onClick={onReveal}
       >
         {t('message.revealSecrets')}

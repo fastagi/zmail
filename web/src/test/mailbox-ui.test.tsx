@@ -768,6 +768,18 @@ describe('mailbox workspace', () => {
     expect(pane.scrollTop).toBe(0);
   });
 
+  it('shows the code request in flight on the Show codes button', () => {
+    state.detail.data = message({ html_body: '', secrets_masked: true });
+    state.reveal.isPending = true;
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+
+    const show = screen.getByRole('button', { name: 'Show codes' });
+    expect(show).toBeDisabled();
+    expect(show).toHaveAttribute('aria-busy', 'true');
+    state.reveal.isPending = false;
+  });
+
   it('shows no code panel for a message with nothing masked', () => {
     state.detail.data = message({ html_body: '' });
     renderWorkspace();
