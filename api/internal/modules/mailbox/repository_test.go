@@ -233,7 +233,7 @@ func TestRepositoryRecordsDeliveryReadStateAndDeletion(t *testing.T) {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 
-	if err := repo.UpdateMessageDelivery(ctx, message.ID, domain.MailStatusFailed, "", "provider.http_500"); err != nil {
+	if err := repo.UpdateMessageDelivery(ctx, message.ID, domain.MailStatusFailed, "", message.RFCMessageID, "provider.http_500"); err != nil {
 		t.Fatalf("UpdateMessageDelivery: %v", err)
 	}
 	readAt := time.Now().UTC().Truncate(time.Microsecond)
@@ -637,7 +637,7 @@ func TestRepositoryTransactionCommitsOrRollsBackTogether(t *testing.T) {
 		t.Fatalf("CreateMessage: %v", err)
 	}
 	change := func(tx context.Context) error {
-		if err := repo.UpdateMessageDelivery(tx, message.ID, domain.MailStatusSent, "prov-tx@mail.example", ""); err != nil {
+		if err := repo.UpdateMessageDelivery(tx, message.ID, domain.MailStatusSent, "prov-tx@mail.example", "prov-tx@mail.example", ""); err != nil {
 			return err
 		}
 		_, _, err := repo.AddMessageEvents(tx, message.ID, []domain.MailEvent{{Type: domain.MailEventAccepted, OccurredAt: time.Now().UTC()}})

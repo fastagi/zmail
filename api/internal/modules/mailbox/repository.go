@@ -497,15 +497,17 @@ func (r *repository) UpdateMessageDelivery(
 	id uint,
 	status domain.MailStatus,
 	messageID string,
+	rfcMessageID string,
 	failureCode string,
 ) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Model(&MailMessagePO{}).Where("id = ?", id).Updates(map[string]any{
-		"status":       string(status),
-		"message_id":   messageID,
-		"failure_code": failureCode,
+		"status":         string(status),
+		"message_id":     messageID,
+		"rfc_message_id": rfcMessageID,
+		"failure_code":   failureCode,
 	}).Error
 }
 

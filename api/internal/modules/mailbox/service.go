@@ -926,6 +926,9 @@ func (s *service) deliver(
 
 	message.Status = domain.MailStatusSent
 	message.MessageID = outcome.MessageID
+	if outcome.RFCMessageID != "" {
+		message.RFCMessageID = outcome.RFCMessageID
+	}
 	var result error
 	if sendErr != nil {
 		message.Status = domain.MailStatusFailed
@@ -939,7 +942,7 @@ func (s *service) deliver(
 	occurredAt := s.now().UTC()
 	events := sendEvents(outcome, sendErr == nil, occurredAt)
 	err := s.apply(recordContext, func(tx context.Context) ([]MailNotification, error) {
-		if updateErr := s.repo.UpdateMessageDelivery(tx, message.ID, message.Status, message.MessageID, message.FailureCode); updateErr != nil {
+		if updateErr := s.repo.UpdateMessageDelivery(tx, message.ID, message.Status, message.MessageID, message.RFCMessageID, message.FailureCode); updateErr != nil {
 			return nil, updateErr
 		}
 		if len(events) > 0 {
