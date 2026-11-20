@@ -11,6 +11,39 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Registration email codes
+
+Self-registration now proves that the person reads the email address: `POST /v1/register/email-codes`
+mails a 6-digit code, and `POST /v1/register` takes it as `email_code`. Contract:
+`contracts/AUTHENTICATION.md`, Registration Email Codes.
+
+### High — Registration requires an email code and a working system mailer by default
+
+`AUTH_REGISTRATION_EMAIL_CODE_REQUIRED` defaults to `true`. With registration open, a client that
+calls `POST /v1/register` without `email_code` now gets `400 AUTH.REGISTRATION_EMAIL_CODE_REQUIRED`,
+and the code only arrives through the system mailer (`MAIL_PROVIDER`, `MAIL_FROM`, and its key). An
+open instance without a mailer can register nobody; it logs `user.registration_email_code_mailer_missing`
+at startup. Default `true` is the safe choice: open registration without proof of email lets anyone
+claim any address. Act on one of:
+
+- Configure the system mailer and update every registration client to request a code first. The
+  Web console does this already; its `POST /api/auth/register` now requires `code`.
+- Set `AUTH_REGISTRATION_EMAIL_CODE_REQUIRED=false` where no mail can be sent, such as local
+  development, test harnesses, and processes that create accounts out of band.
+  `deploy/self-host/create-user.sh` and `api/tests/kest/run_local.sh` already do.
+
+New error codes: `AUTH.REGISTRATION_EMAIL_CODE_REQUIRED`, `AUTH.REGISTRATION_EMAIL_CODE_INVALID`,
+and `AUTH.REGISTRATION_EMAIL_CODE_EXPIRED` (all `400`). Production adds the
+`AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_*` quotas (10 per IP and 5 per address per hour by default).
+A fork that implements `user.UserMailer` or `user.AuthService` adds `SendRegistrationCodeEmail` and
+`RequestRegistrationEmailCode`.
+
+### Low — One new table for registration codes
+
+Run migrations: `2026_11_27_090000_create_registration_email_codes` creates
+`registration_email_codes`. It only creates a new table and its index, so it locks nothing
+existing.
+
 ## Unreleased — AI triage (offline part)
 
 ### Low — Two new tables and a mailbox switch for AI triage

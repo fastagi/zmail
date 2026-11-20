@@ -55,14 +55,15 @@ by email and registers with it. Executed inline on `feat/register-email-code`.
 - `AUTH_REGISTRATION_EMAIL_CODE_REQUIRED` defaults to `true`: open registration without proof of
   email is the unsafe default. Cost: an instance with open registration and no system mailer
   cannot register anyone; startup logs `user.registration_email_code_mailer_missing` in that case.
-  Local development and Kest flows set it to `false` explicitly. Documented in `UPGRADING.md` (High).
+  Kest (`run_local.sh` default, overridden by `register_email_code.kestenv`) and
+  `deploy/self-host/create-user.sh` set it to `false`. Documented in `UPGRADING.md` (High).
 - Response for the code request is `202 Accepted` with `{ message }`.
 - Hash includes the address so a code row can only be used for the address it was mailed to.
 - Kest has no system-mail log provider and codes must never be logged, so the Kest flow requests a
   code, then overwrites the stored hash with the hash of a known code through `psql` (precedent:
   `mailbox_admin.flow.md`), and drives every assertion through the API.
-- Mail: one English-and-Chinese message (`SendRegistrationCodeEmail`) on the existing system mailer;
-  the mailer has no locale input.
+- Mail: one English message (`SendRegistrationCodeEmail`) on the existing system mailer. The mailer
+  has no locale input, and Go source must stay English-only, so no Chinese copy is added there.
 - Web: the form is two steps on one page: email + "Send code" (60 s countdown), then code, name,
   password, and terms. The BFF requires a 6-digit `code` and forwards it as `email_code`; the
   development mock accepts any 6 digits.
