@@ -56,46 +56,48 @@ func NewService(
 
 // SignIn verifies credentials and issues a session only for a current operator of any scope. A
 // verified non-operator is rejected before any session exists.
-func (s *service) SignIn(ctx context.Context, identifier, password string) (*domain.IssuedSession, domain.OperatorScope, error) {
+func (s *service) SignIn(ctx context.Context, identifier, password string) (*domain.IssuedSession, domain.OperatorAccess, error) {
 	if s.signIn == nil {
-		return nil, "", domain.ErrServiceUnavailable
+		return nil, domain.OperatorAccess{}, domain.ErrServiceUnavailable
 	}
-	var scope domain.OperatorScope
+	var access domain.OperatorAccess
 	issued, err := s.signIn.SignIn(ctx, identifier, password, domain.SessionAudienceOperator, func(ctx context.Context, user *domain.User) error {
 		granted, grantErr := s.requireOperator(ctx, user.ID)
-		scope = granted
+		access = granted
 		return grantErr
 	})
 	if err != nil {
-		return nil, "", err
+		return nil, domain.OperatorAccess{}, err
 	}
-	return issued, scope, nil
+	return issued, access, nil
 }
 
-// Authenticate resolves a session credential to a current operator account and its grant's scope.
-func (s *service) Authenticate(ctx context.Context, credential string) (*domain.User, domain.OperatorScope, error) {
+// Authenticate resolves a session credential to a current operator account and what its grant
+// allows.
+func (s *service) Authenticate(ctx context.Context, credential string) (*domain.User, domain.OperatorAccess, error) {
+	none := domain.OperatorAccess{}
 	if s.authenticator == nil {
-		return nil, "", domain.ErrServiceUnavailable
+		return nil, none, domain.ErrServiceUnavailable
 	}
 	identity, err := s.authenticator.Authenticate(ctx, credential)
 	if err != nil {
-		return nil, "", err
+		return nil, none, err
 	}
 	if identity == nil || identity.Audience != domain.SessionAudienceOperator {
-		return nil, "", domain.ErrAuthenticationRequired
+		return nil, none, domain.ErrAuthenticationRequired
 	}
-	scope, grantErr := s.requireOperator(ctx, identity.UserID)
+	access, grantErr := s.requireOperator(ctx, identity.UserID)
 	if grantErr != nil {
-		return nil, "", grantErr
+		return nil, none, grantErr
 	}
 	user, err := s.users.FindByID(ctx, identity.UserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, "", domain.ErrAuthenticationRequired
+			return nil, none, domain.ErrAuthenticationRequired
 		}
-		return nil, "", fmt.Errorf("load operator account: %w", err)
+		return nil, none, fmt.Errorf("load operator account: %w", err)
 	}
-	return user, scope, nil
+	return user, access, nil
 }
 
 // SignOut ends the presented session. Unknown or already revoked sessions succeed.
@@ -106,43 +108,44 @@ func (s *service) SignOut(ctx context.Context, credential string) error {
 	return s.revoker.RevokeSession(ctx, credential)
 }
 
-// requireOperator returns the scope of the user's current grant. An unknown stored scope allows
+// requireOperator returns what the user's current grant allows. An unknown stored scope allows
 // nothing and is treated as no grant.
-func (s *service) requireOperator(ctx context.Context, userID uint) (domain.OperatorScope, error) {
-	scope, found, err := s.grants.grantScope(ctx, userID)
+func (s *service) requireOperator(ctx context.Context, userID uint) (domain.OperatorAccess, error) {
+	access, found, err := s.grants.grantAccess(ctx, userID)
 	if err != nil {
-		return "", fmt.Errorf("check operator grant: %w", err)
+		return domain.OperatorAccess{}, fmt.Errorf("check operator grant: %w", err)
 	}
-	if !found || !scope.Valid() {
-		return "", domain.ErrOperatorForbidden
+	if !found || !access.Valid() {
+		return domain.OperatorAccess{}, domain.ErrOperatorForbidden
 	}
-	return scope, nil
+	return access, nil
 }
 
-// GrantOperator makes the account with this email a platform operator with the given scope, or
-// changes the scope of its grant. Repeating it is a no-op.
+// GrantOperator makes the account with this email a platform operator with exactly the given scope
+// and content flag, or sets them on its existing grant. Repeating it is a no-op.
 func (s *service) GrantOperator(
 	ctx context.Context,
 	email string,
-	scope domain.OperatorScope,
+	access domain.OperatorAccess,
 ) (*domain.OperatorGrant, domain.OperatorGrantChange, error) {
-	if !scope.Valid() {
+	if !access.Valid() {
 		return nil, "", domain.ErrInvalidInput
 	}
 	user, err := s.findByEmail(ctx, email)
 	if err != nil {
 		return nil, "", err
 	}
-	change, grantedAt, err := s.grants.upsertGrant(ctx, user.ID, scope, s.now())
+	change, grantedAt, err := s.grants.upsertGrant(ctx, user.ID, access, s.now())
 	if err != nil {
 		return nil, "", err
 	}
 	return &domain.OperatorGrant{
-		UserID:    user.ID,
-		Username:  user.Username,
-		Email:     user.Email,
-		Scope:     scope,
-		GrantedAt: grantedAt,
+		UserID:      user.ID,
+		Username:    user.Username,
+		Email:       user.Email,
+		Scope:       access.Scope,
+		MailContent: access.MailContent,
+		GrantedAt:   grantedAt,
 	}, change, nil
 }
 
@@ -164,7 +167,9 @@ func (s *service) ListOperators(ctx context.Context) ([]domain.OperatorGrant, er
 	}
 	grants := make([]domain.OperatorGrant, 0, len(rows))
 	for _, row := range rows {
-		grant := domain.OperatorGrant{UserID: row.UserID, Scope: domain.OperatorScope(row.Scope), GrantedAt: row.GrantedAt}
+		grant := domain.OperatorGrant{
+			UserID: row.UserID, Scope: domain.OperatorScope(row.Scope), MailContent: row.MailContent, GrantedAt: row.GrantedAt,
+		}
 		if user, err := s.users.FindByID(ctx, row.UserID); err == nil {
 			grant.Username = user.Username
 			grant.Email = user.Email

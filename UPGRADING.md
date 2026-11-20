@@ -11,6 +11,44 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Platform mail operations: broadcast content and its audit
+
+Operators can read the sent text of organization broadcast messages, with a reason and an access
+record stored first. Contract: `contracts/OPERATORS.md`, Broadcast Content. Plan:
+`docs/plans/admin-mail-content.plan.md`.
+
+### Medium — A content add-on on operator grants; no existing grant reads bodies
+
+`platform_operators` gains `mail_content` (default `false`). It adds the new capability
+`mail_content:read` to either scope; `full` does not include it. Grant it with
+`fastbuild operator:grant <email> --scope=full,mail-content` or `--scope=mail-metrics,mail-content`.
+A grant command now sets the whole grant, so re-running `operator:grant <email>` without
+`,mail-content` removes content from a grant that had it. `operator:list` adds a CONTENT column;
+grant audit metadata adds `mail_content`.
+
+`GET`/`POST /v1/operator/session` may list `mail_content:read`. New routes (with the `mailbox` and
+`organization` starters): `POST /v1/operator/outbound-messages/{organization_id}/{message_id}/content`
+and `GET /v1/operator/content-access-audits`. Outbound log rows add `broadcast_id` (nullable). New
+error code `OPERATOR.CONTENT_NOT_ELIGIBLE` (403); clients that switch exhaustively on `error_code`
+should add it.
+
+A fork that calls `domain.OperatorGrantStore.GrantOperator` now passes a `domain.OperatorAccess`
+(scope plus content flag) instead of a `domain.OperatorScope`.
+
+### Low — Operator content migrations
+
+Run migrations:
+
+- `2026_12_01_090000_add_platform_operator_mail_content` adds
+  `platform_operators.mail_content boolean NOT NULL DEFAULT false`. The constant default is
+  recorded in the catalog only (PostgreSQL 11+), so the table is not rewritten; the `ALTER` takes a
+  brief `ACCESS EXCLUSIVE` lock on the grants table (a handful of rows) that blocks operator
+  sign-in and operator requests for that moment only. Rolling back drops the column, which only
+  removes content from grants.
+- `2026_12_01_090100_create_mail_content_access_audits` creates `mail_content_access_audits` and
+  its indexes. It only creates a new table and locks no existing one. Rolling back drops the table
+  and every access record in it; export them first if they must be kept.
+
 ## Unreleased — Hot-path benchmarks and two query-plan fixes
 
 Benchmarks for the unified inbox triage filter, external sources, operator mail metrics, platform

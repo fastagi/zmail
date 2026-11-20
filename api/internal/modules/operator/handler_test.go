@@ -26,21 +26,24 @@ type fakeGrants struct {
 	operators map[uint]bool
 	// scopes overrides the scope of a grant; a grant without an entry is full.
 	scopes map[uint]domain.OperatorScope
-	err    error
+	// content marks grants with the mail content add-on.
+	content map[uint]bool
+	err     error
 }
 
 func (f *fakeGrants) isOperator(_ context.Context, userID uint) (bool, error) {
 	return f.operators[userID], f.err
 }
 
-func (f *fakeGrants) grantScope(_ context.Context, userID uint) (domain.OperatorScope, bool, error) {
+func (f *fakeGrants) grantAccess(_ context.Context, userID uint) (domain.OperatorAccess, bool, error) {
 	if !f.operators[userID] {
-		return "", false, f.err
+		return domain.OperatorAccess{}, false, f.err
 	}
+	access := domain.OperatorAccess{Scope: domain.OperatorScopeFull, MailContent: f.content[userID]}
 	if scope, ok := f.scopes[userID]; ok {
-		return scope, true, f.err
+		access.Scope = scope
 	}
-	return domain.OperatorScopeFull, true, f.err
+	return access, true, f.err
 }
 
 func (f *fakeGrants) operatorIDs(_ context.Context, ids []uint) (map[uint]bool, error) {
@@ -56,20 +59,24 @@ func (f *fakeGrants) operatorIDs(_ context.Context, ids []uint) (map[uint]bool, 
 func (f *fakeGrants) upsertGrant(
 	_ context.Context,
 	userID uint,
-	scope domain.OperatorScope,
+	access domain.OperatorAccess,
 	now time.Time,
 ) (domain.OperatorGrantChange, time.Time, error) {
 	if f.scopes == nil {
 		f.scopes = map[uint]domain.OperatorScope{}
 	}
+	if f.content == nil {
+		f.content = map[uint]bool{}
+	}
 	change := domain.OperatorGrantUnchanged
 	if !f.operators[userID] {
 		change = domain.OperatorGrantCreated
-	} else if current, _, _ := f.grantScope(context.Background(), userID); current != scope {
+	} else if current, _, _ := f.grantAccess(context.Background(), userID); current != access {
 		change = domain.OperatorGrantScopeChanged
 	}
 	f.operators[userID] = true
-	f.scopes[userID] = scope
+	f.scopes[userID] = access.Scope
+	f.content[userID] = access.MailContent
 	return change, now, f.err
 }
 

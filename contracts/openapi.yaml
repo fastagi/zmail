@@ -2645,6 +2645,61 @@ paths:
           $ref: '#/components/responses/OperatorForbidden'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/content-access-audits:
+    get:
+      operationId: listOperatorContentAccessAudits
+      summary: Records of operator reads of broadcast bodies, newest first
+      description: Needs `mail_content:read` or `operator:manage`. Mounted only when the `mailbox` and
+        `organization` starters are selected. A record holds who read which message of which
+        organization, when, and why; never a body, subject, code, or recipient address.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - name: organization_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: viewer_user_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: from
+          in: query
+          description: RFC 3339 instant; records at or after it.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: RFC 3339 instant; records before it. Must be after `from`.
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/OperatorMailPerPage'
+      responses:
+        '200':
+          description: Paginated content access records.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorContentAccessPageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/operator/mail-metrics:
     get:
       operationId: getOperatorMailMetrics
@@ -3103,6 +3158,62 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/OperatorForbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/outbound-messages/{organization_id}/{message_id}/content:
+    post:
+      operationId: readOperatorBroadcastContent
+      summary: Read the sent text of one organization broadcast message, with a reason
+      description: Needs `mail_content:read`, which no scope includes; a grant gets it only through
+        the explicit content add-on. Only an outbound message created by a broadcast of the same
+        organization is readable. The access record (viewer, organization, message, reason, time)
+        is stored before the body is loaded, in the same transaction; if it cannot be stored the
+        response is `503` and carries no body. Returns plain text only; an HTML-only message is
+        converted to readable text without fetching anything. Never HTML, images, attachments, or
+        recipients.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - name: message_id
+          in: path
+          required: true
+          description: Positive message identifier; must belong to `organization_id`.
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorBroadcastContentRequest'
+      responses:
+        '200':
+          description: The sent text. The access record already exists.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorBroadcastContentResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorContentForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorMessageNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/operator/session:
@@ -9070,6 +9181,22 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    OperatorContentForbidden:
+      description: '`OPERATOR.CONTENT_NOT_ELIGIBLE` when the message is in the organization but is
+        not an outbound organization broadcast message (ordinary outbound, inbound, or a synced copy),
+        or any code of `OperatorForbidden`, including `OPERATOR.CAPABILITY_REQUIRED` for a grant
+        without `mail_content:read`.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    OperatorMessageNotFound:
+      description: '`MAILBOX.MESSAGE_NOT_FOUND`: no message with this ID is stored in a mailbox of
+        this organization.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     OperatorSignInForbidden:
       description: '`OPERATOR.ORIGIN_REJECTED` when `Origin` is missing or not allowed, or `OPERATOR.FORBIDDEN`
         when valid credentials belong to an account without an operator grant.'
@@ -9217,6 +9344,7 @@ components:
         - OPERATOR.ORIGIN_REJECTED
         - OPERATOR.CSRF_REJECTED
         - OPERATOR.TARGET_PROTECTED
+        - OPERATOR.CONTENT_NOT_ELIGIBLE
         - MAILBOX.NOT_FOUND
         - MAILBOX.ADDRESS_TAKEN
         - MAILBOX.ADDRESS_INVALID
@@ -11515,15 +11643,19 @@ components:
           $ref: '#/components/schemas/OperatorAccount'
         capabilities:
           type: array
-          description: What the grant allows. `operator:manage` is every operator route;
-            `mail_metrics:read` is the mail metrics, the outbound log, and the read-only organization
-            routes. A `full` grant has both; a `mail_metrics` grant has only `mail_metrics:read`.
+          description: What the grant allows. `operator:manage` is every operator route except reading
+            bodies; `mail_metrics:read` is the mail metrics, the outbound log, and the read-only
+            organization routes; `mail_content:read` is reading broadcast bodies and their access
+            records. A `full` grant has `operator:manage` and `mail_metrics:read`; a `mail_metrics`
+            grant has only `mail_metrics:read`. Either gains `mail_content:read` only with the
+            explicit content add-on.
           uniqueItems: true
           items:
             type: string
             enum:
               - operator:manage
               - mail_metrics:read
+              - mail_content:read
         csrf_token:
           type: string
           pattern: ^[A-Za-z0-9_-]{43}$
@@ -11863,6 +11995,7 @@ components:
         - last_event
         - created_at
         - send_attempted_at
+        - broadcast_id
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -11907,6 +12040,12 @@ components:
             - string
             - 'null'
           format: date-time
+        broadcast_id:
+          description: The organization broadcast that created the message, or null. Only such a
+            message has a body a grant with `mail_content:read` may read.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
     OperatorOutboundMessagePageResponse:
       type: object
       additionalProperties: false
@@ -11925,6 +12064,121 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OperatorOutboundMessage'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    OperatorBroadcastContentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the body is read. Trimmed; 1–500 characters; no control characters other
+            than line breaks and tabs. Stored in the access record.
+    OperatorBroadcastContent:
+      type: object
+      additionalProperties: false
+      required:
+        - access_id
+        - organization_id
+        - message_id
+        - broadcast_id
+        - subject
+        - from_address
+        - created_at
+        - text
+        - text_source
+      properties:
+        access_id:
+          $ref: '#/components/schemas/PositiveID'
+        organization_id:
+          $ref: '#/components/schemas/PositiveID'
+        message_id:
+          $ref: '#/components/schemas/PositiveID'
+        broadcast_id:
+          $ref: '#/components/schemas/PositiveID'
+        subject:
+          type: string
+        from_address:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        text:
+          type: string
+          description: The sent plain text. Display it as text, never as HTML.
+        text_source:
+          type: string
+          description: '`text` is the stored text part; `html` is the HTML part converted to
+            readable text because the message had no text part.'
+          enum:
+            - text
+            - html
+    OperatorBroadcastContentResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/OperatorBroadcastContent'
+    OperatorContentAccess:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - viewer_user_id
+        - organization_id
+        - organization_name
+        - message_id
+        - reason
+        - accessed_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        viewer_user_id:
+          $ref: '#/components/schemas/PositiveID'
+        organization_id:
+          $ref: '#/components/schemas/PositiveID'
+        organization_name:
+          type: string
+          description: Empty when the organization no longer exists.
+        message_id:
+          $ref: '#/components/schemas/PositiveID'
+        reason:
+          type: string
+        accessed_at:
+          type: string
+          format: date-time
+    OperatorContentAccessPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperatorContentAccess'
         meta:
           $ref: '#/components/schemas/PaginationMeta'
         links:

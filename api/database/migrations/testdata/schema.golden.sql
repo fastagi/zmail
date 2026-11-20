@@ -162,6 +162,14 @@ TABLE mail_contacts
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
 
+TABLE mail_content_access_audits
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_content_access_audits_id_seq'::regclass)
+  COLUMN viewer_user_id bigint NOT NULL
+  COLUMN organization_id bigint NOT NULL
+  COLUMN message_id bigint NOT NULL
+  COLUMN reason character varying(500) NOT NULL
+  COLUMN accessed_at timestamp with time zone NOT NULL
+
 TABLE mail_domains
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_domains_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -498,6 +506,7 @@ TABLE platform_operators
   COLUMN user_id bigint NOT NULL
   COLUMN granted_at timestamp with time zone NOT NULL
   COLUMN scope character varying(16) NOT NULL DEFAULT 'full'::character varying
+  COLUMN mail_content boolean NOT NULL DEFAULT false
 
 TABLE rate_limit_buckets
   COLUMN key_hash bytea NOT NULL
@@ -759,6 +768,8 @@ CONSTRAINT mail_contact_lists.mail_contact_lists_pkey PRIMARY KEY (id)
 CONSTRAINT mail_contacts.chk_mail_contacts_status CHECK (((status)::text = ANY ((ARRAY['subscribed'::character varying, 'unsubscribed'::character varying, 'suppressed'::character varying])::text[])))
 CONSTRAINT mail_contacts.fk_mail_contacts_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_contacts.mail_contacts_pkey PRIMARY KEY (id)
+CONSTRAINT mail_content_access_audits.mail_content_access_audits_pkey PRIMARY KEY (id)
+CONSTRAINT mail_content_access_audits.mail_content_access_audits_reason_check CHECK ((btrim((reason)::text) <> ''::text))
 CONSTRAINT mail_domains.chk_mail_domains_capability CHECK (((capability)::text = ANY ((ARRAY['send_receive'::character varying, 'send_only'::character varying])::text[])))
 CONSTRAINT mail_domains.chk_mail_domains_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'verified'::character varying])::text[])))
 CONSTRAINT mail_domains.fk_mail_domains_mail_zone FOREIGN KEY (mail_zone_id) REFERENCES mail_zones(id)
@@ -1015,6 +1026,10 @@ INDEX CREATE UNIQUE INDEX mail_contact_lists_pkey ON mail_contact_lists USING bt
 INDEX CREATE UNIQUE INDEX idx_mail_contacts_email ON mail_contacts USING btree (organization_id, email)
 INDEX CREATE INDEX idx_mail_contacts_listing ON mail_contacts USING btree (organization_id, id)
 INDEX CREATE UNIQUE INDEX mail_contacts_pkey ON mail_contacts USING btree (id)
+INDEX CREATE INDEX idx_mail_content_access_audits_organization ON mail_content_access_audits USING btree (organization_id, accessed_at DESC, id DESC)
+INDEX CREATE INDEX idx_mail_content_access_audits_time ON mail_content_access_audits USING btree (accessed_at DESC, id DESC)
+INDEX CREATE INDEX idx_mail_content_access_audits_viewer ON mail_content_access_audits USING btree (viewer_user_id, accessed_at DESC, id DESC)
+INDEX CREATE UNIQUE INDEX mail_content_access_audits_pkey ON mail_content_access_audits USING btree (id)
 INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
 INDEX CREATE INDEX idx_mail_domains_organization ON mail_domains USING btree (organization_id)

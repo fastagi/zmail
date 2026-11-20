@@ -6,8 +6,9 @@ Console. It depends on the default `user` and `audit` starters and is selected w
 command exists.
 
 Implementation plans: [`admin-operator-console.md`](../docs/plans/admin-operator-console.md),
-[`admin-operator-starters.md`](../docs/plans/admin-operator-starters.md), and
-[`admin-mail-operations.plan.md`](../docs/plans/admin-mail-operations.plan.md).
+[`admin-operator-starters.md`](../docs/plans/admin-operator-starters.md),
+[`admin-mail-operations.plan.md`](../docs/plans/admin-mail-operations.plan.md), and
+[`admin-mail-content.plan.md`](../docs/plans/admin-mail-content.plan.md).
 
 ## Operators
 
@@ -15,7 +16,7 @@ A platform operator is a user with a current operator grant. Grants are created 
 from the CLI on a host with database access:
 
 ```bash
-fastbuild operator:grant <email> [--scope=full|mail-metrics]
+fastbuild operator:grant <email> [--scope=full|mail-metrics][,mail-content]
 fastbuild operator:revoke <email>
 fastbuild operator:list
 ```
@@ -24,12 +25,19 @@ A grant has one scope, which decides its capabilities:
 
 | Scope | Capabilities | Allows |
 |---|---|---|
-| `full` (default) | `operator:manage`, `mail_metrics:read` | Every operator route |
+| `full` (default) | `operator:manage`, `mail_metrics:read` | Every operator route except reading bodies |
 | `mail_metrics` | `mail_metrics:read` | Sign-in, [Mail Metrics](#mail-metrics), and the read-only [Organizations](#organizations) routes |
 
-Granting the same scope twice, or revoking twice, is a no-op; granting another scope changes the
-grant's scope. Each change writes an audit record with the system as actor and the account's user
-ID as target. Deleting an account removes its grant. A grant is not an organization role and not a
+The content add-on (`,mail-content`, e.g. `--scope=mail-metrics,mail-content`) adds
+`mail_content:read` to either scope: reading organization broadcast bodies and the
+[content access records](#broadcast-content). No scope includes it, `full` included, so reading a
+body always needs an explicit grant by the owner.
+
+A grant command sets the whole grant: granting `--scope=mail-metrics` to a grant that has content
+removes content. Granting the same scope and add-on twice, or revoking twice, is a no-op; any other
+grant changes the grant. Each change writes an audit record with the system as actor, the
+account's user ID as target, and the resulting `scope` and `mail_content` in its metadata.
+`operator:list` shows SCOPE and CONTENT columns. Deleting an account removes its grant. A grant is not an organization role and not a
 permission key: organization owners and admins receive no capability from their role.
 
 ## Browser Session
@@ -89,6 +97,7 @@ Sign-out without a cookie, or with an already revoked session, returns `204` and
 | `Origin` outside both `CORS_ALLOW_ORIGINS` and `OPERATOR_ALLOWED_ORIGINS` | 403 | none: the kernel CORS policy rejects it before routing |
 | `X-CSRF-Token` missing or not bound to this session | 403 | `OPERATOR.CSRF_REJECTED` |
 | Target account holds an operator grant | 409 | `OPERATOR.TARGET_PROTECTED` |
+| Message is not an outbound organization broadcast message ([Broadcast Content](#broadcast-content)) | 403 | `OPERATOR.CONTENT_NOT_ELIGIBLE` |
 | Sign-in quota exceeded | 429 | `COMMON.RATE_LIMITED` |
 | Persistence unavailable | 503 | `COMMON.SERVICE_UNAVAILABLE` |
 
@@ -232,9 +241,55 @@ matching `q` is listed, including those with zero mail, ordered by `sent` descen
 ascending organization ID.
 
 An outbound message is `{ id, organization_id, organization_name, mailbox_id, mailbox_address,
-from_address, subject, status, failure_code, last_event, created_at, send_attempted_at }`, ordered by
-`created_at` and then `id`, both descending. `last_event` summarizes the delivery receipts as in
-[`MAILBOXES.md`](MAILBOXES.md) and is empty when none arrived; `send_attempted_at` may be `null`.
+from_address, subject, status, failure_code, last_event, created_at, send_attempted_at, broadcast_id }`,
+ordered by `created_at` and then `id`, both descending. `last_event` summarizes the delivery receipts
+as in [`MAILBOXES.md`](MAILBOXES.md) and is empty when none arrived; `send_attempted_at` may be
+`null`. `broadcast_id` names the broadcast of the same organization that created the message, or is
+`null`; only such a message has a readable body ([Broadcast Content](#broadcast-content)).
+
+## Broadcast Content
+
+Registered only when the `mailbox` and `organization` starters are also selected. By the owner's
+decision, an operator may read a body **only for organization broadcast mail**: never ordinary
+business outbound, private inbox mail, synced Gmail or Outlook copies, or transactional system mail
+(login codes, account recovery), which lives in its own table and has no route here.
+
+| Operation | Method and path | Capability | Success |
+|---|---|---|---|
+| Read one broadcast message's text | `POST /v1/operator/outbound-messages/{organization_id}/{message_id}/content` with `{ reason }` | `mail_content:read` | `200 broadcast content` |
+| Content access records | `GET /v1/operator/content-access-audits?organization_id=&viewer_user_id=&from=&to=&page=&per_page=` | `mail_content:read` or `operator:manage` | `200` paginated `content access` list |
+
+Reading:
+
+- The read is an unsafe request: `Origin` and `X-CSRF-Token` are required as on every unsafe
+  operator route, and the audit middleware records the request (never its body).
+- `reason` is trimmed and must be 1–500 characters with no control character other than line breaks
+  and tabs; otherwise `422 COMMON.VALIDATION_FAILED`.
+- No message with `message_id` is stored in an existing mailbox of `organization_id` (including a
+  real message of another organization): `404 MAILBOX.MESSAGE_NOT_FOUND`.
+- The message is in that organization but is not outbound, not sent through Zmail, or not created
+  by a broadcast of that same organization: `403 OPERATOR.CONTENT_NOT_ELIGIBLE`. Refused reads write
+  no content access record.
+- In one transaction the API checks the message, stores the content access record, then loads the
+  body. If the record cannot be stored or the transaction cannot commit, the response is
+  `503 COMMON.SERVICE_UNAVAILABLE` and carries no body.
+- Removing the add-on or revoking the grant applies on the next request, like every grant change.
+- Neither the body nor the reason is written to the application log.
+
+A broadcast content is `{ access_id, organization_id, message_id, broadcast_id, subject,
+from_address, created_at, text, text_source }`. `text` is the stored text part (`text_source =
+"text"`); when that is blank, it is the HTML part converted to readable text (`text_source =
+"html"`): script, style, head, and embedded content dropped, block elements and `<br>` become line
+breaks, entities decoded, nothing fetched. HTML, images, attachments, and recipients are never
+returned; clients show `text` as plain text and must not cache it.
+
+A content access is `{ id, viewer_user_id, organization_id, organization_name, message_id, reason,
+accessed_at }`, newest first (`accessed_at`, then `id`, descending). It never holds a body, subject,
+code, or recipient address, and it outlives the message, organization, and account it names
+(`organization_name` is empty once the organization is gone). `from` and `to` are RFC 3339 instants;
+`from` is inclusive, `to` exclusive and must be after `from`. `organization_id` and `viewer_user_id`
+are positive integers and `per_page` is 1–100 (default 20). Invalid values return
+`400 COMMON.INVALID_INPUT`.
 
 ## Webhooks
 

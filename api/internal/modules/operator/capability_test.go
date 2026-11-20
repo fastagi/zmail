@@ -167,17 +167,23 @@ func TestGrantOperatorScopes(t *testing.T) {
 	svc := f.handler.service
 	svc.users = emailUsers{fakeUsers: users, byEmail: map[string]*domain.User{"viewer@example.test": viewer}}
 
-	grant, change, err := svc.GrantOperator(context.Background(), "viewer@example.test", domain.OperatorScopeMailMetrics)
+	metrics := domain.OperatorAccess{Scope: domain.OperatorScopeMailMetrics}
+	grant, change, err := svc.GrantOperator(context.Background(), "viewer@example.test", metrics)
 	require.NoError(t, err)
 	assert.Equal(t, domain.OperatorGrantCreated, change)
 	assert.Equal(t, domain.OperatorScopeMailMetrics, grant.Scope)
-	_, change, err = svc.GrantOperator(context.Background(), "viewer@example.test", domain.OperatorScopeMailMetrics)
+	_, change, err = svc.GrantOperator(context.Background(), "viewer@example.test", metrics)
 	require.NoError(t, err)
 	assert.Equal(t, domain.OperatorGrantUnchanged, change)
-	_, change, err = svc.GrantOperator(context.Background(), "viewer@example.test", domain.OperatorScopeFull)
+	_, change, err = svc.GrantOperator(context.Background(), "viewer@example.test", domain.OperatorAccess{Scope: domain.OperatorScopeFull})
 	require.NoError(t, err)
 	assert.Equal(t, domain.OperatorGrantScopeChanged, change)
-	_, _, err = svc.GrantOperator(context.Background(), "viewer@example.test", "superuser")
+	grant, change, err = svc.GrantOperator(context.Background(), "viewer@example.test",
+		domain.OperatorAccess{Scope: domain.OperatorScopeFull, MailContent: true})
+	require.NoError(t, err)
+	assert.Equal(t, domain.OperatorGrantScopeChanged, change)
+	assert.True(t, grant.MailContent)
+	_, _, err = svc.GrantOperator(context.Background(), "viewer@example.test", domain.OperatorAccess{Scope: "superuser", MailContent: true})
 	require.ErrorIs(t, err, domain.ErrInvalidInput)
 }
 
@@ -202,4 +208,112 @@ func sessionCapabilities(t *testing.T, body []byte) []string {
 	}
 	require.NoError(t, json.Unmarshal(body, &envelope))
 	return envelope.Data.Capabilities
+}
+
+// Spec acceptance row 4: a normal member, an organization owner, a metrics-only grant, and a full
+// grant without the content add-on cannot read a broadcast body; only a grant with content can,
+// and removing content or revoking the grant makes the next read fail.
+func TestBroadcastContentNeedsTheExplicitContentCapability(t *testing.T) {
+	// passed marks a request the authorization let through to the database-less store.
+	const passed = -1
+	const auditsPath = "/v1/operator/content-access-audits"
+	tests := []struct {
+		name       string
+		userID     uint
+		granted    bool
+		scope      domain.OperatorScope
+		content    bool
+		readCode   int
+		readErr    string
+		auditsCode int
+		auditsErr  string
+	}{
+		{name: "normal member without a grant", userID: 2,
+			readCode: http.StatusForbidden, readErr: domain.CodeOperatorForbidden,
+			auditsCode: http.StatusForbidden, auditsErr: domain.CodeOperatorForbidden},
+		{name: "organization owner gets nothing from the role", userID: 4,
+			readCode: http.StatusForbidden, readErr: domain.CodeOperatorForbidden,
+			auditsCode: http.StatusForbidden, auditsErr: domain.CodeOperatorForbidden},
+		{name: "metrics-only grant", userID: 3, granted: true, scope: domain.OperatorScopeMailMetrics,
+			readCode: http.StatusForbidden, readErr: domain.CodeOperatorCapability,
+			auditsCode: http.StatusForbidden, auditsErr: domain.CodeOperatorCapability},
+		{name: "full grant without content reads the audit but no body", userID: 1, granted: true,
+			scope:    domain.OperatorScopeFull,
+			readCode: http.StatusForbidden, readErr: domain.CodeOperatorCapability,
+			auditsCode: passed},
+		{name: "metrics grant with content", userID: 3, granted: true, scope: domain.OperatorScopeMailMetrics,
+			content: true, readCode: passed, auditsCode: passed},
+		{name: "full grant with content", userID: 1, granted: true, scope: domain.OperatorScopeFull,
+			content: true, readCode: passed, auditsCode: passed},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			f := newCapabilityFixture(t)
+			f.grants.operators = map[uint]bool{}
+			if test.granted {
+				f.grants.operators[test.userID] = true
+				f.grants.scopes = map[uint]domain.OperatorScope{test.userID: test.scope}
+				f.grants.content = map[uint]bool{test.userID: test.content}
+			}
+			f.auth.identity = &domain.AuthenticationIdentity{UserID: test.userID, Audience: domain.SessionAudienceOperator}
+
+			read := f.do(t, contentRead())
+			if test.readCode == passed {
+				assert.GreaterOrEqual(t, read.Code, http.StatusInternalServerError)
+			} else {
+				assert.Equal(t, test.readCode, read.Code)
+				assert.Equal(t, test.readErr, errorCode(t, read))
+			}
+			audits := f.do(t, call{method: http.MethodGet, path: auditsPath, cookie: testCredential})
+			if test.auditsCode == passed {
+				assert.GreaterOrEqual(t, audits.Code, http.StatusInternalServerError)
+			} else {
+				assert.Equal(t, test.auditsCode, audits.Code)
+				assert.Equal(t, test.auditsErr, errorCode(t, audits))
+			}
+		})
+	}
+}
+
+func TestRemovingContentFailsTheNextRead(t *testing.T) {
+	f := newCapabilityFixture(t)
+	f.grants.operators = map[uint]bool{3: true}
+	f.grants.scopes = map[uint]domain.OperatorScope{3: domain.OperatorScopeMailMetrics}
+	f.grants.content = map[uint]bool{3: true}
+	f.auth.identity = &domain.AuthenticationIdentity{UserID: 3, Audience: domain.SessionAudienceOperator}
+
+	recorder := f.do(t, call{method: http.MethodGet, path: "/v1/operator/session", cookie: testCredential})
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Equal(t, []string{"mail_metrics:read", "mail_content:read"}, sessionCapabilities(t, recorder.Body.Bytes()))
+	assert.GreaterOrEqual(t, f.do(t, contentRead()).Code, http.StatusInternalServerError, "the content grant passes")
+
+	f.grants.content[3] = false
+	recorder = f.do(t, contentRead())
+	assert.Equal(t, http.StatusForbidden, recorder.Code)
+	assert.Equal(t, domain.CodeOperatorCapability, errorCode(t, recorder), "re-granting without content applies on the next request")
+
+	f.grants.content[3] = true
+	delete(f.grants.operators, 3)
+	recorder = f.do(t, contentRead())
+	assert.Equal(t, http.StatusForbidden, recorder.Code)
+	assert.Equal(t, domain.CodeOperatorForbidden, errorCode(t, recorder), "a revoked grant reads nothing")
+}
+
+func TestBroadcastContentIsAnUnsafeRequest(t *testing.T) {
+	f := newCapabilityFixture(t)
+	f.grants.operators = map[uint]bool{1: true}
+	f.grants.content = map[uint]bool{1: true}
+	read := contentRead()
+	read.csrf = ""
+	recorder := f.do(t, read)
+	assert.Equal(t, http.StatusForbidden, recorder.Code)
+	assert.Equal(t, domain.CodeOperatorCSRFRejected, errorCode(t, recorder))
+}
+
+// contentPath is a broadcast body read; the database-less store never resolves it.
+const contentPath = "/v1/operator/outbound-messages/1/2/content"
+
+func contentRead() call {
+	return call{method: http.MethodPost, path: contentPath, body: `{"reason":"Complaint ticket 42"}`,
+		origin: testOrigin, cookie: testCredential, csrf: csrfToken(testCredential)}
 }

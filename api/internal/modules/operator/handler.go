@@ -22,7 +22,7 @@ import (
 const (
 	contextCredential = "operator_session_credential"
 	contextOperator   = "operator_account"
-	contextScope      = "operator_scope"
+	contextAccess     = "operator_access"
 )
 
 // Surfaces are the operator-facing handlers owned by other optional starters. Each owning starter
@@ -103,9 +103,9 @@ type sessionResponse struct {
 	Capabilities []domain.OperatorCapability `json:"capabilities"`
 }
 
-func newSessionResponse(account *domain.User, scope domain.OperatorScope, credential string) sessionResponse {
+func newSessionResponse(account *domain.User, access domain.OperatorAccess, credential string) sessionResponse {
 	return sessionResponse{
-		Capabilities: scope.Capabilities(),
+		Capabilities: access.Capabilities(),
 		Operator: operatorResponse{
 			ID:       account.ID,
 			Username: account.Username,
@@ -127,14 +127,14 @@ func (h *Handler) SignIn(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	issued, scope, err := h.service.SignIn(c.Request.Context(), req.Identifier, req.Password)
+	issued, access, err := h.service.SignIn(c.Request.Context(), req.Identifier, req.Password)
 	if err != nil {
 		writeError(c, "Operator sign-in failed", err)
 		return
 	}
 	h.session.store(c, issued.Credential, issued.ExpiresAt)
 	c.Set("userID", issued.User.ID)
-	response.Success(c, newSessionResponse(issued.User, scope, issued.Credential))
+	response.Success(c, newSessionResponse(issued.User, access, issued.Credential))
 }
 
 // Current returns the signed-in operator and the CSRF token for unsafe requests.
@@ -144,7 +144,7 @@ func (h *Handler) Current(c *gin.Context) {
 		response.AbortWithCode(c, http.StatusUnauthorized, response.ErrorCodeUnauthorized, "Authentication required")
 		return
 	}
-	response.Success(c, newSessionResponse(account, currentScope(c), credential))
+	response.Success(c, newSessionResponse(account, currentAccess(c), credential))
 }
 
 // SignOut revokes the presented session and expires the cookie. It succeeds when no session exists.
@@ -192,7 +192,7 @@ func (h *Handler) requireOperator(c *gin.Context) {
 		return
 	}
 
-	account, scope, err := h.service.Authenticate(c.Request.Context(), credential)
+	account, access, err := h.service.Authenticate(c.Request.Context(), credential)
 	if err != nil {
 		writeError(c, "Operator authentication failed", err)
 		return
@@ -213,31 +213,34 @@ func (h *Handler) requireOperator(c *gin.Context) {
 	c.Set("username", account.Username)
 	c.Set(contextCredential, credential)
 	c.Set(contextOperator, account)
-	c.Set(contextScope, scope)
+	c.Set(contextAccess, access)
 	c.Next()
 }
 
-// requireCapability runs after requireOperator and rejects a grant whose scope does not include the
-// capability. The caller stays signed in.
-func requireCapability(capability domain.OperatorCapability) gin.HandlerFunc {
+// requireCapability runs after requireOperator and rejects a grant that includes none of the
+// capabilities. The caller stays signed in.
+func requireCapability(capabilities ...domain.OperatorCapability) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !currentScope(c).Allows(capability) {
-			writeError(c, "Operator capability check failed", domain.ErrOperatorCapability)
-			return
+		access := currentAccess(c)
+		for _, capability := range capabilities {
+			if access.Allows(capability) {
+				c.Next()
+				return
+			}
 		}
-		c.Next()
+		writeError(c, "Operator capability check failed", domain.ErrOperatorCapability)
 	}
 }
 
-func currentScope(c *gin.Context) domain.OperatorScope {
-	value, exists := c.Get(contextScope)
+func currentAccess(c *gin.Context) domain.OperatorAccess {
+	value, exists := c.Get(contextAccess)
 	if !exists {
-		return ""
+		return domain.OperatorAccess{}
 	}
-	if scope, ok := value.(domain.OperatorScope); ok {
-		return scope
+	if access, ok := value.(domain.OperatorAccess); ok {
+		return access
 	}
-	return ""
+	return domain.OperatorAccess{}
 }
 
 // writeError maps operator-starter failures to their public status and error code. Unexpected
@@ -256,6 +259,8 @@ func writeError(c *gin.Context, message string, err error) {
 		response.AbortWithCode(c, http.StatusForbidden, domain.CodeOperatorForbidden, "Operator access is required")
 	case errors.Is(err, domain.ErrOperatorCapability):
 		response.AbortWithCode(c, http.StatusForbidden, domain.CodeOperatorCapability, "Operator grant does not allow this")
+	case errors.Is(err, domain.ErrOperatorContentNotEligible):
+		response.AbortWithCode(c, http.StatusForbidden, domain.CodeOperatorContentNotEligible, "Message body is not readable here")
 	case errors.Is(err, domain.ErrOperatorTargetProtected):
 		response.AbortWithCode(c, http.StatusConflict, domain.CodeOperatorTargetProtected, "Operator accounts cannot be changed here")
 	case errors.Is(err, domain.ErrInvalidInput):
