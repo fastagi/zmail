@@ -12,6 +12,7 @@ import { useMailOrganizationId } from '@/features/mailbox/components/mail-organi
 import {
   ErrorAlert,
   MailHtmlFrame,
+  ReaderArticleSkeleton,
   StaleNotice,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
@@ -71,6 +72,33 @@ function ReaderSubject({ subject, layout }: { subject: string; layout: ReaderLay
 
 const articleClassName = 'mx-auto w-full max-w-[640px] space-y-4 px-5 sm:px-7';
 
+/** The originals of the messages revealed in this reader, by message id. */
+type RevealedMessages = ReadonlyMap<number, MailMessage>;
+
+const noneRevealed: RevealedMessages = new Map();
+
+/**
+ * The originals a reader has revealed while it shows `owner` (a thread or a message), so the
+ * subject above the messages and each message agree. Another row, or reopening this one, starts
+ * masked again; the reader stays mounted, so focus on its controls survives moving through rows.
+ */
+function useRevealedMessages(owner: number) {
+  const [state, setState] = useState<{ owner: number; messages: RevealedMessages }>(() => ({
+    owner,
+    messages: noneRevealed,
+  }));
+  // A new row drops what the last one revealed, during render, before it can show.
+  if (state.owner !== owner) setState({ owner, messages: noneRevealed });
+  const revealed = state.owner === owner ? state.messages : noneRevealed;
+  const remember = (message: MailMessage) =>
+    setState(current =>
+      current.owner === owner
+        ? { owner, messages: new Map(current.messages).set(message.id, message) }
+        : current
+    );
+  return { revealed, remember };
+}
+
 /**
  * A thread opened from a placement view: every message of it outside the trash, oldest first, so
  * the replies in Sent show beside the mail they answer. The newest message is open; the others
@@ -85,6 +113,7 @@ export function ThreadView({
   const t = useT('mailbox');
   const query = useMailThread(useMailOrganizationId(), reader.mailboxId, threadId);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
+  const { revealed, remember } = useRevealedMessages(threadId);
   const layout = { variant, kicker };
 
   return (
@@ -95,12 +124,18 @@ export function ThreadView({
         return (
           <article className={variant === 'article' ? articleClassName : 'space-y-4'}>
             {variant === 'article' ? null : <ReaderToolbar reader={reader} />}
-            <ReaderSubject subject={newest.subject} layout={layout} />
+            <ReaderSubject subject={(revealed.get(newest.id) ?? newest).subject} layout={layout} />
             <ol aria-label={t('thread.label')} className="space-y-3">
               {messages.map(message => (
                 <li key={message.id}>
                   {message.id === newest.id || expanded.has(message.id) ? (
-                    <MessageCard message={message} reader={reader} variant={variant} />
+                    <MessageCard
+                      message={message}
+                      revealed={revealed.get(message.id) ?? null}
+                      onRevealed={remember}
+                      reader={reader}
+                      variant={variant}
+                    />
                   ) : (
                     <CollapsedMessage
                       message={message}
@@ -125,14 +160,22 @@ export function MessageDetail({
   ...reader
 }: ReaderProps & ReaderLayout & { messageId: number }) {
   const query = useMailMessage(useMailOrganizationId(), reader.mailboxId, messageId);
+  const { revealed, remember } = useRevealedMessages(messageId);
   const layout = { variant, kicker };
   return (
     <ReaderState query={query} reader={reader} layout={layout}>
       {(message: MailMessage) => (
         <article className={variant === 'article' ? articleClassName : 'space-y-4'}>
           {variant === 'article' ? null : <ReaderToolbar reader={reader} />}
-          <ReaderSubject subject={message.subject} layout={layout} />
-          <MessageCard key={message.id} message={message} reader={reader} variant={variant} />
+          <ReaderSubject subject={(revealed.get(message.id) ?? message).subject} layout={layout} />
+          <MessageCard
+            key={message.id}
+            message={message}
+            revealed={revealed.get(message.id) ?? null}
+            onRevealed={remember}
+            reader={reader}
+            variant={variant}
+          />
         </article>
       )}
     </ReaderState>
@@ -153,9 +196,10 @@ function ReaderState<T>({
   const t = useT('mailbox');
   const article = layout.variant === 'article';
   if (query.isPending) {
+    if (article) return <ReaderArticleSkeleton className={articleClassName} />;
     return (
-      <div className={article ? articleClassName : 'space-y-3'}>
-        {article ? null : <ReaderToolbar reader={reader} />}
+      <div className="space-y-3">
+        <ReaderToolbar reader={reader} />
         <Skeleton className="h-48 w-full" />
       </div>
     );
@@ -268,27 +312,32 @@ function CollapsedMessage({ message, onExpand }: { message: MailMessage; onExpan
   );
 }
 
-/** An open message: its headers, its actions, its files, and its content. */
+/**
+ * An open message: its headers, its actions, its files, and its content. `revealed` is its
+ * original once the reader revealed it, kept by the reader so the subject above follows.
+ */
 function MessageCard({
   message: stored,
+  revealed,
+  onRevealed,
   reader,
   variant,
 }: {
   message: MailMessage;
+  revealed: MailMessage | null;
+  onRevealed: (message: MailMessage) => void;
   reader: ReaderProps;
   variant: NonNullable<ReaderLayout['variant']>;
 }) {
   const t = useT('mailbox');
   const [plainText, setPlainText] = useState(false);
   const reveal = useRevealMailMessage(useMailOrganizationId(), reader.mailboxId);
-  // The original stays in this card only; another message, or reopening this one, is masked.
-  const [revealed, setRevealed] = useState<MailMessage | null>(null);
   const message = revealed?.id === stored.id ? revealed : stored;
   const showSecretsPanel = stored.secrets_masked === true;
   const onReveal = () => {
     reveal
       .mutateAsync(stored.id)
-      .then(setRevealed)
+      .then(onRevealed)
       .catch(() => undefined);
   };
   const hasHtml = message.html_body !== '';

@@ -377,11 +377,76 @@ describe('unified inbox', () => {
     expect(screen.queryByRole('button', { name: 'Manage mailboxes' })).not.toBeInTheDocument();
   });
 
+  it('keeps the three-pane shape while the organization and the mailboxes load', () => {
+    state.organizations.data = undefined;
+    state.organizations.isPending = true;
+    const { container, rerender } = renderRoute();
+
+    expect(container.querySelector('[data-inbox-skeleton]')).not.toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Inbox' })).toBeNull();
+
+    state.organizations.data = page([organization('owner')]);
+    state.organizations.isPending = false;
+    state.mailboxes.data = undefined;
+    state.mailboxes.isPending = true;
+    rerender(wrap(<MailboxesRoute />));
+    expect(container.querySelector('[data-inbox-skeleton]')).not.toBeNull();
+  });
+
+  it('a loading list shows row-shaped skeletons, never the empty view', () => {
+    state.inbox.data = undefined;
+    state.inbox.isPending = true;
+    const { container } = renderRoute();
+
+    expect(container.querySelector('[data-list-skeleton]')).not.toBeNull();
+    expect(screen.queryByText('No mail yet')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('a loading mail shows the subject, sender, and body skeleton in the article column', async () => {
+    state.thread.data = undefined;
+    state.thread.isPending = true;
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    const { container } = renderRoute();
+    await readingPaneLoaded();
+
+    const skeleton = container.querySelector('[data-reader-skeleton]');
+    expect(skeleton).not.toBeNull();
+    expect(skeleton).toHaveClass('max-w-[640px]');
+    expect(screen.queryByRole('heading', { level: 2, name: 'Launch plan' })).toBeNull();
+  });
+
   it('a view with no mail shows the empty view', () => {
     state.inbox.data = listing([[]]);
     renderRoute();
 
     expect(screen.getByText('No mail yet')).toBeInTheDocument();
+  });
+
+  it('each empty listing says what would show there', () => {
+    state.inbox.data = listing([[]]);
+    const cases: [string, string, string][] = [
+      ['?view=today', 'No new mail today', 'Mail that arrives today shows here, read or not.'],
+      [
+        '?view=pending',
+        'Nothing starred to follow up',
+        'Star mail you need to come back to (S) and it waits here.',
+      ],
+      ['?view=sent', 'No sent mail yet', 'Mail sent from the mailboxes you read shows here.'],
+      ['?tab=unread', 'No unread mail', 'You are all caught up.'],
+      [
+        '?q=invoice',
+        'No mail matches this search',
+        'Search matches the subject, the sender, and the recipients. Try other words.',
+      ],
+    ];
+    for (const [query, title, hint] of cases) {
+      window.history.replaceState(null, '', `/console/mailboxes${query}`);
+      const { unmount } = renderRoute();
+      expect(screen.getByText(title)).toBeInTheDocument();
+      expect(screen.getByText(hint)).toBeInTheDocument();
+      unmount();
+    }
   });
 
   it('a row whose mailbox became unreadable shows the unavailable notice and refetches list and mailboxes', async () => {
@@ -1012,6 +1077,39 @@ describe('unified inbox', () => {
     expect(rowButton('Launch plan')).toHaveAttribute('aria-selected', 'false');
   });
 
+  it('revealing the newest message of a thread shows its original subject in the heading', async () => {
+    state.thread.data = [
+      message({ id: 29, thread_id: 30, subject: 'Your code is ••••••' }),
+      message({
+        id: 31,
+        thread_id: 30,
+        subject: 'Your code is ••••••',
+        secrets_masked: true,
+      }),
+    ];
+    const reveal = vi.spyOn(mailboxService, 'revealMessage').mockResolvedValue(
+      message({
+        id: 31,
+        thread_id: 30,
+        subject: 'Your code is 482913',
+        secrets_masked: false,
+      }) as never
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Your code is ••••••' })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show codes' }));
+
+    expect(await screen.findByText('Codes shown')).toBeInTheDocument();
+    expect(reveal).toHaveBeenCalledWith(1, 2, 31);
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Your code is 482913' })
+    ).toBeInTheDocument();
+  });
+
   it('narrow layout shows a back button from the reading pane', async () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
     renderRoute();
@@ -1162,6 +1260,35 @@ describe('inbox keyboard shortcuts', () => {
     press('Escape');
 
     expect(openParam()).toBeNull();
+    // The focus comes back to the row that was open, which Tab now reaches.
+    expect(rowButton('Invoice')).toHaveFocus();
+    expect(rowButton('Invoice')).toHaveAttribute('tabindex', '0');
+    expect(rowButton('Launch plan')).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('closing the mail from a control in the pane returns the focus to its row', async () => {
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    const back = await screen.findByRole('button', { name: 'Back to list' });
+    back.focus();
+
+    fireEvent.click(back);
+
+    expect(openParam()).toBeNull();
+    expect(rowButton('Invoice')).toHaveFocus();
+  });
+
+  it('closing the mail leaves the focus alone when it is elsewhere', async () => {
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    await readingPaneLoaded();
+    const search = screen.getByRole('searchbox', { name: 'Search all mail' });
+    search.focus();
+
+    press('Escape', search);
+
+    expect(openParam()).toBeNull();
+    expect(search).toHaveFocus();
   });
 
   it('s stars optimistically and rolls back on error', async () => {

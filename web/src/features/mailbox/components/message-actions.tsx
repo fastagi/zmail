@@ -163,7 +163,8 @@ export function MessageActions({
           type="button"
           size="sm"
           variant="ghost"
-          loading={update.isPending}
+          // Only marking unread spins here; a star shows at once on its own button.
+          loading={update.isPending && update.variables?.read !== undefined}
           icon={<MailOpen className="size-4" />}
           onClick={() =>
             void run(() => update.mutateAsync({ messageId: message.id, read: false }), null, true)
@@ -180,7 +181,7 @@ export function MessageActions({
         aria-pressed={message.starred}
         aria-label={t(message.starred ? 'list.unstar' : 'list.star')}
         title={t(message.starred ? 'list.unstar' : 'list.star')}
-        className={cn(message.starred ? 'text-warning' : iconButton)}
+        className={cn(message.starred ? 'text-warning hover:text-warning' : iconButton)}
         onClick={() =>
           void run(
             () => update.mutateAsync({ messageId: message.id, starred: !message.starred }),

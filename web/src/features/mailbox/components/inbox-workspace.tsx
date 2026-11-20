@@ -18,7 +18,12 @@ import {
   replyAllDraft,
   type ComposeDraft,
 } from '@/features/mailbox/components/compose-dialog';
-import { InboxList, InboxListHeader } from '@/features/mailbox/components/inbox-list';
+import {
+  InboxList,
+  InboxListHeader,
+  InboxListHeaderSkeleton,
+  InboxListSkeleton,
+} from '@/features/mailbox/components/inbox-list';
 import type {
   InboxPaneActions,
   InboxReaderNavigation,
@@ -40,10 +45,10 @@ import {
 import {
   EmptyState,
   ErrorAlert,
+  ReaderArticleSkeleton,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import type { PaletteCommand } from '@/features/mailbox/components/command-palette';
-import { ListSkeleton } from '@/features/mailbox/components/message-list';
 import {
   useInboxCounts,
   useInboxMessages,
@@ -215,12 +220,15 @@ type ReadyScope = Extract<MailOrganizationScope, { status: 'ready' }>;
  *
  * Responsive (§11.11): three panes from 1280px; from 1024px the sidebar folds to an icon rail;
  * below 1024px the list and the open mail take turns, with a way back; below 768px the sidebar
- * opens as a sheet. Until the organization is known, and when there is nothing to list, the page
- * keeps the console's ordinary header and frame.
+ * opens as a sheet. While the organization and the mailboxes load, the three panes show as
+ * skeletons; without an organization, and when there is nothing to list, the page keeps the
+ * console's ordinary header and frame.
  */
 export function InboxWorkspace() {
   const t = useT('mailbox');
   const scope = useMailOrganization();
+  // The three panes stand while the organization resolves, so the page does not change shape.
+  if (scope.status === 'loading') return <InboxSkeleton />;
   if (scope.status !== 'ready') {
     return (
       <div className={cn(mailPageClassName, 'space-y-5')}>
@@ -506,6 +514,14 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         : urlState.view === 'all'
           ? t('inbox.empty.view')
           : t(`inbox.empty.${urlState.view}`);
+  const emptyHint =
+    urlState.q !== ''
+      ? t('inbox.empty.searchHint')
+      : urlState.unread
+        ? t('inbox.empty.unreadHint')
+        : urlState.view === 'all'
+          ? t('inbox.empty.viewHint')
+          : t(`inbox.empty.${urlState.view}Hint`);
 
   /** Moves the open row by `delta`; past the last loaded row, opens the first of the next page. */
   const step = (delta: 1 | -1) => {
@@ -557,11 +573,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
 
   let list: React.ReactNode;
   if (inbox.isPending || resetting) {
-    list = (
-      <div className="px-3">
-        <ListSkeleton />
-      </div>
-    );
+    list = <InboxListSkeleton />;
   } else if (!inbox.data && isSearchTooBroad(inbox.error)) {
     list = (
       <Alert className="mx-3 w-auto">
@@ -588,11 +600,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         <EmptyState
           icon={<Inbox className="size-5" aria-hidden="true" />}
           title={emptyTitle}
-          description={
-            urlState.view === 'all' && urlState.q === '' && !urlState.unread
-              ? t('inbox.empty.viewHint')
-              : undefined
-          }
+          description={emptyHint}
         />
       </div>
     );
@@ -725,6 +733,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
 
       <section
         aria-label={t('inbox.readingPane')}
+        data-reading-pane=""
         className={cn(
           'my-2.5 mr-2.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-border-main bg-bg-surface max-md:ml-2.5',
           'lg:rounded-l-none lg:border-l-0',
@@ -923,9 +932,8 @@ function ReaderSkeleton() {
   return (
     <div className="flex h-full min-h-0 flex-col" aria-hidden="true">
       <div className="h-[52px] shrink-0 border-b border-border-subtle" />
-      <div className="mx-auto w-full max-w-[640px] space-y-4 px-5 py-[34px] sm:px-7">
-        <Skeleton className="h-9 w-3/4" />
-        <Skeleton className="h-48 w-full" />
+      <div className="py-[34px]">
+        <ReaderArticleSkeleton className="mx-auto w-full max-w-[640px] space-y-4 px-5 sm:px-7" />
       </div>
     </div>
   );
@@ -934,13 +942,14 @@ function ReaderSkeleton() {
 /** The three panes while the mailboxes load, at their finished sizes. */
 function InboxSkeleton() {
   return (
-    <div className="flex h-full min-h-0 bg-bg-canvas" aria-hidden="true">
+    <div className="flex h-full min-h-0 bg-bg-canvas" aria-hidden="true" data-inbox-skeleton="">
       <div className="hidden w-14 flex-none flex-col gap-2 px-2 pt-[18px] md:flex xl:w-[248px] xl:px-3">
         <Skeleton className="h-9 w-full" />
         <Skeleton className="h-40 w-full" />
       </div>
-      <div className="my-2.5 ml-2.5 flex-1 rounded-[14px] border border-border-main bg-bg-surface p-3 max-lg:mr-2.5 md:ml-0 lg:w-[380px] lg:flex-none lg:rounded-r-none xl:w-[470px]">
-        <ListSkeleton />
+      <div className="my-2.5 ml-2.5 flex-1 overflow-hidden rounded-[14px] border border-border-main bg-bg-surface max-lg:mr-2.5 md:ml-0 lg:w-[380px] lg:flex-none lg:rounded-r-none lg:border-y-0 xl:w-[470px]">
+        <InboxListHeaderSkeleton />
+        <InboxListSkeleton />
       </div>
       <div className="my-2.5 mr-2.5 hidden flex-1 rounded-r-[14px] border border-l-0 border-border-main bg-bg-surface lg:block" />
     </div>

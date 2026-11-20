@@ -174,6 +174,11 @@ const messages = {
       noMailboxesMember: 'An owner or admin of this organization can give you access to a mailbox.',
       view: 'No mail yet',
       viewHint: 'Mail that arrives in the mailboxes you read appears here.',
+      todayHint: 'Mail that arrives today shows here, read or not.',
+      pendingHint: 'Star mail you need to come back to (S) and it waits here.',
+      sentHint: 'Mail sent from the mailboxes you read shows here.',
+      unreadHint: 'You are all caught up.',
+      searchHint: 'Search matches the subject, the sender, and the recipients. Try other words.',
     },
     unavailable:
       'This mail is no longer available to you. Access to its mailbox may have changed; the list is refreshed.',
