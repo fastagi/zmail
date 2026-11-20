@@ -1,6 +1,6 @@
 # 组织管理后台：公共邮箱管理（第一期）设计
 
-状态：已确认
+状态：已实现（feat/shared-mailbox-admin；验收流程 api/tests/kest/mailbox_admin.flow.md）
 依赖：PR #22（邮箱访问权限）、PR #23（发送队列）、自助域名分支。这些合入 main 后从 main 开发；若开工时仍未合入，就叠在 `feature/mailbox-organize`（它已包含 #22、#23）上开发，自助域名合入后再变基（我的决定）。
 
 ## 1. 目的
