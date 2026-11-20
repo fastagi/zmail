@@ -464,7 +464,11 @@ export function useCreateMailbox(organizationId: number) {
   return useMutation({
     mutationFn: (input: CreateMailboxInput) => mailboxService.create(organizationId, input),
     meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.directories(organizationId) }),
+      ]),
   });
 }
 
@@ -480,6 +484,7 @@ export function useDeleteMailbox(organizationId: number) {
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.directories(organizationId) }),
         invalidateLog(queryClient, organizationId),
       ]),
   });
@@ -798,6 +803,8 @@ export function useMailboxAccessEvents(
 function invalidateAccess(queryClient: QueryClient, organizationId: number, mailboxId: number) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+    // The directory counts members.
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.directories(organizationId) }),
     queryClient.invalidateQueries({ queryKey: mailboxKeys.mailbox(organizationId, mailboxId) }),
     invalidateLog(queryClient, organizationId),
   ]);

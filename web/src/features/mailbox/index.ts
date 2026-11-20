@@ -1,4 +1,5 @@
 export { EmailLog } from './components/email-log';
+export { SharedMailboxesAdmin } from './components/admin/shared-mailboxes-admin';
 export { MailDomainStatus } from './components/mail-domain-status';
 export { MailboxWorkspace } from './components/mailbox-workspace';
 export { mailboxService } from './services/mailbox-service';

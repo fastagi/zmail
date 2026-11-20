@@ -229,36 +229,41 @@ export function CreateMailboxForm({
             />
           </div>
 
-          <fieldset className={cn('space-y-2', fixedType ? 'hidden' : undefined)}>
-            <legend id={ids.type} className="text-sm font-medium">
-              {t('create.type')}
-            </legend>
-            <div role="radiogroup" aria-labelledby={ids.type} className="space-y-2">
-              {(['shared', 'personal'] as const).map(option => (
-                <div key={option} className="flex items-start gap-2 text-sm">
-                  <input
-                    id={`${ids.type}-${option}`}
-                    type="radio"
-                    name={`${ids.type}-type`}
-                    value={option}
-                    className="mt-1"
-                    checked={type === option}
-                    disabled={create.isPending}
-                    aria-describedby={`${ids.type}-${option}-hint`}
-                    onChange={() => setType(option)}
-                  />
-                  <div>
-                    <label htmlFor={`${ids.type}-${option}`} className="block font-medium">
-                      {t(`create.${option}`)}
-                    </label>
-                    <p id={`${ids.type}-${option}-hint`} className="text-xs text-muted-foreground">
-                      {t(option === 'shared' ? 'create.sharedHint' : 'create.personalHint')}
-                    </p>
+          {fixedType ? null : (
+            <fieldset className="space-y-2">
+              <legend id={ids.type} className="text-sm font-medium">
+                {t('create.type')}
+              </legend>
+              <div role="radiogroup" aria-labelledby={ids.type} className="space-y-2">
+                {(['shared', 'personal'] as const).map(option => (
+                  <div key={option} className="flex items-start gap-2 text-sm">
+                    <input
+                      id={`${ids.type}-${option}`}
+                      type="radio"
+                      name={`${ids.type}-type`}
+                      value={option}
+                      className="mt-1"
+                      checked={type === option}
+                      disabled={create.isPending}
+                      aria-describedby={`${ids.type}-${option}-hint`}
+                      onChange={() => setType(option)}
+                    />
+                    <div>
+                      <label htmlFor={`${ids.type}-${option}`} className="block font-medium">
+                        {t(`create.${option}`)}
+                      </label>
+                      <p
+                        id={`${ids.type}-${option}-hint`}
+                        className="text-xs text-muted-foreground"
+                      >
+                        {t(option === 'shared' ? 'create.sharedHint' : 'create.personalHint')}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </fieldset>
+                ))}
+              </div>
+            </fieldset>
+          )}
 
           {people.status === 'loading' ? (
             <p className="text-sm text-muted-foreground">{t('create.membersLoading')}</p>
