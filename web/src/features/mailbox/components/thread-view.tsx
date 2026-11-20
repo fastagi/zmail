@@ -12,6 +12,7 @@ import { useMailOrganizationId } from '@/features/mailbox/components/mail-organi
 import {
   ErrorAlert,
   MailHtmlFrame,
+  ReaderArticleSkeleton,
   StaleNotice,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
@@ -195,9 +196,10 @@ function ReaderState<T>({
   const t = useT('mailbox');
   const article = layout.variant === 'article';
   if (query.isPending) {
+    if (article) return <ReaderArticleSkeleton className={articleClassName} />;
     return (
-      <div className={article ? articleClassName : 'space-y-3'}>
-        {article ? null : <ReaderToolbar reader={reader} />}
+      <div className="space-y-3">
+        <ReaderToolbar reader={reader} />
         <Skeleton className="h-48 w-full" />
       </div>
     );

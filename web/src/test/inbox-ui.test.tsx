@@ -377,6 +377,29 @@ describe('unified inbox', () => {
     expect(screen.queryByRole('button', { name: 'Manage mailboxes' })).not.toBeInTheDocument();
   });
 
+  it('a loading list shows row-shaped skeletons, never the empty view', () => {
+    state.inbox.data = undefined;
+    state.inbox.isPending = true;
+    const { container } = renderRoute();
+
+    expect(container.querySelector('[data-list-skeleton]')).not.toBeNull();
+    expect(screen.queryByText('No mail yet')).toBeNull();
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('a loading mail shows the subject, sender, and body skeleton in the article column', async () => {
+    state.thread.data = undefined;
+    state.thread.isPending = true;
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    const { container } = renderRoute();
+    await readingPaneLoaded();
+
+    const skeleton = container.querySelector('[data-reader-skeleton]');
+    expect(skeleton).not.toBeNull();
+    expect(skeleton).toHaveClass('max-w-[640px]');
+    expect(screen.queryByRole('heading', { level: 2, name: 'Launch plan' })).toBeNull();
+  });
+
   it('a view with no mail shows the empty view', () => {
     state.inbox.data = listing([[]]);
     renderRoute();

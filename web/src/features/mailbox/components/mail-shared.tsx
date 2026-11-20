@@ -7,6 +7,7 @@ import { AlertCircle, Check, Copy, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
@@ -84,6 +85,37 @@ export function StaleNotice({ message, className }: { message: string; className
       <AlertCircle className="size-3.5" aria-hidden="true" />
       {message}
     </p>
+  );
+}
+
+/**
+ * An article reader while its mail loads, at the finished sizes (§11.0): the line above the
+ * subject, the serif subject, the sender's avatar line, then the first lines of the body, so the
+ * mail takes the same place when it arrives.
+ */
+export function ReaderArticleSkeleton({ className }: { className?: string }) {
+  return (
+    <div aria-hidden="true" data-reader-skeleton="" className={className}>
+      <div>
+        <Skeleton className="h-3 w-44" />
+        <Skeleton className="mt-2 mb-[18px] h-[37px] w-3/4" />
+      </div>
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Skeleton className="size-[34px] shrink-0 rounded-full" />
+          <div className="flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-32" />
+            <Skeleton className="h-3 w-48" />
+          </div>
+        </div>
+        <div className="space-y-3">
+          <Skeleton className="h-3.5 w-full" />
+          <Skeleton className="h-3.5 w-full" />
+          <Skeleton className="h-3.5 w-11/12" />
+          <Skeleton className="h-3.5 w-2/3" />
+        </div>
+      </div>
+    </div>
   );
 }
 

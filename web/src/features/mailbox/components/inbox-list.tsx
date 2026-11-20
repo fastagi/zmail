@@ -16,6 +16,7 @@ import { ExternalLink, PanelLeft, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Kbd } from '@/components/ui/kbd';
+import { Skeleton } from '@/components/ui/skeleton';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { rowUnread } from '@/features/mailbox/components/message-list';
 import { MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
@@ -394,6 +395,51 @@ export function InboxList({
           {loadingMore ? t('inbox.loadingMore') : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** One line of a row, at the row's line height, so the skeleton rows match the rows. */
+function SkeletonLine({ className }: { className: string }) {
+  return (
+    <span className="flex h-[19.5px] items-center">
+      <Skeleton className={cn('h-3', className)} />
+    </span>
+  );
+}
+
+/**
+ * The rows of the unified inbox while they load, in the rows' own anatomy and size: the sender
+ * line with its time, the subject, the snippet. The list keeps its height when the rows arrive.
+ */
+export function InboxListSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div aria-hidden="true" data-list-skeleton="" className="px-3 pb-3">
+      {Array.from({ length: rows }, (_, index) => (
+        <div key={index} className="p-3">
+          <span className="flex items-center gap-2">
+            <span className="size-1.5 shrink-0" />
+            <SkeletonLine className="w-28" />
+            <span className="flex-1" />
+            <SkeletonLine className="w-9" />
+          </span>
+          <span className="mt-0.5 block">
+            <SkeletonLine className="w-3/5" />
+          </span>
+          <SkeletonLine className="w-11/12" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** The head of the list while the page loads: the title, the search field, the tabs. */
+export function InboxListHeaderSkeleton() {
+  return (
+    <div aria-hidden="true" className="shrink-0 px-4 pt-[22px] pb-2.5 sm:px-6">
+      <Skeleton className="h-[35px] w-40" />
+      <Skeleton className="mt-3 h-8 w-full" />
+      <div className="mt-3.5 h-[31px] border-b border-border-subtle" />
     </div>
   );
 }
