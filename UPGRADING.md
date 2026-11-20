@@ -11,6 +11,18 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Platform account ledger
+
+### Low — Two new tables for platform accounts
+
+Run migrations: `2026_11_25_120000_create_platform_accounts` creates `platform_accounts` and
+`platform_account_events` for the platform account ledger and owner handover
+(`/v1/platform-accounts`, `/v1/platform-account-handovers`; see `contracts/MAILBOXES.md`, Platform
+Accounts). It only creates new tables and their indexes, so it takes no lock on an existing table
+and needs no preparation on a large installation. Its foreign keys reference `organizations`,
+`mail_roles`, `mailboxes`, and `users`; rolling back `2026_11_22_090000_add_mail_roles` now needs
+this migration rolled back first.
+
 ## Unreleased — Unread count index
 
 ### Medium — The migration locks `mail_messages` while it builds the unread index
