@@ -1,11 +1,6 @@
 package config
 
-import (
-	"fmt"
-	"strings"
-
-	"github.com/fastagi/zmail/api/pkg/env"
-)
+import "fmt"
 
 // AI triage model providers. Real providers are added once one is confirmed; until then no
 // provider key is read.
@@ -49,18 +44,6 @@ func (c AITriageConfig) ModelLabel() string {
 		return AITriageProviderDisabled
 	}
 	return c.Provider
-}
-
-func loadAITriageConfig() AITriageConfig {
-	provider := strings.ToLower(strings.TrimSpace(env.Get("AI_TRIAGE_PROVIDER", AITriageProviderDisabled)))
-	if provider == "" {
-		provider = AITriageProviderDisabled
-	}
-	return AITriageConfig{
-		Provider: provider,
-		Model:    strings.TrimSpace(env.Get("AI_TRIAGE_MODEL", "")),
-		DailyCap: env.GetInt("AI_TRIAGE_DAILY_CAP", DefaultAITriageDailyCap),
-	}
 }
 
 // validateAITriageConfig refuses unknown providers, the fake provider in production, and caps

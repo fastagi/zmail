@@ -1699,3 +1699,17 @@ func validateDiagnosticsAddr(addr string) error {
 	}
 	return nil
 }
+
+// loadAITriageConfig reads AI_TRIAGE_PROVIDER, AI_TRIAGE_MODEL, and AI_TRIAGE_DAILY_CAP. No provider
+// key is read until a real provider is confirmed.
+func loadAITriageConfig() AITriageConfig {
+	provider := strings.ToLower(strings.TrimSpace(env.Get("AI_TRIAGE_PROVIDER", AITriageProviderDisabled)))
+	if provider == "" {
+		provider = AITriageProviderDisabled
+	}
+	return AITriageConfig{
+		Provider: provider,
+		Model:    strings.TrimSpace(env.Get("AI_TRIAGE_MODEL", "")),
+		DailyCap: env.GetInt("AI_TRIAGE_DAILY_CAP", DefaultAITriageDailyCap),
+	}
+}
