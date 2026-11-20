@@ -451,6 +451,8 @@ type MailMessageSummaryResponse struct {
 	TemplateID *uint `json:"template_id"`
 	// AttachmentCount is how many files the message has; the detail lists them.
 	AttachmentCount int `json:"attachment_count"`
+	// Source is where the message came from: zmail, or gmail/outlook for a synced copy.
+	Source string `json:"source"`
 	// Placement, FolderID, LabelIDs, and TrashedAt are shared by everyone with access; Starred is
 	// the viewer's own.
 	Placement string     `json:"placement"`
@@ -625,6 +627,14 @@ func toMailboxResponses(mailboxes []*domain.Mailbox) []*MailboxResponse {
 	return responses
 }
 
+// sourceOf reads an unset source as Zmail's own mail.
+func sourceOf(message *domain.MailMessage) domain.MailSource {
+	if message.Source == "" {
+		return domain.MailSourceZmail
+	}
+	return message.Source
+}
+
 func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryResponse {
 	to, cc := message.To, message.Cc
 	if to == nil {
@@ -651,6 +661,7 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		QueuedReason:    queuedReasonOf(message),
 		LastEvent:       string(message.LastEvent),
 		AttachmentCount: message.AttachmentCount,
+		Source:          string(sourceOf(message)),
 		TemplateID:      templateIDOf(message),
 		Placement:       string(placementOrDefault(message.Placement)),
 		FolderID:        folderIDOf(message),

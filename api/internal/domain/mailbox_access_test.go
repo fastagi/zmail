@@ -7,6 +7,7 @@ func TestMailboxAccessFor(t *testing.T) {
 	personal := &Mailbox{ID: 1, OrganizationID: 7, Type: MailboxTypePersonal, OwnerUserID: &owner}
 	orphan := &Mailbox{ID: 2, OrganizationID: 7, Type: MailboxTypePersonal}
 	shared := &Mailbox{ID: 3, OrganizationID: 7, Type: MailboxTypeShared}
+	external := &Mailbox{ID: 4, OrganizationID: 7, Type: MailboxTypeExternal, OwnerUserID: &owner}
 	viewer := func(userID, membershipID uint, role OrganizationRole) OrganizationContext {
 		return OrganizationContext{OrganizationID: 7, OrganizationName: "Acme", OrganizationSlug: "acme",
 			MembershipID: membershipID, UserID: userID, Role: role}
@@ -57,6 +58,12 @@ func TestMailboxAccessFor(t *testing.T) {
 			MailboxAccess{View: true, Send: true, Administer: true, SeeHistory: true, ManageMembers: true, Organize: true}},
 		{"other organization", shared, OrganizationContext{OrganizationID: 8, MembershipID: 110, UserID: 11,
 			Role: OrganizationRoleOwner}, member(110, MailboxPermissionManage), none},
+		// An external mailbox is the binder's alone, and read-only even for them.
+		{"external binder", external, viewer(10, 100, OrganizationRoleMember), nil, MailboxAccess{View: true, SeeHistory: true}},
+		{"external colleague", external, viewer(11, 110, OrganizationRoleMember), nil, none},
+		{"external colleague with member row", external, viewer(11, 110, OrganizationRoleMember),
+			&MailboxMember{MailboxID: 4, MembershipID: 110, Permission: MailboxPermissionManage}, none},
+		{"external admin", external, viewer(12, 120, OrganizationRoleAdmin), nil, administer},
 		{"nil mailbox", nil, viewer(10, 100, OrganizationRoleOwner), nil, none},
 	}
 	for _, tt := range tests {

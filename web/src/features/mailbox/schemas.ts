@@ -281,7 +281,10 @@ export const mailDnsRecordPatchSchema = strictObject({
   proxied: optional(boolean()),
 });
 
+/** The types a mailbox can be created, filtered, or exported as. */
 export const mailboxTypeSchema = union([literal('personal'), literal('shared')]);
+/** Every type the API reports; `external` holds read-only copies of a member's bound account. */
+export const mailboxKindSchema = union([literal('personal'), literal('shared'), literal('external')]);
 
 /** AI triage categories; `review` means the model could not decide (`contracts/MAILBOXES.md`). */
 export const MAIL_TRIAGE_CATEGORIES = ['reply', 'deadline', 'fyi', 'review'] as const;
@@ -319,7 +322,7 @@ export const mailboxSchema = strictObject({
   id: safeIdSchema,
   address: string(),
   display_name: string(),
-  type: mailboxTypeSchema,
+  type: mailboxKindSchema,
   // Null for a shared mailbox or after the owner account is deleted; kept while a personal mailbox awaits handover.
   owner_user_id: nullable(safeIdSchema),
   awaiting_handover: boolean(),
@@ -372,6 +375,9 @@ export const MAIL_LABEL_COLORS = [
 ] as const;
 
 /** The fields every listing shares, the log included. */
+/** `zmail` for Zmail's own mail; `gmail` and `outlook` for read-only copies of a bound account. */
+export const mailSourceSchema = union([literal('zmail'), literal('gmail'), literal('outlook')]);
+
 const logSummaryShape = {
   id: safeIdSchema,
   mailbox_id: safeIdSchema,
@@ -387,6 +393,8 @@ const logSummaryShape = {
   queued_reason: nullable(literal('send_limit')),
   last_event: mailEventSummarySchema,
   attachment_count: nonnegativeIntegerSchema,
+  // Where the message came from; optional until every API emits it, and missing reads as `zmail`.
+  source: optional(mailSourceSchema),
   template_id: nullable(safeIdSchema),
   created_at: timestampSchema,
 };
@@ -1125,7 +1133,7 @@ export const mailboxDirectoryEntrySchema = strictObject({
   id: safeIdSchema,
   address: string(),
   display_name: string(),
-  type: mailboxTypeSchema,
+  type: mailboxKindSchema,
   owner_user_id: nullable(safeIdSchema),
   awaiting_handover: boolean(),
   created_at: timestampSchema,

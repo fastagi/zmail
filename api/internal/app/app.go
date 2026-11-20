@@ -54,4 +54,6 @@ type Application struct {
 	MailboxOperator domain.MailboxOperatorConsole
 	// MailTriage classifies mail queued for AI triage; nil when the mailbox starter is not selected.
 	MailTriage domain.MailTriageWorker
+	// ExternalMail syncs bound external mailboxes; nil when the mailbox starter is not selected.
+	ExternalMail domain.ExternalMailSyncWorker
 }

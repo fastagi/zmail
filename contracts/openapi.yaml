@@ -8085,6 +8085,72 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-connections:
+    get:
+      operationId: listExternalMailConnections
+      summary: List the caller's bound external mailboxes
+      description: Lists the outside accounts (Gmail, Outlook) the caller bound in this organization, at
+        most 10. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty)
+        the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached
+        and never carries a token.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The caller's connections, id ascending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailConnectionListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization is not found (`ORGANIZATION.NOT_FOUND`), or external mail is off
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-connections/{connection_id}:
+    delete:
+      operationId: revokeExternalMailConnection
+      summary: Unbind an external mailbox
+      description: The member who bound the account, or an `owner` or `admin`, may unbind it. The grant is
+        revoked at the provider on a best-effort basis, the stored token is erased, and the connection is
+        never synced again; mail already synced stays in the external mailbox. Unbinding a revoked
+        connection succeeds again. Another member's connection, another organization's id, and any id
+        while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/ExternalMailConnectionID'
+      responses:
+        '204':
+          description: The connection is revoked.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the connection
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-triage-setting:
     get:
       operationId: getMailTriageSetting
@@ -8574,6 +8640,13 @@ components:
       in: path
       required: true
       description: Positive mail role identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    ExternalMailConnectionID:
+      name: connection_id
+      in: path
+      required: true
+      description: Positive external mail connection identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
     PlatformAccountID:
@@ -9071,6 +9144,7 @@ components:
         - MAILBOX.DNS_RECORD_REJECTED
         - MAILBOX.TRIAGE_UNAVAILABLE
         - MAILBOX.TRIAGE_MODEL_FAILED
+        - MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND
     FieldErrors:
       type: object
       additionalProperties:
@@ -11917,9 +11991,13 @@ components:
             $ref: '#/components/schemas/MailboxMemberRequest'
     MailboxType:
       type: string
+      description: '`external` mailboxes hold read-only copies of a bound outside account; only the member
+        who bound it reads them and nobody sends from them. They are never created, filtered, or exported
+        by type through these routes, which accept `personal` and `shared` only.'
       enum:
         - personal
         - shared
+        - external
     MailboxPermission:
       type: string
       description: Each level includes the previous one.
@@ -12436,6 +12514,7 @@ components:
         - queued_reason
         - last_event
         - attachment_count
+        - source
         - template_id
         - created_at
         - placement
@@ -12492,6 +12571,8 @@ components:
           description: How many files the message has; the detail lists them.
           minimum: 0
           maximum: 10
+        source:
+          $ref: '#/components/schemas/MailSource'
         template_id:
           description: The template the message was rendered from; null when none was used.
           oneOf:
@@ -12549,6 +12630,7 @@ components:
         - queued_reason
         - last_event
         - attachment_count
+        - source
         - template_id
         - created_at
         - placement
@@ -12611,6 +12693,8 @@ components:
           description: How many files the message has; the detail lists them.
           minimum: 0
           maximum: 10
+        source:
+          $ref: '#/components/schemas/MailSource'
         template_id:
           description: The template the message was rendered from; null when none was used.
           oneOf:
@@ -12954,6 +13038,7 @@ components:
         - queued_reason
         - last_event
         - attachment_count
+        - source
         - template_id
         - created_at
         - placement
@@ -13025,6 +13110,8 @@ components:
           description: How many files the message has; the detail lists them.
           minimum: 0
           maximum: 10
+        source:
+          $ref: '#/components/schemas/MailSource'
         template_id:
           description: The template the message was rendered from; null when none was used.
           oneOf:
@@ -13188,6 +13275,83 @@ components:
           oneOf:
             - $ref: '#/components/schemas/InboxTriageCounts'
             - type: 'null'
+    MailSource:
+      type: string
+      description: Where the message came from. `zmail` is mail Zmail itself received or sent; `gmail` and
+        `outlook` are read-only copies synced from a bound outside account into an `external` mailbox.
+      enum:
+        - zmail
+        - gmail
+        - outlook
+    ExternalMailConnection:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - provider
+        - account_address
+        - mailbox_id
+        - status
+        - last_synced_at
+        - last_error_code
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        provider:
+          type: string
+          enum:
+            - gmail
+            - outlook
+        account_address:
+          type: string
+          maxLength: 320
+        mailbox_id:
+          description: The `external` mailbox synced mail is stored in.
+          allOf:
+            - $ref: '#/components/schemas/PositiveID'
+        status:
+          type: string
+          description: '`active` connections are synced every two minutes; `needs_reconnect` lost the
+            provider grant and waits for the owner to bind again; `revoked` was unbound and is never
+            synced again.'
+          enum:
+            - active
+            - needs_reconnect
+            - revoked
+        last_synced_at:
+          description: When a sync last succeeded; null before the first.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        last_error_code:
+          description: The latest failed sync, `external.auth_failed` or `external.fetch_failed`; null after
+            a success.
+          oneOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+    ExternalMailConnectionListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/ExternalMailConnection'
     MailTriageCategory:
       type: string
       description: '`reply` needs the reader''s answer, `deadline` carries a date, `fyi` is for
@@ -15514,6 +15678,7 @@ components:
         - queued_reason
         - last_event
         - attachment_count
+        - source
         - template_id
         - created_at
       properties:
@@ -15566,6 +15731,8 @@ components:
           description: How many files the message has; the detail lists them.
           minimum: 0
           maximum: 10
+        source:
+          $ref: '#/components/schemas/MailSource'
         template_id:
           description: The template the message was rendered from; null when none was used.
           oneOf:

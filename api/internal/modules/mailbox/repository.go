@@ -110,7 +110,7 @@ func (r *repository) ListUsableMailboxes(ctx context.Context, organizationID, me
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	condition := "(type = 'personal' AND owner_user_id = ?) OR id IN (SELECT mailbox_id FROM mailbox_members WHERE membership_id = ?)"
+	condition := "(type IN ('personal','external') AND owner_user_id = ?) OR id IN (SELECT mailbox_id FROM mailbox_members WHERE membership_id = ?)"
 	if includeAwaitingHandover {
 		condition += " OR (type = 'personal' AND owner_left_at IS NOT NULL)"
 	}

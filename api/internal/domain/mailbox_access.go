@@ -118,6 +118,13 @@ func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMem
 			access.SeeHistory = true
 			access.Organize = true
 		}
+	case MailboxTypeExternal:
+		// A synced copy of an outside account: only the member who bound it reads it, and nobody
+		// sends from it or deletes its mail for good.
+		if m.OwnerUserID != nil && viewer.UserID != 0 && *m.OwnerUserID == viewer.UserID {
+			access.View = true
+			access.SeeHistory = true
+		}
 	case MailboxTypeShared:
 		if member != nil && member.MailboxID == m.ID && viewer.MembershipID != 0 && member.MembershipID == viewer.MembershipID {
 			access.View = access.View || member.Permission.Includes(MailboxPermissionView)
