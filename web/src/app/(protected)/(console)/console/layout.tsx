@@ -161,6 +161,10 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
     },
   ];
 
+  // The mail workspace has its own sidebar; the console's folds to an icon rail beside it so the
+  // page keeps one navigation, as Gmail does, and the mailboxes get the width.
+  const compact = isNavigationItemActive(pathname, ROUTES.CONSOLE.MAILBOXES);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg-canvas text-text-main">
       {/* Fixed Header */}
@@ -257,7 +261,13 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
       {/* Body: Sidebar + Main Content */}
       <div className="flex h-0 grow overflow-hidden">
         {/* Fixed Sidebar */}
-        <aside className="hidden w-[220px] shrink-0 border-r bg-background md:flex md:flex-col">
+        <aside
+          data-compact={compact}
+          className={cn(
+            'hidden shrink-0 border-r bg-background md:flex md:flex-col',
+            compact ? 'w-[60px]' : 'w-[220px]'
+          )}
+        >
           <div className="flex flex-1 flex-col overflow-y-auto py-2">
             <nav className="grid items-start px-2 text-sm font-medium">
               {mainNavItems.map(item => {
@@ -267,21 +277,24 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                   <Link
                     key={item.href}
                     href={item.href}
+                    title={compact ? t(item.titleKey) : undefined}
+                    aria-current={isActive ? 'page' : undefined}
                     className={cn(
                       'group flex items-center gap-3 rounded-lg px-3 py-2 transition-all duration-150 hover:text-primary active:scale-[0.99]',
+                      compact && 'justify-center px-0',
                       isActive
                         ? 'bg-muted font-semibold text-primary shadow-2xs'
                         : 'text-text-subtle hover:bg-muted/50'
                     )}
                   >
-                    <IconComponent className="h-4.5 w-4.5 transition-transform duration-150 group-hover:scale-110" />
-                    {t(item.titleKey)}
+                    <IconComponent className="h-4.5 w-4.5 shrink-0 transition-transform duration-150 group-hover:scale-110" />
+                    <span className={cn(compact && 'sr-only')}>{t(item.titleKey)}</span>
                   </Link>
                 );
               })}
             </nav>
           </div>
-          <div className="mt-auto p-4">
+          <div className={cn('mt-auto', compact ? 'px-2 py-4' : 'p-4')}>
             <nav className="grid items-start gap-1 text-sm font-medium">
               {secondaryNavItems.map(item => {
                 const IconComponent = item.icon;
@@ -290,20 +303,25 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                   <Link
                     key={item.href}
                     href={item.href}
+                    title={compact ? t(item.titleKey) : undefined}
                     className={cn(
                       'flex items-center gap-3 rounded-lg px-3 py-2 transition-all hover:text-primary',
+                      compact && 'justify-center px-0',
                       isActive ? 'bg-muted text-primary' : 'text-text-subtle hover:bg-muted/50'
                     )}
                   >
-                    <IconComponent className="h-4.5 w-4.5" />
-                    {t(item.titleKey)}
+                    <IconComponent className="h-4.5 w-4.5 shrink-0" />
+                    <span className={cn(compact && 'sr-only')}>{t(item.titleKey)}</span>
                   </Link>
                 );
               })}
             </nav>
             <Link
               href={ROUTES.SITE.HOME}
-              className="flex h-8 items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+              className={cn(
+                'flex h-8 items-center gap-2 text-sm text-muted-foreground hover:text-foreground',
+                compact && 'sr-only'
+              )}
             >
               <span>{t('console.returnToSite')}</span>
             </Link>
