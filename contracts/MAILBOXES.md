@@ -106,6 +106,8 @@ recorded but has no special rights to it. A removed member loses access on their
 | Delete a platform account | `DELETE /api/platform-accounts/:accountId` | `DELETE /v1/platform-accounts/:account_id` | `204` |
 | Platform account history | `GET /api/platform-accounts/:accountId/events` | `GET /v1/platform-accounts/:account_id/events` | Paginated envelope |
 | Hand over platform accounts | `POST /api/platform-account-handovers` | `POST /v1/platform-account-handovers` | `201` envelope |
+| List the caller's external mailboxes | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 10 items |
+| Unbind an external mailbox | none yet | `DELETE /v1/external-mail-connections/:connection_id` | `204` |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
 | Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
 | Send a transactional message | none | `POST /v1/transactional-messages` | `202`, or `200` for a repeat |
@@ -330,10 +332,15 @@ surface that carries member email addresses.
 
 ## Access
 
-Every mailbox is one of two types:
+Every mailbox is one of three types:
 
 - **Personal** mailboxes belong to one member, the owner (`owner_user_id`). The owner reads,
   sends, replies, and deletes; nobody else reads or sends, and a personal mailbox has no members.
+- **External** mailboxes hold read-only copies of an outside account a member bound (see
+  [External Mailboxes](#external-mailboxes)). Only that member, the owner, reads them, with `view`
+  and `see_history`; nobody sends from them, moves or deletes their mail for good, or becomes a
+  member. Owners and admins get `administer` only. They are never created through
+  `POST /v1/mailboxes`, and the directory and export accept `personal` and `shared` only.
 - **Shared** mailboxes are worked by named members, 1 to 100, each with one permission. Each level
   includes the previous one:
 
@@ -686,6 +693,42 @@ It needs the `owner` or `admin` role. `to_user_id` must be a current member othe
 empty `account_ids`. It is independent of a mailbox handover: handing over a personal mailbox moves
 no platform account.
 
+## External Mailboxes
+
+A member can bind an outside Gmail or Outlook account read-only. Its mail is copied into an
+`external` mailbox the member owns alone (see [Access](#access)); every copy is inbound, `received`,
+and carries `source` `gmail` or `outlook`, and the provider's receive time as `created_at`. A copy is
+stored once per mailbox and provider message id, so a reconnect or a repeated fetch never adds a
+second one. The first sync looks back 14 days.
+
+Binding itself (the OAuth flow) is not available yet. While the instance enables no source
+(`EXTERNAL_MAIL_PROVIDERS` empty, the default) both routes below answer
+`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` and no account is synced.
+
+`GET /v1/external-mail-connections` lists the caller's own connections in the organization, id
+ascending, at most 10; it never carries a token:
+
+```json
+{ "id": 3, "provider": "gmail", "account_address": "me@gmail.com", "mailbox_id": 41,
+  "status": "active", "last_synced_at": "2026-11-20T08:00:00Z", "last_error_code": null,
+  "created_at": "2026-11-19T08:00:00Z" }
+```
+
+| `status` | Meaning |
+|---|---|
+| `active` | Synced every two minutes |
+| `needs_reconnect` | The provider refused the grant (`last_error_code` `external.auth_failed`); syncing stops until the member binds the account again |
+| `revoked` | Unbound; never synced again |
+
+A provider failure that is not about the grant keeps the connection `active` with
+`last_error_code` `external.fetch_failed` and retries at the next interval.
+
+`DELETE /v1/external-mail-connections/:connection_id` unbinds: the member who bound the account, or
+an `owner` or `admin`, may. The grant is revoked at the provider on a best-effort basis, the stored
+token is erased, and syncing stops for good, including a fetch already running. Mail already synced
+stays in the external mailbox. Unbinding a revoked connection answers `204` again. Another member's
+connection and another organization's id are `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+
 ## Domains
 
 With `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, an organization may use its own domains next to the
@@ -905,6 +948,7 @@ they existed. See [Listing And Search](#listing-and-search) for the filters.
 | `failure_code` | Stable provider or transport reason when `status` is `failed`, otherwise empty |
 | `last_event` | Summary of the delivery events of an outbound message; see [Delivery Events](#delivery-events). Empty when none are recorded. |
 | `attachment_count` | How many files the message has |
+| `source` | `zmail` for mail Zmail received or sent; `gmail` or `outlook` for a read-only copy synced into an external mailbox. Also on log entries and unified inbox rows. |
 | `template_id` | The template the message was rendered from; `null` when none was used |
 | `placement` | `default`, `archive`, `folder`, or `trash`; see [Placements](#placements). Shared by everyone. |
 | `folder_id` | The folder that holds the message when `placement` is `folder`, otherwise `null` |
@@ -2357,3 +2401,4 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.DNS_RECORD_REJECTED` | 422 |
 | `MAILBOX.TRIAGE_UNAVAILABLE` | 409 |
 | `MAILBOX.TRIAGE_MODEL_FAILED` | 502 |
+| `MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` | 404 |
