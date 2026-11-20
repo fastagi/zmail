@@ -149,7 +149,7 @@ func (po *MailboxAccessEventPO) toDomain() *domain.MailboxAccessEvent {
 // MailMessagePO is the persistent object for one stored message.
 type MailMessagePO struct {
 	ID                     uint    `gorm:"primaryKey"`
-	MailboxID              uint    `gorm:"not null;index:idx_mail_messages_listing,priority:1;uniqueIndex:idx_mail_messages_dedupe,priority:1,where:dedupe_key IS NOT NULL;uniqueIndex:idx_mail_messages_idempotency,priority:1,where:idempotency_key IS NOT NULL"`
+	MailboxID              uint    `gorm:"not null;index:idx_mail_messages_listing,priority:1;uniqueIndex:idx_mail_messages_dedupe,priority:1,where:dedupe_key IS NOT NULL;uniqueIndex:idx_mail_messages_idempotency,priority:1,where:idempotency_key IS NOT NULL;uniqueIndex:idx_mail_messages_external,priority:1,where:external_id IS NOT NULL"`
 	Direction              string  `gorm:"size:16;not null;index:idx_mail_messages_listing,priority:2"`
 	Status                 string  `gorm:"size:16;not null"`
 	FromAddress            string  `gorm:"size:320;not null"`
@@ -187,8 +187,11 @@ type MailMessagePO struct {
 	ReferencesHeader string `gorm:"type:text;not null;default:''"`
 	// RFCMessageID is the RFC 5322 Message-ID threading matches In-Reply-To against.
 	RFCMessageID string `gorm:"column:rfc_message_id;size:998;not null;default:''"`
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// Source is zmail, gmail, or outlook; ExternalID is the provider's id of a synced copy.
+	Source     string  `gorm:"size:16;not null;default:'zmail'"`
+	ExternalID *string `gorm:"size:255;uniqueIndex:idx_mail_messages_external,priority:2,where:external_id IS NOT NULL"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 func (MailMessagePO) TableName() string {
@@ -322,6 +325,13 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 	}
 	message.References = strings.Fields(po.ReferencesHeader)
 	message.RFCMessageID = po.RFCMessageID
+	message.Source = domain.MailSource(po.Source)
+	if message.Source == "" {
+		message.Source = domain.MailSourceZmail
+	}
+	if po.ExternalID != nil {
+		message.ExternalID = *po.ExternalID
+	}
 	return message
 }
 
@@ -377,6 +387,14 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 	}
 	po.ReferencesHeader = strings.Join(message.References, " ")
 	po.RFCMessageID = message.RFCMessageID
+	po.Source = string(message.Source)
+	if po.Source == "" {
+		po.Source = string(domain.MailSourceZmail)
+	}
+	if message.ExternalID != "" {
+		externalID := message.ExternalID
+		po.ExternalID = &externalID
+	}
 	return po
 }
 

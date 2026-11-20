@@ -104,6 +104,7 @@ type Config struct {
 	Webhook        WebhookConfig
 	Mailbox        MailboxConfig
 	AITriage       AITriageConfig
+	ExternalMail   ExternalMailConfig
 	Audit          AuditConfig
 	Operator       OperatorConfig
 	R2             R2Config
@@ -733,6 +734,9 @@ func Load() (*Config, error) {
 			PendingTTL:         env.GetDuration("ASSET_PENDING_TTL", DefaultAssetPendingTTL),
 		},
 		AITriage: loadAITriageConfig(),
+		ExternalMail: ExternalMailConfig{
+			Providers: parseExternalMailProviders(env.Get("EXTERNAL_MAIL_PROVIDERS", "")),
+		},
 		Mailbox: MailboxConfig{
 			Domain:              env.Get("MAILBOX_DOMAIN", ""),
 			Provider:            env.Get("MAILBOX_PROVIDER", ""),
@@ -1094,6 +1098,9 @@ func validate(cfg *Config) error {
 		return err
 	}
 	if err := validateAITriageConfig(cfg.AITriage, isProd); err != nil {
+		return err
+	}
+	if err := validateExternalMailConfig(cfg.ExternalMail, cfg.Mailbox.SecretEncryptionKey, isProd); err != nil {
 		return err
 	}
 

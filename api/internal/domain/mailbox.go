@@ -329,7 +329,11 @@ type MailMessage struct {
 	// fills it.
 	Thread *MailThreadInfo
 	// DedupeKey makes inbound delivery idempotent for one mailbox. Empty for outbound.
-	DedupeKey   string
+	DedupeKey string
+	// Source is where the message came from; empty reads as MailSourceZmail.
+	Source MailSource
+	// ExternalID is the provider's id of a synced copy, unique per mailbox; empty for Zmail mail.
+	ExternalID  string
 	FailureCode string
 	// QueuedReason is MailQueuedForSendLimit while a queued outbound message waits for room in
 	// the organization's send limit, and empty otherwise.

@@ -11,6 +11,61 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — External mailboxes (offline part)
+
+Read-only external mailboxes: the data model, the sync worker, message `source`, and two connection
+routes. Binding (the Gmail and Outlook OAuth flow) does not exist yet, and nothing changes until an
+operator sets `EXTERNAL_MAIL_PROVIDERS`. Contract: `contracts/MAILBOXES.md`, External Mailboxes.
+
+### Medium — Message summaries carry `source`; mailboxes may be `external`
+
+Every message summary (mailbox listings, the log, unified inbox rows, the detail) gains a required
+`source`: `zmail`, `gmail`, or `outlook`. Existing mail is `zmail`. `Mailbox.type` and directory rows
+may now be `external`; create, directory filters, and export still accept `personal` and `shared`
+only. A client with a strict schema must accept both. A fork that builds `domain.MailboxAccessFor`
+results by hand should note that an `external` mailbox gives its owner `view` and `see_history` only,
+and that `send()` refuses one whatever the access says.
+
+New error code: `MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` (`404`), which both
+`/v1/external-mail-connections` routes answer while `EXTERNAL_MAIL_PROVIDERS` is empty.
+
+### Low — External mail migration, and building its index beforehand
+
+Run migrations: `2026_11_28_090000_add_external_mail` allows `mailboxes.type = 'external'`, adds
+`mail_messages.source varchar(16) NOT NULL DEFAULT 'zmail'` and nullable `mail_messages.external_id`,
+creates the partial unique index `idx_mail_messages_external (mailbox_id, external_id) WHERE
+external_id IS NOT NULL`, and creates `external_mail_connections`. What it locks:
+
+- `mail_messages` columns: a constant default and a nullable column are recorded in the catalog only
+  (PostgreSQL 11+, including 18), so the table is not rewritten; the `ACCESS EXCLUSIVE` lock is held
+  only for that catalog change. The `source` CHECK is added `NOT VALID`, so no row is scanned; every
+  existing row takes the default `zmail`.
+- `mailboxes`: the type CHECK is replaced, which scans `mailboxes` under its lock; the table is small
+  (bounded per organization).
+- The unique index reads all of `mail_messages` while holding the write lock. A large installation
+  builds it first, outside a transaction, then migrates; `IF NOT EXISTS` makes the migration skip it:
+
+```sql
+ALTER TABLE mail_messages ADD COLUMN IF NOT EXISTS external_id varchar(255);
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_external
+  ON mail_messages (mailbox_id, external_id) WHERE external_id IS NOT NULL;
+```
+
+If the `CONCURRENTLY` build fails, drop the invalid index
+(`DROP INDEX CONCURRENTLY idx_mail_messages_external;`) and build it again before migrating.
+Rolling the migration back fails while any `external` mailbox row exists (including soft-deleted
+ones); delete those rows first.
+
+### Low — New setting and worker, off by default
+
+`EXTERNAL_MAIL_PROVIDERS` (default empty) lists the enabled sources. Only `fake` exists yet: it
+serves scripted mail from memory for tests and local demos, and `APP_ENV=production` refuses to
+start with it; `gmail` and `outlook` are refused until their sources exist. A non-empty list needs
+`MAILBOX_SECRET_ENCRYPTION_KEY` (32+ characters), which seals refresh tokens. The new command
+`mail:external:sync [--batch=20] [--poll=30s] [--once]` polls each active connection at most every
+two minutes; with the list empty it logs `external_mail.worker_disabled` and exits 0, so it is not
+added to Compose yet.
+
 ## Unreleased — Registration email codes
 
 Self-registration now proves that the person reads the email address: `POST /v1/register/email-codes`

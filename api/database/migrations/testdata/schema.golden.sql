@@ -73,6 +73,23 @@ TABLE authentication_sessions
   COLUMN revocation_reason character varying(32) NOT NULL DEFAULT ''::character varying
   COLUMN audience character varying(16) NOT NULL DEFAULT 'user'::character varying
 
+TABLE external_mail_connections
+  COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_connections_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN provider character varying(16) NOT NULL
+  COLUMN account_address character varying(320) NOT NULL
+  COLUMN owner_user_id bigint
+  COLUMN status character varying(16) NOT NULL DEFAULT 'active'::character varying
+  COLUMN last_synced_at timestamp with time zone
+  COLUMN last_error_code character varying(64)
+  COLUMN encrypted_refresh_token text NOT NULL DEFAULT ''::text
+  COLUMN sync_cursor text NOT NULL DEFAULT ''::text
+  COLUMN backfill_days smallint NOT NULL DEFAULT 14
+  COLUMN next_sync_at timestamp with time zone NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_attachments
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_attachments_id_seq'::regclass)
   COLUMN message_id bigint NOT NULL
@@ -235,6 +252,8 @@ TABLE mail_messages
   COLUMN references_header text NOT NULL DEFAULT ''::text
   COLUMN rfc_message_id character varying(998) NOT NULL DEFAULT ''::character varying
   COLUMN send_lane character varying(16) NOT NULL DEFAULT 'personal'::character varying
+  COLUMN source character varying(16) NOT NULL DEFAULT 'zmail'::character varying
+  COLUMN external_id character varying(255)
 
 TABLE mail_roles
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_roles_id_seq'::regclass)
@@ -713,6 +732,14 @@ CONSTRAINT assets.fk_assets_user FOREIGN KEY (user_id) REFERENCES users(id) ON U
 CONSTRAINT audit_logs.audit_logs_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.authentication_sessions_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.chk_authentication_sessions_audience CHECK (((audience)::text = ANY ((ARRAY['user'::character varying, 'operator'::character varying])::text[])))
+CONSTRAINT external_mail_connections.external_mail_connections_backfill_days_check CHECK (((backfill_days >= 1) AND (backfill_days <= 90)))
+CONSTRAINT external_mail_connections.external_mail_connections_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT external_mail_connections.external_mail_connections_mailbox_id_key UNIQUE (mailbox_id)
+CONSTRAINT external_mail_connections.external_mail_connections_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT external_mail_connections.external_mail_connections_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT external_mail_connections.external_mail_connections_pkey PRIMARY KEY (id)
+CONSTRAINT external_mail_connections.external_mail_connections_provider_check CHECK (((provider)::text = ANY ((ARRAY['gmail'::character varying, 'outlook'::character varying])::text[])))
+CONSTRAINT external_mail_connections.external_mail_connections_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'needs_reconnect'::character varying, 'revoked'::character varying])::text[])))
 CONSTRAINT mail_attachments.chk_mail_attachments_size CHECK (((size >= 0) AND (size = octet_length(content))))
 CONSTRAINT mail_attachments.fk_mail_attachments_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_attachments.mail_attachments_pkey PRIMARY KEY (id)
@@ -757,6 +784,7 @@ CONSTRAINT mail_messages.chk_mail_messages_direction CHECK (((direction)::text =
 CONSTRAINT mail_messages.chk_mail_messages_folder CHECK ((((placement)::text <> 'folder'::text) OR (folder_id IS NOT NULL)))
 CONSTRAINT mail_messages.chk_mail_messages_placement CHECK (((placement)::text = ANY ((ARRAY['default'::character varying, 'archive'::character varying, 'folder'::character varying, 'trash'::character varying])::text[])))
 CONSTRAINT mail_messages.chk_mail_messages_send_lane CHECK (((send_lane)::text = ANY ((ARRAY['personal'::character varying, 'broadcast'::character varying])::text[])))
+CONSTRAINT mail_messages.chk_mail_messages_source CHECK (((source)::text = ANY ((ARRAY['zmail'::character varying, 'gmail'::character varying, 'outlook'::character varying])::text[]))) NOT VALID
 CONSTRAINT mail_messages.chk_mail_messages_status CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'queued'::character varying, 'sent'::character varying, 'failed'::character varying])::text[])))
 CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_messages.mail_messages_folder_id_fkey FOREIGN KEY (folder_id) REFERENCES mail_folders(id) ON DELETE SET NULL
@@ -800,7 +828,7 @@ CONSTRAINT mailbox_members.mailbox_members_membership_id_fkey FOREIGN KEY (membe
 CONSTRAINT mailbox_members.mailbox_members_permission_check CHECK (((permission)::text = ANY ((ARRAY['view'::character varying, 'send'::character varying, 'manage'::character varying])::text[])))
 CONSTRAINT mailbox_members.mailbox_members_pkey PRIMARY KEY (mailbox_id, membership_id)
 CONSTRAINT mailboxes.chk_mailboxes_personal_webhooks CHECK ((((type)::text = 'shared'::text) OR (NOT webhooks_enabled)))
-CONSTRAINT mailboxes.chk_mailboxes_type CHECK (((type)::text = ANY ((ARRAY['personal'::character varying, 'shared'::character varying])::text[])))
+CONSTRAINT mailboxes.chk_mailboxes_type CHECK (((type)::text = ANY ((ARRAY['personal'::character varying, 'shared'::character varying, 'external'::character varying])::text[])))
 CONSTRAINT mailboxes.fk_mailboxes_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
@@ -964,6 +992,11 @@ INDEX CREATE INDEX idx_authentication_sessions_idle_expires_at ON authentication
 INDEX CREATE INDEX idx_authentication_sessions_revoked_at ON authentication_sessions USING btree (revoked_at)
 INDEX CREATE UNIQUE INDEX idx_authentication_sessions_token_hash ON authentication_sessions USING btree (token_hash)
 INDEX CREATE INDEX idx_authentication_sessions_user_id ON authentication_sessions USING btree (user_id)
+INDEX CREATE UNIQUE INDEX external_mail_connections_mailbox_id_key ON external_mail_connections USING btree (mailbox_id)
+INDEX CREATE UNIQUE INDEX external_mail_connections_pkey ON external_mail_connections USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_external_mail_connections_account ON external_mail_connections USING btree (organization_id, provider, lower((account_address)::text))
+INDEX CREATE INDEX idx_external_mail_connections_due ON external_mail_connections USING btree (next_sync_at) WHERE ((status)::text = 'active'::text)
+INDEX CREATE INDEX idx_external_mail_connections_owner ON external_mail_connections USING btree (organization_id, owner_user_id)
 INDEX CREATE INDEX idx_mail_attachments_message ON mail_attachments USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_attachments_pkey ON mail_attachments USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_broadcast_recipients_contact ON mail_broadcast_recipients USING btree (broadcast_id, contact_id)
@@ -997,6 +1030,7 @@ INDEX CREATE UNIQUE INDEX mail_message_reads_pkey ON mail_message_reads USING bt
 INDEX CREATE INDEX idx_mail_message_stars_message ON mail_message_stars USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_message_stars_pkey ON mail_message_stars USING btree (membership_id, message_id)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree (mailbox_id, dedupe_key) WHERE (dedupe_key IS NOT NULL)
+INDEX CREATE UNIQUE INDEX idx_mail_messages_external ON mail_messages USING btree (mailbox_id, external_id) WHERE (external_id IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_folder ON mail_messages USING btree (folder_id) WHERE (folder_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING btree (mailbox_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_inbox_time ON mail_messages USING btree (mailbox_id, direction, created_at DESC, id DESC)

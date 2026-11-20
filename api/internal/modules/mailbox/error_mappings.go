@@ -88,6 +88,7 @@ var mailboxErrorCodes = []struct {
 	{ErrPlatformAccountTaken, http.StatusConflict, domain.CodePlatformAccountTaken},
 	{ErrTriageUnavailable, http.StatusConflict, domain.CodeMailTriageUnavailable},
 	{ErrTriageModelFailed, http.StatusBadGateway, domain.CodeMailTriageModelFailed},
+	{ErrExternalMailConnectionNotFound, http.StatusNotFound, domain.CodeExternalMailConnectionNotFound},
 	{ErrMailRoleLimitReached, http.StatusUnprocessableEntity, domain.CodeMailRoleLimitReached},
 	{ErrTransactionalMessageNotFound, http.StatusNotFound, domain.CodeMailTransactionalMessageNotFound},
 	{ErrTransactionalDisabled, http.StatusServiceUnavailable, domain.CodeMailTransactionalDisabled},

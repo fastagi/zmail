@@ -75,6 +75,8 @@ type Settings struct {
 	TransactionalKeyPerSecond       int
 	// Triage selects the AI triage model and its instance cap; the zero value is disabled.
 	Triage config.AITriageConfig
+	// ExternalMail enables read-only external mailboxes; the zero value is off.
+	ExternalMail config.ExternalMailConfig
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -257,6 +259,8 @@ type Service interface {
 	PlatformAccountService
 	// TriageService serves the AI triage switches, overrides, and reply drafts.
 	TriageService
+	// ExternalMailService lists and revokes bound external mailboxes.
+	ExternalMailService
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -351,6 +355,10 @@ type service struct {
 	triage domain.MailTriageRepository
 	// triageModel classifies and drafts; settings.Triage selects it.
 	triageModel TriageModel
+	// externalMail stores external mail connections; nil when repo does not implement it.
+	externalMail domain.ExternalMailRepository
+	// externalSource reads outside mailboxes; settings.ExternalMail selects it.
+	externalSource ExternalMailSource
 }
 
 var _ Service = (*service)(nil)
@@ -393,6 +401,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailTriageRepository); ok {
 		triage = seam
 	}
+	var externalMail domain.ExternalMailRepository
+	if seam, ok := repo.(domain.ExternalMailRepository); ok {
+		externalMail = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -409,6 +421,7 @@ func NewService(
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
 		recordAudit: auditstarter.RecordChange,
 		triage:      triage, triageModel: newTriageModel(settings.Triage),
+		externalMail: externalMail, externalSource: newExternalMailSource(settings.ExternalMail),
 	}
 }
 
@@ -479,6 +492,7 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.TransactionalRecipientPerMinute = resolved.TransactionalRecipientPerMinute
 	settings.TransactionalKeyPerSecond = resolved.TransactionalKeyPerSecond
 	settings.Triage = cfg.AITriage
+	settings.ExternalMail = cfg.ExternalMail
 	return settings
 }
 
@@ -796,6 +810,10 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 // when the window has room. A broadcast recipient (not queueAtLimit) counts in the broadcast lane
 // and gets ErrMailSendLimitReached there, which pauses the broadcast.
 func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput, queueAtLimit bool) (*domain.MailMessage, bool, error) {
+	// An external mailbox holds read-only copies of an outside account; no path sends from it.
+	if mailbox.Type == domain.MailboxTypeExternal {
+		return nil, false, domain.ErrPermissionDenied
+	}
 	var templateID uint
 	if input.Template != nil {
 		var err error
