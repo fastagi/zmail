@@ -157,6 +157,8 @@ const (
 	CodeMailSearchTooBroad               = "MAILBOX.SEARCH_TOO_BROAD"
 	CodePlatformAccountNotFound          = "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND"
 	CodePlatformAccountTaken             = "MAILBOX.PLATFORM_ACCOUNT_TAKEN"
+	CodeMailTriageUnavailable            = "MAILBOX.TRIAGE_UNAVAILABLE"
+	CodeMailTriageModelFailed            = "MAILBOX.TRIAGE_MODEL_FAILED"
 	CodeMailZoneNotFound                 = "MAILBOX.ZONE_NOT_FOUND"
 	CodeMailZonePending                  = "MAILBOX.ZONE_PENDING"
 	CodeMailZoneInUse                    = "MAILBOX.ZONE_IN_USE"

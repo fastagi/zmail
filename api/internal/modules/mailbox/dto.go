@@ -407,8 +407,11 @@ type MailboxResponse struct {
 	// UnreadCount counts unread inbound messages; 0 for a viewer who may not read the mailbox.
 	UnreadCount int `json:"unread_count"`
 	// RoleID is the mail role the mailbox belongs to; null when it has none.
-	RoleID    *uint     `json:"role_id"`
-	CreatedAt time.Time `json:"created_at"`
+	RoleID *uint `json:"role_id"`
+	// AITriageEnabled queues the mailbox's inbound mail for AI triage when the organization's
+	// switch is on too.
+	AITriageEnabled bool      `json:"ai_triage_enabled"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // MailboxAccessResponse is the viewer's capabilities on one mailbox.
@@ -609,6 +612,7 @@ func toMailboxResponse(mailbox *domain.Mailbox) *MailboxResponse {
 		Access:           MailboxAccessResponse(mailbox.Access),
 		UnreadCount:      mailbox.UnreadCount,
 		RoleID:           mailbox.RoleID,
+		AITriageEnabled:  mailbox.AITriageEnabled,
 		CreatedAt:        mailbox.CreatedAt,
 	}
 }

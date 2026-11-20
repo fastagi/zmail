@@ -80,6 +80,8 @@ func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
 	mapper.Register(ErrMailRoleNameTaken, http.StatusConflict, domain.CodeMailRoleNameTaken)
 	mapper.Register(ErrPlatformAccountNotFound, http.StatusNotFound, domain.CodePlatformAccountNotFound)
 	mapper.Register(ErrPlatformAccountTaken, http.StatusConflict, domain.CodePlatformAccountTaken)
+	mapper.Register(ErrTriageUnavailable, http.StatusConflict, domain.CodeMailTriageUnavailable)
+	mapper.Register(ErrTriageModelFailed, http.StatusBadGateway, domain.CodeMailTriageModelFailed)
 	mapper.Register(ErrMailRoleLimitReached, http.StatusUnprocessableEntity, domain.CodeMailRoleLimitReached)
 	mapper.Register(ErrTransactionalMessageNotFound, http.StatusNotFound, domain.CodeMailTransactionalMessageNotFound)
 	mapper.Register(ErrTransactionalDisabled, http.StatusServiceUnavailable, domain.CodeMailTransactionalDisabled)

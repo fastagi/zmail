@@ -240,6 +240,8 @@ type Service interface {
 	AssignMailboxRole(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, roleID *uint) (*domain.Mailbox, error)
 	// PlatformAccountService keeps the platform account ledger and its owner handovers.
 	PlatformAccountService
+	// TriageService serves the AI triage switches, overrides, and reply drafts.
+	TriageService
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
