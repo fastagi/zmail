@@ -260,16 +260,27 @@ func inboxFilters(query domain.InboxQuery, args map[string]any) string {
 	if query.Unread != nil {
 		filters += " AND " + negatedIf(unreadByMember, !*query.Unread)
 	}
-	if len(query.Triage) > 0 {
-		filters += ` AND EXISTS (SELECT 1 FROM mail_triage WHERE mail_triage.message_id = mail_messages.id
-		    AND mail_triage.status IN @triage_visible AND mail_triage.category IN @triage_categories)`
-		categories := make([]string, 0, len(query.Triage))
-		for _, category := range query.Triage {
-			categories = append(categories, string(category))
-		}
-		args["triage_visible"], args["triage_categories"] = visibleTriageStatuses(), categories
-	}
 	return filters
+}
+
+// inboxTriageFilter keeps the messages of box with a visible triage result of one of the query's
+// categories; checkInboxQuery allows it only in views inboxMailboxHeads serves. It reads the
+// mailbox's results from idx_mail_triage_results and joins them to the mailbox's messages, so a
+// mailbox without matching results costs one index probe. A per-message EXISTS instead walks every
+// Inbox message of a mailbox whose results are rare or absent: 42 ms against 9 ms for triage=reply
+// across 200 mailboxes and 100,000 messages (docs/benchmarks/v2-hot-paths.md).
+func inboxTriageFilter(query domain.InboxQuery, args map[string]any) string {
+	if len(query.Triage) == 0 {
+		return ""
+	}
+	categories := make([]string, 0, len(query.Triage))
+	for _, category := range query.Triage {
+		categories = append(categories, string(category))
+	}
+	args["triage_visible"], args["triage_categories"] = visibleTriageStatuses(), categories
+	return ` AND mail_messages.id IN (SELECT mail_triage.message_id FROM mail_triage
+		    WHERE mail_triage.mailbox_id = box.id
+		      AND mail_triage.status IN @triage_visible AND mail_triage.category IN @triage_categories)`
 }
 
 // inboxOrder is the inbox order on mail_messages, newest first.
@@ -307,7 +318,7 @@ func inboxMailboxHeads(db *gorm.DB, query domain.InboxQuery) ([]inboxHead, error
 		  WHERE mail_messages.mailbox_id = box.id AND mail_messages.direction = @direction
 		    `+view+`
 		    AND (box.sealed_before IS NULL OR mail_messages.created_at >= box.sealed_before)
-		    `+inboxFilters(query, args)+`
+		    `+inboxFilters(query, args)+inboxTriageFilter(query, args)+`
 		    `+threadHead+`
 		  `+inboxOrder+`) AS page
 		WHERE box.id IN @mailbox_ids

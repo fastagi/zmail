@@ -1039,6 +1039,7 @@ INDEX CREATE INDEX idx_mail_messages_inbox_time ON mail_messages USING btree (ma
 INDEX CREATE INDEX idx_mail_messages_lane_attempted ON mail_messages USING btree (send_lane, send_attempted_at) WHERE ((direction)::text = 'outbound'::text)
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
 INDEX CREATE INDEX idx_mail_messages_mailbox_send_attempted ON mail_messages USING btree (mailbox_id, send_lane, send_attempted_at) WHERE ((direction)::text = 'outbound'::text)
+INDEX CREATE INDEX idx_mail_messages_outbound_time ON mail_messages USING btree (created_at, id) INCLUDE (mailbox_id, status, source) WHERE ((direction)::text = 'outbound'::text)
 INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (message_id) WHERE (((direction)::text = 'outbound'::text) AND ((message_id)::text <> ''::text))
 INDEX CREATE INDEX idx_mail_messages_rfc_message_id ON mail_messages USING btree (mailbox_id, rfc_message_id)
 INDEX CREATE INDEX idx_mail_messages_threads ON mail_messages USING btree (mailbox_id, placement, thread_id, id DESC)

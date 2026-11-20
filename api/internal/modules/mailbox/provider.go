@@ -89,6 +89,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_25_120000_create_platform_accounts",
 			"2026_11_26_090000_add_mail_triage",
 			"2026_11_28_090000_add_external_mail",
+			"2026_11_30_090000_add_mail_outbound_time_index",
 		),
 	)
 }

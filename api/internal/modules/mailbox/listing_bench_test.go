@@ -46,6 +46,7 @@ func TestMain(m *testing.M) {
 	dropBenchScene()
 	dropInboxScene()
 	dropDirectoryScene()
+	dropV2Scene()
 	os.Exit(code)
 }
 
