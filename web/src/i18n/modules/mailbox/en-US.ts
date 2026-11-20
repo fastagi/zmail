@@ -732,6 +732,10 @@ const messages = {
       label: 'Push to organization webhooks',
       hint: 'Sends the mail events of this mailbox (received, sent, delivered, bounced) to the webhooks of the organization. Off by default, because those endpoints see subjects and addresses.',
     },
+    triage: {
+      label: 'AI triage for this mailbox',
+      hint: 'Sorts new incoming mail of this mailbox into needs your reply, has a deadline, and just so you know. Incoming mail, with codes and secrets masked, is sent to the AI provider. Mail received before you turn it on is not sorted.',
+    },
     handover: {
       title: 'Hand over',
       description:
@@ -821,6 +825,8 @@ const messages = {
     sealedDeleted: 'Deleted {messages} sealed messages and {broadcasts} broadcasts.',
     webhooksOn: 'Organization webhooks turned on',
     webhooksOff: 'Organization webhooks turned off',
+    triageOn: 'AI triage turned on for this mailbox',
+    triageOff: 'AI triage turned off for this mailbox',
   },
   templates: {
     title: 'Templates',
@@ -1422,6 +1428,7 @@ const messages = {
     senderNotConfigured:
       'The message was NOT delivered: sending mail is not set up on this server. It is kept in Sent as failed.',
     tooLarge: 'The message is too large to send.',
+    triageUnavailable: 'AI triage is not available for this organization.',
     unavailable: 'The mailbox service is temporarily unavailable.',
     folderNotFound: 'This folder does not exist or was deleted.',
     labelNotFound: 'This label does not exist or was deleted.',
@@ -1459,6 +1466,33 @@ const messages = {
     dnsRecordLocked:
       'Zmail mail relies on this record or name, so it cannot be written here. To change it, remove the mail domain first.',
     dnsRecordRejected: 'Cloudflare refused the record.',
+  },
+  triageAdmin: {
+    title: 'AI triage',
+    description:
+      'Let AI sort incoming mail by what it needs from you and draft replies on request. Mailboxes join one by one from their access settings.',
+    unavailableTitle: 'AI triage is not available',
+    unavailable:
+      'No AI provider is configured for this Zmail instance, so AI triage cannot be turned on. Ask the operator of this instance to configure one.',
+    unavailableSave:
+      'AI triage cannot be turned on: no AI provider is configured for this Zmail instance.',
+    enabled: 'Turn on AI triage',
+    enabledHint:
+      'New incoming mail of mailboxes that have AI triage on is sorted into needs your reply, has a deadline, and just so you know. Turning it off hides triage everywhere.',
+    cap: 'Daily message cap',
+    capHint:
+      'At most this many messages are sorted per UTC day; later ones wait for the next day. This instance allows at most {instance} a day, and the lower limit applies.',
+    capInvalid: 'Enter a whole number from 1 to {max, number}.',
+    drafts: 'Reply drafts',
+    draftsHint:
+      'Members who may send from a mailbox can ask for an AI reply draft. Drafts are never sent or stored on their own.',
+    dataNoticeTitle: 'What is sent to the AI provider',
+    dataNotice:
+      'While AI triage is on, incoming mail of the mailboxes that use it is sent to the AI provider of this Zmail instance, with verification codes and other secrets masked. Mail content is treated as data: the AI never acts on instructions inside a message.',
+    neverSaved: 'These are the defaults; the settings have never been saved.',
+    updatedAt: 'Last saved {date}',
+    save: 'Save',
+    saved: 'AI triage settings saved',
   },
   triage: {
     label: 'AI triage',

@@ -30,6 +30,7 @@ export const ROUTES = {
     ADMIN: '/console/admin',
     ADMIN_MAILBOXES: '/console/admin/mailboxes',
     ADMIN_PLATFORM_ACCOUNTS: '/console/admin/platform-accounts',
+    ADMIN_AI_TRIAGE: '/console/admin/ai-triage',
     MAIL_DOMAIN: '/console/admin/domains',
     MAIL_ZONE_DNS: '/console/admin/domains/:zoneId/dns',
     MAIL_TEMPLATES: '/console/mail-templates',

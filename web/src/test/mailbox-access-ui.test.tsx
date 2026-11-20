@@ -61,6 +61,15 @@ vi.mock('@/features/mailbox/hooks/use-inbox', () => ({
   useMailRoles: () => ({ data: [], isPending: false, error: null }),
   useAssignMailboxRole: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));
+// The AI triage switch has its own tests; the organization has triage off unless a test says so.
+const triage = vi.hoisted(() => ({
+  setting: { data: undefined as unknown, isPending: true, error: null },
+  setMailbox: { isPending: false, mutateAsync: vi.fn() },
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-triage', () => ({
+  useMailTriageSetting: () => triage.setting,
+  useSetMailboxTriage: () => triage.setMailbox,
+}));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useMailboxDomains: () => state.domains,
   useMailboxes: () => state.mailboxes,
@@ -147,6 +156,8 @@ function openManage() {
 
 describe('mailbox access in the console', () => {
   beforeEach(() => {
+    triage.setting = { data: undefined, isPending: true, error: null };
+    triage.setMailbox.mutateAsync.mockReset();
     toast.success.mockReset();
     toast.error.mockReset();
     state.organizations.data = page([organization('owner')]);
@@ -415,6 +426,29 @@ describe('mailbox access in the console', () => {
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
     await waitFor(() => expect(state.setWebhooks.mutateAsync).toHaveBeenCalledWith(true));
+  });
+
+  it('offers the AI triage switch beside webhooks while the organization has triage on', async () => {
+    triage.setting = {
+      data: {
+        available: true,
+        enabled: true,
+        daily_message_cap: 500,
+        draft_enabled: false,
+        instance_daily_cap: 500,
+        updated_at: null,
+      },
+      isPending: false,
+      error: null,
+    };
+    triage.setMailbox.mutateAsync.mockResolvedValue(mailbox(1, 'hello'));
+    renderWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: 'Access to hello@mail.example.com' }));
+    const toggle = within(screen.getByRole('dialog')).getByRole('switch', {
+      name: 'AI triage for this mailbox',
+    });
+    fireEvent.click(toggle);
+    await waitFor(() => expect(triage.setMailbox.mutateAsync).toHaveBeenCalledWith(true));
   });
 
   it('shows the owner but no members or webhooks on a personal mailbox', () => {

@@ -30,6 +30,7 @@ import {
   useUserNames,
   type MailboxPerson,
 } from '@/features/mailbox/components/mailbox-people';
+import { MailboxTriageSwitch } from '@/features/mailbox/components/mailbox-triage-switch';
 import {
   useDeleteMailboxSealedHistory,
   useHandOverMailbox,
@@ -67,7 +68,8 @@ type PanelError = { key: MailboxErrorKey; stale: boolean } | null;
 
 /**
  * Access of one mailbox: its type and owner or members, the members with their permissions
- * (`manage_members`), the webhook switch (shared, `manage_members`), handover of a personal
+ * (`manage_members`), the webhook switch (shared, `manage_members`), the AI triage switch (the
+ * personal owner or `manage_members`, while the organization has triage on), handover of a personal
  * mailbox and deletion of sealed history (`administer`), and the access history (`see_history`).
  * Controls follow `mailbox.access`; the API remains the authority. A concurrent change answers
  * `MAILBOX.ACCESS_CONFLICT` and lost access answers `PERMISSION.DENIED`; both ask for a refresh.
@@ -198,6 +200,8 @@ function PanelBody({ mailbox, onRefresh }: { mailbox: Mailbox; onRefresh: () => 
       ) : null}
 
       {shared && access.manage_members ? <WebhookSwitch mailbox={mailbox} run={run} /> : null}
+
+      <MailboxTriageSwitch organizationId={organizationId} mailbox={mailbox} run={run} />
 
       {!shared && access.administer ? (
         <HandoverSection mailbox={mailbox} people={people.items} run={run} />

@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { notFound, usePathname } from 'next/navigation';
-import { AtSign, Globe, Inbox, type LucideIcon } from 'lucide-react';
+import { AtSign, Globe, Inbox, Sparkles, type LucideIcon } from 'lucide-react';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { ROUTES } from '@/constants/routes';
@@ -16,7 +16,11 @@ import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
 interface AdminNavItem {
-  titleKey: 'nav.adminDomains' | 'nav.adminSharedMailboxes' | 'nav.adminPlatformAccounts';
+  titleKey:
+    | 'nav.adminDomains'
+    | 'nav.adminSharedMailboxes'
+    | 'nav.adminPlatformAccounts'
+    | 'nav.adminAiTriage';
   href: string;
   icon: LucideIcon;
 }
@@ -29,6 +33,7 @@ const adminNavItems: AdminNavItem[] = [
     href: ROUTES.CONSOLE.ADMIN_PLATFORM_ACCOUNTS,
     icon: AtSign,
   },
+  { titleKey: 'nav.adminAiTriage', href: ROUTES.CONSOLE.ADMIN_AI_TRIAGE, icon: Sparkles },
 ];
 
 /**

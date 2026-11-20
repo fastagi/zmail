@@ -709,6 +709,10 @@ const messages = {
       label: '推送到组织 webhook',
       hint: '把这个邮箱的信件事件（收信、发出、送达、退信）推送到组织的 webhook。默认关闭，因为这些地址能看到主题和收发件人。',
     },
+    triage: {
+      label: '这个邮箱的 AI 分流',
+      hint: '把这个邮箱新收到的信分成“需要回复、有期限、只需知道”。来信会在遮罩验证码等机密后发送给 AI 服务商。开启前收到的信不会分流。',
+    },
     handover: {
       title: '交接',
       description: '邮箱会转为共享邮箱，由接手人以“回复”权限使用。原主人立即失去访问权。',
@@ -795,6 +799,8 @@ const messages = {
     sealedDeleted: '已删除 {messages} 封封存信件和 {broadcasts} 个群发。',
     webhooksOn: '已开启推送到组织 webhook',
     webhooksOff: '已关闭推送到组织 webhook',
+    triageOn: '已为这个邮箱开启 AI 分流',
+    triageOff: '已为这个邮箱关闭 AI 分流',
   },
   templates: {
     title: '模板',
@@ -1361,6 +1367,7 @@ const messages = {
     senderNotConfigured:
       '邮件没有送达：此服务器尚未配置发信功能。它已保存在“已发送”中并标记为发送失败。',
     tooLarge: '邮件太大，无法发送。',
+    triageUnavailable: '本组织无法使用 AI 分流。',
     unavailable: '邮箱服务暂时不可用。',
     folderNotFound: '这个文件夹不存在或已被删除。',
     labelNotFound: '这个标签不存在或已被删除。',
@@ -1391,6 +1398,30 @@ const messages = {
     dnsRecordInvalid: '请检查记录：名称、内容、TTL 和优先级必须符合记录类型。',
     dnsRecordLocked: 'Zmail 邮件依赖此记录或名称，不能在这里写入。要修改，请先删除对应的邮件域名。',
     dnsRecordRejected: 'Cloudflare 拒绝了该记录。',
+  },
+  triageAdmin: {
+    title: 'AI 分流',
+    description:
+      '让 AI 按“需要你做什么”给来信分类，并按需起草回复。各邮箱在自己的访问设置里单独开启。',
+    unavailableTitle: 'AI 分流不可用',
+    unavailable: '这个 Zmail 实例没有配置 AI 服务商，无法开启 AI 分流。请联系实例运维人员配置。',
+    unavailableSave: '无法开启 AI 分流：这个 Zmail 实例没有配置 AI 服务商。',
+    enabled: '开启 AI 分流',
+    enabledHint:
+      '已开启 AI 分流的邮箱，新来信会分成“需要回复、有期限、只需知道”。关闭后，所有地方都不再显示分流。',
+    cap: '每日分流上限',
+    capHint:
+      '每个 UTC 日最多分流这么多封，超出的顺延到第二天。本实例每天最多 {instance} 封，以较低者为准。',
+    capInvalid: '请输入 1 到 {max, number} 之间的整数。',
+    drafts: '回复草稿',
+    draftsHint: '能用某个邮箱发信的成员，可以请 AI 起草回复。草稿不会自动发送，也不会保存。',
+    dataNoticeTitle: '哪些内容会发送给 AI 服务商',
+    dataNotice:
+      '开启 AI 分流后，使用它的邮箱的来信会发送给本 Zmail 实例配置的 AI 服务商，验证码等机密会先遮罩。信件内容只作为数据处理，AI 不会执行信中的任何指令。',
+    neverSaved: '当前为默认值，尚未保存过。',
+    updatedAt: '上次保存于 {date}',
+    save: '保存',
+    saved: 'AI 分流设置已保存',
   },
   triage: {
     label: 'AI 分流',
