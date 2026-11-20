@@ -31,8 +31,8 @@ kest run tests/kest/mailbox_access.flow.md -e local --fail-fast \
 ```
 
 The flow needs two variables: `run_id` (unique per run) and `scheduled_at` (an RFC 3339 UTC time
-roughly one day ahead, used by AC-13). `run_local.sh` passes only `run_id`, so it cannot run this
-flow as is. kest 0.7.2 drops values captured by `@type exec` steps and does not substitute
+roughly one day ahead, used by AC-13). `run_local.sh` passes both and starts the API with
+`mailbox_access.kestenv`. kest 0.7.2 drops values captured by `@type exec` steps and does not substitute
 `{{variables}}` inside an assertion's or capture's JSON path, so this flow never captures from an
 exec step and selects list items by literal queries (`#(display_name="B")`,
 `#(subject%"b-private-*")`), then compares ids on the right-hand side.

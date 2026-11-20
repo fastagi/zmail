@@ -59,7 +59,12 @@ function rank(text: string, query: string): number | null {
 }
 
 /** The items whose texts match, prefix matches first, at most `limit` when a query is typed. */
-function matching<T>(items: readonly T[], texts: (item: T) => string[], query: string, limit: number) {
+function matching<T>(
+  items: readonly T[],
+  texts: (item: T) => string[],
+  query: string,
+  limit: number
+) {
   if (query === '') return items.slice(0, limit);
   return items
     .map(item => {
@@ -314,7 +319,12 @@ function PaletteBody({
         />
         <Kbd>Esc</Kbd>
       </div>
-      <div id={listId} role="listbox" aria-label={t('palette.label')} className="overflow-y-auto p-2">
+      <div
+        id={listId}
+        role="listbox"
+        aria-label={t('palette.label')}
+        className="overflow-y-auto p-2"
+      >
         {groups.map(group => {
           const headingId = `${listId}-${group.key}`;
           return (

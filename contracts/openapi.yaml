@@ -7631,6 +7631,263 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/platform-accounts:
+    get:
+      operationId: listPlatformAccounts
+      summary: List the platform account ledger
+      description: Owners and admins see every account. Members see only the accounts registered with a
+        mailbox they may read or that they own; `q` matches a registration address only through a
+        mailbox they can see, and `mailbox_address` is null for a mailbox they cannot see. Ordered by
+        platform, then handle, both ignoring case, then id. A malformed filter is
+        `400 COMMON.INVALID_INPUT`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: q
+          in: query
+          required: false
+          description: Matches the platform, the handle, or the registration address anywhere, ignoring
+            case; wildcards match themselves. Trimmed; at most 100 characters.
+          schema:
+            type: string
+            maxLength: 400
+        - name: role_id
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: mailbox_id
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: owner_user_id
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PlatformAccountStatus'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated ledger entries the caller may see.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAccountPageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createPlatformAccount
+      summary: Add a platform account to the ledger
+      description: Needs the `owner` or `admin` organization role. Records a `created` event. The body is at
+        most 8 KiB; a larger or malformed body is `400 COMMON.INVALID_INPUT`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformAccountInput'
+      responses:
+        '201':
+          description: The created ledger entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAccountResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The organization already has an account with this platform and handle, ignoring case
+            (`MAILBOX.PLATFORM_ACCOUNT_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/platform-accounts/{account_id}:
+    put:
+      operationId: updatePlatformAccount
+      summary: Replace a platform account
+      description: Needs the `owner` or `admin` organization role. Replaces every field; an omitted field
+        takes its default. Each change of status, owner, or registration mailbox records an event. The
+        last write wins.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/PlatformAccountID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformAccountInput'
+      responses:
+        '200':
+          description: The ledger entry after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAccountResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the account
+            (`MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another account of the organization has this platform and handle, ignoring case
+            (`MAILBOX.PLATFORM_ACCOUNT_TAKEN`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deletePlatformAccount
+      summary: Delete a platform account
+      description: Needs the `owner` or `admin` organization role. Records a `deleted` event, which is kept,
+        and removes the entry.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/PlatformAccountID'
+      responses:
+        '204':
+          description: The entry is deleted.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the account
+            (`MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/platform-accounts/{account_id}/events:
+    get:
+      operationId: listPlatformAccountEvents
+      summary: List a platform account's handover and status history, newest first
+      description: Follows the listing's visibility; an account the caller may not see is
+        `404 MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/PlatformAccountID'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated events.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAccountEventPageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the account
+            (`MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/platform-account-handovers:
+    post:
+      operationId: handOverPlatformAccounts
+      summary: Hand over every platform account of one owner
+      description: Needs the `owner` or `admin` organization role. Moves every account owned by
+        `from_user_id` to `to_user_id` in one transaction and records an `owner_changed` event for
+        each. Independent of mailbox handover.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformAccountHandoverRequest'
+      responses:
+        '201':
+          description: The accounts moved; possibly none.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAccountHandoverResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-delivery-events:
     post:
       operationId: receiveMailDeliveryEvent
@@ -8051,6 +8308,13 @@ components:
       in: path
       required: true
       description: Positive mail role identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    PlatformAccountID:
+      name: account_id
+      in: path
+      required: true
+      description: Positive platform account identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
     MailIdempotencyKey:
@@ -8522,6 +8786,8 @@ components:
         - MAILBOX.FOLDER_LIMIT_REACHED
         - MAILBOX.LABEL_LIMIT_REACHED
         - MAILBOX.SEARCH_TOO_BROAD
+        - MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND
+        - MAILBOX.PLATFORM_ACCOUNT_TAKEN
         - MAILBOX.ROLE_NOT_FOUND
         - MAILBOX.ROLE_NAME_TAKEN
         - MAILBOX.ROLE_LIMIT_REACHED
@@ -12728,6 +12994,273 @@ components:
           maxItems: 50
           items:
             $ref: '#/components/schemas/MailRole'
+    PlatformAccountStatus:
+      type: string
+      enum:
+        - invited
+        - awaiting_confirmation
+        - active
+        - timed_out
+        - needs_review
+        - retired
+    PlatformAccountEventKind:
+      type: string
+      enum:
+        - created
+        - status_changed
+        - owner_changed
+        - mailbox_changed
+        - deleted
+    PlatformAccount:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - platform
+        - handle
+        - profile_url
+        - role_id
+        - mailbox_id
+        - mailbox_address
+        - owner_user_id
+        - status
+        - notes
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        platform:
+          type: string
+          minLength: 1
+          maxLength: 64
+        handle:
+          type: string
+          minLength: 1
+          maxLength: 200
+        profile_url:
+          oneOf:
+            - type: string
+              maxLength: 2048
+            - type: 'null'
+        role_id:
+          description: The mail role; null when unset or deleted.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        mailbox_id:
+          description: The registration mailbox; null when unset or deleted.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        mailbox_address:
+          description: The registration mailbox's address; null without a live mailbox or when the caller
+            cannot see it.
+          oneOf:
+            - type: string
+            - type: 'null'
+        owner_user_id:
+          description: The responsible user, who may have left the organization; null for none.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        status:
+          $ref: '#/components/schemas/PlatformAccountStatus'
+        notes:
+          type: string
+          maxLength: 2000
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PlatformAccountInput:
+      type: object
+      description: Unknown fields are ignored. A field of the wrong JSON type is `400 COMMON.INVALID_INPUT`.
+      required:
+        - platform
+        - handle
+      properties:
+        platform:
+          type: string
+          description: Trimmed; 1 to 64 characters afterwards, without control characters.
+          minLength: 1
+          maxLength: 400
+        handle:
+          type: string
+          description: Trimmed; 1 to 200 characters afterwards, without control characters. Unique with the
+            platform in the organization, ignoring case.
+          minLength: 1
+          maxLength: 1000
+        profile_url:
+          type: string
+          description: Trimmed; empty for none, otherwise an absolute `http` or `https` URL with a host and no
+            credentials, at most 2048 bytes. Defaults to none.
+          maxLength: 4096
+        role_id:
+          description: A mail role of the organization, or null. Defaults to null.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        mailbox_id:
+          description: A live mailbox of the organization, or null. Defaults to null.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        owner_user_id:
+          description: A current member of the organization, or null. Defaults to null.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        status:
+          description: Defaults to `active`.
+          $ref: '#/components/schemas/PlatformAccountStatus'
+        notes:
+          type: string
+          description: Trimmed; at most 2000 characters afterwards. Defaults to empty.
+          maxLength: 4000
+    PlatformAccountResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/PlatformAccount'
+    PlatformAccountPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformAccount'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    PlatformAccountEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - account_id
+        - kind
+        - actor_user_id
+        - from
+        - to
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        account_id:
+          $ref: '#/components/schemas/PositiveID'
+        kind:
+          $ref: '#/components/schemas/PlatformAccountEventKind'
+        actor_user_id:
+          description: Who made the change; null when that user's account was deleted.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        from:
+          description: The value before; a status for `status_changed` and `deleted`, a user or mailbox id
+            as text for `owner_changed` and `mailbox_changed`; null for none.
+          oneOf:
+            - type: string
+              maxLength: 200
+            - type: 'null'
+        to:
+          description: The value after, as for `from`; the initial status for `created`.
+          oneOf:
+            - type: string
+              maxLength: 200
+            - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+    PlatformAccountEventPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlatformAccountEvent'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    PlatformAccountHandoverRequest:
+      type: object
+      description: Unknown fields are ignored.
+      required:
+        - from_user_id
+        - to_user_id
+      properties:
+        from_user_id:
+          description: The current owner; may have left the organization.
+          $ref: '#/components/schemas/PositiveID'
+        to_user_id:
+          description: A current member of the organization, other than `from_user_id`.
+          $ref: '#/components/schemas/PositiveID'
+    PlatformAccountHandover:
+      type: object
+      additionalProperties: false
+      required:
+        - from_user_id
+        - to_user_id
+        - account_ids
+      properties:
+        from_user_id:
+          $ref: '#/components/schemas/PositiveID'
+        to_user_id:
+          $ref: '#/components/schemas/PositiveID'
+        account_ids:
+          type: array
+          description: The accounts moved, ascending.
+          items:
+            $ref: '#/components/schemas/PositiveID'
+    PlatformAccountHandoverResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/PlatformAccountHandover'
     MailboxRoleAssignment:
       type: object
       additionalProperties: false

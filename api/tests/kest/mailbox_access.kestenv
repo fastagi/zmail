@@ -1,0 +1,7 @@
+# Server settings for mailbox_access.flow.md (sourced by run_local.sh; test values only).
+OPTIONAL_STARTERS=organization,mailbox,webhook
+MAILBOX_DOMAIN=mail.localhost
+MAILBOX_INBOUND_SECRET=kest-inbound-secret-at-least-32-chars
+MAILBOX_PUBLIC_URL=http://localhost:3000
+WEBHOOK_ENCRYPTION_KEY=kest-webhook-key-at-least-32-characters
+WEBHOOK_ALLOW_PRIVATE_TARGETS=true

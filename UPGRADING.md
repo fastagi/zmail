@@ -49,6 +49,18 @@ If the `CONCURRENTLY` build fails, drop the invalid index
 (`DROP INDEX CONCURRENTLY idx_mail_messages_mailbox_send_attempted;`) and build it again before
 migrating. Down drops the index and loses nothing.
 
+## Unreleased — Platform account ledger
+
+### Low — Two new tables for platform accounts
+
+Run migrations: `2026_11_25_120000_create_platform_accounts` creates `platform_accounts` and
+`platform_account_events` for the platform account ledger and owner handover
+(`/v1/platform-accounts`, `/v1/platform-account-handovers`; see `contracts/MAILBOXES.md`, Platform
+Accounts). It only creates new tables and their indexes, so it takes no lock on an existing table
+and needs no preparation on a large installation. Its foreign keys reference `organizations`,
+`mail_roles`, `mailboxes`, and `users`; rolling back `2026_11_22_090000_add_mail_roles` now needs
+this migration rolled back first.
+
 ## Unreleased — Unread count index
 
 ### Medium — The migration locks `mail_messages` while it builds the unread index

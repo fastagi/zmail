@@ -203,8 +203,8 @@ and admins manage mailboxes but read no mail by role alone. The rules come from
 automated in [`api/tests/kest/mailbox_access.flow.md`](../../api/tests/kest/mailbox_access.flow.md),
 whose header lists the environment it needs. Run it with `kest run ... --var run_id=<unique>
 --var scheduled_at=<UTC time about one day ahead>` against an API started with the mailbox,
-organization, and webhook starters and `WEBHOOK_ALLOW_PRIVATE_TARGETS=true`; `run_local.sh`
-passes only `run_id` and cannot run it as is. The flow needs no public DNS and captures nothing
+organization, and webhook starters and `WEBHOOK_ALLOW_PRIVATE_TARGETS=true`, or let
+`api/tests/kest/run_local.sh` do it from `mailbox_access.kestenv`. The flow needs no public DNS and captures nothing
 from exec steps, which kest 0.7.2 does not support.
 
 **Setup.** Organization O with admin A and members B and C. A creates the personal mailbox `b@`

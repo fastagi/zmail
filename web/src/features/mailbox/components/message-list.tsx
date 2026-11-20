@@ -776,13 +776,14 @@ function MessageRows({
                 aria-pressed={starred}
                 aria-label={t(starred ? 'list.unstar' : 'list.star')}
                 title={t(starred ? 'list.unstar' : 'list.star')}
-                className={cn('mt-2', starred ? 'text-warning' : 'text-muted-foreground')}
+                className={cn('mt-2', starred ? 'text-warning hover:text-warning' : 'text-muted-foreground')}
                 onClick={() => void star(row)}
               >
                 <Star className={cn('size-4', starred && 'fill-current')} />
               </Button>
               <button
                 type="button"
+                data-row-id={row.id}
                 aria-current={current ? 'true' : undefined}
                 className="flex min-w-0 flex-1 items-start gap-3 rounded-md px-2 py-2 text-left focus-ring hover:bg-accent/70 active:bg-accent"
                 onClick={() => onOpen(row)}

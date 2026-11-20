@@ -84,6 +84,8 @@ var mailboxErrorCodes = []struct {
 	{ErrMailLabelLimitReached, http.StatusUnprocessableEntity, domain.CodeMailLabelLimitReached},
 	{ErrMailRoleNotFound, http.StatusNotFound, domain.CodeMailRoleNotFound},
 	{ErrMailRoleNameTaken, http.StatusConflict, domain.CodeMailRoleNameTaken},
+	{ErrPlatformAccountNotFound, http.StatusNotFound, domain.CodePlatformAccountNotFound},
+	{ErrPlatformAccountTaken, http.StatusConflict, domain.CodePlatformAccountTaken},
 	{ErrMailRoleLimitReached, http.StatusUnprocessableEntity, domain.CodeMailRoleLimitReached},
 	{ErrTransactionalMessageNotFound, http.StatusNotFound, domain.CodeMailTransactionalMessageNotFound},
 	{ErrTransactionalDisabled, http.StatusServiceUnavailable, domain.CodeMailTransactionalDisabled},

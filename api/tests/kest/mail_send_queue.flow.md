@@ -17,6 +17,8 @@ export MAILBOX_DOMAIN=mail.localhost
 export MAILBOX_PROVIDER=log                 # nothing leaves the machine
 export MAILBOX_DAILY_SEND_LIMIT=1
 # ... migrate and start the API with these variables, then:
+# (`bash tests/kest/run_local.sh tests/kest/mail_send_queue.flow.md` does all of this from
+# mail_send_queue.kestenv.)
 kest run tests/kest/mail_send_queue.flow.md -e local --fail-fast --var "run_id=$(date +%s)"
 ```
 
@@ -183,11 +185,15 @@ body.data.#(subject%"q2-waiting-*").queued_reason == "send_limit"
 body.data.#(subject%"q2-waiting-*").id == {{waiting_id}}
 ```
 
-## Q-3: A deleted waiting message is gone
+## Q-3: A deleted waiting message is canceled
+
+Deleting a message outside the trash moves it to the trash (`contracts/MAILBOXES.md`, delete). A
+waiting message moved there is never sent: it becomes `failed` with `send.canceled` and frees its
+waiting place.
 
 ```step
 @id q3-delete
-@name Q-3 deleting the waiting message
+@name Q-3 deleting the waiting message moves it to the trash
 
 DELETE /v1/mailboxes/{{box_id}}/messages/{{waiting_id}}
 Authorization: Bearer {{a_token}}
@@ -198,15 +204,18 @@ status == 204
 ```
 
 ```step
-@id q3-gone
-@name Q-3 the waiting message no longer exists
+@id q3-canceled
+@name Q-3 the trashed waiting message is canceled and will not be sent
 
 GET /v1/mailboxes/{{box_id}}/messages/{{waiting_id}}
 Authorization: Bearer {{a_token}}
 Organization-Id: {{org_id}}
 
 [Asserts]
-status == 404
+status == 200
+body.data.status == "failed"
+body.data.failure_code == "send.canceled"
+body.data.trashed_at != ""
 ```
 
 ## Q-4: The waiting room is capped at the limit

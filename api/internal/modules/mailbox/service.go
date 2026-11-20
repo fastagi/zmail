@@ -251,6 +251,8 @@ type Service interface {
 	// AssignMailboxRole puts a mailbox in a mail role, or takes it out when roleID is nil. It needs
 	// administer on the mailbox.
 	AssignMailboxRole(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, roleID *uint) (*domain.Mailbox, error)
+	// PlatformAccountService keeps the platform account ledger and its owner handovers.
+	PlatformAccountService
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -306,6 +308,8 @@ type service struct {
 	roles domain.MailRoleRepository
 	// directory reads the administration directory; nil when repo does not implement it.
 	directory domain.MailboxDirectoryRepository
+	// ledger stores the platform account ledger; nil when repo does not implement it.
+	ledger domain.PlatformAccountRepository
 	// domains, zones, and domainProvider serve organization domains; nil when a test does not
 	// need them.
 	domains        domain.MailDomainRepository
@@ -373,6 +377,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailboxDirectoryRepository); ok {
 		directory = seam
 	}
+	var ledger domain.PlatformAccountRepository
+	if seam, ok := repo.(domain.PlatformAccountRepository); ok {
+		ledger = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -382,7 +390,7 @@ func NewService(
 	return &service{
 		transactional: transactional, accounts: accounts, transactionalLimits: newTransactionalLimits(limits, settings),
 		encryptor: encryptor, fingerprintKey: fingerprintKey,
-		repo: repo, inbox: inbox, roles: roles, directory: directory, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
+		repo: repo, inbox: inbox, roles: roles, directory: directory, ledger: ledger, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
 		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },

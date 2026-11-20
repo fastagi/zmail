@@ -703,13 +703,83 @@ describe('mailbox workspace', () => {
       screen.getByText("Codes are hidden. Only this mailbox's members can see them; AI and admins can't.")
     ).toBeInTheDocument();
     expect(screen.getByText('Use code •••••• now')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Your code is ••••••' })).toBeInTheDocument();
     expect(screen.queryByText(/482913/)).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Show codes' }));
     await waitFor(() => expect(state.reveal.mutateAsync).toHaveBeenCalledWith(11));
     expect(await screen.findByText('Use code 482913 now')).toBeInTheDocument();
+    // The subject above the message shows the original too, not the masked copy.
+    expect(screen.getByRole('heading', { name: 'Your code is 482913' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Your code is ••••••' })).toBeNull();
     expect(screen.getByText('Codes shown')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show codes' })).toBeNull();
+
+    // Another message, then this one again: the reader starts masked.
+    fireEvent.click(rowButton('Old news'));
+    fireEvent.click(rowButton('Unread question'));
+    expect(screen.getByRole('heading', { name: 'Your code is ••••••' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show codes' })).toBeInTheDocument();
+  });
+
+  it('keeps Mark unread usable while a star is on its way', () => {
+    state.detail.data = message({ html_body: '' });
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+    Object.assign(state.update, { isPending: true, variables: { messageId: 11, starred: true } });
+    fireEvent.click(rowButton('Old news'));
+
+    expect(screen.getByRole('button', { name: 'Mark unread' })).toBeEnabled();
+    Object.assign(state.update, { isPending: false, variables: undefined });
+  });
+
+  it('returns the focus to the row when the reader closes', () => {
+    state.detail.data = message({ html_body: '' });
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+    const back = screen.getByRole('button', { name: 'Back to list' });
+    back.focus();
+
+    fireEvent.click(back);
+
+    expect(screen.queryByRole('button', { name: 'Back to list' })).toBeNull();
+    expect(rowButton('Unread question')).toHaveFocus();
+  });
+
+  it('keeps a starred star in its color on hover', () => {
+    state.detail.data = message({ html_body: '', starred: true });
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+
+    const star = screen.getByRole('button', { name: 'Remove star' });
+    expect(star).toHaveClass('text-warning', 'hover:text-warning');
+    expect(star).not.toHaveClass('hover:text-accent-foreground');
+  });
+
+  it('starts the reader at its top when another row opens', () => {
+    state.detail.data = message({ html_body: '' });
+    const { container } = renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+    const pane = container.querySelector<HTMLElement>('[data-reading-pane]');
+    if (!pane) throw new Error('no reading pane');
+    pane.scrollTop = 400;
+    expect(pane.scrollTop).toBe(400);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next message' }));
+
+    expect(pane.scrollTop).toBe(0);
+  });
+
+  it('shows the code request in flight on the Show codes button', () => {
+    state.detail.data = message({ html_body: '', secrets_masked: true });
+    state.reveal.isPending = true;
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+
+    const show = screen.getByRole('button', { name: 'Show codes' });
+    expect(show).toBeDisabled();
+    expect(show).toHaveAttribute('aria-busy', 'true');
+    state.reveal.isPending = false;
   });
 
   it('shows no code panel for a message with nothing masked', () => {

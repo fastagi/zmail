@@ -157,6 +157,8 @@ const (
 	CodeMailRoleNameTaken                = "MAILBOX.ROLE_NAME_TAKEN"
 	CodeMailRoleLimitReached             = "MAILBOX.ROLE_LIMIT_REACHED"
 	CodeMailSearchTooBroad               = "MAILBOX.SEARCH_TOO_BROAD"
+	CodePlatformAccountNotFound          = "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND"
+	CodePlatformAccountTaken             = "MAILBOX.PLATFORM_ACCOUNT_TAKEN"
 	CodeMailZoneNotFound                 = "MAILBOX.ZONE_NOT_FOUND"
 	CodeMailZonePending                  = "MAILBOX.ZONE_PENDING"
 	CodeMailZoneInUse                    = "MAILBOX.ZONE_IN_USE"

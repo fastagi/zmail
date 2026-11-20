@@ -333,4 +333,45 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   expect(testLog.items.map(entry => entry.id)).toEqual([testSent.id]);
   expect(testLog.meta).toEqual({ next_cursor: null, total_24h: 1 });
   expect((await developerService.logEntry(organizationId, testSent.id)).events).toHaveLength(2);
+
+  // The platform account ledger rides on the mailbox feature too.
+  const { platformAccountService } =
+    await import('@/features/mailbox/services/platform-account-service');
+  const { mockPlatformAccountStore } =
+    await import('@/features/mailbox/server/mock-platform-account-store');
+  mockPlatformAccountStore.reset();
+  const account = await platformAccountService.create(organizationId, {
+    platform: 'YouTube',
+    handle: '@parity',
+    profile_url: 'https://youtube.com/@parity',
+    role_id: null,
+    mailbox_id: null,
+    owner_user_id: 1,
+    notes: '',
+  });
+  expect(account).toMatchObject({ status: 'active', owner_user_id: 1, mailbox_address: null });
+  const ledger = await platformAccountService.list(organizationId, { q: 'parity' });
+  expect(ledger.data.map(item => item.id)).toEqual([account.id]);
+  const retired = await platformAccountService.update(organizationId, account.id, {
+    platform: 'YouTube',
+    handle: '@parity',
+    profile_url: '',
+    role_id: null,
+    mailbox_id: null,
+    owner_user_id: 1,
+    status: 'retired',
+    notes: 'On hold',
+  });
+  expect(retired).toMatchObject({ status: 'retired', profile_url: null });
+  expect(
+    await platformAccountService.handOver(organizationId, { from_user_id: 1, to_user_id: 2 })
+  ).toEqual({ from_user_id: 1, to_user_id: 2, account_ids: [account.id] });
+  const accountHistory = await platformAccountService.events(organizationId, account.id);
+  expect(accountHistory.data.map(event => event.kind)).toEqual([
+    'owner_changed',
+    'status_changed',
+    'created',
+  ]);
+  await platformAccountService.remove(organizationId, account.id);
+  expect((await platformAccountService.list(organizationId)).data).toEqual([]);
 }

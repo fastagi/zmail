@@ -50,6 +50,16 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.PUT("/mail-roles/:role_id", h.UpdateMailRole).Name("mail_roles.update").WhereNumber("role_id")
 		auth.DELETE("/mail-roles/:role_id", h.DeleteMailRole).Name("mail_roles.destroy").WhereNumber("role_id")
 
+		auth.GET("/platform-accounts", h.ListPlatformAccounts).Name("platform_accounts.index")
+		auth.POST("/platform-accounts", h.CreatePlatformAccount).Name("platform_accounts.store")
+		auth.PUT("/platform-accounts/:account_id", h.UpdatePlatformAccount).
+			Name("platform_accounts.update").WhereNumber("account_id")
+		auth.DELETE("/platform-accounts/:account_id", h.DeletePlatformAccount).
+			Name("platform_accounts.destroy").WhereNumber("account_id")
+		auth.GET("/platform-accounts/:account_id/events", h.ListPlatformAccountEvents).
+			Name("platform_accounts.events.index").WhereNumber("account_id")
+		auth.POST("/platform-account-handovers", h.HandOverPlatformAccounts).Name("platform_account_handovers.store")
+
 		auth.GET("/transactional-mail-log", h.ListTransactionalLog).Name("transactional_mail_log.index")
 		auth.GET("/transactional-mail-log/:message_id", h.GetTransactionalLogEntry).
 			Name("transactional_mail_log.show").WhereNumber("message_id")

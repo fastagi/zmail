@@ -115,6 +115,13 @@ export interface MailboxViewer {
   role: OrganizationRole;
 }
 
+/** The organization's mailboxes, roles, and members as the platform account mock reads them. */
+export interface MockLedgerDirectory {
+  mailboxes: ReadonlyMap<number, { address: string; readable: boolean; visible: boolean }>;
+  roleIds: ReadonlySet<number>;
+  isMember: (userId: number) => boolean;
+}
+
 interface MailboxAccessState {
   type: MailboxType;
   ownerUserId: number | null;
@@ -1651,6 +1658,28 @@ export class MockMailboxStore {
     this.store(state, message);
     if (files.size > 0) state.files.set(id, files);
     return { ok: true, message };
+  }
+
+  /**
+   * What the platform account ledger mock needs to judge a request as the API does: each mailbox
+   * with whether the viewer may read it or see it at all, the organization's role ids, and who is a
+   * current member.
+   */
+  ledgerDirectory(organizationId: number, viewer: MailboxViewer): MockLedgerDirectory {
+    const mailboxes = new Map<number, { address: string; readable: boolean; visible: boolean }>();
+    for (const state of this.statesOf(organizationId)) {
+      const access = mailboxAccessFor(state.access, viewer);
+      mailboxes.set(state.mailbox.id, {
+        address: state.mailbox.address,
+        readable: access.view,
+        visible: anyAccess(access),
+      });
+    }
+    return {
+      mailboxes,
+      roleIds: new Set(this.rolesOf(organizationId).keys()),
+      isMember: userId => this.dependencies.membershipOf(organizationId, userId) !== null,
+    };
   }
 
   /** Test seam: forget every mailbox, message, and claimed address. */

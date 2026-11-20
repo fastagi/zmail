@@ -352,6 +352,10 @@ make test-kest
 ./tests/kest/run_local.sh tests/kest/auth.flow.md
 ```
 
+`run_local.sh` runs every flow in `tests/kest/` when given none. Each flow gets a freshly migrated
+API started with the settings in its `<flow>.kestenv` (when present) and its own `run_id`; the mail
+provider is always `log`, so no flow sends mail.
+
 ## AI Capability
 
 See [`internal/capabilities/README.md`](internal/capabilities/README.md) for the capability catalog.

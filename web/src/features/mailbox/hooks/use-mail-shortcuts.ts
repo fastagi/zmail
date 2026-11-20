@@ -48,7 +48,9 @@ function isTyping(target: EventTarget | null): boolean {
 }
 
 function modalOpen(): boolean {
-  return document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"]') !== null;
+  return (
+    document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"]') !== null
+  );
 }
 
 function shortcutOf(event: KeyboardEvent): MailShortcut | null {
