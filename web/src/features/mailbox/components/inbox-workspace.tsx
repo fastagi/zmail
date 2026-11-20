@@ -220,12 +220,15 @@ type ReadyScope = Extract<MailOrganizationScope, { status: 'ready' }>;
  *
  * Responsive (§11.11): three panes from 1280px; from 1024px the sidebar folds to an icon rail;
  * below 1024px the list and the open mail take turns, with a way back; below 768px the sidebar
- * opens as a sheet. Until the organization is known, and when there is nothing to list, the page
- * keeps the console's ordinary header and frame.
+ * opens as a sheet. While the organization and the mailboxes load, the three panes show as
+ * skeletons; without an organization, and when there is nothing to list, the page keeps the
+ * console's ordinary header and frame.
  */
 export function InboxWorkspace() {
   const t = useT('mailbox');
   const scope = useMailOrganization();
+  // The three panes stand while the organization resolves, so the page does not change shape.
+  if (scope.status === 'loading') return <InboxSkeleton />;
   if (scope.status !== 'ready') {
     return (
       <div className={cn(mailPageClassName, 'space-y-5')}>
@@ -935,7 +938,7 @@ function ReaderSkeleton() {
 /** The three panes while the mailboxes load, at their finished sizes. */
 function InboxSkeleton() {
   return (
-    <div className="flex h-full min-h-0 bg-bg-canvas" aria-hidden="true">
+    <div className="flex h-full min-h-0 bg-bg-canvas" aria-hidden="true" data-inbox-skeleton="">
       <div className="hidden w-14 flex-none flex-col gap-2 px-2 pt-[18px] md:flex xl:w-[248px] xl:px-3">
         <Skeleton className="h-9 w-full" />
         <Skeleton className="h-40 w-full" />

@@ -377,6 +377,22 @@ describe('unified inbox', () => {
     expect(screen.queryByRole('button', { name: 'Manage mailboxes' })).not.toBeInTheDocument();
   });
 
+  it('keeps the three-pane shape while the organization and the mailboxes load', () => {
+    state.organizations.data = undefined;
+    state.organizations.isPending = true;
+    const { container, rerender } = renderRoute();
+
+    expect(container.querySelector('[data-inbox-skeleton]')).not.toBeNull();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Inbox' })).toBeNull();
+
+    state.organizations.data = page([organization('owner')]);
+    state.organizations.isPending = false;
+    state.mailboxes.data = undefined;
+    state.mailboxes.isPending = true;
+    rerender(wrap(<MailboxesRoute />));
+    expect(container.querySelector('[data-inbox-skeleton]')).not.toBeNull();
+  });
+
   it('a loading list shows row-shaped skeletons, never the empty view', () => {
     state.inbox.data = undefined;
     state.inbox.isPending = true;
