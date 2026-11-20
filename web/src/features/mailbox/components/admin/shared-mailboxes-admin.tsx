@@ -195,29 +195,32 @@ function SharedMailboxes() {
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={cursors.length === 0}
-          onClick={() => setCursors(previous => previous.slice(0, -1))}
-        >
-          {t('admin.previous')}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!meta?.has_more || !meta.next_cursor || directory.isFetching}
-          onClick={() => {
-            const next = meta?.next_cursor;
-            if (next) setCursors(previous => [...previous, next]);
-          }}
-        >
-          {t('admin.next')}
-        </Button>
-      </div>
+      {/* One page needs no pager. */}
+      {cursors.length > 0 || meta?.has_more ? (
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={cursors.length === 0}
+            onClick={() => setCursors(previous => previous.slice(0, -1))}
+          >
+            {t('admin.previous')}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!meta?.has_more || !meta.next_cursor || directory.isFetching}
+            onClick={() => {
+              const next = meta?.next_cursor;
+              if (next) setCursors(previous => [...previous, next]);
+            }}
+          >
+            {t('admin.next')}
+          </Button>
+        </div>
+      ) : null}
 
       <CreateSharedMailboxDialog open={dialog?.kind === 'create'} onClose={() => setDialog(null)} />
       <ImportMailboxesDialog open={dialog?.kind === 'import'} onClose={() => setDialog(null)} />
@@ -280,6 +283,7 @@ function MailboxRow({
                 size="sm"
                 variant="ghost"
                 isIcon
+                noScale
                 aria-label={t('admin.moreActions', { address: mailbox.address })}
                 title={t('admin.moreActions', { address: mailbox.address })}
               >
