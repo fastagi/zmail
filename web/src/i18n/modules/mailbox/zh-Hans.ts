@@ -1049,6 +1049,8 @@ const messages = {
       '此群发因退信或垃圾邮件举报过多而被暂停。继续发送可能损害该域名所有邮件的送达率。恢复后不会再自动暂停。',
     pausedToast: '群发已暂停',
     resumedToast: '群发已恢复',
+    queueProgress: '队列进度',
+    sendSuccessRate: '发送成功率',
     progressValue: '已发送 {sent} / {total}',
     progressFailed: '失败 {failed}',
     scheduledFor: '定时于 {time}',
