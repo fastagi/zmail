@@ -71,9 +71,9 @@ func (f *accessFixture) fixClock() func(time.Duration) time.Time {
 	}
 }
 
-func (f *accessFixture) dispatchTriage(t *testing.T, limit int) int {
+func (f *accessFixture) dispatchTriage(t *testing.T) int {
 	t.Helper()
-	handled, err := f.service.DispatchTriage(context.Background(), limit)
+	handled, err := f.service.DispatchTriage(context.Background(), 20)
 	if err != nil {
 		t.Fatalf("DispatchTriage: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestTriageWorkerClassifiesPending(t *testing.T) {
 	question := f.receiveText(t, f.team, "q@sender.test", "Deck", "Can you send the deck?")
 	notice := f.receiveText(t, f.team, "n@sender.test", "Newsletter", "This week in review.")
 
-	if handled := f.dispatchTriage(t, 20); handled != 2 {
+	if handled := f.dispatchTriage(t); handled != 2 {
 		t.Fatalf("handled %d, want 2", handled)
 	}
 	reply := f.triageOf(t, question.ID)
@@ -97,7 +97,7 @@ func TestTriageWorkerClassifiesPending(t *testing.T) {
 	if fyi := f.triageOf(t, notice.ID); fyi.Category != domain.MailTriageFYI {
 		t.Fatalf("notice triage = %+v", fyi)
 	}
-	if handled := f.dispatchTriage(t, 20); handled != 0 {
+	if handled := f.dispatchTriage(t); handled != 0 {
 		t.Fatalf("a second pass handled %d, want 0", handled)
 	}
 }
@@ -116,7 +116,7 @@ func TestTriageWorkerSkipsLockedRows(t *testing.T) {
 		t.Fatalf("lock: %v", err)
 	}
 	done := make(chan int, 1)
-	go func() { done <- f.dispatchTriage(t, 20) }()
+	go func() { done <- f.dispatchTriage(t) }()
 	select {
 	case handled := <-done:
 		if handled != 1 {
@@ -144,23 +144,23 @@ func TestTriageWorkerBackoffThenFailed(t *testing.T) {
 	f.switchTriage(t, true, f.team)
 	message := f.receiveText(t, f.team, "fail@sender.test", "Hello", "Text")
 
-	f.dispatchTriage(t, 20)
+	f.dispatchTriage(t)
 	row := f.triageOf(t, message.ID)
 	if row.Status != domain.MailTriagePending || row.Attempts != 1 || !row.NextAttemptAt.Equal(f.service.now().Add(time.Minute)) {
 		t.Fatalf("after the 1st failure: %+v", row)
 	}
 	advance(30 * time.Second)
-	if handled := f.dispatchTriage(t, 20); handled != 0 {
+	if handled := f.dispatchTriage(t); handled != 0 {
 		t.Fatalf("retried %d before the backoff ended", handled)
 	}
 	advance(30 * time.Second)
-	f.dispatchTriage(t, 20)
+	f.dispatchTriage(t)
 	row = f.triageOf(t, message.ID)
 	if row.Attempts != 2 || !row.NextAttemptAt.Equal(f.service.now().Add(5*time.Minute)) {
 		t.Fatalf("after the 2nd failure: %+v", row)
 	}
 	advance(5 * time.Minute)
-	f.dispatchTriage(t, 20)
+	f.dispatchTriage(t)
 	row = f.triageOf(t, message.ID)
 	if row.Status != domain.MailTriageFailed || row.Category != domain.MailTriageReview || row.Attempts != 3 || row.LastErrorCode == "" {
 		t.Fatalf("after the 3rd failure: %+v", row)
@@ -184,7 +184,7 @@ func TestTriageWorkerDailyCap(t *testing.T) {
 	first := f.receiveText(t, f.team, "cap-1@sender.test", "One", "Text")
 	second := f.receiveText(t, f.team, "cap-2@sender.test", "Two", "Text")
 
-	f.dispatchTriage(t, 20)
+	f.dispatchTriage(t)
 	if got := f.triageOf(t, first.ID); got.Status != domain.MailTriageDone {
 		t.Fatalf("first = %+v", got)
 	}
@@ -204,7 +204,7 @@ func TestTriageWorkerDailyCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	third := f.receiveText(t, f.team, "cap-3@sender.test", "Three", "Text")
-	f.dispatchTriage(t, 20)
+	f.dispatchTriage(t)
 	if got := f.triageOf(t, second.ID); got.Status != domain.MailTriageDone {
 		t.Fatalf("second on the next day = %+v", got)
 	}
@@ -222,7 +222,7 @@ func TestTriageWorkerDefersWhenUnavailable(t *testing.T) {
 	message := f.receiveText(t, f.team, "off@sender.test", "Hello", "Text")
 	f.service.triageModel = disabledTriageModel{}
 
-	f.dispatchTriage(t, 20)
+	f.dispatchTriage(t)
 	row := f.triageOf(t, message.ID)
 	if row.Status != domain.MailTriagePending || row.Attempts != 0 || !row.NextAttemptAt.Equal(f.service.now().Add(30*time.Minute)) {
 		t.Fatalf("row = %+v, want pending for 30 minutes", row)
@@ -241,7 +241,7 @@ func TestTriageWorkerSkipsSwitchedOff(t *testing.T) {
 	if err := f.triageRepo().SetMailboxTriage(context.Background(), f.team.ID, false); err != nil {
 		t.Fatal(err)
 	}
-	f.dispatchTriage(t, 20)
+	f.dispatchTriage(t)
 	if got := f.triageOf(t, message.ID); got.Status != domain.MailTriageSkipped {
 		t.Fatalf("row = %+v, want skipped", got)
 	}
@@ -267,7 +267,7 @@ func TestTriageWorkerSendsOnlyMaskedInput(t *testing.T) {
 	message := f.receiveText(t, f.team, "code@sender.test", "Verification code "+code,
 		"Your verification code is "+code+". Or open https://id.example.com/verify?token=zzz")
 
-	f.dispatchTriage(t, 20)
+	f.dispatchTriage(t)
 	if len(model.inputs) != 1 {
 		t.Fatalf("model got %d inputs", len(model.inputs))
 	}

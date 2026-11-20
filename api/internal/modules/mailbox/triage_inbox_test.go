@@ -44,7 +44,7 @@ func triagedInbox(t *testing.T) (*accessFixture, *domain.MailMessage, *domain.Ma
 	f.switchTriage(t, true, f.team)
 	question := f.receiveText(t, f.team, "inbox-q@sender.test", "Deck", "Can you send the deck?")
 	notice := f.receiveText(t, f.team, "inbox-n@sender.test", "Newsletter", "This week in review.")
-	f.dispatchTriage(t, 20)
+	f.dispatchTriage(t)
 	return f, question, notice
 }
 

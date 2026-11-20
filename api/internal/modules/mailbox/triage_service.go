@@ -105,8 +105,8 @@ func (s *service) SaveTriageSetting(ctx context.Context, viewer domain.Organizat
 	if input.DailyMessageCap < 1 || input.DailyMessageCap > config.MaxAITriageDailyCap {
 		invalid.add("daily_message_cap", fmt.Sprintf("must be between 1 and %d", config.MaxAITriageDailyCap))
 	}
-	if err := invalid.orNil(); err != nil {
-		return TriageSetting{}, err
+	if invalidErr := invalid.orNil(); invalidErr != nil {
+		return TriageSetting{}, invalidErr
 	}
 	if (input.Enabled || input.DraftEnabled) && !s.triageAvailable() {
 		return TriageSetting{}, fmt.Errorf("%w: no AI triage model is configured", ErrTriageUnavailable)

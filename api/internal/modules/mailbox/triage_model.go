@@ -290,6 +290,9 @@ func htmlText(body string) string {
 			if skip == 0 {
 				out.Write(tokenizer.Text())
 			}
+		case html.SelfClosingTagToken:
+			out.WriteByte(' ')
+		case html.CommentToken, html.DoctypeToken:
 		}
 	}
 }

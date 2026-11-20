@@ -72,12 +72,12 @@ func TestMailboxTriageSwitchPermissions(t *testing.T) {
 		t.Fatalf("owner = %+v, %v", mailbox, err)
 	}
 	for name, viewer := range map[string]domain.OrganizationContext{"send member": f.b, "view member": f.c} {
-		if _, err := f.service.SetMailboxTriage(ctx, viewer, f.team.ID, true); !errors.Is(err, domain.ErrPermissionDenied) {
-			t.Fatalf("%s on team@ err = %v", name, err)
+		if _, callErr := f.service.SetMailboxTriage(ctx, viewer, f.team.ID, true); !errors.Is(callErr, domain.ErrPermissionDenied) {
+			t.Fatalf("%s on team@ err = %v", name, callErr)
 		}
 	}
-	if _, err := f.service.SetMailboxTriage(ctx, f.d, f.team.ID, true); !errors.Is(err, ErrMailboxNotFound) {
-		t.Fatalf("outsider err = %v", err)
+	if _, callErr := f.service.SetMailboxTriage(ctx, f.d, f.team.ID, true); !errors.Is(callErr, ErrMailboxNotFound) {
+		t.Fatalf("outsider err = %v", callErr)
 	}
 	mailbox, err = f.service.SetMailboxTriage(ctx, f.admin, f.team.ID, true)
 	if err != nil || !mailbox.AITriageEnabled {
@@ -112,11 +112,11 @@ func TestTriageOverridePermissionsAndValidation(t *testing.T) {
 	if err != nil || triage.DueAt == nil || !triage.DueAt.Equal(due) {
 		t.Fatalf("deadline override = %+v, %v", triage, err)
 	}
-	if _, err := f.service.OverrideTriage(ctx, f.d, f.team.ID, message.ID, TriageOverrideInput{Category: "fyi"}); !errors.Is(err, ErrMailboxNotFound) {
-		t.Fatalf("outsider err = %v", err)
+	if _, callErr := f.service.OverrideTriage(ctx, f.d, f.team.ID, message.ID, TriageOverrideInput{Category: "fyi"}); !errors.Is(callErr, ErrMailboxNotFound) {
+		t.Fatalf("outsider err = %v", callErr)
 	}
-	if _, err := f.service.OverrideTriage(ctx, f.c, f.personal.ID, f.personalMessage.ID, TriageOverrideInput{Category: "fyi"}); !errors.Is(err, ErrMailboxNotFound) {
-		t.Fatalf("C on B's personal mailbox err = %v", err)
+	if _, callErr := f.service.OverrideTriage(ctx, f.c, f.personal.ID, f.personalMessage.ID, TriageOverrideInput{Category: "fyi"}); !errors.Is(callErr, ErrMailboxNotFound) {
+		t.Fatalf("C on B's personal mailbox err = %v", callErr)
 	}
 	for name, input := range map[string]TriageOverrideInput{
 		"review":                {Category: "review"},
@@ -124,8 +124,8 @@ func TestTriageOverridePermissionsAndValidation(t *testing.T) {
 		"due on fyi":            {Category: "fyi", DueAt: &due},
 		"due far in the future": {Category: "deadline", DueAt: new(due.AddDate(10, 0, 0))},
 	} {
-		if _, err := f.service.OverrideTriage(ctx, f.c, f.team.ID, message.ID, input); func() bool { _, ok := asValidationError(err); return !ok }() {
-			t.Fatalf("%s err = %v, want a validation error", name, err)
+		if _, callErr := f.service.OverrideTriage(ctx, f.c, f.team.ID, message.ID, input); func() bool { _, ok := asValidationError(callErr); return !ok }() {
+			t.Fatalf("%s err = %v, want a validation error", name, callErr)
 		}
 	}
 	sent, _, err := f.service.SendMessage(ctx, f.b, f.team.ID, sendInput())
