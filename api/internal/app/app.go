@@ -52,4 +52,6 @@ type Application struct {
 	// MailboxOperator imports mailboxes and summarizes an organization's mailboxes for operator
 	// console commands; nil when the mailbox starter is not selected.
 	MailboxOperator domain.MailboxOperatorConsole
+	// MailTriage classifies mail queued for AI triage; nil when the mailbox starter is not selected.
+	MailTriage domain.MailTriageWorker
 }

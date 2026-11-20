@@ -103,6 +103,7 @@ type Config struct {
 	Asset          AssetConfig
 	Webhook        WebhookConfig
 	Mailbox        MailboxConfig
+	AITriage       AITriageConfig
 	Audit          AuditConfig
 	Operator       OperatorConfig
 	R2             R2Config
@@ -726,6 +727,7 @@ func Load() (*Config, error) {
 			DownloadGrantTTL:   env.GetDuration("ASSET_DOWNLOAD_GRANT_TTL", DefaultAssetDownloadGrantTTL),
 			PendingTTL:         env.GetDuration("ASSET_PENDING_TTL", DefaultAssetPendingTTL),
 		},
+		AITriage: loadAITriageConfig(),
 		Mailbox: MailboxConfig{
 			Domain:              env.Get("MAILBOX_DOMAIN", ""),
 			Provider:            env.Get("MAILBOX_PROVIDER", ""),
@@ -1074,6 +1076,9 @@ func validate(cfg *Config) error {
 		return err
 	}
 	if err := validateMailboxConfig(cfg.Mailbox, cfg.Starters.Selected(StarterMailbox), isProd); err != nil {
+		return err
+	}
+	if err := validateAITriageConfig(cfg.AITriage, isProd); err != nil {
 		return err
 	}
 
@@ -1706,4 +1711,18 @@ func validateDiagnosticsAddr(addr string) error {
 		return fmt.Errorf("SERVER_DIAGNOSTICS_ADDR must listen on a loopback address such as 127.0.0.1")
 	}
 	return nil
+}
+
+// loadAITriageConfig reads AI_TRIAGE_PROVIDER, AI_TRIAGE_MODEL, and AI_TRIAGE_DAILY_CAP. No provider
+// key is read until a real provider is confirmed.
+func loadAITriageConfig() AITriageConfig {
+	provider := strings.ToLower(strings.TrimSpace(env.Get("AI_TRIAGE_PROVIDER", AITriageProviderDisabled)))
+	if provider == "" {
+		provider = AITriageProviderDisabled
+	}
+	return AITriageConfig{
+		Provider: provider,
+		Model:    strings.TrimSpace(env.Get("AI_TRIAGE_MODEL", "")),
+		DailyCap: env.GetInt("AI_TRIAGE_DAILY_CAP", DefaultAITriageDailyCap),
+	}
 }

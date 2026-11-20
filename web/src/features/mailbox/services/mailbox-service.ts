@@ -12,6 +12,7 @@ import {
   MAIL_PAGE_MAX_SIZE,
   MAIL_SEARCH_MAX_LENGTH,
   MAIL_STATS_DEFAULT_DAYS,
+  MAIL_TRIAGE_CATEGORIES,
   MAIL_STATS_MAX_DAYS,
   mailDayStatsListSchema,
   mailLogPageEnvelopeSchema,
@@ -562,7 +563,7 @@ export const mailboxService = {
    */
   async listInbox(
     organizationId: number,
-    { view, roleId, mailboxId, unread, q, group, tz }: InboxFilters,
+    { view, roleId, mailboxId, unread, q, group, triage, tz }: InboxFilters,
     cursor?: string,
     perPage?: number
   ): Promise<InboxPage> {
@@ -570,6 +571,11 @@ export const mailboxService = {
     if (!(INBOX_VIEWS as readonly string[]).includes(view)) throw invalidResponse();
     if (roleId !== undefined && roleId !== 'none') validId(roleId);
     if (mailboxId !== undefined) validId(mailboxId);
+    if (
+      triage?.some(category => !(MAIL_TRIAGE_CATEGORIES as readonly string[]).includes(category))
+    ) {
+      throw invalidResponse();
+    }
     const query = q?.trim();
     if (
       query !== undefined &&
@@ -596,6 +602,7 @@ export const mailboxService = {
         ...(unread === undefined ? {} : { unread }),
         ...(query === undefined ? {} : { q: query }),
         ...(group ? { group } : {}),
+        ...(triage === undefined ? {} : { triage: triage.join(',') }),
         tz,
         ...(cursor === undefined ? {} : { cursor }),
         ...(perPage === undefined ? {} : { per_page: perPage }),

@@ -11,13 +11,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  ComposeDialog,
   emptyDraft,
   forwardDraft,
   quotedReplyDraft,
   replyAllDraft,
   type ComposeDraft,
-} from '@/features/mailbox/components/compose-dialog';
+} from '@/features/mailbox/components/compose-drafts';
 import {
   InboxList,
   InboxListHeader,
@@ -62,6 +61,11 @@ import {
   type MailOrganizationScope,
 } from '@/features/mailbox/hooks/use-mail-organization';
 import { INBOX_VIEWS, MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
+import {
+  INBOX_TRIAGE_TABS,
+  triageTabCategories,
+  type InboxTriageTab,
+} from '@/features/mailbox/triage-tabs';
 import type {
   InboxCounts,
   InboxFilters,
@@ -93,6 +97,14 @@ const InboxReadingPane = lazy(async () => ({
 const ShortcutHelpDialog = lazy(async () => ({
   default: (await import('@/features/mailbox/components/shortcut-help-dialog')).ShortcutHelpDialog,
 }));
+// The composer loads when it first opens.
+const ComposeDialog = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/compose-dialog')).ComposeDialog,
+}));
+// The triage tabs load only for an organization with AI triage on.
+const InboxTriageTabs = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/inbox-triage')).InboxTriageTabs,
+}));
 const CommandPalette = lazy(async () => ({
   default: (await import('@/features/mailbox/components/command-palette')).CommandPalette,
 }));
@@ -120,9 +132,17 @@ const BOX_PARAM = 'box';
 const ROLE_PARAM = 'role';
 const SEARCH_PARAM = 'q';
 const TAB_PARAM = 'tab';
+const TRIAGE_PARAM = 'triage';
 const UNREAD_TAB = 'unread';
 const NO_ROLE = 'none';
-const filterParams = [VIEW_PARAM, BOX_PARAM, ROLE_PARAM, SEARCH_PARAM, TAB_PARAM] as const;
+const filterParams = [
+  VIEW_PARAM,
+  BOX_PARAM,
+  ROLE_PARAM,
+  SEARCH_PARAM,
+  TAB_PARAM,
+  TRIAGE_PARAM,
+] as const;
 const rowIdPattern = /^[1-9]\d{0,15}$/u;
 const fallbackTimeZone = 'UTC';
 
@@ -133,6 +153,8 @@ interface InboxUrlState {
   role: InboxRoleFilter | null;
   q: string;
   unread: boolean;
+  /** The AI triage tab; it applies only to `all` and `today` without a search. */
+  triage: InboxTriageTab | null;
 }
 
 /**
@@ -155,21 +177,35 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
   let role: InboxRoleFilter | null = null;
   if (rawRole === NO_ROLE) role = NO_ROLE;
   else if (rowIdPattern.test(rawRole)) role = Number(rawRole);
+  const rawTriage = params.get(TRIAGE_PARAM) ?? '';
+  const triage =
+    q === '' &&
+    (view === 'all' || view === 'today') &&
+    (INBOX_TRIAGE_TABS as readonly string[]).includes(rawTriage)
+      ? (rawTriage as InboxTriageTab)
+      : null;
   return {
     view,
     box: rowIdPattern.test(rawBox) ? Number(rawBox) : null,
     role,
     q,
     unread: params.get(TAB_PARAM) === UNREAD_TAB,
+    triage,
   };
 }
 
 /**
- * The list query for the URL state. `all` and `sent` group by thread, except for the Unread tab
- * and a search, which list single messages.
+ * The list query for the URL state. `all` and `sent` group by thread, except for the Unread tab,
+ * a search, and an AI triage tab, which list single messages. The triage tab applies only while
+ * the organization's triage is on.
  */
-function inboxFilters({ view, box, role, q, unread }: InboxUrlState, tz: string): InboxFilters {
-  const grouped = !unread && q === '' && (view === 'all' || view === 'sent');
+function inboxFilters(
+  { view, box, role, q, unread, triage }: InboxUrlState,
+  tz: string,
+  triageOn: boolean
+): InboxFilters {
+  const triageTab = triageOn ? triage : null;
+  const grouped = !unread && q === '' && triageTab === null && (view === 'all' || view === 'sent');
   return {
     view,
     ...(role === null ? {} : { roleId: role }),
@@ -177,6 +213,7 @@ function inboxFilters({ view, box, role, q, unread }: InboxUrlState, tz: string)
     ...(unread ? { unread: true } : {}),
     ...(q === '' ? {} : { q }),
     ...(grouped ? { group: 'thread' as const } : {}),
+    ...(triageTab === null ? {} : { triage: triageTabCategories(triageTab) }),
     tz,
   };
 }
@@ -272,9 +309,12 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const [refusedZone, setRefusedZone] = useState<string | null>(null);
   const timeZone = refusedZone === inboxZone ? fallbackTimeZone : inboxZone;
   const urlState = readInboxUrl(searchParams);
-  const filters = inboxFilters(urlState, timeZone);
-  const inbox = useInboxMessages(organizationId, filters, { enabled: zoneReady });
   const counts = useInboxCounts(organizationId, timeZone, { enabled: zoneReady });
+  // AI triage shows only while the organization has it on, which its counts say by not being null.
+  const triageCounts = counts.data?.triage ?? null;
+  const filters = inboxFilters(urlState, timeZone, triageCounts !== null);
+  const inbox = useInboxMessages(organizationId, filters, { enabled: zoneReady });
+  const [triageMenuOpen, setTriageMenuOpen] = useState(false);
   const [managingRoles, setManagingRoles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Mounted from the first open on, so the sheet can animate closed.
@@ -558,6 +598,9 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     reply: sending('reply'),
     replyAll: sending('replyAll'),
     forward: sending('forward'),
+    triage: () => {
+      if (triageCounts !== null && openItem?.direction === 'inbound') setTriageMenuOpen(true);
+    },
     star: () => paneActions.current?.star(),
     compose: compose ?? (() => toast.error(t('inbox.noSendableMailbox'))),
     search: () => searchRef.current?.focus(),
@@ -726,6 +769,17 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           }}
           searchRef={searchRef}
         />
+        {triageCounts !== null &&
+        urlState.q === '' &&
+        (urlState.view === 'all' || urlState.view === 'today') ? (
+          <Suspense fallback={null}>
+            <InboxTriageTabs
+              counts={triageCounts}
+              active={urlState.triage}
+              onChange={tab => setListing({ [TRIAGE_PARAM]: tab })}
+            />
+          </Suspense>
+        ) : null}
         <div data-scroll-pane className="min-h-0 flex-1 overflow-y-auto">
           {list}
         </div>
@@ -754,6 +808,19 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
               navigation={navigation}
               onUnavailable={refreshListing}
               actionsRef={paneActions}
+              triage={
+                triageCounts === null
+                  ? null
+                  : {
+                      menuOpen: triageMenuOpen,
+                      onMenuOpenChange: setTriageMenuOpen,
+                      onUseDraft: (message, body) =>
+                        withSender(() => {
+                          const reply = quotedReplyDraft(message, replyCopy);
+                          return { ...reply, body: `${body}\n\n${reply.body ?? ''}` };
+                        }),
+                    }
+              }
             />
           </Suspense>
         ) : (
@@ -825,13 +892,15 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       ) : null}
 
       {draft && draft.mailbox.access.send ? (
-        <ComposeDialog
-          mailbox={draft.mailbox}
-          fromOptions={draft.fromOptions}
-          draft={draft.draft}
-          onClose={() => setDraft(null)}
-          onStored={() => setDraft(null)}
-        />
+        <Suspense fallback={null}>
+          <ComposeDialog
+            mailbox={draft.mailbox}
+            fromOptions={draft.fromOptions}
+            draft={draft.draft}
+            onClose={() => setDraft(null)}
+            onStored={() => setDraft(null)}
+          />
+        </Suspense>
       ) : null}
     </div>
   );

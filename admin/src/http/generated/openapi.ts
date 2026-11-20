@@ -970,6 +970,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail-triage-setting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the organization's AI triage switches
+         * @description Any member may read them; clients hide triage when `available` or `enabled` is false. The response is never cached.
+         */
+        get: operations["getMailTriageSetting"];
+        /**
+         * Replace the organization's AI triage switches
+         * @description Organization owners and admins only. Every field is required. Turning triage on needs an instance model (`409 MAILBOX.TRIAGE_UNAVAILABLE` otherwise); turning it off always succeeds. The effective daily cap is the lower of `daily_message_cap` and the instance cap.
+         */
+        put: operations["updateMailTriageSetting"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mail-unsubscribes/{token}": {
         parameters: {
             query?: never;
@@ -1487,6 +1511,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mailboxes/{mailbox_id}/messages/{message_id}/reply-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft a reply to an inbound message
+         * @description Needs `send` on the mailbox and the organization's draft switch. The model reads only the masked thread up to this message, the organization's template names, and the mailbox's mail role. The draft is returned once and never stored or sent; the request has no body and the response is never cached.
+         */
+        post: operations["createMailReplyDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mailboxes/{mailbox_id}/messages/{message_id}/reveal": {
         parameters: {
             query?: never;
@@ -1501,6 +1545,26 @@ export interface paths {
          * @description Returns the message with nothing masked, to anyone who may read it, and logs a `mail.secret_revealed` event. Every other response masks one-time codes and sign-in links of inbound mail. The request has no body; the response is never cached.
          */
         post: operations["revealMailMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/messages/{message_id}/triage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set an inbound message's triage category by hand
+         * @description Needs `view` on the mailbox. The decision replaces the AI result for every reader and is never overwritten by the model. `review` cannot be chosen; `due_at` is only for `deadline` and lies within one year back and five years ahead. Outbound mail is `422 COMMON.VALIDATION_FAILED`.
+         */
+        put: operations["updateMailMessageTriage"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1581,6 +1645,26 @@ export interface paths {
          * @description Deletes every message in the mailbox's trash for good, with its files. Needs `organize`.
          */
         post: operations["purgeMailTrash"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/triage-setting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Turn AI triage for a mailbox on or off
+         * @description A personal mailbox's switch belongs to its owner alone; a shared mailbox's needs `manage_members`. Turning it on needs an instance model (`409 MAILBOX.TRIAGE_UNAVAILABLE` otherwise). Only mail received while both this switch and the organization switch are on is queued; earlier mail is never classified.
+         */
+        put: operations["setMailboxTriageSetting"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3228,7 +3312,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -3307,6 +3391,8 @@ export interface components {
              * @description The start of today in the requested time zone, in UTC; inclusive.
              */
             today_starts_at: string;
+            /** @description The caller's unread inbound messages in `default` by triage category; null while the organization's AI triage is off, which is how clients know to hide it. */
+            triage: components["schemas"]["InboxTriageCounts"] | null;
             /** @description The `all_unread` of the readable mailboxes without a mail role. */
             ungrouped_unread: number;
             views: {
@@ -3381,6 +3467,14 @@ export interface components {
             to: string[];
             /** @description Always null; the unified inbox never lists the trash. */
             trashed_at: string | null;
+            /** @description The message's AI triage result, shared by every reader; null while the organization's AI triage is off, before the message is classified, and for outbound mail. */
+            triage: components["schemas"]["MailTriage"] | null;
+        };
+        InboxTriageCounts: {
+            deadline: number;
+            fyi: number;
+            reply: number;
+            review: number;
         };
         /**
          * @description A unified inbox view. `all` is inbound mail in `default`; `today` is inbound mail outside the trash that arrived today; `pending` is mail the caller starred outside `archive` and the trash, both directions; `sent` is outbound mail in `default`.
@@ -3410,6 +3504,8 @@ export interface components {
         Mailbox: {
             access: components["schemas"]["MailboxAccess"];
             address: string;
+            /** @description Whether new inbound mail of this mailbox is queued for AI triage. Triage also needs the organization switch; handover turns it off. */
+            ai_triage_enabled: boolean;
             /** @description True while a personal mailbox's owner has left the organization and nobody has taken it over. */
             awaiting_handover: boolean;
             /** Format: date-time */
@@ -4257,6 +4353,24 @@ export interface components {
          * @enum {string}
          */
         MailPlacement: "default" | "archive" | "folder" | "trash";
+        MailReplyDraft: {
+            basis: components["schemas"]["MailReplyDraftBasis"][];
+            /** @description Plain text for the reader to edit; never stored. */
+            body: string;
+        };
+        MailReplyDraftBasis: {
+            id: components["schemas"]["PositiveID"];
+            /** @enum {string} */
+            kind: "message" | "template";
+            /** @description The message subject or template name. */
+            label: string;
+        };
+        MailReplyDraftResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailReplyDraft"];
+            message: string;
+        };
         /** @description An organization-level grouping of mailboxes by business identity. It grants nothing. */
         MailRole: {
             color: components["schemas"]["MailLabelColor"];
@@ -4503,6 +4617,46 @@ export interface components {
                 /** @description How many messages were deleted for good. */
                 deleted: number;
             };
+            message: string;
+        };
+        /** @description A message's triage result as every reader of the mailbox sees it. */
+        MailTriage: {
+            category: components["schemas"]["MailTriageCategory"];
+            /** @description The deadline; only for `deadline`, and null when none was found. */
+            due_at: string | null;
+            /** @description One masked line explaining the category; empty for a manual decision. */
+            reason: string;
+            /** @enum {string} */
+            source: "ai" | "manual";
+        };
+        /**
+         * @description `reply` needs the reader's answer, `deadline` carries a date, `fyi` is for information, `review` means the model could not decide.
+         * @enum {string}
+         */
+        MailTriageCategory: "reply" | "deadline" | "fyi" | "review";
+        MailTriageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailTriage"] | null;
+            message: string;
+        };
+        MailTriageSetting: {
+            /** @description False when the instance has no AI triage model; triage cannot be turned on. */
+            available: boolean;
+            /** @description Messages classified per UTC day at most; later ones wait for the next day. */
+            daily_message_cap: number;
+            /** @description Whether members with `send` may ask for reply drafts. */
+            draft_enabled: boolean;
+            enabled: boolean;
+            /** @description The instance ceiling; the effective cap is the lower of the two. 0 when unavailable. */
+            instance_daily_cap: number;
+            /** @description Null until an owner or admin saves the switches. */
+            updated_at: string | null;
+        };
+        MailTriageSettingResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailTriageSetting"];
             message: string;
         };
         MailZone: {
@@ -5122,6 +5276,9 @@ export interface components {
         SetMailboxMemberRequest: {
             permission: components["schemas"]["MailboxPermission"];
         };
+        SetMailboxTriageSettingRequest: {
+            enabled: boolean;
+        };
         SetMailboxWebhookSettingRequest: {
             enabled: boolean;
         };
@@ -5350,6 +5507,17 @@ export interface components {
             remove_label_ids?: components["schemas"]["PositiveID"][];
             /** @description The caller's own star; needs `view`. */
             starred?: boolean;
+        };
+        UpdateMailTriageRequest: {
+            /** @enum {string} */
+            category: "reply" | "deadline" | "fyi";
+            /** @description Only with `deadline`. */
+            due_at?: string | null;
+        };
+        UpdateMailTriageSettingRequest: {
+            daily_message_cap: number;
+            draft_enabled: boolean;
+            enabled: boolean;
         };
         /** @enum {string} */
         UsagePeriod: "day" | "month";
@@ -6813,6 +6981,8 @@ export interface operations {
                 q?: string;
                 /** @description Keep only the mailboxes of one mail role, or `none` for the mailboxes without a role. A role the caller cannot see matches nothing. */
                 role_id?: components["schemas"]["PositiveID"] | "none";
+                /** @description Keep only messages whose triage result is one of these comma-separated, distinct categories, for example `reply,review`. Only with `view` `all` or `today`, and without `group` and `q`. While the organization's AI triage is off it matches nothing. */
+                triage?: string;
                 /** @description The IANA time zone that defines today for `view=today`, at most 64 characters. Defaults to `UTC`. `Local` and an empty value are `400 COMMON.INVALID_INPUT`. */
                 tz?: string;
                 /** @description `true` keeps only inbound messages the caller has not read; outbound messages are always read and never match. `false` keeps the others. Read state is the caller's own. */
@@ -8792,6 +8962,74 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    getMailTriageSetting: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The switches; defaults until an owner or admin saves them. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailTriageSettingResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailTriageSetting: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailTriageSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description The switches after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailTriageSettingResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description AI triage is off for the organization, or the instance has no model (`MAILBOX.TRIAGE_UNAVAILABLE`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     unsubscribeMailContact: {
         parameters: {
             query?: never;
@@ -10427,6 +10665,58 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    createMailReplyDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail message identifier. */
+                message_id: components["parameters"]["MailMessageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft and what it relied on. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailReplyDraftResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description AI triage or drafts are off for the organization, or the instance has no model (`MAILBOX.TRIAGE_UNAVAILABLE`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            422: components["responses"]["ValidationFailed"];
+            /** @description The model failed or returned nothing usable (`MAILBOX.TRIAGE_MODEL_FAILED`). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     revealMailMessage: {
         parameters: {
             query?: never;
@@ -10456,6 +10746,53 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailMessageTriage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail message identifier. */
+                message_id: components["parameters"]["MailMessageID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailTriageRequest"];
+            };
+        };
+        responses: {
+            /** @description The message's triage result after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailTriageResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description AI triage is off for the organization, or the instance has no model (`MAILBOX.TRIAGE_UNAVAILABLE`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -10618,6 +10955,52 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    setMailboxTriageSetting: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMailboxTriageSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description The mailbox after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailboxResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description AI triage is off for the organization, or the instance has no model (`MAILBOX.TRIAGE_UNAVAILABLE`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

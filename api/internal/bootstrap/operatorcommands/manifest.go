@@ -23,6 +23,7 @@ func Manifest() infracommands.Manifest {
 		infracommands.Registration{Command: NewWebhookPruneCommand()},
 		infracommands.Registration{Command: NewMailBroadcastWorkCommand()},
 		infracommands.Registration{Command: NewMailZoneWorkCommand()},
+		infracommands.Registration{Command: NewMailTriageWorkCommand()},
 		infracommands.Registration{Command: NewMailZoneReleaseCommand()},
 		infracommands.Registration{Command: NewMailboxImportCommand()},
 		infracommands.Registration{Command: NewOrganizationShowCommand()},

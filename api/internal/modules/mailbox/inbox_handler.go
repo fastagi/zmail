@@ -27,7 +27,7 @@ const (
 )
 
 // inboxParameters are the parameters of the unified inbox; each may appear at most once.
-var inboxParameters = []string{"view", "role_id", "mailbox_id", "unread", "q", "group", "tz", "cursor", "per_page"}
+var inboxParameters = []string{"view", "role_id", "mailbox_id", "unread", "q", "group", "tz", "cursor", "per_page", "triage"}
 
 // ListInboxMessages returns one cursor page of the caller's mail across every mailbox they read.
 func (h *Handler) ListInboxMessages(c *gin.Context) {
@@ -171,6 +171,13 @@ func parseInboxRequest(query url.Values) (InboxRequest, error) {
 		}
 		request.After = cursor
 	}
+	if raw, present := value("triage"); present {
+		categories, ok := parseTriageCategories(raw)
+		if !ok {
+			return invalid("triage")
+		}
+		request.Triage = categories
+	}
 	if raw, present := value("per_page"); present {
 		perPage, err := strconv.Atoi(raw)
 		if errors.Is(err, strconv.ErrRange) {
@@ -194,6 +201,10 @@ func parseInboxRequest(query url.Values) (InboxRequest, error) {
 		return invalid("group needs view all or sent")
 	case request.GroupThreads && (request.Unread != nil || request.Query != ""):
 		return invalid("group cannot be combined with unread or q")
+	case len(request.Triage) > 0 && request.View != domain.InboxViewAll && request.View != domain.InboxViewToday:
+		return invalid("triage needs view all or today")
+	case len(request.Triage) > 0 && (request.GroupThreads || request.Query != ""):
+		return invalid("triage cannot be combined with group or q")
 	}
 	return request, nil
 }

@@ -34,6 +34,8 @@ type InboxRequest struct {
 	// After is the cursor of the previous page; nil for the newest page.
 	After   *domain.InboxCursor
 	PerPage int
+	// Triage keeps only messages triaged into one of these categories; empty applies no filter.
+	Triage []domain.MailTriageCategory
 }
 
 // InboxItem is one row of the unified inbox: a message summary without bodies, the mail role of
@@ -43,6 +45,9 @@ type InboxItem struct {
 	// RoleID is the mailbox's mail role now; nil when it has none.
 	RoleID  *uint
 	Snippet string
+	// Triage is the message's AI triage result; nil without one or with the organization's AI
+	// triage off.
+	Triage *domain.MailTriage
 }
 
 // InboxPage is one page of the unified inbox. Next is nil on the last page.
@@ -65,6 +70,9 @@ type InboxCounts struct {
 	Mailboxes []InboxMailboxCount
 	// TodayStartsAt and TodayEndsAt bound the viewer's day [start, end), in UTC.
 	TodayStartsAt, TodayEndsAt time.Time
+	// Triage counts unread Inbox mail per AI triage category; nil with the organization's AI
+	// triage off.
+	Triage *domain.MailTriageCounts
 }
 
 // InboxRoleCount is the unread Inbox mail of a mail role's readable mailboxes.
@@ -108,11 +116,19 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 	if len(ids) == 0 {
 		return page, nil
 	}
+	triageOn, err := s.triageOn(ctx, viewer.OrganizationID)
+	if err != nil {
+		return page, err
+	}
+	if len(request.Triage) > 0 && !triageOn {
+		// Without AI triage nothing has a visible result, so the filter keeps nothing.
+		return page, nil
+	}
 
 	query := domain.InboxQuery{
 		MailboxIDs: ids, MembershipID: viewer.MembershipID, View: request.View,
 		Unread: request.Unread, Query: request.Query, GroupThreads: request.GroupThreads,
-		After: request.After, Limit: request.PerPage + 1,
+		After: request.After, Limit: request.PerPage + 1, Triage: request.Triage,
 	}
 	if request.View == domain.InboxViewToday {
 		query.DayStart, query.DayEnd = inboxDay(s.now(), request.Location)
@@ -140,6 +156,12 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 	if err != nil {
 		return InboxPage{}, err
 	}
+	triage := map[uint]*domain.MailTriage{}
+	if triageOn {
+		if triage, err = s.triage.ListTriage(ctx, messageIDs); err != nil {
+			return InboxPage{}, err
+		}
+	}
 	for _, message := range messages {
 		mailbox := readable[message.MailboxID]
 		if mailbox == nil {
@@ -154,7 +176,9 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 		if mailbox.RoleID != nil {
 			roleID = new(*mailbox.RoleID)
 		}
-		page.Items = append(page.Items, InboxItem{Message: message, RoleID: roleID, Snippet: inboxItemSnippet(message, snippets[message.ID])})
+		page.Items = append(page.Items, InboxItem{
+			Message: message, RoleID: roleID, Snippet: inboxItemSnippet(message, snippets[message.ID]), Triage: triage[message.ID],
+		})
 	}
 	return page, nil
 }
@@ -193,6 +217,9 @@ func (s *service) InboxCounts(ctx context.Context, viewer domain.OrganizationCon
 	}
 	counts.Today, counts.TodayUnread, counts.Pending, counts.SentWaiting =
 		views.Today, views.TodayUnread, views.Pending, views.SentWaiting
+	if counts.Triage, err = s.triageCounts(ctx, viewer, ids); err != nil {
+		return InboxCounts{}, err
+	}
 
 	roles := map[uint]int{}
 	for _, mailbox := range readable {

@@ -14,7 +14,7 @@ import {
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
-import { replyAllRecipients } from '@/features/mailbox/components/compose-dialog';
+import { replyAllRecipients } from '@/features/mailbox/components/compose-drafts';
 import { ConfirmDialog } from '@/features/mailbox/components/mail-shared';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { useDeleteMailMessage, useUpdateMailMessage } from '@/features/mailbox/hooks/use-mailbox';
