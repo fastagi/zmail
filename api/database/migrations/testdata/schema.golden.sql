@@ -272,6 +272,33 @@ TABLE mail_templates
   COLUMN from_name character varying(100) NOT NULL DEFAULT ''::character varying
   COLUMN variable_definitions jsonb NOT NULL DEFAULT '[]'::jsonb
 
+TABLE mail_triage
+  COLUMN message_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN category character varying(16)
+  COLUMN reason character varying(120) NOT NULL DEFAULT ''::character varying
+  COLUMN due_at timestamp with time zone
+  COLUMN source character varying(16) NOT NULL DEFAULT 'ai'::character varying
+  COLUMN status character varying(16) NOT NULL DEFAULT 'pending'::character varying
+  COLUMN attempts smallint NOT NULL DEFAULT 0
+  COLUMN last_error_code character varying(64)
+  COLUMN model character varying(64) NOT NULL DEFAULT ''::character varying
+  COLUMN decided_by bigint
+  COLUMN next_attempt_at timestamp with time zone NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
+TABLE mail_triage_settings
+  COLUMN organization_id bigint NOT NULL
+  COLUMN enabled boolean NOT NULL DEFAULT false
+  COLUMN daily_message_cap integer NOT NULL DEFAULT 500
+  COLUMN draft_enabled boolean NOT NULL DEFAULT false
+  COLUMN usage_day date
+  COLUMN usage_count integer NOT NULL DEFAULT 0
+  COLUMN updated_by bigint
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_zones
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_zones_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -321,6 +348,7 @@ TABLE mailboxes
   COLUMN sealed_before timestamp with time zone
   COLUMN webhooks_enabled boolean NOT NULL DEFAULT false
   COLUMN role_id bigint
+  COLUMN ai_triage_enabled boolean NOT NULL DEFAULT false
 
 TABLE migrations
   COLUMN id integer NOT NULL DEFAULT nextval('migrations_id_seq'::regclass)
@@ -736,6 +764,21 @@ CONSTRAINT mail_templates.chk_mail_templates_kind CHECK (((kind)::text = ANY ((A
 CONSTRAINT mail_templates.chk_mail_templates_transactional_fields CHECK (((((kind)::text = 'transactional'::text) AND (template_key IS NOT NULL) AND (from_address IS NOT NULL)) OR (((kind)::text = 'standard'::text) AND (template_key IS NULL) AND (from_address IS NULL) AND ((from_name)::text = ''::text) AND (variable_definitions = '[]'::jsonb))))
 CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_templates.mail_templates_pkey PRIMARY KEY (id)
+CONSTRAINT mail_triage.mail_triage_attempts_check CHECK ((attempts >= 0))
+CONSTRAINT mail_triage.mail_triage_category_check CHECK (((category)::text = ANY ((ARRAY['reply'::character varying, 'deadline'::character varying, 'fyi'::character varying, 'review'::character varying])::text[])))
+CONSTRAINT mail_triage.mail_triage_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_triage.mail_triage_due_only_for_deadline CHECK (((due_at IS NULL) OR ((category)::text = 'deadline'::text)))
+CONSTRAINT mail_triage.mail_triage_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_triage.mail_triage_message_id_fkey FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
+CONSTRAINT mail_triage.mail_triage_pkey PRIMARY KEY (message_id)
+CONSTRAINT mail_triage.mail_triage_result_has_category CHECK ((((status)::text <> ALL ((ARRAY['done'::character varying, 'failed'::character varying])::text[])) OR (category IS NOT NULL)))
+CONSTRAINT mail_triage.mail_triage_source_check CHECK (((source)::text = ANY ((ARRAY['ai'::character varying, 'manual'::character varying])::text[])))
+CONSTRAINT mail_triage.mail_triage_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'done'::character varying, 'failed'::character varying, 'skipped'::character varying])::text[])))
+CONSTRAINT mail_triage_settings.mail_triage_settings_daily_message_cap_check CHECK (((daily_message_cap >= 1) AND (daily_message_cap <= 100000)))
+CONSTRAINT mail_triage_settings.mail_triage_settings_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_triage_settings.mail_triage_settings_pkey PRIMARY KEY (organization_id)
+CONSTRAINT mail_triage_settings.mail_triage_settings_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_triage_settings.mail_triage_settings_usage_count_check CHECK ((usage_count >= 0))
 CONSTRAINT mail_zones.chk_mail_zones_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'active'::character varying])::text[])))
 CONSTRAINT mail_zones.fk_mail_zones_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_zones.mail_zones_pkey PRIMARY KEY (id)
@@ -967,6 +1010,11 @@ INDEX CREATE UNIQUE INDEX mail_suppressions_pkey ON mail_suppressions USING btre
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
 INDEX CREATE UNIQUE INDEX mail_templates_key_idx ON mail_templates USING btree (organization_id, template_key) WHERE (template_key IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
+INDEX CREATE INDEX idx_mail_triage_overrides ON mail_triage USING btree (mailbox_id, updated_at) WHERE ((source)::text = 'manual'::text)
+INDEX CREATE INDEX idx_mail_triage_pending ON mail_triage USING btree (next_attempt_at, message_id) WHERE ((status)::text = 'pending'::text)
+INDEX CREATE INDEX idx_mail_triage_results ON mail_triage USING btree (mailbox_id, category) WHERE ((status)::text = ANY ((ARRAY['done'::character varying, 'failed'::character varying])::text[]))
+INDEX CREATE UNIQUE INDEX mail_triage_pkey ON mail_triage USING btree (message_id)
+INDEX CREATE UNIQUE INDEX mail_triage_settings_pkey ON mail_triage_settings USING btree (organization_id)
 INDEX CREATE UNIQUE INDEX idx_mail_zones_cloudflare_zone ON mail_zones USING btree (cloudflare_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_zones_name ON mail_zones USING btree (name)
 INDEX CREATE INDEX idx_mail_zones_organization ON mail_zones USING btree (organization_id)
