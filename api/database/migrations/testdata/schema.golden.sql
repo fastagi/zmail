@@ -423,6 +423,30 @@ TABLE permission_roles
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
 
+TABLE platform_account_events
+  COLUMN id bigint NOT NULL DEFAULT nextval('platform_account_events_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN account_id bigint NOT NULL
+  COLUMN kind character varying(32) NOT NULL
+  COLUMN actor_user_id bigint
+  COLUMN from_value character varying(200)
+  COLUMN to_value character varying(200)
+  COLUMN created_at timestamp with time zone NOT NULL
+
+TABLE platform_accounts
+  COLUMN id bigint NOT NULL DEFAULT nextval('platform_accounts_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN platform character varying(64) NOT NULL
+  COLUMN handle character varying(200) NOT NULL
+  COLUMN profile_url character varying(2048)
+  COLUMN role_id bigint
+  COLUMN mailbox_id bigint
+  COLUMN owner_user_id bigint
+  COLUMN status character varying(32) NOT NULL DEFAULT 'active'::character varying
+  COLUMN notes character varying(2000) NOT NULL DEFAULT ''::character varying
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE platform_operators
   COLUMN user_id bigint NOT NULL
   COLUMN granted_at timestamp with time zone NOT NULL
@@ -758,6 +782,18 @@ CONSTRAINT permission_role_grants.fk_permission_roles_permissions FOREIGN KEY (a
 CONSTRAINT permission_role_grants.permission_role_grants_pkey PRIMARY KEY (access_role_id, permission)
 CONSTRAINT permission_roles.fk_permission_roles_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT permission_roles.permission_roles_pkey PRIMARY KEY (id)
+CONSTRAINT platform_account_events.platform_account_events_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT platform_account_events.platform_account_events_kind_check CHECK (((kind)::text = ANY ((ARRAY['created'::character varying, 'status_changed'::character varying, 'owner_changed'::character varying, 'mailbox_changed'::character varying, 'deleted'::character varying])::text[])))
+CONSTRAINT platform_account_events.platform_account_events_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT platform_account_events.platform_account_events_pkey PRIMARY KEY (id)
+CONSTRAINT platform_accounts.platform_accounts_handle_check CHECK (((char_length(btrim((handle)::text)) >= 1) AND (char_length(btrim((handle)::text)) <= 200)))
+CONSTRAINT platform_accounts.platform_accounts_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE SET NULL
+CONSTRAINT platform_accounts.platform_accounts_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT platform_accounts.platform_accounts_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT platform_accounts.platform_accounts_pkey PRIMARY KEY (id)
+CONSTRAINT platform_accounts.platform_accounts_platform_check CHECK (((char_length(btrim((platform)::text)) >= 1) AND (char_length(btrim((platform)::text)) <= 64)))
+CONSTRAINT platform_accounts.platform_accounts_role_id_fkey FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL
+CONSTRAINT platform_accounts.platform_accounts_status_check CHECK (((status)::text = ANY ((ARRAY['invited'::character varying, 'awaiting_confirmation'::character varying, 'active'::character varying, 'timed_out'::character varying, 'needs_review'::character varying, 'retired'::character varying])::text[])))
 CONSTRAINT platform_operators.fk_platform_operators_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT platform_operators.platform_operators_pkey PRIMARY KEY (user_id)
 CONSTRAINT rate_limit_buckets.rate_limit_buckets_hits_check CHECK ((hits >= 1))
@@ -988,6 +1024,13 @@ INDEX CREATE UNIQUE INDEX permission_role_grants_pkey ON permission_role_grants 
 INDEX CREATE UNIQUE INDEX idx_permission_roles_org_slug ON permission_roles USING btree (organization_id, slug)
 INDEX CREATE INDEX idx_permission_roles_organization_id ON permission_roles USING btree (organization_id)
 INDEX CREATE UNIQUE INDEX permission_roles_pkey ON permission_roles USING btree (id)
+INDEX CREATE INDEX idx_platform_account_events_account ON platform_account_events USING btree (account_id, id)
+INDEX CREATE UNIQUE INDEX platform_account_events_pkey ON platform_account_events USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_platform_accounts_identity ON platform_accounts USING btree (organization_id, lower((platform)::text), lower((handle)::text))
+INDEX CREATE INDEX idx_platform_accounts_mailbox ON platform_accounts USING btree (mailbox_id) WHERE (mailbox_id IS NOT NULL)
+INDEX CREATE INDEX idx_platform_accounts_owner ON platform_accounts USING btree (organization_id, owner_user_id) WHERE (owner_user_id IS NOT NULL)
+INDEX CREATE INDEX idx_platform_accounts_role ON platform_accounts USING btree (role_id) WHERE (role_id IS NOT NULL)
+INDEX CREATE UNIQUE INDEX platform_accounts_pkey ON platform_accounts USING btree (id)
 INDEX CREATE UNIQUE INDEX platform_operators_pkey ON platform_operators USING btree (user_id)
 INDEX CREATE INDEX idx_rate_limit_buckets_window_end ON rate_limit_buckets USING btree (window_end)
 INDEX CREATE UNIQUE INDEX rate_limit_buckets_pkey ON rate_limit_buckets USING btree (key_hash)

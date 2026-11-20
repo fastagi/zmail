@@ -28,8 +28,8 @@ Within the organization, what a caller may do with a mailbox follows from the ma
 
 | Role | May |
 |---|---|
-| `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the unified inbox, the log, and statistics of the mailboxes they may read; list the mail roles of the mailboxes they can see |
-| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; read the usage of each send lane; list the suppression list and remove addresses from it |
+| `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the unified inbox, the log, and statistics of the mailboxes they may read; list the mail roles of the mailboxes they can see; read the platform accounts registered with a mailbox they may read or that they own, with their history |
+| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; list, create, change, and delete every platform account and hand over an owner's accounts; read the usage of each send lane; list the suppression list and remove addresses from it |
 
 The owner and admin roles never grant reading or sending mail by themselves: an admin reads a
 mailbox only as a member of it, and the access history records how they became one. A member who
@@ -91,6 +91,12 @@ recorded but has no special rights to it. A removed member loses access on their
 | Replace a mail role | `PUT /api/mail-roles/:roleId` | `PUT /v1/mail-roles/:role_id` | `200` envelope |
 | Delete a mail role | `DELETE /api/mail-roles/:roleId` | `DELETE /v1/mail-roles/:role_id` | `204` |
 | Set a mailbox's mail role | `PUT /api/mailboxes/:id/role-assignment` | `PUT /v1/mailboxes/:mailbox_id/role-assignment` | `200` envelope |
+| List platform accounts | `GET /api/platform-accounts` | `GET /v1/platform-accounts` | Paginated envelope |
+| Add a platform account | `POST /api/platform-accounts` | `POST /v1/platform-accounts` | `201` envelope |
+| Replace a platform account | `PUT /api/platform-accounts/:accountId` | `PUT /v1/platform-accounts/:account_id` | `200` envelope |
+| Delete a platform account | `DELETE /api/platform-accounts/:accountId` | `DELETE /v1/platform-accounts/:account_id` | `204` |
+| Platform account history | `GET /api/platform-accounts/:accountId/events` | `GET /v1/platform-accounts/:account_id/events` | Paginated envelope |
+| Hand over platform accounts | `POST /api/platform-account-handovers` | `POST /v1/platform-account-handovers` | `201` envelope |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
 | Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
 | Send a transactional message | none | `POST /v1/transactional-messages` | `202`, or `200` for a repeat |
@@ -437,6 +443,115 @@ organization, or is deleted meanwhile is `404 MAILBOX.ROLE_NOT_FOUND`. Setting t
 succeeds and changes nothing.
 
 When a member leaves the organization, every mail role they owned gets `owner_user_id` `null`.
+
+## Platform Accounts
+
+The platform account ledger records the organization's accounts on outside platforms (Medium,
+Behance, and so on): the mailbox each was registered with, its mail role, the user responsible for
+it, and its status, with a history of handovers and status changes. Like mail roles, the ledger
+grants and revokes no mailbox access.
+
+```json
+{
+  "id": 12,
+  "platform": "Medium",
+  "handle": "@acme",
+  "profile_url": "https://medium.com/@acme",
+  "role_id": 3,
+  "mailbox_id": 14,
+  "mailbox_address": "design@mail.example.com",
+  "owner_user_id": 7,
+  "status": "active",
+  "notes": "",
+  "created_at": "2026-11-20T10:00:00Z",
+  "updated_at": "2026-11-20T10:00:00Z"
+}
+```
+
+Owners and admins see and write every account. A member sees, read-only, only the accounts
+registered with a mailbox they may read (`view`) or whose `owner_user_id` is them; any other
+account does not exist for them, so the ledger never reveals another member's private mailbox. For
+an account a member owns but whose mailbox they cannot see, `mailbox_address` is `null`.
+`mailbox_address` is also `null` without a mailbox or when the mailbox was deleted.
+
+`GET /v1/platform-accounts` is paginated (`page`, `per_page`) and ordered by platform, then handle,
+both ignoring case, then id. Filters, all optional and combined with AND:
+
+| Parameter | Matches |
+|---|---|
+| `q` | The platform, the handle, or the registration address, anywhere and ignoring case; `%`, `_`, and `\` match themselves. Trimmed; at most 100 characters. For a member, the address part only matches mailboxes they can see |
+| `role_id`, `mailbox_id`, `owner_user_id` | That id exactly |
+| `status` | One status |
+
+A malformed id, an unknown status, or a longer `q` is `400 COMMON.INVALID_INPUT`.
+
+`POST /v1/platform-accounts` (`201`) and `PUT /v1/platform-accounts/:account_id` (`200`) take the
+same body and need the `owner` or `admin` role; `PUT` replaces every field, an omitted one taking
+its default, and the last write wins:
+
+```json
+{ "platform": "Medium", "handle": "@acme", "profile_url": "https://medium.com/@acme",
+  "role_id": 3, "mailbox_id": 14, "owner_user_id": 7, "status": "active", "notes": "" }
+```
+
+| Field | Rule | Key in `errors` |
+|---|---|---|
+| `platform` | Required; trimmed, then 1 to 64 characters without control characters | `platform` |
+| `handle` | Required; trimmed, then 1 to 200 characters without control characters | `handle` |
+| `profile_url` | Trimmed; empty for none, otherwise an absolute `http` or `https` URL with a host and no credentials, at most 2048 bytes | `profile_url` |
+| `role_id` | A mail role of the organization, or `null` (the default) | `role_id` |
+| `mailbox_id` | A live mailbox of the organization, or `null` (the default) | `mailbox_id` |
+| `owner_user_id` | A current member of the organization, or `null` (the default) | `owner_user_id` |
+| `status` | `invited`, `awaiting_confirmation`, `active` (the default), `timed_out`, `needs_review`, or `retired` | `status` |
+| `notes` | Trimmed, then at most 2000 characters; defaults to empty | `notes` |
+
+Unknown fields are ignored. A body over 8 KiB, that is not a JSON object, or with a field of the
+wrong JSON type is `400 COMMON.INVALID_INPUT`; a field that breaks its rule is
+`422 COMMON.VALIDATION_FAILED`. Platform and handle are unique in the organization ignoring case;
+a taken pair is `409 MAILBOX.PLATFORM_ACCOUNT_TAKEN`. A member gets `403 PERMISSION.DENIED`. An
+account that does not exist or belongs to another organization is
+`404 MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND`. Checks run in the order `400`, `403`, `404`, `422`,
+`409`. Deleting a mail role, mailbox, or user sets the matching field to `null`; a member who
+leaves the organization stays `owner_user_id` until their accounts are handed over.
+
+`DELETE /v1/platform-accounts/:account_id` needs the `owner` or `admin` role and answers `204`.
+
+`GET /v1/platform-accounts/:account_id/events` lists the account's history, newest first,
+paginated, with the listing's visibility (a hidden account is
+`404 MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND`):
+
+```json
+{ "id": 40, "account_id": 12, "kind": "owner_changed", "actor_user_id": 1,
+  "from": "7", "to": "9", "created_at": "2026-11-21T09:00:00Z" }
+```
+
+| `kind` | Written when | `from` / `to` |
+|---|---|---|
+| `created` | The account is added | `null` / the status |
+| `status_changed` | A write changes the status | The statuses |
+| `owner_changed` | A write or a handover changes the owner | User ids as text, `null` for none |
+| `mailbox_changed` | A write changes the registration mailbox | Mailbox ids as text, `null` for none |
+| `deleted` | The account is deleted | The last status / `null` |
+
+A write that changes none of status, owner, and mailbox records no event. The `deleted` event is
+kept after the account is gone, but the account's events are no longer listed.
+
+`POST /v1/platform-account-handovers` moves every account of the organization owned by one user to
+another in one transaction, records an `owner_changed` event for each, and answers `201`:
+
+```json
+{ "from_user_id": 7, "to_user_id": 9 }
+```
+
+```json
+{ "from_user_id": 7, "to_user_id": 9, "account_ids": [12, 15] }
+```
+
+It needs the `owner` or `admin` role. `to_user_id` must be a current member other than
+`from_user_id`; `from_user_id` may have left the organization. Either breaking its rule is
+`422 COMMON.VALIDATION_FAILED` keyed by that field. Nothing to move still answers `201` with an
+empty `account_ids`. It is independent of a mailbox handover: handing over a personal mailbox moves
+no platform account.
 
 ## Domains
 
@@ -2044,6 +2159,8 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.ROLE_NOT_FOUND` | 404 |
 | `MAILBOX.ROLE_NAME_TAKEN` | 409 |
 | `MAILBOX.ROLE_LIMIT_REACHED` | 422 |
+| `MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND` | 404 |
+| `MAILBOX.PLATFORM_ACCOUNT_TAKEN` | 409 |
 | `MAILBOX.ZONE_NOT_FOUND` | 404 |
 | `MAILBOX.ZONE_PENDING` | 409 |
 | `MAILBOX.ZONE_IN_USE` | 409 |

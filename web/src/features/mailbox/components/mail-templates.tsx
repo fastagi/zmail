@@ -879,7 +879,9 @@ function TemplateTestDialog({
         templateId,
         input: { mailbox_id: from, to: recipients as string[] },
       });
-      toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'templates.testSent'));
+      toast.success(
+        t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'templates.testSent')
+      );
       onClose();
     } catch (failure) {
       setErrorKey(resolveMailboxErrorKey(failure));

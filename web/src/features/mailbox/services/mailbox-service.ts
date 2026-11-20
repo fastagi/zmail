@@ -1384,7 +1384,9 @@ assertContract<
   Accepts<z.input<typeof mailMessagePageEnvelopeSchema>, ContractResponse<'listMailMessages', 200>>
 >();
 assertContract<Accepts<z.input<typeof mailMessageSchema>, ContractData<'getMailMessage', 200>>>();
-assertContract<Accepts<z.input<typeof mailMessageSchema>, ContractData<'revealMailMessage', 200>>>();
+assertContract<
+  Accepts<z.input<typeof mailMessageSchema>, ContractData<'revealMailMessage', 200>>
+>();
 assertContract<Accepts<z.input<typeof mailMessageSchema>, ContractData<'sendMailMessage', 201>>>();
 assertContract<Sends<SendMailMessageInput, ContractRequest<'sendMailMessage'>>>();
 assertContract<

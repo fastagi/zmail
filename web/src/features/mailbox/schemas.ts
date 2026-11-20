@@ -107,8 +107,8 @@ const reservedLocalParts = new Set([
   'webmaster',
 ]);
 
-const safeIdSchema = number().check(int(), positive(), maximum(Number.MAX_SAFE_INTEGER));
-const timestampSchema = iso.datetime({ offset: true });
+export const safeIdSchema = number().check(int(), positive(), maximum(Number.MAX_SAFE_INTEGER));
+export const timestampSchema = iso.datetime({ offset: true });
 const positiveIntegerSchema = number().check(int(), positive());
 const nonnegativeIntegerSchema = number().check(int(), nonnegative());
 
@@ -414,7 +414,7 @@ export const mailMessageSchema = strictObject({
   attachments: array(mailAttachmentSchema),
 });
 
-const pageMetaSchema = strictObject({
+export const pageMetaSchema = strictObject({
   current_page: positiveIntegerSchema,
   per_page: positiveIntegerSchema,
   total: nonnegativeIntegerSchema,
@@ -422,7 +422,7 @@ const pageMetaSchema = strictObject({
   from: nonnegativeIntegerSchema,
   to: nonnegativeIntegerSchema,
 });
-const pageLinksSchema = strictObject({
+export const pageLinksSchema = strictObject({
   first: string(),
   last: string(),
   prev: nullable(string()),
