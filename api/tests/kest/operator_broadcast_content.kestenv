@@ -1,0 +1,6 @@
+# Server settings for operator_broadcast_content.flow.md (sourced by run_local.sh; test values only).
+OPTIONAL_STARTERS=organization,mailbox,operator
+MAILBOX_DOMAIN=mail.localhost
+MAILBOX_INBOUND_SECRET=kest-inbound-secret-at-least-32-chars
+MAILBOX_PUBLIC_URL=http://localhost:3000
+OPERATOR_ALLOWED_ORIGINS=http://admin.localhost
