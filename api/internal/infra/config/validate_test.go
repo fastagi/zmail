@@ -816,6 +816,7 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 			RequestTimeout:      DefaultMailboxRequestTimeout,
 			InboundSecret:       strings.Repeat("s", 32),
 			DailySendLimit:      DefaultMailboxDailySendLimit,
+			MaxPerOrganization:  DefaultMailboxMaxPerOrganization,
 		}
 		return cfg
 	}
@@ -888,6 +889,15 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 		{name: "zone limit unused while custom domains are off", environment: "production", edit: func(cfg *Config) {
 			cfg.Mailbox.MaxZonesPerOrganization = 0
 		}},
+		{name: "mailbox limit at the ceiling", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.MaxPerOrganization = MailboxMaxPerOrganizationCeiling
+		}},
+		{name: "mailbox limit zero", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.MaxPerOrganization = 0
+		}, wantErr: "MAILBOX_MAX_PER_ORGANIZATION must be between 1 and 5000"},
+		{name: "mailbox limit above the ceiling", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.MaxPerOrganization = MailboxMaxPerOrganizationCeiling + 1
+		}, wantErr: "MAILBOX_MAX_PER_ORGANIZATION must be between 1 and 5000"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

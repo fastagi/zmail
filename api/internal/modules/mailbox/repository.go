@@ -96,11 +96,39 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMe
 	err := r.conn(ctx).
 		Where("organization_id = ?", organizationID).
 		Order("id asc").
-		Limit(domain.MaxMailboxesPerOrganization).
+		Limit(domain.MailboxesPerOrganizationCeiling).
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
+	return r.withUnreadCounts(ctx, rows, readerMembershipID)
+}
+
+// ListUsableMailboxes is bounded like ListMailboxes; it reads the caller's personal mailboxes,
+// their member rows, and, for managers, personal mailboxes awaiting handover.
+func (r *repository) ListUsableMailboxes(ctx context.Context, organizationID, membershipID, userID uint, includeAwaitingHandover bool) ([]*domain.Mailbox, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	condition := "(type = 'personal' AND owner_user_id = ?) OR id IN (SELECT mailbox_id FROM mailbox_members WHERE membership_id = ?)"
+	if includeAwaitingHandover {
+		condition += " OR (type = 'personal' AND owner_left_at IS NOT NULL)"
+	}
+	var rows []MailboxPO
+	err := r.conn(ctx).
+		Where("organization_id = ?", organizationID).
+		Where(condition, userID, membershipID).
+		Order("id asc").
+		Limit(domain.MailboxesPerOrganizationCeiling).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return r.withUnreadCounts(ctx, rows, membershipID)
+}
+
+// withUnreadCounts converts mailbox rows and fills what readerMembershipID has not read of each.
+func (r *repository) withUnreadCounts(ctx context.Context, rows []MailboxPO, readerMembershipID uint) ([]*domain.Mailbox, error) {
 	mailboxes := make([]*domain.Mailbox, 0, len(rows))
 	ids := make([]uint, 0, len(rows))
 	for i := range rows {

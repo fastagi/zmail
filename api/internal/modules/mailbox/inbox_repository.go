@@ -92,7 +92,7 @@ func (r *repository) ListMailboxAccessRows(ctx context.Context, organizationID, 
 	err := r.conn(ctx).
 		Where("organization_id = ?", organizationID).
 		Order("id ASC").
-		Limit(domain.MaxMailboxesPerOrganization).
+		Limit(domain.MailboxesPerOrganizationCeiling).
 		Find(&boxes).Error
 	if err != nil {
 		return nil, err

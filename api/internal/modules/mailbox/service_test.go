@@ -259,6 +259,24 @@ func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID, reader
 	return owned, nil
 }
 
+func (r *fakeRepository) ListUsableMailboxes(ctx context.Context, organizationID, membershipID, userID uint, includeAwaitingHandover bool) ([]*domain.Mailbox, error) {
+	all, err := r.ListMailboxes(ctx, organizationID, membershipID)
+	if err != nil {
+		return nil, err
+	}
+	usable := make([]*domain.Mailbox, 0, len(all))
+	for _, mailbox := range all {
+		personal := mailbox.Type == domain.MailboxTypePersonal
+		_, member := r.members[[2]uint{mailbox.ID, membershipID}]
+		owned := personal && mailbox.OwnerUserID != nil && *mailbox.OwnerUserID == userID
+		awaiting := includeAwaitingHandover && personal && mailbox.OwnerLeftAt != nil
+		if owned || member || awaiting {
+			usable = append(usable, mailbox)
+		}
+	}
+	return usable, nil
+}
+
 func (r *fakeRepository) FindMailbox(_ context.Context, organizationID, id uint) (*domain.Mailbox, error) {
 	mailbox, ok := r.mailboxes[id]
 	if !ok || mailbox.OrganizationID != organizationID {

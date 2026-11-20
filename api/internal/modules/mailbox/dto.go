@@ -958,3 +958,8 @@ func toMailSuppressionPageMeta(next *uint) MailSuppressionPageMetaResponse {
 	cursor := strconv.FormatUint(uint64(*next), 10)
 	return MailSuppressionPageMetaResponse{NextCursor: &cursor}
 }
+
+// ListMailboxesRequest holds the query of GET /v1/mailboxes.
+type ListMailboxesRequest struct {
+	Scope string `form:"scope" binding:"omitempty,oneof=usable"`
+}

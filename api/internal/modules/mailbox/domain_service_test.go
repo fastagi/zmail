@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
 )
 
@@ -634,7 +635,7 @@ func TestMailboxesWaitForAVerifiedDomain(t *testing.T) {
 func TestAMailboxThatCannotBeStoredLosesItsRoutingRule(t *testing.T) {
 	fixture := newDomainFixture(t)
 	fixture.connect(t, "news.example.com")
-	for i := 0; i < domain.MaxMailboxesPerOrganization; i++ {
+	for i := 0; i < config.DefaultMailboxMaxPerOrganization; i++ {
 		fixture.mailbox(t, 7, fmt.Sprintf("box%d", i))
 	}
 	if _, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedInput("hello", "", "news.example.com")); !errors.Is(err, ErrMailboxLimitReached) {

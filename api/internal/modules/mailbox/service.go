@@ -60,6 +60,8 @@ type Settings struct {
 	EmailWorker string
 	// MaxZonesPerOrganization bounds the managed zones one organization may have Zmail create.
 	MaxZonesPerOrganization int
+	// MaxMailboxes bounds the mailboxes one organization may own; 0 takes the default.
+	MaxMailboxes int
 	// TransactionalEnabled accepts transactional messages; SecretEncryptionKey must be set too.
 	TransactionalEnabled bool
 	// SecretEncryptionKey encrypts queued transactional content and keys idempotency fingerprints.
@@ -137,8 +139,12 @@ type Service interface {
 	CreateMailDNSRecord(ctx context.Context, organizationID, zoneID uint, input MailDNSRecordInput) (*MailDNSRecord, error)
 	UpdateMailDNSRecord(ctx context.Context, organizationID, zoneID uint, recordID string, patch MailDNSRecordPatch) (*MailDNSRecord, error)
 	DeleteMailDNSRecord(ctx context.Context, organizationID, zoneID uint, recordID string) error
-	// ListMailboxes lists the mailboxes the viewer has any access to, with that access.
-	ListMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error)
+	// ListMailboxes lists the mailboxes the viewer has any access to, with that access; the usable
+	// scope keeps only those the viewer can read or send from, plus, for owners and admins,
+	// personal mailboxes awaiting handover.
+	ListMailboxes(ctx context.Context, viewer domain.OrganizationContext, scope MailboxListScope) ([]*domain.Mailbox, error)
+	// MaxMailboxes is the configured per-organization mailbox limit.
+	MaxMailboxes() int
 	DeleteMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) error
 	// ListMessages lists a mailbox's messages, or with filter.GroupThreads one row per thread, each
 	// row the newest message of its thread in the view with its Thread filled.
@@ -406,6 +412,7 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 		DailySendLimit:   config.DefaultMailboxDailySendLimit,
 
 		MaxZonesPerOrganization: config.DefaultMailboxMaxZonesPerOrganization,
+		MaxMailboxes:            config.DefaultMailboxMaxPerOrganization,
 	}
 	if cfg == nil {
 		return settings
@@ -425,6 +432,9 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	if resolved.MaxZonesPerOrganization > 0 {
 		settings.MaxZonesPerOrganization = resolved.MaxZonesPerOrganization
 	}
+	if resolved.MaxPerOrganization > 0 {
+		settings.MaxMailboxes = resolved.MaxPerOrganization
+	}
 	settings.TransactionalEnabled = resolved.TransactionalEnabled
 	settings.SecretEncryptionKey = resolved.SecretEncryptionKey
 	settings.SimulatorDomain = resolved.SimulatorDomain
@@ -439,6 +449,14 @@ func (s *service) Domain() string {
 
 func (s *service) Provider() string {
 	return s.settings.Provider
+}
+
+// MaxMailboxes is the configured per-organization mailbox limit.
+func (s *service) MaxMailboxes() int {
+	if s.settings.MaxMailboxes > 0 {
+		return s.settings.MaxMailboxes
+	}
+	return config.DefaultMailboxMaxPerOrganization
 }
 
 func (s *service) DailySendLimit() int {
@@ -566,8 +584,28 @@ func (s *service) Stats(ctx context.Context, viewer domain.OrganizationContext, 
 	return stats, nil
 }
 
-func (s *service) ListMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error) {
-	mailboxes, err := s.visibleMailboxes(ctx, viewer)
+// MailboxListScope selects which mailboxes ListMailboxes returns.
+type MailboxListScope string
+
+const (
+	// MailboxListScopeAll lists every mailbox the viewer has any access to.
+	MailboxListScopeAll MailboxListScope = ""
+	// MailboxListScopeUsable lists the mailboxes the viewer can read or send from, plus, for owners
+	// and admins, personal mailboxes awaiting handover.
+	MailboxListScopeUsable MailboxListScope = "usable"
+)
+
+func (s *service) ListMailboxes(ctx context.Context, viewer domain.OrganizationContext, scope MailboxListScope) ([]*domain.Mailbox, error) {
+	var mailboxes []*domain.Mailbox
+	var err error
+	switch scope {
+	case MailboxListScopeAll:
+		mailboxes, err = s.visibleMailboxes(ctx, viewer)
+	case MailboxListScopeUsable:
+		mailboxes, err = s.usableMailboxes(ctx, viewer)
+	default:
+		return nil, fmt.Errorf("%w: unknown mailbox list scope", domain.ErrInvalidInput)
+	}
 	if err != nil {
 		return nil, err
 	}

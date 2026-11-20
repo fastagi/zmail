@@ -73,7 +73,7 @@ func (h *Handler) ListDomains(c *gin.Context) {
 		items = append(items, MailboxDomainResponse{
 			Domain:                  mailboxDomain.Name,
 			Kind:                    kind,
-			MaxMailboxes:            domain.MaxMailboxesPerOrganization,
+			MaxMailboxes:            h.service.MaxMailboxes(),
 			Provider:                h.service.Provider(),
 			InboundEnabled:          h.service.InboundEnabled(),
 			DailySendLimit:          h.service.DailySendLimit(),
@@ -93,14 +93,19 @@ func (h *Handler) ListDomains(c *gin.Context) {
 }
 
 // ListMailboxes returns the organization's mailboxes the caller has any access to, each with that
-// access. Admins see every mailbox's metadata; mail stays with its owner and members.
-// fastbuild:bounded-list max=50 reason=an organization owns at most domain.MaxMailboxesPerOrganization mailboxes
+// access. Admins see every mailbox's metadata; mail stays with its owner and members. The usable
+// scope narrows it to the mailboxes the caller works in.
+// fastbuild:bounded-list max=5000 reason=an organization owns at most domain.MailboxesPerOrganizationCeiling mailboxes
 func (h *Handler) ListMailboxes(c *gin.Context) {
 	viewer, ok := organizationScope(c)
 	if !ok {
 		return
 	}
-	mailboxes, err := h.service.ListMailboxes(c.Request.Context(), viewer)
+	var request ListMailboxesRequest
+	if !bindValidatedQuery(c, &request) {
+		return
+	}
+	mailboxes, err := h.service.ListMailboxes(c.Request.Context(), viewer, MailboxListScope(request.Scope))
 	if err != nil {
 		response.HandleError(c, "Failed to list mailboxes", err)
 		return
@@ -590,4 +595,14 @@ func managerScope(c *gin.Context) (domain.OrganizationContext, bool) {
 func privateResponse(c *gin.Context) {
 	c.Header("Cache-Control", "private, no-store")
 	c.Header("Vary", "Authorization, Organization-Id")
+}
+
+// bindValidatedQuery binds query parameters whose values the contract validates: a value that fails
+// its validation tag is 422 COMMON.VALIDATION_FAILED, anything unparseable 400 COMMON.INVALID_INPUT.
+func bindValidatedQuery(c *gin.Context, obj any) bool {
+	if err := c.ShouldBindQuery(obj); err != nil {
+		httphandler.WriteBodyError(c, err)
+		return false
+	}
+	return true
 }

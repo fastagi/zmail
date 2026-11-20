@@ -91,7 +91,7 @@ func TestInboxAccessRowsListMemberRowsWithoutCounts(t *testing.T) {
 	}
 	createOwner(t, repo.db, 99)
 	foreign := &domain.Mailbox{OrganizationID: 99, Address: "foreign@mail.example", Type: domain.MailboxTypeShared}
-	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(ctx, foreign, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("create foreign mailbox: %v", err)
 	}
 
@@ -596,7 +596,7 @@ func TestInboxCountUnreadOnlyGivenMailboxes(t *testing.T) {
 	repo := f.inboxRepo()
 	createOwner(t, repo.db, 99)
 	foreign := &domain.Mailbox{OrganizationID: 99, Address: "foreign@mail.example", Type: domain.MailboxTypeShared}
-	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(ctx, foreign, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("create foreign mailbox: %v", err)
 	}
 	f.deliver(t, foreign, delivery{subject: "foreign"})

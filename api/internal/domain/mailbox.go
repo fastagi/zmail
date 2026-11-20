@@ -7,8 +7,10 @@ import (
 
 // Mailbox limits shared by the service, persistence, and the HTTP contract.
 const (
-	// MaxMailboxesPerOrganization bounds how many addresses one organization may own.
-	MaxMailboxesPerOrganization = 50
+	// MailboxesPerOrganizationCeiling is the highest per-organization mailbox limit an operator may
+	// configure (MAILBOX_MAX_PER_ORGANIZATION). Every mailbox list is bounded by it rather than by
+	// the configured limit, so lowering the limit never hides an existing mailbox.
+	MailboxesPerOrganizationCeiling = 5000
 	// MaxMailRecipients matches the provider limit across to and cc.
 	MaxMailRecipients = 50
 	// MaxMailSubjectLength is the RFC 5322 line limit for a subject.
@@ -867,6 +869,10 @@ type MailboxRepository interface {
 	// ListMailboxes lists the organization's mailboxes. UnreadCount is what readerMembershipID has
 	// not read of each mailbox's inbound mail in default (the Inbox) after its seal boundary.
 	ListMailboxes(ctx context.Context, organizationID, readerMembershipID uint) ([]*Mailbox, error)
+	// ListUsableMailboxes lists, with unread counts as ListMailboxes, the organization's live
+	// mailboxes that are personal and owned by userID or hold a member row of membershipID, and
+	// with includeAwaitingHandover also every personal mailbox whose owner left.
+	ListUsableMailboxes(ctx context.Context, organizationID, membershipID, userID uint, includeAwaitingHandover bool) ([]*Mailbox, error)
 	FindMailbox(ctx context.Context, organizationID, id uint) (*Mailbox, error)
 	FindMailboxByAddress(ctx context.Context, address string) (*Mailbox, error)
 	DeleteMailbox(ctx context.Context, organizationID, id uint) error

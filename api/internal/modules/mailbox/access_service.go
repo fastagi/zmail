@@ -121,6 +121,34 @@ func (s *service) visibleMailboxes(ctx context.Context, viewer domain.Organizati
 	return visible, nil
 }
 
+// usableMailboxes lists the mailboxes the viewer can read or send from, plus, for owners and admins,
+// personal mailboxes awaiting handover, each with the viewer's access filled in. It reads only the
+// viewer's own mailboxes, so it stays cheap however many mailboxes the organization owns.
+func (s *service) usableMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error) {
+	manager := viewer.Role.CanManageOrganization()
+	mailboxes, err := s.repo.ListUsableMailboxes(ctx, viewer.OrganizationID, viewer.MembershipID, viewer.UserID, manager)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.ListMembershipMailboxMembers(ctx, viewer.OrganizationID, viewer.MembershipID)
+	if err != nil {
+		return nil, err
+	}
+	members := make(map[uint]*domain.MailboxMember, len(rows))
+	for _, row := range rows {
+		members[row.MailboxID] = row
+	}
+	usable := make([]*domain.Mailbox, 0, len(mailboxes))
+	for _, mailbox := range mailboxes {
+		mailbox.Access = domain.MailboxAccessFor(mailbox, viewer, members[mailbox.ID])
+		awaiting := manager && mailbox.Type == domain.MailboxTypePersonal && mailbox.OwnerLeftAt != nil
+		if mailbox.Access.View || mailbox.Access.Send || (awaiting && mailbox.Access.Any()) {
+			usable = append(usable, mailbox)
+		}
+	}
+	return usable, nil
+}
+
 // readableMailboxIDs lists the mailboxes whose mail the viewer may read.
 func (s *service) readableMailboxIDs(ctx context.Context, viewer domain.OrganizationContext) ([]uint, error) {
 	mailboxes, err := s.visibleMailboxes(ctx, viewer)
@@ -322,7 +350,7 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 		}
 	}
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
-		if createErr := s.repo.CreateMailbox(tx, mailbox, domain.MaxMailboxesPerOrganization); createErr != nil {
+		if createErr := s.repo.CreateMailbox(tx, mailbox, s.MaxMailboxes()); createErr != nil {
 			return createErr
 		}
 		detail := map[string]any{"type": string(mailbox.Type)}
