@@ -37,6 +37,8 @@ export interface ReaderProps {
   onPrevious: (() => void) | null;
   onNext: (() => void) | null;
   onClose: () => void;
+  /** Opens the next message once the open one was moved out of the view; `onClose` without it. */
+  onLeave?: () => void;
   onReply: (message: MailMessage) => void;
   onReplyAll: (message: MailMessage) => void;
   onForward: (message: MailMessage) => void;
@@ -467,6 +469,7 @@ function MessageHeaders({ message, reader }: { message: MailMessage; reader: Rea
         onReplyAll={reader.onReplyAll}
         onForward={reader.onForward}
         onClose={reader.onClose}
+        onLeave={reader.onLeave}
       />
     </div>
   );

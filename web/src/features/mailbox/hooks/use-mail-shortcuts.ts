@@ -43,14 +43,16 @@ const singleKeys: Readonly<Record<string, MailShortcut>> = {
 /** Moving may repeat while the key is held; an action runs once per press. */
 const repeatable = new Set<MailShortcut>(['next', 'previous']);
 
-function isTyping(target: EventTarget | null): boolean {
+/** Whether the key went to a field or editable text, where single keys are text. */
+export function isTyping(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
     (target.isContentEditable || target.closest('input, textarea, select') !== null)
   );
 }
 
-function modalOpen(): boolean {
+/** Whether a dialog is open, which keeps its keys (`Esc` included) for itself. */
+export function modalOpen(): boolean {
   return (
     document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"]') !== null
   );
