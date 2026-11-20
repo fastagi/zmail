@@ -32,6 +32,7 @@ describe('auth service response contracts', () => {
           name: 'Ada Lovelace',
           email: 'ada@example.com',
           password: 'secret-123',
+          code: '042917',
         }),
     ],
   ])('rejects a malformed %s success payload', async (_name, invoke) => {
