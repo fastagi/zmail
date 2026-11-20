@@ -46,6 +46,8 @@ export type MailboxErrorKey =
   | 'errors.organizationNotFound'
   | 'errors.createDenied'
   | 'errors.permissionDenied'
+  | 'errors.platformAccountNotFound'
+  | 'errors.platformAccountTaken'
   | 'errors.sendLimitReached'
   | 'errors.senderNotConfigured'
   | 'errors.templateInvalid'
@@ -138,6 +140,8 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_ROLE_NOT_FOUND]: 'errors.roleNotFound',
   [ApiErrorCode.MAILBOX_ROLE_NAME_TAKEN]: 'errors.roleNameTaken',
   [ApiErrorCode.MAILBOX_ROLE_LIMIT_REACHED]: 'errors.roleLimitReached',
+  [ApiErrorCode.MAILBOX_PLATFORM_ACCOUNT_NOT_FOUND]: 'errors.platformAccountNotFound',
+  [ApiErrorCode.MAILBOX_PLATFORM_ACCOUNT_TAKEN]: 'errors.platformAccountTaken',
   [ApiErrorCode.MAILBOX_ZONE_NOT_FOUND]: 'errors.zoneNotFound',
   [ApiErrorCode.MAILBOX_ZONE_PENDING]: 'errors.zonePending',
   [ApiErrorCode.MAILBOX_ZONE_IN_USE]: 'errors.zoneInUse',

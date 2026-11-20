@@ -28,6 +28,7 @@ import {
   useUpdateMailRole,
 } from '@/features/mailbox/hooks/use-inbox';
 import { useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
+import { usePlatformAccountCount } from '@/features/mailbox/hooks/use-platform-accounts';
 import {
   MAIL_LABEL_COLORS,
   MAIL_ROLE_DESCRIPTION_MAX_LENGTH,
@@ -161,6 +162,7 @@ export function ManageRolesDialog({
                             t('roles.mailboxCount', { count: role.mailbox_ids.length })}
                         </span>
                       </span>
+                      <RoleAccountCount roleId={role.id} />
                       <Button
                         type="button"
                         isIcon
@@ -230,6 +232,18 @@ export function ManageRolesDialog({
         </section>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The platform accounts filed under a role, once the ledger answers; nothing otherwise. */
+function RoleAccountCount({ roleId }: { roleId: number }) {
+  const t = useT('mailbox');
+  const count = usePlatformAccountCount(useMailOrganizationId(), roleId);
+  if (count.data === undefined) return null;
+  return (
+    <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+      {t('roles.accountCount', { count: count.data })}
+    </span>
   );
 }
 

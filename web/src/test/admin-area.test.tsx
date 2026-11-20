@@ -87,6 +87,14 @@ describe('organization admin area', () => {
     expect(state.notFound).not.toHaveBeenCalled();
   });
 
+  it('lists the platform account page', () => {
+    state.pathname = '/console/admin/platform-accounts';
+    renderWithMessages(<AdminShell>content</AdminShell>);
+    const link = screen.getByRole('link', { name: 'Platform accounts' });
+    expect(link).toHaveAttribute('href', '/console/admin/platform-accounts?org=1');
+    expect(link).toHaveAttribute('aria-current', 'page');
+  });
+
   it('marks Domains current on a zone DNS page', () => {
     state.pathname = '/console/admin/domains/9/dns';
     renderWithMessages(<AdminShell>content</AdminShell>);

@@ -29,6 +29,7 @@ export const ROUTES = {
     // The organization admin area: owners and admins only.
     ADMIN: '/console/admin',
     ADMIN_MAILBOXES: '/console/admin/mailboxes',
+    ADMIN_PLATFORM_ACCOUNTS: '/console/admin/platform-accounts',
     MAIL_DOMAIN: '/console/admin/domains',
     MAIL_ZONE_DNS: '/console/admin/domains/:zoneId/dns',
     MAIL_TEMPLATES: '/console/mail-templates',
