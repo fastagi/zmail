@@ -19,8 +19,9 @@ import (
 )
 
 type authGuardFakeService struct {
-	loginCalls         int
-	passwordResetCalls int
+	loginCalls            int
+	passwordResetCalls    int
+	registrationCodeCalls int
 }
 
 func (s *authGuardFakeService) Register(context.Context, *UserRegisterRequest) (*domain.User, error) {
@@ -37,6 +38,11 @@ func (s *authGuardFakeService) Login(context.Context, *UserLoginRequest) (*UserL
 
 func (s *authGuardFakeService) RequestPasswordReset(context.Context, *UserPasswordResetRequest) error {
 	s.passwordResetCalls++
+	return nil
+}
+
+func (s *authGuardFakeService) RequestRegistrationEmailCode(context.Context, *RegistrationEmailCodeRequest) error {
+	s.registrationCodeCalls++
 	return nil
 }
 

@@ -23,6 +23,7 @@ import (
 // AuthService defines the authentication and public account flows.
 type AuthService interface {
 	Register(ctx context.Context, req *UserRegisterRequest) (*domain.User, error)
+	RequestRegistrationEmailCode(ctx context.Context, req *RegistrationEmailCodeRequest) error
 	Login(ctx context.Context, req *UserLoginRequest) (*UserLoginResponse, error)
 	RequestPasswordReset(ctx context.Context, req *UserPasswordResetRequest) error
 	ConfirmPasswordReset(ctx context.Context, req *UserPasswordResetConfirmRequest) error
@@ -56,6 +57,7 @@ type UserMailer interface {
 	IsConfigured() bool
 	SendPasswordResetEmail(ctx context.Context, to string, resetToken string) error
 	SendWelcomeEmail(ctx context.Context, to string, username string) error
+	SendRegistrationCodeEmail(ctx context.Context, to string, code string) error
 }
 
 type passwordResetStore interface {
@@ -92,6 +94,12 @@ type service struct {
 	registrationOpen bool
 	// runPasswordReset starts reset delivery; tests replace it with an inline runner.
 	runPasswordReset func(ctx context.Context, task func(context.Context))
+	// emailCodes stores registration codes; the repository provides it.
+	emailCodes registrationEmailCodeStore
+	// emailCodeRequired makes Register demand a mailed code (AUTH_REGISTRATION_EMAIL_CODE_REQUIRED).
+	emailCodeRequired bool
+	// runRegistrationCode starts code delivery; tests replace it with an inline runner.
+	runRegistrationCode func(ctx context.Context, task func(context.Context))
 }
 
 var (
@@ -124,9 +132,15 @@ func NewService(
 		runPasswordReset: newBackgroundRunner(
 			"user.password_reset", passwordResetConcurrency, passwordResetTimeout,
 		).run,
+		runRegistrationCode: newBackgroundRunner(
+			"user.registration_email_code", registrationEmailCodeConcurrency, registrationEmailCodeTimeout,
+		).run,
 	}
 	if store, ok := repo.(userAdministrationStore); ok {
 		svc.admin = store
+	}
+	if store, ok := repo.(registrationEmailCodeStore); ok {
+		svc.emailCodes = store
 	}
 	return svc
 }
@@ -146,6 +160,11 @@ func ProvideService(
 	svc.signIns = guard.loginThrottle()
 	if cfg != nil {
 		svc.registrationOpen = !cfg.Authentication.RegistrationDisabled
+		svc.emailCodeRequired = cfg.Authentication.RegistrationEmailCodeRequired
+	}
+	if svc.registrationOpen && svc.emailCodeRequired && (mailer == nil || !mailer.IsConfigured()) {
+		slog.Warn("user.registration_email_code_mailer_missing",
+			"detail", "registration requires an email code but no system mailer is configured, so nobody can register")
 	}
 	return svc
 }
@@ -160,6 +179,41 @@ func (s *service) Register(ctx context.Context, req *UserRegisterRequest) (*doma
 		return nil, domain.ErrRegistrationDisabled
 	}
 
+	var (
+		user *domain.User
+		err  error
+	)
+	if s.emailCodeRequired {
+		user, err = s.registerWithEmailCode(ctx, req)
+	} else {
+		var hashedPassword string
+		if hashedPassword, err = hashRegistrationPassword(req.Password); err == nil {
+			user, err = s.createAccount(ctx, req, hashedPassword)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Publish UserCreated event (fully decoupled side effects)
+	// Welcome delivery is fire-and-forget after the account transaction. Keep
+	// request values for correlation, but let the email adapter own its deadline.
+	s.eventBus.PublishAsync(context.WithoutCancel(ctx), domain.NewUserCreatedEvent(user))
+
+	return user, nil
+}
+
+func hashRegistrationPassword(password string) (string, error) {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("failed to hash password: %w", err)
+	}
+	return string(hashedPassword), nil
+}
+
+// createAccount checks the username and email are free and inserts the account. It runs inside the
+// registration-code transaction when codes are required.
+func (s *service) createAccount(ctx context.Context, req *UserRegisterRequest, hashedPassword string) (*domain.User, error) {
 	existingByUsername, err := s.repo.FindByUsername(ctx, req.Username)
 	if err == nil && existingByUsername != nil {
 		return nil, domain.ErrUsernameAlreadyExists
@@ -177,16 +231,10 @@ func (s *service) Register(ctx context.Context, req *UserRegisterRequest) (*doma
 		return nil, fmt.Errorf("failed to check existing email: %w", err)
 	}
 
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, fmt.Errorf("failed to hash password: %w", err)
-	}
-
 	user := &domain.User{
 		Username: req.Username,
 		Email:    req.Email,
-		Password: string(hashedPassword),
+		Password: hashedPassword,
 		Nickname: req.Nickname,
 		Phone:    req.Phone,
 		Status:   1,
@@ -195,12 +243,6 @@ func (s *service) Register(ctx context.Context, req *UserRegisterRequest) (*doma
 	if err := s.repo.Create(ctx, user); err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
-
-	// Publish UserCreated event (fully decoupled side effects)
-	// Welcome delivery is fire-and-forget after the account transaction. Keep
-	// request values for correlation, but let the email adapter own its deadline.
-	s.eventBus.PublishAsync(context.WithoutCancel(ctx), domain.NewUserCreatedEvent(user))
-
 	return user, nil
 }
 

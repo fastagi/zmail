@@ -21,6 +21,7 @@ const (
 	authEndpointRegister             authEndpoint = "register"
 	authEndpointPasswordReset        authEndpoint = "password_reset"
 	authEndpointPasswordResetConfirm authEndpoint = "password_reset_confirm"
+	authEndpointRegisterEmailCode    authEndpoint = "register_email_code"
 )
 
 type authEndpointGuard struct {
@@ -63,6 +64,7 @@ func newAuthAbuseGuardWithStores(cfg config.AuthenticationRateLimitConfig, store
 	guard.endpoints[authEndpointRegister] = buildAuthEndpointGuard(stores, authEndpointRegister, cfg.Register, cfg.MaxBucketsPerRule)
 	guard.endpoints[authEndpointPasswordReset] = buildAuthEndpointGuard(stores, authEndpointPasswordReset, cfg.PasswordReset, cfg.MaxBucketsPerRule)
 	guard.endpoints[authEndpointPasswordResetConfirm] = buildAuthEndpointGuard(stores, authEndpointPasswordResetConfirm, cfg.PasswordResetConfirm, cfg.MaxBucketsPerRule)
+	guard.endpoints[authEndpointRegisterEmailCode] = buildAuthEndpointGuard(stores, authEndpointRegisterEmailCode, cfg.RegisterEmailCode, cfg.MaxBucketsPerRule)
 	return guard
 }
 

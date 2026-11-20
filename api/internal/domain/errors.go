@@ -20,6 +20,13 @@ var (
 	ErrPasswordResetTokenExpired = errors.New("password reset token is expired")
 	ErrSignInThrottled           = errors.New("too many failed sign-in attempts")
 
+	// ErrRegistrationEmailCodeRequired means registration needs an email code and none was sent.
+	ErrRegistrationEmailCodeRequired = errors.New("registration email code is required")
+	// ErrRegistrationEmailCodeInvalid covers a wrong, used, superseded, or never-issued code.
+	ErrRegistrationEmailCodeInvalid = errors.New("registration email code is invalid")
+	// ErrRegistrationEmailCodeExpired covers an expired code and one whose attempts are spent.
+	ErrRegistrationEmailCodeExpired = errors.New("registration email code is expired")
+
 	// Permission errors
 	ErrPermissionDenied            = errors.New("permission denied")
 	ErrPermissionUnknown           = errors.New("permission is not registered")
