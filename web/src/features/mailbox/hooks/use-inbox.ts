@@ -218,6 +218,41 @@ function patchInboxRow(
   };
 }
 
+/**
+ * Takes a row out of every cached unified inbox listing it leaves by moving to `placement`, before
+ * the server answers: the trash leaves every view, the archive every view but Today, which keeps
+ * mail archived since it arrived. Answers the function that puts the listings back.
+ */
+export function removeInboxRow(
+  queryClient: QueryClient,
+  organizationId: number,
+  rowId: number,
+  placement: 'archive' | 'trash'
+): () => void {
+  const queryKey = mailboxKeys.inboxes(organizationId);
+  // The view follows the prefix in every listing's key.
+  const filters = {
+    queryKey,
+    predicate: (query: { queryKey: readonly unknown[] }) =>
+      placement === 'trash' || query.queryKey[queryKey.length] !== 'today',
+  };
+  const snapshot = queryClient.getQueriesData<InboxListing>(filters);
+  queryClient.setQueriesData<InboxListing>(filters, listing =>
+    listing?.pages
+      ? {
+          ...listing,
+          pages: listing.pages.map(page => ({
+            ...page,
+            items: page.items.filter(item => item.id !== rowId),
+          })),
+        }
+      : listing
+  );
+  return () => {
+    for (const [key, listing] of snapshot) queryClient.setQueryData(key, listing);
+  };
+}
+
 /** Shows the row read in every cached listing at once; answers the rollback. */
 export function markInboxRowRead(
   queryClient: QueryClient,
