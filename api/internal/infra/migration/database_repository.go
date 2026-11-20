@@ -34,11 +34,12 @@ func (r *databaseRepository) GetTable() string {
 }
 
 // GetRan returns all completed migration names ordered by batch ascending,
-// then by migration name ascending.
+// then by migration name ascending. Names compare by their bytes (COLLATE "C"), as Go and the
+// migration files order them, so the order never depends on the database's collation.
 func (r *databaseRepository) GetRan() ([]string, error) {
 	var migrations []string
 	err := r.db.Table(r.tableName).
-		Order("batch ASC, migration ASC").
+		Order(`batch ASC, migration COLLATE "C" ASC`).
 		Pluck("migration", &migrations).Error
 	return migrations, err
 }
@@ -48,7 +49,7 @@ func (r *databaseRepository) GetRan() ([]string, error) {
 func (r *databaseRepository) GetMigrations(steps int) ([]MigrationRecord, error) {
 	var records []MigrationRecord
 	err := r.db.Table(r.tableName).
-		Order("batch DESC, migration DESC").
+		Order(`batch DESC, migration COLLATE "C" DESC`).
 		Limit(steps).
 		Find(&records).Error
 	return records, err
@@ -59,7 +60,7 @@ func (r *databaseRepository) GetMigrationsByBatch(batch int) ([]MigrationRecord,
 	var records []MigrationRecord
 	err := r.db.Table(r.tableName).
 		Where("batch = ?", batch).
-		Order("migration DESC").
+		Order(`migration COLLATE "C" DESC`).
 		Find(&records).Error
 	return records, err
 }

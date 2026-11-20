@@ -504,3 +504,25 @@ func TestDatabaseRepository_DefaultTableName(t *testing.T) {
 	repo := NewDatabaseRepository(db, "")
 	assert.Equal(t, "migrations", repo.GetTable())
 }
+
+// Names in one batch are ordered by their bytes, as Go and the migration files order them, whatever
+// the database's collation: en_US.utf8 ignores underscores and would put "wns__0" before "w__txo".
+func TestRepositoryOrdersNamesByBytesNotCollation(t *testing.T) {
+	repo := setupTestRepository(t)
+	require.NoError(t, repo.Log("wns__0", 1))
+	require.NoError(t, repo.Log("w__txo", 1))
+
+	ran, err := repo.GetRan()
+	require.NoError(t, err)
+	require.Equal(t, []string{"w__txo", "wns__0"}, ran)
+
+	latest, err := repo.GetMigrations(2)
+	require.NoError(t, err)
+	require.Equal(t, "wns__0", latest[0].Migration)
+	require.Equal(t, "w__txo", latest[1].Migration)
+
+	inBatch, err := repo.GetMigrationsByBatch(1)
+	require.NoError(t, err)
+	require.Equal(t, "wns__0", inBatch[0].Migration)
+	require.Equal(t, "w__txo", inBatch[1].Migration)
+}
