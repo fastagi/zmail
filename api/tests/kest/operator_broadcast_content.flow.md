@@ -261,10 +261,15 @@ PY
 set -a
 . tests/kest/operator_broadcast_content.kestenv
 set +a
-APP_ENV=test DB_ENABLED=true DB_DRIVER=postgres MAILBOX_PROVIDER=log AI_ENABLED=false TRACING_ENABLED=false \
-  tmp/kest/fastbuild mail:broadcast:work --once >/dev/null
-sent=$(psql "$FASTBUILD_TEST_POSTGRES_DSN" -v ON_ERROR_STOP=1 -qtAc \
-  "SELECT count(*) FROM mail_broadcast_recipients WHERE broadcast_id = {{broadcast_id}} AND message_id IS NOT NULL")
+# One worker pass shares its batch with transactional mail and waiting sends that other flows
+# left in the shared test database, which run first; pass again until this broadcast is reached.
+for _ in $(seq 1 20); do
+  APP_ENV=test DB_ENABLED=true DB_DRIVER=postgres MAILBOX_PROVIDER=log AI_ENABLED=false TRACING_ENABLED=false \
+    tmp/kest/fastbuild mail:broadcast:work --once >/dev/null
+  sent=$(psql "$FASTBUILD_TEST_POSTGRES_DSN" -v ON_ERROR_STOP=1 -qtAc \
+    "SELECT count(*) FROM mail_broadcast_recipients WHERE broadcast_id = {{broadcast_id}} AND message_id IS NOT NULL")
+  [ "$sent" = "0" ] || break
+done
 [ "$sent" = "1" ] || { echo "broadcast recipient not sent: $sent" >&2; exit 1; }
 ```
 
