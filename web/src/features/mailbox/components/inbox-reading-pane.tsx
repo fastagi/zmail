@@ -17,7 +17,6 @@ import {
 } from '@/features/mailbox/components/thread-view';
 import {
   markInboxRowRead,
-  removeInboxRow,
   useUpdateInboxMessage,
   useUpdateInboxMessages,
 } from '@/features/mailbox/hooks/use-inbox';
@@ -76,9 +75,8 @@ function newestInbound(messages: readonly MailMessage[]): MailMessage | undefine
  * to the list below 1024px, where the list and the pane take turns, and steps to the previous or
  * next row; with the mailbox's `send` it holds Reply, Reply all, and Forward (answering the newest
  * inbound message, forwarding the newest) and Archive and Delete, which act on every message the
- * row stands for and take the row out of the list at once, putting it back if the request fails.
- * When the mailbox stopped being readable since the list loaded, the pane says so and
- * `onUnavailable` refreshes what is listed, once per row.
+ * row stands for. When the mailbox stopped being readable since the list loaded, the pane says so
+ * and `onUnavailable` refreshes what is listed, once per row.
  *
  * `access` is the row's mailbox access from the mailbox list, null when it is no longer listed.
  * `roleName` names the mailbox's role in the line above the subject. While the mail can be read,
@@ -146,10 +144,7 @@ export function InboxReadingPane({
     onUnavailable();
   }, [unavailable, item.id, onUnavailable]);
 
-  /** The row leaves the list and the pane at once; a failed request puts it back and says why. */
   const move = async (placement: 'archive' | 'trash') => {
-    const rollback = removeInboxRow(queryClient, organizationId, item.id, placement);
-    navigation.onClose();
     try {
       await updateInbox.mutateAsync({
         mailboxId: item.mailbox_id,
@@ -157,8 +152,8 @@ export function InboxReadingPane({
         placement,
       });
       toast.success(t(placement === 'archive' ? 'messages.archived' : 'messages.trashed'));
+      navigation.onClose();
     } catch (failure) {
-      rollback();
       toast.error(t(resolveMailboxErrorKey(failure)));
     }
   };
