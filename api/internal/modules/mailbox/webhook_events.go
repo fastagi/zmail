@@ -39,6 +39,28 @@ const (
 	webhookSource = "mailbox"
 )
 
+// Webhook event types of transactional mail (spec §9.16). They belong to no mailbox, so the
+// mailbox webhook switch never gates them.
+const (
+	// WebhookEmailSent: the provider took the message, or a test or simulated message finished.
+	WebhookEmailSent = "email.sent"
+	// WebhookEmailDelivered: the recipient's mail server accepted the message.
+	WebhookEmailDelivered = "email.delivered"
+	// WebhookEmailBounced: a permanent bounce, or a temporary one the provider is still retrying.
+	WebhookEmailBounced = "email.bounced"
+	// WebhookEmailComplained: the recipient reported the message as spam.
+	WebhookEmailComplained = "email.complained"
+	// WebhookEmailSuppressed: the message was not attempted because the recipient is suppressed.
+	WebhookEmailSuppressed = "email.suppressed"
+	// WebhookEmailFailed: the message failed for good.
+	WebhookEmailFailed = "email.failed"
+)
+
+var transactionalWebhookTypes = []string{
+	WebhookEmailSent, WebhookEmailDelivered, WebhookEmailBounced,
+	WebhookEmailComplained, WebhookEmailSuppressed, WebhookEmailFailed,
+}
+
 var mailWebhookTypes = []string{
 	WebhookMailSent, WebhookMailFailed, WebhookMailReceived, WebhookMailDelivered,
 	WebhookMailDeliveryDelayed, WebhookMailBounced, WebhookMailComplained, WebhookMailSuppressed,
@@ -103,12 +125,67 @@ func validateMailWebhookPayload(raw json.RawMessage) error {
 	return nil
 }
 
+// transactionalWebhookPayload is the exact `data` of every email.* webhook. It names the message
+// and its full recipient so the organization's own backend can match the outcome to its user; it
+// never carries a subject, a body, or any variable.
+type transactionalWebhookPayload struct {
+	MessageID uint   `json:"message_id"`
+	Template  string `json:"template"`
+	To        string `json:"to"`
+	Mode      string `json:"mode"`
+	Simulated bool   `json:"simulated"`
+	// BounceType is permanent or temporary for email.bounced and empty otherwise.
+	BounceType string `json:"bounce_type"`
+	// Reason is a short machine-readable code; empty when there is nothing to explain.
+	Reason string `json:"reason"`
+}
+
+// transactionalWebhookFields are the payload's keys; every one must be present.
+var transactionalWebhookFields = []string{"message_id", "template", "to", "mode", "simulated", "bounce_type", "reason"}
+
+var errTransactionalWebhookPayload = errors.New("transactional webhook payload is invalid")
+
+func validateTransactionalWebhookPayload(raw json.RawMessage) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || len(fields) != len(transactionalWebhookFields) {
+		return errTransactionalWebhookPayload
+	}
+	for _, name := range transactionalWebhookFields {
+		value, present := fields[name]
+		if !present || string(value) == "null" {
+			return errTransactionalWebhookPayload
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var payload transactionalWebhookPayload
+	if err := decoder.Decode(&payload); err != nil {
+		return errTransactionalWebhookPayload
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errTransactionalWebhookPayload
+	}
+	mode := domain.APIKeyMode(payload.Mode)
+	bounceTypeValid := payload.BounceType == "" || payload.BounceType == bounceTypePermanent ||
+		payload.BounceType == bounceTypeTemporary
+	if payload.MessageID == 0 || payload.Template == "" || len(payload.Template) > 255 ||
+		payload.To == "" || len(payload.To) > 320 || (mode != domain.APIKeyModeLive && mode != domain.APIKeyModeTest) ||
+		!bounceTypeValid || len(payload.Reason) > 255 {
+		return errTransactionalWebhookPayload
+	}
+	return nil
+}
+
 // NewWebhookCatalog is the product's webhook event catalog: the webhook starter's own
-// definitions plus the mail events.
+// definitions plus the mail and transactional mail events.
 func NewWebhookCatalog() (*webhook.Catalog, error) {
 	definitions := webhook.DefaultDefinitions()
 	for _, eventType := range mailWebhookTypes {
 		definitions = append(definitions, webhook.Definition{Type: eventType, ValidatePayload: validateMailWebhookPayload})
+	}
+	for _, eventType := range transactionalWebhookTypes {
+		definitions = append(definitions, webhook.Definition{Type: eventType, ValidatePayload: validateTransactionalWebhookPayload})
 	}
 	return webhook.NewCatalog(definitions...)
 }
@@ -136,6 +213,7 @@ type MailNotification struct {
 // commits or rolls back with the state change it describes.
 type mailNotifier interface {
 	Notify(ctx context.Context, notification MailNotification) error
+	NotifyTransactional(ctx context.Context, notification TransactionalNotification) error
 }
 
 // webhookNotifier publishes through the webhook starter when that starter is selected and does
@@ -197,6 +275,40 @@ func (n *webhookNotifier) Notify(ctx context.Context, notification MailNotificat
 	return err
 }
 
+// NotifyTransactional publishes a transactional mail event whenever the webhook starter is
+// selected. No mailbox switch applies: a transactional message belongs to no mailbox. Test and
+// simulated messages publish too; mode and simulated tell the receiver.
+func (n *webhookNotifier) NotifyTransactional(ctx context.Context, notification TransactionalNotification) error {
+	if n == nil || !n.enabled {
+		return nil
+	}
+	message := notification.Message
+	if message == nil || message.OrganizationID == 0 {
+		return nil
+	}
+	data, err := json.Marshal(transactionalWebhookPayload{
+		MessageID:  message.ID,
+		Template:   message.TemplateKey,
+		To:         message.ToAddress,
+		Mode:       string(message.Mode),
+		Simulated:  message.Simulated,
+		BounceType: notification.BounceType,
+		Reason:     notification.Reason,
+	})
+	if err != nil {
+		return fmt.Errorf("encode transactional webhook: %w", err)
+	}
+	_, err = n.publisher.PublishWebhook(ctx, domain.WebhookEvent{
+		OrganizationID: message.OrganizationID,
+		Source:         webhookSource,
+		EventID:        transactionalWebhookEventID(message.ID, notification.Type, notification.Key),
+		Type:           notification.Type,
+		OccurredAt:     n.publishableTime(notification.OccurredAt),
+		Data:           data,
+	})
+	return err
+}
+
 // publishableTime keeps a provider timestamp inside the window the webhook starter accepts.
 func (n *webhookNotifier) publishableTime(occurredAt time.Time) time.Time {
 	now := n.now().UTC()
@@ -210,9 +322,20 @@ func (n *webhookNotifier) publishableTime(occurredAt time.Time) time.Time {
 // twice is recognized by the webhook starter. It uses only the characters that starter allows.
 func mailWebhookEventID(messageID uint, eventType, key string) string {
 	id := "m" + strconv.FormatUint(uint64(messageID), 10) + ":" + eventType[len("mail.message."):]
+	return id + keyedEventIDSuffix(key)
+}
+
+// transactionalWebhookEventID is t<id>:<type without "email.">[:<key hash>], stable like
+// mailWebhookEventID; the t prefix keeps it apart from mailbox message ids.
+func transactionalWebhookEventID(messageID uint, eventType, key string) string {
+	return "t" + strconv.FormatUint(uint64(messageID), 10) + ":" + eventType[len("email."):] + keyedEventIDSuffix(key)
+}
+
+// keyedEventIDSuffix is ":" and the first 12 bytes of the key's SHA-256 in hex, or empty.
+func keyedEventIDSuffix(key string) string {
 	if key == "" {
-		return id
+		return ""
 	}
 	sum := sha256.Sum256([]byte(key))
-	return id + ":" + hex.EncodeToString(sum[:12])
+	return ":" + hex.EncodeToString(sum[:12])
 }

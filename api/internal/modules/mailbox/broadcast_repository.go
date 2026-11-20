@@ -418,6 +418,19 @@ func (r *repository) SetStopReason(ctx context.Context, id uint, reason string) 
 		Updates(map[string]any{"stop_reason": reason, "updated_at": gorm.Expr("now()")}).Error
 }
 
+func (r *repository) CountWaitingBroadcastRecipients(ctx context.Context, organizationID uint, stopReason string) (int64, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	var count int64
+	err := r.conn(ctx).Model(&MailBroadcastRecipientPO{}).
+		Joins("JOIN mail_broadcasts ON mail_broadcasts.id = mail_broadcast_recipients.broadcast_id").
+		Where("mail_broadcasts.organization_id = ? AND mail_broadcasts.stop_reason = ? AND mail_broadcast_recipients.status = ?",
+			organizationID, stopReason, string(domain.MailRecipientPending)).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *repository) FinishBroadcasts(ctx context.Context, now time.Time) (int, error) {
 	if r.db == nil {
 		return 0, domain.ErrServiceUnavailable

@@ -41,7 +41,8 @@ export class MockApiKeyStore {
 
   create(actor: AuthUser, input: CreateApiKeyInput): CreateApiKeyResult {
     const now = this.dependencies.now().toISOString();
-    const keyPrefix = `fastbuild_${this.dependencies.randomHex(6)}`;
+    const mode = input.mode ?? 'live';
+    const keyPrefix = `${mode === 'test' ? 'fastbuild_test_' : 'fastbuild_'}${this.dependencies.randomHex(6)}`;
     const plaintextKey = `${keyPrefix}.${this.dependencies.randomHex(24)}`;
     const record: MockApiKeyRecord = {
       id: this.nextId++,
@@ -49,6 +50,7 @@ export class MockApiKeyStore {
       owner_key: actor.id,
       name: input.name,
       key_prefix: keyPrefix,
+      mode,
       key_hash: createHash('sha256').update(plaintextKey).digest('hex'),
       scopes: [...new Set(input.scopes)].sort(),
       ...(input.expires_at ? { expires_at: input.expires_at } : {}),
@@ -81,6 +83,7 @@ function publicApiKey(record: MockApiKeyRecord): ApiKey {
     user_id: record.user_id,
     name: record.name,
     key_prefix: record.key_prefix,
+    mode: record.mode,
     scopes: [...record.scopes],
     ...(record.last_used_at ? { last_used_at: record.last_used_at } : {}),
     ...(record.expires_at ? { expires_at: record.expires_at } : {}),

@@ -289,6 +289,11 @@ func (d *fakeDomains) DeleteDomain(_ context.Context, organizationID, id uint) e
 			return ErrMailDomainInUse
 		}
 	}
+	for _, template := range d.mailbox.templates {
+		if strings.HasSuffix(template.FromAddress, "@"+existing.Name) {
+			return ErrMailDomainInUse
+		}
+	}
 	delete(d.domains, id)
 	return nil
 }

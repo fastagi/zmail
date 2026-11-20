@@ -116,6 +116,7 @@ import type {
   MailDnsRecordType,
   MailboxPermission,
   MailTemplateInput,
+  MailTemplateKind,
   MailTemplateTestInput,
   SendMailMessageInput,
 } from '@/features/mailbox/types';
@@ -1657,18 +1658,26 @@ async function contactListBody(request: Request): Promise<Parsed<{ name: string 
   return { ok: true, value: { name } };
 }
 
+const templateKinds: readonly MailTemplateKind[] = ['standard', 'transactional'];
+
 export async function listMailTemplatesRoute(request: Request): Promise<NextResponse> {
   const target = await resolveMailboxReadRoute(request);
   if (!target.available) return target.response;
+  const kind = new URL(request.url).searchParams.get('kind') ?? '';
+  if (kind !== '' && !isOneOf(templateKinds, kind)) return invalidInput('Invalid template kind');
   if (target.backend === 'go-api') {
     return forwardAuthenticatedGoApi(request, {
       method: 'GET',
       path: 'mail-templates',
       accessToken: target.accessToken,
       organizationId: String(target.organizationId),
+      // Only the kind filter reaches the API; anything else in the query is dropped.
+      ...(kind === '' ? {} : { searchParams: new URLSearchParams({ kind }) }),
     });
   }
-  return success(mockMailboxStore.listTemplates(target.organizationId));
+  return success(
+    mockMailboxStore.listTemplates(target.organizationId, kind === '' ? undefined : kind)
+  );
 }
 
 export async function createMailTemplateRoute(request: Request): Promise<NextResponse> {
@@ -1797,6 +1806,11 @@ const templateFieldMap = {
   html: 'html',
   text: 'text',
   sample_variables: 'sample_variables',
+  kind: 'kind',
+  key: 'key',
+  from_address: 'from_address',
+  from_name: 'from_name',
+  variable_definitions: 'variable_definitions',
 } as const;
 
 function mockTemplateResponse(result: MockMailTemplateResult, status: 200 | 201 = 200) {
@@ -1806,6 +1820,14 @@ function mockTemplateResponse(result: MockMailTemplateResult, status: 200 | 201 
       return templateNotFound();
     case 'taken':
       return failure(409, ApiErrorCode.MAILBOX_TEMPLATE_NAME_TAKEN, 'Mail template name is taken');
+    case 'key_taken':
+      return failure(409, ApiErrorCode.MAILBOX_TEMPLATE_KEY_TAKEN, 'Mail template key is taken');
+    case 'kind_immutable':
+      return failure(
+        409,
+        ApiErrorCode.MAILBOX_TEMPLATE_KIND_IMMUTABLE,
+        'Mail template kind cannot change'
+      );
     case 'limit':
       return failure(
         409,
@@ -2970,9 +2992,40 @@ function variableMap(value: unknown): value is Record<string, string> {
 
 /** Shape checks only; names, placeholders, and bodies are judged by the API or the mock. */
 function templateFields(body: Record<string, unknown>): Parsed<MailTemplateInput> {
-  const { name, subject, html, text, sample_variables: samples, design, ...rest } = body;
+  const {
+    name,
+    subject,
+    html,
+    text,
+    sample_variables: samples,
+    design,
+    kind,
+    key,
+    from_address: fromAddress,
+    from_name: fromName,
+    variable_definitions: definitions,
+    ...rest
+  } = body;
   const errors: Record<string, string[]> = {};
   if (Object.keys(rest).length > 0) errors.body = ['Unknown fields'];
+  if (kind !== undefined && kind !== 'standard' && kind !== 'transactional') {
+    errors.kind = ['The kind field is invalid'];
+  }
+  if (key !== undefined && !(typeof key === 'string' && MAIL_TEMPLATE_KEY_PATTERN.test(key))) {
+    errors.key = ['The key field is invalid'];
+  }
+  if (
+    fromAddress !== undefined &&
+    !boundedString(fromAddress, MAIL_TEMPLATE_FROM_ADDRESS_MAX_LENGTH)
+  ) {
+    errors.from_address = ['The from_address field is invalid'];
+  }
+  if (fromName !== undefined && !boundedString(fromName, MAIL_TEMPLATE_FROM_NAME_MAX_LENGTH)) {
+    errors.from_name = ['The from_name field is invalid'];
+  }
+  if (definitions !== undefined && !variableDefinitions(definitions)) {
+    errors.variable_definitions = ['The variable_definitions field is invalid'];
+  }
   if (!boundedString(name, MAIL_TEMPLATE_NAME_MAX_LENGTH) || name === '') {
     errors.name = ['The name field is invalid'];
   }
@@ -3001,8 +3054,38 @@ function templateFields(body: Record<string, unknown>): Parsed<MailTemplateInput
       ...(typeof text === 'string' ? { text } : {}),
       ...(variableMap(samples) ? { sample_variables: samples } : {}),
       ...(templateDesign(design) ? { design } : {}),
+      ...(kind === 'standard' || kind === 'transactional' ? { kind } : {}),
+      ...(typeof key === 'string' ? { key } : {}),
+      ...(typeof fromAddress === 'string' ? { from_address: fromAddress } : {}),
+      ...(typeof fromName === 'string' ? { from_name: fromName } : {}),
+      ...(variableDefinitions(definitions) ? { variable_definitions: definitions } : {}),
     },
   };
+}
+
+const MAIL_TEMPLATE_KEY_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
+const MAIL_TEMPLATE_FROM_ADDRESS_MAX_LENGTH = 320;
+const MAIL_TEMPLATE_FROM_NAME_MAX_LENGTH = 100;
+
+/** Shape checks only; the declaration rules are judged by the API or the mock. */
+function variableDefinitions(
+  value: unknown
+): value is { name: string; secret: boolean; required: boolean }[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAIL_TEMPLATE_MAX_VARIABLES &&
+    value.every(item => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) return false;
+      const { name, secret, required, ...rest } = item as Record<string, unknown>;
+      return (
+        Object.keys(rest).length === 0 &&
+        typeof name === 'string' &&
+        MAIL_TEMPLATE_VARIABLE_PATTERN.test(name) &&
+        typeof secret === 'boolean' &&
+        typeof required === 'boolean'
+      );
+    })
+  );
 }
 
 /** A design document as the contract describes it: an object with a positive integer version. */

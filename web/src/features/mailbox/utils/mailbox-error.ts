@@ -48,6 +48,9 @@ export type MailboxErrorKey =
   | 'errors.sendLimitReached'
   | 'errors.senderNotConfigured'
   | 'errors.templateInvalid'
+  | 'errors.templateKeyTaken'
+  | 'errors.templateKindImmutable'
+  | 'errors.templateKindMismatch'
   | 'errors.templateLimitReached'
   | 'errors.templateNameTaken'
   | 'errors.templateNotFound'
@@ -109,6 +112,9 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_TEMPLATE_NOT_FOUND]: 'errors.templateNotFound',
   [ApiErrorCode.MAILBOX_TEMPLATE_INVALID]: 'errors.templateInvalid',
   [ApiErrorCode.MAILBOX_TEMPLATE_NAME_TAKEN]: 'errors.templateNameTaken',
+  [ApiErrorCode.MAILBOX_TEMPLATE_KEY_TAKEN]: 'errors.templateKeyTaken',
+  [ApiErrorCode.MAILBOX_TEMPLATE_KIND_IMMUTABLE]: 'errors.templateKindImmutable',
+  [ApiErrorCode.MAILBOX_TEMPLATE_KIND_MISMATCH]: 'errors.templateKindMismatch',
   [ApiErrorCode.MAILBOX_TEMPLATE_LIMIT_REACHED]: 'errors.templateLimitReached',
   [ApiErrorCode.MAILBOX_TEMPLATE_VARIABLES_MISSING]: 'errors.templateVariablesMissing',
   [ApiErrorCode.MAILBOX_DOMAIN_NOT_FOUND]: 'errors.domainNotFound',

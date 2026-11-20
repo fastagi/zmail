@@ -67,9 +67,11 @@ import type {
   MailboxType,
   MailTemplate,
   MailTemplateInput,
+  MailTemplateKind,
   MailTemplateSummary,
   SendMailMessageInput,
 } from '@/features/mailbox/types';
+import { mockTransactionalStore } from '@/features/developer/server/mock-transactional-store';
 import { renderTemplate, templateVariables } from '@/features/mailbox/utils/template-render';
 import { mockOrganizationStore } from '@/features/organization/server/mock-organization-store';
 import type { OrganizationRole } from '@/features/organization/types';
@@ -163,7 +165,10 @@ export type MockMailSendResult =
 
 export type MockMailTemplateResult =
   | { ok: true; template: MailTemplate }
-  | { ok: false; error: 'not_found' | 'invalid' | 'taken' | 'limit' };
+  | {
+      ok: false;
+      error: 'not_found' | 'invalid' | 'taken' | 'key_taken' | 'kind_immutable' | 'limit';
+    };
 
 export type MockMailAttachmentResult =
   | { ok: true; filename: string; content: Uint8Array }
@@ -321,8 +326,15 @@ export class MockMailboxStore {
       provider: 'log' as const,
       inbound_enabled: false,
       daily_send_limit: MOCK_DAILY_SEND_LIMIT,
+      daily_broadcast_limit: MOCK_DAILY_SEND_LIMIT,
+      daily_transactional_limit: MOCK_DAILY_SEND_LIMIT,
+      transactional_recipient_limit_per_minute: 3,
+      transactional_key_limit_per_second: 20,
+      simulator_domain: 'test.zmail.im',
       broadcasts_enabled: true,
       custom_domains_enabled: true,
+      // The instance switch of the transactional mock; on by default so the console is usable.
+      transactional_enabled: mockTransactionalStore.isEnabled(),
     };
     return [
       { domain: MOCK_MAILBOX_DOMAIN, kind: 'shared', ...settings },
@@ -1164,8 +1176,10 @@ export class MockMailboxStore {
     return { ok: true, value: this.view(found.state, viewer) };
   }
 
-  listTemplates(organizationId: number): MailTemplateSummary[] {
+  /** Every template of the organization by name, or only those of `kind`. */
+  listTemplates(organizationId: number, kind?: MailTemplateKind): MailTemplateSummary[] {
     return [...this.templatesOf(organizationId).values()]
+      .filter(template => kind === undefined || template.kind === kind)
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : a.id - b.id))
       .map(template => ({
         id: template.id,
@@ -1174,6 +1188,10 @@ export class MockMailboxStore {
         variables: template.variables,
         created_at: template.created_at,
         updated_at: template.updated_at,
+        kind: template.kind,
+        key: template.key,
+        from: template.from,
+        variable_definitions: template.variable_definitions,
       }));
   }
 
@@ -1193,6 +1211,12 @@ export class MockMailboxStore {
     if (!built) return { ok: false, error: 'invalid' };
     if ([...templates.values()].some(existing => existing.name === built.name)) {
       return { ok: false, error: 'taken' };
+    }
+    if (
+      built.key !== null &&
+      [...templates.values()].some(existing => existing.key === built.key)
+    ) {
+      return { ok: false, error: 'key_taken' };
     }
     if (templates.size >= MAIL_TEMPLATE_MAX_PER_ORGANIZATION) return { ok: false, error: 'limit' };
     const now = this.timestamp();
@@ -1216,10 +1240,17 @@ export class MockMailboxStore {
     if (!existing) return { ok: false, error: 'not_found' };
     const built = buildTemplate(input);
     if (!built) return { ok: false, error: 'invalid' };
+    if (built.kind !== existing.kind) return { ok: false, error: 'kind_immutable' };
     if (
       [...templates.values()].some(other => other.id !== templateId && other.name === built.name)
     ) {
       return { ok: false, error: 'taken' };
+    }
+    if (
+      built.key !== null &&
+      [...templates.values()].some(other => other.id !== templateId && other.key === built.key)
+    ) {
+      return { ok: false, error: 'key_taken' };
     }
     const template: MailTemplate = { ...existing, ...built, updated_at: this.timestamp() };
     templates.set(templateId, template);
@@ -2203,6 +2234,19 @@ function buildTemplate(
   const samples = cleanValues(input.sample_variables ?? {});
   const variables = templateVariables({ subject, html, text });
   if (!samples || !variables) return null;
+  const kind = input.kind ?? 'standard';
+  const transactionalFields =
+    input.key !== undefined ||
+    input.from_address !== undefined ||
+    input.from_name !== undefined ||
+    input.variable_definitions !== undefined;
+  if (kind === 'standard' && transactionalFields) return null;
+  if (
+    kind === 'transactional' &&
+    (!input.key || !input.from_address || !input.variable_definitions)
+  ) {
+    return null;
+  }
   return {
     name,
     subject,
@@ -2211,6 +2255,13 @@ function buildTemplate(
     sample_variables: samples,
     variables,
     design: input.design ?? null,
+    kind,
+    key: kind === 'transactional' ? (input.key ?? null) : null,
+    from:
+      kind === 'transactional' && input.from_address
+        ? { address: input.from_address.toLowerCase(), name: input.from_name ?? '' }
+        : null,
+    variable_definitions: kind === 'transactional' ? (input.variable_definitions ?? []) : [],
   };
 }
 

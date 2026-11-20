@@ -1,6 +1,6 @@
 # 开发者 · 事务邮件（v2 切片 ⑤）设计
 
-状态：设计稿，待评审（分支 `docs/v2-architecture`）
+状态：已实现（切片 S1–S5，2026-11-19）；本地验收流程 `api/tests/kest/transactional_mail.flow.md`（`log` 服务商 + 模拟地址），运维说明见 `UPGRADING.md`、`api/docs/DEPLOYMENT.md`、`api/docs/OBSERVABILITY.md`。设计稿评审于分支 `docs/v2-architecture`。
 依据：[PRODUCT_REQUIREMENTS.zh-CN.md](../PRODUCT_REQUIREMENTS.zh-CN.md) R4（验证码与恢复链接按权限保护、创建与发送权限分离）、R6（回执与可追溯历史）；原型 `Developer.dc.html`（快速上手、事务模板、发送日志、额度与保护、Webhook 五个页签）。
 编写规范：[BUSINESS_IMPLEMENTATION_PLAN_STANDARD.md](../BUSINESS_IMPLEMENTATION_PLAN_STANDARD.md)。
 前置：[send-quota-queue.md](send-quota-queue.md)（发送队列）、[mail-template-editor.md](mail-template-editor.md)、[broadcast-variables.md](broadcast-variables.md)、[mailbox-organize.zh-CN.md](mailbox-organize.zh-CN.md)（`rfc_message_id`、标签）。

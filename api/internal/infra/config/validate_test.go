@@ -843,6 +843,32 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 		{name: "short inbound secret", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "short" }, wantErr: "MAILBOX_INBOUND_SECRET"},
 		{name: "inbound may stay disabled", environment: "production", edit: func(cfg *Config) { cfg.Mailbox.InboundSecret = "" }},
 		{name: "send limit must be positive", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailySendLimit = 0 }, wantErr: "MAILBOX_DAILY_SEND_LIMIT"},
+		{name: "lane limits inherit the send limit", environment: "development", edit: func(cfg *Config) {
+			cfg.Mailbox.DailyBroadcastLimit, cfg.Mailbox.DailyTransactionalLimit = 0, 0
+		}},
+		{name: "lane limits may reach the cap", environment: "development", edit: func(cfg *Config) {
+			cfg.Mailbox.DailyBroadcastLimit, cfg.Mailbox.DailyTransactionalLimit = 100000, 1
+		}},
+		{name: "broadcast limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailyBroadcastLimit = 100001 }, wantErr: "MAILBOX_DAILY_BROADCAST_LIMIT"},
+		{name: "broadcast limit negative", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailyBroadcastLimit = -1 }, wantErr: "MAILBOX_DAILY_BROADCAST_LIMIT"},
+		{name: "transactional limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.DailyTransactionalLimit = 100001 }, wantErr: "MAILBOX_DAILY_TRANSACTIONAL_LIMIT"},
+		{name: "transactional mail off needs no key", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.TransactionalEnabled, cfg.Mailbox.SecretEncryptionKey = false, ""
+		}},
+		{name: "transactional mail with a key", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.TransactionalEnabled, cfg.Mailbox.SecretEncryptionKey = true, strings.Repeat("k", 32)
+		}},
+		{name: "transactional mail needs a key", environment: "production", edit: func(cfg *Config) {
+			cfg.Mailbox.TransactionalEnabled = true
+		}, wantErr: "MAILBOX_SECRET_ENCRYPTION_KEY"},
+		{name: "transactional key too short", environment: "development", edit: func(cfg *Config) {
+			cfg.Mailbox.TransactionalEnabled, cfg.Mailbox.SecretEncryptionKey = true, strings.Repeat("k", 31)
+		}, wantErr: "MAILBOX_SECRET_ENCRYPTION_KEY"},
+		{name: "invalid simulator domain", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.SimulatorDomain = "not a domain" }, wantErr: "MAILBOX_SIMULATOR_DOMAIN"},
+		{name: "recipient limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.TransactionalRecipientPerMinute = 1001 }, wantErr: "MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE"},
+		{name: "recipient limit negative", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.TransactionalRecipientPerMinute = -1 }, wantErr: "MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE"},
+		{name: "key limit above the cap", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.TransactionalKeyPerSecond = 10001 }, wantErr: "MAILBOX_TRANSACTIONAL_KEY_PER_SECOND"},
+		{name: "key limit negative", environment: "development", edit: func(cfg *Config) { cfg.Mailbox.TransactionalKeyPerSecond = -1 }, wantErr: "MAILBOX_TRANSACTIONAL_KEY_PER_SECOND"},
 		{name: "custom domains with the default zone limit", environment: "production", edit: func(cfg *Config) {
 			cfg.Mailbox.CustomDomainsEnabled, cfg.Mailbox.CloudflareEmailWorker = true, "zmail-email-worker"
 			cfg.Mailbox.MaxZonesPerOrganization = DefaultMailboxMaxZonesPerOrganization
@@ -889,4 +915,17 @@ func TestValidate_MailboxPolicy(t *testing.T) {
 			t.Fatalf("validate() error = %v", err)
 		}
 	})
+}
+
+// An unset or zero lane limit takes the personal limit's value, so an upgrade never shrinks the
+// room broadcasts or transactional mail had under the shared limit.
+func TestMailboxConfigLaneLimitsInheritTheSendLimit(t *testing.T) {
+	resolved := MailboxConfig{DailySendLimit: 50}.Resolved(false)
+	if resolved.DailyBroadcastLimit != 50 || resolved.DailyTransactionalLimit != 50 {
+		t.Fatalf("resolved lanes = %d, %d; want both to inherit 50", resolved.DailyBroadcastLimit, resolved.DailyTransactionalLimit)
+	}
+	resolved = MailboxConfig{DailySendLimit: 50, DailyBroadcastLimit: 7, DailyTransactionalLimit: 9}.Resolved(false)
+	if resolved.DailyBroadcastLimit != 7 || resolved.DailyTransactionalLimit != 9 {
+		t.Fatalf("resolved lanes = %d, %d; want the explicit 7 and 9", resolved.DailyBroadcastLimit, resolved.DailyTransactionalLimit)
+	}
 }

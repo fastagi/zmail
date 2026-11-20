@@ -111,6 +111,39 @@ var (
 		prometheus.GaugeOpts{Name: "workflow_queue_lag_seconds", Help: "Age of the oldest available workflow task"},
 		[]string{"queue"},
 	)
+
+	// Transactional mail (spec §15). Every label comes from a code-owned bounded set.
+	transactionalMessagesTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zmail_transactional_messages_total",
+			Help: "Transactional messages that reached a final state, by mode and outcome",
+		},
+		[]string{"mode", "outcome"},
+	)
+	transactionalDispatchSeconds = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "zmail_transactional_dispatch_seconds",
+			Help:    "Time from storing a transactional message to the provider accepting it",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 900, 3600},
+		},
+	)
+	transactionalQueueOldest = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "zmail_transactional_queue_oldest_seconds",
+			Help: "Age of the oldest live transactional message waiting to be sent, not counting lane waits",
+		},
+	)
+	sendLaneAttemptsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{Name: "zmail_send_lane_attempts_total", Help: "Provider send attempts by send lane"},
+		[]string{"lane"},
+	)
+	transactionalRateLimitedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zmail_transactional_rate_limited_total",
+			Help: "Transactional send requests refused by a rate limit, by rule",
+		},
+		[]string{"rule"},
+	)
 )
 
 // Middleware returns a Gin middleware for HTTP metrics
@@ -206,6 +239,32 @@ func SetWorkflowQueueStats(queue string, stats workflow.QueueStats) {
 	workflowQueueTasks.WithLabelValues(queue, "processing").Set(float64(stats.Processing))
 	workflowQueueTasks.WithLabelValues(queue, "failed").Set(float64(stats.Failed))
 	workflowQueueLag.WithLabelValues(queue).Set(stats.Lag.Seconds())
+}
+
+// RecordTransactionalMessage counts a transactional message reaching an outcome. mode is live or
+// test; outcome is sent, failed, or suppressed.
+func RecordTransactionalMessage(mode, outcome string) {
+	transactionalMessagesTotal.WithLabelValues(mode, outcome).Inc()
+}
+
+// ObserveTransactionalDispatch records the time from storing a message to the provider accepting it.
+func ObserveTransactionalDispatch(d time.Duration) {
+	transactionalDispatchSeconds.Observe(d.Seconds())
+}
+
+// SetTransactionalQueueOldest publishes the age of the oldest waiting live message; 0 when none waits.
+func SetTransactionalQueueOldest(seconds float64) {
+	transactionalQueueOldest.Set(seconds)
+}
+
+// RecordSendLaneAttempt counts one provider call in a send lane: personal, broadcast, or transactional.
+func RecordSendLaneAttempt(lane string) {
+	sendLaneAttemptsTotal.WithLabelValues(lane).Inc()
+}
+
+// RecordTransactionalRateLimited counts one request refused by a transactional rate-limit rule.
+func RecordTransactionalRateLimited(rule string) {
+	transactionalRateLimitedTotal.WithLabelValues(rule).Inc()
 }
 
 // --- Custom Metrics ---

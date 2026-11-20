@@ -77,6 +77,7 @@ import type {
   MailContactPage,
   MailTemplate,
   MailTemplateInput,
+  MailTemplateKind,
   MailTemplateSummary,
   MailTemplateTestInput,
   MailDayStats,
@@ -878,13 +879,18 @@ export const mailboxService = {
     });
   },
 
-  async templates(organizationId: number): Promise<MailTemplateSummary[]> {
+  /** The organization's templates by name; only those of `kind` when it is given. */
+  async templates(organizationId: number, kind?: MailTemplateKind): Promise<MailTemplateSummary[]> {
     const parsed = mailTemplateListSchema.safeParse(
       await request.get<unknown>('/mail-templates', {
         headers: organizationHeaders(organizationId),
+        ...(kind === undefined ? {} : { params: { kind } }),
       })
     );
     if (!parsed.success) throw invalidResponse();
+    if (kind !== undefined && parsed.data.some(template => template.kind !== kind)) {
+      throw invalidResponse();
+    }
     return parsed.data;
   },
 

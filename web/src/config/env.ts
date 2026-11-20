@@ -37,6 +37,21 @@ function readAbsoluteUrl(
   }
 }
 
+/** An optional absolute http(s) URL; empty or unset means not configured. */
+function readOptionalHttpOrigin(name: string, value: string | undefined): string | undefined {
+  if (value === undefined || value === '') {
+    return undefined;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:'
+      ? value
+      : invalidPublicEnv(name);
+  } catch {
+    return invalidPublicEnv(name);
+  }
+}
+
 function readBoolean(
   name: string,
   value: string | undefined,
@@ -95,6 +110,11 @@ export const env: PublicEnv = {
   ),
   NEXT_PUBLIC_OPTIONAL_FEATURES:
     process.env.NEXT_PUBLIC_OPTIONAL_FEATURES ?? '',
+  // The public API origin the developer console prints in code snippets; optional.
+  NEXT_PUBLIC_DEVELOPER_API_ORIGIN: readOptionalHttpOrigin(
+    'NEXT_PUBLIC_DEVELOPER_API_ORIGIN',
+    process.env.NEXT_PUBLIC_DEVELOPER_API_ORIGIN
+  ),
   // Devtools routes are on outside production and off in production builds
   // unless a deployment explicitly opts in.
   NEXT_PUBLIC_DEVTOOLS_ENABLED: readBoolean(

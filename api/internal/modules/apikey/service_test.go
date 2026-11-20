@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -267,4 +268,52 @@ func TestServicePreservesServiceUnavailable(t *testing.T) {
 			t.Fatalf("Validate() error = %v, want service unavailable", err)
 		}
 	})
+}
+
+func TestCreateTestKeyUsesTestPrefix(t *testing.T) {
+	repo := newFakeRepository()
+	created, err := NewService(repo).CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
+		Name:   "sandbox",
+		Scopes: []string{"mail:transactional"},
+		Mode:   "test",
+	})
+	require.NoError(t, err)
+
+	assert.Regexp(t, `^fastbuild_test_[a-z0-9_-]{8}$`, created.APIKey.KeyPrefix)
+	assert.Equal(t, domain.APIKeyModeTest, created.APIKey.Mode)
+	assert.True(t, strings.HasPrefix(created.PlaintextKey, created.APIKey.KeyPrefix+"."))
+	assert.Equal(t, domain.APIKeyModeTest, repo.keys[created.APIKey.ID].Mode)
+	assert.Equal(t, "test", toResponse(created.APIKey).Mode)
+
+	validated, err := NewService(repo).Validate(context.Background(), created.PlaintextKey, "mail:transactional")
+	require.NoError(t, err)
+	assert.Equal(t, domain.APIKeyModeTest, validated.Mode)
+}
+
+func TestCreateKeyDefaultsToLive(t *testing.T) {
+	for _, mode := range []string{"", "live"} {
+		repo := newFakeRepository()
+		created, err := NewService(repo).CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
+			Name:   "deploy",
+			Scopes: []string{"mail:send"},
+			Mode:   mode,
+		})
+		require.NoError(t, err)
+
+		assert.Regexp(t, `^fastbuild_[a-z0-9_-]{8}$`, created.APIKey.KeyPrefix)
+		assert.False(t, strings.HasPrefix(created.APIKey.KeyPrefix, "fastbuild_test_"))
+		assert.Equal(t, domain.APIKeyModeLive, created.APIKey.Mode)
+		assert.Equal(t, "live", toResponse(created.APIKey).Mode)
+	}
+}
+
+func TestCreateKeyRejectsUnknownMode(t *testing.T) {
+	repo := newFakeRepository()
+	_, err := NewService(repo).CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
+		Name:   "deploy",
+		Scopes: []string{"mail:send"},
+		Mode:   "staging",
+	})
+	assert.ErrorIs(t, err, domain.ErrInvalidInput)
+	assert.Empty(t, repo.keys)
 }

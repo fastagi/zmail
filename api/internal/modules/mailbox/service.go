@@ -16,9 +16,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
+	"github.com/fastagi/zmail/api/internal/infra/metrics"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
@@ -42,7 +45,13 @@ type Settings struct {
 	Provider         string
 	InboundSecret    string
 	InboundTolerance time.Duration
-	DailySendLimit   int
+	// DailySendLimit is the personal lane limit: console sends, replies, API outbound messages, and
+	// template tests one organization may attempt per rolling 24 hours.
+	DailySendLimit int
+	// DailyBroadcastLimit is the broadcast lane limit; 0 takes DailySendLimit.
+	DailyBroadcastLimit int
+	// DailyTransactionalLimit is the transactional lane limit; 0 takes DailySendLimit.
+	DailyTransactionalLimit int
 	// PublicURL is the public Web origin unsubscribe links point at; empty disables broadcasts.
 	PublicURL string
 	// CustomDomainsEnabled lets organizations connect their own domains.
@@ -51,6 +60,17 @@ type Settings struct {
 	EmailWorker string
 	// MaxZonesPerOrganization bounds the managed zones one organization may have Zmail create.
 	MaxZonesPerOrganization int
+	// TransactionalEnabled accepts transactional messages; SecretEncryptionKey must be set too.
+	TransactionalEnabled bool
+	// SecretEncryptionKey encrypts queued transactional content and keys idempotency fingerprints.
+	SecretEncryptionKey string
+	// SimulatorDomain is the domain whose addresses transactional mail simulates; empty takes
+	// the default.
+	SimulatorDomain string
+	// TransactionalRecipientPerMinute and TransactionalKeyPerSecond are the transactional rate
+	// limits; 0 takes the defaults.
+	TransactionalRecipientPerMinute int
+	TransactionalKeyPerSecond       int
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -145,11 +165,14 @@ type Service interface {
 	// MemberRemoved and MemberJoined follow the organization starter's membership events.
 	MemberRemoved(ctx context.Context, event domain.OrganizationMemberRemovedEvent) error
 	MemberJoined(ctx context.Context, event domain.OrganizationMemberJoinedEvent) error
-	ListTemplates(ctx context.Context, organizationID uint) ([]*domain.MailTemplate, error)
+	// ListTemplates lists templates of one kind, or every template when kind is empty.
+	ListTemplates(ctx context.Context, organizationID uint, kind domain.MailTemplateKind) ([]*domain.MailTemplate, error)
 	GetTemplate(ctx context.Context, organizationID, id uint) (*domain.MailTemplate, error)
-	CreateTemplate(ctx context.Context, organizationID, createdBy uint, input TemplateInput) (*domain.MailTemplate, error)
-	UpdateTemplate(ctx context.Context, organizationID, id uint, input TemplateInput) (*domain.MailTemplate, error)
-	DeleteTemplate(ctx context.Context, organizationID, id uint) error
+	// CreateTemplate, UpdateTemplate, and DeleteTemplate let every member write standard
+	// templates and only owners and admins write transactional ones.
+	CreateTemplate(ctx context.Context, viewer domain.OrganizationContext, input TemplateInput) (*domain.MailTemplate, error)
+	UpdateTemplate(ctx context.Context, viewer domain.OrganizationContext, id uint, input TemplateInput) (*domain.MailTemplate, error)
+	DeleteTemplate(ctx context.Context, viewer domain.OrganizationContext, id uint) error
 	PreviewTemplate(ctx context.Context, organizationID uint, input PreviewInput) (*TemplatePreview, error)
 	SendTemplateTest(ctx context.Context, viewer domain.OrganizationContext, templateID, mailboxID uint, to []string, values map[string]string) (*domain.MailMessage, error)
 	ListContacts(ctx context.Context, organizationID uint, filter domain.MailContactFilter) ([]*domain.MailContact, int64, error)
@@ -221,9 +244,32 @@ type Service interface {
 	Provider() string
 	InboundEnabled() bool
 	DailySendLimit() int
-	// RecordDeliveryEvent stores one signed provider event about an outbound message. It
-	// reports recorded=false when the event was already stored.
-	RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (message *domain.MailMessage, event domain.MailEvent, recorded bool, err error)
+	DailyBroadcastLimit() int
+	DailyTransactionalLimit() int
+	// TransactionalPolicy reports the instance's transactional switch, rate limits, and simulator domain.
+	TransactionalPolicy() TransactionalPolicy
+	// SendTransactional sends one transactional message for an API key; created is false for an
+	// idempotent replay.
+	SendTransactional(ctx context.Context, actor TransactionalActor, input TransactionalSendInput) (message *domain.TransactionalMessage, created bool, err error)
+	// GetTransactional reads a transactional message of the organization and mode.
+	GetTransactional(ctx context.Context, organizationID uint, mode domain.APIKeyMode, id uint) (*domain.TransactionalMessage, error)
+	// SendTransactionalTest sends a transactional template to the caller's own account address.
+	SendTransactionalTest(ctx context.Context, viewer domain.OrganizationContext, input TransactionalTestInput) (*domain.TransactionalMessage, error)
+	// ListTransactionalLog lists the organization's transactional messages for the console.
+	ListTransactionalLog(ctx context.Context, organizationID uint, filter domain.TransactionalLogFilter) (TransactionalLogPage, error)
+	// GetTransactionalLogEntry reads one transactional message of the organization, of either mode.
+	GetTransactionalLogEntry(ctx context.Context, organizationID, id uint) (*domain.TransactionalMessage, error)
+	// ListSendLanes counts each lane's usage over the rolling window ending at computedAt; only
+	// owners and admins may.
+	ListSendLanes(ctx context.Context, viewer domain.OrganizationContext) (lanes []SendLaneUsage, computedAt time.Time, err error)
+	// ListSuppressions lists one page of the suppression list and the next page's cursor; only
+	// owners and admins may.
+	ListSuppressions(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailSuppressionFilter) ([]domain.MailSuppression, *uint, error)
+	// RemoveSuppression takes an entry off the suppression list, succeeding when there is none.
+	RemoveSuppression(ctx context.Context, viewer domain.OrganizationContext, id uint) error
+	// RecordDeliveryEvent stores one signed provider event about an outbound mailbox message or a
+	// transactional message. Its Recorded is false when the event was already stored.
+	RecordDeliveryEvent(ctx context.Context, delivery DeliveryEvent) (DeliveryEventResult, error)
 	ReceiveInbound(ctx context.Context, delivery InboundDelivery) (message *domain.MailMessage, created bool, err error)
 }
 
@@ -265,6 +311,15 @@ type service struct {
 	now            func() time.Time
 	// recordAudit enriches the request's audit entry; tests capture it.
 	recordAudit func(context.Context, auditstarter.Change)
+	// transactional stores transactional messages and suppressions; nil when a test does not
+	// need them, which keeps transactional mail disabled.
+	transactional domain.TransactionalMailRepository
+	// accounts reads the caller's account address for console test sends.
+	accounts            accountDirectory
+	transactionalLimits transactionalLimits
+	// encryptor seals queued transactional content; nil without SecretEncryptionKey.
+	encryptor      *crypto.AESEncryptor
+	fingerprintKey []byte
 }
 
 var _ Service = (*service)(nil)
@@ -283,6 +338,9 @@ func NewService(
 	transport mailtransport.Transport,
 	notifier mailNotifier,
 	settings Settings,
+	transactional domain.TransactionalMailRepository,
+	limits *ratelimit.Stores,
+	accounts accountDirectory,
 ) *service {
 	var inbox domain.MailInboxRepository
 	if seam, ok := repo.(domain.MailInboxRepository); ok {
@@ -292,7 +350,15 @@ func NewService(
 	if seam, ok := repo.(domain.MailRoleRepository); ok {
 		roles = seam
 	}
+	var encryptor *crypto.AESEncryptor
+	var fingerprintKey []byte
+	if settings.SecretEncryptionKey != "" {
+		encryptor = crypto.NewAESEncryptorFromString(settings.SecretEncryptionKey)
+		fingerprintKey = transactionalFingerprintKey(settings.SecretEncryptionKey)
+	}
 	return &service{
+		transactional: transactional, accounts: accounts, transactionalLimits: newTransactionalLimits(limits, settings),
+		encryptor: encryptor, fingerprintKey: fingerprintKey,
 		repo: repo, inbox: inbox, roles: roles, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
 		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
@@ -354,9 +420,16 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	if resolved.DailySendLimit > 0 {
 		settings.DailySendLimit = resolved.DailySendLimit
 	}
+	settings.DailyBroadcastLimit = resolved.DailyBroadcastLimit
+	settings.DailyTransactionalLimit = resolved.DailyTransactionalLimit
 	if resolved.MaxZonesPerOrganization > 0 {
 		settings.MaxZonesPerOrganization = resolved.MaxZonesPerOrganization
 	}
+	settings.TransactionalEnabled = resolved.TransactionalEnabled
+	settings.SecretEncryptionKey = resolved.SecretEncryptionKey
+	settings.SimulatorDomain = resolved.SimulatorDomain
+	settings.TransactionalRecipientPerMinute = resolved.TransactionalRecipientPerMinute
+	settings.TransactionalKeyPerSecond = resolved.TransactionalKeyPerSecond
 	return settings
 }
 
@@ -369,7 +442,27 @@ func (s *service) Provider() string {
 }
 
 func (s *service) DailySendLimit() int {
-	return s.settings.DailySendLimit
+	return s.settings.laneLimit(domain.SendLanePersonal)
+}
+
+func (s *service) DailyBroadcastLimit() int {
+	return s.settings.laneLimit(domain.SendLaneBroadcast)
+}
+
+func (s *service) DailyTransactionalLimit() int {
+	return s.settings.laneLimit(domain.SendLaneTransactional)
+}
+
+// laneLimit is the rolling 24-hour limit of one lane. A lane without its own limit takes the
+// personal limit, so no lane has less room than the shared limit gave before lanes existed.
+func (settings Settings) laneLimit(lane domain.SendLane) int {
+	switch {
+	case lane == domain.SendLaneBroadcast && settings.DailyBroadcastLimit > 0:
+		return settings.DailyBroadcastLimit
+	case lane == domain.SendLaneTransactional && settings.DailyTransactionalLimit > 0:
+		return settings.DailyTransactionalLimit
+	}
+	return settings.DailySendLimit
 }
 
 func (s *service) InboundEnabled() bool {
@@ -618,9 +711,10 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 	return s.withEvents(ctx, message)
 }
 
-// send stores and sends one outbound message. A direct send (queueAtLimit) that finds the
-// organization's send limit full is stored as a waiting message instead, for the worker to send
-// when the window has room; a broadcast recipient gets ErrMailSendLimitReached and pauses.
+// send stores and sends one outbound message. A direct send (queueAtLimit) counts in the personal
+// lane and, when that lane is full, is stored as a waiting message instead, for the worker to send
+// when the window has room. A broadcast recipient (not queueAtLimit) counts in the broadcast lane
+// and gets ErrMailSendLimitReached there, which pauses the broadcast.
 func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput, queueAtLimit bool) (*domain.MailMessage, bool, error) {
 	var templateID uint
 	if input.Template != nil {
@@ -634,6 +728,10 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		return nil, false, err
 	}
 	message.TemplateID = templateID
+	message.SendLane = domain.SendLanePersonal
+	if !queueAtLimit {
+		message.SendLane = domain.SendLaneBroadcast
+	}
 	if message.IdempotencyKey != "" {
 		existing, findErr := s.repo.FindMessageByIdempotencyKey(ctx, mailbox.ID, message.IdempotencyKey)
 		if findErr == nil {
@@ -655,11 +753,11 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		}
 	}
 
-	sent, err := s.repo.CountOutboundSince(ctx, mailbox.OrganizationID, s.now().Add(-sendLimitWindow))
+	sent, err := s.repo.CountOutboundSince(ctx, mailbox.OrganizationID, message.SendLane, s.now().Add(-sendLimitWindow))
 	if err != nil {
 		return nil, false, err
 	}
-	if sent >= int64(s.settings.DailySendLimit) {
+	if sent >= int64(s.settings.laneLimit(message.SendLane)) {
 		if !queueAtLimit {
 			return nil, false, ErrMailSendLimitReached
 		}
@@ -712,6 +810,7 @@ func (s *service) deliver(
 	files []mailtransport.Attachment,
 	headers map[string]string,
 ) (*domain.MailMessage, bool, error) {
+	metrics.RecordSendLaneAttempt(string(message.SendLane))
 	outcome, sendErr := s.transport.Send(ctx, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,
@@ -761,14 +860,14 @@ func (s *service) deliver(
 	return message, true, result
 }
 
-// queueForSendLimit stores a direct send as a waiting message. At most one day's limit of messages
-// may wait per organization; one more is rejected and nothing is stored.
+// queueForSendLimit stores a direct send as a waiting message. At most one day's personal lane
+// limit of messages may wait per organization; one more is rejected and nothing is stored.
 func (s *service) queueForSendLimit(ctx context.Context, mailbox *domain.Mailbox, message *domain.MailMessage) (*domain.MailMessage, bool, error) {
 	waiting, err := s.repo.CountWaitingSends(ctx, mailbox.OrganizationID)
 	if err != nil {
 		return nil, false, err
 	}
-	if waiting >= int64(s.settings.DailySendLimit) {
+	if waiting >= int64(s.settings.laneLimit(domain.SendLanePersonal)) {
 		return nil, false, ErrMailSendLimitReached
 	}
 	message.Status = domain.MailStatusQueued

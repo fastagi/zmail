@@ -2,10 +2,13 @@ package mailbox
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +23,7 @@ func TestWebhookCatalogListsTheStarterAndMailEvents(t *testing.T) {
 		t.Fatalf("NewWebhookCatalog: %v", err)
 	}
 	types := catalog.Types()
-	want := append([]string{"webhook.test"}, mailWebhookTypes...)
+	want := append(append([]string{"webhook.test"}, mailWebhookTypes...), transactionalWebhookTypes...)
 	slices.Sort(types)
 	slices.Sort(want)
 	if !slices.Equal(types, want) {
@@ -208,7 +211,7 @@ func TestDeliveryEventPublishesOnceAcrossRedeliveries(t *testing.T) {
 	fixture.notifier.sent = nil
 	raw := deliveryEventBody("bounced", "evt-9", "prov-9@mail.example", "bob@example.com")
 	for range 2 {
-		if _, _, _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw)); err != nil {
+		if _, err := fixture.service.RecordDeliveryEvent(ctx, fixture.signedEvent(raw)); err != nil {
 			t.Fatalf("RecordDeliveryEvent: %v", err)
 		}
 	}
@@ -252,5 +255,159 @@ func TestMailStateIsRecordedWhenPublishingFails(t *testing.T) {
 	}
 	if _, ok := fixture.repo.messages[inbound.ID]; !ok {
 		t.Fatalf("inbound message was not stored")
+	}
+}
+
+func TestCatalogListsEmailEvents(t *testing.T) {
+	catalog, err := NewWebhookCatalog()
+	if err != nil {
+		t.Fatalf("NewWebhookCatalog: %v", err)
+	}
+	types := catalog.Types()
+	for _, eventType := range []string{
+		WebhookEmailSent, WebhookEmailDelivered, WebhookEmailBounced,
+		WebhookEmailComplained, WebhookEmailSuppressed, WebhookEmailFailed,
+	} {
+		if !slices.Contains(types, eventType) {
+			t.Errorf("catalog lacks %s", eventType)
+		}
+	}
+	valid := `{"message_id":1,"template":"signup-code","to":"lilei@example.com","mode":"live",` +
+		`"simulated":false,"bounce_type":"","reason":""}`
+	if _, err := catalog.Normalize(WebhookEmailSent, json.RawMessage(valid)); err != nil {
+		t.Fatalf("valid payload rejected: %v", err)
+	}
+	for name, payload := range map[string]string{
+		"unknown field":   `{"message_id":1,"template":"t","to":"a@b.test","mode":"live","simulated":false,"bounce_type":"","reason":"","subject":"x"}`,
+		"missing field":   `{"message_id":1,"template":"t","to":"a@b.test","mode":"live","simulated":false,"bounce_type":""}`,
+		"no message":      `{"message_id":0,"template":"t","to":"a@b.test","mode":"live","simulated":false,"bounce_type":"","reason":""}`,
+		"no template":     `{"message_id":1,"template":"","to":"a@b.test","mode":"live","simulated":false,"bounce_type":"","reason":""}`,
+		"no recipient":    `{"message_id":1,"template":"t","to":"","mode":"live","simulated":false,"bounce_type":"","reason":""}`,
+		"bad mode":        `{"message_id":1,"template":"t","to":"a@b.test","mode":"prod","simulated":false,"bounce_type":"","reason":""}`,
+		"bad bounce type": `{"message_id":1,"template":"t","to":"a@b.test","mode":"live","simulated":false,"bounce_type":"soft","reason":""}`,
+		"null simulated":  `{"message_id":1,"template":"t","to":"a@b.test","mode":"live","simulated":null,"bounce_type":"","reason":""}`,
+		"trailing data":   valid + `{}`,
+		"not an object":   `[]`,
+	} {
+		if err := validateTransactionalWebhookPayload(json.RawMessage(payload)); err == nil {
+			t.Errorf("%s: payload accepted", name)
+		}
+	}
+}
+
+// secretMessage is a transactional message whose rendered content held the code 482913.
+func secretMessage() *domain.TransactionalMessage {
+	return &domain.TransactionalMessage{
+		ID: 77, OrganizationID: 10, Mode: domain.APIKeyModeLive, TemplateKey: "signup-code",
+		FromAddress: "no-reply@mail.example", ToAddress: "lilei@example.com",
+		SubjectMasked: "Acme verification code: ••••••", VariablesMasked: map[string]string{"code": "••••••"},
+		PayloadCiphertext: []byte("Acme verification code: 482913"), Status: domain.TransactionalStatusSent,
+	}
+}
+
+func TestTransactionalWebhookPayloadHasNoSecrets(t *testing.T) {
+	publisher := &recordingPublisher{}
+	notifier := NewWebhookNotifier(webhookConfig(true), publisher)
+	now := time.Unix(1_800_000_000, 0).UTC()
+	notifier.now = func() time.Time { return now }
+	if err := notifier.NotifyTransactional(context.Background(), TransactionalNotification{
+		Type: WebhookEmailBounced, Message: secretMessage(), BounceType: bounceTypePermanent,
+		Reason: "5.1.1 permanent_failure", Key: "event:prov-1", OccurredAt: now.Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("NotifyTransactional: %v", err)
+	}
+	if len(publisher.events) != 1 {
+		t.Fatalf("published %d events; want 1", len(publisher.events))
+	}
+	event := publisher.events[0]
+	if event.OrganizationID != 10 || event.Source != "mailbox" || event.Type != WebhookEmailBounced ||
+		!event.OccurredAt.Equal(now.Add(-time.Minute)) {
+		t.Fatalf("event = %+v", event)
+	}
+	if err := validateTransactionalWebhookPayload(event.Data); err != nil {
+		t.Fatalf("published payload fails its own catalog validation: %v", err)
+	}
+	for _, secret := range []string{"482913", "verification", "Acme", "••••••", "no-reply"} {
+		if strings.Contains(string(event.Data), secret) {
+			t.Fatalf("payload contains %q: %s", secret, event.Data)
+		}
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(event.Data, &fields); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	want := map[string]any{
+		"message_id": float64(77), "template": "signup-code", "to": "lilei@example.com", "mode": "live",
+		"simulated": false, "bounce_type": "permanent", "reason": "5.1.1 permanent_failure",
+	}
+	if len(fields) != len(want) {
+		t.Fatalf("payload = %s", event.Data)
+	}
+	for key, value := range want {
+		if fields[key] != value {
+			t.Fatalf("payload %s = %v; want %v", key, fields[key], value)
+		}
+	}
+}
+
+func TestTransactionalWebhookEventIDsAreStable(t *testing.T) {
+	sum := sha256.Sum256([]byte("event:prov-1"))
+	hash := hex.EncodeToString(sum[:12])
+	for _, test := range []struct {
+		eventType, key, want string
+	}{
+		{WebhookEmailSent, "", "t42:sent"},
+		{WebhookEmailFailed, "", "t42:failed"},
+		{WebhookEmailSuppressed, "", "t42:suppressed"},
+		{WebhookEmailBounced, "event:prov-1", "t42:bounced:" + hash},
+		{WebhookEmailDelivered, "event:prov-1", "t42:delivered:" + hash},
+		{WebhookEmailComplained, "event:prov-1", "t42:complained:" + hash},
+	} {
+		got := transactionalWebhookEventID(42, test.eventType, test.key)
+		if got != test.want {
+			t.Errorf("transactionalWebhookEventID(42, %s, %q) = %q; want %q", test.eventType, test.key, got, test.want)
+		}
+		if again := transactionalWebhookEventID(42, test.eventType, test.key); again != got {
+			t.Errorf("event id is not stable: %q then %q", got, again)
+		}
+	}
+	if !regexp.MustCompile(`^t42:sent:[0-9a-f]{24}$`).MatchString(transactionalWebhookEventID(42, WebhookEmailSent, "sim:0")) {
+		t.Fatalf("keyed id = %q", transactionalWebhookEventID(42, WebhookEmailSent, "sim:0"))
+	}
+	if transactionalWebhookEventID(42, WebhookEmailSent, "") == mailWebhookEventID(42, WebhookMailSent, "") {
+		t.Fatal("transactional and mailbox event ids collide")
+	}
+}
+
+// Transactional mail belongs to no mailbox, so no mailbox switch gates it: the webhook starter
+// alone decides. Without that starter, or without an organization, nothing is published.
+func TestTransactionalWebhookIgnoresMailboxSwitch(t *testing.T) {
+	now := time.Now().UTC()
+	notification := TransactionalNotification{Type: WebhookEmailSent, Message: secretMessage(), OccurredAt: now}
+	publisher := &recordingPublisher{}
+	if err := NewWebhookNotifier(webhookConfig(true), publisher).NotifyTransactional(context.Background(), notification); err != nil {
+		t.Fatalf("NotifyTransactional: %v", err)
+	}
+	if got := publisher.publishedTypes(); !slices.Equal(got, []string{WebhookEmailSent}) {
+		t.Fatalf("published = %v", got)
+	}
+
+	silent := &recordingPublisher{}
+	if err := NewWebhookNotifier(webhookConfig(false), silent).NotifyTransactional(context.Background(), notification); err != nil {
+		t.Fatalf("NotifyTransactional: %v", err)
+	}
+	orphan := *secretMessage()
+	orphan.OrganizationID = 0
+	on := NewWebhookNotifier(webhookConfig(true), silent)
+	for _, missing := range []TransactionalNotification{
+		{Type: WebhookEmailSent, Message: &orphan, OccurredAt: now},
+		{Type: WebhookEmailSent, OccurredAt: now},
+	} {
+		if err := on.NotifyTransactional(context.Background(), missing); err != nil {
+			t.Fatalf("NotifyTransactional: %v", err)
+		}
+	}
+	if len(silent.events) != 0 {
+		t.Fatalf("published %d events; want none", len(silent.events))
 	}
 }

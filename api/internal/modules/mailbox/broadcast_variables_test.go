@@ -13,7 +13,7 @@ import (
 func TestBroadcastVariablesFillEveryRecipient(t *testing.T) {
 	fixture := newBroadcastFixture(t, 100)
 	ctx := context.Background()
-	template, err := fixture.service.CreateTemplate(ctx, 1, testCreator, TemplateInput{
+	template, err := fixture.service.CreateTemplate(ctx, as(1), TemplateInput{
 		Name:    "Sale",
 		Subject: "{{first_name|Hi}}, use {{code}}",
 		HTML:    "<p>Code {{code}} until {{ends}} for {{plan}}.</p>",

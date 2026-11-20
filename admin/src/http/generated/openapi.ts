@@ -683,7 +683,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a connected domain
-         * @description Allowed only when no mailbox uses the domain. Zmail forgets the domain and leaves its DNS and Cloudflare settings as they are. Only owners and admins may.
+         * @description Allowed only when no mailbox uses the domain and no transactional template sends from it. Zmail forgets the domain and leaves its DNS and Cloudflare settings as they are. Only owners and admins may.
          */
         delete: operations["deleteMailDomain"];
         options?: never;
@@ -834,6 +834,66 @@ export interface paths {
          * @description Needs the `owner` or `admin` organization role. Its mailboxes become ungrouped in the same statement; no mailbox access changes.
          */
         delete: operations["deleteMailRole"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-send-lanes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show the organization's usage of each send lane
+         * @description Needs the `owner` or `admin` organization role. Computed on every request over the rolling 24 hours before `computed_at`, never cached. Always three lanes, in the order `transactional`, `broadcast`, `personal`.
+         */
+        get: operations["listMailSendLanes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-suppressions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's suppressed addresses, newest first
+         * @description Needs the `owner` or `admin` organization role. Neither transactional messages nor broadcasts reach a listed address. Keyset pages ordered by `created_at` and `id`, newest first; pass `meta.next_cursor` as `cursor` for the next, older page.
+         */
+        get: operations["listMailSuppressions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-suppressions/{suppression_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an address from the suppression list
+         * @description Needs the `owner` or `admin` organization role. Transactional messages may reach the address again; a contact's status is not changed. Idempotent, and discloses nothing; an id the organization does not have also answers `204`. A removal is audited as `mail_suppression.removed`.
+         */
+        delete: operations["deleteMailSuppression"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2340,6 +2400,106 @@ export interface paths {
         patch: operations["updateUserSetting"];
         trace?: never;
     };
+    "/v1/transactional-mail-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's transactional messages, newest first
+         * @description For the console; any member may read it. Entries carry the masked recipient and masked subject, never the full recipient or the variables. Keyset pages; pass `meta.next_cursor` as `cursor` for the next, older page. Without `since` and `until` the last 7 days are listed; the range is at most 30 days.
+         */
+        get: operations["listTransactionalMailLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/transactional-mail-log/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one transactional message of the log with its timeline
+         * @description For the console; any member may read it, in either mode. Adds the sender, the masked variables, and up to 50 events to the log entry. The full recipient is never returned.
+         */
+        get: operations["getTransactionalMailLogEntry"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/transactional-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send one transactional message from a transactional template
+         * @description For backend services. The key must hold the `mail:transactional` scope (`*` also grants it); test keys are accepted. The template is named by its `key` and must be a transactional template of the organization named by `Organization-Id`, of which the key's owner must be a member. The message is stored as `queued` and dispatched after the request commits; a test key or a simulator address never calls the provider. Checks run in this order: key authentication, organization, scope, feature switch, body, `Idempotency-Key`, per-key rate limit, template and variables, idempotent replay, per-recipient rate limit, sender domain, suppression, transactional lane. See MAILBOXES.md, Transactional Mail.
+         */
+        post: operations["sendTransactionalMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/transactional-messages/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one transactional message with its events
+         * @description The key must hold the `mail:transactional` scope; test keys are accepted. A live key reads only live messages and a test key only test messages; a message of the other mode, or of another organization, is `404 MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND`.
+         */
+        get: operations["getTransactionalMessage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/transactional-test-sends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a transactional template to the caller's own account address
+         * @description For the console; any member may. The recipient is always the caller's account email and cannot be named. Variables not given take the template's sample values. `live` counts in the transactional lane and calls the provider; `test` is simulated as `delivered`. At most 5 per minute per user. Otherwise the message follows `POST /v1/transactional-messages` from the per-recipient rate limit on, with a server-generated idempotency key.
+         */
+        post: operations["sendTransactionalTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/usage/user": {
         parameters: {
             query?: never;
@@ -2578,10 +2738,11 @@ export interface components {
             /** Format: date-time */
             expires_at?: string;
             id: components["schemas"]["PositiveID"];
-            /** @description Issued with the `fastbuild_` prefix; keys created before the rename keep their original lowercase prefix. */
+            /** @description Issued with the `fastbuild_` prefix (`fastbuild_test_` for a test key); keys created before the rename keep their original lowercase prefix. */
             key_prefix: string;
             /** Format: date-time */
             last_used_at?: string;
+            mode: components["schemas"]["APIKeyMode"];
             name: string;
             /** Format: date-time */
             revoked_at?: string;
@@ -2590,6 +2751,11 @@ export interface components {
             updated_at: string;
             user_id: components["schemas"]["PositiveID"];
         };
+        /**
+         * @description `live` keys act for real; `test` keys are issued with the `fastbuild_test_` prefix, are accepted only by routes that declare test support, and there never send mail. Fixed at creation; defaults to `live`.
+         * @enum {string}
+         */
+        APIKeyMode: "live" | "test";
         APIKeyPageResponse: {
             /** @constant */
             code: 0;
@@ -2834,6 +3000,7 @@ export interface components {
         CreateAPIKeyRequest: {
             /** Format: date-time */
             expires_at?: string;
+            mode?: components["schemas"]["APIKeyMode"];
             name: string;
             scopes: string[];
         };
@@ -2889,7 +3056,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -3127,8 +3294,12 @@ export interface components {
             broadcasts_enabled: boolean;
             /** @description Whether owners and admins may connect their own domains. Instance-wide, repeated on every item. */
             custom_domains_enabled: boolean;
-            /** @description Outbound messages one organization may attempt per rolling 24 hours. */
+            /** @description The broadcast lane limit. Broadcast recipients one organization may attempt per rolling 24 hours. */
+            daily_broadcast_limit: number;
+            /** @description The personal lane limit. Personal messages (console sends, replies, `outbound-mail-messages`, and template test sends) one organization may attempt per rolling 24 hours. */
             daily_send_limit: number;
+            /** @description The transactional lane limit. Live, non-simulated transactional messages one organization may attempt per rolling 24 hours. */
+            daily_transactional_limit: number;
             domain: string;
             /** @description Whether the API accepts signed deliveries from the mail edge. */
             inbound_enabled: boolean;
@@ -3143,6 +3314,14 @@ export interface components {
              * @enum {string}
              */
             provider: "cloudflare" | "log";
+            /** @description The domain whose addresses are simulated instead of sent (`delivered@`, `bounced@`, `soft-bounced@`, `complained@`, `suppressed@`, each with an optional `+tag`). */
+            simulator_domain: string;
+            /** @description Whether the instance accepts transactional messages (`MAILBOX_TRANSACTIONAL_ENABLED`). Instance-wide, repeated on every item. */
+            transactional_enabled: boolean;
+            /** @description Transactional messages one API key may send per second. */
+            transactional_key_limit_per_second: number;
+            /** @description Transactional messages one organization may send from one template to one recipient in one mode per minute. */
+            transactional_recipient_limit_per_minute: number;
         };
         MailboxDomainListResponse: {
             /** @constant */
@@ -3439,7 +3618,13 @@ export interface components {
         };
         MailDeliveryEvent: {
             duplicate: boolean;
+            /** @description The id of the matched message in the table `message_kind` names. */
             message_id: components["schemas"]["PositiveID"];
+            /**
+             * @description `mailbox` when the event matched a mailbox message, `transactional` when it matched a transactional message.
+             * @enum {string}
+             */
+            message_kind: "mailbox" | "transactional";
             type: components["schemas"]["MailEventType"];
         };
         MailDeliveryEventResponse: {
@@ -3861,23 +4046,81 @@ export interface components {
             data: components["schemas"]["MailRole"];
             message: string;
         };
+        MailSendLaneUsage: {
+            /** @enum {string} */
+            lane: "transactional" | "broadcast" | "personal";
+            /** @description The lane's rolling 24-hour limit. */
+            limit: number;
+            /** @description Provider calls of the lane that started in the window, failed attempts included. */
+            used: number;
+            /** @description For `transactional` and `personal`, messages waiting for room in the lane; for `broadcast`, the pending recipients of broadcasts paused because the lane was full. */
+            waiting: number;
+        };
+        MailSendLaneUsageList: {
+            /**
+             * Format: date-time
+             * @description The end of the window the usage was counted in.
+             */
+            computed_at: string;
+            /** @description Always the three lanes, in the order `transactional`, `broadcast`, `personal`. */
+            lanes: components["schemas"]["MailSendLaneUsage"][];
+            /** @constant */
+            window_hours: 24;
+        };
+        MailSendLaneUsageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailSendLaneUsageList"];
+            message: string;
+        };
         /**
          * @description `received` for inbound messages. Outbound messages are `queued` while the provider call is in flight, then `sent` or `failed`.
          * @enum {string}
          */
         MailStatus: "received" | "queued" | "sent" | "failed";
+        MailSuppression: {
+            /** Format: date-time */
+            created_at: string;
+            /** @description The suppressed address, lowercased. */
+            email: string;
+            id: components["schemas"]["PositiveID"];
+            reason: components["schemas"]["MailSuppressionReason"];
+            /**
+             * @description What first suppressed the address; `backfill` is a contact suppressed before the list existed.
+             * @enum {string}
+             */
+            source: "broadcast" | "transactional" | "backfill";
+        };
+        MailSuppressionPageMeta: {
+            /** @description Pass as `cursor` to read the next, older page; null on the last page. */
+            next_cursor: string | null;
+        };
+        MailSuppressionPageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailSuppression"][];
+            message: string;
+            meta: components["schemas"]["MailSuppressionPageMeta"];
+        };
+        /** @enum {string} */
+        MailSuppressionReason: "bounced" | "complained";
         MailTemplate: {
             /** Format: date-time */
             created_at: string;
             design: components["schemas"]["MailTemplateDesign"];
+            from: components["schemas"]["MailTemplateSender"];
             html_body: string;
             id: components["schemas"]["PositiveID"];
+            key: string | null;
+            kind: components["schemas"]["MailTemplateKind"];
             name: string;
             sample_variables: components["schemas"]["MailTemplateVariables"];
             subject: string;
             text_body: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description The declared variables of a transactional template; empty for a standard template. */
+            variable_definitions: components["schemas"]["MailTemplateVariableDefinition"][];
             variables: string[];
         };
         /** @description The visual editor's document that `html` and `text` were rendered from, stored as given. The API checks only that it is an object of at most 256 KiB with a positive integer `version`; sending always uses the bodies. Null or absent means the template is written in HTML, and a replace without it clears the stored design. */
@@ -3886,6 +4129,11 @@ export interface components {
         } & {
             [key: string]: unknown;
         }) | null;
+        /**
+         * @description `standard` templates serve mailbox sends, template tests, and broadcasts; `transactional` templates serve only transactional messages. Fixed when the template is created.
+         * @enum {string}
+         */
+        MailTemplateKind: "standard" | "transactional";
         MailTemplateListResponse: {
             /** @constant */
             code: 0;
@@ -3915,13 +4163,22 @@ export interface components {
         };
         MailTemplateRequest: {
             design?: components["schemas"]["MailTemplateDesign"];
+            /** @description Required for a transactional template and refused for a standard one. A bare address whose domain is a verified domain of the organization (or, with the `log` provider, the instance mail domain). Stored in lowercase. */
+            from_address?: string;
+            /** @description Optional display name of a transactional template's sender. */
+            from_name?: string;
             /** @description At least one of `html` and `text` is required. */
             html?: string;
+            /** @description Required for a transactional template and refused for a standard one. Unique in the organization; the API refers to the template by it. */
+            key?: string;
+            kind?: components["schemas"]["MailTemplateKind"];
             name: string;
             sample_variables?: components["schemas"]["MailTemplateVariables"];
             /** @description May use `{{name}}` and `{{name|fallback}}` placeholders, as may both bodies. */
             subject: string;
             text?: string;
+            /** @description For a transactional template only; a standard template refuses a non-empty list. Every placeholder must be declared and every declaration used, so it is empty when the content has no placeholders. A secret variable must be required; a required variable must have no fallback and an optional one must have one. */
+            variable_definitions?: components["schemas"]["MailTemplateVariableDefinition"][];
         };
         MailTemplateResponse: {
             /** @constant */
@@ -3929,6 +4186,11 @@ export interface components {
             data: components["schemas"]["MailTemplate"];
             message: string;
         };
+        /** @description The sender of a transactional template; null for a standard template. */
+        MailTemplateSender: {
+            address: string;
+            name: string;
+        } | null;
         /** @description Sends a stored template in place of `subject`, `text`, and `html`. Only these values fill variables; sample values are never used for a real send. */
         MailTemplateSendInput: {
             id: components["schemas"]["PositiveID"];
@@ -3937,11 +4199,16 @@ export interface components {
         MailTemplateSummary: {
             /** Format: date-time */
             created_at: string;
+            from: components["schemas"]["MailTemplateSender"];
             id: components["schemas"]["PositiveID"];
+            key: string | null;
+            kind: components["schemas"]["MailTemplateKind"];
             name: string;
             subject: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description The declared variables of a transactional template; empty for a standard template. */
+            variable_definitions: components["schemas"]["MailTemplateVariableDefinition"][];
             /** @description Every variable the template uses, sorted. */
             variables: string[];
         };
@@ -3949,6 +4216,12 @@ export interface components {
             mailbox_id: components["schemas"]["PositiveID"];
             to: string[];
             variables?: components["schemas"]["MailTemplateVariables"];
+        };
+        MailTemplateVariableDefinition: {
+            name: string;
+            required: boolean;
+            /** @description A secret value is stored encrypted and masked when shown. */
+            secret: boolean;
         };
         /** @description Values by variable name; names are a letter followed by letters, digits, or underscores. */
         MailTemplateVariables: {
@@ -4545,6 +4818,155 @@ export interface components {
         };
         /** @enum {string} */
         SettingVisibility: "public" | "private";
+        /**
+         * @description The most severe delivery event recorded for the message (see MAILBOXES.md, Delivery Events); null when none was recorded.
+         * @enum {string|null}
+         */
+        TransactionalLastEvent: "accepted" | "delivered" | "deferred" | "bounced" | "failed" | "rejected" | "complained" | null;
+        /** @description A transactional message as the console log shows it, without the full recipient or the variables. */
+        TransactionalLogEntry: {
+            /** Format: date-time */
+            created_at: string;
+            failure_code: string | null;
+            id: components["schemas"]["PositiveID"];
+            idempotency_key: string | null;
+            last_event: components["schemas"]["TransactionalLastEvent"];
+            mode: components["schemas"]["TransactionalMode"];
+            queued_reason: components["schemas"]["TransactionalQueuedReason"];
+            /** Format: date-time */
+            sent_at: string | null;
+            simulated: boolean;
+            status: components["schemas"]["TransactionalMessageStatus"];
+            /** @description The rendered subject with every secret variable masked. */
+            subject: string;
+            template: string;
+            to_masked: string;
+        };
+        /** @description A log entry with its sender, masked variables, and events. Still without the full recipient. */
+        TransactionalLogEntryDetail: {
+            /** Format: date-time */
+            created_at: string;
+            /** @description Up to 50 events, oldest first. */
+            events: components["schemas"]["TransactionalMessageEvent"][];
+            failure_code: string | null;
+            from: components["schemas"]["TransactionalSender"];
+            id: components["schemas"]["PositiveID"];
+            idempotency_key: string | null;
+            last_event: components["schemas"]["TransactionalLastEvent"];
+            mode: components["schemas"]["TransactionalMode"];
+            queued_reason: components["schemas"]["TransactionalQueuedReason"];
+            /** Format: date-time */
+            sent_at: string | null;
+            simulated: boolean;
+            status: components["schemas"]["TransactionalMessageStatus"];
+            subject: string;
+            template: string;
+            to_masked: string;
+            /** @description The variables as sent, with secret values masked. */
+            variables: {
+                [key: string]: string;
+            };
+        };
+        TransactionalLogEntryResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["TransactionalLogEntryDetail"];
+            message: string;
+        };
+        TransactionalLogPageMeta: {
+            /** @description Pass as `cursor` to read the next, older page; null on the last page. */
+            next_cursor: string | null;
+            /** @description Messages of the requested mode created in the last 24 hours, of the requested `template` when one is given, ignoring the other filters; counting stops at 10000. */
+            total_24h: number;
+        };
+        TransactionalLogPageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["TransactionalLogEntry"][];
+            message: string;
+            meta: components["schemas"]["TransactionalLogPageMeta"];
+        };
+        TransactionalMessage: {
+            /** @description Provider calls made so far; at most 4. */
+            attempts: number;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Up to 50 events, oldest first. */
+            events: components["schemas"]["TransactionalMessageEvent"][];
+            /** @description Stable reason when `status` is `failed`, such as `send.expired`, `send.sender_unverified`, `transport.unknown_outcome`, or a provider code; null otherwise. */
+            failure_code: string | null;
+            from: components["schemas"]["TransactionalSender"];
+            id: components["schemas"]["PositiveID"];
+            /** @description The `Idempotency-Key` the message was created with; null once released 24 hours later. */
+            idempotency_key: string | null;
+            last_event: components["schemas"]["TransactionalLastEvent"];
+            mode: components["schemas"]["TransactionalMode"];
+            queued_reason: components["schemas"]["TransactionalQueuedReason"];
+            /** Format: date-time */
+            sent_at: string | null;
+            /** @description True for a simulator address or a test-mode message; the provider is never called. */
+            simulated: boolean;
+            status: components["schemas"]["TransactionalMessageStatus"];
+            /** @description The rendered subject with every secret variable masked. */
+            subject: string;
+            /** @description The template key when the message was created; kept after the template is deleted. */
+            template: string;
+            /** @description The full recipient, lowercased. Returned only on API key routes and console test sends. */
+            to: string;
+            /** @description The recipient with the local part cut to its first two characters (one when it has at most two) followed by `••`, domain kept, for example `li••@example.com`. */
+            to_masked: string;
+            /** @description The variables as sent, with secret values masked. A secret value that is an `http` or `https` URL with a host shows `<host>/••••`; any other secret value shows `••••••`. */
+            variables: {
+                [key: string]: string;
+            };
+        };
+        TransactionalMessageEvent: {
+            /** @description Short machine-readable reason such as `5.1.1 permanent_failure` or `simulated`; never provider free text. */
+            detail: string;
+            /** Format: date-time */
+            occurred_at: string;
+            type: components["schemas"]["MailEventType"];
+        };
+        TransactionalMessageRequest: {
+            /** @description The `key` of a transactional template of the organization. */
+            template: string;
+            /** @description One bare address. Surrounding whitespace is trimmed and the address is lowercased; a display name or several addresses are refused. */
+            to: string;
+            variables?: components["schemas"]["MailTemplateVariables"];
+        };
+        TransactionalMessageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["TransactionalMessage"];
+            message: string;
+        };
+        /**
+         * @description `queued` until the provider takes the message (or the simulator decides), then `sent`; `failed` when the provider refused it, its outcome is unknown, retries ran out, it waited more than an hour, or its sender domain lost verification; `suppressed` when the recipient is on the organization's suppression list (nothing is sent).
+         * @enum {string}
+         */
+        TransactionalMessageStatus: "queued" | "sent" | "failed" | "suppressed";
+        /**
+         * @description `live` messages come from live keys and live console test sends; `test` messages come from test keys and test console sends, are always simulated, and never call the provider.
+         * @enum {string}
+         */
+        TransactionalMode: "live" | "test";
+        /**
+         * @description `send_limit` while a queued message waits for room in the transactional lane; `retry` while it waits for a retry after a temporary provider failure; otherwise null.
+         * @enum {string|null}
+         */
+        TransactionalQueuedReason: "send_limit" | "retry" | null;
+        /** @description The template's sender when the message was created. */
+        TransactionalSender: {
+            address: string;
+            /** @description The display name; empty when the template has none. */
+            name: string;
+        };
+        TransactionalTestSendRequest: {
+            mode: components["schemas"]["TransactionalMode"];
+            /** @description The `key` of a transactional template of the organization. */
+            template: string;
+            variables?: components["schemas"]["MailTemplateVariables"];
+        };
         /** @description Any field of a new record; an omitted field keeps its current value. */
         UpdateMailDNSRecordRequest: {
             content?: string;
@@ -5200,6 +5622,8 @@ export interface components {
         MailMessageID: components["schemas"]["PositiveID"];
         /** @description Positive mail role identifier. */
         MailRoleID: components["schemas"]["PositiveID"];
+        /** @description Positive suppression list entry identifier. */
+        MailSuppressionID: components["schemas"]["PositiveID"];
         /** @description Positive mail template identifier. */
         MailTemplateID: components["schemas"]["PositiveID"];
         /** @description Positive mail thread identifier, the `thread_id` of its messages. */
@@ -5238,6 +5662,10 @@ export interface components {
         SettingIfNoneMatch: string;
         /** @description Code-owned setting key for the route's scope, such as `localization.locale`. */
         SettingKey: string;
+        /** @description Names this message within the organization and the key's mode for 24 hours from the first message. A repeat with the same content returns that message; different content is `409 MAILBOX.IDEMPOTENCY_CONFLICT`. After 24 hours the key is released and names a new message. */
+        TransactionalIdempotencyKey: string;
+        /** @description Positive transactional message identifier. */
+        TransactionalMessageID: components["schemas"]["PositiveID"];
         /** @description Only deliveries for this endpoint (canonical positive decimal). */
         WebhookDeliveryEndpointFilter: components["schemas"]["PositiveID"];
         /** @description Positive webhook delivery identifier in the active organization. */
@@ -6187,7 +6615,7 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description A field failed validation, or the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`). */
+            /** @description A field failed validation, the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6269,7 +6697,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A field failed validation, or the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`). */
+            /** @description A field failed validation, the name or unsubscribe label is unusable (`MAILBOX.BROADCAST_INVALID`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6538,7 +6966,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A field failed validation, `scheduled_at` is more than a year ahead (`MAILBOX.BROADCAST_INVALID`), or the list has no subscribed contact (`MAILBOX.BROADCAST_NO_RECIPIENTS`). */
+            /** @description A field failed validation, `scheduled_at` is more than a year ahead (`MAILBOX.BROADCAST_INVALID`), the list has no subscribed contact (`MAILBOX.BROADCAST_NO_RECIPIENTS`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7225,7 +7653,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description A mailbox still uses the domain (`MAILBOX.DOMAIN_IN_USE`). */
+            /** @description A mailbox still uses the domain, or a transactional template sends from it (`MAILBOX.DOMAIN_IN_USE`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7583,6 +8011,106 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    listMailSendLanes: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The usage of each lane. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSendLaneUsageResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailSuppressions: {
+        parameters: {
+            query?: {
+                /** @description Opaque keyset position from `meta.next_cursor`; absent or empty requests the newest page. */
+                cursor?: string;
+                /** @description An exact address, compared in lowercase after trimming. */
+                email?: string;
+                per_page?: number;
+                reason?: components["schemas"]["MailSuppressionReason"];
+            };
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the suppression list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSuppressionPageResponse"];
+                };
+            };
+            /** @description A filter is unusable or the cursor is malformed (`COMMON.INVALID_INPUT`); or the organization header is missing or malformed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailSuppression: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive suppression list entry identifier. */
+                suppression_id: components["parameters"]["MailSuppressionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The address is not on the suppression list. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     previewMailTemplate: {
         parameters: {
             query?: never;
@@ -7626,7 +8154,10 @@ export interface operations {
     };
     listMailTemplates: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only templates of this kind. Absent lists every template. */
+                kind?: components["schemas"]["MailTemplateKind"];
+            };
             header: {
                 /** @description Active organization for organization-scoped routes; verified against membership. */
                 "Organization-Id": components["parameters"]["OrganizationContext"];
@@ -7636,7 +8167,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every template of the organization by name, without bodies. */
+            /** @description Every template of the organization (of the requested kind) by name, without bodies. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7678,8 +8209,17 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            /** @description A member tried to write a transactional template; only owners and admins may (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             404: components["responses"]["NotFound"];
-            /** @description The name is taken in the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`) or the organization has 200 templates (`MAILBOX.TEMPLATE_LIMIT_REACHED`). */
+            /** @description The name is taken in the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`), the key is taken in the organization (`MAILBOX.TEMPLATE_KEY_TAKEN`), or the organization has 200 templates (`MAILBOX.TEMPLATE_LIMIT_REACHED`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7689,7 +8229,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, or the name, subject, body, sample values, or placeholder syntax is unusable (`MAILBOX.TEMPLATE_INVALID`). */
+            /** @description A field failed validation; the name, subject, body, sample values, or placeholder syntax is unusable, or a transactional template's key, sender, or variable definitions break the template rules (`MAILBOX.TEMPLATE_INVALID`); or a transactional template's sender domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7761,8 +8301,17 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            /** @description A member tried to write a transactional template; only owners and admins may (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             404: components["responses"]["NotFound"];
-            /** @description The name is taken by another template of the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`). */
+            /** @description The name or key is taken by another template of the organization (`MAILBOX.TEMPLATE_NAME_TAKEN`, `MAILBOX.TEMPLATE_KEY_TAKEN`), or the request changes the template's `kind` (`MAILBOX.TEMPLATE_KIND_IMMUTABLE`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7772,7 +8321,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, or the name, subject, body, sample values, or placeholder syntax is unusable (`MAILBOX.TEMPLATE_INVALID`). */
+            /** @description A field failed validation; the name, subject, body, sample values, or placeholder syntax is unusable, or a transactional template's key, sender, or variable definitions break the template rules (`MAILBOX.TEMPLATE_INVALID`); or a transactional template's sender domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7808,6 +8357,15 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            /** @description A member tried to delete a transactional template; only owners and admins may (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -7852,7 +8410,7 @@ export interface operations {
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
-            /** @description A field failed validation, the recipients are unusable (`MAILBOX.MESSAGE_INVALID`), or variables without a value or fallback remain (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, with one field error per variable). */
+            /** @description A field failed validation, the recipients are unusable (`MAILBOX.MESSAGE_INVALID`), variables without a value or fallback remain (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, with one field error per variable), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9176,7 +9734,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, the recipients, subject, body, or reply reference are unusable (`MAILBOX.MESSAGE_INVALID`), or the `Idempotency-Key` is not 1 to 255 printable ASCII characters (`MAILBOX.IDEMPOTENCY_KEY_INVALID`). */
+            /** @description A field failed validation, the recipients, subject, body, or reply reference are unusable (`MAILBOX.MESSAGE_INVALID`), the `Idempotency-Key` is not 1 to 255 printable ASCII characters (`MAILBOX.IDEMPOTENCY_KEY_INVALID`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -11168,7 +11726,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, the message is unusable (`MAILBOX.MESSAGE_INVALID`), or the `Idempotency-Key` is malformed (`MAILBOX.IDEMPOTENCY_KEY_INVALID`). */
+            /** @description A field failed validation, the message is unusable (`MAILBOX.MESSAGE_INVALID`), the `Idempotency-Key` is malformed (`MAILBOX.IDEMPOTENCY_KEY_INVALID`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -11549,6 +12107,313 @@ export interface operations {
             422: components["responses"]["SettingInvalidValue"];
             428: components["responses"]["PreconditionRequired"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listTransactionalMailLog: {
+        parameters: {
+            query?: {
+                /** @description Opaque keyset position from `meta.next_cursor`; absent or empty requests the newest page. */
+                cursor?: string;
+                last_event?: "delivered" | "deferred" | "bounced" | "failed" | "rejected" | "complained";
+                /** @description Which mode to list. Defaults to `live`. */
+                mode?: components["schemas"]["TransactionalMode"];
+                /** @description `delivered` keeps `last_event` `delivered`; `problem` keeps `last_event` `bounced`, `complained`, `failed`, or `rejected`, or `status` `failed` or `suppressed`. Combined with `status` and `last_event` as an intersection. */
+                outcome?: "delivered" | "problem";
+                per_page?: number;
+                /** @description Inclusive lower bound on `created_at`. */
+                since?: string;
+                status?: components["schemas"]["TransactionalMessageStatus"];
+                /** @description A template key. */
+                template?: string;
+                /** @description An exact recipient address, compared in lowercase after trimming. */
+                to?: string;
+                /** @description Exclusive upper bound on `created_at`. */
+                until?: string;
+            };
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the log. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionalLogPageResponse"];
+                };
+            };
+            /** @description A filter is unusable, the range is longer than 30 days, or the cursor is malformed (`COMMON.INVALID_INPUT`); or the organization header is missing or malformed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getTransactionalMailLogEntry: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive transactional message identifier. */
+                message_id: components["parameters"]["TransactionalMessageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The log entry with its sender, masked variables, and events. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionalLogEntryResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is not a member of the organization (`ORGANIZATION.NOT_FOUND`), or the organization has no transactional message with the id (`MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    sendTransactionalMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Names this message within the organization and the key's mode for 24 hours from the first message. A repeat with the same content returns that message; different content is `409 MAILBOX.IDEMPOTENCY_CONFLICT`. After 24 hours the key is released and names a new message. */
+                "Idempotency-Key": components["parameters"]["TransactionalIdempotencyKey"];
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransactionalMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description The `Idempotency-Key` already named a message of this key's mode in the last 24 hours with the same content; that message is returned and nothing is sent again. */
+            200: {
+                headers: {
+                    /** @description The message's path, `/v1/transactional-messages/{message_id}`. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionalMessageResponse"];
+                };
+            };
+            /** @description The message is stored. It is `queued` (with `queued_reason` `send_limit` when the transactional lane is full) or, for a suppressed recipient, `suppressed`. */
+            202: {
+                headers: {
+                    /** @description The message's path, `/v1/transactional-messages/{message_id}`. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionalMessageResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The key lacks `mail:transactional` (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The key's owner is not a member of the organization (`ORGANIZATION.NOT_FOUND`), or the organization has no template with this key (`MAILBOX.TEMPLATE_NOT_FOUND`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The `Idempotency-Key` named a message with different content in the last 24 hours (`MAILBOX.IDEMPOTENCY_CONFLICT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation (`COMMON.VALIDATION_FAILED`); the recipient is not one bare address, a variable is not declared by the template, or a simulator address has an unknown local part (`MAILBOX.MESSAGE_INVALID`); the `Idempotency-Key` is missing or not 1 to 255 printable ASCII characters (`MAILBOX.IDEMPOTENCY_KEY_INVALID`); the template is not transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`); a required variable is missing or empty (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, one field error per variable); or the template's sender domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The key sent more than its per-second limit (`COMMON.RATE_LIMITED`), the same template went to the same recipient too often in this mode (`MAILBOX.RECIPIENT_RATE_LIMITED`), or the transactional lane is full and as many messages already wait as the lane allows (`MAILBOX.SEND_LIMIT_REACHED`, nothing is stored). The rate limits set `Retry-After`. */
+            429: {
+                headers: {
+                    /** @description Seconds until the limit has room; at least 1. Set for the two rate limits. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The instance has not enabled transactional mail (`MAILBOX.TRANSACTIONAL_DISABLED`), or the database or a dependency is unavailable (`COMMON.SERVICE_UNAVAILABLE`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getTransactionalMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive transactional message identifier. */
+                message_id: components["parameters"]["TransactionalMessageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The message with up to 50 events, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionalMessageResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The key lacks `mail:transactional` (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The key's owner is not a member of the organization (`ORGANIZATION.NOT_FOUND`), or no message of this organization and mode has the id (`MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    sendTransactionalTest: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransactionalTestSendRequest"];
+            };
+        };
+        responses: {
+            /** @description The test message is stored. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactionalMessageResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is not a member of the organization (`ORGANIZATION.NOT_FOUND`), or the organization has no template with this key (`MAILBOX.TEMPLATE_NOT_FOUND`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description A field failed validation (`COMMON.VALIDATION_FAILED`); a variable is not declared by the template (`MAILBOX.MESSAGE_INVALID`); the template is not transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`); a required variable has no value and no sample value (`MAILBOX.TEMPLATE_VARIABLES_MISSING`); or the template's sender domain is not verified (`MAILBOX.DOMAIN_NOT_VERIFIED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The caller sent more than 5 test messages in a minute (`COMMON.RATE_LIMITED`), the same template went to the caller's address too often in this mode (`MAILBOX.RECIPIENT_RATE_LIMITED`), or the transactional lane is full and as many messages already wait as it allows (`MAILBOX.SEND_LIMIT_REACHED`). The rate limits set `Retry-After`. */
+            429: {
+                headers: {
+                    /** @description Seconds until the limit has room; at least 1. Set for the two rate limits. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The instance has not enabled transactional mail (`MAILBOX.TRANSACTIONAL_DISABLED`), or the database or a dependency is unavailable (`COMMON.SERVICE_UNAVAILABLE`). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     listUserUsage: {

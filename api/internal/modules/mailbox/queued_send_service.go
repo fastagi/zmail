@@ -41,7 +41,7 @@ func (s *service) DispatchQueuedSends(ctx context.Context, limit int) (int, erro
 func (s *service) dispatchOrganizationQueue(ctx context.Context, organizationID uint, limit int) (int, error) {
 	now := s.now().UTC()
 	messages, err := s.repo.LeaseWaitingSends(ctx, organizationID, now, now.Add(queuedSendLease),
-		now.Add(-sendLimitWindow), s.settings.DailySendLimit, limit)
+		now.Add(-sendLimitWindow), s.settings.laneLimit(domain.SendLanePersonal), limit)
 	if err != nil {
 		return 0, err
 	}

@@ -89,10 +89,9 @@ if [[ -z "${FASTBUILD_TEST_POSTGRES_DSN:-}" ]]; then
   exit 2
 fi
 
-POSTGRES_ENV=()
-while IFS= read -r entry; do
-  POSTGRES_ENV+=("${entry}")
-done < <(python3 - "${FASTBUILD_TEST_POSTGRES_DSN}" <<'PY'
+# Parse the DSN into a variable first: macOS bash 3.2 cannot read a heredoc inside a process
+# substitution.
+POSTGRES_LINES="$(python3 - "${FASTBUILD_TEST_POSTGRES_DSN}" <<'PY'
 import sys
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -107,7 +106,11 @@ print(f"DB_USERNAME={unquote(value.username or '')}")
 print(f"DB_PASSWORD={unquote(value.password or '')}")
 print(f"DB_SSLMODE={query.get('sslmode', ['disable'])[0]}")
 PY
-)
+)"
+POSTGRES_ENV=()
+while IFS= read -r entry; do
+  POSTGRES_ENV+=("${entry}")
+done <<<"${POSTGRES_LINES}"
 
 COMMON_ENV=(
   APP_ENV=test
@@ -120,6 +123,8 @@ COMMON_ENV=(
   "${POSTGRES_ENV[@]}"
   AI_ENABLED=false
   TRACING_ENABLED=false
+  # Never inherit a real mail provider from the caller's environment: Kest flows must not send mail.
+  MAILBOX_PROVIDER=log
 )
 
 cd "${ROOT_DIR}"
@@ -128,7 +133,9 @@ cp "${KEST_CONFIG_PATH}" "${KEST_CONFIG_BACKUP}"
 write_kest_config
 
 env "${COMMON_ENV[@]}" go run ./cmd/fastbuild/main.go migrate >/dev/null
-env "${COMMON_ENV[@]}" go run ./cmd/server/main.go >"${SERVER_LOG}" 2>&1 &
+# Build first and run the binary: killing `go run` would leave its child server listening.
+go build -o "${TMP_DIR}/server" ./cmd/server/main.go
+env "${COMMON_ENV[@]}" "${TMP_DIR}/server" >"${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
 
 for _ in $(seq 1 30); do

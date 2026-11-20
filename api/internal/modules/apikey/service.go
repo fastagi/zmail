@@ -23,6 +23,12 @@ import (
 // is not useful and the write amplification on hot keys is real.
 const lastUsedAtThrottle = time.Minute
 
+// Issued key prefixes. A test key's prefix tells it apart at a glance.
+const (
+	liveKeyPrefix = "fastbuild_"
+	testKeyPrefix = "fastbuild_test_"
+)
+
 const (
 	MaxAPIKeyScopes      = 32
 	MaxAPIKeyScopeLength = 65
@@ -69,13 +75,23 @@ func (s *service) CreateForUser(ctx context.Context, userID uint, req *APIKeyCre
 	if req.ExpiresAt != nil && !req.ExpiresAt.After(time.Now()) {
 		return nil, domain.ErrInvalidInput
 	}
+	mode := domain.APIKeyModeLive
+	if req.Mode != "" {
+		mode = domain.APIKeyMode(req.Mode)
+		if !mode.Valid() {
+			return nil, domain.ErrInvalidInput
+		}
+	}
 
 	secret, err := crypto.GenerateKeyHex(24)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate api key secret: %w", err)
 	}
 
-	keyPrefix := "fastbuild_" + strings.ToLower(idgen.ShortID())
+	keyPrefix := liveKeyPrefix + strings.ToLower(idgen.ShortID())
+	if mode == domain.APIKeyModeTest {
+		keyPrefix = testKeyPrefix + strings.ToLower(idgen.ShortID())
+	}
 	plaintext := keyPrefix + "." + secret
 
 	apiKey := &domain.APIKey{
@@ -84,6 +100,7 @@ func (s *service) CreateForUser(ctx context.Context, userID uint, req *APIKeyCre
 		KeyPrefix: keyPrefix,
 		KeyHash:   crypto.SHA256Hex(plaintext),
 		Scopes:    scopes,
+		Mode:      mode,
 		ExpiresAt: req.ExpiresAt,
 	}
 
@@ -101,6 +118,7 @@ func (s *service) CreateForUser(ctx context.Context, userID uint, req *APIKeyCre
 			"name":       {After: apiKey.Name},
 			"scopes":     {After: append([]string(nil), apiKey.Scopes...)},
 			"expires_at": {After: apiKey.ExpiresAt},
+			"mode":       {After: string(apiKey.Mode)},
 		},
 	})
 

@@ -60,6 +60,11 @@ export const publicEnvSchema = z.object({
     }
   }),
   NEXT_PUBLIC_DEVTOOLS_ENABLED: z.boolean(),
+  NEXT_PUBLIC_DEVELOPER_API_ORIGIN: z
+    .string()
+    .url()
+    .refine((value) => /^https?:\/\//i.test(value), 'Must be an http(s) URL')
+    .optional(),
   NODE_ENV: z.enum(['development', 'production', 'test']),
 });
 

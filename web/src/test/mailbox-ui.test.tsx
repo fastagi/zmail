@@ -1522,6 +1522,12 @@ function domain(maxMailboxes: number) {
     provider: 'log',
     inbound_enabled: false,
     daily_send_limit: 200,
+    daily_broadcast_limit: 200,
+    daily_transactional_limit: 200,
+    transactional_enabled: true,
+    transactional_recipient_limit_per_minute: 3,
+    transactional_key_limit_per_second: 20,
+    simulator_domain: 'test.zmail.im',
     broadcasts_enabled: true,
     custom_domains_enabled: false,
   };

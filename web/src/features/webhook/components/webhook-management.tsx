@@ -69,7 +69,18 @@ import { useT } from '@/i18n';
 
 const webhookTestEvent = 'webhook.test' as const;
 
-export function WebhookManagement({ organizationId }: { organizationId: number }) {
+/**
+ * Manages the organization's webhook endpoints and deliveries. `eventTypePrefix` limits the event
+ * types an endpoint can newly subscribe to (for example `email.`); without it every catalog type is
+ * offered. An edited endpoint keeps every subscription it already has, inside the prefix or not.
+ */
+export function WebhookManagement({
+  organizationId,
+  eventTypePrefix,
+}: {
+  organizationId: number;
+  eventTypePrefix?: string;
+}) {
   const t = useT('webhook');
   const locale = useLocale();
   const [endpointPage, setEndpointPage] = useState(1);
@@ -82,6 +93,10 @@ export function WebhookManagement({ organizationId }: { organizationId: number }
   const endpoints = useWebhookEndpoints(organizationId, endpointPage);
   const deliveries = useWebhookDeliveries(organizationId, deliveryPage);
   const eventTypes = useWebhookEventTypes(organizationId);
+  const catalog = eventTypes.data ?? [webhookTestEvent];
+  const selectableEventTypes = eventTypePrefix
+    ? catalog.filter(eventType => eventType.startsWith(eventTypePrefix))
+    : catalog;
   const replaceStatus = useReplaceWebhookEndpointStatus(organizationId);
   const testEndpoint = useTestWebhookEndpoint(organizationId);
   const dateTime = useMemo(
@@ -123,7 +138,7 @@ export function WebhookManagement({ organizationId }: { organizationId: number }
           type="button"
           size="sm"
           icon={<Plus className="size-4" />}
-          disabled={eventTypes.isError}
+          disabled={eventTypes.isError || (Boolean(eventTypePrefix) && eventTypes.isPending)}
           onClick={() => setEditor('create')}
         >
           {t('actions.create')}
@@ -349,7 +364,7 @@ export function WebhookManagement({ organizationId }: { organizationId: number }
           key={editor === 'create' ? 'create' : `edit-${editor.id}-${editor.version}`}
           organizationId={organizationId}
           endpoint={editor === 'create' ? null : editor}
-          eventTypes={eventTypes.data ?? [webhookTestEvent]}
+          eventTypes={selectableEventTypes}
           onClose={() => setEditor(null)}
           onSecret={value => {
             setSecret(value);

@@ -188,6 +188,12 @@ describe('mailbox browser route boundary', () => {
           provider: 'log',
           inbound_enabled: false,
           daily_send_limit: 200,
+          daily_broadcast_limit: 200,
+          daily_transactional_limit: 200,
+          transactional_enabled: true,
+          transactional_recipient_limit_per_minute: 3,
+          transactional_key_limit_per_second: 20,
+          simulator_domain: 'test.zmail.im',
           broadcasts_enabled: true,
           custom_domains_enabled: true,
         },
@@ -941,6 +947,84 @@ describe('mailbox browser route boundary', () => {
     );
   });
 
+  it('stores transactional template fields in the mock and keeps the kind fixed', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const template = {
+      name: 'Signup code',
+      subject: 'Your code',
+      text: 'Code {{code}}',
+      kind: 'transactional',
+      key: 'signup-code',
+      from_address: 'No-Reply@Example.com',
+      from_name: 'Acme',
+      variable_definitions: [{ name: 'code', secret: true, required: true }],
+    };
+    const created = await route.createMailTemplateRoute(
+      request('/api/mail-templates', { method: 'POST', body: JSON.stringify(template) })
+    );
+    expect(created.status).toBe(201);
+    const stored = (await created.json()).data;
+    expect(stored).toMatchObject({
+      kind: 'transactional',
+      key: 'signup-code',
+      from: { address: 'no-reply@example.com', name: 'Acme' },
+      variable_definitions: [{ name: 'code', secret: true, required: true }],
+    });
+
+    await expectError(
+      await route.createMailTemplateRoute(
+        request('/api/mail-templates', {
+          method: 'POST',
+          body: JSON.stringify({ ...template, name: 'Other' }),
+        })
+      ),
+      409,
+      'MAILBOX.TEMPLATE_KEY_TAKEN'
+    );
+    await expectError(
+      await route.updateMailTemplateRoute(
+        request(`/api/mail-templates/${stored.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ name: 'Signup code', subject: 'Your code', text: 'Code' }),
+        }),
+        String(stored.id)
+      ),
+      409,
+      'MAILBOX.TEMPLATE_KIND_IMMUTABLE'
+    );
+    const invalid = await route.createMailTemplateRoute(
+      request('/api/mail-templates', {
+        method: 'POST',
+        body: JSON.stringify({ ...template, name: 'Bad', key: 'Bad Key' }),
+      })
+    );
+    expect(invalid.status).toBe(422);
+
+    // The list filters by kind like the API; without kind it lists every template.
+    await route.createMailTemplateRoute(
+      request('/api/mail-templates', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Newsletter', subject: 'News', text: 'Hello' }),
+      })
+    );
+    const names = async (path: string) =>
+      (
+        (await (await route.listMailTemplatesRoute(request(path))).json()).data as {
+          name: string;
+        }[]
+      ).map(item => item.name);
+    expect(await names('/api/mail-templates')).toEqual(['Newsletter', 'Signup code']);
+    expect(await names('/api/mail-templates?kind=transactional')).toEqual(['Signup code']);
+    expect(await names('/api/mail-templates?kind=standard')).toEqual(['Newsletter']);
+    await expectError(
+      await route.listMailTemplatesRoute(request('/api/mail-templates?kind=other')),
+      400,
+      'COMMON.INVALID_INPUT'
+    );
+  });
+
   it('keeps templates per organization in the mock and sends with them', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockUser('demo-admin'));
@@ -964,6 +1048,10 @@ describe('mailbox browser route boundary', () => {
       variables: ['code', 'first_name'],
       sample_variables: { first_name: 'Ann', code: '1' },
       design: null,
+      kind: 'standard',
+      key: null,
+      from: null,
+      variable_definitions: [],
     });
     const designed = await route.createMailTemplateRoute(
       request('/api/mail-templates', {
@@ -1128,6 +1216,7 @@ describe('mailbox browser route boundary', () => {
     const body = JSON.stringify({ name: 'A', subject: 'S', text: 'x' });
 
     await route.listMailTemplatesRoute(request('/api/mail-templates'));
+    await route.listMailTemplatesRoute(request('/api/mail-templates?kind=transactional&x=1'));
     await route.createMailTemplateRoute(request('/api/mail-templates', { method: 'POST', body }));
     await route.getMailTemplateRoute(request('/api/mail-templates/3'), '3');
     await route.updateMailTemplateRoute(
@@ -1150,12 +1239,16 @@ describe('mailbox browser route boundary', () => {
       fetchMock.mock.calls.map(([url, init]) => `${init?.method} ${new URL(String(url)).pathname}`)
     ).toEqual([
       'GET /v1/mail-templates',
+      'GET /v1/mail-templates',
       'POST /v1/mail-templates',
       'GET /v1/mail-templates/3',
       'PUT /v1/mail-templates/3',
       'DELETE /v1/mail-templates/3',
       'POST /v1/mail-templates/3/tests',
     ]);
+    // Only the documented kind filter reaches the API.
+    expect(new URL(String(fetchMock.mock.calls[0]?.[0])).search).toBe('');
+    expect(new URL(String(fetchMock.mock.calls[1]?.[0])).search).toBe('?kind=transactional');
     for (const [, init] of fetchMock.mock.calls) {
       expect(new Headers(init?.headers).get('organization-id')).toBe('1');
     }

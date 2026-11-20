@@ -18,6 +18,12 @@ export async function runServiceParity(context: { organizationId: number }): Pro
     provider: 'log',
     inbound_enabled: false,
     daily_send_limit: 200,
+    daily_broadcast_limit: 200,
+    daily_transactional_limit: 200,
+    transactional_enabled: true,
+    transactional_recipient_limit_per_minute: 3,
+    transactional_key_limit_per_second: 20,
+    simulator_domain: 'test.zmail.im',
   });
 
   const mailbox = await mailboxService.create(organizationId, {
@@ -303,4 +309,28 @@ export async function runServiceParity(context: { organizationId: number }): Pro
   expect(await mailboxService.purgeTrash(organizationId, mailbox.id)).toEqual({ deleted: 1 });
   await mailboxService.remove(organizationId, mailbox.id);
   expect(await mailboxService.list(organizationId)).toEqual([]);
+  // The developer console's transactional routes ride on the mailbox feature.
+  const { developerService } = await import('@/features/developer/services/developer-service');
+  const { mockTransactionalStore } =
+    await import('@/features/developer/server/mock-transactional-store');
+  mockTransactionalStore.reset();
+  await mailboxService.saveTemplate(organizationId, {
+    name: 'Sign-up code',
+    subject: 'Code {{code}}',
+    text: 'Your code is {{code}}.',
+    kind: 'transactional',
+    key: 'signup-code',
+    from_address: 'no-reply@mail.example.com',
+    variable_definitions: [{ name: 'code', secret: true, required: true }],
+  });
+  const testSent = await developerService.testSend(organizationId, {
+    template: 'signup-code',
+    mode: 'test',
+    variables: { code: '482913' },
+  });
+  expect(testSent).toMatchObject({ mode: 'test', simulated: true, subject: 'Code ••••••' });
+  const testLog = await developerService.log(organizationId, { mode: 'test' }, { perPage: 10 });
+  expect(testLog.items.map(entry => entry.id)).toEqual([testSent.id]);
+  expect(testLog.meta).toEqual({ next_cursor: null, total_24h: 1 });
+  expect((await developerService.logEntry(organizationId, testSent.id)).events).toHaveLength(2);
 }

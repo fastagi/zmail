@@ -144,6 +144,48 @@ describe('API key browser route boundary', () => {
     );
   });
 
+  it('forwards the mode of a new key to the API', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: opaqueCredential() });
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ code: 0, message: 'created', data: {} }, { status: 201 })
+    );
+    const { createApiKeyRoute } = await import('@/features/api-key/server/api-key-route');
+
+    await createApiKeyRoute(
+      request('/api/api-keys', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'CI', scopes: ['mail:transactional'], mode: 'test' }),
+      })
+    );
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://api.example.com/v1/api-keys');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      name: 'CI',
+      scopes: ['mail:transactional'],
+      mode: 'test',
+    });
+  });
+
+  it('issues a test-mode mock key with the test prefix', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser());
+    const { createApiKeyRoute } = await import('@/features/api-key/server/api-key-route');
+
+    const response = await createApiKeyRoute(
+      request('/api/api-keys', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'CI', scopes: ['mail:transactional'], mode: 'test' }),
+      })
+    );
+    const created = await response.json();
+    expect(response.status).toBe(201);
+    expect(created.data.api_key.mode).toBe('test');
+    expect(created.data.plaintext_key).toMatch(/^fastbuild_test_/);
+  });
+
   it('returns the canonical error for an oversized create body', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockUser());

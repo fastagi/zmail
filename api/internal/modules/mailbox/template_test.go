@@ -81,7 +81,7 @@ func TestTemplatesAreKeptPerOrganization(t *testing.T) {
 	fixture := newServiceFixture(t)
 	ctx := context.Background()
 
-	template, err := fixture.service.CreateTemplate(ctx, 1, testCreator, templateInput())
+	template, err := fixture.service.CreateTemplate(ctx, as(1), templateInput())
 	if err != nil {
 		t.Fatalf("CreateTemplate: %v", err)
 	}
@@ -91,10 +91,10 @@ func TestTemplatesAreKeptPerOrganization(t *testing.T) {
 	if got := TemplateVariables(template); !slices.Equal(got, []string{"code", "first_name"}) {
 		t.Fatalf("variables = %v", got)
 	}
-	if _, err = fixture.service.CreateTemplate(ctx, 1, testCreator, templateInput()); !errors.Is(err, ErrMailTemplateNameTaken) {
+	if _, err = fixture.service.CreateTemplate(ctx, as(1), templateInput()); !errors.Is(err, ErrMailTemplateNameTaken) {
 		t.Fatalf("duplicate name error = %v", err)
 	}
-	if _, err = fixture.service.CreateTemplate(ctx, 2, testCreator, templateInput()); err != nil {
+	if _, err = fixture.service.CreateTemplate(ctx, as(2), templateInput()); err != nil {
 		t.Fatalf("same name in another organization: %v", err)
 	}
 	if _, err = fixture.service.GetTemplate(ctx, 2, template.ID); !errors.Is(err, ErrMailTemplateNotFound) {
@@ -103,17 +103,17 @@ func TestTemplatesAreKeptPerOrganization(t *testing.T) {
 
 	changed := templateInput()
 	changed.Subject = "Changed {{first_name}}"
-	updated, err := fixture.service.UpdateTemplate(ctx, 1, template.ID, changed)
+	updated, err := fixture.service.UpdateTemplate(ctx, as(1), template.ID, changed)
 	if err != nil || updated.Subject != "Changed {{first_name}}" {
 		t.Fatalf("UpdateTemplate = %+v, %v", updated, err)
 	}
-	if _, err = fixture.service.UpdateTemplate(ctx, 2, template.ID, changed); !errors.Is(err, ErrMailTemplateNotFound) {
+	if _, err = fixture.service.UpdateTemplate(ctx, as(2), template.ID, changed); !errors.Is(err, ErrMailTemplateNotFound) {
 		t.Fatalf("update from another organization error = %v", err)
 	}
-	if err = fixture.service.DeleteTemplate(ctx, 2, template.ID); !errors.Is(err, ErrMailTemplateNotFound) {
+	if err = fixture.service.DeleteTemplate(ctx, as(2), template.ID); !errors.Is(err, ErrMailTemplateNotFound) {
 		t.Fatalf("delete from another organization error = %v", err)
 	}
-	if err = fixture.service.DeleteTemplate(ctx, 1, template.ID); err != nil {
+	if err = fixture.service.DeleteTemplate(ctx, as(1), template.ID); err != nil {
 		t.Fatalf("DeleteTemplate: %v", err)
 	}
 }
@@ -140,7 +140,7 @@ func TestTemplateValidation(t *testing.T) {
 	} {
 		input := templateInput()
 		change(&input)
-		if _, err := fixture.service.CreateTemplate(context.Background(), 1, testCreator, input); !errors.Is(err, ErrMailTemplateInvalid) {
+		if _, err := fixture.service.CreateTemplate(context.Background(), as(1), input); !errors.Is(err, ErrMailTemplateInvalid) {
 			t.Errorf("%s: error = %v; want invalid", name, err)
 		}
 	}
@@ -149,7 +149,7 @@ func TestTemplateValidation(t *testing.T) {
 func TestPreviewUsesSamplesAndReportsMissing(t *testing.T) {
 	fixture := newServiceFixture(t)
 	ctx := context.Background()
-	template, err := fixture.service.CreateTemplate(ctx, 1, testCreator, templateInput())
+	template, err := fixture.service.CreateTemplate(ctx, as(1), templateInput())
 	if err != nil {
 		t.Fatalf("CreateTemplate: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestSendByTemplateRendersAndRecordsTheTemplate(t *testing.T) {
 	fixture := newServiceFixture(t)
 	ctx := context.Background()
 	mailbox := fixture.mailbox(t, 1, "hello")
-	template, err := fixture.service.CreateTemplate(ctx, 1, testCreator, templateInput())
+	template, err := fixture.service.CreateTemplate(ctx, as(1), templateInput())
 	if err != nil {
 		t.Fatalf("CreateTemplate: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestTemplateTestSendUsesSampleValues(t *testing.T) {
 	fixture := newServiceFixture(t)
 	ctx := context.Background()
 	mailbox := fixture.mailbox(t, 1, "hello")
-	template, err := fixture.service.CreateTemplate(ctx, 1, testCreator, templateInput())
+	template, err := fixture.service.CreateTemplate(ctx, as(1), templateInput())
 	if err != nil {
 		t.Fatalf("CreateTemplate: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestSendRouteNamesMissingTemplateVariables(t *testing.T) {
 	if _, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedWithHandlerUser("hello")); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
-	template, err := fixture.service.CreateTemplate(context.Background(), 7, testCreator, templateInput())
+	template, err := fixture.service.CreateTemplate(context.Background(), as(7), templateInput())
 	if err != nil {
 		t.Fatalf("CreateTemplate: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestTemplatesKeepTheirVisualDesign(t *testing.T) {
 
 	input := templateInput()
 	input.Design = json.RawMessage("{ \"version\": 1,\n \"blocks\": [ {\"type\": \"text\"} ] }")
-	template, err := fixture.service.CreateTemplate(ctx, 1, testCreator, input)
+	template, err := fixture.service.CreateTemplate(ctx, as(1), input)
 	if err != nil || template.Design != `{"version":1,"blocks":[{"type":"text"}]}` {
 		t.Fatalf("CreateTemplate design = %q, %v; want the compact document", template.Design, err)
 	}
@@ -292,7 +292,7 @@ func TestTemplatesKeepTheirVisualDesign(t *testing.T) {
 	}
 
 	input.Design = json.RawMessage("null")
-	updated, err := fixture.service.UpdateTemplate(ctx, 1, template.ID, input)
+	updated, err := fixture.service.UpdateTemplate(ctx, as(1), template.ID, input)
 	if err != nil || updated.Design != "" {
 		t.Fatalf("UpdateTemplate with a null design = %q, %v; want none", updated.Design, err)
 	}

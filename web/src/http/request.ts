@@ -41,13 +41,16 @@ export class ApiError extends Error {
   fieldErrors?: ApiFieldErrors;
   status?: number;
   requestId?: string;
+  /** Whole seconds from a `Retry-After` header given in seconds; absent otherwise. */
+  retryAfterSeconds?: number;
 
   constructor(
     message: string,
     errorCode: ErrorCodeValue,
     status?: number,
     requestId?: string,
-    fieldErrors?: ApiFieldErrors
+    fieldErrors?: ApiFieldErrors,
+    retryAfterSeconds?: number
   ) {
     super(message);
     this.name = 'ApiError';
@@ -55,7 +58,16 @@ export class ApiError extends Error {
     this.status = status;
     this.requestId = requestId;
     this.fieldErrors = fieldErrors;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
+}
+
+/** `Retry-After` in delta seconds (the HTTP-date form is ignored); at most one day. */
+function retryAfterSecondsOf(error: AxiosError): number | undefined {
+  const raw: unknown = error.response?.headers?.['retry-after'];
+  if (typeof raw !== 'string' || !/^\d{1,6}$/u.test(raw.trim())) return undefined;
+  const seconds = Number(raw.trim());
+  return seconds > 0 && seconds <= 86_400 ? seconds : undefined;
 }
 
 function clientErrorCodeFor(error: AxiosError): ErrorCodeValue {
@@ -85,7 +97,8 @@ export function toApiError(error: AxiosError): ApiError {
       clientErrorCodeFor(error),
     status,
     body?.request_id,
-    body?.errors
+    body?.errors,
+    retryAfterSecondsOf(error)
   );
 }
 

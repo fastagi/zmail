@@ -254,9 +254,13 @@ provider call independently and composes with caller cancellation. See [`EMAIL.m
 
 The optional `mailbox` starter requires the `organization` starter and reads `MAILBOX_DOMAIN`, `MAILBOX_PROVIDER`,
 `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN`, `MAILBOX_REQUEST_TIMEOUT`,
-`MAILBOX_INBOUND_SECRET`, `MAILBOX_DAILY_SEND_LIMIT`, `MAILBOX_PUBLIC_URL`,
-`MAILBOX_CUSTOM_DOMAINS_ENABLED`, `MAILBOX_CLOUDFLARE_EMAIL_WORKER`, and
-`MAILBOX_MAX_ZONES_PER_ORGANIZATION` from the same typed snapshot. They are
+`MAILBOX_INBOUND_SECRET`, `MAILBOX_DAILY_SEND_LIMIT`, `MAILBOX_DAILY_BROADCAST_LIMIT`,
+`MAILBOX_DAILY_TRANSACTIONAL_LIMIT`, `MAILBOX_PUBLIC_URL`,
+`MAILBOX_CUSTOM_DOMAINS_ENABLED`, `MAILBOX_CLOUDFLARE_EMAIL_WORKER`,
+`MAILBOX_MAX_ZONES_PER_ORGANIZATION`, `MAILBOX_TRANSACTIONAL_ENABLED`,
+`MAILBOX_SECRET_ENCRYPTION_KEY`, `MAILBOX_SIMULATOR_DOMAIN`,
+`MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE`, and `MAILBOX_TRANSACTIONAL_KEY_PER_SECOND` from the
+same typed snapshot. They are
 validated only when the starter is selected.
 
 | Key | Default | Rule |
@@ -266,11 +270,18 @@ validated only when the starter is selected.
 | `MAILBOX_CLOUDFLARE_ACCOUNT_ID`, `MAILBOX_CLOUDFLARE_API_TOKEN` | empty | Both are required when the provider is `cloudflare`. The token is a secret. |
 | `MAILBOX_REQUEST_TIMEOUT` | `15s` | Bounds one provider call; greater than 0 and at most `60s`. |
 | `MAILBOX_INBOUND_SECRET` | empty | Shared secret of at least 32 characters that signs deliveries from the mail edge. Empty keeps inbound mail disabled. |
-| `MAILBOX_DAILY_SEND_LIMIT` | `200` | Outbound messages one organization may attempt per rolling 24 hours; 1 to 100000. |
+| `MAILBOX_DAILY_SEND_LIMIT` | `200` | The personal lane: console sends, replies, API outbound messages, and template test sends one organization may attempt per rolling 24 hours; 1 to 100000. |
+| `MAILBOX_DAILY_BROADCAST_LIMIT` | value of `MAILBOX_DAILY_SEND_LIMIT` | The broadcast lane: broadcast recipients one organization may attempt per rolling 24 hours; 1 to 100000. Unset or `0` takes the personal limit. |
+| `MAILBOX_DAILY_TRANSACTIONAL_LIMIT` | value of `MAILBOX_DAILY_SEND_LIMIT` | The transactional lane: live, non-simulated transactional messages one organization may attempt per rolling 24 hours; 1 to 100000. Unset or `0` takes the personal limit. Lanes are counted separately, so an organization's total can reach the sum of the three; keep it within the provider account's limit. |
 | `MAILBOX_PUBLIC_URL` | empty | Public origin of the Web console that broadcast unsubscribe links point at. Empty keeps broadcasts off. |
 | `MAILBOX_CUSTOM_DOMAINS_ENABLED` | `false` | Lets owners and admins connect their own domains: into a zone the operator added to the Cloudflare account, or into a managed zone Zmail creates for an apex the account does not hold. Requires the `cloudflare` provider. The token then needs Account → Zone: Edit, DNS Edit, Zone Settings Edit, Email Routing Rules Edit, and Email Sending Edit, with zone resources set to all zones of the account, since a token scoped to named zones cannot reach the zones Zmail creates later. Any organization may claim a domain in any zone the operator added, so keep zones organizations must not use in a separate Cloudflare account. |
 | `MAILBOX_CLOUDFLARE_EMAIL_WORKER` | empty | The Email Worker that routing rules of connected domains deliver to; required when custom domains are enabled. |
 | `MAILBOX_MAX_ZONES_PER_ORGANIZATION` | `3` | Managed zones Zmail may create in the Cloudflare account for one organization; 1 to 20. |
+| `MAILBOX_TRANSACTIONAL_ENABLED` | `false` | Accepts `POST /v1/transactional-messages` and console test sends. Requires `MAILBOX_SECRET_ENCRYPTION_KEY`; off, both answer `503 MAILBOX.TRANSACTIONAL_DISABLED`. |
+| `MAILBOX_SECRET_ENCRYPTION_KEY` | empty | At least 32 characters; required when transactional mail is enabled. Encrypts queued transactional content (AES-256-GCM) and keys the idempotency fingerprints. The key is a secret: keep it apart from database backups, and turn transactional mail off and let the queue drain before rotating it. |
+| `MAILBOX_SIMULATOR_DOMAIN` | `test.zmail.im` | Addresses on this domain (`delivered`, `bounced`, `soft-bounced`, `complained`, `suppressed`, each with an optional `+tag`) are simulated and never reach the provider. |
+| `MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE` | `3` | Transactional messages of one organization, mode, template, and recipient per minute; 1 to 1000. |
+| `MAILBOX_TRANSACTIONAL_KEY_PER_SECOND` | `20` | Transactional messages one API key may send per second; 1 to 10000. The rate limits use `RATE_LIMIT_STORE`: with `memory`, each replica counts on its own. |
 
 See [`../../contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md) for the HTTP behavior and
 [`../../deploy/cloudflare/email-worker/README.md`](../../deploy/cloudflare/email-worker/README.md)

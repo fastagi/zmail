@@ -148,10 +148,10 @@ func recordBounce(t *testing.T, f *accessFixture, eventID, providerID string) {
 	t.Helper()
 	raw := deliveryEventBody("bounced", eventID, providerID, "gone@example.net")
 	now := f.service.now()
-	_, _, recorded, err := f.service.RecordDeliveryEvent(context.Background(),
+	result, err := f.service.RecordDeliveryEvent(context.Background(),
 		DeliveryEvent{Raw: raw, Signature: signedHeader(now, deliveryEventScope, raw)})
-	if err != nil || !recorded {
-		t.Fatalf("RecordDeliveryEvent = %v, recorded %v", err, recorded)
+	if err != nil || !result.Recorded {
+		t.Fatalf("RecordDeliveryEvent = %v, recorded %v", err, result.Recorded)
 	}
 }
 

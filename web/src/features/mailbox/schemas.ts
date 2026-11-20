@@ -141,11 +141,20 @@ export const mailboxDomainSchema = strictObject({
   // `cloudflare` delivers; `log` only records and is for development.
   provider: union([literal('cloudflare'), literal('log')]),
   inbound_enabled: boolean(),
+  // Per-organization lane limits over a rolling 24 hours: personal, broadcast, transactional.
   daily_send_limit: positiveIntegerSchema,
+  daily_broadcast_limit: positiveIntegerSchema,
+  daily_transactional_limit: positiveIntegerSchema,
   // Broadcasts need the inbound secret and MAILBOX_PUBLIC_URL for their unsubscribe links.
   broadcasts_enabled: boolean(),
   // Instance-wide: whether owners and admins may connect their own domains.
   custom_domains_enabled: boolean(),
+  // Instance-wide transactional mail settings: the switch, the two rate limits, and the domain whose
+  // addresses are simulated instead of sent.
+  transactional_enabled: boolean(),
+  transactional_recipient_limit_per_minute: positiveIntegerSchema,
+  transactional_key_limit_per_second: positiveIntegerSchema,
+  simulator_domain: string(),
 });
 export const mailboxDomainListSchema = array(mailboxDomainSchema);
 
@@ -678,6 +687,17 @@ export function attachmentsWithinLimits(
   return true;
 }
 
+export const mailTemplateKindSchema = union([literal('standard'), literal('transactional')]);
+
+export const mailTemplateVariableDefinitionSchema = strictObject({
+  name: string(),
+  secret: boolean(),
+  required: boolean(),
+});
+
+/** The sender of a transactional template; null for a standard template. */
+export const mailTemplateSenderSchema = strictObject({ address: string(), name: string() });
+
 export const mailTemplateSummarySchema = strictObject({
   id: safeIdSchema,
   name: string(),
@@ -685,6 +705,10 @@ export const mailTemplateSummarySchema = strictObject({
   variables: array(string()),
   created_at: timestampSchema,
   updated_at: timestampSchema,
+  kind: mailTemplateKindSchema,
+  key: nullable(string()),
+  from: nullable(mailTemplateSenderSchema),
+  variable_definitions: array(mailTemplateVariableDefinitionSchema),
 });
 export const mailTemplateListSchema = array(mailTemplateSummarySchema);
 
@@ -703,6 +727,10 @@ export const mailTemplateSchema = strictObject({
   sample_variables: templateVariablesSchema,
   // The visual editor reads it with its own parser; the API stores it as given.
   design: nullable(mailTemplateDesignSchema),
+  kind: mailTemplateKindSchema,
+  key: nullable(string()),
+  from: nullable(mailTemplateSenderSchema),
+  variable_definitions: array(mailTemplateVariableDefinitionSchema),
 });
 
 export const mailTemplateInputSchema = strictObject({
@@ -712,6 +740,11 @@ export const mailTemplateInputSchema = strictObject({
   text: optional(string()),
   sample_variables: optional(templateVariablesSchema),
   design: optional(nullable(mailTemplateDesignSchema)),
+  kind: optional(mailTemplateKindSchema),
+  key: optional(string()),
+  from_address: optional(string()),
+  from_name: optional(string()),
+  variable_definitions: optional(array(mailTemplateVariableDefinitionSchema)),
 });
 
 export const mailTemplateTestInputSchema = strictObject({

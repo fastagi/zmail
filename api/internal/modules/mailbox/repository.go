@@ -596,19 +596,23 @@ func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) erro
 	})
 }
 
-// CountOutboundSince counts messages the organization tried to send since the given time,
-// including failed attempts, across every mailbox it owns or has deleted.
-func (r *repository) CountOutboundSince(ctx context.Context, organizationID uint, since time.Time) (int64, error) {
+// CountOutboundSince counts messages of one lane the organization tried to send since the given
+// time, including failed attempts, across every mailbox it owns or has deleted.
+func (r *repository) CountOutboundSince(ctx context.Context, organizationID uint, lane domain.SendLane, since time.Time) (int64, error) {
 	if r.db == nil {
 		return 0, domain.ErrServiceUnavailable
 	}
 	var count int64
-	err := r.conn(ctx).Model(&MailMessagePO{}).
-		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
-		Where("mailboxes.organization_id = ? AND mail_messages.direction = ? AND mail_messages.send_attempted_at >= ?",
-			organizationID, string(domain.MailDirectionOutbound), since).
-		Count(&count).Error
+	err := laneAttempts(r.conn(ctx), organizationID, lane, since).Count(&count).Error
 	return count, err
+}
+
+// laneAttempts selects the organization's outbound attempts in one lane since the given time.
+func laneAttempts(db *gorm.DB, organizationID uint, lane domain.SendLane, since time.Time) *gorm.DB {
+	return db.Model(&MailMessagePO{}).
+		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
+		Where("mailboxes.organization_id = ? AND mail_messages.direction = ? AND mail_messages.send_lane = ? AND mail_messages.send_attempted_at >= ?",
+			organizationID, string(domain.MailDirectionOutbound), string(lane), since)
 }
 
 // CountWaitingSends counts the organization's messages waiting for room in the send limit.
@@ -658,12 +662,9 @@ func (r *repository) LeaseWaitingSends(
 			organizationID).Error; err != nil {
 			return err
 		}
+		// Only direct sends wait, so only the personal lane's attempts take their room.
 		var attempts, held int64
-		if err := tx.Model(&MailMessagePO{}).
-			Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
-			Where("mailboxes.organization_id = ? AND mail_messages.direction = ? AND mail_messages.send_attempted_at >= ?",
-				organizationID, string(domain.MailDirectionOutbound), windowStart).
-			Count(&attempts).Error; err != nil {
+		if err := laneAttempts(tx, organizationID, domain.SendLanePersonal, windowStart).Count(&attempts).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&MailMessagePO{}).
@@ -978,7 +979,7 @@ func (r *repository) FindOutboundMessageByProviderID(ctx context.Context, provid
 			mail_messages.cc_addresses, mail_messages.subject, mail_messages.message_id,
 			mail_messages.in_reply_to, mail_messages.failure_code, mail_messages.last_event,
 			mail_messages.attachment_count, mail_messages.template_id, mail_messages.created_at,
-			mail_messages.updated_at,
+			mail_messages.updated_at, mail_messages.send_lane,
 			mailboxes.address AS mailbox_address, mailboxes.organization_id AS organization_id,
 			mailboxes.type AS mailbox_type, mailboxes.webhooks_enabled AS mailbox_webhooks_enabled,
 			mailboxes.sealed_before AS mailbox_sealed_before`).

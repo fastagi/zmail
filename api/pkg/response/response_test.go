@@ -294,3 +294,13 @@ func TestPaginated(t *testing.T) {
 	assert.NotNil(t, resp.Links)
 	assert.Equal(t, "/api/users?page=1", resp.Links.First)
 }
+
+func TestSuccessWithMeta(t *testing.T) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	SuccessWithMeta(c, []int{1}, map[string]any{"next_cursor": nil, "total_24h": 3})
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"code":0,"message":"success","data":[1],"meta":{"next_cursor":null,"total_24h":3}}`, w.Body.String())
+}

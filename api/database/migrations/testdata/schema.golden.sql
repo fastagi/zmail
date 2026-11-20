@@ -13,6 +13,7 @@ TABLE api_keys
   COLUMN last_used_at timestamp with time zone
   COLUMN expires_at timestamp with time zone
   COLUMN revoked_at timestamp with time zone
+  COLUMN mode character varying(8) NOT NULL DEFAULT 'live'::character varying
 
 TABLE assets
   COLUMN id character varying(36) NOT NULL
@@ -233,6 +234,7 @@ TABLE mail_messages
   COLUMN thread_id bigint
   COLUMN references_header text NOT NULL DEFAULT ''::text
   COLUMN rfc_message_id character varying(998) NOT NULL DEFAULT ''::character varying
+  COLUMN send_lane character varying(16) NOT NULL DEFAULT 'personal'::character varying
 
 TABLE mail_roles
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_roles_id_seq'::regclass)
@@ -243,6 +245,14 @@ TABLE mail_roles
   COLUMN owner_user_id bigint
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
+
+TABLE mail_suppressions
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_suppressions_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN email character varying(320) NOT NULL
+  COLUMN reason character varying(16) NOT NULL
+  COLUMN source character varying(16) NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
 
 TABLE mail_templates
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_templates_id_seq'::regclass)
@@ -256,6 +266,11 @@ TABLE mail_templates
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
   COLUMN design jsonb
+  COLUMN kind character varying(16) NOT NULL DEFAULT 'standard'::character varying
+  COLUMN template_key character varying(64)
+  COLUMN from_address character varying(320)
+  COLUMN from_name character varying(100) NOT NULL DEFAULT ''::character varying
+  COLUMN variable_definitions jsonb NOT NULL DEFAULT '[]'::jsonb
 
 TABLE mail_zones
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_zones_id_seq'::regclass)
@@ -430,6 +445,46 @@ TABLE settings
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
 
+TABLE transactional_message_events
+  COLUMN id bigint NOT NULL DEFAULT nextval('transactional_message_events_id_seq'::regclass)
+  COLUMN message_id bigint NOT NULL
+  COLUMN type character varying(16) NOT NULL
+  COLUMN detail character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN provider_event_id character varying(128)
+  COLUMN occurred_at timestamp with time zone NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+
+TABLE transactional_messages
+  COLUMN id bigint NOT NULL DEFAULT nextval('transactional_messages_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN mode character varying(8) NOT NULL
+  COLUMN simulated boolean NOT NULL DEFAULT false
+  COLUMN api_key_id bigint
+  COLUMN created_by bigint NOT NULL
+  COLUMN template_id bigint
+  COLUMN template_key character varying(64) NOT NULL
+  COLUMN from_address character varying(320) NOT NULL
+  COLUMN from_name character varying(100) NOT NULL
+  COLUMN to_address character varying(320) NOT NULL
+  COLUMN subject_masked character varying(998) NOT NULL
+  COLUMN variables_masked jsonb NOT NULL
+  COLUMN payload_ciphertext bytea
+  COLUMN idempotency_key character varying(255)
+  COLUMN idempotency_fingerprint bytea NOT NULL
+  COLUMN status character varying(16) NOT NULL
+  COLUMN queued_reason character varying(16)
+  COLUMN attempts smallint NOT NULL DEFAULT 0
+  COLUMN next_attempt_at timestamp with time zone
+  COLUMN lease_until timestamp with time zone
+  COLUMN send_attempted_at timestamp with time zone
+  COLUMN provider_message_id character varying(255)
+  COLUMN rfc_message_id character varying(998) NOT NULL
+  COLUMN failure_code character varying(120) NOT NULL DEFAULT ''::character varying
+  COLUMN last_event character varying(16)
+  COLUMN sent_at timestamp with time zone
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE usage_counters
   COLUMN id bigint NOT NULL DEFAULT nextval('usage_counters_id_seq'::regclass)
   COLUMN scope character varying(24) NOT NULL
@@ -589,6 +644,7 @@ TABLE workflow_tasks
   COLUMN updated_at timestamp with time zone NOT NULL
 
 CONSTRAINT api_keys.api_keys_pkey PRIMARY KEY (id)
+CONSTRAINT api_keys.chk_api_keys_mode CHECK (((mode)::text = ANY ((ARRAY['live'::character varying, 'test'::character varying])::text[])))
 CONSTRAINT assets.assets_pkey PRIMARY KEY (id)
 CONSTRAINT assets.assets_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'ready'::character varying, 'rejected'::character varying, 'deleted'::character varying])::text[])))
 CONSTRAINT assets.fk_assets_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
@@ -638,6 +694,7 @@ CONSTRAINT mail_message_stars.mail_message_stars_pkey PRIMARY KEY (membership_id
 CONSTRAINT mail_messages.chk_mail_messages_direction CHECK (((direction)::text = ANY ((ARRAY['inbound'::character varying, 'outbound'::character varying])::text[])))
 CONSTRAINT mail_messages.chk_mail_messages_folder CHECK ((((placement)::text <> 'folder'::text) OR (folder_id IS NOT NULL)))
 CONSTRAINT mail_messages.chk_mail_messages_placement CHECK (((placement)::text = ANY ((ARRAY['default'::character varying, 'archive'::character varying, 'folder'::character varying, 'trash'::character varying])::text[])))
+CONSTRAINT mail_messages.chk_mail_messages_send_lane CHECK (((send_lane)::text = ANY ((ARRAY['personal'::character varying, 'broadcast'::character varying])::text[])))
 CONSTRAINT mail_messages.chk_mail_messages_status CHECK (((status)::text = ANY ((ARRAY['received'::character varying, 'queued'::character varying, 'sent'::character varying, 'failed'::character varying])::text[])))
 CONSTRAINT mail_messages.fk_mail_messages_mailbox FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_messages.mail_messages_folder_id_fkey FOREIGN KEY (folder_id) REFERENCES mail_folders(id) ON DELETE SET NULL
@@ -647,6 +704,12 @@ CONSTRAINT mail_roles.mail_roles_name_check CHECK (((char_length(btrim((name)::t
 CONSTRAINT mail_roles.mail_roles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT mail_roles.mail_roles_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mail_roles.mail_roles_pkey PRIMARY KEY (id)
+CONSTRAINT mail_suppressions.chk_mail_suppressions_reason CHECK (((reason)::text = ANY ((ARRAY['bounced'::character varying, 'complained'::character varying])::text[])))
+CONSTRAINT mail_suppressions.chk_mail_suppressions_source CHECK (((source)::text = ANY ((ARRAY['broadcast'::character varying, 'transactional'::character varying, 'backfill'::character varying])::text[])))
+CONSTRAINT mail_suppressions.fk_mail_suppressions_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_suppressions.mail_suppressions_pkey PRIMARY KEY (id)
+CONSTRAINT mail_templates.chk_mail_templates_kind CHECK (((kind)::text = ANY ((ARRAY['standard'::character varying, 'transactional'::character varying])::text[])))
+CONSTRAINT mail_templates.chk_mail_templates_transactional_fields CHECK (((((kind)::text = 'transactional'::text) AND (template_key IS NOT NULL) AND (from_address IS NOT NULL)) OR (((kind)::text = 'standard'::text) AND (template_key IS NULL) AND (from_address IS NULL) AND ((from_name)::text = ''::text) AND (variable_definitions = '[]'::jsonb))))
 CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_templates.mail_templates_pkey PRIMARY KEY (id)
 CONSTRAINT mail_zones.chk_mail_zones_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'active'::character varying])::text[])))
@@ -708,6 +771,18 @@ CONSTRAINT settings.settings_scope_check CHECK (((scope)::text = ANY ((ARRAY['ap
 CONSTRAINT settings.settings_subject_check CHECK (((((scope)::text = 'app'::text) AND (subject_id = 0) AND (user_id IS NULL) AND (organization_id IS NULL)) OR (((scope)::text = 'user'::text) AND (subject_id = user_id) AND (user_id IS NOT NULL) AND (organization_id IS NULL)) OR (((scope)::text = 'organization'::text) AND (subject_id = organization_id) AND (organization_id IS NOT NULL) AND (user_id IS NULL))))
 CONSTRAINT settings.settings_value_state_check CHECK (((length(value_json) <= 4096) AND (((is_overridden = true) AND (value_json <> ''::text)) OR ((is_overridden = false) AND (value_json = ''::text)))))
 CONSTRAINT settings.settings_version_check CHECK ((version > 0))
+CONSTRAINT transactional_message_events.chk_transactional_message_events_type CHECK (((type)::text = ANY ((ARRAY['accepted'::character varying, 'delivered'::character varying, 'deferred'::character varying, 'bounced'::character varying, 'failed'::character varying, 'rejected'::character varying, 'complained'::character varying])::text[])))
+CONSTRAINT transactional_message_events.fk_transactional_message_events_message FOREIGN KEY (message_id) REFERENCES transactional_messages(id) ON DELETE CASCADE
+CONSTRAINT transactional_message_events.transactional_message_events_pkey PRIMARY KEY (id)
+CONSTRAINT transactional_messages.chk_transactional_messages_attempt_lane CHECK (((((mode)::text = 'live'::text) AND (NOT simulated)) OR (send_attempted_at IS NULL)))
+CONSTRAINT transactional_messages.chk_transactional_messages_mode CHECK (((mode)::text = ANY ((ARRAY['live'::character varying, 'test'::character varying])::text[])))
+CONSTRAINT transactional_messages.chk_transactional_messages_queued_reason CHECK (((queued_reason)::text = ANY ((ARRAY['send_limit'::character varying, 'retry'::character varying])::text[])))
+CONSTRAINT transactional_messages.chk_transactional_messages_status CHECK (((status)::text = ANY ((ARRAY['queued'::character varying, 'sent'::character varying, 'failed'::character varying, 'suppressed'::character varying])::text[])))
+CONSTRAINT transactional_messages.chk_transactional_messages_terminal_payload CHECK ((((status)::text = 'queued'::text) OR (payload_ciphertext IS NULL)))
+CONSTRAINT transactional_messages.chk_transactional_messages_terminal_queue CHECK ((((status)::text = 'queued'::text) OR ((queued_reason IS NULL) AND (next_attempt_at IS NULL) AND (lease_until IS NULL))))
+CONSTRAINT transactional_messages.fk_transactional_messages_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT transactional_messages.fk_transactional_messages_template FOREIGN KEY (template_id) REFERENCES mail_templates(id) ON DELETE SET NULL
+CONSTRAINT transactional_messages.transactional_messages_pkey PRIMARY KEY (id)
 CONSTRAINT usage_counters.fk_usage_counters_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT usage_counters.fk_usage_counters_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT usage_counters.usage_counters_period_check CHECK ((period_end > period_start))
@@ -832,10 +907,10 @@ INDEX CREATE UNIQUE INDEX idx_mail_messages_dedupe ON mail_messages USING btree 
 INDEX CREATE INDEX idx_mail_messages_folder ON mail_messages USING btree (folder_id) WHERE (folder_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX idx_mail_messages_idempotency ON mail_messages USING btree (mailbox_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
 INDEX CREATE INDEX idx_mail_messages_inbox_time ON mail_messages USING btree (mailbox_id, direction, created_at DESC, id DESC)
+INDEX CREATE INDEX idx_mail_messages_lane_attempted ON mail_messages USING btree (send_lane, send_attempted_at) WHERE ((direction)::text = 'outbound'::text)
 INDEX CREATE INDEX idx_mail_messages_listing ON mail_messages USING btree (mailbox_id, direction, id DESC)
 INDEX CREATE INDEX idx_mail_messages_provider_id ON mail_messages USING btree (message_id) WHERE (((direction)::text = 'outbound'::text) AND ((message_id)::text <> ''::text))
 INDEX CREATE INDEX idx_mail_messages_rfc_message_id ON mail_messages USING btree (mailbox_id, rfc_message_id)
-INDEX CREATE INDEX idx_mail_messages_send_attempted ON mail_messages USING btree (send_attempted_at) WHERE ((direction)::text = 'outbound'::text)
 INDEX CREATE INDEX idx_mail_messages_threads ON mail_messages USING btree (mailbox_id, placement, thread_id, id DESC)
 INDEX CREATE INDEX idx_mail_messages_trash ON mail_messages USING btree (placement, trashed_at)
 INDEX CREATE INDEX idx_mail_messages_trgm_cc_addresses ON mail_messages USING gin (cc_addresses public.gin_trgm_ops)
@@ -849,7 +924,11 @@ INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_roles_name ON mail_roles USING btree (organization_id, lower((name)::text))
 INDEX CREATE INDEX idx_mail_roles_owner ON mail_roles USING btree (owner_user_id) WHERE (owner_user_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_roles_pkey ON mail_roles USING btree (id)
+INDEX CREATE UNIQUE INDEX mail_suppressions_email_idx ON mail_suppressions USING btree (organization_id, email)
+INDEX CREATE INDEX mail_suppressions_list_idx ON mail_suppressions USING btree (organization_id, created_at DESC, id DESC)
+INDEX CREATE UNIQUE INDEX mail_suppressions_pkey ON mail_suppressions USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
+INDEX CREATE UNIQUE INDEX mail_templates_key_idx ON mail_templates USING btree (organization_id, template_key) WHERE (template_key IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_zones_cloudflare_zone ON mail_zones USING btree (cloudflare_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_zones_name ON mail_zones USING btree (name)
@@ -915,6 +994,19 @@ INDEX CREATE INDEX idx_settings_organization ON settings USING btree (organizati
 INDEX CREATE UNIQUE INDEX idx_settings_scope_subject_key ON settings USING btree (scope, subject_id, key)
 INDEX CREATE INDEX idx_settings_user ON settings USING btree (user_id, subject_id)
 INDEX CREATE UNIQUE INDEX settings_pkey ON settings USING btree (id)
+INDEX CREATE INDEX transactional_message_events_message_idx ON transactional_message_events USING btree (message_id, occurred_at)
+INDEX CREATE UNIQUE INDEX transactional_message_events_pkey ON transactional_message_events USING btree (id)
+INDEX CREATE UNIQUE INDEX transactional_message_events_provider_idx ON transactional_message_events USING btree (provider_event_id) WHERE (provider_event_id IS NOT NULL)
+INDEX CREATE INDEX transactional_messages_attempted_idx ON transactional_messages USING btree (organization_id, send_attempted_at) WHERE (send_attempted_at IS NOT NULL)
+INDEX CREATE INDEX transactional_messages_created_idx ON transactional_messages USING btree (created_at)
+INDEX CREATE INDEX transactional_messages_due_idx ON transactional_messages USING btree (next_attempt_at, id) WHERE ((status)::text = 'queued'::text)
+INDEX CREATE UNIQUE INDEX transactional_messages_idempotency_idx ON transactional_messages USING btree (organization_id, mode, idempotency_key) WHERE (idempotency_key IS NOT NULL)
+INDEX CREATE INDEX transactional_messages_log_idx ON transactional_messages USING btree (organization_id, id DESC)
+INDEX CREATE UNIQUE INDEX transactional_messages_pkey ON transactional_messages USING btree (id)
+INDEX CREATE UNIQUE INDEX transactional_messages_provider_idx ON transactional_messages USING btree (provider_message_id) WHERE (provider_message_id IS NOT NULL)
+INDEX CREATE UNIQUE INDEX transactional_messages_rfc_idx ON transactional_messages USING btree (rfc_message_id)
+INDEX CREATE INDEX transactional_messages_template_idx ON transactional_messages USING btree (organization_id, template_key, id DESC)
+INDEX CREATE INDEX transactional_messages_to_idx ON transactional_messages USING btree (organization_id, to_address, id DESC)
 INDEX CREATE INDEX idx_usage_counters_current ON usage_counters USING btree (scope, subject_id, metric, period_end)
 INDEX CREATE UNIQUE INDEX idx_usage_counters_identity ON usage_counters USING btree (scope, subject_id, metric, period_start)
 INDEX CREATE INDEX idx_usage_counters_organization ON usage_counters USING btree (organization_id)

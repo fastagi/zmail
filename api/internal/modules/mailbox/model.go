@@ -169,6 +169,8 @@ type MailMessagePO struct {
 	QueuedReason *string `gorm:"size:32"`
 	// SendAttemptedAt is when the provider call started; the send limit counts by it.
 	SendAttemptedAt *time.Time
+	// SendLane is the send limit lane the message counts against: personal or broadcast.
+	SendLane string `gorm:"size:16;not null;default:'personal'"`
 	// SendLeaseUntil keeps a waiting message to one worker while it is being sent.
 	SendLeaseUntil *time.Time
 	// Placement is default, archive, folder, or trash; FolderID names the folder while in one.
@@ -302,6 +304,10 @@ func (po *MailMessagePO) toDomain() *domain.MailMessage {
 		message.QueuedReason = *po.QueuedReason
 	}
 	message.SendAttemptedAt = po.SendAttemptedAt
+	message.SendLane = domain.SendLane(po.SendLane)
+	if message.SendLane == "" {
+		message.SendLane = domain.SendLanePersonal
+	}
 	message.Placement = domain.MailPlacement(po.Placement)
 	if message.Placement == "" {
 		message.Placement = domain.MailPlacementDefault
@@ -352,6 +358,10 @@ func newMailMessagePO(message *domain.MailMessage) *MailMessagePO {
 		po.QueuedReason = &reason
 	}
 	po.SendAttemptedAt = message.SendAttemptedAt
+	po.SendLane = string(message.SendLane)
+	if po.SendLane == "" {
+		po.SendLane = string(domain.SendLanePersonal)
+	}
 	po.Placement = string(message.Placement)
 	if po.Placement == "" {
 		po.Placement = string(domain.MailPlacementDefault)
@@ -457,17 +467,30 @@ func (po *MailAttachmentPO) toDomain() domain.MailAttachment {
 // MailTemplatePO is the persistent object for one template.
 type MailTemplatePO struct {
 	ID              uint   `gorm:"primaryKey"`
-	OrganizationID  uint   `gorm:"not null;uniqueIndex:idx_mail_templates_name,priority:1"`
+	OrganizationID  uint   `gorm:"not null;uniqueIndex:idx_mail_templates_name,priority:1;uniqueIndex:mail_templates_key_idx,priority:1,where:template_key IS NOT NULL"`
 	Name            string `gorm:"size:100;not null;uniqueIndex:idx_mail_templates_name,priority:2"`
 	Subject         string `gorm:"size:998;not null"`
 	HTMLBody        string `gorm:"column:html_body;type:text;not null;default:''"`
 	TextBody        string `gorm:"type:text;not null;default:''"`
 	SampleVariables string `gorm:"type:jsonb;not null;default:'{}'"`
 	// Design is NULL for a template written in HTML.
-	Design    *string `gorm:"type:jsonb"`
-	CreatedBy uint    `gorm:"not null"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Design *string `gorm:"type:jsonb"`
+	Kind   string  `gorm:"size:16;not null;default:'standard'"`
+	// TemplateKey and FromAddress are NULL for a standard template.
+	TemplateKey         *string `gorm:"column:template_key;size:64;uniqueIndex:mail_templates_key_idx,priority:2"`
+	FromAddress         *string `gorm:"size:320"`
+	FromName            string  `gorm:"size:100;not null;default:''"`
+	VariableDefinitions string  `gorm:"type:jsonb;not null;default:'[]'"`
+	CreatedBy           uint    `gorm:"not null"`
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+// variableDefinitionPO is one stored variable declaration of a transactional template.
+type variableDefinitionPO struct {
+	Name     string `json:"name"`
+	Secret   bool   `json:"secret"`
+	Required bool   `json:"required"`
 }
 
 func (MailTemplatePO) TableName() string {
@@ -481,6 +504,20 @@ func (po *MailTemplatePO) toDomain() *domain.MailTemplate {
 			samples = map[string]string{}
 		}
 	}
+	var stored []variableDefinitionPO
+	if po.VariableDefinitions != "" {
+		if err := json.Unmarshal([]byte(po.VariableDefinitions), &stored); err != nil {
+			stored = nil
+		}
+	}
+	variables := make([]domain.TransactionalVariable, 0, len(stored))
+	for _, variable := range stored {
+		variables = append(variables, domain.TransactionalVariable(variable))
+	}
+	kind := domain.MailTemplateKind(po.Kind)
+	if kind == "" {
+		kind = domain.MailTemplateStandard
+	}
 	return &domain.MailTemplate{
 		ID:              po.ID,
 		OrganizationID:  po.OrganizationID,
@@ -490,6 +527,11 @@ func (po *MailTemplatePO) toDomain() *domain.MailTemplate {
 		TextBody:        po.TextBody,
 		SampleVariables: samples,
 		Design:          stringOrEmpty(po.Design),
+		Kind:            kind,
+		Key:             stringOrEmpty(po.TemplateKey),
+		FromAddress:     stringOrEmpty(po.FromAddress),
+		FromName:        po.FromName,
+		Variables:       variables,
 		CreatedBy:       po.CreatedBy,
 		CreatedAt:       po.CreatedAt,
 		UpdatedAt:       po.UpdatedAt,
@@ -505,16 +547,33 @@ func newMailTemplatePO(template *domain.MailTemplate) *MailTemplatePO {
 	if err != nil {
 		encoded = []byte("{}")
 	}
+	kind := template.Kind
+	if kind == "" {
+		kind = domain.MailTemplateStandard
+	}
+	stored := make([]variableDefinitionPO, 0, len(template.Variables))
+	for _, variable := range template.Variables {
+		stored = append(stored, variableDefinitionPO(variable))
+	}
+	definitions, err := json.Marshal(stored)
+	if err != nil {
+		definitions = []byte("[]")
+	}
 	return &MailTemplatePO{
-		ID:              template.ID,
-		OrganizationID:  template.OrganizationID,
-		Name:            template.Name,
-		Subject:         template.Subject,
-		HTMLBody:        template.HTMLBody,
-		TextBody:        template.TextBody,
-		SampleVariables: string(encoded),
-		Design:          nullableString(template.Design),
-		CreatedBy:       template.CreatedBy,
+		ID:                  template.ID,
+		OrganizationID:      template.OrganizationID,
+		Name:                template.Name,
+		Subject:             template.Subject,
+		HTMLBody:            template.HTMLBody,
+		TextBody:            template.TextBody,
+		SampleVariables:     string(encoded),
+		Design:              nullableString(template.Design),
+		Kind:                string(kind),
+		TemplateKey:         nullableString(template.Key),
+		FromAddress:         nullableString(template.FromAddress),
+		FromName:            template.FromName,
+		VariableDefinitions: string(definitions),
+		CreatedBy:           template.CreatedBy,
 	}
 }
 

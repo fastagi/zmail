@@ -232,7 +232,7 @@ export function ComposeDialog({
   const send = useSendMailMessage(organizationId, from.id);
   // Replies and forwards quote an existing message, so they are always written by hand.
   const isReplyOrForward = draft.reply || draft.mode === 'reply' || draft.mode === 'forward';
-  const templates = useMailTemplates(isReplyOrForward ? 0 : organizationId);
+  const templates = useMailTemplates(isReplyOrForward ? 0 : organizationId, 'standard');
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;

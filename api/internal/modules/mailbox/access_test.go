@@ -57,7 +57,7 @@ func newAccessFixture(t *testing.T) *accessFixture {
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()
 	svc := NewService(repo, memberships, repo, newFakeContacts(), &stubBroadcasts{}, nil,
-		nil, nil, nil, transport, &fakeNotifier{}, accessSettings())
+		nil, nil, nil, transport, &fakeNotifier{}, accessSettings(), nil, nil, nil)
 	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
 
@@ -69,7 +69,7 @@ func newPostgresAccessFixture(t *testing.T) *accessFixture {
 	transport := &fakeTransport{}
 	memberships := newAccessMemberships()
 	svc := NewService(repo, memberships, repo, repo, repo, repo,
-		nil, nil, nil, transport, &fakeNotifier{}, accessSettings())
+		nil, nil, nil, transport, &fakeNotifier{}, accessSettings(), nil, nil, nil)
 	return seedAccessFixture(t, svc, repo, transport, memberships)
 }
 
@@ -125,7 +125,7 @@ func (f *accessFixture) receive(t *testing.T, mailbox *domain.Mailbox, subject s
 
 func (f *accessFixture) outboundCount(t *testing.T) int64 {
 	t.Helper()
-	count, err := f.repo.CountOutboundSince(context.Background(), accessOrg, time.Time{})
+	count, err := f.repo.CountOutboundSince(context.Background(), accessOrg, domain.SendLanePersonal, time.Time{})
 	if err != nil {
 		t.Fatalf("CountOutboundSince: %v", err)
 	}
@@ -643,7 +643,7 @@ func listedMailboxCount(t *testing.T, f *accessFixture) int {
 func broadcastScene(t *testing.T, f *accessFixture) (templateID, listID uint) {
 	t.Helper()
 	ctx := context.Background()
-	template, err := f.service.CreateTemplate(ctx, accessOrg, accessB, TemplateInput{
+	template, err := f.service.CreateTemplate(ctx, viewerOf(accessOrg, accessB, domain.OrganizationRoleMember), TemplateInput{
 		Name: "News", Subject: "News", HTML: "<p>Hi</p>", Text: "Hi",
 	})
 	if err != nil {

@@ -15,6 +15,7 @@ import {
   refine,
   regex,
   strictObject,
+  enum as zEnum,
   string,
   toLowerCase,
   transform,
@@ -32,6 +33,7 @@ const canonicalApiKeyScopeSchema = string().check(regex(apiKeyScopePattern));
 const apiKeyScopeInputSchema = string().check(trim(), toLowerCase(), regex(apiKeyScopePattern));
 const positiveIntegerSchema = number().check(int(), positive());
 const nonnegativeIntegerSchema = number().check(int(), nonnegative());
+const apiKeyModeSchema = zEnum(['live', 'test']);
 
 export const apiKeySchema = strictObject({
   id: safeIdSchema,
@@ -39,6 +41,7 @@ export const apiKeySchema = strictObject({
   name: canonicalApiKeyNameSchema,
   // Keys issued before a prefix rename keep their original lowercase prefix.
   key_prefix: string().check(regex(/^[a-z][a-z0-9]*_[a-z0-9_-]+$/)),
+  mode: apiKeyModeSchema,
   scopes: array(canonicalApiKeyScopeSchema).check(maxLength(32)),
   last_used_at: optional(timestampSchema),
   expires_at: optional(timestampSchema),
@@ -84,6 +87,7 @@ export const createApiKeySchema = strictObject({
   name: apiKeyNameInputSchema,
   scopes: array(apiKeyScopeInputSchema).check(maxLength(32)),
   expires_at: optional(timestampSchema),
+  mode: optional(apiKeyModeSchema),
 });
 
 export const apiKeyRouteIdSchema = pipe(

@@ -63,20 +63,28 @@ func (h *Handler) ListDomains(c *gin.Context) {
 		return
 	}
 	items := make([]MailboxDomainResponse, 0, len(domains))
+	transactional := h.service.TransactionalPolicy()
 	for _, mailboxDomain := range domains {
 		kind := "organization"
 		if mailboxDomain.Shared {
 			kind = "shared"
 		}
 		items = append(items, MailboxDomainResponse{
-			Domain:               mailboxDomain.Name,
-			Kind:                 kind,
-			MaxMailboxes:         domain.MaxMailboxesPerOrganization,
-			Provider:             h.service.Provider(),
-			InboundEnabled:       h.service.InboundEnabled(),
-			DailySendLimit:       h.service.DailySendLimit(),
-			BroadcastsEnabled:    h.service.BroadcastsEnabled(),
-			CustomDomainsEnabled: h.service.CustomDomainsEnabled(),
+			Domain:                  mailboxDomain.Name,
+			Kind:                    kind,
+			MaxMailboxes:            domain.MaxMailboxesPerOrganization,
+			Provider:                h.service.Provider(),
+			InboundEnabled:          h.service.InboundEnabled(),
+			DailySendLimit:          h.service.DailySendLimit(),
+			DailyBroadcastLimit:     h.service.DailyBroadcastLimit(),
+			DailyTransactionalLimit: h.service.DailyTransactionalLimit(),
+			BroadcastsEnabled:       h.service.BroadcastsEnabled(),
+			CustomDomainsEnabled:    h.service.CustomDomainsEnabled(),
+
+			TransactionalEnabled:                 transactional.Enabled,
+			TransactionalRecipientLimitPerMinute: transactional.RecipientPerMinute,
+			TransactionalKeyLimitPerSecond:       transactional.KeyPerSecond,
+			SimulatorDomain:                      transactional.SimulatorDomain,
 		})
 	}
 	privateResponse(c)
@@ -487,7 +495,7 @@ func (h *Handler) ReceiveDeliveryEvent(c *gin.Context) {
 		response.HandleError(c, "Delivery event is invalid", ErrMailDeliveryEventInvalid)
 		return
 	}
-	message, event, recorded, err := h.service.RecordDeliveryEvent(c.Request.Context(), DeliveryEvent{
+	result, err := h.service.RecordDeliveryEvent(c.Request.Context(), DeliveryEvent{
 		Signature: c.GetHeader(InboundSignatureHeader),
 		Raw:       raw,
 	})
@@ -495,8 +503,10 @@ func (h *Handler) ReceiveDeliveryEvent(c *gin.Context) {
 		response.HandleError(c, "Failed to record delivery event", err)
 		return
 	}
-	body := DeliveryEventResponse{MessageID: message.ID, Type: string(event.Type), Duplicate: !recorded}
-	if recorded {
+	body := DeliveryEventResponse{
+		MessageID: result.MessageID, MessageKind: result.Kind, Type: string(result.Event.Type), Duplicate: !result.Recorded,
+	}
+	if result.Recorded {
 		response.Created(c, body)
 		return
 	}

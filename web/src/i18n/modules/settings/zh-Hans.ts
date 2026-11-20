@@ -30,6 +30,7 @@ const messages = {
       revoked: '已撤销',
     },
     noScopes: '无 scope',
+    mode: { live: '正式', test: '测试' },
     neverUsed: '从未使用',
     revoke: '撤销',
     createTitle: '创建 API 密钥',

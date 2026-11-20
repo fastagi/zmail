@@ -44,6 +44,10 @@ type Error struct {
 	Code string
 	// Permanent tells that retrying the same message cannot succeed.
 	Permanent bool
+	// Responded tells that the provider answered with an HTTP status it took a decision with. When
+	// false the provider may have accepted the message before the answer was lost or unreadable, so
+	// a resend could deliver it twice.
+	Responded bool
 }
 
 func (e *Error) Error() string {

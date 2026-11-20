@@ -15,6 +15,7 @@ import errors, { type ErrorsMessages } from './errors/en-US';
 import metadata, { type MetadataMessages } from './metadata/en-US';
 import test, { type TestMessages } from './test/en-US';
 import mailbox, { type MailboxMessages } from './mailbox/en-US';
+import developer, { type DeveloperMessages } from './developer/en-US';
 // fastbuild:slot web.i18n.message-imports
 import type { LocaleMessageVariableParity } from '../locale-message-shape';
 import type { Locale } from '../locales';
@@ -40,6 +41,7 @@ export const messages = {
   metadata,
   test,
   mailbox,
+  developer,
   // fastbuild:slot web.i18n.messages
 } as const;
 
@@ -66,6 +68,7 @@ export interface MessageSchema {
   metadata: MetadataMessages;
   test: TestMessages;
   mailbox: MailboxMessages;
+  developer: DeveloperMessages;
   // fastbuild:slot web.i18n.message-schema
 }
 
@@ -87,6 +90,7 @@ interface ZhHansMessageSchema {
   metadata: typeof import('./metadata/zh-Hans').default;
   test: typeof import('./test/zh-Hans').default;
   mailbox: typeof import('./mailbox/zh-Hans').default;
+  developer: typeof import('./developer/zh-Hans').default;
   // fastbuild:slot web.i18n.zh-hans-schema
 }
 

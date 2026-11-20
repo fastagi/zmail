@@ -486,7 +486,7 @@ function BroadcastEditor({
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
   const mailboxes = useMailboxes(organizationId);
-  const templates = useMailTemplates(organizationId);
+  const templates = useMailTemplates(organizationId, 'standard');
   const lists = useMailContactLists(organizationId);
   const save = useSaveMailBroadcast(organizationId);
   const send = useSendMailBroadcast(organizationId);

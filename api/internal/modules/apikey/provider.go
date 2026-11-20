@@ -23,6 +23,9 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 		config.StarterAPIKey,
 		assembly.WithStarterSummary("Personal API keys with one-time secrets, revocation, and request authentication."),
 		assembly.WithStarterModule(handler),
-		assembly.WithStarterMigrationNames("2026_04_06_000000_create_api_keys_table"),
+		assembly.WithStarterMigrationNames(
+			"2026_04_06_000000_create_api_keys_table",
+			"2026_11_23_090000_add_api_key_mode",
+		),
 	)
 }

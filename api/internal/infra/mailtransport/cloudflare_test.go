@@ -240,3 +240,60 @@ func TestCloudflareSendsMessageIDAndReferences(t *testing.T) {
 		t.Fatalf("headers = %v; want none", body["headers"])
 	}
 }
+
+func TestCloudflareErrorRespondedOnlyWithHTTPStatus(t *testing.T) {
+	respond := func(status int, body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		}
+	}
+	cases := []struct {
+		name      string
+		transport func(t *testing.T) *Cloudflare
+		code      string
+		responded bool
+		permanent bool
+	}{
+		{"temporary HTTP status", func(t *testing.T) *Cloudflare {
+			return cloudflareAgainst(t, respond(http.StatusServiceUnavailable, `{"success":false}`))
+		}, "provider.http_503", true, false},
+		{"permanent HTTP status", func(t *testing.T) *Cloudflare {
+			return cloudflareAgainst(t, respond(http.StatusBadRequest, `{"success":false}`))
+		}, "provider.http_400", true, true},
+		{"every recipient bounced", func(t *testing.T) *Cloudflare {
+			return cloudflareAgainst(t, respond(http.StatusOK, `{"success":true,"result":{"delivered":[],"permanent_bounces":["b@example.com"],"queued":[]}}`))
+		}, failurePermanentBounce, true, true},
+		{"every recipient suppressed", func(t *testing.T) *Cloudflare {
+			return cloudflareAgainst(t, respond(http.StatusOK, `{"success":true,"result":{"delivered":[],"permanent_bounces":[],"queued":[],"suppressed_recipients":["b@example.com"]}}`))
+		}, failureSuppressed, true, true},
+		{"connection refused", func(t *testing.T) *Cloudflare {
+			server := httptest.NewServer(http.NotFoundHandler())
+			url := server.URL
+			server.Close()
+			return newCloudflare(config.MailboxConfig{
+				CloudflareAccountID: "acct123",
+				CloudflareAPIToken:  "token-value",
+				RequestTimeout:      2 * time.Second,
+			}, http.DefaultClient, url)
+		}, failureTransport, false, false},
+		{"oversized body", func(t *testing.T) *Cloudflare {
+			return cloudflareAgainst(t, respond(http.StatusOK, strings.Repeat("x", maxProviderResponseBytes+1)))
+		}, failureResponseTooLarge, false, false},
+		{"invalid JSON on 200", func(t *testing.T) *Cloudflare {
+			return cloudflareAgainst(t, respond(http.StatusOK, `not json`))
+		}, failureInvalidResponse, false, false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := test.transport(t).Send(context.Background(), Message{FromAddress: "a@mail.example", To: []string{"b@example.com"}, Subject: "s", TextBody: "t"})
+			var transportErr *Error
+			if !errors.As(err, &transportErr) {
+				t.Fatalf("error = %v; want *Error", err)
+			}
+			if transportErr.Code != test.code || transportErr.Responded != test.responded || transportErr.Permanent != test.permanent {
+				t.Fatalf("error = %+v; want code %q responded %v permanent %v", transportErr, test.code, test.responded, test.permanent)
+			}
+		})
+	}
+}

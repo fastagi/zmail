@@ -128,6 +128,10 @@ describe('mail broadcasts console', () => {
       design: null,
       created_at: now(),
       updated_at: now(),
+      kind: 'standard',
+      key: null,
+      from: null,
+      variable_definitions: [],
     };
     state.lists.data = [{ id: 4, name: 'Customers', contact_count: 12, created_at: now() }];
     state.broadcasts.data = page([
@@ -458,6 +462,12 @@ function domain(broadcastsEnabled: boolean) {
     provider: 'cloudflare',
     inbound_enabled: true,
     daily_send_limit: 200,
+    daily_broadcast_limit: 200,
+    daily_transactional_limit: 200,
+    transactional_enabled: true,
+    transactional_recipient_limit_per_minute: 3,
+    transactional_key_limit_per_second: 20,
+    simulator_domain: 'test.zmail.im',
     broadcasts_enabled: broadcastsEnabled,
     custom_domains_enabled: false,
   };

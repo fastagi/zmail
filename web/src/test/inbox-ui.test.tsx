@@ -1266,6 +1266,13 @@ describe('inbox keyboard shortcuts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }));
     expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
   });
+
+  it('the sidebar footer links to the developer console in the active organization', async () => {
+    renderRoute();
+    const footer = await screen.findByRole('navigation', { name: 'Mail pages' });
+    const link = within(footer).getByRole('link', { name: 'Developers' });
+    expect(link.getAttribute('href')).toMatch(/^\/console\/developers\?org=1$/u);
+  });
 });
 
 describe('command palette', () => {

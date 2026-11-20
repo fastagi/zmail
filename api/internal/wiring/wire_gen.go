@@ -142,7 +142,8 @@ func InitApplication() (*app.Application, error) {
 	transport := mailtransport.New(configConfig)
 	webhookNotifier := mailbox.NewWebhookNotifier(configConfig, webhookService)
 	settings := mailbox.SettingsFromConfig(configConfig)
-	mailboxService := mailbox.NewService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings)
+	accountDirectory := mailbox.NewAccountDirectory(userRepository)
+	mailboxService := mailbox.NewService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,
@@ -301,7 +302,8 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	transport := mailtransport.New(cfg)
 	webhookNotifier := mailbox.NewWebhookNotifier(cfg, webhookService)
 	settings := mailbox.SettingsFromConfig(cfg)
-	mailboxService := mailbox.NewService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings)
+	accountDirectory := mailbox.NewAccountDirectory(userRepository)
+	mailboxService := mailbox.NewService(mailboxRepository, membershipDirectory, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, mailboxRepository, domainProvider, transport, webhookNotifier, settings, mailboxRepository, stores, accountDirectory)
 	mailboxHandler := mailbox.NewHandler(mailboxService)
 	handlers := &starter.Handlers{
 		Audit:        handler,

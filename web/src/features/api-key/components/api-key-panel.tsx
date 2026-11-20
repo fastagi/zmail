@@ -178,7 +178,12 @@ export function ApiKeyPanel() {
                   return (
                     <TableRow key={apiKey.id}>
                       <TableCell>
-                        <div className="font-medium">{apiKey.name}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{apiKey.name}</span>
+                          <Badge variant={apiKey.mode === 'test' ? 'secondary' : 'outline'}>
+                            {t(`mode.${apiKey.mode}`)}
+                          </Badge>
+                        </div>
                         <code className="text-xs text-muted-foreground">{apiKey.key_prefix}</code>
                       </TableCell>
                       <TableCell>

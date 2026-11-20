@@ -31,3 +31,17 @@ func SuccessCursorPage(c *gin.Context, items any, perPage int, nextCursor string
 	}
 	c.JSON(http.StatusOK, CursorPageResponse{Code: 0, Message: "success", Data: items, Meta: meta})
 }
+
+// MetaResponse is the envelope for a list whose meta has a resource-specific shape.
+type MetaResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data"`
+	Meta    any    `json:"meta"`
+}
+
+// SuccessWithMeta writes a list with its own meta object, for pages whose meta is neither the
+// offset nor the generic keyset shape.
+func SuccessWithMeta(c *gin.Context, items, meta any) {
+	c.JSON(http.StatusOK, MetaResponse{Code: 0, Message: "success", Data: items, Meta: meta})
+}

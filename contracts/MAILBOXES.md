@@ -29,7 +29,7 @@ Within the organization, what a caller may do with a mailbox follows from the ma
 | Role | May |
 |---|---|
 | `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the unified inbox, the log, and statistics of the mailboxes they may read; list the mail roles of the mailboxes they can see |
-| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them |
+| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; read the usage of each send lane; list the suppression list and remove addresses from it |
 
 The owner and admin roles never grant reading or sending mail by themselves: an admin reads a
 mailbox only as a member of it, and the access history records how they became one. A member who
@@ -92,6 +92,14 @@ recorded but has no special rights to it. A removed member loses access on their
 | Set a mailbox's mail role | `PUT /api/mailboxes/:id/role-assignment` | `PUT /v1/mailboxes/:mailbox_id/role-assignment` | `200` envelope |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
 | Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
+| Send a transactional message | none | `POST /v1/transactional-messages` | `202`, or `200` for a repeat |
+| Get a transactional message | none | `GET /v1/transactional-messages/:message_id` | `200` envelope |
+| Transactional send log | `GET /api/transactional-mail-log` | `GET /v1/transactional-mail-log` | Keyset envelope |
+| Transactional log entry | `GET /api/transactional-mail-log/:id` | `GET /v1/transactional-mail-log/:message_id` | `200` envelope |
+| Transactional test send | `POST /api/transactional-test-sends` | `POST /v1/transactional-test-sends` | `202` envelope |
+| Send lane usage | `GET /api/mail-send-lanes` | `GET /v1/mail-send-lanes` | `200` envelope, 3 lanes |
+| List the suppression list | `GET /api/mail-suppressions` | `GET /v1/mail-suppressions` | Keyset envelope |
+| Remove a suppressed address | `DELETE /api/mail-suppressions/:id` | `DELETE /v1/mail-suppressions/:suppression_id` | `204` |
 | Inbound delivery | none | `POST /v1/inbound-mail-messages` | `201`, or `200` for a repeat |
 | Delivery event | none | `POST /v1/mail-delivery-events` | `201`, or `200` for a repeat |
 
@@ -132,7 +140,11 @@ has no browser route: only the mail edge calls it.
   organization's verified domains (`kind: "organization"`). Every item repeats the instance
   settings: `max_mailboxes` (per organization, across all domains), the outbound `provider`
   (`cloudflare` delivers; `log` only records and is for development), `inbound_enabled`,
-  `daily_send_limit` (per organization), `broadcasts_enabled`, and `custom_domains_enabled`.
+  the per-organization lane limits `daily_send_limit` (personal), `daily_broadcast_limit`, and
+  `daily_transactional_limit` (see [Send](#send)), `transactional_enabled`,
+  `transactional_recipient_limit_per_minute`, `transactional_key_limit_per_second`, and
+  `simulator_domain` (see [Transactional Mail](#transactional-mail)), `broadcasts_enabled`, and
+  `custom_domains_enabled`.
 - An address that is or ever was a mailbox is
   `409 MAILBOX.ADDRESS_TAKEN`: deleting a mailbox keeps its address reserved, so a later owner
   never receives mail meant for the previous one.
@@ -494,7 +506,8 @@ route is `404 MAILBOX.DOMAINS_DISABLED`.
   not Cloudflare Email Routing's (`*.mx.cloudflare.net`), else `send_receive`. A failed lookup,
   including a name without MX records, answers `existing_mx: []` and `send_receive`. An unusable
   name is `422 MAILBOX.DOMAIN_INVALID`, and the shared domain `409 MAILBOX.DOMAIN_TAKEN`.
-- Removing a domain that a mailbox still uses is `409 MAILBOX.DOMAIN_IN_USE`. Removing forgets the
+- Removing a domain that a mailbox still uses, or that a transactional template sends from, is
+  `409 MAILBOX.DOMAIN_IN_USE`. Removing forgets the
   domain and leaves its DNS and Cloudflare settings as they are, including a managed zone, which is
   removed on its own (see Managed Zones).
 - Any owner or admin may connect any domain in a zone the operator added to the account. The token
@@ -923,11 +936,21 @@ answers:
 | Provider accepted | `201` with the message | `sent` |
 | Provider rejected or was unreachable | `502 MAILBOX.DELIVERY_FAILED` | `failed`, with `failure_code` |
 | No provider configured | `503 MAILBOX.SENDER_NOT_CONFIGURED` | `failed` |
-| Organization's rolling 24-hour limit reached | `202` with the message | `queued`, `queued_reason` `send_limit` |
+| Organization's rolling 24-hour personal lane limit reached | `202` with the message | `queued`, `queued_reason` `send_limit` |
 | Limit reached and as many messages already waiting as the limit | `429 MAILBOX.SEND_LIMIT_REACHED` | nothing stored |
 
-A send is never reported as successful before the provider accepts it. The send limit is counted
-per organization over the instants provider calls started, and failed attempts count toward it.
+A send is never reported as successful before the provider accepts it.
+
+The send limit is split into three lanes. Each lane is counted separately per organization over a
+rolling 24 hours by the instants provider calls started, failed attempts count toward it, and a
+full lane never consumes another lane's room. Every message belongs to exactly one lane, fixed when
+it is stored:
+
+| Lane | Counts | Limit (`GET /v1/mailbox-domains`) | When full |
+|---|---|---|---|
+| Personal | Console sends, replies, `POST /v1/outbound-mail-messages`, and template test sends | `daily_send_limit` | The message waits (below) |
+| Broadcast | Each broadcast recipient | `daily_broadcast_limit` | The broadcast pauses (see [Broadcasts](#broadcasts)) |
+| Transactional | Live, non-simulated transactional messages | `daily_transactional_limit` | The message is queued |
 
 A `202` message waits; nothing about the limit's usage is in the answer, and the Web console tells
 everyone the same thing: the limit is full and the message is queued. The `mail:broadcast:work`
@@ -941,6 +964,30 @@ send routes and to template test sends. The limit is a soft bound: concurrent re
 requests in flight. There is no automatic retry. A client that retries a `502` without an
 `Idempotency-Key` may send a duplicate when the first attempt reached the provider but the answer
 was lost (`failure_code` `transport.unreachable`); see [Idempotency](#idempotency).
+
+#### Lane Usage
+
+`GET /v1/mail-send-lanes` shows owners and admins how full each lane is; a member gets
+`403 PERMISSION.DENIED` and reads only the limits from `GET /v1/mailbox-domains`. It is computed on
+every request and never cached:
+
+```json
+{
+  "lanes": [
+    { "lane": "transactional", "limit": 200, "used": 37, "waiting": 0 },
+    { "lane": "broadcast", "limit": 200, "used": 200, "waiting": 412 },
+    { "lane": "personal", "limit": 200, "used": 12, "waiting": 0 }
+  ],
+  "window_hours": 24,
+  "computed_at": "2026-11-23T08:00:00Z"
+}
+```
+
+`lanes` always has the three lanes in this order. `used` counts the lane's provider calls that
+started in the 24 hours before `computed_at`, failed attempts included, exactly as the limit counts
+them, and may exceed `limit` by the requests that were in flight. `waiting` is the messages waiting
+for room in the transactional or personal lane, and for the broadcast lane the pending recipients
+of broadcasts paused because the lane was full.
 
 ### Attachments
 
@@ -987,8 +1034,9 @@ their metadata; they cannot download files.
 ### Templates
 
 A template is reusable content of an organization: a `name`, a `subject`, and an `html` and `text`
-body, at least one of which is not empty. Every member reads and edits the organization's
-templates; an organization keeps at most 200, and names are unique within it.
+body, at least one of which is not empty. Every member reads the organization's templates and
+edits its standard ones (transactional templates below need an owner or admin); an organization
+keeps at most 200, and names are unique within it.
 
 Placeholders may appear in the subject and both bodies:
 
@@ -1030,6 +1078,43 @@ stores the rendered content and `template_id`; editing or deleting the template 
 it. The idempotency fingerprint covers the rendered content.
 
 A template of another organization is `404 MAILBOX.TEMPLATE_NOT_FOUND`.
+
+#### Transactional templates
+
+Every template has a `kind`: `standard` (the default, everything above) or `transactional`. The kind
+is fixed when the template is created; a replace that changes it is
+`409 MAILBOX.TEMPLATE_KIND_IMMUTABLE`. `GET /v1/mail-templates?kind=standard|transactional` lists one
+kind; without `kind` it lists every template.
+
+A transactional template also has:
+
+| Field | Rule |
+|---|---|
+| `key` | Required. `^[a-z][a-z0-9-]{0,63}$`, unique within the organization (`409 MAILBOX.TEMPLATE_KEY_TAKEN`). The API names the template by it. |
+| `from_address` | Required. A bare address, stored lowercased, whose domain is a `verified` domain of the organization (`send_receive` or `send_only`). With the `log` provider the instance's own `MAILBOX_DOMAIN` is also allowed. Otherwise `422 MAILBOX.DOMAIN_NOT_VERIFIED`. |
+| `from_name` | Optional display name, at most 100 characters. |
+| `variable_definitions` | At most 100 items of `{ name, secret, required }`, names unique and following the placeholder name rule. Empty or absent when the content has no placeholders. |
+
+The variable definitions must match the content exactly, or the save is
+`422 MAILBOX.TEMPLATE_INVALID` with an `error` message naming the problem:
+
+- every placeholder in the subject and bodies is declared, and every declared variable is used;
+- a `required` variable has no fallback, and every placeholder of an optional variable has one;
+- a `secret` variable is `required`, so it never has a fallback.
+
+A `standard` template must not carry `key`, `from_address`, `from_name`, or `variable_definitions`
+(`422 MAILBOX.TEMPLATE_INVALID`). Responses always carry `kind`, `key` (null for standard), `from`
+(`{ address, name }`, null for standard), and `variable_definitions` (empty for standard).
+`sample_variables` may hold example values for secret variables too; they are used only by previews.
+
+Every member reads every template and writes standard ones. Creating, replacing, or deleting a
+transactional template needs an owner or admin; a member is `403 PERMISSION.DENIED`.
+
+A transactional template serves only transactional messages. Naming one in a mailbox send
+(`template`), a template test (`POST /v1/mail-templates/{id}/tests`), or a broadcast (create,
+update, or send) is `422 MAILBOX.TEMPLATE_KIND_MISMATCH`. A broadcast copies its template when it
+starts, so a running broadcast is not affected. If the sender domain later loses verification, the template is
+kept and sends from it are refused.
 
 ### Contacts
 
@@ -1168,8 +1253,8 @@ the mailbox.
 #### Sending
 
 The `mail:broadcast:work` worker sends each recipient as an ordinary outbound message from the
-broadcast's mailbox, so the organization's send limit, delivery events, the log, and webhooks apply
-to it.
+broadcast's mailbox, so the organization's broadcast lane limit, delivery events, the log, and
+webhooks apply to it.
 
 - Variables come from the broadcast's `variables`, then the contact's properties (which override a
   shared value of the same name), then the contact's `email`, `first_name`, `last_name`, and
@@ -1180,11 +1265,14 @@ to it.
 - Every message carries `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`,
   so mail clients can offer one-click unsubscribe.
 - A contact that is no longer `subscribed` when its turn comes is `skipped`
-  (`contact_not_subscribed`); a deleted contact is `skipped` (`contact_deleted`).
+  (`contact_not_subscribed`); a deleted contact is `skipped` (`contact_deleted`); a contact whose
+  address is on the organization's suppression list (see [Transactional Mail](#transactional-mail))
+  is `skipped` (`contact_suppressed`) and keeps its status.
 - Each recipient is sent with an idempotency key of its broadcast and contact, so a worker that stops
   after the provider call never sends that contact a second message.
-- When the send limit is reached, the broadcast keeps `sending` with `stop_reason`
-  `send_limit_reached` and continues when the 24-hour window has room.
+- When the broadcast lane limit (`daily_broadcast_limit`) is reached, the broadcast keeps `sending`
+  with `stop_reason` `send_limit_reached` and continues when the 24-hour window has room. Personal
+  and transactional sends never use the broadcast lane's room, and a broadcast never uses theirs.
 
 The broadcast reports `counts` of its recipients by status. `GET
 /v1/mail-broadcasts/{id}/recipients` pages them, with an optional `status` filter, each with the
@@ -1205,7 +1293,8 @@ which the Web console forwards to this route for mail clients.
 
 A broadcast recipient whose message bounces permanently, is refused by the provider's suppression
 list, or draws a spam complaint becomes `suppressed`, with `status_reason` `bounced`, `rejected`, or
-`complained`. Later broadcasts skip it.
+`complained`. Later broadcasts skip it. A `bounced` or `complained` delivery event for a broadcast
+message also adds the address to the organization's suppression list.
 
 ### Log And Statistics
 
@@ -1384,6 +1473,12 @@ are not defined.
 |---|---|
 | `POST /v1/outbound-mail-messages` | `mail:send` |
 | `GET /v1/outbound-mail-messages/:message_id` | `mail:read` |
+| `POST /v1/transactional-messages` | `mail:transactional` |
+| `GET /v1/transactional-messages/:message_id` | `mail:transactional` |
+
+`mail:transactional` neither includes nor is included by `mail:send`; `*` grants both. Only the two
+transactional routes accept test keys (see [`API_KEYS.md`](API_KEYS.md)); every other route here
+refuses a test key with `403 PERMISSION.DENIED`.
 
 ```json
 {
@@ -1405,6 +1500,277 @@ to a person viewing the mailbox. `placement`, `folder_id`, `label_ids`, `trashed
 `Idempotency-Key` behavior are those of [Send](#send). A key without the scope gets
 `403 PERMISSION.DENIED`. The read route returns only outbound messages, so a `mail:read` key cannot
 read mail that was received. Both routes are limited to the organization in the header.
+
+## Transactional Mail
+
+A transactional message is one message to one recipient, rendered from a
+[transactional template](#transactional-templates) and sent by a backend service with an API key:
+sign-up codes, password resets, receipts. It is a separate resource from mailbox messages: it has
+no mailbox, never appears in a mailbox, the mail log, or the statistics, and counts only in the
+transactional lane (see [Send](#send)).
+
+The instance enables it with `MAILBOX_TRANSACTIONAL_ENABLED=true`, which also requires
+`MAILBOX_SECRET_ENCRYPTION_KEY`. While it is off, `POST /v1/transactional-messages` and
+`POST /v1/transactional-test-sends` answer `503 MAILBOX.TRANSACTIONAL_DISABLED`;
+`GET /v1/mailbox-domains` reports the switch as `transactional_enabled`.
+
+### Sending
+
+```http
+POST /v1/transactional-messages
+X-API-Key: fastbuild_xxxxxxxx.yyyyyyyy
+Organization-Id: 42
+Idempotency-Key: signup-u_8812
+Content-Type: application/json
+
+{
+  "template": "signup-code",
+  "to": "lilei@example.com",
+  "variables": { "code": "482913", "app": "Acme" }
+}
+```
+
+| Field | Rule |
+|---|---|
+| `template` | Required. The `key` of a template of the organization, `^[a-z][a-z0-9-]{0,63}$`. An unknown key, or one of another organization, is `404 MAILBOX.TEMPLATE_NOT_FOUND`; a standard template is `422 MAILBOX.TEMPLATE_KIND_MISMATCH`. |
+| `to` | Required. One bare address of 3 to 320 characters, trimmed and lowercased. A display name or several addresses is `422 MAILBOX.MESSAGE_INVALID`. |
+| `variables` | Optional values by name, as for templates (at most 100, each at most 2000 characters). A name the template does not declare is `422 MAILBOX.MESSAGE_INVALID` with a field error `variables.<name>`. A required variable that is missing or empty is `422 MAILBOX.TEMPLATE_VARIABLES_MISSING` with one field error per variable. |
+| `Idempotency-Key` header | Required. 1 to 255 printable ASCII characters; missing or malformed is `422 MAILBOX.IDEMPOTENCY_KEY_INVALID`. |
+
+The body is at most 64 KiB (`413 COMMON.REQUEST_TOO_LARGE`). The template's sender domain must be
+verified (with the `log` provider the instance's `MAILBOX_DOMAIN` also passes), else
+`422 MAILBOX.DOMAIN_NOT_VERIFIED`. A refused request stores nothing.
+
+The checks run in this order, and the first failure answers:
+
+1. API key authentication (`401`), the organization header and membership (`400`, `404`).
+2. Scope `mail:transactional` (`403 PERMISSION.DENIED`). Authorization comes before any lookup, so a
+   refused caller learns nothing about templates.
+3. The instance switch (`503 MAILBOX.TRANSACTIONAL_DISABLED`).
+4. The body (`413`, `422 COMMON.VALIDATION_FAILED`) and the `Idempotency-Key`
+   (`422 MAILBOX.IDEMPOTENCY_KEY_INVALID`).
+5. The per-key rate limit (`429 COMMON.RATE_LIMITED`).
+6. The template, the recipient, and the variable names (`404 MAILBOX.TEMPLATE_NOT_FOUND`,
+   `422 MAILBOX.TEMPLATE_KIND_MISMATCH`, `422 MAILBOX.MESSAGE_INVALID`).
+7. Idempotent replay: a stored message with the same key answers here (`200` or
+   `409 MAILBOX.IDEMPOTENCY_CONFLICT`), so a replay uses no recipient allowance.
+8. The per-recipient rate limit (`429 MAILBOX.RECIPIENT_RATE_LIMITED`).
+9. The sender domain (`422 MAILBOX.DOMAIN_NOT_VERIFIED`) and the required variables
+   (`422 MAILBOX.TEMPLATE_VARIABLES_MISSING`).
+10. The suppression list and the transactional lane (`429 MAILBOX.SEND_LIMIT_REACHED`).
+
+Because the template is read before the replay check, replaying a key after its template was
+deleted is `404 MAILBOX.TEMPLATE_NOT_FOUND`; the stored message stays readable by id.
+
+A new message answers `202` and a replay `200`, both with `Location: /v1/transactional-messages/<id>`
+and the message:
+
+```json
+{
+  "id": 7012,
+  "mode": "live",
+  "simulated": false,
+  "template": "signup-code",
+  "from": { "address": "no-reply@notify.acme-app.com", "name": "Acme" },
+  "to": "lilei@example.com",
+  "to_masked": "li••@example.com",
+  "subject": "Acme verification code: ••••••",
+  "variables": { "code": "••••••", "app": "Acme" },
+  "status": "queued",
+  "queued_reason": null,
+  "failure_code": null,
+  "last_event": null,
+  "attempts": 0,
+  "idempotency_key": "signup-u_8812",
+  "created_at": "2026-11-19T14:22:08Z",
+  "sent_at": null,
+  "events": []
+}
+```
+
+The request returns once the message is stored; the provider is called afterwards.
+`subject` and `variables` are copies taken at creation with every secret variable masked; the
+rendered content is kept encrypted only while the message is `queued` and is wiped when it reaches
+any other status.
+
+### Idempotency
+
+The `Idempotency-Key` names one message within the organization and the key's mode, for 24 hours
+from that message's `created_at`. A live key and a test key of the same organization using the same
+`Idempotency-Key` create two independent messages. Within the 24 hours, a repeat with the same
+template, recipient (after trimming and lowercasing), and variables answers `200` with the stored
+message whatever its status, and nothing is sent again; different content is
+`409 MAILBOX.IDEMPOTENCY_CONFLICT`. After 24 hours the key is released (`idempotency_key` becomes
+null on the old message) and names a new message. Two concurrent requests with one key create one
+message; the other answers as a repeat.
+
+### Modes And Simulation
+
+Every message has the `mode` of the key that sent it (see [`API_KEYS.md`](API_KEYS.md)):
+
+- A `test` message renders and validates everything, but never calls the provider, never counts in
+  a lane, and never writes the suppression list. To a normal address it is simulated as delivered.
+- Addresses on the instance's `simulator_domain` (`MAILBOX_SIMULATOR_DOMAIN`, default
+  `test.zmail.im`) are simulated in both modes, the same way. The local part, case-insensitive and
+  with an optional `+tag`, picks the outcome:
+
+| Local part | Outcome |
+|---|---|
+| `delivered` | `sent`, with `accepted` and `delivered` events |
+| `bounced` | `sent`, with `accepted` and `bounced` events |
+| `soft-bounced` | `sent`, with `accepted` and `deferred` events |
+| `complained` | `sent`, with `accepted`, `delivered`, and `complained` events |
+| `suppressed` | `suppressed`, with a `rejected` event |
+
+Any other local part on the simulator domain is `422 MAILBOX.MESSAGE_INVALID`. Simulated messages
+have `simulated: true`, their events have `detail` `simulated`, and they publish webhooks as usual.
+
+### Rate Limits
+
+| Limit | Scope | Answer |
+|---|---|---|
+| `transactional_key_limit_per_second` (`MAILBOX_TRANSACTIONAL_KEY_PER_SECOND`, default 20) | One API key, per second | `429 COMMON.RATE_LIMITED` |
+| `transactional_recipient_limit_per_minute` (`MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE`, default 3) | One organization, mode, template, and recipient, per minute | `429 MAILBOX.RECIPIENT_RATE_LIMITED` |
+| 5 per minute | Console test sends of one user | `429 COMMON.RATE_LIMITED` |
+
+Each `429` sets `Retry-After` in whole seconds, at least 1. Windows are fixed, and a request refused
+by a rate limit stores nothing.
+
+### Suppression And The Lane
+
+A recipient on the organization's suppression list is not sent to: the message is stored as
+`suppressed` and answers `202`. A live, non-simulated message counts in the transactional lane
+(see [Send](#send)). When the lane is full the message is stored as `queued` with `queued_reason`
+`send_limit` and sent when the lane has room; when as many messages already wait as the lane allows,
+the request is `429 MAILBOX.SEND_LIMIT_REACHED` and nothing is stored.
+
+### Suppression List
+
+The suppression list holds one entry per organization and address (lowercased). An address is
+added when a delivery event reports it `bounced` or `complained` (see [Delivery Events](#delivery-events));
+`rejected` events and provider refusals at send time never add one. Transactional messages to a
+listed address are `suppressed`, and broadcasts skip it. Owners and admins manage the list; a
+member gets `403 PERMISSION.DENIED`.
+
+`GET /v1/mail-suppressions` lists entries newest first, by `created_at` then `id`, in keyset pages.
+Each entry has `id`, `email`, `reason` (`bounced` or `complained`), `source` (`transactional`,
+`broadcast`, or `backfill` for a contact suppressed before the list existed), and `created_at`.
+
+| Query | Meaning |
+|---|---|
+| `email` | An exact address, at most 320 characters, compared after trimming and lowercasing |
+| `reason` | `bounced` or `complained` |
+| `cursor` | `meta.next_cursor` of the previous page |
+| `per_page` | 1 to 100, default 50 |
+
+An unusable filter or a malformed cursor is `400 COMMON.INVALID_INPUT`. `meta` holds only
+`next_cursor`, null on the last page.
+
+`DELETE /v1/mail-suppressions/:suppression_id` removes an entry and answers `204`. It is idempotent
+and discloses nothing: an entry already removed, or one of another organization, also answers `204`
+and changes nothing. A removal that deleted an entry is audited as `mail_suppression.removed` with
+the entry's id and reason. Removing an address lets transactional messages reach it again; it never
+changes a contact's status, so a contact still `suppressed` is still skipped by broadcasts until it
+is changed too.
+
+### Status And Retries
+
+| Status | Meaning |
+|---|---|
+| `queued` | Waiting to be sent. `queued_reason` is `send_limit` (waiting for the lane), `retry` (waiting for a retry), or null. |
+| `sent` | The provider took the message (or the simulator decided). Later delivery events update `last_event`. |
+| `failed` | Not sent; `failure_code` says why. |
+| `suppressed` | The recipient is on the suppression list; nothing was sent. |
+
+A temporary provider failure for which the provider returned an HTTP status is retried after 30
+seconds, 2 minutes, and 10 minutes: at most 4 provider calls (`attempts`). Any failure without an
+HTTP status, such as an unreachable provider or an unreadable answer, may have been accepted, so the
+message becomes `failed` with `failure_code` `transport.unknown_outcome` and is never sent again.
+Other `failure_code` values: a provider's permanent refusal code, `send.expired` (queued more than an
+hour), `send.sender_unverified` (the sender domain lost verification before dispatch), and
+`transport.not_configured` (the deployment has no outbound transport; the provider was never called). To send
+again on purpose, use a new `Idempotency-Key`.
+
+`last_event` follows [Delivery Events](#delivery-events): the most severe recorded event, null when
+none. Messages and their events are deleted 30 days after `created_at`.
+
+### Reading A Message
+
+`GET /v1/transactional-messages/:message_id` needs `mail:transactional` and returns the same object
+with up to 50 events (`type`, `detail`, `occurred_at`), oldest first. A live key reads only live
+messages and a test key only test messages; a message of the other mode or another organization is
+`404 MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND`.
+
+### Send Log
+
+`GET /v1/transactional-mail-log` serves the console; any member of the organization may read it.
+Each entry has `id`, `mode`, `simulated`, `template`, `to_masked`, `subject` (masked), `status`,
+`queued_reason`, `failure_code`, `last_event`, `idempotency_key`, `created_at`, and `sent_at`, and
+never the full recipient or the variables. Entries are newest first, in keyset pages.
+
+| Query | Meaning |
+|---|---|
+| `mode` | `live` (default) or `test` |
+| `status` | `queued`, `sent`, `failed`, or `suppressed` |
+| `last_event` | `delivered`, `deferred`, `bounced`, `failed`, `rejected`, or `complained` |
+| `outcome` | `delivered` (`last_event` is `delivered`) or `problem` (`last_event` is `bounced`, `complained`, `failed`, or `rejected`, or `status` is `failed` or `suppressed`); combined with `status` and `last_event` as an intersection |
+| `template` | A template key |
+| `to` | An exact recipient, at most 320 characters, compared after trimming and lowercasing |
+| `since`, `until` | `created_at` range, `since` inclusive and `until` exclusive; default the last 7 days, at most 30 days |
+| `cursor` | `meta.next_cursor` of the previous page |
+| `per_page` | 1 to 100, default 50 |
+
+An unusable filter, a longer range, or a malformed cursor is `400 COMMON.INVALID_INPUT`. `meta` holds
+`next_cursor` (null on the last page) and `total_24h`: the messages of the requested mode created in
+the last 24 hours, of the requested `template` when one is given, ignoring the other filters and
+counted up to 10000.
+
+`GET /v1/transactional-mail-log/:message_id` returns one entry of either mode with `from`, the masked
+`variables`, and up to 50 events, oldest first; still without the full recipient. A message of
+another organization is `404 MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND`.
+
+### Masking
+
+- A recipient keeps its domain and the first two characters of its local part (one when the local
+  part has at most two), followed by `••`: `lilei@example.com` shows `li••@example.com`.
+- A secret variable that parses as an `http` or `https` URL with a host shows `<host>/••••`, without
+  user information, port, path, or query: `https://u:p@reset.acme.com/t?code=1` shows
+  `reset.acme.com/••••`. Any other secret value shows `••••••`.
+- The subject is rendered with masked secret values. Non-secret variables are shown as sent.
+
+### Console Test Sends
+
+`POST /v1/transactional-test-sends` with `{ "template", "mode", "variables" }` sends a
+transactional template to the caller's own account email; the recipient cannot be named. Any member
+may. Variables not given take the template's sample values. `mode` `live` counts in the
+transactional lane and calls the provider; `test` is simulated as delivered. The server generates
+the idempotency key, so every request is a new message. At most 5 per user per minute
+(`429 COMMON.RATE_LIMITED`). Otherwise the request follows the sending rules above from the
+per-recipient rate limit on, and answers `202` with the message, including `to`.
+
+### Transactional Errors
+
+| Condition | Status | `error_code` | Retry |
+|---|---:|---|---|
+| Organization header missing or malformed | 400 | `ORGANIZATION.CONTEXT_REQUIRED` / `ORGANIZATION.CONTEXT_INVALID` | After fixing |
+| Key missing or invalid | 401 | `AUTH.UNAUTHORIZED` (or an `API_KEY.*` code) | No |
+| Scope missing | 403 | `PERMISSION.DENIED` | No |
+| Not a member, or no such organization | 404 | `ORGANIZATION.NOT_FOUND` | No |
+| Unknown template key | 404 | `MAILBOX.TEMPLATE_NOT_FOUND` | No |
+| Unknown message, or another mode's message | 404 | `MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND` | No |
+| Same key, different content | 409 | `MAILBOX.IDEMPOTENCY_CONFLICT` | With a new key |
+| Body too large | 413 | `COMMON.REQUEST_TOO_LARGE` | After fixing |
+| A field failed validation | 422 | `COMMON.VALIDATION_FAILED` | After fixing |
+| Unusable recipient, undeclared variable, unknown simulator address | 422 | `MAILBOX.MESSAGE_INVALID` | After fixing |
+| `Idempotency-Key` missing or malformed | 422 | `MAILBOX.IDEMPOTENCY_KEY_INVALID` | After fixing |
+| Not a transactional template | 422 | `MAILBOX.TEMPLATE_KIND_MISMATCH` | No |
+| Required variable missing or empty | 422 | `MAILBOX.TEMPLATE_VARIABLES_MISSING` | After fixing |
+| Sender domain not verified | 422 | `MAILBOX.DOMAIN_NOT_VERIFIED` | After verifying |
+| Per-key or per-user rate limit | 429 | `COMMON.RATE_LIMITED` with `Retry-After` | Yes |
+| Per-recipient rate limit | 429 | `MAILBOX.RECIPIENT_RATE_LIMITED` with `Retry-After` | Yes |
+| Lane full and as many messages waiting as it allows | 429 | `MAILBOX.SEND_LIMIT_REACHED` | Later |
+| Feature off | 503 | `MAILBOX.TRANSACTIONAL_DISABLED` | No |
+| Database or dependency unavailable | 503 | `COMMON.SERVICE_UNAVAILABLE` | Yes |
 
 ## Delivery Events
 
@@ -1438,10 +1804,11 @@ and then delivered counts as `delivered`.
 ### Webhooks
 
 When the `webhook` starter is selected, an organization's webhook endpoints can subscribe to mail
-events. Mail events are published only for messages of a shared mailbox whose
+events. Mailbox mail events (`mail.message.*`) are published only for messages of a shared mailbox whose
 [webhook switch](#webhook-switch) is on, and only for messages created at or after its seal
 boundary; personal mailboxes never publish. Endpoints, signing, retries, and delivery history are those of [WEBHOOKS.md](WEBHOOKS.md);
-this section defines only the mail events.
+this section defines only the mail events. Transactional mail publishes the separate `email.*`
+events of [Transactional Mail Events](#transactional-mail-events).
 
 | Event type | Published when |
 |---|---|
@@ -1479,6 +1846,53 @@ If the webhook cannot be queued, the mail state is still recorded and the failur
 one webhook is lost. Mail that was really sent or received is never dropped because of a webhook
 failure. Without the `webhook` starter nothing is published.
 
+#### Transactional Mail Events
+
+[Transactional messages](#transactional-mail) publish their own `email.*` events, listed by
+`GET /v1/webhook-event-types` with the mail events. A transactional message belongs to no
+mailbox, so the mailbox webhook switch and seal boundary do not apply: when the `webhook` starter
+is selected, every enabled endpoint of the organization that subscribes to a type receives it.
+Test-mode and simulated messages publish too; `mode` and `simulated` tell them apart.
+
+| Event type | Published when |
+|---|---|
+| `email.sent` | The provider accepted the message (`status` becomes `sent`), or a test-mode or simulated message finished. |
+| `email.delivered` | A `delivered` delivery event. |
+| `email.bounced` | A `bounced` delivery event (`bounce_type: "permanent"`) or a `deferred` one (`bounce_type: "temporary"`). |
+| `email.complained` | A `complained` delivery event. |
+| `email.suppressed` | The recipient was on the organization's suppression list at acceptance or before dispatch, or the provider reported it on its own suppression list (at send time or as a `rejected` event). |
+| `email.failed` | `status` became `failed` (permanent provider refusal, unknown outcome, retries exhausted, queued too long, sender domain no longer verified, payload unavailable), or a `failed` delivery event (the provider gave up without a bounce). |
+
+Every transactional event has the same `data` object, with every field always present:
+
+| Field | Value |
+|---|---|
+| `message_id` | The transactional message's id, as used by `GET /v1/transactional-messages/{id}`. |
+| `template` | The template key the message was sent with. |
+| `to` | The full normalized (trimmed, lowercased) recipient address. |
+| `mode` | `live` or `test`. |
+| `simulated` | `true` when the message was simulated and never reached the provider. |
+| `bounce_type` | `permanent` or `temporary` for `email.bounced`; `""` otherwise. |
+| `reason` | A short machine-readable code such as `5.1.1 permanent_failure`, `suppressed`, `simulated`, or a failure code; `""` when there is nothing to explain. |
+
+The payload never contains the subject, the body, or any variable, secret or not. The recipient is
+given in full, unlike the masked send log: the receiver is the organization's own signed endpoint,
+and only the full address lets it match an outcome to its user.
+
+Each event's id is `t<message id>:<type without "email.">`, followed by `:` and the first 12 bytes
+of the SHA-256 of a distinguishing key (hex) when one message can publish that type more than once,
+such as one per provider event. The webhook starter deduplicates by
+`(organization_id, source, event_id)`, so a repeated provider event or a replayed send publishes
+nothing new. A consumer may still receive more than one event of the same type for one message:
+for example, an `email.delivered` or `email.suppressed` reported by the provider during the send
+and the same outcome reported again by a later provider event carry different event ids. Consumers
+that act once per outcome deduplicate on `data.message_id` plus the event type. Events are queued
+in the same transaction as the state change they report, with the same loss rule as the mail
+events. Signing, delivery history, and retries are those of
+[WEBHOOKS.md](WEBHOOKS.md): up to ten attempts, retried after about 1 minute, 5 minutes, 15
+minutes, 1 hour, 3 hours, 6 hours, 12 hours, 18 hours, and 24 hours, each with ±20% deterministic
+jitter.
+
 ### Event Intake
 
 `POST /v1/mail-delivery-events` carries one Cloudflare Email Sending event
@@ -1490,15 +1904,20 @@ as an event. The same five-minute window applies.
 
 | Condition | Response | Mail edge action |
 |---|---|---|
-| Recorded | `201` `{ "message_id", "type", "duplicate": false }` | Acknowledge |
+| Recorded | `201` `{ "message_id", "message_kind", "type", "duplicate": false }` | Acknowledge |
 | Event already recorded | `200` with `duplicate: true` | Acknowledge |
 | Missing, stale, or wrong signature | `401 MAILBOX.INBOUND_SIGNATURE_INVALID` | Retry |
-| No outbound message has the event's message id | `404 MAILBOX.MESSAGE_NOT_FOUND` | Acknowledge |
+| No outbound or transactional message has the event's message id | `404 MAILBOX.MESSAGE_NOT_FOUND` | Acknowledge |
 | Not a usable Email Sending event | `422 MAILBOX.DELIVERY_EVENT_INVALID` | Acknowledge |
 | No inbound secret configured | `503 MAILBOX.INBOUND_DISABLED` | Retry |
 
 An event is matched to a message by the provider's message id, which the send call stores as
-`message_id`, and is idempotent by the provider's event id. Opens and clicks are not tracked.
+`message_id`, and is idempotent by the provider's event id. Mailbox messages are searched first,
+then transactional messages; `message_kind` (`mailbox` or `transactional`) says which matched, and
+`message_id` is that message's id. A transactional message records the event without a recipient
+(it has one), updates its `last_event` by the same severity order, and a `bounced` or `complained`
+event adds the recipient to the organization's suppression list (see
+[Transactional Mail](#transactional-mail)); `rejected` never does. Opens and clicks are not tracked.
 Messages sent with the development `log` provider have no provider id and never receive events.
 
 ## Inbound Delivery
@@ -1561,6 +1980,12 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.TEMPLATE_LIMIT_REACHED` | 409 |
 | `MAILBOX.TEMPLATE_INVALID` | 422 |
 | `MAILBOX.TEMPLATE_VARIABLES_MISSING` | 422 |
+| `MAILBOX.TEMPLATE_KEY_TAKEN` | 409 |
+| `MAILBOX.TEMPLATE_KIND_IMMUTABLE` | 409 |
+| `MAILBOX.TEMPLATE_KIND_MISMATCH` | 422 |
+| `MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND` | 404 |
+| `MAILBOX.RECIPIENT_RATE_LIMITED` | 429 |
+| `MAILBOX.TRANSACTIONAL_DISABLED` | 503 |
 | `MAILBOX.CONTACT_NOT_FOUND` | 404 |
 | `MAILBOX.CONTACT_LIST_NOT_FOUND` | 404 |
 | `MAILBOX.CONTACT_EXISTS` | 409 |

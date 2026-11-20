@@ -14,6 +14,7 @@ const apiKey = {
   user_id: 7,
   name: 'Deployment',
   key_prefix: 'fastbuild_ab-cd_123456',
+  mode: 'live',
   scopes: ['models:invoke', 'models:read'],
   created_at: timestamp,
   updated_at: timestamp,
@@ -68,6 +69,36 @@ describe('API key browser contract', () => {
     expect(JSON.stringify(store.list(actor, 1, 15))).not.toContain('key_hash');
   });
 
+  it('issues live keys by default and test keys with the fastbuild_test_ prefix', () => {
+    const store = new MockApiKeyStore({
+      now: () => new Date(timestamp),
+      randomHex: bytes => 'c'.repeat(bytes * 2),
+    });
+    const actor = { id: 'user-1', email: 'user@example.com', name: 'User' };
+    const live = store.create(actor, { name: 'Live', scopes: ['mail:transactional'] });
+    const test = store.create(actor, {
+      name: 'Test',
+      scopes: ['mail:transactional'],
+      mode: 'test',
+    });
+
+    expect(live.api_key).toMatchObject({ mode: 'live', key_prefix: 'fastbuild_cccccccccccc' });
+    expect(test.api_key).toMatchObject({ mode: 'test', key_prefix: 'fastbuild_test_cccccccccccc' });
+    expect(test.plaintext_key).toMatch(/^fastbuild_test_c+\.c+$/);
+    expect(
+      parseApiKeyPageResponse(pageEnvelope(store.list(actor, 1, 15).items)).items
+    ).toHaveLength(2);
+  });
+
+  it('rejects key metadata without a known mode', () => {
+    const withoutMode: Record<string, unknown> = { ...apiKey };
+    delete withoutMode.mode;
+    expectInvalidResponse(() => parseApiKeyPageResponse(pageEnvelope([withoutMode])));
+    expectInvalidResponse(() =>
+      parseApiKeyPageResponse(pageEnvelope([{ ...apiKey, mode: 'sandbox' }]))
+    );
+  });
+
   it('isolates mock keys by owner and makes revocation idempotent', () => {
     const store = new MockApiKeyStore({
       now: () => new Date(timestamp),
@@ -80,9 +111,7 @@ describe('API key browser contract', () => {
     expect(store.revoke(other, created.api_key.id)).toBe(false);
     expect(store.revoke(owner, created.api_key.id)).toBe(true);
     expect(store.revoke(owner, created.api_key.id)).toBe(true);
-    expect(store.list(owner, 1, 15).items[0].revoked_at).toBe(
-      new Date(timestamp).toISOString()
-    );
+    expect(store.list(owner, 1, 15).items[0].revoked_at).toBe(new Date(timestamp).toISOString());
     expect(store.list(other, 1, 15).items).toEqual([]);
   });
 });

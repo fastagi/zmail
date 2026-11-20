@@ -19,10 +19,13 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailDomainRepository), new(*repository)),
 	wire.Bind(new(domain.MailOrganizeRepository), new(*repository)),
 	wire.Bind(new(domain.MailZoneRepository), new(*repository)),
+	wire.Bind(new(domain.TransactionalMailRepository), new(*repository)),
 	wire.Bind(new(domain.MailBroadcastDispatcher), new(*service)),
 	wire.Bind(new(domain.MailZoneChecker), new(*service)),
 	// Owners and members are validated against the organization starter's memberships.
 	NewMembershipDirectory,
+	// Console test sends go to the caller's account address, read through the user starter.
+	NewAccountDirectory,
 	mailtransport.New,
 	mailtransport.NewDomainProvider,
 	SettingsFromConfig,
@@ -38,6 +41,11 @@ var ProviderSet = wire.NewSet(
 // NewMembershipDirectory reads memberships through the organization starter's repository.
 func NewMembershipDirectory(organizations domain.OrganizationRepository) membershipDirectory {
 	return organizations
+}
+
+// NewAccountDirectory reads accounts through the user starter's repository.
+func NewAccountDirectory(users domain.UserRepository) accountDirectory {
+	return users
 }
 
 // NewStarterManifest describes the mailbox starter: its dependencies, routes, and migrations.
@@ -68,6 +76,10 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_21_090100_backfill_mail_threads",
 			"2026_11_22_090000_add_mail_roles",
 			"2026_11_22_090100_add_mail_inbox_index",
+			"2026_11_23_080000_add_send_lanes",
+			"2026_11_23_100000_add_transactional_templates",
+			"2026_11_23_110000_create_transactional_messages",
+			"2026_11_23_120000_create_mail_suppressions",
 		),
 	)
 }

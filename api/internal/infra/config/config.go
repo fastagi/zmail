@@ -439,13 +439,23 @@ const (
 	DefaultMailboxDomain = "mail.localhost"
 	// DefaultMailboxRequestTimeout caps one outbound provider call.
 	DefaultMailboxRequestTimeout = 15 * time.Second
-	// DefaultMailboxDailySendLimit bounds outbound messages per user per 24 hours.
+	// DefaultMailboxDailySendLimit bounds personal outbound messages per organization per 24 hours.
 	DefaultMailboxDailySendLimit = 200
 	// DefaultMailboxInboundTolerance is the accepted clock skew for a signed inbound delivery.
 	DefaultMailboxInboundTolerance = 5 * time.Minute
 	// DefaultMailboxMaxZonesPerOrganization bounds the DNS zones Zmail creates for one
 	// organization; the provider account limits how many zones it may add.
 	DefaultMailboxMaxZonesPerOrganization = 3
+	// DefaultMailboxSimulatorDomain is the domain whose addresses transactional mail simulates
+	// instead of sending.
+	DefaultMailboxSimulatorDomain = "test.zmail.im"
+	// DefaultMailboxTransactionalRecipientPerMinute bounds transactional messages of one
+	// organization, mode, template, and recipient per minute.
+	DefaultMailboxTransactionalRecipientPerMinute = 3
+	// DefaultMailboxTransactionalKeyPerSecond bounds transactional messages one API key sends per second.
+	DefaultMailboxTransactionalKeyPerSecond = 20
+	// MinMailboxSecretEncryptionKeyLength is the shortest MAILBOX_SECRET_ENCRYPTION_KEY accepted.
+	MinMailboxSecretEncryptionKeyLength = 32
 )
 
 // MailboxConfig holds optional mailbox starter policy and its mail transport.
@@ -458,8 +468,14 @@ type MailboxConfig struct {
 	CloudflareAPIToken  string
 	RequestTimeout      time.Duration
 	// InboundSecret signs deliveries from the mail edge. Empty disables inbound mail.
-	InboundSecret  string
+	InboundSecret string
+	// DailySendLimit is the personal lane limit: console sends, replies, API outbound messages, and
+	// template tests one organization may attempt per rolling 24 hours.
 	DailySendLimit int
+	// DailyBroadcastLimit and DailyTransactionalLimit are the broadcast and transactional lane
+	// limits; 0 (unset) takes DailySendLimit when resolved.
+	DailyBroadcastLimit     int
+	DailyTransactionalLimit int
 	// PublicURL is the public origin of the Web console, such as https://app.example.com. Broadcast
 	// unsubscribe links point at it; empty disables broadcasts.
 	PublicURL string
@@ -474,6 +490,15 @@ type MailboxConfig struct {
 	// MaxZonesPerOrganization bounds the zones Zmail adds to the Cloudflare account for one
 	// organization's apex domains, between 1 and MaxMailboxZonesPerOrganization.
 	MaxZonesPerOrganization int
+	// TransactionalEnabled accepts transactional messages; it requires SecretEncryptionKey.
+	TransactionalEnabled bool
+	// SecretEncryptionKey encrypts queued transactional content and keys idempotency fingerprints.
+	SecretEncryptionKey string
+	// SimulatorDomain is the domain whose addresses transactional mail simulates.
+	SimulatorDomain string
+	// TransactionalRecipientPerMinute and TransactionalKeyPerSecond are the transactional rate limits.
+	TransactionalRecipientPerMinute int
+	TransactionalKeyPerSecond       int
 }
 
 // Resolved fills the development defaults: outside production an unset domain is
@@ -486,6 +511,23 @@ func (m MailboxConfig) Resolved(production bool) MailboxConfig {
 	m.InboundSecret = strings.TrimSpace(m.InboundSecret)
 	m.PublicURL = strings.TrimRight(strings.TrimSpace(m.PublicURL), "/")
 	m.CloudflareEmailWorker = strings.TrimSpace(m.CloudflareEmailWorker)
+	m.SecretEncryptionKey = strings.TrimSpace(m.SecretEncryptionKey)
+	m.SimulatorDomain = strings.ToLower(strings.TrimSpace(m.SimulatorDomain))
+	if m.SimulatorDomain == "" {
+		m.SimulatorDomain = DefaultMailboxSimulatorDomain
+	}
+	if m.TransactionalRecipientPerMinute == 0 {
+		m.TransactionalRecipientPerMinute = DefaultMailboxTransactionalRecipientPerMinute
+	}
+	if m.TransactionalKeyPerSecond == 0 {
+		m.TransactionalKeyPerSecond = DefaultMailboxTransactionalKeyPerSecond
+	}
+	if m.DailyBroadcastLimit == 0 {
+		m.DailyBroadcastLimit = m.DailySendLimit
+	}
+	if m.DailyTransactionalLimit == 0 {
+		m.DailyTransactionalLimit = m.DailySendLimit
+	}
 	if !production {
 		if m.Domain == "" {
 			m.Domain = DefaultMailboxDomain
@@ -676,18 +718,27 @@ func Load() (*Config, error) {
 			PendingTTL:         env.GetDuration("ASSET_PENDING_TTL", DefaultAssetPendingTTL),
 		},
 		Mailbox: MailboxConfig{
-			Domain:                env.Get("MAILBOX_DOMAIN", ""),
-			Provider:              env.Get("MAILBOX_PROVIDER", ""),
-			CloudflareAccountID:   env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", ""),
-			CloudflareAPIToken:    env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", ""),
-			RequestTimeout:        env.GetDuration("MAILBOX_REQUEST_TIMEOUT", DefaultMailboxRequestTimeout),
-			InboundSecret:         env.Get("MAILBOX_INBOUND_SECRET", ""),
-			DailySendLimit:        env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
-			PublicURL:             env.Get("MAILBOX_PUBLIC_URL", ""),
-			CustomDomainsEnabled:  env.GetBool("MAILBOX_CUSTOM_DOMAINS_ENABLED", false),
-			CloudflareEmailWorker: env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
+			Domain:              env.Get("MAILBOX_DOMAIN", ""),
+			Provider:            env.Get("MAILBOX_PROVIDER", ""),
+			CloudflareAccountID: env.Get("MAILBOX_CLOUDFLARE_ACCOUNT_ID", ""),
+			CloudflareAPIToken:  env.Get("MAILBOX_CLOUDFLARE_API_TOKEN", ""),
+			RequestTimeout:      env.GetDuration("MAILBOX_REQUEST_TIMEOUT", DefaultMailboxRequestTimeout),
+			InboundSecret:       env.Get("MAILBOX_INBOUND_SECRET", ""),
+			DailySendLimit:      env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
+
+			DailyBroadcastLimit:     env.GetInt("MAILBOX_DAILY_BROADCAST_LIMIT", 0),
+			DailyTransactionalLimit: env.GetInt("MAILBOX_DAILY_TRANSACTIONAL_LIMIT", 0),
+			PublicURL:               env.Get("MAILBOX_PUBLIC_URL", ""),
+			CustomDomainsEnabled:    env.GetBool("MAILBOX_CUSTOM_DOMAINS_ENABLED", false),
+			CloudflareEmailWorker:   env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
 
 			MaxZonesPerOrganization: env.GetInt("MAILBOX_MAX_ZONES_PER_ORGANIZATION", DefaultMailboxMaxZonesPerOrganization),
+
+			TransactionalEnabled:            env.GetBool("MAILBOX_TRANSACTIONAL_ENABLED", false),
+			SecretEncryptionKey:             env.Get("MAILBOX_SECRET_ENCRYPTION_KEY", ""),
+			SimulatorDomain:                 env.Get("MAILBOX_SIMULATOR_DOMAIN", DefaultMailboxSimulatorDomain),
+			TransactionalRecipientPerMinute: env.GetInt("MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE", DefaultMailboxTransactionalRecipientPerMinute),
+			TransactionalKeyPerSecond:       env.GetInt("MAILBOX_TRANSACTIONAL_KEY_PER_SECOND", DefaultMailboxTransactionalKeyPerSecond),
 		},
 		Webhook: WebhookConfig{
 			EncryptionKey:       env.Get("WEBHOOK_ENCRYPTION_KEY", ""),
@@ -1325,6 +1376,15 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 	if resolved.DailySendLimit <= 0 || resolved.DailySendLimit > 100000 {
 		return fmt.Errorf("MAILBOX_DAILY_SEND_LIMIT must be between 1 and 100000")
 	}
+	if resolved.DailyBroadcastLimit <= 0 || resolved.DailyBroadcastLimit > 100000 {
+		return fmt.Errorf("MAILBOX_DAILY_BROADCAST_LIMIT must be between 1 and 100000, or unset to take MAILBOX_DAILY_SEND_LIMIT")
+	}
+	if resolved.DailyTransactionalLimit <= 0 || resolved.DailyTransactionalLimit > 100000 {
+		return fmt.Errorf("MAILBOX_DAILY_TRANSACTIONAL_LIMIT must be between 1 and 100000, or unset to take MAILBOX_DAILY_SEND_LIMIT")
+	}
+	if err := validateMailboxTransactional(resolved); err != nil {
+		return err
+	}
 	if resolved.PublicURL != "" {
 		parsed, err := url.Parse(resolved.PublicURL)
 		if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" ||
@@ -1342,6 +1402,24 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 		if resolved.MaxZonesPerOrganization < 1 || resolved.MaxZonesPerOrganization > MaxMailboxZonesPerOrganization {
 			return fmt.Errorf("MAILBOX_MAX_ZONES_PER_ORGANIZATION must be between 1 and %d", MaxMailboxZonesPerOrganization)
 		}
+	}
+	return nil
+}
+
+// validateMailboxTransactional checks the transactional mail settings of a resolved config.
+func validateMailboxTransactional(resolved MailboxConfig) error {
+	if resolved.TransactionalEnabled && len(resolved.SecretEncryptionKey) < MinMailboxSecretEncryptionKeyLength {
+		return fmt.Errorf("MAILBOX_SECRET_ENCRYPTION_KEY must be at least %d characters when MAILBOX_TRANSACTIONAL_ENABLED is true",
+			MinMailboxSecretEncryptionKeyLength)
+	}
+	if !ValidMailboxDomain(resolved.SimulatorDomain) {
+		return fmt.Errorf("MAILBOX_SIMULATOR_DOMAIN must be a valid lowercase domain name")
+	}
+	if resolved.TransactionalRecipientPerMinute < 1 || resolved.TransactionalRecipientPerMinute > 1000 {
+		return fmt.Errorf("MAILBOX_TRANSACTIONAL_RECIPIENT_PER_MINUTE must be between 1 and 1000")
+	}
+	if resolved.TransactionalKeyPerSecond < 1 || resolved.TransactionalKeyPerSecond > 10000 {
+		return fmt.Errorf("MAILBOX_TRANSACTIONAL_KEY_PER_SECOND must be between 1 and 10000")
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -329,7 +330,19 @@ type MailboxDomainResponse struct {
 	Provider string `json:"provider"`
 	// InboundEnabled tells whether the API accepts signed deliveries from the mail edge.
 	InboundEnabled bool `json:"inbound_enabled"`
-	DailySendLimit int  `json:"daily_send_limit"`
+	// DailySendLimit is the personal lane limit; the broadcast and transactional lanes have
+	// their own, each counted separately per organization over a rolling 24 hours.
+	DailySendLimit          int `json:"daily_send_limit"`
+	DailyBroadcastLimit     int `json:"daily_broadcast_limit"`
+	DailyTransactionalLimit int `json:"daily_transactional_limit"`
+	// TransactionalEnabled tells whether the instance accepts transactional messages.
+	TransactionalEnabled bool `json:"transactional_enabled"`
+	// TransactionalRecipientLimitPerMinute and TransactionalKeyLimitPerSecond are the
+	// transactional rate limits.
+	TransactionalRecipientLimitPerMinute int `json:"transactional_recipient_limit_per_minute"`
+	TransactionalKeyLimitPerSecond       int `json:"transactional_key_limit_per_second"`
+	// SimulatorDomain is the domain whose addresses transactional mail simulates.
+	SimulatorDomain string `json:"simulator_domain"`
 	// BroadcastsEnabled tells whether broadcasts can be sent: unsubscribe links need the inbound
 	// secret and MAILBOX_PUBLIC_URL.
 	BroadcastsEnabled bool `json:"broadcasts_enabled"`
@@ -551,9 +564,11 @@ type MailEventResponse struct {
 
 // DeliveryEventResponse acknowledges one provider event from the mail edge.
 type DeliveryEventResponse struct {
-	MessageID uint   `json:"message_id"`
-	Type      string `json:"type"`
-	Duplicate bool   `json:"duplicate"`
+	MessageID uint `json:"message_id"`
+	// MessageKind is mailbox or transactional: the table MessageID belongs to.
+	MessageKind string `json:"message_kind"`
+	Type        string `json:"type"`
+	Duplicate   bool   `json:"duplicate"`
 }
 
 func toMailEventResponses(events []domain.MailEvent) []MailEventResponse {
@@ -785,4 +800,141 @@ func toInboxCountsResponse(counts InboxCounts) InboxCountsResponse {
 		TodayStartsAt:   counts.TodayStartsAt.UTC(),
 		TodayEndsAt:     counts.TodayEndsAt.UTC(),
 	}
+}
+
+// TransactionalLogEntryResponse is a transactional message as the console log lists it: the
+// masked recipient and subject, never the full recipient or the variables.
+type TransactionalLogEntryResponse struct {
+	ID             uint       `json:"id"`
+	Mode           string     `json:"mode"`
+	Simulated      bool       `json:"simulated"`
+	Template       string     `json:"template"`
+	ToMasked       string     `json:"to_masked"`
+	Subject        string     `json:"subject"`
+	Status         string     `json:"status"`
+	QueuedReason   *string    `json:"queued_reason"`
+	FailureCode    *string    `json:"failure_code"`
+	LastEvent      *string    `json:"last_event"`
+	IdempotencyKey *string    `json:"idempotency_key"`
+	CreatedAt      time.Time  `json:"created_at"`
+	SentAt         *time.Time `json:"sent_at"`
+}
+
+// TransactionalLogEntryDetailResponse adds the sender, the masked variables, and the events to
+// a log entry. It still has no full recipient.
+type TransactionalLogEntryDetailResponse struct {
+	TransactionalLogEntryResponse
+	From      TransactionalSenderResponse  `json:"from"`
+	Variables map[string]string            `json:"variables"`
+	Events    []TransactionalEventResponse `json:"events"`
+}
+
+// TransactionalLogMetaResponse is the meta of a log page.
+type TransactionalLogMetaResponse struct {
+	NextCursor *string `json:"next_cursor"`
+	Total24h   int64   `json:"total_24h"`
+}
+
+func toTransactionalLogEntry(message *domain.TransactionalMessage) TransactionalLogEntryResponse {
+	full := toTransactionalMessageResponse(message)
+	return TransactionalLogEntryResponse{
+		ID:             full.ID,
+		Mode:           full.Mode,
+		Simulated:      full.Simulated,
+		Template:       full.Template,
+		ToMasked:       full.ToMasked,
+		Subject:        full.Subject,
+		Status:         full.Status,
+		QueuedReason:   full.QueuedReason,
+		FailureCode:    full.FailureCode,
+		LastEvent:      full.LastEvent,
+		IdempotencyKey: full.IdempotencyKey,
+		CreatedAt:      full.CreatedAt,
+		SentAt:         full.SentAt,
+	}
+}
+
+func toTransactionalLogEntries(messages []*domain.TransactionalMessage) []TransactionalLogEntryResponse {
+	entries := make([]TransactionalLogEntryResponse, 0, len(messages))
+	for _, message := range messages {
+		entries = append(entries, toTransactionalLogEntry(message))
+	}
+	return entries
+}
+
+func toTransactionalLogEntryDetail(message *domain.TransactionalMessage) TransactionalLogEntryDetailResponse {
+	full := toTransactionalMessageResponse(message)
+	return TransactionalLogEntryDetailResponse{
+		TransactionalLogEntryResponse: toTransactionalLogEntry(message),
+		From:                          full.From,
+		Variables:                     full.Variables,
+		Events:                        full.Events,
+	}
+}
+
+func toTransactionalLogMeta(page TransactionalLogPage) TransactionalLogMetaResponse {
+	meta := TransactionalLogMetaResponse{Total24h: page.Total24h}
+	if page.NextCursor != nil {
+		cursor := strconv.FormatUint(uint64(*page.NextCursor), 10)
+		meta.NextCursor = &cursor
+	}
+	return meta
+}
+
+// MailSendLaneUsageResponse is how full one send lane is.
+type MailSendLaneUsageResponse struct {
+	Lane    string `json:"lane"`
+	Limit   int    `json:"limit"`
+	Used    int64  `json:"used"`
+	Waiting int64  `json:"waiting"`
+}
+
+// MailSendLaneUsageListResponse is the usage of every send lane over the rolling window.
+type MailSendLaneUsageListResponse struct {
+	Lanes       []MailSendLaneUsageResponse `json:"lanes"`
+	WindowHours int                         `json:"window_hours"`
+	ComputedAt  time.Time                   `json:"computed_at"`
+}
+
+func toMailSendLaneUsageList(lanes []SendLaneUsage, computedAt time.Time) MailSendLaneUsageListResponse {
+	items := make([]MailSendLaneUsageResponse, 0, len(lanes))
+	for _, lane := range lanes {
+		items = append(items, MailSendLaneUsageResponse{
+			Lane: string(lane.Lane), Limit: lane.Limit, Used: lane.Used, Waiting: lane.Waiting,
+		})
+	}
+	return MailSendLaneUsageListResponse{Lanes: items, WindowHours: sendLaneWindowHours, ComputedAt: computedAt.UTC()}
+}
+
+// MailSuppressionResponse is one entry of the suppression list.
+type MailSuppressionResponse struct {
+	ID        uint      `json:"id"`
+	Email     string    `json:"email"`
+	Reason    string    `json:"reason"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// MailSuppressionPageMetaResponse is the meta of a suppression list page.
+type MailSuppressionPageMetaResponse struct {
+	NextCursor *string `json:"next_cursor"`
+}
+
+func toMailSuppressions(suppressions []domain.MailSuppression) []MailSuppressionResponse {
+	items := make([]MailSuppressionResponse, 0, len(suppressions))
+	for _, suppression := range suppressions {
+		items = append(items, MailSuppressionResponse{
+			ID: suppression.ID, Email: suppression.Email, Reason: suppression.Reason,
+			Source: suppression.Source, CreatedAt: suppression.CreatedAt.UTC(),
+		})
+	}
+	return items
+}
+
+func toMailSuppressionPageMeta(next *uint) MailSuppressionPageMetaResponse {
+	if next == nil {
+		return MailSuppressionPageMetaResponse{}
+	}
+	cursor := strconv.FormatUint(uint64(*next), 10)
+	return MailSuppressionPageMetaResponse{NextCursor: &cursor}
 }

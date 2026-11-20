@@ -88,6 +88,52 @@ SQL), and `other` for anything else or once 256 distinct table labels exist. The
 allocations per statement; pool statistics are read only when Prometheus scrapes, with no
 background goroutine. With metrics disabled, no callback is registered.
 
+## Transactional Mail
+
+Transactional mail (`POST /v1/transactional-messages`, the `mailbox` starter) logs one structured
+`slog` event per state change. Every event carries only `organization_id`, `message_id`,
+`template_id`, `mode`, and `status`, plus the listed extras; the request's `request_id` comes from
+the request context. Recipients, subjects, variables, and the encrypted payload are never logged
+(`transactional_logging_test.go` enforces this).
+
+| Event | Level | When | Extra fields |
+|---|---|---|---|
+| `transactional_message.accepted` | info | The request stored a message (`status` `queued` or `suppressed`) | none |
+| `transactional_message.dispatch_deferred` | warn | The in-process dispatch right after the request failed; the worker sends the message | `message_id` only |
+| `transactional_message.dispatched` | info | A provider call returned (live, non-simulated messages only) | `attempts`, `duration_ms` |
+| `transactional_message.sent` | info | The provider accepted the message, or a simulation finished | none |
+| `transactional_message.failed` | info | The message failed for good, for example `send.sender_unverified` or a permanent provider code | `failure_code` |
+| `transactional_message.suppressed` | info | The recipient joined the suppression list while the message waited, or the provider refused it as suppressed | none |
+| `transactional_message.retry_scheduled` | info | A provider answered with a temporary error; another attempt is due | `attempts`, `failure_code` |
+| `transactional_message.expired` | info | The worker failed a message queued for more than 1 hour (`send.expired`) | `failure_code` |
+| `transactional_message.unknown_outcome` | info | A provider call returned no HTTP status, or its lease ran out mid-call; never resent | `attempts` or `failure_code` |
+| `transactional_message.lease_lost` | warn | A dispatcher lost its lease before recording what it did | `organization_id`, `message_id` only |
+| `transactional_message.event_recorded` | info | A delivery event (bounce, complaint, delivery) matched a message | `event` |
+| `transactional_message.purged` | info | The worker deleted messages older than 30 days | `count` only |
+| `transactional_payload.decrypt_failed` | info | A queued payload could not be decrypted, usually after a key rotation; the message fails with `send.payload_unavailable` | none |
+
+A message suppressed when the request arrives logs only `accepted` with `status` `suppressed`; it
+is counted once in `zmail_transactional_messages_total{outcome="suppressed"}` when it is stored
+(an idempotent replay is not counted again).
+
+When `METRICS_ENABLED=true`, the `mailbox` starter adds:
+
+| Series | Type | Labels | Meaning |
+|---|---|---|---|
+| `zmail_transactional_messages_total` | counter | `mode` (`live`, `test`), `outcome` (`sent`, `failed`, `suppressed`) | Messages that reached a final state: through dispatch or the worker, or, for `suppressed`, also at acceptance |
+| `zmail_transactional_dispatch_seconds` | histogram | none | Time from storing a message to the provider accepting it (live, non-simulated) |
+| `zmail_transactional_queue_oldest_seconds` | gauge | none | Age of the oldest live message waiting to be sent, not counting `send_limit` waits; set by each worker pass |
+| `zmail_send_lane_attempts_total` | counter | `lane` (`personal`, `broadcast`, `transactional`) | Provider send attempts per send lane |
+| `zmail_transactional_rate_limited_total` | counter | `rule` (`mail.transactional.key`, `mail.transactional.recipient`, `mail.transactional.test_send`) | Requests refused by a transactional rate limit |
+
+Every label value comes from a code-owned set. Suggested alerts (spec §15): the oldest-queue gauge
+above 120 seconds; any `transactional_payload.decrypt_failed`; more than 5% of
+`zmail_transactional_messages_total` with `outcome="failed"` over 5 minutes; and any
+`transactional_message.unknown_outcome`, which needs a human because the recipient may or may not
+have the message. HTTP spans cover the request until it commits; the worker
+(`mail:broadcast:work`) traces its process like the other workers, and no per-message dispatch span
+exists yet.
+
 ## Alerts
 
 HTTP series label the route template in `path`, so each route can carry its own budget. With

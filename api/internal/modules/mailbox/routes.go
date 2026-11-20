@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"github.com/fastagi/zmail/api/internal/infra/middleware"
 	"github.com/fastagi/zmail/api/internal/infra/router"
 	"github.com/fastagi/zmail/api/internal/modules/apikey"
 )
@@ -48,6 +49,17 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.POST("/mail-roles", h.CreateMailRole).Name("mail_roles.store")
 		auth.PUT("/mail-roles/:role_id", h.UpdateMailRole).Name("mail_roles.update").WhereNumber("role_id")
 		auth.DELETE("/mail-roles/:role_id", h.DeleteMailRole).Name("mail_roles.destroy").WhereNumber("role_id")
+
+		auth.GET("/transactional-mail-log", h.ListTransactionalLog).Name("transactional_mail_log.index")
+		auth.GET("/transactional-mail-log/:message_id", h.GetTransactionalLogEntry).
+			Name("transactional_mail_log.show").WhereNumber("message_id")
+		auth.POST("/transactional-test-sends", h.SendTransactionalTest).
+			Name("transactional_test_sends.store").Middleware(middleware.BodyLimit(maxTransactionalBodyBytes))
+
+		auth.GET("/mail-send-lanes", h.ListSendLanes).Name("mail_send_lanes.index")
+		auth.GET("/mail-suppressions", h.ListSuppressions).Name("mail_suppressions.index")
+		auth.DELETE("/mail-suppressions/:suppression_id", h.RemoveSuppression).
+			Name("mail_suppressions.destroy").WhereNumber("suppression_id")
 
 		auth.GET("/mail-templates", h.ListTemplates).Name("mail_templates.index")
 		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store")
@@ -157,6 +169,15 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		key.GET("/outbound-mail-messages/:message_id", h.GetOutbound).
 			Name("outbound_mail_messages.show").WhereNumber("message_id").
 			Middleware(apikey.RequireScopes(ScopeMailRead))
+
+		// Transactional mail accepts test keys: a test key's messages are simulated and never
+		// reach the provider.
+		key.POST("/transactional-messages", h.SendTransactional).
+			Name("transactional_messages.store").
+			Middleware(middleware.BodyLimit(maxTransactionalBodyBytes), apikey.RequireScopesAllowingTest(ScopeMailTransactional))
+		key.GET("/transactional-messages/:message_id", h.GetTransactional).
+			Name("transactional_messages.show").WhereNumber("message_id").
+			Middleware(apikey.RequireScopesAllowingTest(ScopeMailTransactional))
 	})
 
 	r.POST("/inbound-mail-messages", h.ReceiveInbound).Name("inbound_mail_messages.store")

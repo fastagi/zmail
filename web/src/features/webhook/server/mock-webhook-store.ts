@@ -57,6 +57,10 @@ export class MockWebhookStore {
     this.nextDeliveryId = 1;
   }
 
+  // The framework boundary: the shipped mock catalog is only the starter test event. The real API
+  // also lists product types (the mailbox `mail.message.*` and transactional `email.*` events of
+  // contracts/MAILBOXES.md), so in mock mode the developer console's Webhooks tab has no `email.*`
+  // type to pick; UI tests supply those types through their own service mocks.
   eventTypes(): readonly ['webhook.test'] {
     return ['webhook.test'];
   }

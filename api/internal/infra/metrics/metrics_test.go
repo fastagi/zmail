@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -78,4 +79,50 @@ func metricPathLabels(t *testing.T, metricName string) map[string]bool {
 		}
 	}
 	return labels
+}
+
+// TestTransactionalMailMetricsAreRegistered checks the transactional mail metrics of spec §15
+// exist under their names with their bounded labels.
+func TestTransactionalMailMetricsAreRegistered(t *testing.T) {
+	RecordTransactionalMessage("live", "sent")
+	ObserveTransactionalDispatch(1500 * time.Millisecond)
+	SetTransactionalQueueOldest(42)
+	RecordSendLaneAttempt("transactional")
+	RecordTransactionalRateLimited("mail.transactional.recipient")
+
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	want := map[string][]string{
+		"zmail_transactional_messages_total":       {"mode", "outcome"},
+		"zmail_transactional_dispatch_seconds":     nil,
+		"zmail_transactional_queue_oldest_seconds": nil,
+		"zmail_send_lane_attempts_total":           {"lane"},
+		"zmail_transactional_rate_limited_total":   {"rule"},
+	}
+	for _, family := range families {
+		labels, ok := want[family.GetName()]
+		if !ok {
+			continue
+		}
+		delete(want, family.GetName())
+		got := map[string]bool{}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				got[label.GetName()] = true
+			}
+		}
+		if len(got) != len(labels) {
+			t.Fatalf("%s labels = %v; want %v", family.GetName(), got, labels)
+		}
+		for _, label := range labels {
+			if !got[label] {
+				t.Fatalf("%s labels = %v; want %v", family.GetName(), got, labels)
+			}
+		}
+	}
+	if len(want) > 0 {
+		t.Fatalf("metrics not registered: %v", want)
+	}
 }

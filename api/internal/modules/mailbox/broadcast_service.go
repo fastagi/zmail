@@ -42,6 +42,7 @@ const (
 	maxActiveBroadcasts          = 100
 	recipientSkippedUnsubscribed = "contact_not_subscribed"
 	recipientSkippedDeleted      = "contact_deleted"
+	recipientSkippedSuppressed   = "contact_suppressed" // on the organization's suppression list
 	recipientFailedVariables     = "template.variables_missing"
 	recipientFailedMailbox       = "mailbox_not_found"
 	recipientFailedMessage       = "message_invalid"
@@ -188,7 +189,11 @@ func (s *service) buildBroadcast(ctx context.Context, viewer domain.Organization
 	if _, err := s.authorizeMailbox(ctx, viewer, input.MailboxID, canSend); err != nil {
 		return nil, err
 	}
-	if _, err := s.templates.FindTemplate(ctx, organizationID, input.TemplateID); err != nil {
+	template, err := s.templates.FindTemplate(ctx, organizationID, input.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	if err = requireStandardTemplate(template); err != nil {
 		return nil, err
 	}
 	lists, err := s.contacts.ListContactLists(ctx, organizationID)
@@ -232,6 +237,9 @@ func (s *service) SendBroadcast(ctx context.Context, viewer domain.OrganizationC
 	}
 	template, err := s.templates.FindTemplate(ctx, organizationID, broadcast.TemplateID)
 	if err != nil {
+		return nil, err
+	}
+	if err = requireStandardTemplate(template); err != nil {
 		return nil, err
 	}
 	if _, err := parseStoredTemplate(template); err != nil {
@@ -498,6 +506,17 @@ func (run *broadcastRun) send(ctx context.Context, recipient *domain.MailBroadca
 	// The status at the moment of sending wins: an unsubscribe after the broadcast started counts.
 	if contact.Status != domain.MailContactSubscribed {
 		return finish(domain.MailRecipientSkipped, 0, recipientSkippedUnsubscribed)
+	}
+	// The organization's suppression list is shared with transactional mail; a hit skips the
+	// recipient without touching the contact (D35).
+	if s.transactional != nil {
+		suppressed, lookupErr := s.transactional.IsSuppressed(ctx, broadcast.OrganizationID, normalizeEmail(contact.Email))
+		if lookupErr != nil {
+			return false, lookupErr
+		}
+		if suppressed {
+			return finish(domain.MailRecipientSkipped, 0, recipientSkippedSuppressed)
+		}
 	}
 
 	token := s.unsubscribeToken(broadcast.OrganizationID, contact.ID)
