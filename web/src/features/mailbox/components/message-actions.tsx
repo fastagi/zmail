@@ -38,9 +38,15 @@ export function originOf(message: {
     : { placement: message.placement };
 }
 
-/** A success toast for a move, with an Undo action that runs `undo`. */
+/** How long a move can be undone from its toast. */
+export const UNDO_TOAST_MS = 5000;
+
+/** A success toast for a move, with an Undo action that runs `undo` for 5 seconds. */
 export function toastWithUndo(text: string, undoLabel: string, undo: () => Promise<unknown>) {
-  toast.success(text, { action: { label: undoLabel, onClick: () => void undo() } });
+  toast.success(text, {
+    duration: UNDO_TOAST_MS,
+    action: { label: undoLabel, onClick: () => void undo() },
+  });
 }
 
 /**

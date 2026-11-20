@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { InboxTriagePanel } from '@/features/mailbox/components/inbox-triage-panel';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
+import { originOf, toastWithUndo } from '@/features/mailbox/components/message-actions';
 import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-list';
 import {
   MessageDetail,
@@ -18,6 +19,7 @@ import {
 } from '@/features/mailbox/components/thread-view';
 import {
   markInboxRowRead,
+  removeInboxRow,
   useUpdateInboxMessage,
   useUpdateInboxMessages,
 } from '@/features/mailbox/hooks/use-inbox';
@@ -33,11 +35,15 @@ import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
-/** What the reading pane does besides the row's own mailbox: moving through the list, replying. */
+/**
+ * What the reading pane does besides the row's own mailbox: moving through the list, replying, and
+ * `onLeave`, which opens the row after `item` (or goes back to the list) once it was archived or
+ * deleted.
+ */
 export type InboxReaderNavigation = Omit<
   ReaderProps,
   'mailboxId' | 'mailboxAddress' | 'canSend' | 'canOrganize'
->;
+> & { onLeave: (item: InboxItem) => void };
 
 /**
  * The AI triage block of the pane, given only while the organization's triage is on: the override
@@ -157,17 +163,42 @@ export function InboxReadingPane({
     onUnavailable();
   }, [unavailable, item.id, onUnavailable]);
 
+  // Rows whose archive or delete is on its way; another row may be moved meanwhile.
+  const moving = useRef(new Set<number>());
+  /**
+   * Archives or deletes the row: it leaves the list at once and the next row opens. A failed
+   * request puts the row back; a done one offers for 5 seconds to put every message back where it
+   * was.
+   */
   const move = async (placement: 'archive' | 'trash') => {
+    const target = item;
+    if (moving.current.has(target.id)) return;
+    moving.current.add(target.id);
+    const messageIds = rowMessageIds(target);
+    const origin = originOf(target);
+    const rollback = removeInboxRow(queryClient, organizationId, target.id);
+    navigation.onLeave(target);
     try {
       await updateInbox.mutateAsync({
-        mailboxId: item.mailbox_id,
-        message_ids: rowMessageIds(item),
+        mailboxId: target.mailbox_id,
+        message_ids: messageIds,
         placement,
       });
-      toast.success(t(placement === 'archive' ? 'messages.archived' : 'messages.trashed'));
-      navigation.onClose();
+      toastWithUndo(
+        t(placement === 'archive' ? 'messages.archived' : 'messages.trashed'),
+        t('actions.undo'),
+        () =>
+          updateInbox
+            .mutateAsync({ mailboxId: target.mailbox_id, message_ids: messageIds, ...origin })
+            .catch((failure: unknown) => {
+              toast.error(t(resolveMailboxErrorKey(failure)));
+            })
+      );
     } catch (failure) {
+      rollback();
       toast.error(t(resolveMailboxErrorKey(failure)));
+    } finally {
+      moving.current.delete(target.id);
     }
   };
   const starred = item.thread?.starred ?? item.starred;
@@ -183,17 +214,12 @@ export function InboxReadingPane({
   const reply = () => replyTarget && navigation.onReply(replyTarget);
   const replyAll = () => replyTarget && navigation.onReplyAll(replyTarget);
   const forward = () => newest && navigation.onForward(newest);
-  const pending = updateInbox.isPending;
 
   useEffect(() => {
     if (!actionsRef || unavailable) return;
     actionsRef.current = {
-      archive: () => {
-        if (!pending) void move('archive');
-      },
-      trash: () => {
-        if (!pending) void move('trash');
-      },
+      archive: () => void move('archive'),
+      trash: () => void move('trash'),
       star: toggleStar,
       reply,
       replyAll,
@@ -218,8 +244,9 @@ export function InboxReadingPane({
       </div>
     );
   } else {
+    const { onLeave: _onLeave, ...readerNavigation } = navigation;
     const reader: ReaderProps = {
-      ...navigation,
+      ...readerNavigation,
       mailboxId: item.mailbox_id,
       mailboxAddress: item.mailbox_address,
       canSend: access.send,
@@ -285,13 +312,11 @@ export function InboxReadingPane({
             <ToolbarAction
               label={t('inbox.actions.archive')}
               keyCap="E"
-              disabled={pending}
               onClick={() => void move('archive')}
             />
             <ToolbarAction
               label={t('inbox.actions.trash')}
               keyCap="#"
-              disabled={pending}
               onClick={() => void move('trash')}
             />
           </div>

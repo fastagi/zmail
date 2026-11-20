@@ -887,7 +887,8 @@ CREATE INDEX IF NOT EXISTS idx_mail_messages_inbox_time
 - `mailboxKeys.inbox(orgId, filters)`、`mailboxKeys.inboxCounts(orgId, tz)`、`mailboxKeys.roles(orgId)`。
 - 列表与计数使用现有 `liveRefresh`（`MAIL_REFRESH_MS`，后台标签页不刷新）。
 - 单邮箱写动作（已读、星标、位置、发送）成功后，除现有失效外再失效 `inbox` 与 `inboxCounts`；角色写成功后失效 `roles`、`mailboxes`、`inboxCounts`。
-- 星标与已读做乐观更新（在缓存中改该行），失败回滚并提示；归档、回收站不做乐观移除，成功后再刷新（避免与线程 `message_ids` 截断规则冲突）。
+- 星标与已读做乐观更新（在缓存中改该行），失败回滚并提示。
+- 归档、回收站（2026-11-20 用户决定，取代原先"不做乐观移除"）：该行立即从缓存中的列表移除，阅读栏打开下一行（没有下一行就回到列表）；请求失败把该行放回并提示；成功后提示 5 秒内可撤销，撤销按该行原来的位置（`placement` / `folder_id`）放回本行的全部 `message_ids`。请求发出的 `message_ids` 与之前相同，服务端截断规则不变，成功后照常失效刷新。
 
 ### 11.3 状态
 

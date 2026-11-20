@@ -218,6 +218,34 @@ function patchInboxRow(
   };
 }
 
+/**
+ * Takes the row out of every cached unified inbox listing of the organization at once, for an
+ * archive or a delete that has not been answered yet. Answers the function that puts those
+ * listings back as they were, for a failed request.
+ */
+export function removeInboxRow(
+  queryClient: QueryClient,
+  organizationId: number,
+  rowId: number
+): () => void {
+  const queryKey = mailboxKeys.inboxes(organizationId);
+  const snapshot = queryClient.getQueriesData<InboxListing>({ queryKey });
+  queryClient.setQueriesData<InboxListing>({ queryKey }, listing =>
+    listing?.pages
+      ? {
+          ...listing,
+          pages: listing.pages.map(page => ({
+            ...page,
+            items: page.items.filter(item => item.id !== rowId),
+          })),
+        }
+      : listing
+  );
+  return () => {
+    for (const [key, listing] of snapshot) queryClient.setQueryData(key, listing);
+  };
+}
+
 /** Shows the row read in every cached listing at once; answers the rollback. */
 export function markInboxRowRead(
   queryClient: QueryClient,

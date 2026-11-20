@@ -498,6 +498,12 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         ? () => setOpenParam(rows[openIndex + 1].id)
         : null,
     onClose: () => setOpenParam(null),
+    // An archived or deleted row hands the pane to the row after it, or back to the list.
+    onLeave: (left: InboxItem) => {
+      const index = rows.findIndex(row => row.id === left.id);
+      const next = index >= 0 ? rows[index + 1] : undefined;
+      setOpenParam(next ? next.id : null);
+    },
     onReply: (message: MailMessage) => withSender(() => quotedReplyDraft(message, replyCopy)),
     onReplyAll: (message: MailMessage) =>
       withSender(mailbox => replyAllDraft(message, mailbox.address, replyCopy)),
