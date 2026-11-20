@@ -65,6 +65,7 @@ function renderList(items: InboxItem[], locale: 'en-US' | 'zh-Hans' = 'en-US') {
         timeZone="UTC"
         selectedId={null}
         onOpen={() => undefined}
+        onFilterMailbox={() => undefined}
         onLoadMore={() => undefined}
         hasMore={false}
       />

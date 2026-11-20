@@ -11,7 +11,7 @@ import {
 } from 'react';
 import Link from 'next/link';
 import { useLocale } from 'next-intl';
-import { ExternalLink, PanelLeft, Search, X } from 'lucide-react';
+import { ExternalLink, Inbox, PanelLeft, RefreshCw, Search, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -80,6 +80,7 @@ function useRowTime(zone: string): (iso: string) => string {
  */
 export function InboxListHeader({
   title,
+  mailboxSelected,
   subtitle,
   unread,
   unreadCount,
@@ -90,8 +91,13 @@ export function InboxListHeader({
   onClearMailbox,
   onShowSidebar,
   searchRef,
+  onRefresh,
+  refreshing,
 }: {
+  onRefresh: () => void;
+  refreshing: boolean;
   title: string;
+  mailboxSelected: boolean;
   subtitle?: string;
   unread: boolean;
   unreadCount?: number;
@@ -168,14 +174,40 @@ export function InboxListHeader({
           </Button>
         ) : null}
         <div className="flex min-w-0 flex-1 items-baseline gap-2.5">
-          <h1 className="min-w-0 truncate font-serif text-[28px] leading-tight font-semibold tracking-[-0.01em]">
+          <h1
+            className={cn(
+              'min-w-0 leading-tight font-semibold tracking-[-0.01em]',
+              mailboxSelected
+                ? 'break-all rounded-md bg-blue-50 px-2 py-1 font-sans text-[13px] leading-[18px] font-medium tracking-normal text-blue-800 dark:bg-blue-950 dark:text-blue-200'
+                : 'truncate font-serif text-[28px]'
+            )}
+          >
             {title}
           </h1>
           {subtitle ? <span className="shrink-0 text-text-muted">{subtitle}</span> : null}
         </div>
+        <Button
+          type="button"
+          isIcon
+          size="sm"
+          variant="ghost"
+          aria-label={t('actions.refresh')}
+          title={t('actions.refresh')}
+          aria-busy={refreshing}
+          disabled={refreshing}
+          onClick={onRefresh}
+        >
+          <RefreshCw className={cn('size-4', refreshing && 'motion-safe:animate-spin')} />
+        </Button>
         {mailboxHref ? (
-          <Button asChild size="xs" variant="ghost" icon={<ExternalLink className="size-3.5" />}>
-            <Link href={mailboxHref}>{t('inbox.openInMailbox')}</Link>
+          <Button asChild size="sm" isIcon variant="ghost">
+            <Link
+              href={mailboxHref}
+              aria-label={t('inbox.openInMailbox')}
+              title={t('inbox.openInMailbox')}
+            >
+              <ExternalLink className="size-4" />
+            </Link>
           </Button>
         ) : null}
         {onClearMailbox ? (
@@ -243,6 +275,7 @@ export function InboxList({
   timeZone,
   selectedId,
   onOpen,
+  onFilterMailbox,
   onLoadMore,
   hasMore,
   loadingMore = false,
@@ -260,6 +293,7 @@ export function InboxList({
   timeZone: string;
   selectedId: number | null;
   onOpen: (item: InboxItem) => void;
+  onFilterMailbox: (id: number) => void;
   onLoadMore: () => void;
   hasMore: boolean;
   loadingMore?: boolean;
@@ -318,7 +352,7 @@ export function InboxList({
     list.current?.querySelector<HTMLElement>(`[data-row-id="${String(focusable)}"]`)?.focus();
   }, [selectedId, focusable]);
   /** Enter and Space open the focused row; the arrow keys move between rows. */
-  const keyDown = (event: KeyboardEvent<HTMLLIElement>, item: InboxItem) => {
+  const keyDown = (event: KeyboardEvent<HTMLDivElement>, item: InboxItem) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onOpen(item);
@@ -328,9 +362,9 @@ export function InboxList({
     event.preventDefault();
     const sibling =
       event.key === 'ArrowDown'
-        ? event.currentTarget.nextElementSibling
-        : event.currentTarget.previousElementSibling;
-    if (sibling instanceof HTMLElement) sibling.focus();
+        ? event.currentTarget.parentElement?.nextElementSibling
+        : event.currentTarget.parentElement?.previousElementSibling;
+    sibling?.querySelector<HTMLElement>('[data-row-id]')?.focus();
   };
 
   return (
@@ -342,84 +376,101 @@ export function InboxList({
           const count = item.thread?.message_count ?? 1;
           const role = item.role_id === null ? undefined : roles?.get(item.role_id);
           return (
-            <li
-              key={item.id}
-              role="option"
-              data-row-id={item.id}
-              aria-selected={selected}
-              tabIndex={item.id === focusable ? 0 : -1}
-              className={cn(
-                'group cursor-pointer rounded-[10px] p-3 focus-ring motion-reduce:transition-none',
-                selected ? 'bg-row-selected' : 'hover:bg-row-hover'
-              )}
-              onClick={() => onOpen(item)}
-              onKeyDown={event => keyDown(event, item)}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    'size-1.5 shrink-0 rounded-full',
-                    unread ? 'bg-brand' : 'bg-transparent'
-                  )}
-                />
-                {unread ? <span className="sr-only">{t('list.unread')}</span> : null}
-                <span
-                  className={cn(
-                    'min-w-0 truncate text-[13.5px]',
-                    unread ? 'font-semibold text-text-main' : 'text-text-subtle'
-                  )}
-                >
-                  {item.from.name || item.from.address}
-                </span>
-                {count > 1 ? (
-                  <span className="shrink-0 text-xs text-text-muted">
-                    {t('inbox.threadCount', { count })}
-                  </span>
-                ) : null}
-                {item.source === 'gmail' || item.source === 'outlook' ? (
-                  <span
-                    data-source={item.source}
-                    title={t(`inbox.source.${item.source}Title`)}
-                    className="shrink-0 rounded-full border border-border px-[6px] text-[11px] text-text-muted"
-                  >
-                    {t(`inbox.source.${item.source}`)}
-                  </span>
-                ) : null}
-                <span className="flex-1" />
-                {sendable.has(item.mailbox_id) ? (
+            <li key={item.id} role="presentation" className="relative min-w-0">
+              <div
+                role="option"
+                data-row-id={item.id}
+                aria-selected={selected}
+                tabIndex={item.id === focusable ? 0 : -1}
+                className={cn(
+                  'group cursor-pointer rounded-[10px] p-3 focus-ring motion-reduce:transition-none',
+                  showMailbox && 'pb-9',
+                  selected
+                    ? 'bg-blue-50 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/65 dark:ring-blue-800'
+                    : 'hover:bg-row-hover'
+                )}
+                onClick={() => onOpen(item)}
+                onKeyDown={event => keyDown(event, item)}
+              >
+                <span className="flex min-w-0 items-center gap-2">
                   <span
                     aria-hidden="true"
-                    className="flex shrink-0 gap-1 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 motion-reduce:transition-none max-sm:hidden"
+                    className={cn(
+                      'size-1.5 shrink-0 rounded-full',
+                      unread ? 'bg-brand' : 'bg-transparent'
+                    )}
+                  />
+                  {unread ? <span className="sr-only">{t('list.unread')}</span> : null}
+                  <span
+                    className={cn(
+                      'min-w-0 truncate text-[13.5px]',
+                      unread ? 'font-semibold text-text-main' : 'text-text-subtle'
+                    )}
                   >
-                    <Kbd>E</Kbd>
-                    <Kbd>#</Kbd>
+                    {item.from.name || item.from.address}
                   </span>
-                ) : null}
-                <time
-                  dateTime={item.created_at}
-                  className="shrink-0 text-xs text-text-faint tabular-nums"
-                >
-                  {rowTime(item.created_at)}
-                </time>
-              </span>
-              <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                {showMailbox ? (
-                  <MailboxLabel address={item.mailbox_address} role={role} />
-                ) : null}
+                  {count > 1 ? (
+                    <span className="shrink-0 text-xs text-text-muted">
+                      {t('inbox.threadCount', { count })}
+                    </span>
+                  ) : null}
+                  {item.source === 'gmail' || item.source === 'outlook' ? (
+                    <span
+                      data-source={item.source}
+                      title={t(`inbox.source.${item.source}Title`)}
+                      className="shrink-0 rounded-full border border-border px-[6px] text-[11px] text-text-muted"
+                    >
+                      {t(`inbox.source.${item.source}`)}
+                    </span>
+                  ) : null}
+                  {role ? (
+                    <span className="flex min-w-0 shrink items-center gap-1 rounded-full bg-row-selected px-[7px] text-[11px] text-text-muted group-aria-selected:bg-bg-surface">
+                      <LabelDot color={role.color} className="size-1.5" />
+                      <span className="truncate">{role.name}</span>
+                    </span>
+                  ) : null}
+                  <span className="flex-1" />
+                  {sendable.has(item.mailbox_id) ? (
+                    <span
+                      aria-hidden="true"
+                      className="flex shrink-0 gap-1 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 motion-reduce:transition-none max-sm:hidden"
+                    >
+                      <Kbd>E</Kbd>
+                      <Kbd>#</Kbd>
+                    </span>
+                  ) : null}
+                  <time
+                    dateTime={item.created_at}
+                    className="shrink-0 text-xs text-text-faint tabular-nums"
+                  >
+                    {rowTime(item.created_at)}
+                  </time>
+                </span>
                 <span
                   className={cn(
-                    'min-w-0 truncate',
+                    'mt-0.5 block truncate',
                     unread ? 'font-semibold text-text-main' : 'text-text-subtle'
                   )}
                 >
                   {item.subject || t('list.noSubject')}
                 </span>
-              </span>
-              {item.triage ? <TriageReasonLine triage={item.triage} /> : null}
-              {item.snippet ? (
-                <span className="block truncate text-text-muted">{item.snippet}</span>
-              ) : null}
+                {item.triage ? <TriageReasonLine triage={item.triage} /> : null}
+                {item.snippet ? (
+                  <span className="block truncate text-text-muted">{item.snippet}</span>
+                ) : null}
+              </div>
+              {showMailbox && (
+                <button
+                  type="button"
+                  title={t('inbox.filterMailbox', { address: item.mailbox_address })}
+                  aria-label={t('inbox.filterMailbox', { address: item.mailbox_address })}
+                  onClick={() => onFilterMailbox(item.mailbox_id)}
+                  className="absolute bottom-1.5 left-2 inline-flex h-6 max-w-[calc(100%-1.5rem)] items-center gap-1.5 rounded-md px-1.5 text-xs text-text-muted focus-ring hover:bg-blue-50 hover:text-blue-800 focus-visible:text-blue-800 motion-safe:transition-colors dark:hover:bg-blue-950 dark:hover:text-blue-200 dark:focus-visible:text-blue-200"
+                >
+                  <Inbox className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{item.mailbox_address}</span>
+                </button>
+              )}
             </li>
           );
         })}
@@ -434,24 +485,6 @@ export function InboxList({
         </div>
       ) : null}
     </div>
-  );
-}
-
-/**
- * The mailbox that received a row, like a Gmail label before the subject: the address's local
- * part, tinted by the mailbox's role, with the full address (and the role) on hover.
- */
-function MailboxLabel({ address, role }: { address: string; role: MailRole | undefined }) {
-  const at = address.lastIndexOf('@');
-  const name = at > 0 ? address.slice(0, at) : address;
-  return (
-    <span
-      title={role ? `${address} · ${role.name}` : address}
-      className="flex max-w-[45%] shrink-0 items-center gap-1 rounded-[5px] bg-row-selected px-1.5 text-[11.5px] leading-[18px] text-text-muted group-aria-selected:bg-bg-surface"
-    >
-      {role ? <LabelDot color={role.color} className="size-1.5" /> : null}
-      <span className="truncate">{name}</span>
-    </span>
   );
 }
 

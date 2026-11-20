@@ -141,6 +141,7 @@ const messages = {
     },
     viewByMailbox: 'View by mailbox',
     openInMailbox: 'Open in mailbox',
+    filterMailbox: 'Filter by mailbox {address}',
     clearMailbox: 'Show all mailboxes',
     threadCount: '({count})',
     loadingMore: 'Loading more…',
