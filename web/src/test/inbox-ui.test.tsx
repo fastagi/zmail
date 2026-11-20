@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MailboxesRoute } from '@/features/mailbox/components/mailboxes-route';
 import { markInboxRowRead } from '@/features/mailbox/hooks/use-inbox';
@@ -12,6 +12,22 @@ import type { InboxFilters, InboxItem } from '@/features/mailbox/types';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { messages } from '@/i18n/modules';
+
+// The workspace loads its dialogs, reader, and sheet on demand. Load those modules once up front:
+// when the whole suite runs in parallel, a cold dynamic import can outlast findBy's one-second
+// wait, and these tests check the inbox's behavior, not how fast a module loads.
+beforeAll(async () => {
+  await Promise.all([
+    import('@/features/mailbox/components/manage-roles-dialog'),
+    import('@/features/mailbox/components/manage-mailboxes-dialog'),
+    import('@/features/mailbox/components/inbox-reading-pane'),
+    import('@/features/mailbox/components/shortcut-help-dialog'),
+    import('@/features/mailbox/components/compose-dialog'),
+    import('@/features/mailbox/components/inbox-triage'),
+    import('@/features/mailbox/components/command-palette'),
+    import('@/components/ui/sheet'),
+  ]);
+});
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const state = vi.hoisted(() => {
