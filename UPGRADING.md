@@ -11,6 +11,36 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Hot-path benchmarks and two query-plan fixes
+
+Benchmarks for the unified inbox triage filter, external sources, operator mail metrics, platform
+accounts, and registration codes, with the measured effect of the fixes below:
+`docs/benchmarks/v2-hot-paths.md`.
+
+### Low — Outbound time index for platform mail metrics, and building it beforehand
+
+Run migrations: `2026_11_30_090000_add_mail_outbound_time_index` adds
+`idx_mail_messages_outbound_time`, which the operator mail overview, per-organization counts, and
+outbound log read instead of scanning all of `mail_messages`. Building it holds the write lock on
+`mail_messages`; on a large installation build it first, outside a transaction, as a role that
+owns `mail_messages`, and the migration then skips it:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_outbound_time
+  ON mail_messages (created_at, id) INCLUDE (mailbox_id, status, source)
+  WHERE direction = 'outbound';
+```
+
+If the `CONCURRENTLY` build fails, drop the invalid index
+(`DROP INDEX CONCURRENTLY idx_mail_messages_outbound_time;`) and build it again before migrating.
+Down drops the index and loses nothing. Because the index includes `source`, rolling back
+`2026_11_28_090000_add_external_mail` needs this migration rolled back first, as the migrator's
+reverse order already does.
+
+The unified inbox triage filter (`triage=`) now reads each mailbox's results from the existing
+`idx_mail_triage_results`; no schema change. A fork that changed `inboxFilters` should move its
+triage condition to `inboxTriageFilter`.
+
 ## Unreleased — Platform mail operations (metrics and outbound log)
 
 Read-only platform mail metrics for the Admin Console, behind a new operator grant scope.

@@ -44,12 +44,15 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 	exec(`INSERT INTO mail_messages (mailbox_id, direction, status, from_address, source, external_id, created_at, updated_at)
 		VALUES (1, 'inbound', 'received', 'bob@sender.test', 'gmail', 'g-1', now(), now())`)
 
+	// The outbound time index includes source, so it rolls back first.
+	require.NoError(t, (&addMailOutboundTimeIndex{}).Down(db))
 	require.NoError(t, (&addExternalMail{}).Down(db))
 	rolledBack := dumpSchema(t, db)
 	assert.NotContains(t, rolledBack, "TABLE external_mail_connections")
 	assert.NotContains(t, rolledBack, "external_id")
 
 	require.NoError(t, (&addExternalMail{}).Up(db))
+	require.NoError(t, (&addMailOutboundTimeIndex{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 

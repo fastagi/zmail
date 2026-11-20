@@ -12,7 +12,9 @@ import (
 
 // countedOutbound selects the messages platform mail metrics count: outbound mail sent through
 // Zmail (not synced Gmail or Outlook copies) in a mailbox that still exists and belongs to an
-// organization. Each row is one message, so counting rows never fans out.
+// organization. Each row is one message, so counting rows never fans out. The direction and
+// source are SQL literals, not bound values, so every plan, generic ones included, can read the
+// partial index idx_mail_messages_outbound_time.
 func (r *repository) countedOutbound(ctx context.Context) (*gorm.DB, error) {
 	if r == nil || r.db == nil {
 		return nil, domain.ErrServiceUnavailable
@@ -20,9 +22,12 @@ func (r *repository) countedOutbound(ctx context.Context) (*gorm.DB, error) {
 	return r.conn(ctx).Table("mail_messages").
 		Joins(`JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id
 			AND mailboxes.deleted_at IS NULL AND mailboxes.organization_id IS NOT NULL`).
-		Where("mail_messages.direction = ? AND mail_messages.source = ?",
-			string(domain.MailDirectionOutbound), string(domain.MailSourceZmail)), nil
+		Where(countedOutboundCondition), nil
 }
+
+// countedOutboundCondition is the counted direction and source as literals.
+const countedOutboundCondition = "mail_messages.direction = '" + string(domain.MailDirectionOutbound) +
+	"' AND mail_messages.source = '" + string(domain.MailSourceZmail) + "'"
 
 // statusCountColumns counts one row per message under its current status.
 const statusCountColumns = `COUNT(*) FILTER (WHERE mail_messages.status = 'sent') AS sent,
