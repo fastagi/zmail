@@ -744,6 +744,16 @@ describe('mailbox workspace', () => {
     expect(rowButton('Unread question')).toHaveFocus();
   });
 
+  it('keeps a starred star in its color on hover', () => {
+    state.detail.data = message({ html_body: '', starred: true });
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+
+    const star = screen.getByRole('button', { name: 'Remove star' });
+    expect(star).toHaveClass('text-warning', 'hover:text-warning');
+    expect(star).not.toHaveClass('hover:text-accent-foreground');
+  });
+
   it('shows no code panel for a message with nothing masked', () => {
     state.detail.data = message({ html_body: '' });
     renderWorkspace();

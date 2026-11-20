@@ -776,7 +776,7 @@ function MessageRows({
                 aria-pressed={starred}
                 aria-label={t(starred ? 'list.unstar' : 'list.star')}
                 title={t(starred ? 'list.unstar' : 'list.star')}
-                className={cn('mt-2', starred ? 'text-warning' : 'text-muted-foreground')}
+                className={cn('mt-2', starred ? 'text-warning hover:text-warning' : 'text-muted-foreground')}
                 onClick={() => void star(row)}
               >
                 <Star className={cn('size-4', starred && 'fill-current')} />
