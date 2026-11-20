@@ -262,7 +262,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthenticationUserResponse'
         '400':
-          $ref: '#/components/responses/InvalidInput'
+          description: The email code is missing (`AUTH.REGISTRATION_EMAIL_CODE_REQUIRED`), wrong, used, or
+            replaced (`AUTH.REGISTRATION_EMAIL_CODE_INVALID`), or expired or out of attempts
+            (`AUTH.REGISTRATION_EMAIL_CODE_EXPIRED`), or the body is malformed (`COMMON.INVALID_INPUT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '403':
           description: '`AUTH.FORBIDDEN`: registration is closed on this instance (`AUTH_REGISTRATION_ENABLED=false`).'
           content:
@@ -284,6 +290,43 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/register/email-codes:
+    post:
+      operationId: requestRegistrationEmailCode
+      summary: Mail a registration code to an address
+      description: Always answers the same `202` body for an open instance, whether the address is new,
+        already has an account, or is inside its 60-second cooldown or hourly cap. An address with an
+        account is mailed nothing. The 6-digit code is valid for 10 minutes; a newer code replaces it.
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthenticationRegistrationEmailCodeRequest'
+      responses:
+        '202':
+          description: Generic acknowledgement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationMessageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '403':
+          description: '`AUTH.FORBIDDEN`: registration is closed on this instance (`AUTH_REGISTRATION_ENABLED=false`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /v1/users/account:
     delete:
       operationId: deleteUserAccount
@@ -8887,6 +8930,9 @@ components:
         - AUTH.ACCOUNT_DISABLED
         - AUTH.PASSWORD_RESET_TOKEN_INVALID
         - AUTH.PASSWORD_RESET_TOKEN_EXPIRED
+        - AUTH.REGISTRATION_EMAIL_CODE_REQUIRED
+        - AUTH.REGISTRATION_EMAIL_CODE_INVALID
+        - AUTH.REGISTRATION_EMAIL_CODE_EXPIRED
         - USER.NOT_FOUND
         - USER.EMAIL_ALREADY_EXISTS
         - USER.USERNAME_ALREADY_EXISTS
@@ -9405,6 +9451,21 @@ components:
         phone:
           type: string
           maxLength: 20
+        email_code:
+          type: string
+          pattern: ^[0-9]{6}$
+          description: The code mailed by `POST /v1/register/email-codes`. Required when the instance runs
+            with `AUTH_REGISTRATION_EMAIL_CODE_REQUIRED=true` (the default); ignored otherwise.
+    AuthenticationRegistrationEmailCodeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 100
     AuthenticationLoginRequest:
       type: object
       additionalProperties: false
