@@ -115,6 +115,7 @@ const messages = {
     description: 'Mail from every mailbox you read, newest first.',
     subtitle:
       '{mailboxes, plural, one {# mailbox} other {# mailboxes}} · {roles, plural, one {# role} other {# roles}}',
+    subtitleMailboxes: '{mailboxes, plural, one {# mailbox} other {# mailboxes}}',
     showSidebar: 'Show mailboxes',
     readingPane: 'Reading pane',
     footer: {
@@ -133,6 +134,7 @@ const messages = {
     groups: {
       label: 'Roles & mailboxes',
       ungrouped: 'Ungrouped',
+      mailboxes: 'Mailboxes',
       manage: 'Manage roles',
       locked: 'No access',
       unread: '{name}: {count} unread',

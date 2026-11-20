@@ -110,6 +110,7 @@ const messages = {
     title: '收件',
     description: '你能阅读的所有邮箱的邮件，最新的在前。',
     subtitle: '{mailboxes} 个邮箱 · {roles} 个角色',
+    subtitleMailboxes: '{mailboxes} 个邮箱',
     showSidebar: '显示邮箱',
     readingPane: '阅读窗格',
     footer: {
@@ -122,12 +123,13 @@ const messages = {
       shortcuts: '快捷键',
     },
     reader: {
-      to: '发到 {address}',
-      toRole: '发到 {address} · {role}',
+      to: '收件邮箱 {address}',
+      toRole: '收件邮箱 {address} · {role}',
     },
     groups: {
       label: '角色与邮箱',
       ungrouped: '未分组',
+      mailboxes: '邮箱',
       manage: '管理角色',
       locked: '无访问权限',
       unread: '{name}：{count} 封未读',

@@ -350,10 +350,27 @@ type MailboxDomainResponse struct {
 	CustomDomainsEnabled bool `json:"custom_domains_enabled"`
 }
 
-// MailLogEntryResponse is one row of the cross-mailbox log.
+// MailLogEntryResponse is one row of the cross-mailbox log: the delivery fields of a summary with
+// the owning mailbox's address. The log's contract has no organize fields (placement, folders,
+// labels, stars, threads, trash), so they are left out rather than embedded with the summary.
 type MailLogEntryResponse struct {
-	MailMessageSummaryResponse
-	MailboxAddress string `json:"mailbox_address"`
+	ID              uint                `json:"id"`
+	MailboxID       uint                `json:"mailbox_id"`
+	MailboxAddress  string              `json:"mailbox_address"`
+	Direction       string              `json:"direction"`
+	Status          string              `json:"status"`
+	From            MailAddressResponse `json:"from"`
+	To              []string            `json:"to"`
+	Cc              []string            `json:"cc"`
+	Subject         string              `json:"subject"`
+	Read            bool                `json:"read"`
+	FailureCode     string              `json:"failure_code"`
+	QueuedReason    *string             `json:"queued_reason"`
+	LastEvent       string              `json:"last_event"`
+	TemplateID      *uint               `json:"template_id"`
+	AttachmentCount int                 `json:"attachment_count"`
+	Source          string              `json:"source"`
+	CreatedAt       time.Time           `json:"created_at"`
 }
 
 // MailDayStatsResponse counts one UTC day.
@@ -367,9 +384,25 @@ type MailDayStatsResponse struct {
 func toMailLogEntries(messages []*domain.MailMessage) []MailLogEntryResponse {
 	entries := make([]MailLogEntryResponse, 0, len(messages))
 	for _, message := range messages {
+		summary := toMailMessageSummary(message)
 		entries = append(entries, MailLogEntryResponse{
-			MailMessageSummaryResponse: toMailMessageSummary(message),
-			MailboxAddress:             message.MailboxAddress,
+			ID:              summary.ID,
+			MailboxID:       summary.MailboxID,
+			MailboxAddress:  message.MailboxAddress,
+			Direction:       summary.Direction,
+			Status:          summary.Status,
+			From:            summary.From,
+			To:              summary.To,
+			Cc:              summary.Cc,
+			Subject:         summary.Subject,
+			Read:            summary.Read,
+			FailureCode:     summary.FailureCode,
+			QueuedReason:    summary.QueuedReason,
+			LastEvent:       summary.LastEvent,
+			TemplateID:      summary.TemplateID,
+			AttachmentCount: summary.AttachmentCount,
+			Source:          summary.Source,
+			CreatedAt:       summary.CreatedAt,
 		})
 	}
 	return entries

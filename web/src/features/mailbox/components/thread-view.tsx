@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { AlertCircle, ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ChevronLeft, ChevronRight, Inbox } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -62,7 +62,12 @@ function ReaderSubject({ subject, layout }: { subject: string; layout: ReaderLay
   }
   return (
     <header>
-      {layout.kicker ? <p className="text-xs text-text-muted">{layout.kicker}</p> : null}
+      {layout.kicker ? (
+        <p className="inline-flex max-w-full items-center gap-1.5 rounded-[6px] bg-row-selected px-2 py-0.5 text-xs text-text-subtle">
+          <Inbox className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{layout.kicker}</span>
+        </p>
+      ) : null}
       <h2 className="mt-2 mb-[18px] font-serif text-[30px] leading-[1.25] font-semibold tracking-[-0.01em] break-words">
         {subject || t('list.noSubject')}
       </h2>

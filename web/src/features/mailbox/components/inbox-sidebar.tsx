@@ -125,6 +125,9 @@ export function InboxSidebar({
     unreadByRole,
     ungroupedUnread: counts?.ungrouped_unread ?? 0,
   });
+  // Without roles there is nothing to group: the mailboxes are listed themselves, as Gmail lists
+  // its labels, instead of behind a lone Ungrouped folder.
+  const flat = groups.length === 1;
   // Unfolded by default: the narrowed group, the group of the narrowed mailbox, and Ungrouped
   // when there is no role. A click on the narrowed group folds or unfolds it.
   const activeKey =
@@ -236,7 +239,7 @@ export function InboxSidebar({
       <nav aria-label={t('inbox.groups.label')} className="flex flex-col gap-0.5">
         <div className={cn('items-center gap-2 pt-[18px] pr-1 pb-1.5 pl-3', wide)}>
           <p className="min-w-0 flex-1 truncate text-[11px] tracking-[0.06em] text-text-faint">
-            {t('inbox.groups.label')}
+            {flat ? t('inbox.groups.mailboxes') : t('inbox.groups.label')}
           </p>
           {canManage ? (
             <Button
@@ -254,7 +257,24 @@ export function InboxSidebar({
           ) : null}
         </div>
         {rail ? <div className="h-4 xl:hidden" aria-hidden="true" /> : null}
-        {groups.map(group => {
+        {flat
+          ? mailboxes.map(mailbox =>
+              mailbox.access.view ? (
+                <MailboxRow
+                  key={mailbox.id}
+                  mailbox={mailbox}
+                  unread={unreadByMailbox.get(mailbox.id) ?? 0}
+                  selected={mailbox.id === box}
+                  flat
+                  rail={rail}
+                  onSelect={() => onBox(mailbox.id)}
+                />
+              ) : (
+                <LockedMailboxRow key={mailbox.id} mailbox={mailbox} flat className={wide} />
+              )
+            )
+          : null}
+        {(flat ? [] : groups).map(group => {
           const open = isOpen(group);
           const selected = role !== null && String(role) === group.key;
           return (
@@ -305,17 +325,7 @@ export function InboxSidebar({
                         onSelect={() => onBox(mailbox.id)}
                       />
                     ) : (
-                      <div
-                        key={mailbox.id}
-                        className={cn(
-                          'h-[30px] min-w-0 items-center gap-2.5 rounded-[8px] pr-3 pl-[29px] text-[12.5px] text-text-faint',
-                          wide
-                        )}
-                      >
-                        <span className="min-w-0 flex-1 truncate">{mailbox.address}</span>
-                        <Lock className="size-3.5 shrink-0" aria-hidden="true" />
-                        <span className="sr-only">{t('inbox.groups.locked')}</span>
-                      </div>
+                      <LockedMailboxRow key={mailbox.id} mailbox={mailbox} className={wide} />
                     )
                   )
                 : null}
@@ -387,16 +397,24 @@ function ZmailMark() {
   );
 }
 
+/**
+ * A mailbox of the sidebar: under its role, or, `flat`, at the top level when there are no roles.
+ * In the rail a flat mailbox is the first letter of its address, its address on hover.
+ */
 function MailboxRow({
   mailbox,
   unread,
   selected,
+  flat = false,
+  rail = false,
   className,
   onSelect,
 }: {
   mailbox: Mailbox;
   unread: number;
   selected: boolean;
+  flat?: boolean;
+  rail?: boolean;
   className?: string;
   onSelect: () => void;
 }) {
@@ -408,8 +426,11 @@ function MailboxRow({
         unread > 0 ? t('views.unread', { name: mailbox.address, count: unread }) : undefined
       }
       aria-current={selected ? 'page' : undefined}
+      title={rail ? mailbox.address : undefined}
       className={cn(
-        'h-[30px] w-full min-w-0 shrink-0 items-center gap-2.5 rounded-[8px] pr-3 pl-[29px] text-left text-[12.5px] transition-colors focus-ring motion-reduce:transition-none',
+        'flex h-[30px] w-full min-w-0 shrink-0 items-center gap-2.5 rounded-[8px] pr-3 text-left text-[12.5px] transition-colors focus-ring motion-reduce:transition-none',
+        flat ? 'pl-3' : 'pl-[29px]',
+        rail && 'justify-center px-0 xl:justify-start xl:px-3',
         selected
           ? 'bg-nav-selected font-semibold text-text-main'
           : 'text-text-subtle hover:bg-nav-hover',
@@ -417,15 +438,59 @@ function MailboxRow({
       )}
       onClick={onSelect}
     >
-      <span className="min-w-0 flex-1 truncate">{mailbox.address}</span>
+      {rail ? (
+        <span
+          aria-hidden="true"
+          className="flex size-5 shrink-0 items-center justify-center rounded-full bg-row-selected text-[11px] font-semibold text-text-muted uppercase xl:hidden"
+        >
+          {mailbox.address.charAt(0)}
+        </span>
+      ) : null}
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate',
+          rail && 'sr-only xl:not-sr-only xl:min-w-0 xl:flex-1 xl:truncate'
+        )}
+      >
+        {mailbox.address}
+      </span>
       {/* The source badge slot (slice ④), empty in this slice. */}
       <span data-slot="mailbox-source" className="empty:hidden" />
       {unread > 0 ? (
-        <span aria-hidden="true" className="shrink-0 text-xs text-text-faint tabular-nums">
+        <span
+          aria-hidden="true"
+          className={cn('shrink-0 text-xs text-text-faint tabular-nums', rail && 'hidden xl:inline')}
+        >
           {unread}
         </span>
       ) : null}
     </button>
+  );
+}
+
+/** A mailbox the caller administers but cannot read: its address and a lock, never chosen. */
+function LockedMailboxRow({
+  mailbox,
+  flat = false,
+  className,
+}: {
+  mailbox: Mailbox;
+  flat?: boolean;
+  className?: string;
+}) {
+  const t = useT('mailbox');
+  return (
+    <div
+      className={cn(
+        'h-[30px] min-w-0 items-center gap-2.5 rounded-[8px] pr-3 text-[12.5px] text-text-faint',
+        flat ? 'pl-3' : 'pl-[29px]',
+        className
+      )}
+    >
+      <span className="min-w-0 flex-1 truncate">{mailbox.address}</span>
+      <Lock className="size-3.5 shrink-0" aria-hidden="true" />
+      <span className="sr-only">{t('inbox.groups.locked')}</span>
+    </div>
   );
 }
 
