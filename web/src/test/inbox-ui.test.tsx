@@ -1478,6 +1478,35 @@ describe('inbox keyboard shortcuts', () => {
     expect(rowButton('Renewal')).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('closing the compose dialog keeps what was written as a draft, without asking', async () => {
+    renderRoute();
+
+    press('c');
+    const subject = await screen.findByLabelText('Subject');
+    fireEvent.change(subject, { target: { value: 'Quarterly numbers' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Draft body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(toast.success).toHaveBeenCalledWith('Saved as a draft');
+
+    // The next new message starts from the draft.
+    press('c');
+    expect(await screen.findByLabelText('Subject')).toHaveValue('Quarterly numbers');
+    expect(screen.getByLabelText('Message')).toHaveValue('Draft body');
+
+    // A dialog closed with nothing written keeps no draft and says nothing.
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: '' } });
+    toast.success.mockReset();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    expect(toast.success).not.toHaveBeenCalled();
+    press('c');
+    expect(await screen.findByLabelText('Subject')).toHaveValue('');
+  });
+
   it('c defaults the sender to the narrowed mailbox', async () => {
     window.localStorage.setItem('zmail.mailbox.1', '1');
     window.history.replaceState(null, '', '/console/mailboxes?box=2');
