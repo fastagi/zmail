@@ -143,6 +143,9 @@ type OrganizationRepository interface {
 	// equals one of emails ignoring case, with User (and its Email) loaded. Members of other
 	// organizations are never returned.
 	FindMembershipsByEmails(ctx context.Context, organizationID uint, emails []string) ([]*OrganizationMembership, error)
+	// ListMembershipsByUserIDs returns the organization's memberships of the given users, with User
+	// (and its Email) loaded. Users of other organizations are never returned.
+	ListMembershipsByUserIDs(ctx context.Context, organizationID uint, userIDs []uint) ([]*OrganizationMembership, error)
 }
 
 // OrganizationInvitationRepository owns invitation persistence and atomic acceptance.

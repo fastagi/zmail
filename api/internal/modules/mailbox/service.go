@@ -153,6 +153,8 @@ type Service interface {
 	RenameMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, displayName string) (*domain.Mailbox, error)
 	// ImportMailboxes checks or creates shared mailboxes row by row; only owners and admins may.
 	ImportMailboxes(ctx context.Context, viewer domain.OrganizationContext, rows []MailboxImportRow, dryRun bool) (*MailboxImportResult, error)
+	// ExportMailboxes reads every mailbox of one type with members' emails; only owners and admins may.
+	ExportMailboxes(ctx context.Context, viewer domain.OrganizationContext, mailboxType domain.MailboxType) ([]MailboxExportRow, error)
 	// ListMessages lists a mailbox's messages, or with filter.GroupThreads one row per thread, each
 	// row the newest message of its thread in the view with its Thread filled.
 	ListMessages(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
@@ -257,6 +259,8 @@ type Service interface {
 	Provider() string
 	InboundEnabled() bool
 	DailySendLimit() int
+	// Now is the service clock, which names export files.
+	Now() time.Time
 	DailyBroadcastLimit() int
 	DailyTransactionalLimit() int
 	// TransactionalPolicy reports the instance's transactional switch, rate limits, and simulator domain.
@@ -471,6 +475,9 @@ func (s *service) MaxMailboxes() int {
 	}
 	return config.DefaultMailboxMaxPerOrganization
 }
+
+// Now reads the service clock.
+func (s *service) Now() time.Time { return s.now() }
 
 func (s *service) DailySendLimit() int {
 	return s.settings.laneLimit(domain.SendLanePersonal)

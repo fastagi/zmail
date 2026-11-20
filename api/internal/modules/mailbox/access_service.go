@@ -15,6 +15,8 @@ type membershipDirectory interface {
 	// FindMembershipsByEmails returns the organization's memberships whose account email equals one
 	// of emails ignoring case, with User and its Email loaded.
 	FindMembershipsByEmails(ctx context.Context, organizationID uint, emails []string) ([]*domain.OrganizationMembership, error)
+	// ListMembershipsByUserIDs returns the organization's memberships of userIDs with account emails.
+	ListMembershipsByUserIDs(ctx context.Context, organizationID uint, userIDs []uint) ([]*domain.OrganizationMembership, error)
 }
 
 // CreateMailboxInput is a request to create a mailbox.

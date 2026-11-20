@@ -94,6 +94,20 @@ func (f *fakeMemberships) FindMembershipsByEmails(ctx context.Context, organizat
 	return found, nil
 }
 
+// ListMembershipsByUserIDs gives user n the email u<n>@people.test, unless n is absent.
+func (f *fakeMemberships) ListMembershipsByUserIDs(ctx context.Context, organizationID uint, userIDs []uint) ([]*domain.OrganizationMembership, error) {
+	found := make([]*domain.OrganizationMembership, 0, len(userIDs))
+	for _, userID := range userIDs {
+		membership, err := f.FindForUser(ctx, organizationID, userID)
+		if err != nil {
+			continue
+		}
+		membership.User = &domain.User{ID: userID, Email: fmt.Sprintf("u%d@people.test", userID)}
+		found = append(found, membership)
+	}
+	return found, nil
+}
+
 // fakeRepository is an in-memory domain.MailboxRepository for service tests.
 type fakeRepository struct {
 	mailboxes map[uint]*domain.Mailbox
@@ -354,6 +368,23 @@ func (r *fakeRepository) CountMailboxes(_ context.Context, organizationID uint) 
 		}
 	}
 	return count, nil
+}
+
+func (r *fakeRepository) ListMembersOfMailboxes(_ context.Context, mailboxIDs []uint) ([]*domain.MailboxMember, error) {
+	var members []*domain.MailboxMember
+	for _, member := range r.members {
+		if slices.Contains(mailboxIDs, member.MailboxID) {
+			copied := *member
+			members = append(members, &copied)
+		}
+	}
+	sort.Slice(members, func(i, j int) bool {
+		if members[i].MailboxID != members[j].MailboxID {
+			return members[i].MailboxID < members[j].MailboxID
+		}
+		return members[i].UserID < members[j].UserID
+	})
+	return members, nil
 }
 
 func (r *fakeRepository) MailboxAddressUsed(_ context.Context, address string) (bool, error) {

@@ -34,4 +34,6 @@ type MailboxDirectoryRepository interface {
 	CountMailboxes(ctx context.Context, organizationID uint) (int64, error)
 	// MailboxAddressUsed reports whether any mailbox, deleted ones included, holds the address.
 	MailboxAddressUsed(ctx context.Context, address string) (bool, error)
+	// ListMembersOfMailboxes lists the members of the given mailboxes.
+	ListMembersOfMailboxes(ctx context.Context, mailboxIDs []uint) ([]*MailboxMember, error)
 }

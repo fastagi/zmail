@@ -191,3 +191,7 @@ func TestServiceAccountDeletionGuardRequiresMembershipExit(t *testing.T) {
 func (r *fakeRepository) FindMembershipsByEmails(context.Context, uint, []string) ([]*domain.OrganizationMembership, error) {
 	return nil, nil
 }
+
+func (r *fakeRepository) ListMembershipsByUserIDs(context.Context, uint, []uint) ([]*domain.OrganizationMembership, error) {
+	return nil, nil
+}

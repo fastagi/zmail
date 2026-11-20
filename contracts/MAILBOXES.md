@@ -309,7 +309,8 @@ surface that carries member email addresses.
   with a UTF-8 byte order mark and uses CRLF line ends.
 - Header `address,display_name,members,member_count,sent_last_24h,created_at`, then one line per
   mailbox, newest first, at most 5000. `members` is `email:permission` joined by `;`, ordered by
-  email; `created_at` is RFC 3339 in UTC.
+  email; a personal mailbox lists its owner's email alone, and none once the owner left.
+  `created_at` is RFC 3339 in UTC.
 - A cell starting with `=`, `+`, `-`, or `@` gets a leading `'` so spreadsheets do not run it as a
   formula; importing the file removes it again.
 

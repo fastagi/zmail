@@ -258,3 +258,7 @@ func TestServiceAcceptInvitationHashesToken(t *testing.T) {
 func (r *invitationRepositoryStub) FindMembershipsByEmails(context.Context, uint, []string) ([]*domain.OrganizationMembership, error) {
 	return nil, nil
 }
+
+func (r *invitationRepositoryStub) ListMembershipsByUserIDs(context.Context, uint, []uint) ([]*domain.OrganizationMembership, error) {
+	return nil, nil
+}

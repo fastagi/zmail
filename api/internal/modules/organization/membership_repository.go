@@ -351,6 +351,38 @@ func (r *repository) FindMembershipsByEmails(ctx context.Context, organizationID
 	return found, nil
 }
 
+// ListMembershipsByUserIDs reads the organization's memberships of userIDs in chunks, with account
+// emails; only server-side mailbox exports use it.
+func (r *repository) ListMembershipsByUserIDs(ctx context.Context, organizationID uint, userIDs []uint) ([]*domain.OrganizationMembership, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[uint]struct{}, len(userIDs))
+	ids := make([]uint, 0, len(userIDs))
+	for _, id := range userIDs {
+		if _, duplicate := seen[id]; id == 0 || duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	found := make([]*domain.OrganizationMembership, 0, len(ids))
+	for start := 0; start < len(ids); start += membershipLookupChunk {
+		chunk := ids[start:min(start+membershipLookupChunk, len(ids))]
+		var rows []*OrganizationMembershipPO
+		if err := db.Model(&OrganizationMembershipPO{}).
+			Where("organization_id = ? AND user_id IN ?", organizationID, chunk).
+			Preload("User").
+			Order("user_id ASC").
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		found = append(found, withEmails(rows)...)
+	}
+	return found, nil
+}
+
 // withEmails converts memberships and keeps each user's account email, which toDomain leaves out.
 func withEmails(rows []*OrganizationMembershipPO) []*domain.OrganizationMembership {
 	memberships := make([]*domain.OrganizationMembership, 0, len(rows))

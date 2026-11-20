@@ -116,3 +116,26 @@ func (r *repository) MailboxAddressUsed(ctx context.Context, address string) (bo
 	}
 	return count > 0, nil
 }
+
+// mailboxMembersChunk bounds the ids of one members query.
+const mailboxMembersChunk = 1000
+
+// ListMembersOfMailboxes reads members in chunks of mailbox ids; at most
+// MailboxesPerOrganizationCeiling mailboxes of MaxMailboxMembers members each.
+func (r *repository) ListMembersOfMailboxes(ctx context.Context, mailboxIDs []uint) ([]*domain.MailboxMember, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	members := make([]*domain.MailboxMember, 0, len(mailboxIDs))
+	for start := 0; start < len(mailboxIDs); start += mailboxMembersChunk {
+		chunk := mailboxIDs[start:min(start+mailboxMembersChunk, len(mailboxIDs))]
+		var rows []MailboxMemberPO
+		if err := r.conn(ctx).Where("mailbox_id IN ?", chunk).Order("mailbox_id ASC, user_id ASC").Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		for i := range rows {
+			members = append(members, rows[i].toDomain())
+		}
+	}
+	return members, nil
+}
