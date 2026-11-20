@@ -414,12 +414,6 @@ export function InboxList({
                       {t('inbox.threadCount', { count })}
                     </span>
                   ) : null}
-                  {role ? (
-                    <span className="flex min-w-0 shrink items-center gap-1 rounded-full bg-row-selected px-[7px] text-[11px] text-text-muted group-aria-selected:bg-bg-surface">
-                      <LabelDot color={role.color} className="size-1.5" />
-                      <span className="truncate">{role.name}</span>
-                    </span>
-                  ) : null}
                   {item.source === 'gmail' || item.source === 'outlook' ? (
                     <span
                       data-source={item.source}
@@ -427,6 +421,12 @@ export function InboxList({
                       className="shrink-0 rounded-full border border-border px-[6px] text-[11px] text-text-muted"
                     >
                       {t(`inbox.source.${item.source}`)}
+                    </span>
+                  ) : null}
+                  {role ? (
+                    <span className="flex min-w-0 shrink items-center gap-1 rounded-full bg-row-selected px-[7px] text-[11px] text-text-muted group-aria-selected:bg-bg-surface">
+                      <LabelDot color={role.color} className="size-1.5" />
+                      <span className="truncate">{role.name}</span>
                     </span>
                   ) : null}
                   <span className="flex-1" />
