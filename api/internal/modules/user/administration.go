@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 )
@@ -72,11 +73,34 @@ func (s *service) RevokeUserSessions(ctx context.Context, id uint) error {
 	return s.admin.revokeUserSessions(ctx, id, time.Now())
 }
 
+// FindUserByEmail returns the live account whose email equals email ignoring case and surrounding
+// spaces, without its password hash. Emails are unique as stored, so two accounts may differ only
+// in case: the exact match wins, then the oldest account.
+func (s *service) FindUserByEmail(ctx context.Context, email string) (*domain.User, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return nil, domain.ErrUserNotFound
+	}
+	if s.admin == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	user, err := s.admin.findUserByEmailFold(ctx, email)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domain.ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	user.Password = ""
+	return user, nil
+}
+
 // userAdministrationStore is the persistence the administration seam needs beyond UserRepository.
 type userAdministrationStore interface {
 	listUsers(ctx context.Context, filter domain.UserListFilter, page, pageSize int) ([]*domain.User, int64, error)
 	setUserStatus(ctx context.Context, id uint, status int, now time.Time) error
 	revokeUserSessions(ctx context.Context, id uint, now time.Time) error
+	findUserByEmailFold(ctx context.Context, email string) (*domain.User, error)
 }
 
 func (r *repository) listUsers(
@@ -115,6 +139,21 @@ func (r *repository) listUsers(
 		users[index] = rows[index].toDomain()
 	}
 	return users, total, nil
+}
+
+func (r *repository) findUserByEmailFold(ctx context.Context, email string) (*domain.User, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var po UserPO
+	err = db.Where("LOWER(users.email) = LOWER(?)", email).
+		Order(clause.OrderBy{Expression: clause.Expr{SQL: "CASE WHEN users.email = ? THEN 0 ELSE 1 END, users.id", Vars: []any{email}}}).
+		Take(&po).Error
+	if err != nil {
+		return nil, err
+	}
+	return po.toDomain(), nil
 }
 
 func (r *repository) setUserStatus(ctx context.Context, id uint, status int, now time.Time) error {

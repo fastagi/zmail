@@ -47,6 +47,15 @@ func (f *fakeAdmin) GetUser(_ context.Context, id uint) (*domain.User, error) {
 	return nil, domain.ErrUserNotFound
 }
 
+func (f *fakeAdmin) FindUserByEmail(_ context.Context, email string) (*domain.User, error) {
+	for _, user := range f.users {
+		if strings.EqualFold(user.Email, email) {
+			return user, nil
+		}
+	}
+	return nil, domain.ErrUserNotFound
+}
+
 func (f *fakeAdmin) SetUserActive(_ context.Context, id uint, active bool) (*domain.User, error) {
 	f.statusWrites++
 	user := f.users[id]

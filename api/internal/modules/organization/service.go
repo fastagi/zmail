@@ -45,7 +45,9 @@ type service struct {
 	invitationPolicy InvitationPolicy
 	// events is nil when nothing listens, as in tests that do not need it.
 	events MembershipEventPublisher
-	now    func() time.Time
+	// administration serves operator tooling; nil when repo does not implement it.
+	administration administrationStore
+	now            func() time.Time
 }
 
 var (
@@ -64,7 +66,12 @@ func NewService(
 	if invitationPolicy.TTL <= 0 {
 		invitationPolicy = NewInvitationPolicy(nil)
 	}
+	var administration administrationStore
+	if seam, ok := repo.(administrationStore); ok {
+		administration = seam
+	}
 	return &service{
+		administration:   administration,
 		repo:             repo,
 		invitationRepo:   invitationRepo,
 		invitationMailer: invitationMailer,

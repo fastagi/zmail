@@ -41,10 +41,17 @@ type Application struct {
 	WebhookTester          domain.WebhookTester
 	WebhookMaintainer      domain.WebhookMaintainer
 	OperatorGrants         domain.OperatorGrantStore
+	// UserAdministration finds accounts for operator console commands.
+	UserAdministration domain.UserAdministrator
+	// OrganizationAdministration reads managers and grants admin for operator console commands.
+	OrganizationAdministration domain.OrganizationAdministrator
 	// MailBroadcasts sends broadcast recipients; nil when the mailbox starter is not selected.
 	MailBroadcasts domain.MailBroadcastDispatcher
 	// MailZones checks pending managed zones; nil when the mailbox starter is not selected.
 	MailZones domain.MailZoneChecker
+	// MailboxOperator imports mailboxes and summarizes an organization's mailboxes for operator
+	// console commands; nil when the mailbox starter is not selected.
+	MailboxOperator domain.MailboxOperatorConsole
 	// MailTriage classifies mail queued for AI triage; nil when the mailbox starter is not selected.
 	MailTriage domain.MailTriageWorker
 }

@@ -54,6 +54,9 @@ type UserListFilter struct {
 type UserAdministrator interface {
 	ListUsers(ctx context.Context, filter UserListFilter, page, pageSize int) ([]*User, int64, error)
 	GetUser(ctx context.Context, id uint) (*User, error)
+	// FindUserByEmail returns the live account whose email matches ignoring case, without its
+	// password hash, or ErrUserNotFound.
+	FindUserByEmail(ctx context.Context, email string) (*User, error)
 	SetUserActive(ctx context.Context, id uint, active bool) (*User, error)
 	RevokeUserSessions(ctx context.Context, id uint) error
 }
