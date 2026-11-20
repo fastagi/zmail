@@ -701,13 +701,23 @@ describe('mailbox workspace', () => {
       screen.getByText("Codes are hidden. Only this mailbox's members can see them; AI and admins can't.")
     ).toBeInTheDocument();
     expect(screen.getByText('Use code •••••• now')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Your code is ••••••' })).toBeInTheDocument();
     expect(screen.queryByText(/482913/)).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Show codes' }));
     await waitFor(() => expect(state.reveal.mutateAsync).toHaveBeenCalledWith(11));
     expect(await screen.findByText('Use code 482913 now')).toBeInTheDocument();
+    // The subject above the message shows the original too, not the masked copy.
+    expect(screen.getByRole('heading', { name: 'Your code is 482913' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Your code is ••••••' })).toBeNull();
     expect(screen.getByText('Codes shown')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show codes' })).toBeNull();
+
+    // Another message, then this one again: the reader starts masked.
+    fireEvent.click(rowButton('Old news'));
+    fireEvent.click(rowButton('Unread question'));
+    expect(screen.getByRole('heading', { name: 'Your code is ••••••' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show codes' })).toBeInTheDocument();
   });
 
   it('shows no code panel for a message with nothing masked', () => {

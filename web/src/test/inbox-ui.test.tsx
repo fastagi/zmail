@@ -1012,6 +1012,39 @@ describe('unified inbox', () => {
     expect(rowButton('Launch plan')).toHaveAttribute('aria-selected', 'false');
   });
 
+  it('revealing the newest message of a thread shows its original subject in the heading', async () => {
+    state.thread.data = [
+      message({ id: 29, thread_id: 30, subject: 'Your code is ••••••' }),
+      message({
+        id: 31,
+        thread_id: 30,
+        subject: 'Your code is ••••••',
+        secrets_masked: true,
+      }),
+    ];
+    const reveal = vi.spyOn(mailboxService, 'revealMessage').mockResolvedValue(
+      message({
+        id: 31,
+        thread_id: 30,
+        subject: 'Your code is 482913',
+        secrets_masked: false,
+      }) as never
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Your code is ••••••' })
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show codes' }));
+
+    expect(await screen.findByText('Codes shown')).toBeInTheDocument();
+    expect(reveal).toHaveBeenCalledWith(1, 2, 31);
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Your code is 482913' })
+    ).toBeInTheDocument();
+  });
+
   it('narrow layout shows a back button from the reading pane', async () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
     renderRoute();
