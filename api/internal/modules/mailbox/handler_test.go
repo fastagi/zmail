@@ -569,8 +569,11 @@ func TestInboxCountsRejectsOtherParameters(t *testing.T) {
 			t.Fatalf("%s = %q; want an RFC 3339 UTC time", field, value)
 		}
 	}
-	if len(data) != 6 {
-		t.Fatalf("data = %v; want exactly views, roles, ungrouped_unread, mailboxes, today_starts_at, today_ends_at", data)
+	if triage, present := data["triage"]; !present || triage != nil {
+		t.Fatalf("data = %v; want triage null while AI triage is off", data)
+	}
+	if len(data) != 7 {
+		t.Fatalf("data = %v; want exactly views, roles, ungrouped_unread, mailboxes, today_starts_at, today_ends_at, triage", data)
 	}
 
 	recorder, body = fixture.do(http.MethodGet, "/inbox-message-counts", "")

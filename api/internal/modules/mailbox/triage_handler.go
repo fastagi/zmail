@@ -1,6 +1,8 @@
 package mailbox
 
 import (
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -180,4 +182,28 @@ func (h *Handler) CreateReplyDraft(c *gin.Context) {
 	}
 	privateResponse(c)
 	response.Success(c, ReplyDraftResponse{Body: draft.Body, Basis: basis})
+}
+
+func toInboxTriageCountsResponse(counts *domain.MailTriageCounts) *InboxTriageCountsResponse {
+	if counts == nil {
+		return nil
+	}
+	return &InboxTriageCountsResponse{Reply: counts.Reply, Deadline: counts.Deadline, FYI: counts.FYI, Review: counts.Review}
+}
+
+// parseTriageCategories reads a comma-separated list of distinct categories.
+func parseTriageCategories(raw string) ([]domain.MailTriageCategory, bool) {
+	parts := strings.Split(raw, ",")
+	if len(parts) > len(domain.MailTriageCategories) {
+		return nil, false
+	}
+	categories := make([]domain.MailTriageCategory, 0, len(parts))
+	for _, part := range parts {
+		category := domain.MailTriageCategory(part)
+		if !category.Valid() || slices.Contains(categories, category) {
+			return nil, false
+		}
+		categories = append(categories, category)
+	}
+	return categories, true
 }

@@ -60,6 +60,9 @@ type InboxQuery struct {
 	DayStart, DayEnd time.Time
 	// After is the cursor of the previous page; nil for the newest page.
 	After *InboxCursor
+	// Triage keeps only messages with a visible AI triage result of one of these categories;
+	// empty applies no triage filter. Only the all and today views take it.
+	Triage []MailTriageCategory
 	// Limit is how many rows to return at most: the page size plus one, to tell whether more follow.
 	Limit int
 }

@@ -322,3 +322,30 @@ func (s *service) DraftReply(ctx context.Context, viewer domain.OrganizationCont
 	)
 	return draft, nil
 }
+
+// triageOn reports whether the organization's readers see AI triage: a model is configured and
+// the organization switch is on.
+func (s *service) triageOn(ctx context.Context, organizationID uint) (bool, error) {
+	if !s.triageAvailable() {
+		return false, nil
+	}
+	settings, err := s.triage.FindTriageSettings(ctx, organizationID)
+	if err != nil {
+		return false, err
+	}
+	return settings.Enabled, nil
+}
+
+// triageCounts counts the viewer's unread Inbox mail of the readable mailboxes per category; nil
+// when the organization's readers see no AI triage.
+func (s *service) triageCounts(ctx context.Context, viewer domain.OrganizationContext, mailboxIDs []uint) (*domain.MailTriageCounts, error) {
+	on, err := s.triageOn(ctx, viewer.OrganizationID)
+	if err != nil || !on {
+		return nil, err
+	}
+	counts, err := s.triage.CountTriage(ctx, viewer.MembershipID, mailboxIDs)
+	if err != nil {
+		return nil, err
+	}
+	return &counts, nil
+}
