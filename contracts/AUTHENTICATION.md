@@ -15,7 +15,8 @@ The Web feature service and development mock BFF use a browser-oriented, same-or
 | Operation | Browser endpoint | Request | Successful `data` |
 |---|---|---|---|
 | Login | `POST /api/auth/login` | `{ email, password }` | `{ user: { id, email, name } }` |
-| Register | `POST /api/auth/register` | `{ name, email, password }` | `{ user: { id, email, name } }` |
+| Request a registration code | `POST /api/auth/register/email-code` | `{ email }` | `{ success: true }`, whether or not the address has an account |
+| Register | `POST /api/auth/register` | `{ name, email, password, code }` (`code`: 6 digits) | `{ user: { id, email, name } }` |
 | Current session | `GET /api/auth/me` | none | `{ user: { id, email, name } }` |
 | Logout | `POST /api/auth/logout` | none | `{ success: true }` |
 | Request a password reset | `POST /api/auth/password-reset` | `{ email }` | `{ success: true }`, whether or not the address has an account |
@@ -38,7 +39,8 @@ The Go `user` starter exposes server-side authentication-session endpoints under
 |---|---|---|---|
 | Login | `POST /v1/login` | `{ username, password }` | `{ access_token, token_type: "Bearer", expires_in, user }` |
 | Logout | `POST /v1/logout` | Bearer session token | `{ success: true }` |
-| Register | `POST /v1/register` | `{ username, password, email, nickname?, phone? }` | API user |
+| Request a registration code | `POST /v1/register/email-codes` | `{ email }` | `202` generic message |
+| Register | `POST /v1/register` | `{ username, password, email, nickname?, phone?, email_code? }` | API user |
 | Request password reset | `POST /v1/password/reset` | `{ email }` | Generic message |
 | Confirm password reset | `POST /v1/password/reset/confirm` | `{ token, new_password }` | Generic message |
 | Profile | `GET /v1/users/profile` | Bearer token | API user |
@@ -108,10 +110,46 @@ legacy username equals it, so one account cannot capture another account's email
   background task, so neither the body nor the response time depends on whether the account
   exists. Failures are logged internally. A delivery in flight when the process stops is lost;
   the user requests another reset.
-- Registration currently preserves `USER.USERNAME_ALREADY_EXISTS` and
-  `USER.EMAIL_ALREADY_EXISTS` for starter UX. This is a deliberate usability tradeoff: products
-  with a stricter identity-enumeration threat model should replace those conflicts with one generic
-  response or add an out-of-band registration flow.
+- Registration preserves `USER.USERNAME_ALREADY_EXISTS` and `USER.EMAIL_ALREADY_EXISTS` for
+  starter UX. When email codes are required (the default) the code is checked first, and no code is
+  ever mailed to an address that has an account, so `USER.EMAIL_ALREADY_EXISTS` is unreachable
+  without a code and registration does not reveal which addresses have accounts. With codes turned
+  off, both conflicts are visible to anyone; products with a stricter threat model keep codes on.
+
+### Registration Email Codes
+
+Registration proves that the person reads the email address. `POST /v1/register/email-codes`
+mails a 6-digit code; `POST /v1/register` takes it as `email_code`.
+
+- The code request always answers `202` with one generic message on an open instance. The account
+  lookup, the code issue, and the mail run after the response on a bounded background task, like
+  password reset, so neither the body nor the timing depends on the address.
+- An address that already has an account is mailed **nothing**: no code and no "you already have an
+  account" notice. Such a person signs in or resets their password instead. This is the
+  enumeration-safe choice that also cannot be used to mail existing users repeatedly.
+- A code is random, valid for 10 minutes, and bound to the address: the API stores only
+  `SHA-256(lower(email) + NUL + code)`, never the code, and never logs it or puts it in a URL. A new
+  code replaces every earlier one for the address.
+- Per address, the database refuses a new code within 60 seconds of the previous one and after 5
+  codes in a rolling hour. A refused request still answers the same `202` and mails nothing.
+  Production also applies the `AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_*` per-IP and per-address quotas
+  (defaults 10 and 5 per hour), which answer `429 COMMON.RATE_LIMITED`.
+- `POST /v1/register` checks the newest code of the address in the same database transaction that
+  checks the username and email and inserts the account, and consumes the code there. Any failure,
+  including a conflict, rolls back and leaves the code usable. Failures, all `400`:
+
+  | `error_code` | When |
+  |---|---|
+  | `AUTH.REGISTRATION_EMAIL_CODE_REQUIRED` | No `email_code` was sent. |
+  | `AUTH.REGISTRATION_EMAIL_CODE_INVALID` | No code was issued, it was replaced or used, or it is wrong. A wrong code counts one attempt. |
+  | `AUTH.REGISTRATION_EMAIL_CODE_EXPIRED` | The code is older than 10 minutes or 5 wrong attempts spent it. The user asks for a new code. |
+
+- `AUTH_REGISTRATION_EMAIL_CODE_REQUIRED` (default `true`) is read at startup. With it `false`,
+  `email_code` is ignored and registration works as before. Codes need a configured system mailer;
+  an open instance that requires codes without one logs `user.registration_email_code_mailer_missing`
+  at startup and nobody can register.
+- The API user carries no email-verified flag: with codes required, every self-registered account
+  proved its address.
 
 ### Closing Registration
 
@@ -189,7 +227,8 @@ and documentation must use the `API_*` names because the adapter now serves more
 | Browser operation | Adapter behavior |
 |---|---|
 | Login | Sends `{ username: email, password }` to `POST /v1/login`, validates the envelope/opaque credential/user, then sets the API session cookie. |
-| Register | Sends a non-identifying generated username plus `{ email, nickname: name, password }` to `POST /v1/register`, then logs in by email and sets the cookie. |
+| Request a registration code | Sends `{ email }` to `POST /v1/register/email-codes` and answers `{ success: true }`. |
+| Register | Sends a non-identifying generated username plus `{ email, nickname: name, password, email_code: code }` to `POST /v1/register`, then logs in by email and sets the cookie. |
 | Current session | Reads the server-only opaque session cookie, sends `Authorization: Bearer ...` to `GET /v1/users/profile`, and maps the API user to `{ id, email, name }`. |
 | Logout | Sends the opaque credential to `POST /v1/logout`, then expires the exact-scope cookie. An upstream `401` is idempotent success because the server session is already absent; an availability failure is reported while local credential custody is still removed. |
 
@@ -211,7 +250,7 @@ issuance should add that capability to the API contract instead of hiding compen
 - The Web adapter validates only the bounded opaque credential shape and positive `expires_in`
   value before accepting login success. It does not decode identity or authorization claims from
   the credential; the Go API resolves current session and account state from persistence.
-- Login, registration, and logout require exact same-origin browser mutations. The adapter forwards
+- Login, registration, registration codes, and logout require exact same-origin browser mutations. The adapter forwards
   no incoming cookies, authorization headers, or arbitrary paths to Go. The allowed browser origin
   comes from validated `NEXT_PUBLIC_APP_URL`, not a proxy-normalized internal request URL.
 - `API_CLIENT_IP_HEADER` names the ingress-owned header from which one validated IP is forwarded as

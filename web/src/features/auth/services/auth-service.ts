@@ -52,6 +52,14 @@ export const authService = {
       'logout'
     ),
 
+  /** Mails a registration code when the address can register; the answer is the same either way. */
+  requestRegistrationCode: (email: string) =>
+    validateResponse<LogoutResponse>(
+      request.post<unknown, { email: string }>('/auth/register/email-code', { email }),
+      isLogoutResponse,
+      'registration-code'
+    ),
+
   /** Emails a reset token when the address has an account; the answer is the same either way. */
   requestPasswordReset: (email: string) =>
     validateResponse<LogoutResponse>(

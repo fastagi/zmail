@@ -45,6 +45,17 @@ const messages = {
   resetTokenInvalid: 'This code is wrong, expired, or already used. Request a new one.',
   resetRequestFailed: 'The reset code could not be sent. Try again in a moment.',
   resetConfirmFailed: 'The password could not be changed. Try again in a moment.',
+  verificationCode: 'Verification code',
+  enterVerificationCode: 'Enter the 6-digit code',
+  sendCode: 'Send code',
+  resendCode: 'Resend code',
+  resendCodeIn: 'Resend in {seconds}s',
+  registrationCodeSent:
+    'If {email} can be registered, a 6-digit code is on its way. It expires in 10 minutes.',
+  registrationCodeRequestFailed: 'The code could not be sent. Try again in a moment.',
+  registrationCodeRequired: 'Enter the code we emailed you.',
+  registrationCodeInvalid: 'This code is wrong or already used.',
+  registrationCodeExpired: 'This code has expired. Send a new one.',
   demoCredentials: 'Demo credentials',
   demoCredentialsHint: 'Use the preset login',
 

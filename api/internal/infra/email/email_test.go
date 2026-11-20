@@ -344,3 +344,37 @@ func TestServiceReportsACloudflareRefusal(t *testing.T) {
 		t.Fatal("a refused send reported success")
 	}
 }
+
+func TestServiceRegistrationCodeEmailCarriesTheCode(t *testing.T) {
+	payloads := make(chan resendSendRequest, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload resendSendRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		payloads <- payload
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"email_123"}`)
+	}))
+	t.Cleanup(server.Close)
+
+	service := configuredEmailService(server.Client(), server.URL, time.Second)
+	if err := service.SendRegistrationCodeEmail(context.Background(), "new@example.com", "042917"); err != nil {
+		t.Fatalf("SendRegistrationCodeEmail() error = %v", err)
+	}
+
+	payload := <-payloads
+	if strings.Contains(payload.Subject, "042917") {
+		t.Fatalf("the subject must not carry the code: %q", payload.Subject)
+	}
+	if !strings.Contains(payload.HTML, "042917") {
+		t.Fatalf("registration HTML does not contain the code: %s", payload.HTML)
+	}
+	if !strings.Contains(payload.HTML, "10 minutes") {
+		t.Fatalf("registration HTML must state the lifetime: %s", payload.HTML)
+	}
+	if payload.To[0] != "new@example.com" {
+		t.Fatalf("recipient = %v", payload.To)
+	}
+}

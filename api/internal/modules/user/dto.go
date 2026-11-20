@@ -16,6 +16,14 @@ type UserRegisterRequest struct {
 	Email    string `json:"email" binding:"required,email"`
 	Nickname string `json:"nickname" binding:"max=50"`
 	Phone    string `json:"phone" binding:"max=20"`
+	// EmailCode is the 6-digit code mailed by POST /v1/register/email-codes. It is required when
+	// AUTH_REGISTRATION_EMAIL_CODE_REQUIRED is true and ignored otherwise.
+	EmailCode string `json:"email_code" binding:"omitempty,len=6,numeric"`
+}
+
+// RegistrationEmailCodeRequest asks for a registration code for one address.
+type RegistrationEmailCodeRequest struct {
+	Email string `json:"email" binding:"required,email,max=100"`
 }
 
 // UserLoginRequest represents the login request

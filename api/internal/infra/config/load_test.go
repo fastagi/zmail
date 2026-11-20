@@ -395,6 +395,10 @@ func authRateLimitEnvKeys() []string {
 		"AUTH_RATE_LIMIT_PASSWORD_RESET_CONFIRM_IP_WINDOW",
 		"AUTH_RATE_LIMIT_PASSWORD_RESET_CONFIRM_SUBJECT_MAX",
 		"AUTH_RATE_LIMIT_PASSWORD_RESET_CONFIRM_SUBJECT_WINDOW",
+		"AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_IP_MAX",
+		"AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_IP_WINDOW",
+		"AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_SUBJECT_MAX",
+		"AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_SUBJECT_WINDOW",
 	}
 }
 
@@ -430,6 +434,12 @@ func TestLoad_AuthenticationRateLimitDefaultsByEnvironment(t *testing.T) {
 	}
 	if got.PasswordReset.PerSubject.Max != 3 || got.PasswordReset.PerSubject.Window != time.Hour {
 		t.Fatalf("password reset per-subject default = %#v, want 3/1h", got.PasswordReset.PerSubject)
+	}
+	if got.RegisterEmailCode.PerIP.Max != 10 || got.RegisterEmailCode.PerIP.Window != time.Hour {
+		t.Fatalf("registration code per-IP default = %#v, want 10/1h", got.RegisterEmailCode.PerIP)
+	}
+	if got.RegisterEmailCode.PerSubject.Max != 5 || got.RegisterEmailCode.PerSubject.Window != time.Hour {
+		t.Fatalf("registration code per-subject default = %#v, want 5/1h", got.RegisterEmailCode.PerSubject)
 	}
 
 	dev := loadConfigForAuthRateLimitDefault(t, "development")
@@ -772,6 +782,29 @@ func TestLoad_RegistrationIsOpenUnlessDisabled(t *testing.T) {
 	}
 	if !cfg.Authentication.RegistrationDisabled {
 		t.Fatal("AUTH_REGISTRATION_ENABLED=false should close registration")
+	}
+}
+
+func TestLoad_RegistrationRequiresAnEmailCodeUnlessTurnedOff(t *testing.T) {
+	withoutEnv(t, "AUTH_REGISTRATION_EMAIL_CODE_REQUIRED")
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("DB_ENABLED", "false")
+
+	cfg, err := LoadFresh()
+	if err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	if !cfg.Authentication.RegistrationEmailCodeRequired {
+		t.Fatal("registration should require an email code by default")
+	}
+
+	t.Setenv("AUTH_REGISTRATION_EMAIL_CODE_REQUIRED", "false")
+	cfg, err = LoadFresh()
+	if err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	if cfg.Authentication.RegistrationEmailCodeRequired {
+		t.Fatal("AUTH_REGISTRATION_EMAIL_CODE_REQUIRED=false should drop the code requirement")
 	}
 }
 

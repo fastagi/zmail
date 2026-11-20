@@ -305,6 +305,21 @@ func (s *Service) SendPasswordResetEmail(ctx context.Context, to, resetToken str
 	return s.SendEmail(ctx, []string{to}, subject, htmlContent)
 }
 
+// SendRegistrationCodeEmail sends the 6-digit code that proves the reader owns the address. The code
+// stays out of the subject, which mail clients show in notifications and previews.
+func (s *Service) SendRegistrationCodeEmail(ctx context.Context, to, code string) error {
+	subject := "Your Zmail verification code"
+	htmlContent := fmt.Sprintf(`
+		<h2>Confirm your email address</h2>
+		<p>Enter this code to finish creating your Zmail account:</p>
+		<p style="font-size: 24px; font-weight: bold; letter-spacing: 4px; color: #333;">%s</p>
+		<p>The code expires in 10 minutes and can be used once.</p>
+		<p>If you did not try to create an account, you can ignore this email.</p>
+	`, html.EscapeString(code))
+
+	return s.SendEmail(ctx, []string{to}, subject, htmlContent)
+}
+
 // SendWelcomeEmail sends a welcome email.
 func (s *Service) SendWelcomeEmail(ctx context.Context, to, username string) error {
 	subject := "Welcome to FastBuild"

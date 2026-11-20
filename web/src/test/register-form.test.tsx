@@ -1,0 +1,134 @@
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { RegisterForm } from '@/features/auth/components/register-form';
+import { ApiErrorCode } from '@/http/codes';
+import { ApiError } from '@/http/request';
+import { messages } from '@/i18n/modules';
+
+const mutation = vi.hoisted(() => ({
+  error: null as unknown,
+  isPending: false,
+  mutate: vi.fn(),
+  reset: vi.fn(),
+}));
+const service = vi.hoisted(() => ({ requestRegistrationCode: vi.fn() }));
+
+vi.mock('@/features/auth/hooks/use-auth', () => ({ useRegister: () => mutation }));
+vi.mock('@/features/auth/services/auth-service', () => ({ authService: service }));
+
+function renderForm() {
+  return render(
+    <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
+      <RegisterForm />
+    </NextIntlClientProvider>
+  );
+}
+
+async function sendCode(email = 'ann@example.com') {
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: ` ${email} ` } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send code' }));
+  await screen.findByLabelText('Verification code');
+}
+
+describe('two-step registration form', () => {
+  beforeEach(() => {
+    mutation.error = null;
+    mutation.isPending = false;
+    mutation.mutate.mockReset();
+    mutation.reset.mockReset();
+    service.requestRegistrationCode.mockReset();
+    service.requestRegistrationCode.mockResolvedValue({ success: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('asks for the email first and reveals the rest once a code is sent', async () => {
+    renderForm();
+
+    expect(screen.queryByLabelText('Verification code')).toBeNull();
+    expect(screen.queryByLabelText('Full Name')).toBeNull();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+
+    await sendCode();
+
+    expect(service.requestRegistrationCode).toHaveBeenCalledWith('ann@example.com');
+    expect(screen.getByText(/If ann@example.com can be registered/u)).toBeInTheDocument();
+    expect(screen.getByLabelText('Verification code')).toHaveAttribute('autocomplete', 'one-time-code');
+    expect(screen.getByLabelText('Full Name')).toBeInTheDocument();
+    expect(screen.getByLabelText('Password')).toBeInTheDocument();
+  });
+
+  it('registers with the code, name, email, and password', async () => {
+    renderForm();
+    await sendCode();
+
+    fireEvent.change(screen.getByLabelText('Verification code'), { target: { value: '04 29 17' } });
+    fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'Ann' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret-123' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign Up' }));
+
+    expect(mutation.mutate).toHaveBeenCalledWith({
+      name: 'Ann',
+      email: 'ann@example.com',
+      password: 'secret-123',
+      code: '042917',
+    });
+  });
+
+  it('counts down 60 seconds before the code can be sent again', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderForm();
+    await sendCode();
+
+    const resend = screen.getByRole('button', { name: 'Resend in 60s' });
+    expect(resend).toBeDisabled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(screen.getByRole('button', { name: 'Resend in 30s' })).toBeDisabled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    const again = screen.getByRole('button', { name: 'Resend code' });
+    expect(again).toBeEnabled();
+    fireEvent.click(again);
+    await waitFor(() => expect(service.requestRegistrationCode).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows a localized failure when the code cannot be sent', async () => {
+    service.requestRegistrationCode.mockRejectedValueOnce(
+      new ApiError('raw', ApiErrorCode.COMMON_SERVICE_UNAVAILABLE, 503)
+    );
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ann@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send code' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The code could not be sent');
+    expect(screen.queryByLabelText('Verification code')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
+  });
+
+  it.each([
+    [ApiErrorCode.AUTH_REGISTRATION_EMAIL_CODE_INVALID, 'This code is wrong or already used.'],
+    [ApiErrorCode.AUTH_REGISTRATION_EMAIL_CODE_EXPIRED, 'This code has expired. Send a new one.'],
+    [ApiErrorCode.AUTH_REGISTRATION_EMAIL_CODE_REQUIRED, 'Enter the code we emailed you.'],
+  ])('marks the code field for %s', async (errorCode, copy) => {
+    renderForm();
+    await sendCode();
+
+    mutation.error = new ApiError('raw backend detail', errorCode, 400);
+    fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'Ann' } });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(copy);
+    expect(screen.getByLabelText('Verification code')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByText('raw backend detail')).toBeNull();
+  });
+});

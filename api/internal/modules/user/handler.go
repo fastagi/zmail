@@ -103,6 +103,25 @@ func (h *Handler) Register(c *gin.Context) {
 	response.Created(c, user)
 }
 
+// RequestRegistrationEmailCode mails a registration code. The answer is the same whether or not
+// the address already has an account.
+func (h *Handler) RequestRegistrationEmailCode(c *gin.Context) {
+	var req RegistrationEmailCodeRequest
+	if !handler.BindJSON(c, &req) {
+		return
+	}
+	if !h.authGuard.allowSubject(c, authEndpointRegisterEmailCode, req.Email) {
+		return
+	}
+
+	if err := h.auth.RequestRegistrationEmailCode(c.Request.Context(), &req); err != nil {
+		response.HandleError(c, "Failed to send a registration code", err)
+		return
+	}
+
+	response.Accepted(c, gin.H{"message": "If the address can be registered, a verification code has been sent"})
+}
+
 // Login handles user login
 func (h *Handler) Login(c *gin.Context) {
 	var req UserLoginRequest

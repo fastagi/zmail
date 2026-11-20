@@ -140,7 +140,7 @@ fi
 
 bootstrap="zmail-create-user-$$"
 compose run --detach --rm --no-deps --name "$bootstrap" --label "$bootstrap_label" \
-	--env AUTH_REGISTRATION_ENABLED=true api >/dev/null ||
+	--env AUTH_REGISTRATION_ENABLED=true --env AUTH_REGISTRATION_EMAIL_CODE_REQUIRED=false api >/dev/null ||
 	die "could not start the account-creation API process"
 
 ready=0

@@ -16,6 +16,7 @@ const registerSchema = z.object({
   name: z.string().trim().min(2).max(50),
   email: z.string().email().max(100),
   password: z.string().min(8).max(50),
+  code: z.string().regex(/^\d{6}$/),
 });
 
 export const runtime = 'nodejs';

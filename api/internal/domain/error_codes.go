@@ -30,6 +30,10 @@ const (
 	CodePasswordResetTokenInvalid = "AUTH.PASSWORD_RESET_TOKEN_INVALID"
 	CodePasswordResetTokenExpired = "AUTH.PASSWORD_RESET_TOKEN_EXPIRED"
 
+	CodeRegistrationEmailCodeRequired = "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED"
+	CodeRegistrationEmailCodeInvalid  = "AUTH.REGISTRATION_EMAIL_CODE_INVALID"
+	CodeRegistrationEmailCodeExpired  = "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED"
+
 	CodePermissionDenied            = "PERMISSION.DENIED"
 	CodePermissionUnknown           = "PERMISSION.UNKNOWN"
 	CodeAccessRoleNotFound          = "PERMISSION.ROLE_NOT_FOUND"

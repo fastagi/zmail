@@ -245,6 +245,7 @@ type AuthenticationRateLimitConfig struct {
 	Register             AuthenticationEndpointRateLimitConfig
 	PasswordReset        AuthenticationEndpointRateLimitConfig
 	PasswordResetConfirm AuthenticationEndpointRateLimitConfig
+	RegisterEmailCode    AuthenticationEndpointRateLimitConfig
 }
 
 // MetricsConfig controls HTTP request instrumentation and the Prometheus endpoint.
@@ -376,6 +377,9 @@ type AuthenticationConfig struct {
 	// RegistrationDisabled closes public self-registration (POST /v1/register). It is set by
 	// AUTH_REGISTRATION_ENABLED=false; the zero value keeps registration open.
 	RegistrationDisabled bool
+	// RegistrationEmailCodeRequired makes POST /v1/register demand a code mailed by
+	// POST /v1/register/email-codes. AUTH_REGISTRATION_EMAIL_CODE_REQUIRED defaults to true.
+	RegistrationEmailCodeRequired bool
 }
 
 type LogConfig struct {
@@ -677,11 +681,12 @@ func Load() (*Config, error) {
 			Enabled: env.GetBool("SCHEDULER_ENABLED", false),
 		},
 		Authentication: AuthenticationConfig{
-			SessionTTL:           env.GetDuration("AUTH_SESSION_TTL", DefaultAuthenticationSessionTTL),
-			SessionIdleTimeout:   env.GetDuration("AUTH_SESSION_IDLE_TIMEOUT", DefaultAuthenticationSessionIdleTimeout),
-			SessionTouchInterval: env.GetDuration("AUTH_SESSION_TOUCH_INTERVAL", DefaultAuthenticationSessionTouchInterval),
-			SessionRetention:     env.GetDuration("AUTH_SESSION_RETENTION", DefaultAuthenticationSessionRetention),
-			RegistrationDisabled: !env.GetBool("AUTH_REGISTRATION_ENABLED", true),
+			SessionTTL:                    env.GetDuration("AUTH_SESSION_TTL", DefaultAuthenticationSessionTTL),
+			SessionIdleTimeout:            env.GetDuration("AUTH_SESSION_IDLE_TIMEOUT", DefaultAuthenticationSessionIdleTimeout),
+			SessionTouchInterval:          env.GetDuration("AUTH_SESSION_TOUCH_INTERVAL", DefaultAuthenticationSessionTouchInterval),
+			SessionRetention:              env.GetDuration("AUTH_SESSION_RETENTION", DefaultAuthenticationSessionRetention),
+			RegistrationDisabled:          !env.GetBool("AUTH_REGISTRATION_ENABLED", true),
+			RegistrationEmailCodeRequired: env.GetBool("AUTH_REGISTRATION_EMAIL_CODE_REQUIRED", true),
 		},
 		Log: LogConfig{
 			Level:       env.Get("LOG_LEVEL", defaultLogLevel(isProd)),
@@ -837,6 +842,16 @@ func Load() (*Config, error) {
 					PerSubject: RateLimitRuleConfig{
 						Max:    env.GetInt("AUTH_RATE_LIMIT_PASSWORD_RESET_CONFIRM_SUBJECT_MAX", 5),
 						Window: env.GetDuration("AUTH_RATE_LIMIT_PASSWORD_RESET_CONFIRM_SUBJECT_WINDOW", 15*time.Minute),
+					},
+				},
+				RegisterEmailCode: AuthenticationEndpointRateLimitConfig{
+					PerIP: RateLimitRuleConfig{
+						Max:    env.GetInt("AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_IP_MAX", 10),
+						Window: env.GetDuration("AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_IP_WINDOW", time.Hour),
+					},
+					PerSubject: RateLimitRuleConfig{
+						Max:    env.GetInt("AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_SUBJECT_MAX", 5),
+						Window: env.GetDuration("AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE_SUBJECT_WINDOW", time.Hour),
 					},
 				},
 			},
@@ -1143,6 +1158,7 @@ func validate(cfg *Config) error {
 			{prefix: "AUTH_RATE_LIMIT_REGISTER", config: cfg.Middleware.AuthenticationRateLimit.Register},
 			{prefix: "AUTH_RATE_LIMIT_PASSWORD_RESET", config: cfg.Middleware.AuthenticationRateLimit.PasswordReset},
 			{prefix: "AUTH_RATE_LIMIT_PASSWORD_RESET_CONFIRM", config: cfg.Middleware.AuthenticationRateLimit.PasswordResetConfirm},
+			{prefix: "AUTH_RATE_LIMIT_REGISTER_EMAIL_CODE", config: cfg.Middleware.AuthenticationRateLimit.RegisterEmailCode},
 		}
 		for _, endpoint := range endpoints {
 			if err := validateRateLimitRule(endpoint.prefix+"_IP", endpoint.config.PerIP, true); err != nil {
