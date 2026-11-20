@@ -59,6 +59,7 @@ export type MailboxErrorKey =
   | 'errors.templateNotFound'
   | 'errors.templateVariablesMissing'
   | 'errors.tooLarge'
+  | 'errors.triageUnavailable'
   | 'errors.unavailable'
   | 'errors.folderNotFound'
   | 'errors.labelNotFound'
@@ -151,6 +152,7 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_DNS_RECORD_INVALID]: 'errors.dnsRecordInvalid',
   [ApiErrorCode.MAILBOX_DNS_RECORD_LOCKED]: 'errors.dnsRecordLocked',
   [ApiErrorCode.MAILBOX_DNS_RECORD_REJECTED]: 'errors.dnsRecordRejected',
+  [ApiErrorCode.MAILBOX_TRIAGE_UNAVAILABLE]: 'errors.triageUnavailable',
 };
 
 /**
