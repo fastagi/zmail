@@ -302,6 +302,18 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const sortKey = 'zmail.mailbox-sort';
+  const [sort, setSort] = useState('default');
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(sortKey);
+      if (saved === 'address' || saved === 'unread') setSort(saved);
+    } catch { /* Storage may be unavailable in private browsing. */ }
+  }, []);
+  const changeSort = (value: string) => {
+    setSort(value);
+    try { window.localStorage.setItem(sortKey, value); } catch { /* Keep the session preference. */ }
+  };
   const mailboxes = useMailboxes(organizationId, { live: true });
   const roles = useMailRoles(organizationId);
   const { zone: inboxZone, ready: zoneReady } = useInboxTimezone();
@@ -671,6 +683,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   }
 
   const sidebarProps = {
+    sort,
+    onSort: changeSort,
     counts: counts.data,
     mailboxes: mailboxes.data,
     roles: roles.data,

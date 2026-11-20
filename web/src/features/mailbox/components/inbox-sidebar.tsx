@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { CalendarDays, Inbox, Lock, PenLine, Send, Settings2, Star } from 'lucide-react';
+import { ArrowDownWideNarrow, CalendarDays, Inbox, Lock, PenLine, Send, Settings2, Star } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -65,6 +65,8 @@ interface SidebarGroup {
  */
 export function InboxSidebar({
   organization,
+  sort,
+  onSort,
   counts,
   mailboxes,
   roles,
@@ -82,6 +84,8 @@ export function InboxSidebar({
 }: {
   /** The organization's name, or its picker. */
   organization: ReactNode;
+  sort: string;
+  onSort: (value: string) => void;
   counts: InboxCounts | undefined;
   /** Every mailbox the caller has any access to. */
   mailboxes: readonly Mailbox[];
@@ -120,7 +124,14 @@ export function InboxSidebar({
   const wide = rail ? 'hidden lg:flex' : 'flex';
   const railIcon = rail ? 'size-4 shrink-0 lg:hidden' : 'hidden';
 
-  const groups = sidebarGroups(mailboxes, roles ?? [], canManage, {
+  const ordered = sort === 'default' ? mailboxes : [...mailboxes].sort((a, b) => {
+    if (sort === 'unread') {
+      const difference = (unreadByMailbox.get(b.id) ?? 0) - (unreadByMailbox.get(a.id) ?? 0);
+      if (difference) return difference;
+    }
+    return a.address.localeCompare(b.address);
+  });
+  const groups = sidebarGroups(ordered, roles ?? [], canManage, {
     ungroupedName: t('inbox.groups.ungrouped'),
     unreadByRole,
     ungroupedUnread: counts?.ungrouped_unread ?? 0,
@@ -241,6 +252,19 @@ export function InboxSidebar({
           <p className="min-w-0 flex-1 truncate text-[11px] tracking-[0.06em] text-text-faint">
             {flat ? t('inbox.groups.mailboxes') : t('inbox.groups.label')}
           </p>
+          <label title={t('inbox.sort.label')} className="relative grid size-7 shrink-0 place-items-center rounded-md text-text-muted hover:bg-nav-hover focus-within:ring-2">
+            <ArrowDownWideNarrow aria-hidden="true" className="size-4" />
+            <select
+              aria-label={t('inbox.sort.label')}
+              className="absolute inset-0 size-full cursor-pointer opacity-0"
+              value={sort}
+              onChange={event => onSort(event.target.value)}
+            >
+              <option value="default">{t('inbox.sort.default')}</option>
+              <option value="address">{t('inbox.sort.address')}</option>
+              <option value="unread">{t('inbox.sort.unread')}</option>
+            </select>
+          </label>
           {canManage ? (
             <Button
               type="button"
@@ -258,7 +282,7 @@ export function InboxSidebar({
         </div>
         {rail ? <div className="h-4 lg:hidden" aria-hidden="true" /> : null}
         {flat
-          ? mailboxes.map(mailbox =>
+          ? ordered.map(mailbox =>
               mailbox.access.view ? (
                 <MailboxRow
                   key={mailbox.id}
