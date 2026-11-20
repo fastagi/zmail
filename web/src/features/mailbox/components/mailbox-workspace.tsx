@@ -107,7 +107,7 @@ function Workspace({ canManage }: { canManage: boolean }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const domains = useMailboxDomains(organizationId);
-  const mailboxes = useMailboxes(organizationId, { live: true });
+  const mailboxes = useMailboxes(organizationId, { live: true, scope: 'usable' });
   const [storedId] = useState(() => readStoredMailboxId(organizationId));
   const [manageOpen, setManageOpen] = useState(false);
   const [accessTargetId, setAccessTargetId] = useState<number | null>(null);

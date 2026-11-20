@@ -34,6 +34,94 @@ describe('mailbox service boundary', () => {
     vi.restoreAllMocks();
   });
 
+  it('reads the directory, renames, imports, and exports mailboxes', async () => {
+    const header = { 'Organization-Id': '7' };
+    const meta = {
+      per_page: 15,
+      has_more: true,
+      next_cursor: 'MTI',
+      daily_send_limit: 200,
+      sent_last_24h: 4,
+      mailbox_count: 30,
+      max_mailboxes: 50,
+    };
+    const entry = {
+      id: 12,
+      address: 'team@mail.example.com',
+      display_name: 'Team',
+      type: 'shared',
+      owner_user_id: null,
+      awaiting_handover: false,
+      created_at: '2026-11-19T10:00:00Z',
+      member_count: 2,
+      sent_last_24h: 4,
+    };
+    const getEnvelope = vi
+      .spyOn(request, 'getEnvelope')
+      .mockResolvedValueOnce({ code: 0, message: 'success', data: [entry], meta });
+    const page = await mailboxService.directory(7, { type: 'shared', q: ' sa ' }, 'abc');
+    expect(page).toEqual({ items: [entry], meta });
+    expect(getEnvelope).toHaveBeenCalledWith('/mailbox-directory', {
+      headers: header,
+      params: { type: 'shared', q: 'sa', cursor: 'abc' },
+    });
+
+    // A page whose meta lacks `next_cursor` is not the documented page.
+    const { next_cursor: _dropped, ...withoutCursor } = meta;
+    getEnvelope.mockResolvedValueOnce({ code: 0, message: 'success', data: [], meta: withoutCursor });
+    await expect(mailboxService.directory(7, {})).rejects.toMatchObject({
+      errorCode: ClientErrorCode.INVALID_RESPONSE,
+    });
+
+    const get = vi.spyOn(request, 'get').mockResolvedValue([]);
+    await mailboxService.list(7, 'usable');
+    expect(get).toHaveBeenCalledWith('/mailboxes', { headers: header, params: { scope: 'usable' } });
+
+    const put = vi.spyOn(request, 'put').mockResolvedValue(accessMailbox());
+    await mailboxService.rename(7, 12, 'Billing');
+    expect(put).toHaveBeenCalledWith('/mailboxes/12', { display_name: 'Billing' }, { headers: header });
+
+    const result = {
+      dry_run: true,
+      succeeded: 1,
+      failed: 0,
+      rows: [
+        {
+          row: 1,
+          address: 'sales@mail.example.com',
+          status: 'valid',
+          mailbox_id: null,
+          error_code: null,
+          missing_emails: [],
+        },
+      ],
+    };
+    const post = vi.spyOn(request, 'post').mockResolvedValue(result);
+    const rows = [{ address: 'sales@mail.example.com', display_name: '', members: 'a@b.co' }];
+    await expect(mailboxService.importMailboxes(7, rows, true)).resolves.toEqual(result);
+    expect(post).toHaveBeenCalledWith(
+      '/mailbox-imports',
+      { dry_run: true, rows },
+      { headers: header }
+    );
+
+    const getFile = vi.spyOn(request, 'getFile').mockResolvedValue({
+      blob: new Blob(['address']),
+      disposition: 'attachment; filename="shared-mailboxes-20261119.csv"',
+    });
+    const exported = await mailboxService.exportMailboxes(7, 'shared');
+    expect(exported.filename).toBe('shared-mailboxes-20261119.csv');
+    expect(getFile).toHaveBeenCalledWith('/mailbox-exports', {
+      headers: header,
+      params: { type: 'shared' },
+    });
+    // Without a usable disposition the name falls back to the type.
+    getFile.mockResolvedValueOnce({ blob: new Blob(['address']), disposition: null });
+    expect((await mailboxService.exportMailboxes(7, 'personal')).filename).toBe(
+      'personal-mailboxes.csv'
+    );
+  });
+
   it('names the organization in a header on every call', async () => {
     const pageEnvelope = {
       code: 0 as const,

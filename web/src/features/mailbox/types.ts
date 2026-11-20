@@ -26,7 +26,12 @@ import type {
   mailMessagePageEnvelopeSchema,
   mailMessageSchema,
   mailMessageSummarySchema,
+  mailboxDirectoryEntrySchema,
+  mailboxDirectoryMetaSchema,
   mailboxDomainSchema,
+  mailboxImportResultSchema,
+  mailboxImportRowResultSchema,
+  mailboxImportRowStatusSchema,
   mailboxSchema,
   mailDomainCapabilitySchema,
   mailDomainInputSchema,
@@ -102,6 +107,27 @@ export type MailboxMemberInput = Infer<typeof mailboxMemberInputSchema>;
 export type MailboxAccessEventType = Infer<typeof mailboxAccessEventTypeSchema>;
 export type MailboxAccessEvent = Infer<typeof mailboxAccessEventSchema>;
 export type MailboxSealedDeletion = Infer<typeof mailboxSealedDeletionSchema>;
+/** `usable` narrows the mailbox list to the caller's own mailboxes. */
+export type MailboxListScope = 'usable';
+export type MailboxDirectoryEntry = Infer<typeof mailboxDirectoryEntrySchema>;
+export type MailboxDirectoryMeta = Infer<typeof mailboxDirectoryMetaSchema>;
+export interface MailboxDirectoryPage {
+  items: MailboxDirectoryEntry[];
+  meta: MailboxDirectoryMeta;
+}
+export interface MailboxDirectoryFilters {
+  type?: MailboxType;
+  q?: string;
+}
+/** One import row as the spreadsheet holds it. */
+export interface MailboxImportRowInput {
+  address: string;
+  display_name: string;
+  members: string;
+}
+export type MailboxImportRowStatus = Infer<typeof mailboxImportRowStatusSchema>;
+export type MailboxImportRowResult = Infer<typeof mailboxImportRowResultSchema>;
+export type MailboxImportResult = Infer<typeof mailboxImportResultSchema>;
 
 type MailboxAccessEventPageEnvelope = Infer<typeof mailboxAccessEventPageEnvelopeSchema>;
 

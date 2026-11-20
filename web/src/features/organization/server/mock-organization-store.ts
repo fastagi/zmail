@@ -235,6 +235,20 @@ export class MockOrganizationStore {
       .sort((left, right) => left - right);
   }
 
+  /**
+   * Account emails of the organization's current members by user id, lowercased; only the
+   * mailbox import and export mocks read them, as only the API's import and export do.
+   */
+  memberEmails(organizationId: number): Map<number, string> {
+    const emails = new Map<number, string>();
+    for (const membership of this.memberships) {
+      if (membership.organizationId !== organizationId) continue;
+      const user = this.userRecord(membership.userKey);
+      if (user) emails.set(user.id, user.email.toLowerCase());
+    }
+    return emails;
+  }
+
   /** The membership id of a user in the organization, or null when they are not a member. */
   membershipIdOf(organizationId: number, userId: number): number | null {
     const membership = this.memberships.find(

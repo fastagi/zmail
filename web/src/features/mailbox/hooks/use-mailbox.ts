@@ -21,7 +21,11 @@ import type {
   MailLabelInput,
   MailLogFilters,
   MailMessageFilters,
+  MailboxDirectoryFilters,
+  MailboxImportRowInput,
+  MailboxListScope,
   MailboxPermission,
+  MailboxType,
   SendMailMessageInput,
   UpdateMailMessageInput,
   UpdateMailMessagesInput,
@@ -59,7 +63,21 @@ export const mailboxKeys = {
     [...mailboxKeys.mailZones(organizationId), zoneId] as const,
   dnsRecords: (organizationId: number, zoneId: number) =>
     [...mailboxKeys.mailZone(organizationId, zoneId), 'dns-records'] as const,
-  list: (organizationId: number) => [...mailboxKeys.organization(organizationId), 'list'] as const,
+  /** Without a scope, the key covers every scoped list too. */
+  list: (organizationId: number, scope?: MailboxListScope) =>
+    scope === undefined
+      ? ([...mailboxKeys.organization(organizationId), 'list'] as const)
+      : ([...mailboxKeys.organization(organizationId), 'list', scope] as const),
+  /** Every directory page of the organization. */
+  directories: (organizationId: number) =>
+    [...mailboxKeys.organization(organizationId), 'directory'] as const,
+  directory: (organizationId: number, filters: MailboxDirectoryFilters, cursor?: string) =>
+    [
+      ...mailboxKeys.directories(organizationId),
+      filters.type ?? '',
+      filters.q ?? '',
+      cursor ?? '',
+    ] as const,
   mailbox: (organizationId: number, mailboxId: number) =>
     [...mailboxKeys.organization(organizationId), mailboxId] as const,
   messages: (organizationId: number, mailboxId: number) =>
@@ -353,15 +371,92 @@ export function useDeleteDnsRecord(organizationId: number, zoneId: number) {
 }
 
 /** `live` keeps the list (and its unread counts) fresh while a mailbox is open. */
-export function useMailboxes(organizationId: number, { live = false }: { live?: boolean } = {}) {
+export function useMailboxes(
+  organizationId: number,
+  { live = false, scope }: { live?: boolean; scope?: MailboxListScope } = {}
+) {
   return useQuery({
-    queryKey: mailboxKeys.list(organizationId),
-    queryFn: () => mailboxService.list(organizationId),
+    queryKey: mailboxKeys.list(organizationId, scope),
+    queryFn: () => mailboxService.list(organizationId, scope),
     enabled: validId(organizationId),
     staleTime: 15_000,
     ...(live ? liveRefresh : {}),
     meta: LOCAL_ERROR_HANDLING_META,
   });
+}
+
+/** One directory page; the previous page stays on screen while the next one loads. */
+export function useMailboxDirectory(
+  organizationId: number,
+  filters: MailboxDirectoryFilters,
+  cursor?: string
+) {
+  return useQuery({
+    queryKey: mailboxKeys.directory(organizationId, filters, cursor),
+    queryFn: () => mailboxService.directory(organizationId, filters, cursor),
+    enabled: validId(organizationId),
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+export function useRenameMailbox(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ mailboxId, displayName }: { mailboxId: number; displayName: string }) =>
+      mailboxService.rename(organizationId, mailboxId, displayName),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: (_result, _error, { mailboxId }) =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.directories(organizationId) }),
+        queryClient.invalidateQueries({
+          queryKey: mailboxKeys.accessEvents(organizationId, mailboxId),
+        }),
+      ]),
+  });
+}
+
+/** A dry run changes nothing; a real run refreshes everything of the organization's mailboxes. */
+export function useImportMailboxes(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rows, dryRun }: { rows: MailboxImportRowInput[]; dryRun: boolean }) =>
+      mailboxService.importMailboxes(organizationId, rows, dryRun),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: (_result, _error, { dryRun }) =>
+      dryRun
+        ? undefined
+        : queryClient.invalidateQueries({ queryKey: mailboxKeys.organization(organizationId) }),
+  });
+}
+
+/** Downloads the CSV file of one mailbox type and hands it to the browser to save. */
+export function useExportMailboxes(organizationId: number) {
+  return useMutation({
+    mutationFn: async (type: MailboxType) => {
+      const file = await mailboxService.exportMailboxes(organizationId, type);
+      saveFile(file.blob, file.filename);
+      return file.filename;
+    },
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+/** Saves a file through a temporary link; the page never shows its content. */
+export function saveFile(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.rel = 'noopener noreferrer';
+    anchor.click();
+  } finally {
+    // Revoke after the click has been handled, so the download can start.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  }
 }
 
 export function useCreateMailbox(organizationId: number) {
