@@ -124,7 +124,6 @@ export function ManageMailboxesDialog({
           <CreateMailboxForm
             domain={domain}
             domains={domains}
-            count={mailboxes.length}
             onCreated={onCreated}
           />
         ) : null}

@@ -8,19 +8,22 @@ import (
 	"testing"
 
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
 )
 
 // fakeZones behaves like a Cloudflare account with the zones it lists: enabling routing adds the
 // routing records, enabling sending returns records the zone may or may not have yet.
 type fakeZones struct {
-	zones       map[string]string // zone name -> zone ID
-	records     map[string][]mailtransport.DNSRecord
-	sending     map[string]string // domain name -> tag
-	sendingDNS  []mailtransport.DNSRecord
-	rules       map[string]string // rule ID -> address
-	routingErr  error
-	ruleErr     error
+	zones      map[string]string // zone name -> zone ID
+	records    map[string][]mailtransport.DNSRecord
+	sending    map[string]string // domain name -> tag
+	sendingDNS []mailtransport.DNSRecord
+	rules      map[string]string // rule ID -> address
+	routingErr error
+	ruleErr    error
+	// ruleErrFor fails the routing rule of one address only.
+	ruleErrFor  map[string]error
 	created     []mailtransport.DNSRecord
 	routingFor  []string
 	nextRuleNum int
@@ -122,6 +125,9 @@ func (z *fakeZones) CreateRecord(_ context.Context, _ string, record mailtranspo
 func (z *fakeZones) CreateRoutingRule(_ context.Context, _, address, worker string) (string, error) {
 	if z.ruleErr != nil {
 		return "", z.ruleErr
+	}
+	if err := z.ruleErrFor[address]; err != nil {
+		return "", err
 	}
 	if worker != "zmail-email-worker" {
 		return "", fmt.Errorf("unexpected worker %q", worker)
@@ -634,7 +640,7 @@ func TestMailboxesWaitForAVerifiedDomain(t *testing.T) {
 func TestAMailboxThatCannotBeStoredLosesItsRoutingRule(t *testing.T) {
 	fixture := newDomainFixture(t)
 	fixture.connect(t, "news.example.com")
-	for i := 0; i < domain.MaxMailboxesPerOrganization; i++ {
+	for i := 0; i < config.DefaultMailboxMaxPerOrganization; i++ {
 		fixture.mailbox(t, 7, fmt.Sprintf("box%d", i))
 	}
 	if _, err := fixture.service.CreateMailbox(context.Background(), as(7), sharedInput("hello", "", "news.example.com")); !errors.Is(err, ErrMailboxLimitReached) {
@@ -730,5 +736,23 @@ func TestADomainSetupRunsInTheBackgroundOncePerDomain(t *testing.T) {
 	listed, _ := fixture.service.ListMailDomains(ctx, 7)
 	if len(listed) != 1 || listed[0].SettingUp {
 		t.Fatalf("listed = %+v", listed)
+	}
+}
+
+func TestRoleAddressesAreReservedOnlyOnTheSharedDomain(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	fixture.connect(t, "news.example.com")
+
+	// The organization operates its own domain, so it may claim its role addresses.
+	for _, localPart := range []string{"support", "admin", "postmaster"} {
+		mailbox, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput(localPart, "", "news.example.com"))
+		if err != nil || mailbox.Address != localPart+"@news.example.com" {
+			t.Fatalf("CreateMailbox(%s@news.example.com) = %+v, %v", localPart, mailbox, err)
+		}
+	}
+	// The shared domain belongs to the operator, so its role addresses stay reserved.
+	if _, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("support", "", "")); !errors.Is(err, ErrMailboxAddressReserved) {
+		t.Fatalf("shared-domain support = %v", err)
 	}
 }

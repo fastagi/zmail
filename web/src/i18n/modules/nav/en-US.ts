@@ -14,7 +14,10 @@ const messages = {
   mailBroadcasts: 'Broadcasts',
   mailContacts: 'Contacts',
   mailTemplates: 'Templates',
-  mailDomain: 'Domain',
+  admin: 'Admin console',
+  adminDomains: 'Domains',
+  adminSharedMailboxes: 'Shared mailboxes',
+  adminPlatformAccounts: 'Platform accounts',
   developers: 'Developers',
   // fastbuild:slot web.i18n.nav.en-us
 } as const;

@@ -37,7 +37,7 @@ func migrateLedger(t *testing.T, db *gorm.DB) {
 func ledgerMailbox(t *testing.T, repo *repository, address string) *domain.Mailbox {
 	t.Helper()
 	mailbox := &domain.Mailbox{OrganizationID: ledgerOrg, Address: address, DisplayName: address, Type: domain.MailboxTypeShared}
-	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("CreateMailbox(%q): %v", address, err)
 	}
 	return mailbox

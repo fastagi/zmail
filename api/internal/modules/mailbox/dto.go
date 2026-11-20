@@ -977,3 +977,50 @@ func toMailSuppressionPageMeta(next *uint) MailSuppressionPageMetaResponse {
 	cursor := strconv.FormatUint(uint64(*next), 10)
 	return MailSuppressionPageMetaResponse{NextCursor: &cursor}
 }
+
+// ListMailboxesRequest holds the query of GET /v1/mailboxes.
+type ListMailboxesRequest struct {
+	Scope string `form:"scope" binding:"omitempty,oneof=usable"`
+}
+
+// ListMailboxDirectoryRequest holds the query of GET /v1/mailbox-directory.
+type ListMailboxDirectoryRequest struct {
+	Type    string `form:"type" binding:"omitempty,oneof=shared personal"`
+	Q       string `form:"q" binding:"max=120"`
+	Cursor  string `form:"cursor"`
+	PerPage int    `form:"per_page" binding:"omitempty,min=1,max=100"`
+}
+
+// MailboxDirectoryEntryResponse is one directory row: mailbox metadata and counts, never mail.
+type MailboxDirectoryEntryResponse struct {
+	ID               uint      `json:"id"`
+	Address          string    `json:"address"`
+	DisplayName      string    `json:"display_name"`
+	Type             string    `json:"type"`
+	OwnerUserID      *uint     `json:"owner_user_id"`
+	AwaitingHandover bool      `json:"awaiting_handover"`
+	CreatedAt        time.Time `json:"created_at"`
+	MemberCount      int       `json:"member_count"`
+	SentLast24h      int64     `json:"sent_last_24h"`
+}
+
+func toMailboxDirectoryEntryResponse(entry *domain.MailboxDirectoryEntry) MailboxDirectoryEntryResponse {
+	mailbox := entry.Mailbox
+	return MailboxDirectoryEntryResponse{
+		ID:               mailbox.ID,
+		Address:          mailbox.Address,
+		DisplayName:      mailbox.DisplayName,
+		Type:             string(mailbox.Type),
+		OwnerUserID:      mailbox.OwnerUserID,
+		AwaitingHandover: mailbox.Type == domain.MailboxTypePersonal && mailbox.OwnerLeftAt != nil,
+		CreatedAt:        mailbox.CreatedAt,
+		MemberCount:      entry.MemberCount,
+		SentLast24h:      entry.SentLast24h,
+	}
+}
+
+// UpdateMailboxRequest is the body of PUT /v1/mailboxes/:mailbox_id.
+type UpdateMailboxRequest struct {
+	// DisplayName is required; an empty string clears it.
+	DisplayName *string `json:"display_name" binding:"required"`
+}

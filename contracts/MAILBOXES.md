@@ -29,7 +29,7 @@ Within the organization, what a caller may do with a mailbox follows from the ma
 | Role | May |
 |---|---|
 | `member` | List domains, managed zones, and their DNS records; preview a domain; list the mailboxes they have access to; read, send, organize, and delete mail as their access allows; read the unified inbox, the log, and statistics of the mailboxes they may read; list the mail roles of the mailboxes they can see; read the platform accounts registered with a mailbox they may read or that they own, with their history |
-| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create and delete mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; list, create, change, and delete every platform account and hand over an owner's accounts; read the usage of each send lane; list the suppression list and remove addresses from it |
+| `owner`, `admin` | Everything a member may; see every mailbox's metadata; create, rename, and delete mailboxes; list the mailbox directory, and import and export mailboxes; hand over personal mailboxes and delete sealed history; manage the members and webhook switch of shared mailboxes, including themselves; read every mailbox's access history; connect, set up, check, enable receiving on, and remove domains; remove managed zones; and create, change, and delete their DNS records; list every mail role, create, change, and delete mail roles, and put mailboxes in them; list, create, change, and delete every platform account and hand over an owner's accounts; read the usage of each send lane; list the suppression list and remove addresses from it |
 
 The owner and admin roles never grant reading or sending mail by themselves: an admin reads a
 mailbox only as a member of it, and the access history records how they became one. A member who
@@ -54,9 +54,13 @@ recorded but has no special rights to it. A removed member loses access on their
 | Create a DNS record | none yet | `POST /v1/mail-zones/:zone_id/dns-records` | `201` envelope |
 | Change a DNS record | none yet | `PATCH /v1/mail-zones/:zone_id/dns-records/:record_id` | `200` envelope |
 | Delete a DNS record | none yet | `DELETE /v1/mail-zones/:zone_id/dns-records/:record_id` | `204` |
-| List mailboxes | `GET /api/mailboxes` | `GET /v1/mailboxes` | `200` envelope, at most 50 items |
+| List mailboxes | `GET /api/mailboxes` | `GET /v1/mailboxes` | `200` envelope, at most 5000 items |
 | Create mailbox | `POST /api/mailboxes` | `POST /v1/mailboxes` | `201` envelope |
+| Rename mailbox | `PUT /api/mailboxes/:id` | `PUT /v1/mailboxes/:mailbox_id` | `200` envelope |
 | Delete mailbox | `DELETE /api/mailboxes/:id` | `DELETE /v1/mailboxes/:mailbox_id` | `204` |
+| Mailbox directory | `GET /api/mailbox-directory` | `GET /v1/mailbox-directory` | Keyset envelope |
+| Import mailboxes | `POST /api/mailbox-imports` | `POST /v1/mailbox-imports` | `200` envelope, at most 500 rows |
+| Export mailboxes | `GET /api/mailbox-exports` | `GET /v1/mailbox-exports` | `200` CSV file |
 | List members | `GET /api/mailboxes/:id/members` | `GET /v1/mailboxes/:mailbox_id/members` | `200` envelope, at most 100 items |
 | Set a member | `PUT /api/mailboxes/:id/members/:userId` | `PUT /v1/mailboxes/:mailbox_id/members/:user_id` | `200` envelope |
 | Remove a member | `DELETE /api/mailboxes/:id/members/:userId` | `DELETE /v1/mailboxes/:mailbox_id/members/:user_id` | `204` |
@@ -140,8 +144,9 @@ has no browser route: only the mail edge calls it.
 - `local_part` is trimmed and lowercased. It is 1 to 64 characters of lowercase ASCII letters and
   digits, with single inner `.`, `_`, or `-`. Anything else is `422 MAILBOX.ADDRESS_INVALID`.
 - Role addresses (`abuse`, `admin`, `administrator`, `hostmaster`, `mailer-daemon`, `no-reply`,
-  `noreply`, `postmaster`, `root`, `security`, `support`, `webmaster`) are
-  `422 MAILBOX.ADDRESS_RESERVED`.
+  `noreply`, `postmaster`, `root`, `security`, `support`, `webmaster`) on the shared domain are
+  `422 MAILBOX.ADDRESS_RESERVED`. On a domain the organization connected, the organization
+  operates the domain and may create them.
 - `display_name` is optional, at most 120 characters, and may not contain `<`, `>`, or `"`; a
   violation is also `422 MAILBOX.ADDRESS_INVALID`.
 - The address is `<local_part>@<domain>`. Without `domain`, or with the shared domain, it is the
@@ -160,7 +165,10 @@ has no browser route: only the mail edge calls it.
 - An address that is or ever was a mailbox is
   `409 MAILBOX.ADDRESS_TAKEN`: deleting a mailbox keeps its address reserved, so a later owner
   never receives mail meant for the previous one.
-- An organization owns at most 50 mailboxes; one more is `409 MAILBOX.LIMIT_REACHED`.
+- An organization owns at most `MAILBOX_MAX_PER_ORGANIZATION` mailboxes (default 50, valid 1 to
+  5000); one more is `409 MAILBOX.LIMIT_REACHED`. `max_mailboxes` reports the value. Lowering it
+  below an organization's current count changes no existing mailbox: they all stay listed and
+  usable, and only new creates and import rows get `409 MAILBOX.LIMIT_REACHED`.
 
 ```json
 {
@@ -196,12 +204,129 @@ mailbox. `ai_triage_enabled` is the mailbox's [AI triage](#ai-triage) switch. `r
 [mail role](#mail-roles) the mailbox belongs to, `null` when it has none; clients that do not know it
 ignore it.
 
+`GET /v1/mailboxes` lists every mailbox the caller has any access to, oldest first, without
+pages (an organization never owns more than 5000). `scope=usable` narrows it to the mailboxes the
+caller can read or send from, plus, for owners and admins, personal mailboxes with
+`awaiting_handover: true`, so a workspace does not fill with mailboxes an admin can only manage.
+Any other `scope` value is `422 COMMON.VALIDATION_FAILED`.
+
+`PUT /v1/mailboxes/:mailbox_id` with `{ "display_name": "Support" }` changes the display name and
+answers the mailbox. Only owners and admins may (`403 PERMISSION.DENIED` otherwise); the name
+follows the create rules (`422 MAILBOX.ADDRESS_INVALID`), `""` clears it, and `display_name` is
+required. A change writes a `renamed` access event; sending the current name writes nothing.
+Renaming grants the caller no access to the mail.
+
 Deleting a mailbox deletes its messages in the same transaction; the address stays reserved and
 later mail for it is answered `404 MAILBOX.RECIPIENT_NOT_FOUND`. A mailbox on a connected domain
 also loses its routing rule; if Cloudflare refuses to delete the rule, the deletion still succeeds
 and mail for the address is answered `404` as above. Deleting a user account does not
 touch mailboxes: the organization starter already refuses to delete an account that still belongs
 to an organization.
+
+### Mailbox Directory
+
+`GET /v1/mailbox-directory` is the administration list. Only owners and admins may read it; a
+member gets `403 PERMISSION.DENIED`. It is separate from `GET /v1/mailboxes`, which stays as cheap
+as before for the workspace.
+
+- `type` (`shared` or `personal`) narrows the list; absent lists both.
+- `q` is a case-insensitive substring of `address` or `display_name`, 1 to 120 characters after
+  trimming (longer is `422 COMMON.VALIDATION_FAILED`); `%`, `_`, and `\` match themselves.
+- Keyset pages, newest first: `per_page` 1 to 100 (default 15), `cursor` from `meta.next_cursor`. A
+  malformed cursor or a `page` parameter is `400 COMMON.INVALID_INPUT`.
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": [
+    { "id": 12, "address": "docs@mail.example.com", "display_name": "Docs", "type": "shared",
+      "owner_user_id": null, "awaiting_handover": false, "created_at": "2026-11-16T10:00:00Z",
+      "member_count": 5, "sent_last_24h": 0 }
+  ],
+  "meta": { "per_page": 15, "has_more": false, "next_cursor": null,
+            "daily_send_limit": 200, "sent_last_24h": 37, "mailbox_count": 12, "max_mailboxes": 50 }
+}
+```
+
+`member_count` is the members of a shared mailbox (0 for a personal one). `sent_last_24h` counts the
+mailbox's personal-lane send attempts whose provider call started in the rolling 24 hours, failed ones
+included: the same predicate as the personal lane of [Lane Usage](#lane-usage). In `meta`,
+`daily_send_limit` is that lane's limit and `sent_last_24h` the organization's attempts in it, the
+figure the limit is checked against. Deleting a mailbox deletes its mail, so its attempts leave both
+figures; the rows of every page together add up to `sent_last_24h`. `mailbox_count` counts the
+organization's live mailboxes and `max_mailboxes` is `MAILBOX_MAX_PER_ORGANIZATION`. Entries carry no
+message content, unread count, or access.
+
+### Import And Export
+
+`POST /v1/mailbox-imports` creates shared mailboxes from spreadsheet rows. Only owners and admins may.
+
+```json
+{
+  "dry_run": true,
+  "rows": [
+    { "address": "sales@mail.example.com", "display_name": "Sales", "members": "ana@example.com:manage;bo@example.com" }
+  ]
+}
+```
+
+- 1 to 500 rows; `dry_run` is required. `address` is at most 320 characters, `display_name` 480,
+  and `members` 8192; body violations are `422 COMMON.VALIDATION_FAILED`.
+- `members` is `email[:permission]` joined by `;`. Segments are trimmed and empty ones ignored; the
+  permission is `view`, `send`, or `manage` and defaults to `send`. Emails are matched, ignoring
+  case, to the account emails of the organization's current members, on the server only.
+- One leading `'` is removed from `address`, `display_name`, and `members` when the next character
+  is `=`, `+`, `-`, or `@`, so a file exported by Zmail imports back unchanged.
+- Every row is checked exactly like `POST /v1/mailboxes` with `type: "shared"`. A dry run creates
+  nothing; a real run creates every row that passes, each in its own transaction, and checks again
+  at creation, so a row can pass a dry run and fail the real run. No organization invitation is
+  ever sent.
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "dry_run": true, "succeeded": 1, "failed": 1,
+    "rows": [
+      { "row": 1, "address": "sales@mail.example.com", "status": "valid", "mailbox_id": null, "error_code": null, "missing_emails": [] },
+      { "row": 2, "address": "admin@mail.example.com", "status": "failed", "mailbox_id": null, "error_code": "MAILBOX.ADDRESS_RESERVED", "missing_emails": [] }
+    ]
+  }
+}
+```
+
+`status` is `valid` (a dry run would create it), `created` (with `mailbox_id`), or `failed` (with
+`error_code`). Row error codes:
+
+| `error_code` | Meaning |
+|---|---|
+| `MAILBOX.ADDRESS_INVALID` | No `@`, a bad local part, or a bad display name |
+| `MAILBOX.ADDRESS_RESERVED` | A role address on the shared domain |
+| `MAILBOX.ADDRESS_TAKEN` | The address is or was a mailbox |
+| `MAILBOX.IMPORT_DUPLICATE_ROW` | An earlier row has the same address, ignoring case |
+| `MAILBOX.DOMAIN_NOT_FOUND` | The domain is neither the shared domain nor one the organization connected |
+| `MAILBOX.DOMAIN_NOT_VERIFIED` | The organization's domain is still pending |
+| `MAILBOX.ACCESS_INVALID` | Bad `members` grammar, 0 or more than 100 members, an unknown permission, or a member listed twice |
+| `MAILBOX.IMPORT_MEMBER_NOT_FOUND` | The emails in `missing_emails` are not members of the organization; invite them first |
+| `MAILBOX.LIMIT_REACHED` | The organization would pass `MAILBOX_MAX_PER_ORGANIZATION`, counted in row order |
+| `MAILBOX.DOMAIN_PROVIDER_FAILED` | Cloudflare refused the routing rule |
+| `COMMON.INTERNAL` | Anything else |
+
+`GET /v1/mailbox-exports?type=shared` (or `personal`; `type` is required, otherwise
+`422 COMMON.VALIDATION_FAILED`) answers a CSV file. Only owners and admins may. It is the only
+surface that carries member email addresses.
+
+- `Content-Type: text/csv; charset=utf-8` and `Content-Disposition: attachment;
+  filename="shared-mailboxes-YYYYMMDD.csv"` (`personal-mailboxes-…`), dated in UTC; the body starts
+  with a UTF-8 byte order mark and uses CRLF line ends.
+- Header `address,display_name,members,member_count,sent_last_24h,created_at`, then one line per
+  mailbox, newest first, at most 5000. `members` is `email:permission` joined by `;`, ordered by
+  email; a personal mailbox lists its owner's email alone, and none once the owner left.
+  `created_at` is RFC 3339 in UTC.
+- A cell starting with `=`, `+`, `-`, or `@` gets a leading `'` so spreadsheets do not run it as a
+  formula; importing the file removes it again.
 
 ## Access
 
@@ -299,10 +424,11 @@ per page:
 | `handed_over` | An admin hands the mailbox over | The successor | `{ "former_owner_user_id", "sealed_before" }` |
 | `sealed_deleted` | An admin deletes the sealed history | `null` | `{ "deleted_messages", "deleted_broadcasts" }` |
 | `webhooks_changed` | The webhook switch changes | `null` | `{ "enabled" }` |
+| `renamed` | An admin changes the display name | `null` | `{ "from", "to" }` |
 
 `actor_user_id` is `null` for a change Zmail made itself, such as `owner_left`, `owner_returned`,
-and `member_removed` for a departure. `detail` holds ids, permissions, timestamps, and counts only,
-never message content. Creating a shared mailbox writes `created` and one `member_set` per first
+and `member_removed` for a departure. `detail` holds ids, permissions, timestamps, counts, and display
+names only, never message content. Creating a shared mailbox writes `created` and one `member_set` per first
 member. Clients ignore `detail` keys they do not know.
 
 ### Departure And Handover
@@ -2155,6 +2281,8 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.MESSAGE_NOT_FOUND` | 404 |
 | `MAILBOX.ADDRESS_TAKEN` | 409 |
 | `MAILBOX.LIMIT_REACHED` | 409 |
+| `MAILBOX.IMPORT_DUPLICATE_ROW` | Import row only |
+| `MAILBOX.IMPORT_MEMBER_NOT_FOUND` | Import row only |
 | `MAILBOX.ACCESS_CONFLICT` | 409 |
 | `MAILBOX.ACCESS_INVALID` | 422 |
 | `MAILBOX.ADDRESS_INVALID` | 422 |

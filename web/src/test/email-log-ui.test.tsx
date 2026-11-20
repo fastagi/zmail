@@ -1321,7 +1321,7 @@ describe('mail domain console', () => {
       organization(1, 'Acme', 'owner'),
       organization(2, 'Globex', 'member'),
     ]);
-    window.history.replaceState(null, '', '/console/mail-domain?org=2');
+    window.history.replaceState(null, '', '/console/admin/domains?org=2');
     const view = renderDomain();
     expect(screen.getByLabelText('Organization')).toHaveValue('2');
     expect(new Set(state.organizationIds)).toEqual(new Set([2]));

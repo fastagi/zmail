@@ -109,7 +109,12 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 
 		auth.GET("/mailboxes", h.ListMailboxes).Name("mailboxes.index")
 		auth.POST("/mailboxes", h.CreateMailbox).Name("mailboxes.store")
+		auth.PUT("/mailboxes/:mailbox_id", h.UpdateMailbox).Name("mailboxes.update").WhereNumber("mailbox_id")
 		auth.DELETE("/mailboxes/:mailbox_id", h.DeleteMailbox).Name("mailboxes.destroy").WhereNumber("mailbox_id")
+		auth.GET("/mailbox-directory", h.ListMailboxDirectory).Name("mailbox_directory.index")
+		auth.POST("/mailbox-imports", h.ImportMailboxes).Name("mailbox_imports.store").
+			Middleware(middleware.BodyLimit(maxImportBodyBytes))
+		auth.GET("/mailbox-exports", h.ExportMailboxes).Name("mailbox_exports.index")
 
 		auth.GET("/mailboxes/:mailbox_id/members", h.ListMailboxMembers).
 			Name("mailboxes.members.index").WhereNumber("mailbox_id")

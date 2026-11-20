@@ -274,7 +274,7 @@ func (r *repository) SetDomainCapability(ctx context.Context, organizationID, id
 
 // ListMailboxesWithoutRoutingRule returns live mailboxes only; a deleted mailbox keeps its address
 // but receives nothing.
-// fastbuild:bounded-list max=50 reason=an organization owns at most domain.MaxMailboxesPerOrganization mailboxes
+// fastbuild:bounded-list max=5000 reason=an organization owns at most domain.MailboxesPerOrganizationCeiling mailboxes
 func (r *repository) ListMailboxesWithoutRoutingRule(ctx context.Context, organizationID uint, domainName string) ([]*domain.Mailbox, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
@@ -282,7 +282,7 @@ func (r *repository) ListMailboxesWithoutRoutingRule(ctx context.Context, organi
 	var rows []MailboxPO
 	if err := r.conn(ctx).
 		Where("organization_id = ? AND routing_rule_id = '' AND address LIKE ?", organizationID, "%@"+escapeLike(strings.ToLower(domainName))).
-		Order("id asc").Limit(domain.MaxMailboxesPerOrganization).Find(&rows).Error; err != nil {
+		Order("id asc").Limit(domain.MailboxesPerOrganizationCeiling).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	mailboxes := make([]*domain.Mailbox, 0, len(rows))

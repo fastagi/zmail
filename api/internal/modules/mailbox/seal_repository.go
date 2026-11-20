@@ -68,7 +68,7 @@ func (r *repository) MailboxesGrantedTo(ctx context.Context, organizationID, mem
 		) latest
 		WHERE latest.type <> 'member_removed'
 		ORDER BY latest.mailbox_id
-		LIMIT ?`, organizationID, strconv.FormatUint(uint64(membershipID), 10), domain.MaxMailboxesPerOrganization).
+		LIMIT ?`, organizationID, strconv.FormatUint(uint64(membershipID), 10), domain.MailboxesPerOrganizationCeiling).
 		Scan(&ids).Error
 	return ids, err
 }

@@ -144,6 +144,8 @@ const (
 	MailboxAccessHandedOver      MailboxAccessEventType = "handed_over"
 	MailboxAccessSealedDeleted   MailboxAccessEventType = "sealed_deleted"
 	MailboxAccessWebhooksChanged MailboxAccessEventType = "webhooks_changed"
+	// MailboxAccessRenamed records a display-name change with detail from and to.
+	MailboxAccessRenamed MailboxAccessEventType = "renamed"
 )
 
 // MailboxAccessEvent is one entry of a mailbox's access history. It stores user ids, ids, and

@@ -27,6 +27,8 @@ import type {
   MailMessageFilters,
   MailMessagePage,
   MailMessageSummary,
+  MailboxDirectoryFilters,
+  MailboxListScope,
   MailboxPermission,
   SendMailMessageInput,
   UpdateMailMessageInput,
@@ -65,7 +67,21 @@ export const mailboxKeys = {
     [...mailboxKeys.mailZones(organizationId), zoneId] as const,
   dnsRecords: (organizationId: number, zoneId: number) =>
     [...mailboxKeys.mailZone(organizationId, zoneId), 'dns-records'] as const,
-  list: (organizationId: number) => [...mailboxKeys.organization(organizationId), 'list'] as const,
+  /** Without a scope, the key covers every scoped list too. */
+  list: (organizationId: number, scope?: MailboxListScope) =>
+    scope === undefined
+      ? ([...mailboxKeys.organization(organizationId), 'list'] as const)
+      : ([...mailboxKeys.organization(organizationId), 'list', scope] as const),
+  /** Every directory page of the organization. */
+  directories: (organizationId: number) =>
+    [...mailboxKeys.organization(organizationId), 'directory'] as const,
+  directory: (organizationId: number, filters: MailboxDirectoryFilters, cursor?: string) =>
+    [
+      ...mailboxKeys.directories(organizationId),
+      filters.type ?? '',
+      filters.q ?? '',
+      cursor ?? '',
+    ] as const,
   mailbox: (organizationId: number, mailboxId: number) =>
     [...mailboxKeys.organization(organizationId), mailboxId] as const,
   messages: (organizationId: number, mailboxId: number) =>
@@ -360,10 +376,13 @@ export function useDeleteDnsRecord(organizationId: number, zoneId: number) {
 }
 
 /** `live` keeps the list (and its unread counts) fresh while a mailbox is open. */
-export function useMailboxes(organizationId: number, { live = false }: { live?: boolean } = {}) {
+export function useMailboxes(
+  organizationId: number,
+  { live = false, scope }: { live?: boolean; scope?: MailboxListScope } = {}
+) {
   return useQuery({
-    queryKey: mailboxKeys.list(organizationId),
-    queryFn: () => mailboxService.list(organizationId),
+    queryKey: mailboxKeys.list(organizationId, scope),
+    queryFn: () => mailboxService.list(organizationId, scope),
     enabled: validId(organizationId),
     staleTime: 15_000,
     ...(live ? liveRefresh : {}),
@@ -376,7 +395,11 @@ export function useCreateMailbox(organizationId: number) {
   return useMutation({
     mutationFn: (input: CreateMailboxInput) => mailboxService.create(organizationId, input),
     meta: LOCAL_ERROR_HANDLING_META,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.directories(organizationId) }),
+      ]),
   });
 }
 
@@ -392,6 +415,7 @@ export function useDeleteMailbox(organizationId: number) {
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.directories(organizationId) }),
         invalidateLog(queryClient, organizationId),
       ]),
   });
@@ -838,6 +862,8 @@ export function useMailboxAccessEvents(
 function invalidateAccess(queryClient: QueryClient, organizationId: number, mailboxId: number) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+    // The directory counts members.
+    queryClient.invalidateQueries({ queryKey: mailboxKeys.directories(organizationId) }),
     queryClient.invalidateQueries({ queryKey: mailboxKeys.mailbox(organizationId, mailboxId) }),
     invalidateLog(queryClient, organizationId),
   ]);

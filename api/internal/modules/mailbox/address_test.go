@@ -28,8 +28,15 @@ func TestNormalizeLocalPart(t *testing.T) {
 	}
 
 	for _, input := range []string{"postmaster", "Abuse", "no-reply"} {
-		if _, err := normalizeLocalPart(input); !errors.Is(err, ErrMailboxAddressReserved) {
-			t.Fatalf("normalizeLocalPart(%q) error = %v; want ErrMailboxAddressReserved", input, err)
+		localPart, err := normalizeLocalPart(input)
+		if err != nil {
+			t.Fatalf("normalizeLocalPart(%q) error = %v", input, err)
+		}
+		if err := checkReservedLocalPart(localPart, "mail.example", "mail.example"); !errors.Is(err, ErrMailboxAddressReserved) {
+			t.Fatalf("checkReservedLocalPart(%q) on the shared domain = %v; want ErrMailboxAddressReserved", input, err)
+		}
+		if err := checkReservedLocalPart(localPart, "news.example.com", "mail.example"); err != nil {
+			t.Fatalf("checkReservedLocalPart(%q) on an organization domain = %v; want nil", input, err)
 		}
 	}
 }

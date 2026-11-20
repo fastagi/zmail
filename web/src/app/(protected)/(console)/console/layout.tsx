@@ -15,7 +15,6 @@ import {
   Gauge,
   Mail,
   Send,
-  Globe,
   FileText,
   Users,
   Megaphone,
@@ -46,6 +45,11 @@ const OrganizationSwitcher = lazy(async () => {
   const organizationFeature =
     await import('@/features/organization/components/organization-switcher');
   return { default: organizationFeature.OrganizationSwitcher };
+});
+
+const AdminEntryLink = lazy(async () => {
+  const adminFeature = await import('@/features/mailbox/components/admin/admin-entry-link');
+  return { default: adminFeature.AdminEntryLink };
 });
 
 const NotificationCenter = lazy(async () => {
@@ -131,11 +135,6 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             icon: FileText,
           },
           {
-            titleKey: 'nav.mailDomain' as const,
-            href: ROUTES.CONSOLE.MAIL_DOMAIN,
-            icon: Globe,
-          },
-          {
             titleKey: 'nav.developers' as const,
             href: ROUTES.CONSOLE.DEVELOPERS,
             icon: Code2,
@@ -176,6 +175,11 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
               fallback={<div className="h-8 w-9 rounded-md border bg-muted" aria-hidden="true" />}
             >
               <OrganizationSwitcher />
+            </Suspense>
+          ) : null}
+          {organizationEnabled && isWebFeatureEnabled('mailbox') ? (
+            <Suspense fallback={null}>
+              <AdminEntryLink />
             </Suspense>
           ) : null}
         </div>

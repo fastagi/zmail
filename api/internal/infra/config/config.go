@@ -444,6 +444,12 @@ const (
 	DefaultMailboxDailySendLimit = 200
 	// DefaultMailboxInboundTolerance is the accepted clock skew for a signed inbound delivery.
 	DefaultMailboxInboundTolerance = 5 * time.Minute
+	// DefaultMailboxMaxPerOrganization bounds the mailboxes one organization may own.
+	DefaultMailboxMaxPerOrganization = 50
+	// MailboxMaxPerOrganizationCeiling is the highest MAILBOX_MAX_PER_ORGANIZATION accepted and
+	// the bound of every mailbox list. It equals domain.MailboxesPerOrganizationCeiling; config
+	// may not import domain, so a mailbox test keeps the two in step.
+	MailboxMaxPerOrganizationCeiling = 5000
 	// DefaultMailboxMaxZonesPerOrganization bounds the DNS zones Zmail creates for one
 	// organization; the provider account limits how many zones it may add.
 	DefaultMailboxMaxZonesPerOrganization = 3
@@ -491,6 +497,9 @@ type MailboxConfig struct {
 	// MaxZonesPerOrganization bounds the zones Zmail adds to the Cloudflare account for one
 	// organization's apex domains, between 1 and MaxMailboxZonesPerOrganization.
 	MaxZonesPerOrganization int
+	// MaxPerOrganization bounds the mailboxes one organization may own, between 1 and
+	// MailboxMaxPerOrganizationCeiling. Lowering it keeps every existing mailbox.
+	MaxPerOrganization int
 	// TransactionalEnabled accepts transactional messages; it requires SecretEncryptionKey.
 	TransactionalEnabled bool
 	// SecretEncryptionKey encrypts queued transactional content and keys idempotency fingerprints.
@@ -735,6 +744,7 @@ func Load() (*Config, error) {
 			CloudflareEmailWorker:   env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
 
 			MaxZonesPerOrganization: env.GetInt("MAILBOX_MAX_ZONES_PER_ORGANIZATION", DefaultMailboxMaxZonesPerOrganization),
+			MaxPerOrganization:      env.GetInt("MAILBOX_MAX_PER_ORGANIZATION", DefaultMailboxMaxPerOrganization),
 
 			TransactionalEnabled:            env.GetBool("MAILBOX_TRANSACTIONAL_ENABLED", false),
 			SecretEncryptionKey:             env.Get("MAILBOX_SECRET_ENCRYPTION_KEY", ""),
@@ -1386,6 +1396,9 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 	}
 	if resolved.DailyTransactionalLimit <= 0 || resolved.DailyTransactionalLimit > 100000 {
 		return fmt.Errorf("MAILBOX_DAILY_TRANSACTIONAL_LIMIT must be between 1 and 100000, or unset to take MAILBOX_DAILY_SEND_LIMIT")
+	}
+	if resolved.MaxPerOrganization < 1 || resolved.MaxPerOrganization > MailboxMaxPerOrganizationCeiling {
+		return fmt.Errorf("MAILBOX_MAX_PER_ORGANIZATION must be between 1 and %d", MailboxMaxPerOrganizationCeiling)
 	}
 	if err := validateMailboxTransactional(resolved); err != nil {
 		return err

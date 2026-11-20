@@ -64,6 +64,10 @@ import type {
   MailboxMember,
   MailboxPermission,
   MailboxSealedDeletion,
+  MailboxDirectoryEntry,
+  MailboxImportResult,
+  MailboxImportRowResult,
+  MailboxListScope,
   MailboxType,
   MailTemplate,
   MailTemplateInput,
@@ -74,6 +78,12 @@ import type {
 import { mockTransactionalStore } from '@/features/developer/server/mock-transactional-store';
 import { renderTemplate, templateVariables } from '@/features/mailbox/utils/template-render';
 import { mockOrganizationStore } from '@/features/organization/server/mock-organization-store';
+import {
+  guardFormulaCell,
+  parseImportMembers,
+  stripFormulaGuard,
+} from '@/features/mailbox/utils/mailbox-import';
+import { ApiErrorCode } from '@/http/codes';
 import type { OrganizationRole } from '@/features/organization/types';
 
 /**
@@ -232,13 +242,40 @@ interface MockMailboxStoreDependencies {
   now: () => Date;
   /** The membership id of a current member of the organization, or null. */
   membershipOf: (organizationId: number, userId: number) => number | null;
+  /** Account emails of the organization's current members by user id, lowercased. */
+  memberEmails: (organizationId: number) => Map<number, string>;
 }
 
 const defaultDependencies: MockMailboxStoreDependencies = {
   now: () => new Date(),
   membershipOf: (organizationId, userId) =>
     mockOrganizationStore.membershipIdOf(organizationId, userId),
+  memberEmails: organizationId => mockOrganizationStore.memberEmails(organizationId),
 };
+
+/** One directory page as the route validated its query. */
+export interface MockDirectoryQuery {
+  type?: MailboxType;
+  q?: string;
+  beforeId?: number;
+  perPage: number;
+}
+
+export interface MockDirectoryPage {
+  items: MailboxDirectoryEntry[];
+  /** The last row's id when an older page follows; null otherwise. */
+  nextBeforeId: number | null;
+  mailboxCount: number;
+  sentLast24h: number;
+}
+
+/** Resolves an import row's domain as the create route does. */
+export type MockImportDomainResolver = (
+  name: string
+) => { ok: true; name: string } | { ok: false; error: 'not_found' | 'not_verified' };
+
+const maxMockExportRows = 5_000;
+const exportHeader = 'address,display_name,members,member_count,sent_last_24h,created_at';
 
 /** What a viewer may do with a mailbox: the union of role, personal ownership, and member row. */
 export function mailboxAccessFor(
@@ -359,12 +396,25 @@ export class MockMailboxStore {
     return false;
   }
 
-  /** Mailboxes the viewer has any access to, oldest first, as the API lists them. */
-  list(organizationId: number, viewer: MailboxViewer): Mailbox[] {
+  /**
+   * Mailboxes the viewer has any access to, oldest first, as the API lists them. `usable` keeps
+   * those the viewer reads or sends from, and for owners and admins those awaiting handover.
+   */
+  list(organizationId: number, viewer: MailboxViewer, scope?: MailboxListScope): Mailbox[] {
     return this.statesOf(organizationId)
       .flatMap(state => {
         const access = mailboxAccessFor(state.access, viewer);
-        return anyAccess(access) ? [this.view(state, viewer, access)] : [];
+        if (!anyAccess(access)) return [];
+        const awaiting = state.access.type === 'personal' && state.access.ownerLeft !== null;
+        if (
+          scope === 'usable' &&
+          !access.view &&
+          !access.send &&
+          !(awaiting && managesOrganization(viewer))
+        ) {
+          return [];
+        }
+        return [this.view(state, viewer, access)];
       })
       .sort((left, right) => left.id - right.id);
   }
@@ -376,7 +426,9 @@ export class MockMailboxStore {
     input: Omit<CreateMailboxInput, 'type'> & { type?: unknown },
     addressDomain: string = MOCK_MAILBOX_DOMAIN
   ): MockMailboxCreateResult {
-    const localPart = normalizeLocalPart(input.local_part);
+    const localPart = normalizeLocalPart(input.local_part, {
+      sharedDomain: addressDomain === MOCK_MAILBOX_DOMAIN,
+    });
     if (!localPart.ok) return { ok: false, error: localPart.reason };
     const displayName = normalizeDisplayName(input.display_name ?? '');
     if (displayName === null) return { ok: false, error: 'invalid' };
@@ -420,6 +472,209 @@ export class MockMailboxStore {
     this.store(state, this.welcomeMessage(mailbox));
     // As in the API, a create response reports 0 unread.
     return { ok: true, mailbox: { ...this.view(state, viewer), unread_count: 0 } };
+  }
+
+  /** One page of the administration directory, newest first; owners and admins only. */
+  directory(
+    organizationId: number,
+    viewer: MailboxViewer,
+    query: MockDirectoryQuery
+  ): { ok: true; value: MockDirectoryPage } | { ok: false; error: 'forbidden' } {
+    if (!managesOrganization(viewer)) return { ok: false, error: 'forbidden' };
+    const needle = query.q?.trim().toLowerCase() ?? '';
+    const states = this.statesOf(organizationId).sort(
+      (left, right) => right.mailbox.id - left.mailbox.id
+    );
+    const matching = states.filter(
+      state =>
+        (query.type === undefined || state.access.type === query.type) &&
+        (query.beforeId === undefined || state.mailbox.id < query.beforeId) &&
+        (needle === '' ||
+          state.mailbox.address.toLowerCase().includes(needle) ||
+          state.mailbox.display_name.toLowerCase().includes(needle))
+    );
+    const page = matching.slice(0, query.perPage);
+    const items = page.map(state => this.directoryEntry(state));
+    return {
+      ok: true,
+      value: {
+        items,
+        nextBeforeId:
+          matching.length > query.perPage ? (page[page.length - 1]?.mailbox.id ?? null) : null,
+        mailboxCount: states.length,
+        sentLast24h: states.reduce((total, state) => total + this.sentLast24h(state), 0),
+      },
+    };
+  }
+
+  /** Changes the display name and records `renamed`; owners and admins only. */
+  rename(
+    organizationId: number,
+    mailboxId: number,
+    viewer: MailboxViewer,
+    rawDisplayName: string
+  ):
+    | { ok: true; mailbox: Mailbox }
+    | { ok: false; error: 'forbidden' | 'mailbox_not_found' | 'invalid' } {
+    if (!managesOrganization(viewer)) return { ok: false, error: 'forbidden' };
+    const state = this.stateOf(organizationId, mailboxId);
+    if (!state) return { ok: false, error: 'mailbox_not_found' };
+    const displayName = normalizeDisplayName(rawDisplayName);
+    if (displayName === null) return { ok: false, error: 'invalid' };
+    const from = state.mailbox.display_name;
+    if (from !== displayName) {
+      state.mailbox.display_name = displayName;
+      this.record(state, 'renamed', viewer.userId, null, { from, to: displayName });
+    }
+    return { ok: true, mailbox: this.view(state, viewer) };
+  }
+
+  /**
+   * Checks or creates shared mailboxes from import rows with the API's rules and row codes. A
+   * real run creates each passing row through the create path; a dry run counts the limit in row
+   * order and changes nothing.
+   */
+  importRows(
+    organizationId: number,
+    viewer: MailboxViewer,
+    rows: readonly { address: string; display_name: string; members: string }[],
+    dryRun: boolean,
+    resolveDomain: MockImportDomainResolver
+  ): { ok: true; value: MailboxImportResult } | { ok: false; error: 'forbidden' } {
+    if (!managesOrganization(viewer)) return { ok: false, error: 'forbidden' };
+    const emails = new Map<string, number>();
+    for (const [userId, email] of this.dependencies.memberEmails(organizationId)) {
+      emails.set(email, userId);
+    }
+    const seen = new Set<string>();
+    let planned = this.mailboxesOf(organizationId).size;
+    const result: MailboxImportResult = { dry_run: dryRun, succeeded: 0, failed: 0, rows: [] };
+    rows.forEach((raw, index) => {
+      const address = stripFormulaGuard(raw.address.trim()).trim();
+      const outcome = (
+        status: MailboxImportRowResult['status'],
+        extra: Partial<MailboxImportRowResult> = {}
+      ) => {
+        result.rows.push({
+          row: index + 1,
+          address,
+          status,
+          mailbox_id: null,
+          error_code: null,
+          missing_emails: [],
+          ...extra,
+        });
+        if (status === 'failed') result.failed += 1;
+        else result.succeeded += 1;
+      };
+      const fail = (code: string, missing: string[] = []) =>
+        outcome('failed', { error_code: code, missing_emails: missing });
+
+      const key = address.toLowerCase();
+      const duplicate = seen.has(key);
+      seen.add(key);
+      const at = address.lastIndexOf('@');
+      if (at <= 0 || at === address.length - 1) return fail(ApiErrorCode.MAILBOX_ADDRESS_INVALID);
+      if (duplicate) return fail(ApiErrorCode.MAILBOX_IMPORT_DUPLICATE_ROW);
+      const displayName = normalizeDisplayName(stripFormulaGuard(raw.display_name));
+      if (displayName === null) return fail(ApiErrorCode.MAILBOX_ADDRESS_INVALID);
+      const members = parseImportMembers(stripFormulaGuard(raw.members.trim()));
+      if (members === null) return fail(ApiErrorCode.MAILBOX_ACCESS_INVALID);
+      const missing = members.filter(member => !emails.has(member.email)).map(item => item.email);
+      if (missing.length > 0) return fail(ApiErrorCode.MAILBOX_IMPORT_MEMBER_NOT_FOUND, missing);
+      const localPart = normalizeLocalPart(address.slice(0, at), {
+        sharedDomain: address.slice(at + 1).toLowerCase() === MOCK_MAILBOX_DOMAIN,
+      });
+      if (!localPart.ok) {
+        return fail(
+          localPart.reason === 'reserved'
+            ? ApiErrorCode.MAILBOX_ADDRESS_RESERVED
+            : ApiErrorCode.MAILBOX_ADDRESS_INVALID
+        );
+      }
+      const placement = resolveDomain(address.slice(at + 1));
+      if (!placement.ok) {
+        return fail(
+          placement.error === 'not_verified'
+            ? ApiErrorCode.MAILBOX_DOMAIN_NOT_VERIFIED
+            : ApiErrorCode.MAILBOX_DOMAIN_NOT_FOUND
+        );
+      }
+      if (this.claimedAddresses.has(`${localPart.value}@${placement.name}`)) {
+        return fail(ApiErrorCode.MAILBOX_ADDRESS_TAKEN);
+      }
+      if (dryRun) {
+        if (planned >= MAILBOX_MAX_PER_ORGANIZATION)
+          return fail(ApiErrorCode.MAILBOX_LIMIT_REACHED);
+        planned += 1;
+        return outcome('valid');
+      }
+      const created = this.create(
+        organizationId,
+        viewer,
+        {
+          local_part: localPart.value,
+          display_name: displayName,
+          type: 'shared',
+          members: members.map(member => ({
+            user_id: emails.get(member.email) ?? 0,
+            permission: member.permission,
+          })),
+        },
+        placement.name
+      );
+      if (created.ok) return outcome('created', { mailbox_id: created.mailbox.id });
+      const codes = {
+        invalid: ApiErrorCode.MAILBOX_ADDRESS_INVALID,
+        reserved: ApiErrorCode.MAILBOX_ADDRESS_RESERVED,
+        taken: ApiErrorCode.MAILBOX_ADDRESS_TAKEN,
+        limit: ApiErrorCode.MAILBOX_LIMIT_REACHED,
+        access_invalid: ApiErrorCode.MAILBOX_ACCESS_INVALID,
+      } as const;
+      return fail(codes[created.error]);
+    });
+    return { ok: true, value: result };
+  }
+
+  /** Every mailbox of one type as the API's CSV file, newest first; owners and admins only. */
+  exportCsv(
+    organizationId: number,
+    viewer: MailboxViewer,
+    type: MailboxType
+  ): { ok: true; csv: string; filename: string } | { ok: false; error: 'forbidden' } {
+    if (!managesOrganization(viewer)) return { ok: false, error: 'forbidden' };
+    const emails = this.dependencies.memberEmails(organizationId);
+    const lines = this.statesOf(organizationId)
+      .filter(state => state.access.type === type)
+      .sort((left, right) => right.mailbox.id - left.mailbox.id)
+      .slice(0, maxMockExportRows)
+      .map(state => {
+        const entry = this.directoryEntry(state);
+        const members: string[] = [];
+        const owner = state.access.ownerUserId;
+        if (owner !== null && emails.has(owner)) members.push(emails.get(owner) ?? '');
+        for (const member of state.access.members.values()) {
+          const email = emails.get(member.user_id);
+          if (email) members.push(`${email}:${member.permission}`);
+        }
+        members.sort();
+        return [
+          guardFormulaCell(entry.address),
+          guardFormulaCell(entry.display_name),
+          guardFormulaCell(members.join(';')),
+          String(entry.member_count),
+          String(entry.sent_last_24h),
+          new Date(entry.created_at).toISOString().replace(/\.\d{3}Z$/u, 'Z'),
+        ]
+          .map(csvField)
+          .join(',');
+      });
+    const day = this.dependencies.now().toISOString().slice(0, 10).replaceAll('-', '');
+    return {
+      ok: true,
+      csv: `\uFEFF${[exportHeader, ...lines].join('\r\n')}\r\n`,
+      filename: `${type}-mailboxes-${day}.csv`,
+    };
   }
 
   /** Deletes the mailbox and its messages; the address stays claimed. Needs `administer`. */
@@ -1855,6 +2110,33 @@ export class MockMailboxStore {
   private timestamp(): string {
     return this.dependencies.now().toISOString();
   }
+
+  private directoryEntry(state: MailboxState): MailboxDirectoryEntry {
+    return {
+      ...state.mailbox,
+      type: state.access.type,
+      owner_user_id: state.access.ownerUserId,
+      awaiting_handover: state.access.type === 'personal' && state.access.ownerLeft !== null,
+      member_count: state.access.type === 'shared' ? state.access.members.size : 0,
+      sent_last_24h: this.sentLast24h(state),
+    };
+  }
+
+  /** Outbound mail of the last 24 hours; the mock has one lane. */
+  private sentLast24h(state: MailboxState): number {
+    const since = this.dependencies.now().getTime() - dayMilliseconds;
+    let sent = 0;
+    for (const message of state.messages.values()) {
+      if (message.direction === 'outbound' && Date.parse(message.created_at) >= since) sent += 1;
+    }
+    return sent;
+  }
+}
+
+/** Quotes a CSV field the way Go's encoding/csv does. */
+function csvField(value: string): string {
+  if (value === '' || !/[",\r\n]|^[ \t]/u.test(value)) return value;
+  return `"${value.replaceAll('"', '""')}"`;
 }
 
 export const mockMailboxStore = new MockMailboxStore();

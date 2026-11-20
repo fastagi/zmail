@@ -36,6 +36,7 @@ export type MailboxErrorKey =
   | 'errors.dnsRecordNotFound'
   | 'errors.dnsRecordRejected'
   | 'errors.generic'
+  | 'errors.importDuplicateRow'
   | 'errors.invalidInput'
   | 'errors.invalidResponse'
   | 'errors.limitReached'
@@ -45,6 +46,8 @@ export type MailboxErrorKey =
   | 'errors.organizationNotFound'
   | 'errors.createDenied'
   | 'errors.permissionDenied'
+  | 'errors.platformAccountNotFound'
+  | 'errors.platformAccountTaken'
   | 'errors.sendLimitReached'
   | 'errors.senderNotConfigured'
   | 'errors.templateInvalid'
@@ -92,6 +95,7 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_LIMIT_REACHED]: 'errors.limitReached',
   [ApiErrorCode.MAILBOX_ACCESS_INVALID]: 'errors.accessInvalid',
   [ApiErrorCode.MAILBOX_ACCESS_CONFLICT]: 'errors.accessConflict',
+  [ApiErrorCode.MAILBOX_IMPORT_DUPLICATE_ROW]: 'errors.importDuplicateRow',
   [ApiErrorCode.MAILBOX_MESSAGE_INVALID]: 'errors.messageInvalid',
   [ApiErrorCode.MAILBOX_SEND_LIMIT_REACHED]: 'errors.sendLimitReached',
   [ApiErrorCode.MAILBOX_DELIVERY_FAILED]: 'errors.deliveryFailed',
@@ -136,6 +140,8 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_ROLE_NOT_FOUND]: 'errors.roleNotFound',
   [ApiErrorCode.MAILBOX_ROLE_NAME_TAKEN]: 'errors.roleNameTaken',
   [ApiErrorCode.MAILBOX_ROLE_LIMIT_REACHED]: 'errors.roleLimitReached',
+  [ApiErrorCode.MAILBOX_PLATFORM_ACCOUNT_NOT_FOUND]: 'errors.platformAccountNotFound',
+  [ApiErrorCode.MAILBOX_PLATFORM_ACCOUNT_TAKEN]: 'errors.platformAccountTaken',
   [ApiErrorCode.MAILBOX_ZONE_NOT_FOUND]: 'errors.zoneNotFound',
   [ApiErrorCode.MAILBOX_ZONE_PENDING]: 'errors.zonePending',
   [ApiErrorCode.MAILBOX_ZONE_IN_USE]: 'errors.zoneInUse',
@@ -146,6 +152,19 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_DNS_RECORD_LOCKED]: 'errors.dnsRecordLocked',
   [ApiErrorCode.MAILBOX_DNS_RECORD_REJECTED]: 'errors.dnsRecordRejected',
 };
+
+/**
+ * Maps an import row's error code to local copy; an unknown code is the generic failure. The copy
+ * of `MAILBOX.IMPORT_MEMBER_NOT_FOUND` names the missing emails (`{emails}`).
+ */
+export function importRowErrorKey(
+  code: string | null
+): MailboxErrorKey | 'admin.importDialog.memberNotFound' {
+  if (code === ApiErrorCode.MAILBOX_IMPORT_MEMBER_NOT_FOUND) {
+    return 'admin.importDialog.memberNotFound';
+  }
+  return (code === null ? undefined : errorKeys[code]) ?? 'errors.generic';
+}
 
 /** Maps a failure to stable local copy; backend message text is never shown. */
 export function resolveMailboxErrorKey(error: unknown): MailboxErrorKey {

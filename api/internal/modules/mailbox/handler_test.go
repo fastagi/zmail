@@ -34,12 +34,17 @@ type handlerFixture struct {
 
 func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *handlerFixture {
 	t.Helper()
+	return newHandlerFixtureWith(t, organization, Settings{
+		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5,
+	})
+}
+
+func newHandlerFixtureWith(t *testing.T, organization *domain.OrganizationContext, settings Settings) *handlerFixture {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	inbox := newInboxRecorder()
 	repo := inbox.fakeRepository
-	svc := NewService(inbox, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, Settings{
-		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5,
-	}, nil, nil, nil)
+	svc := NewService(inbox, &fakeMemberships{}, repo, newFakeContacts(), &stubBroadcasts{}, nil, nil, nil, nil, &fakeTransport{}, &fakeNotifier{}, settings, nil, nil, nil)
 	handler := NewHandler(svc)
 	response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
 	response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)
@@ -58,6 +63,10 @@ func newHandlerFixture(t *testing.T, organization *domain.OrganizationContext) *
 	router.GET("/mailboxes", handler.ListMailboxes)
 	router.POST("/mailboxes", handler.CreateMailbox)
 	router.DELETE("/mailboxes/:mailbox_id", handler.DeleteMailbox)
+	router.PUT("/mailboxes/:mailbox_id", handler.UpdateMailbox)
+	router.GET("/mailbox-directory", handler.ListMailboxDirectory)
+	router.POST("/mailbox-imports", handler.ImportMailboxes)
+	router.GET("/mailbox-exports", handler.ExportMailboxes)
 	router.GET("/mailboxes/:mailbox_id/messages", handler.ListMessages)
 	router.POST("/mailboxes/:mailbox_id/messages", handler.SendMessage)
 	router.GET("/mail-messages", handler.ListLog)
@@ -1130,5 +1139,44 @@ func TestReceivingDuringARunningSetupRunsTheSetupAgain(t *testing.T) {
 	if stored.Capability != domain.MailDomainSendReceive || stored.Status != domain.MailDomainStatusVerified ||
 		recordStatus(stored, domain.MailDomainRecordReceiving, "MX", "news.example.com") != domain.MailDomainRecordOK {
 		t.Fatalf("stored domain = %+v; want verified with its receiving records", stored)
+	}
+}
+
+func TestListMailboxesScopeParam(t *testing.T) {
+	f := newHandlerFixture(t, membership(domain.OrganizationRoleAdmin))
+	// The admin manages the mailbox but is not a member of it.
+	if _, err := f.service.CreateMailbox(context.Background(), *membership(domain.OrganizationRoleAdmin), CreateMailboxInput{
+		LocalPart: "desk", Type: domain.MailboxTypeShared,
+		Members: []MailboxMemberInput{{UserID: handlerUser + 1, Permission: domain.MailboxPermissionSend}},
+	}); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	recorder, body := f.do(http.MethodGet, "/mailboxes", "")
+	if recorder.Code != http.StatusOK || len(body["data"].([]any)) != 1 {
+		t.Fatalf("unscoped list = %d %v; want the managed mailbox", recorder.Code, body)
+	}
+	recorder, body = f.do(http.MethodGet, "/mailboxes?scope=usable", "")
+	if recorder.Code != http.StatusOK || len(body["data"].([]any)) != 0 {
+		t.Fatalf("usable list = %d %v; want none", recorder.Code, body)
+	}
+	recorder, body = f.do(http.MethodGet, "/mailboxes?scope=all", "")
+	if recorder.Code != http.StatusUnprocessableEntity || body["error_code"] != "COMMON.VALIDATION_FAILED" {
+		t.Fatalf("scope=all = %d %v; want 422 COMMON.VALIDATION_FAILED", recorder.Code, body)
+	}
+}
+
+func TestListDomainsReportsConfiguredMax(t *testing.T) {
+	f := newHandlerFixtureWith(t, membership(domain.OrganizationRoleMember), Settings{
+		Domain: "mail.example", InboundTolerance: 5 * time.Minute, DailySendLimit: 5, MaxMailboxes: 75,
+	})
+	recorder, body := f.do(http.MethodGet, "/mailbox-domains", "")
+	items, _ := body["data"].([]any)
+	if recorder.Code != http.StatusOK || len(items) == 0 {
+		t.Fatalf("list = %d %v", recorder.Code, body)
+	}
+	for _, item := range items {
+		if got := item.(map[string]any)["max_mailboxes"]; got != float64(75) {
+			t.Fatalf("max_mailboxes = %v; want 75", got)
+		}
 	}
 }

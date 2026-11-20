@@ -45,7 +45,7 @@ const state = vi.hoisted(() => {
 vi.mock('sonner', () => ({ toast }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  usePathname: () => '/console/mail-domain',
+  usePathname: () => '/console/admin/domains',
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
@@ -410,11 +410,11 @@ describe('organization mail domains', () => {
     // Links keep the organization the user works in.
     expect(within(card).getByRole('link', { name: 'Review records' })).toHaveAttribute(
       'href',
-      '/console/mail-domain/9/dns?org=1'
+      '/console/admin/domains/9/dns?org=1'
     );
     expect(within(card).getByRole('link', { name: 'DNS records' })).toHaveAttribute(
       'href',
-      '/console/mail-domain/9/dns?org=1'
+      '/console/admin/domains/9/dns?org=1'
     );
     // A pending zone has nothing to set up yet.
     expect(within(card).queryByRole('button', { name: 'Set up again' })).toBeNull();
@@ -482,7 +482,7 @@ describe('organization mail domains', () => {
     const zone = screen.getByRole('article', { name: 'example.org' });
     expect(within(zone).getByRole('link', { name: 'DNS records' })).toHaveAttribute(
       'href',
-      '/console/mail-domain/9/dns?org=1'
+      '/console/admin/domains/9/dns?org=1'
     );
     fireEvent.click(within(zone).getByRole('button', { name: 'Remove from Zmail' }));
     const dialog = await screen.findByRole('dialog');
@@ -532,7 +532,7 @@ describe('organization mail domains', () => {
 
     expect(screen.getByRole('link', { name: 'Back to domains' })).toHaveAttribute(
       'href',
-      '/console/mail-domain?org=1'
+      '/console/admin/domains?org=1'
     );
   });
 

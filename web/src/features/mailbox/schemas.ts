@@ -25,6 +25,18 @@ export const MAILBOX_MAX_PER_ORGANIZATION = 50;
 /** Members of one shared mailbox. */
 export const MAILBOX_MAX_MEMBERS = 100;
 export const MAILBOX_ACCESS_EVENTS_MAX_PAGE_SIZE = 100;
+/** The administration directory, import, and export of `contracts/MAILBOXES.md`. */
+export const MAILBOX_DIRECTORY_QUERY_MAX_LENGTH = 120;
+export const MAILBOX_DIRECTORY_DEFAULT_PAGE_SIZE = 15;
+export const MAILBOX_DIRECTORY_MAX_PAGE_SIZE = 100;
+export const MAILBOX_DIRECTORY_CURSOR_MAX_LENGTH = 128;
+export const MAILBOX_IMPORT_MAX_ROWS = 500;
+export const MAILBOX_IMPORT_ADDRESS_MAX_LENGTH = 320;
+export const MAILBOX_IMPORT_DISPLAY_NAME_MAX_LENGTH = 480;
+export const MAILBOX_IMPORT_MEMBERS_MAX_LENGTH = 8192;
+/** 5000 rows of 100 members each fit well within it. */
+export const MAILBOX_EXPORT_MAX_BYTES = 24 * 1024 * 1024;
+export const MAILBOX_LIST_SCOPES = ['usable'] as const;
 export const MAIL_DOMAIN_NAME_MAX_LENGTH = 253;
 export const MAIL_DOMAIN_MAX_PER_ORGANIZATION = 10;
 export const MAIL_ZONE_MAX_PER_ORGANIZATION = 3;
@@ -630,6 +642,7 @@ export const mailboxAccessEventTypeSchema = union([
   literal('handed_over'),
   literal('sealed_deleted'),
   literal('webhooks_changed'),
+  literal('renamed'),
 ]);
 
 export const mailboxAccessEventSchema = strictObject({
@@ -978,13 +991,19 @@ export const mailLabelInputSchema = strictObject({ name: string(), color: mailLa
 export type NormalizedLocalPart =
   { ok: true; value: string } | { ok: false; reason: 'invalid' | 'reserved' };
 
-/** Trims and lowercases a local part, then applies the contract's address rules. */
-export function normalizeLocalPart(raw: string): NormalizedLocalPart {
+/**
+ * Trims and lowercases a local part, then applies the contract's address rules. Role addresses
+ * are reserved only on the shared domain; an organization operates its own domain.
+ */
+export function normalizeLocalPart(
+  raw: string,
+  { sharedDomain = true }: { sharedDomain?: boolean } = {}
+): NormalizedLocalPart {
   const value = raw.trim().toLowerCase();
   if (!localPartPattern.test(value) || value.includes('..')) {
     return { ok: false, reason: 'invalid' };
   }
-  if (reservedLocalParts.has(value)) return { ok: false, reason: 'reserved' };
+  if (sharedDomain && reservedLocalParts.has(value)) return { ok: false, reason: 'reserved' };
   return { ok: true, value };
 }
 
@@ -1100,3 +1119,55 @@ function normalizeMessageId(raw: string): string | null {
 function utf8Length(value: string): number {
   return new TextEncoder().encode(value).length;
 }
+
+/** One mailbox of the administration directory, with its member count and personal-lane sends. */
+export const mailboxDirectoryEntrySchema = strictObject({
+  id: safeIdSchema,
+  address: string(),
+  display_name: string(),
+  type: mailboxTypeSchema,
+  owner_user_id: nullable(safeIdSchema),
+  awaiting_handover: boolean(),
+  created_at: timestampSchema,
+  member_count: nonnegativeIntegerSchema,
+  sent_last_24h: nonnegativeIntegerSchema,
+});
+
+export const mailboxDirectoryMetaSchema = strictObject({
+  per_page: positiveIntegerSchema,
+  has_more: boolean(),
+  next_cursor: nullable(string()),
+  daily_send_limit: positiveIntegerSchema,
+  sent_last_24h: nonnegativeIntegerSchema,
+  mailbox_count: nonnegativeIntegerSchema,
+  max_mailboxes: positiveIntegerSchema,
+});
+
+export const mailboxDirectoryPageEnvelopeSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: array(mailboxDirectoryEntrySchema),
+  meta: mailboxDirectoryMetaSchema,
+});
+
+export const mailboxImportRowStatusSchema = union([
+  literal('valid'),
+  literal('created'),
+  literal('failed'),
+]);
+
+export const mailboxImportRowResultSchema = strictObject({
+  row: positiveIntegerSchema,
+  address: string(),
+  status: mailboxImportRowStatusSchema,
+  mailbox_id: nullable(safeIdSchema),
+  error_code: nullable(string()),
+  missing_emails: array(string()),
+});
+
+export const mailboxImportResultSchema = strictObject({
+  dry_run: boolean(),
+  succeeded: nonnegativeIntegerSchema,
+  failed: nonnegativeIntegerSchema,
+  rows: array(mailboxImportRowResultSchema),
+});

@@ -56,7 +56,7 @@ func (r *repository) ListMembershipMailboxMembers(ctx context.Context, organizat
 		Joins("JOIN mailboxes ON mailboxes.id = mailbox_members.mailbox_id").
 		Where("mailbox_members.membership_id = ? AND mailboxes.organization_id = ? AND mailboxes.deleted_at IS NULL",
 			membershipID, organizationID).
-		Order("mailbox_members.mailbox_id ASC").Limit(domain.MaxMailboxesPerOrganization).Find(&rows).Error
+		Order("mailbox_members.mailbox_id ASC").Limit(domain.MailboxesPerOrganizationCeiling).Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}

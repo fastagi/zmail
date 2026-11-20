@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/config"
 	infradatabase "github.com/fastagi/zmail/api/internal/infra/database"
 	"github.com/fastagi/zmail/api/pkg/response"
 )
@@ -134,7 +135,7 @@ func (f *accessFixture) outboundCount(t *testing.T) int64 {
 
 func listedMailbox(t *testing.T, svc *service, viewer domain.OrganizationContext, id uint) *domain.Mailbox {
 	t.Helper()
-	mailboxes, err := svc.ListMailboxes(context.Background(), viewer)
+	mailboxes, err := svc.ListMailboxes(context.Background(), viewer, MailboxListScopeAll)
 	if err != nil {
 		t.Fatalf("ListMailboxes: %v", err)
 	}
@@ -632,7 +633,7 @@ func TestCreateValidation(t *testing.T) {
 
 func listedMailboxCount(t *testing.T, f *accessFixture) int {
 	t.Helper()
-	mailboxes, err := f.service.ListMailboxes(context.Background(), f.admin)
+	mailboxes, err := f.service.ListMailboxes(context.Background(), f.admin, MailboxListScopeAll)
 	if err != nil {
 		t.Fatalf("ListMailboxes: %v", err)
 	}
@@ -878,7 +879,7 @@ func TestMemberLimitUnderConcurrency(t *testing.T) {
 func TestDeletedMailboxesDoNotCrowdOutLiveOnes(t *testing.T) {
 	f := newPostgresAccessFixture(t)
 	ctx := context.Background()
-	for i := 0; i < domain.MaxMailboxesPerOrganization; i++ {
+	for i := 0; i < config.DefaultMailboxMaxPerOrganization; i++ {
 		gone, err := f.service.CreateMailbox(ctx, f.admin, CreateMailboxInput{
 			LocalPart: fmt.Sprintf("gone%d", i), Type: domain.MailboxTypeShared,
 			Members: []MailboxMemberInput{{UserID: accessC, Permission: domain.MailboxPermissionView}},

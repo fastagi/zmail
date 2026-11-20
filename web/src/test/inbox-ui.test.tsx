@@ -127,6 +127,10 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', async importOriginal => ({
   useDeleteMailMessage: () => state.removeMessage,
   useSendMailMessage: () => state.send,
 }));
+// The role dialog counts each role's platform accounts; the ledger is not under test here.
+vi.mock('@/features/mailbox/hooks/use-platform-accounts', () => ({
+  usePlatformAccountCount: () => ({ data: undefined }),
+}));
 vi.mock('@/features/mailbox/hooks/use-inbox', async importOriginal => ({
   ...(await importOriginal<typeof import('@/features/mailbox/hooks/use-inbox')>()),
   // Only calls that load are recorded; a disabled query is pending without data.

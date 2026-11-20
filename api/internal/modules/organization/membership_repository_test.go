@@ -208,3 +208,52 @@ func TestRepositoryCountsOwnedAndNonOwnerMemberships(t *testing.T) {
 	assert.Equal(t, int64(1), total)
 	assert.Zero(t, owned)
 }
+
+func TestFindMembershipsByEmailsIgnoresCaseAndOtherOrganizations(t *testing.T) {
+	db, repo, organizationID, memberships := createOrganizationMembershipFixture(t)
+	strangerID := createOrganizationTestUser(t, db, "stranger")
+	other := &OrganizationPO{Name: "Other Org", Slug: "other-org", CreatedBy: strangerID}
+	require.NoError(t, db.Omit(clause.Associations).Create(other).Error)
+	require.NoError(t, db.Omit(clause.Associations).Create(&OrganizationMembershipPO{
+		OrganizationID: other.ID, UserID: strangerID, Role: string(domain.OrganizationRoleOwner),
+	}).Error)
+
+	found, err := repo.FindMembershipsByEmails(context.Background(), organizationID,
+		[]string{"Member-User@Example.COM", "stranger@example.com", "nobody@example.com"})
+	require.NoError(t, err)
+	require.Len(t, found, 1)
+	assert.Equal(t, memberships["member"].UserID, found[0].UserID)
+	assert.Equal(t, memberships["member"].ID, found[0].ID)
+	require.NotNil(t, found[0].User)
+	assert.Equal(t, "member-user@example.com", found[0].User.Email)
+
+	none, err := repo.FindMembershipsByEmails(context.Background(), organizationID, nil)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}
+
+func TestListMembershipsByUserIDs(t *testing.T) {
+	db, repo, organizationID, memberships := createOrganizationMembershipFixture(t)
+	strangerID := createOrganizationTestUser(t, db, "stranger-by-id")
+	other := &OrganizationPO{Name: "Other By Id", Slug: "other-by-id", CreatedBy: strangerID}
+	require.NoError(t, db.Omit(clause.Associations).Create(other).Error)
+	require.NoError(t, db.Omit(clause.Associations).Create(&OrganizationMembershipPO{
+		OrganizationID: other.ID, UserID: strangerID, Role: string(domain.OrganizationRoleOwner),
+	}).Error)
+
+	found, err := repo.ListMembershipsByUserIDs(context.Background(), organizationID,
+		[]uint{memberships["member"].UserID, memberships["admin"].UserID, strangerID, memberships["member"].UserID})
+	require.NoError(t, err)
+	require.Len(t, found, 2)
+	emails := map[uint]string{}
+	for _, membership := range found {
+		require.NotNil(t, membership.User)
+		emails[membership.UserID] = membership.User.Email
+	}
+	assert.Equal(t, "member-user@example.com", emails[memberships["member"].UserID])
+	assert.Equal(t, "member-admin@example.com", emails[memberships["admin"].UserID])
+
+	none, err := repo.ListMembershipsByUserIDs(context.Background(), organizationID, nil)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}

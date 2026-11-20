@@ -56,6 +56,7 @@ x-api-environment: &api-environment
   MAILBOX_CLOUDFLARE_API_TOKEN: ${MAILBOX_CLOUDFLARE_API_TOKEN:?missing in .env}
   MAILBOX_INBOUND_SECRET: ${MAILBOX_INBOUND_SECRET:?missing in .env}
   MAILBOX_DAILY_SEND_LIMIT: ${MAILBOX_DAILY_SEND_LIMIT:-200}
+  MAILBOX_MAX_PER_ORGANIZATION: ${MAILBOX_MAX_PER_ORGANIZATION:-50}
   # Broadcast unsubscribe links point at the public console.
   MAILBOX_PUBLIC_URL: ${ZMAIL_PUBLIC_ORIGIN:?run ./init-env.sh <public origin> first}
   # Organizations' own domains; off unless .env turns them on (see README).

@@ -60,6 +60,8 @@ type Settings struct {
 	EmailWorker string
 	// MaxZonesPerOrganization bounds the managed zones one organization may have Zmail create.
 	MaxZonesPerOrganization int
+	// MaxMailboxes bounds the mailboxes one organization may own; 0 takes the default.
+	MaxMailboxes int
 	// TransactionalEnabled accepts transactional messages; SecretEncryptionKey must be set too.
 	TransactionalEnabled bool
 	// SecretEncryptionKey encrypts queued transactional content and keys idempotency fingerprints.
@@ -139,9 +141,22 @@ type Service interface {
 	CreateMailDNSRecord(ctx context.Context, organizationID, zoneID uint, input MailDNSRecordInput) (*MailDNSRecord, error)
 	UpdateMailDNSRecord(ctx context.Context, organizationID, zoneID uint, recordID string, patch MailDNSRecordPatch) (*MailDNSRecord, error)
 	DeleteMailDNSRecord(ctx context.Context, organizationID, zoneID uint, recordID string) error
-	// ListMailboxes lists the mailboxes the viewer has any access to, with that access.
-	ListMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error)
+	// ListMailboxes lists the mailboxes the viewer has any access to, with that access; the usable
+	// scope keeps only those the viewer can read or send from, plus, for owners and admins,
+	// personal mailboxes awaiting handover.
+	ListMailboxes(ctx context.Context, viewer domain.OrganizationContext, scope MailboxListScope) ([]*domain.Mailbox, error)
+	// MaxMailboxes is the configured per-organization mailbox limit.
+	MaxMailboxes() int
 	DeleteMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) error
+	// MailboxDirectory lists one page of the organization's mailboxes with member counts and send
+	// attempts; only owners and admins may.
+	MailboxDirectory(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailboxDirectoryFilter) (*MailboxDirectoryPage, error)
+	// RenameMailbox changes a mailbox's display name; only owners and admins may.
+	RenameMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, displayName string) (*domain.Mailbox, error)
+	// ImportMailboxes checks or creates shared mailboxes row by row; only owners and admins may.
+	ImportMailboxes(ctx context.Context, viewer domain.OrganizationContext, rows []MailboxImportRow, dryRun bool) (*MailboxImportResult, error)
+	// ExportMailboxes reads every mailbox of one type with members' emails; only owners and admins may.
+	ExportMailboxes(ctx context.Context, viewer domain.OrganizationContext, mailboxType domain.MailboxType) ([]MailboxExportRow, error)
 	// ListMessages lists a mailbox's messages, or with filter.GroupThreads one row per thread, each
 	// row the newest message of its thread in the view with its Thread filled.
 	ListMessages(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
@@ -250,6 +265,8 @@ type Service interface {
 	Provider() string
 	InboundEnabled() bool
 	DailySendLimit() int
+	// Now is the service clock, which names export files.
+	Now() time.Time
 	DailyBroadcastLimit() int
 	DailyTransactionalLimit() int
 	// TransactionalPolicy reports the instance's transactional switch, rate limits, and simulator domain.
@@ -293,6 +310,8 @@ type service struct {
 	inbox domain.MailInboxRepository
 	// roles stores mail roles; nil when repo does not implement it.
 	roles domain.MailRoleRepository
+	// directory reads the administration directory; nil when repo does not implement it.
+	directory domain.MailboxDirectoryRepository
 	// ledger stores the platform account ledger; nil when repo does not implement it.
 	ledger domain.PlatformAccountRepository
 	// domains, zones, and domainProvider serve organization domains; nil when a test does not
@@ -362,6 +381,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailRoleRepository); ok {
 		roles = seam
 	}
+	var directory domain.MailboxDirectoryRepository
+	if seam, ok := repo.(domain.MailboxDirectoryRepository); ok {
+		directory = seam
+	}
 	var ledger domain.PlatformAccountRepository
 	if seam, ok := repo.(domain.PlatformAccountRepository); ok {
 		ledger = seam
@@ -379,7 +402,7 @@ func NewService(
 	return &service{
 		transactional: transactional, accounts: accounts, transactionalLimits: newTransactionalLimits(limits, settings),
 		encryptor: encryptor, fingerprintKey: fingerprintKey,
-		repo: repo, inbox: inbox, roles: roles, ledger: ledger, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
+		repo: repo, inbox: inbox, roles: roles, directory: directory, ledger: ledger, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
 		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },
@@ -427,6 +450,7 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 		DailySendLimit:   config.DefaultMailboxDailySendLimit,
 
 		MaxZonesPerOrganization: config.DefaultMailboxMaxZonesPerOrganization,
+		MaxMailboxes:            config.DefaultMailboxMaxPerOrganization,
 	}
 	if cfg == nil {
 		return settings
@@ -446,6 +470,9 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	if resolved.MaxZonesPerOrganization > 0 {
 		settings.MaxZonesPerOrganization = resolved.MaxZonesPerOrganization
 	}
+	if resolved.MaxPerOrganization > 0 {
+		settings.MaxMailboxes = resolved.MaxPerOrganization
+	}
 	settings.TransactionalEnabled = resolved.TransactionalEnabled
 	settings.SecretEncryptionKey = resolved.SecretEncryptionKey
 	settings.SimulatorDomain = resolved.SimulatorDomain
@@ -462,6 +489,17 @@ func (s *service) Domain() string {
 func (s *service) Provider() string {
 	return s.settings.Provider
 }
+
+// MaxMailboxes is the configured per-organization mailbox limit.
+func (s *service) MaxMailboxes() int {
+	if s.settings.MaxMailboxes > 0 {
+		return s.settings.MaxMailboxes
+	}
+	return config.DefaultMailboxMaxPerOrganization
+}
+
+// Now reads the service clock.
+func (s *service) Now() time.Time { return s.now() }
 
 func (s *service) DailySendLimit() int {
 	return s.settings.laneLimit(domain.SendLanePersonal)
@@ -588,8 +626,28 @@ func (s *service) Stats(ctx context.Context, viewer domain.OrganizationContext, 
 	return stats, nil
 }
 
-func (s *service) ListMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error) {
-	mailboxes, err := s.visibleMailboxes(ctx, viewer)
+// MailboxListScope selects which mailboxes ListMailboxes returns.
+type MailboxListScope string
+
+const (
+	// MailboxListScopeAll lists every mailbox the viewer has any access to.
+	MailboxListScopeAll MailboxListScope = ""
+	// MailboxListScopeUsable lists the mailboxes the viewer can read or send from, plus, for owners
+	// and admins, personal mailboxes awaiting handover.
+	MailboxListScopeUsable MailboxListScope = "usable"
+)
+
+func (s *service) ListMailboxes(ctx context.Context, viewer domain.OrganizationContext, scope MailboxListScope) ([]*domain.Mailbox, error) {
+	var mailboxes []*domain.Mailbox
+	var err error
+	switch scope {
+	case MailboxListScopeAll:
+		mailboxes, err = s.visibleMailboxes(ctx, viewer)
+	case MailboxListScopeUsable:
+		mailboxes, err = s.usableMailboxes(ctx, viewer)
+	default:
+		return nil, fmt.Errorf("%w: unknown mailbox list scope", domain.ErrInvalidInput)
+	}
 	if err != nil {
 		return nil, err
 	}

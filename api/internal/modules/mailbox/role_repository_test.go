@@ -46,7 +46,7 @@ func createRole(t *testing.T, repo *repository, organizationID uint, name string
 func createOrganizationMailbox(t *testing.T, repo *repository, organizationID uint, address string) *domain.Mailbox {
 	t.Helper()
 	mailbox := &domain.Mailbox{OrganizationID: organizationID, Address: address, Type: domain.MailboxTypeShared}
-	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("CreateMailbox(%q): %v", address, err)
 	}
 	return mailbox

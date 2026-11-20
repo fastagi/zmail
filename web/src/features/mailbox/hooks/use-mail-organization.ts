@@ -70,14 +70,8 @@ function useHydrated(): boolean {
   );
 }
 
-/**
- * The organization of a mail page. The choice lives in the `org` query parameter, so a link or a
- * reload keeps it. Navigating via the sidebar (no `org` parameter) restores the last chosen
- * organization of the session; an unknown explicit `org` parameter falls back to the first one.
- */
-export function useMailOrganization(): MailOrganizationScope {
-  const router = useRouter();
-  const pathname = usePathname();
+/** Which organization the `org` parameter, or else the session's last choice, names. */
+function useOrganizationChoice() {
   const searchParams = useSearchParams();
   const organizations = useOrganizations();
   const hydrated = useHydrated();
@@ -89,6 +83,28 @@ export function useMailOrganization(): MailOrganizationScope {
   const storedId = !hasExplicitOrg && hydrated ? readStoredOrganizationId() : null;
   const candidateId = hasExplicitOrg ? requestedId : storedId;
   const selected = items?.find(item => item.id === candidateId) ?? items?.[0];
+  return { organizations, hydrated, items, requestedId, selected };
+}
+
+/**
+ * The organization a mail page would show, chosen like `useMailOrganization` but read only: it
+ * never changes the URL or the stored choice, so pages outside the mail area can use it. Undefined
+ * while loading or when the user belongs to no organization.
+ */
+export function useChosenMailOrganization(): Organization | undefined {
+  const { hydrated, selected } = useOrganizationChoice();
+  return hydrated ? selected : undefined;
+}
+
+/**
+ * The organization of a mail page. The choice lives in the `org` query parameter, so a link or a
+ * reload keeps it. Navigating via the sidebar (no `org` parameter) restores the last chosen
+ * organization of the session; an unknown explicit `org` parameter falls back to the first one.
+ */
+export function useMailOrganization(): MailOrganizationScope {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { organizations, hydrated, items, requestedId, selected } = useOrganizationChoice();
   const selectedId = selected?.id;
 
   useEffect(() => {
