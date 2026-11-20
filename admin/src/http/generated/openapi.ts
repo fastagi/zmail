@@ -9360,7 +9360,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description A field failed validation, the local part is invalid (`MAILBOX.ADDRESS_INVALID`) or reserved (`MAILBOX.ADDRESS_RESERVED`), the named domain is still pending (`MAILBOX.DOMAIN_NOT_VERIFIED`), or the type, owner, or members are invalid (`MAILBOX.ACCESS_INVALID`). A domain the organization did not connect is `404 MAILBOX.DOMAIN_NOT_FOUND`. */
+            /** @description A field failed validation, the local part is invalid (`MAILBOX.ADDRESS_INVALID`) or a role address on the shared domain (`MAILBOX.ADDRESS_RESERVED`), the named domain is still pending (`MAILBOX.DOMAIN_NOT_VERIFIED`), or the type, owner, or members are invalid (`MAILBOX.ACCESS_INVALID`). A domain the organization did not connect is `404 MAILBOX.DOMAIN_NOT_FOUND`. */
             422: {
                 headers: {
                     [name: string]: unknown;

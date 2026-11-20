@@ -967,13 +967,19 @@ export const mailLabelInputSchema = strictObject({ name: string(), color: mailLa
 export type NormalizedLocalPart =
   { ok: true; value: string } | { ok: false; reason: 'invalid' | 'reserved' };
 
-/** Trims and lowercases a local part, then applies the contract's address rules. */
-export function normalizeLocalPart(raw: string): NormalizedLocalPart {
+/**
+ * Trims and lowercases a local part, then applies the contract's address rules. Role addresses
+ * are reserved only on the shared domain; an organization operates its own domain.
+ */
+export function normalizeLocalPart(
+  raw: string,
+  { sharedDomain = true }: { sharedDomain?: boolean } = {}
+): NormalizedLocalPart {
   const value = raw.trim().toLowerCase();
   if (!localPartPattern.test(value) || value.includes('..')) {
     return { ok: false, reason: 'invalid' };
   }
-  if (reservedLocalParts.has(value)) return { ok: false, reason: 'reserved' };
+  if (sharedDomain && reservedLocalParts.has(value)) return { ok: false, reason: 'reserved' };
   return { ok: true, value };
 }
 

@@ -738,3 +738,21 @@ func TestADomainSetupRunsInTheBackgroundOncePerDomain(t *testing.T) {
 		t.Fatalf("listed = %+v", listed)
 	}
 }
+
+func TestRoleAddressesAreReservedOnlyOnTheSharedDomain(t *testing.T) {
+	fixture := newDomainFixture(t)
+	ctx := context.Background()
+	fixture.connect(t, "news.example.com")
+
+	// The organization operates its own domain, so it may claim its role addresses.
+	for _, localPart := range []string{"support", "admin", "postmaster"} {
+		mailbox, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput(localPart, "", "news.example.com"))
+		if err != nil || mailbox.Address != localPart+"@news.example.com" {
+			t.Fatalf("CreateMailbox(%s@news.example.com) = %+v, %v", localPart, mailbox, err)
+		}
+	}
+	// The shared domain belongs to the operator, so its role addresses stay reserved.
+	if _, err := fixture.service.CreateMailbox(ctx, as(7), sharedInput("support", "", "")); !errors.Is(err, ErrMailboxAddressReserved) {
+		t.Fatalf("shared-domain support = %v", err)
+	}
+}
