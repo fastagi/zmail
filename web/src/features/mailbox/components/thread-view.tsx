@@ -16,7 +16,12 @@ import {
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
-import { useMailMessage, useMailThread } from '@/features/mailbox/hooks/use-mailbox';
+import { SecretsPanel } from '@/features/mailbox/components/secrets-panel';
+import {
+  useMailMessage,
+  useMailThread,
+  useRevealMailMessage,
+} from '@/features/mailbox/hooks/use-mailbox';
 import type { MailMessage } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
@@ -265,7 +270,7 @@ function CollapsedMessage({ message, onExpand }: { message: MailMessage; onExpan
 
 /** An open message: its headers, its actions, its files, and its content. */
 function MessageCard({
-  message,
+  message: stored,
   reader,
   variant,
 }: {
@@ -275,6 +280,17 @@ function MessageCard({
 }) {
   const t = useT('mailbox');
   const [plainText, setPlainText] = useState(false);
+  const reveal = useRevealMailMessage(useMailOrganizationId(), reader.mailboxId);
+  // The original stays in this card only; another message, or reopening this one, is masked.
+  const [revealed, setRevealed] = useState<MailMessage | null>(null);
+  const message = revealed?.id === stored.id ? revealed : stored;
+  const showSecretsPanel = stored.secrets_masked === true;
+  const onReveal = () => {
+    reveal
+      .mutateAsync(stored.id)
+      .then(setRevealed)
+      .catch(() => undefined);
+  };
   const hasHtml = message.html_body !== '';
   const hasText = message.text_body !== '';
   const showHtml = hasHtml && !(plainText && hasText);
@@ -309,6 +325,15 @@ function MessageCard({
       ) : null}
 
       <MailAttachmentList message={message} />
+
+      {showSecretsPanel ? (
+        <SecretsPanel
+          revealed={message !== stored}
+          pending={reveal.isPending}
+          failed={reveal.isError === true}
+          onReveal={onReveal}
+        />
+      ) : null}
 
       {hasHtml && hasText ? (
         <div role="group" aria-label={t('message.viewLabel')} className="flex gap-2">

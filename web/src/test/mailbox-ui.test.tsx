@@ -52,6 +52,7 @@ const state = vi.hoisted(() => {
     createLabel: mutation(),
     updateLabel: mutation(),
     deleteLabel: mutation(),
+    reveal: mutation(),
   };
 });
 
@@ -171,6 +172,7 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
     useSendMailMessage: (organizationId: number) => scoped(organizationId, state.send),
     useUpdateMailMessage: (organizationId: number) => scoped(organizationId, state.update),
     useDeleteMailMessage: (organizationId: number) => scoped(organizationId, state.removeMessage),
+    useRevealMailMessage: (organizationId: number) => scoped(organizationId, state.reveal),
   };
 });
 
@@ -674,6 +676,45 @@ describe('mailbox workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Plain text' }));
     expect(container.querySelector('iframe')).toBeNull();
     expect(screen.getByText('Plain question')).toBeInTheDocument();
+  });
+
+  it('hides masked codes behind a panel and shows the original only on request', async () => {
+    state.detail.data = message({
+      subject: 'Your code is ••••••',
+      text_body: 'Use code •••••• now',
+      html_body: '',
+      secrets_masked: true,
+    });
+    state.reveal.mutateAsync.mockReset();
+    state.reveal.mutateAsync.mockResolvedValue(
+      message({
+        subject: 'Your code is 482913',
+        text_body: 'Use code 482913 now',
+        html_body: '',
+        secrets_masked: false,
+      })
+    );
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+
+    expect(
+      screen.getByText("Codes are hidden. Only this mailbox's members can see them; AI and admins can't.")
+    ).toBeInTheDocument();
+    expect(screen.getByText('Use code •••••• now')).toBeInTheDocument();
+    expect(screen.queryByText(/482913/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show codes' }));
+    await waitFor(() => expect(state.reveal.mutateAsync).toHaveBeenCalledWith(11));
+    expect(await screen.findByText('Use code 482913 now')).toBeInTheDocument();
+    expect(screen.getByText('Codes shown')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show codes' })).toBeNull();
+  });
+
+  it('shows no code panel for a message with nothing masked', () => {
+    state.detail.data = message({ html_body: '' });
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+    expect(screen.queryByRole('button', { name: 'Show codes' })).toBeNull();
   });
 
   it('shows headers and the text body, and offers mark unread, reply, and delete', async () => {

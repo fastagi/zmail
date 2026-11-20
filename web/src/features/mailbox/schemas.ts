@@ -405,6 +405,8 @@ export const mailMessageSchema = strictObject({
   ...summaryShape,
   text_body: string(),
   html_body: string(),
+  // True when codes or sign-in links of an inbound message were masked; absent from older APIs.
+  secrets_masked: optional(boolean()),
   message_id: string(),
   in_reply_to: string(),
   // Oldest first; always empty for inbound messages.

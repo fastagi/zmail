@@ -1988,6 +1988,36 @@ export async function updateMailMessagesRoute(
   );
 }
 
+/** A message with its masked codes shown, to anyone who may read it; a POST, so same-origin only. */
+export async function revealMailMessageRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawMessageId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawMessageId);
+  if (!ids.ok) return ids.response;
+
+  if (target.backend === 'go-api') {
+    // The API reads no body here, so none is forwarded.
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mailboxes/${ids.value.mailboxId}/messages/${ids.value.messageId}/reveal`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  // The mock store never masks, so its message is already the original.
+  const result = mockMailboxStore.getMessage(
+    target.organizationId,
+    ids.value.mailboxId,
+    ids.value.messageId,
+    viewerOf(target)
+  );
+  return result.ok ? success(result.message) : missing(result.error);
+}
+
 /** Deletes every message in the trash for good; needs `organize`. */
 export async function purgeMailTrashRoute(
   request: Request,
