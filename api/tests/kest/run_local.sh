@@ -132,29 +132,61 @@ cd "${ROOT_DIR}"
 cp "${KEST_CONFIG_PATH}" "${KEST_CONFIG_BACKUP}"
 write_kest_config
 
-env "${COMMON_ENV[@]}" go run ./cmd/fastbuild/main.go migrate >/dev/null
-# Build first and run the binary: killing `go run` would leave its child server listening.
+# Build first and run the binaries: killing `go run` would leave its child server listening.
 go build -o "${TMP_DIR}/server" ./cmd/server/main.go
-env "${COMMON_ENV[@]}" "${TMP_DIR}/server" >"${SERVER_LOG}" 2>&1 &
-SERVER_PID=$!
+go build -o "${TMP_DIR}/fastbuild" ./cmd/fastbuild/main.go
 
-for _ in $(seq 1 30); do
-  if curl -fsS "${BASE_URL}/v1/health" >/dev/null 2>&1; then
-    break
+stop_server() {
+  if [[ -n "${SERVER_PID}" ]] && kill -0 "${SERVER_PID}" >/dev/null 2>&1; then
+    kill "${SERVER_PID}" >/dev/null 2>&1 || true
+    wait "${SERVER_PID}" >/dev/null 2>&1 || true
   fi
-  sleep 1
-done
+  SERVER_PID=""
+}
 
-if ! curl -fsS "${BASE_URL}/v1/health" >/dev/null 2>&1; then
+# Each flow needs its own server settings (send limits, starters, feature switches), so every flow
+# gets a fresh server. `<flow>.kestenv` next to the flow holds those settings; it is sourced in a
+# subshell so it may generate throwaway values, and it never overrides the common settings above.
+start_server() {
+  local settings="$1"
+  (
+    if [[ -f "${settings}" ]]; then
+      set -a
+      # shellcheck disable=SC1090
+      source "${settings}"
+      set +a
+    fi
+    # Starters own their migrations, so migrate with the flow's starters before starting.
+    env "${COMMON_ENV[@]}" "${TMP_DIR}/fastbuild" migrate >/dev/null
+    exec env "${COMMON_ENV[@]}" "${TMP_DIR}/server"
+  ) >"${SERVER_LOG}" 2>&1 &
+  SERVER_PID=$!
+
+  for _ in $(seq 1 30); do
+    if curl -fsS "${BASE_URL}/v1/health" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 1
+  done
+
   echo "server failed to start for kest run" >&2
   cat "${SERVER_LOG}" >&2
   exit 1
-fi
+}
 
 if [[ $# -eq 0 ]]; then
   set -- "${ROOT_DIR}"/tests/kest/*.flow.md
 fi
 
+# An RFC 3339 UTC time about one day ahead (mailbox_access AC-13 schedules a broadcast at it).
+SCHEDULED_AT="$(python3 -c 'import datetime; print((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
+
+# Flows share one database and mail domain, so each gets its own run_id: two flows that both create
+# `team-<run_id>@` would otherwise collide.
+FLOW_INDEX=0
 for flow in "$@"; do
-  kest run "${flow}" -e local --fail-fast --var "run_id=${RUN_ID}"
+  FLOW_INDEX=$((FLOW_INDEX + 1))
+  start_server "${flow%.flow.md}.kestenv"
+  kest run "${flow}" -e local --fail-fast --var "run_id=${RUN_ID}${FLOW_INDEX}" --var "scheduled_at=${SCHEDULED_AT}"
+  stop_server
 done

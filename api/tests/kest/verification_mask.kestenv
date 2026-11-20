@@ -1,0 +1,4 @@
+# Server settings for verification_mask.flow.md (sourced by run_local.sh; test values only).
+OPTIONAL_STARTERS=organization,mailbox
+MAILBOX_DOMAIN=mail.localhost
+MAILBOX_INBOUND_SECRET=kest-inbound-secret-at-least-32-chars
