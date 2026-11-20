@@ -24,11 +24,23 @@ const (
 
 type fakeGrants struct {
 	operators map[uint]bool
-	err       error
+	// scopes overrides the scope of a grant; a grant without an entry is full.
+	scopes map[uint]domain.OperatorScope
+	err    error
 }
 
 func (f *fakeGrants) isOperator(_ context.Context, userID uint) (bool, error) {
 	return f.operators[userID], f.err
+}
+
+func (f *fakeGrants) grantScope(_ context.Context, userID uint) (domain.OperatorScope, bool, error) {
+	if !f.operators[userID] {
+		return "", false, f.err
+	}
+	if scope, ok := f.scopes[userID]; ok {
+		return scope, true, f.err
+	}
+	return domain.OperatorScopeFull, true, f.err
 }
 
 func (f *fakeGrants) operatorIDs(_ context.Context, ids []uint) (map[uint]bool, error) {
@@ -41,10 +53,24 @@ func (f *fakeGrants) operatorIDs(_ context.Context, ids []uint) (map[uint]bool, 
 	return result, f.err
 }
 
-func (f *fakeGrants) insertGrant(_ context.Context, userID uint, now time.Time) (bool, time.Time, error) {
-	created := !f.operators[userID]
+func (f *fakeGrants) upsertGrant(
+	_ context.Context,
+	userID uint,
+	scope domain.OperatorScope,
+	now time.Time,
+) (domain.OperatorGrantChange, time.Time, error) {
+	if f.scopes == nil {
+		f.scopes = map[uint]domain.OperatorScope{}
+	}
+	change := domain.OperatorGrantUnchanged
+	if !f.operators[userID] {
+		change = domain.OperatorGrantCreated
+	} else if current, _, _ := f.grantScope(context.Background(), userID); current != scope {
+		change = domain.OperatorGrantScopeChanged
+	}
 	f.operators[userID] = true
-	return created, now, f.err
+	f.scopes[userID] = scope
+	return change, now, f.err
 }
 
 func (f *fakeGrants) deleteGrant(_ context.Context, userID uint) (bool, error) {

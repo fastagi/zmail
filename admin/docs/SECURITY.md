@@ -49,7 +49,11 @@ console has no sign-in and no protected feature:
   guard is UX only; the API authorizes every operator request.
 - The console origin must be listed in `OPERATOR_ALLOWED_ORIGINS`, and `/api/*`
   must reach the Go API on the same origin so the cookie stays first-party.
-- Operator access is granted only with `fastbuild operator:grant <email>`.
+- Operator access is granted only with `fastbuild operator:grant <email>`; `--scope=mail-metrics`
+  grants only the read-only Operations views and organization reads. Navigation hides screens the
+  session's `capabilities` do not cover, but the API enforces every capability.
+- `mailbox` (with `organization`) adds the Operations views. They show counts and outbound
+  metadata only; no message body, recipient, or attachment reaches the browser.
 - `organization`, `webhook`, and `notification` in `VITE_OPTIONAL_FEATURES` add operator screens
   for those API starters. They are support views, not tenant self-service: an operator reads any
   organization's members, webhook endpoints, and deliveries, and the notification delivery ledger,

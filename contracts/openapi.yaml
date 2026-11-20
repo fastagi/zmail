@@ -2645,6 +2645,90 @@ paths:
           $ref: '#/components/responses/OperatorForbidden'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/mail-metrics:
+    get:
+      operationId: getOperatorMailMetrics
+      summary: Platform mail overview for one UTC day plus a daily trend
+      description: Needs the `mail_metrics:read` capability. Mounted only when the `mailbox` and
+        `organization` starters are selected. Counts outbound Zmail messages by record-creation UTC
+        day and current status; inbound mail is excluded and duplicate delivery receipts never add
+        to any count.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorMailDate'
+        - name: days
+          in: query
+          description: Trend length in days, ending on `date`.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 31
+            default: 7
+      responses:
+        '200':
+          description: The overview.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorMailMetricsResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/mail-metrics/organizations:
+    get:
+      operationId: listOperatorMailMetricsOrganizations
+      summary: Per-organization mail counts for one UTC day
+      description: Needs the `mail_metrics:read` capability. Every organization matching `q` is
+        listed, including those with no mail, ordered by `sent` descending and then organization ID.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorMailDate'
+        - name: q
+          in: query
+          description: Case-insensitive literal substring of the organization name.
+          schema:
+            type: string
+            maxLength: 100
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/OperatorMailPerPage'
+      responses:
+        '200':
+          description: Paginated organization rows.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorMailOrganizationPageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/operator/notification-deliveries:
     get:
       operationId: listOperatorNotificationDeliveries
@@ -2968,6 +3052,57 @@ paths:
           $ref: '#/components/responses/OperatorForbidden'
         '404':
           $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/outbound-messages:
+    get:
+      operationId: listOperatorOutboundMessages
+      summary: Platform outbound log for one UTC day, newest first
+      description: Needs the `mail_metrics:read` capability. Returns metadata only; message bodies,
+        recipients, and attachments are never returned.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorMailDate'
+        - name: organization_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: mailbox_id
+          in: query
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - sent
+              - failed
+              - queued
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/OperatorMailPerPage'
+      responses:
+        '200':
+          description: Paginated outbound messages.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOutboundMessagePageResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/operator/session:
@@ -8505,6 +8640,22 @@ components:
       description: Positive user identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    OperatorMailDate:
+      name: date
+      in: query
+      description: UTC calendar day `YYYY-MM-DD`; defaults to today (UTC) and must not be in the future.
+      schema:
+        type: string
+        format: date
+    OperatorMailPerPage:
+      name: per_page
+      in: query
+      description: Requested page size.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
     OperatorOrganizationID:
       name: organization_id
       in: path
@@ -8912,8 +9063,9 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     OperatorForbidden:
-      description: '`AUTH.ACCOUNT_DISABLED`, `OPERATOR.FORBIDDEN` (no current operator grant), `OPERATOR.ORIGIN_REJECTED`,
-        or `OPERATOR.CSRF_REJECTED` on unsafe methods.'
+      description: '`AUTH.ACCOUNT_DISABLED`, `OPERATOR.FORBIDDEN` (no current operator grant), `OPERATOR.CAPABILITY_REQUIRED`
+        (the grant does not cover this route), `OPERATOR.ORIGIN_REJECTED`, or `OPERATOR.CSRF_REJECTED`
+        on unsafe methods.'
       content:
         application/json:
           schema:
@@ -9061,6 +9213,7 @@ components:
         - WEBHOOK.PRECONDITION_REQUIRED
         - WEBHOOK.REPLAY_NOT_ALLOWED
         - OPERATOR.FORBIDDEN
+        - OPERATOR.CAPABILITY_REQUIRED
         - OPERATOR.ORIGIN_REJECTED
         - OPERATOR.CSRF_REJECTED
         - OPERATOR.TARGET_PROTECTED
@@ -11356,9 +11509,21 @@ components:
       required:
         - operator
         - csrf_token
+        - capabilities
       properties:
         operator:
           $ref: '#/components/schemas/OperatorAccount'
+        capabilities:
+          type: array
+          description: What the grant allows. `operator:manage` is every operator route;
+            `mail_metrics:read` is the mail metrics, the outbound log, and the read-only organization
+            routes. A `full` grant has both; a `mail_metrics` grant has only `mail_metrics:read`.
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - operator:manage
+              - mail_metrics:read
         csrf_token:
           type: string
           pattern: ^[A-Za-z0-9_-]{43}$
@@ -11523,6 +11688,247 @@ components:
         updated_at:
           type: string
           format: date-time
+    OperatorMailCounts:
+      type: object
+      additionalProperties: false
+      required:
+        - sent
+        - failed
+        - queued
+        - delivered
+        - bounced
+        - complained
+      properties:
+        sent:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        queued:
+          type: integer
+          minimum: 0
+        delivered:
+          type: integer
+          minimum: 0
+          description: Messages of the day with at least one `delivered` receipt.
+        bounced:
+          type: integer
+          minimum: 0
+          description: Messages of the day with at least one `bounced` receipt.
+        complained:
+          type: integer
+          minimum: 0
+          description: Messages of the day with at least one `complained` receipt.
+    OperatorMailTrendDay:
+      type: object
+      additionalProperties: false
+      required:
+        - date
+        - sent
+        - failed
+        - queued
+      properties:
+        date:
+          type: string
+          format: date
+        sent:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        queued:
+          type: integer
+          minimum: 0
+    OperatorMailMetrics:
+      type: object
+      additionalProperties: false
+      required:
+        - date
+        - organizations
+        - members
+        - disabled_members
+        - mailboxes
+        - day
+        - trend
+      properties:
+        date:
+          type: string
+          format: date
+        organizations:
+          type: integer
+          minimum: 0
+          description: Existing organizations, including those with no mail or mailboxes.
+        members:
+          type: integer
+          minimum: 0
+          description: Distinct users with a membership in any organization; deleted accounts excluded,
+            disabled accounts included.
+        disabled_members:
+          type: integer
+          minimum: 0
+          description: How many of `members` are disabled accounts.
+        mailboxes:
+          type: integer
+          minimum: 0
+        day:
+          $ref: '#/components/schemas/OperatorMailCounts'
+        trend:
+          type: array
+          description: One entry per UTC day ending on `date`, oldest first, including empty days.
+          maxItems: 31
+          items:
+            $ref: '#/components/schemas/OperatorMailTrendDay'
+    OperatorMailMetricsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/OperatorMailMetrics'
+    OperatorMailOrganization:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - members
+        - mailboxes
+        - sent
+        - failed
+        - queued
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        name:
+          type: string
+        members:
+          type: integer
+          minimum: 0
+        mailboxes:
+          type: integer
+          minimum: 0
+        sent:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        queued:
+          type: integer
+          minimum: 0
+    OperatorMailOrganizationPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperatorMailOrganization'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    OperatorOutboundMessage:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - organization_id
+        - organization_name
+        - mailbox_id
+        - mailbox_address
+        - from_address
+        - subject
+        - status
+        - failure_code
+        - last_event
+        - created_at
+        - send_attempted_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        organization_id:
+          $ref: '#/components/schemas/PositiveID'
+        organization_name:
+          type: string
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_address:
+          type: string
+        from_address:
+          type: string
+        subject:
+          type: string
+        status:
+          type: string
+          enum:
+            - sent
+            - failed
+            - queued
+        failure_code:
+          type: string
+        last_event:
+          type: string
+          description: Summary of the delivery receipts (the most severe current state among recipients);
+            empty when none arrived.
+          enum:
+            - ''
+            - accepted
+            - delivered
+            - deferred
+            - bounced
+            - failed
+            - rejected
+            - complained
+        created_at:
+          type: string
+          format: date-time
+        send_attempted_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    OperatorOutboundMessagePageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperatorOutboundMessage'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
     OperatorOrganizationResponse:
       type: object
       additionalProperties: false

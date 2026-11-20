@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/fastagi/zmail/api/internal/domain"
 	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 	"github.com/fastagi/zmail/api/internal/modules/user"
 )
@@ -17,6 +18,7 @@ func TestGrantRepositoryPostgres(t *testing.T) {
 	require.NoError(t, db.Exec(`CREATE TABLE platform_operators (
 		user_id bigint NOT NULL,
 		granted_at timestamptz NOT NULL,
+		scope varchar(16) NOT NULL DEFAULT 'full',
 		CONSTRAINT platform_operators_pkey PRIMARY KEY (user_id)
 	)`).Error)
 	require.NoError(t, db.Exec(`ALTER TABLE platform_operators ADD CONSTRAINT fk_platform_operators_user
@@ -31,15 +33,29 @@ func TestGrantRepositoryPostgres(t *testing.T) {
 	repo := NewRepository(db)
 	now := time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC)
 
-	created, grantedAt, err := repo.insertGrant(ctx, operator.ID, now)
+	change, grantedAt, err := repo.upsertGrant(ctx, operator.ID, domain.OperatorScopeFull, now)
 	require.NoError(t, err)
-	assert.True(t, created)
+	assert.Equal(t, domain.OperatorGrantCreated, change)
 	assert.True(t, grantedAt.Equal(now))
 
-	created, grantedAt, err = repo.insertGrant(ctx, operator.ID, now.Add(time.Hour))
+	change, grantedAt, err = repo.upsertGrant(ctx, operator.ID, domain.OperatorScopeFull, now.Add(time.Hour))
 	require.NoError(t, err)
-	assert.False(t, created, "repeating a grant is a no-op")
+	assert.Equal(t, domain.OperatorGrantUnchanged, change, "repeating a grant is a no-op")
 	assert.True(t, grantedAt.Equal(now), "the original grant time is kept")
+
+	change, grantedAt, err = repo.upsertGrant(ctx, operator.ID, domain.OperatorScopeMailMetrics, now.Add(2*time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, domain.OperatorGrantScopeChanged, change)
+	assert.True(t, grantedAt.Equal(now))
+	scope, found, err := repo.grantScope(ctx, operator.ID)
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, domain.OperatorScopeMailMetrics, scope)
+	_, found, err = repo.grantScope(ctx, member.ID)
+	require.NoError(t, err)
+	assert.False(t, found)
+	_, _, err = repo.upsertGrant(ctx, operator.ID, domain.OperatorScopeFull, now)
+	require.NoError(t, err)
 
 	ok, err := repo.isOperator(ctx, operator.ID)
 	require.NoError(t, err)
@@ -52,7 +68,7 @@ func TestGrantRepositoryPostgres(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[uint]bool{operator.ID: true}, ids)
 
-	_, _, err = repo.insertGrant(ctx, 999999, now)
+	_, _, err = repo.upsertGrant(ctx, 999999, domain.OperatorScopeFull, now)
 	require.Error(t, err, "a grant must reference an existing user")
 
 	require.NoError(t, db.Unscoped().Delete(&user.UserPO{}, operator.ID).Error)

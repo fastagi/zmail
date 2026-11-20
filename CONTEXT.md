@@ -224,7 +224,12 @@ This file is the canonical glossary for the whole repository. Use these terms wh
 
 **Operator grant**
 : The durable, CLI-managed record, owned by the optional `operator` starter, that makes one user a
-  platform operator. It has no lifecycle beyond existing or not and is removed with the account.
+  platform operator. It exists or not, carries one scope, and is removed with the account.
+
+**Operator scope**
+: What an operator grant allows: `full` (every operator route) or `mail_metrics` (read-only platform
+  mail metrics, the outbound log, and organization reads). A scope expands to capabilities
+  (`operator:manage`, `mail_metrics:read`) that each operator route requires.
 
 **Operator session**
 : An ordinary authentication session that the Go API issues to the Admin Console in an HttpOnly

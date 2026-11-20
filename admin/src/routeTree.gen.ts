@@ -18,6 +18,9 @@ import { Route as ConsoleNotificationsRouteImport } from './routes/console.notif
 import { Route as ConsolePreferencesRouteImport } from './routes/console.preferences'
 import { Route as ConsoleSettingsRouteImport } from './routes/console.settings'
 import { Route as ConsoleUsersRouteImport } from './routes/console.users'
+import { Route as ConsoleOperationsIndexRouteImport } from './routes/console.operations.index'
+import { Route as ConsoleOperationsMessagesRouteImport } from './routes/console.operations.messages'
+import { Route as ConsoleOperationsOrganizationsRouteImport } from './routes/console.operations.organizations'
 import { Route as ConsoleOrganizationsIndexRouteImport } from './routes/console.organizations.index'
 import { Route as ConsoleOrganizationsOrganizationIdRouteImport } from './routes/console.organizations.$organizationId'
 
@@ -66,6 +69,23 @@ const ConsoleUsersRoute = ConsoleUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => ConsoleRoute,
 } as any)
+const ConsoleOperationsIndexRoute = ConsoleOperationsIndexRouteImport.update({
+  id: '/operations/',
+  path: '/operations/',
+  getParentRoute: () => ConsoleRoute,
+} as any)
+const ConsoleOperationsMessagesRoute =
+  ConsoleOperationsMessagesRouteImport.update({
+    id: '/operations/messages',
+    path: '/operations/messages',
+    getParentRoute: () => ConsoleRoute,
+  } as any)
+const ConsoleOperationsOrganizationsRoute =
+  ConsoleOperationsOrganizationsRouteImport.update({
+    id: '/operations/organizations',
+    path: '/operations/organizations',
+    getParentRoute: () => ConsoleRoute,
+  } as any)
 const ConsoleOrganizationsIndexRoute =
   ConsoleOrganizationsIndexRouteImport.update({
     id: '/organizations/',
@@ -89,7 +109,10 @@ export interface FileRoutesByFullPath {
   '/console/settings': typeof ConsoleSettingsRoute
   '/console/users': typeof ConsoleUsersRoute
   '/console/': typeof ConsoleIndexRoute
+  '/console/operations/messages': typeof ConsoleOperationsMessagesRoute
+  '/console/operations/organizations': typeof ConsoleOperationsOrganizationsRoute
   '/console/organizations/$organizationId': typeof ConsoleOrganizationsOrganizationIdRoute
+  '/console/operations/': typeof ConsoleOperationsIndexRoute
   '/console/organizations/': typeof ConsoleOrganizationsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -101,7 +124,10 @@ export interface FileRoutesByTo {
   '/console/settings': typeof ConsoleSettingsRoute
   '/console/users': typeof ConsoleUsersRoute
   '/console': typeof ConsoleIndexRoute
+  '/console/operations/messages': typeof ConsoleOperationsMessagesRoute
+  '/console/operations/organizations': typeof ConsoleOperationsOrganizationsRoute
   '/console/organizations/$organizationId': typeof ConsoleOrganizationsOrganizationIdRoute
+  '/console/operations': typeof ConsoleOperationsIndexRoute
   '/console/organizations': typeof ConsoleOrganizationsIndexRoute
 }
 export interface FileRoutesById {
@@ -115,7 +141,10 @@ export interface FileRoutesById {
   '/console/settings': typeof ConsoleSettingsRoute
   '/console/users': typeof ConsoleUsersRoute
   '/console/': typeof ConsoleIndexRoute
+  '/console/operations/messages': typeof ConsoleOperationsMessagesRoute
+  '/console/operations/organizations': typeof ConsoleOperationsOrganizationsRoute
   '/console/organizations/$organizationId': typeof ConsoleOrganizationsOrganizationIdRoute
+  '/console/operations/': typeof ConsoleOperationsIndexRoute
   '/console/organizations/': typeof ConsoleOrganizationsIndexRoute
 }
 export interface FileRouteTypes {
@@ -130,7 +159,10 @@ export interface FileRouteTypes {
     | '/console/settings'
     | '/console/users'
     | '/console/'
+    | '/console/operations/messages'
+    | '/console/operations/organizations'
     | '/console/organizations/$organizationId'
+    | '/console/operations/'
     | '/console/organizations/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -142,7 +174,10 @@ export interface FileRouteTypes {
     | '/console/settings'
     | '/console/users'
     | '/console'
+    | '/console/operations/messages'
+    | '/console/operations/organizations'
     | '/console/organizations/$organizationId'
+    | '/console/operations'
     | '/console/organizations'
   id:
     | '__root__'
@@ -155,7 +190,10 @@ export interface FileRouteTypes {
     | '/console/settings'
     | '/console/users'
     | '/console/'
+    | '/console/operations/messages'
+    | '/console/operations/organizations'
     | '/console/organizations/$organizationId'
+    | '/console/operations/'
     | '/console/organizations/'
   fileRoutesById: FileRoutesById
 }
@@ -230,6 +268,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConsoleUsersRouteImport
       parentRoute: typeof ConsoleRoute
     }
+    '/console/operations/': {
+      id: '/console/operations/'
+      path: '/operations'
+      fullPath: '/console/operations/'
+      preLoaderRoute: typeof ConsoleOperationsIndexRouteImport
+      parentRoute: typeof ConsoleRoute
+    }
+    '/console/operations/messages': {
+      id: '/console/operations/messages'
+      path: '/operations/messages'
+      fullPath: '/console/operations/messages'
+      preLoaderRoute: typeof ConsoleOperationsMessagesRouteImport
+      parentRoute: typeof ConsoleRoute
+    }
+    '/console/operations/organizations': {
+      id: '/console/operations/organizations'
+      path: '/operations/organizations'
+      fullPath: '/console/operations/organizations'
+      preLoaderRoute: typeof ConsoleOperationsOrganizationsRouteImport
+      parentRoute: typeof ConsoleRoute
+    }
     '/console/organizations/': {
       id: '/console/organizations/'
       path: '/organizations'
@@ -254,7 +313,10 @@ interface ConsoleRouteChildren {
   ConsoleSettingsRoute: typeof ConsoleSettingsRoute
   ConsoleUsersRoute: typeof ConsoleUsersRoute
   ConsoleIndexRoute: typeof ConsoleIndexRoute
+  ConsoleOperationsMessagesRoute: typeof ConsoleOperationsMessagesRoute
+  ConsoleOperationsOrganizationsRoute: typeof ConsoleOperationsOrganizationsRoute
   ConsoleOrganizationsOrganizationIdRoute: typeof ConsoleOrganizationsOrganizationIdRoute
+  ConsoleOperationsIndexRoute: typeof ConsoleOperationsIndexRoute
   ConsoleOrganizationsIndexRoute: typeof ConsoleOrganizationsIndexRoute
 }
 
@@ -265,8 +327,11 @@ const ConsoleRouteChildren: ConsoleRouteChildren = {
   ConsoleSettingsRoute: ConsoleSettingsRoute,
   ConsoleUsersRoute: ConsoleUsersRoute,
   ConsoleIndexRoute: ConsoleIndexRoute,
+  ConsoleOperationsMessagesRoute: ConsoleOperationsMessagesRoute,
+  ConsoleOperationsOrganizationsRoute: ConsoleOperationsOrganizationsRoute,
   ConsoleOrganizationsOrganizationIdRoute:
     ConsoleOrganizationsOrganizationIdRoute,
+  ConsoleOperationsIndexRoute: ConsoleOperationsIndexRoute,
   ConsoleOrganizationsIndexRoute: ConsoleOrganizationsIndexRoute,
 }
 

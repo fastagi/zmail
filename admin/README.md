@@ -97,6 +97,7 @@ at build time with `VITE_OPTIONAL_FEATURES`:
 | `organization` | Organization directory and members | `operator`, `organization` |
 | `webhook` | Webhook endpoints, deliveries, attempts, and replay on the organization page | `operator`, `organization`, `webhook` |
 | `notification` | Notification delivery ledger | `operator`, `notification` |
+| `mailbox` | Operations: platform mail overview, per-organization counts, outbound log (with `organization`) | `operator`, `organization`, `mailbox` |
 
 These are operator support views, not tenant self-service; that stays in the
 Next.js Web application. New screens are built against their contract rather

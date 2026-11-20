@@ -9,6 +9,7 @@ import (
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/modules/mailbox"
 	"github.com/fastagi/zmail/api/internal/modules/notification"
 	"github.com/fastagi/zmail/api/internal/modules/organization"
 	"github.com/fastagi/zmail/api/internal/modules/setting"
@@ -21,6 +22,7 @@ import (
 const (
 	contextCredential = "operator_session_credential"
 	contextOperator   = "operator_account"
+	contextScope      = "operator_scope"
 )
 
 // Surfaces are the operator-facing handlers owned by other optional starters. Each owning starter
@@ -31,6 +33,7 @@ type Surfaces struct {
 	Organizations *organization.OperatorHandler
 	Webhooks      *webhook.OperatorHandler
 	Notifications *notification.OperatorHandler
+	MailMetrics   *mailbox.OperatorMetricsHandler
 }
 
 // Handler serves the operator browser session and operator routes.
@@ -42,6 +45,7 @@ type Handler struct {
 	organizations *organization.OperatorHandler
 	webhooks      *webhook.OperatorHandler
 	notifications *notification.OperatorHandler
+	mailMetrics   *mailbox.OperatorMetricsHandler
 	cfg           *config.Config
 }
 
@@ -69,6 +73,10 @@ func NewHandler(
 	if cfg.Starters.Selected(config.StarterNotification) {
 		handler.notifications = surfaces.Notifications
 	}
+	// Mail metrics join mailbox aggregates with organization aggregates, so they need both starters.
+	if cfg.Starters.Selected(config.StarterMailbox) && handler.organizations != nil {
+		handler.mailMetrics = surfaces.MailMetrics
+	}
 	return handler
 }
 
@@ -90,12 +98,14 @@ type operatorResponse struct {
 }
 
 type sessionResponse struct {
-	Operator  operatorResponse `json:"operator"`
-	CSRFToken string           `json:"csrf_token"`
+	Operator     operatorResponse            `json:"operator"`
+	CSRFToken    string                      `json:"csrf_token"`
+	Capabilities []domain.OperatorCapability `json:"capabilities"`
 }
 
-func newSessionResponse(account *domain.User, credential string) sessionResponse {
+func newSessionResponse(account *domain.User, scope domain.OperatorScope, credential string) sessionResponse {
 	return sessionResponse{
+		Capabilities: scope.Capabilities(),
 		Operator: operatorResponse{
 			ID:       account.ID,
 			Username: account.Username,
@@ -117,14 +127,14 @@ func (h *Handler) SignIn(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	issued, err := h.service.SignIn(c.Request.Context(), req.Identifier, req.Password)
+	issued, scope, err := h.service.SignIn(c.Request.Context(), req.Identifier, req.Password)
 	if err != nil {
 		writeError(c, "Operator sign-in failed", err)
 		return
 	}
 	h.session.store(c, issued.Credential, issued.ExpiresAt)
 	c.Set("userID", issued.User.ID)
-	response.Success(c, newSessionResponse(issued.User, issued.Credential))
+	response.Success(c, newSessionResponse(issued.User, scope, issued.Credential))
 }
 
 // Current returns the signed-in operator and the CSRF token for unsafe requests.
@@ -134,7 +144,7 @@ func (h *Handler) Current(c *gin.Context) {
 		response.AbortWithCode(c, http.StatusUnauthorized, response.ErrorCodeUnauthorized, "Authentication required")
 		return
 	}
-	response.Success(c, newSessionResponse(account, credential))
+	response.Success(c, newSessionResponse(account, currentScope(c), credential))
 }
 
 // SignOut revokes the presented session and expires the cookie. It succeeds when no session exists.
@@ -156,7 +166,7 @@ func (h *Handler) SignOut(c *gin.Context) {
 	}
 	// Attribute the audit record to the operator while the session is still valid; an already expired
 	// or revoked session still signs out.
-	if account, err := h.service.Authenticate(c.Request.Context(), credential); err == nil {
+	if account, _, err := h.service.Authenticate(c.Request.Context(), credential); err == nil {
 		c.Set("userID", account.ID)
 	}
 	if err := h.service.SignOut(c.Request.Context(), credential); err != nil {
@@ -167,8 +177,9 @@ func (h *Handler) SignOut(c *gin.Context) {
 	response.NoContent(c)
 }
 
-// requireOperator authenticates the cookie session, requires a current grant, and for unsafe methods
-// requires an allowed Origin and a valid CSRF token.
+// requireOperator authenticates the cookie session, requires a current grant of any scope, and for
+// unsafe methods requires an allowed Origin and a valid CSRF token. Routes then add
+// requireCapability for what they expose.
 func (h *Handler) requireOperator(c *gin.Context) {
 	c.Header("Cache-Control", "private, no-store")
 	credential, ok := h.session.credential(c)
@@ -181,7 +192,7 @@ func (h *Handler) requireOperator(c *gin.Context) {
 		return
 	}
 
-	account, err := h.service.Authenticate(c.Request.Context(), credential)
+	account, scope, err := h.service.Authenticate(c.Request.Context(), credential)
 	if err != nil {
 		writeError(c, "Operator authentication failed", err)
 		return
@@ -202,7 +213,31 @@ func (h *Handler) requireOperator(c *gin.Context) {
 	c.Set("username", account.Username)
 	c.Set(contextCredential, credential)
 	c.Set(contextOperator, account)
+	c.Set(contextScope, scope)
 	c.Next()
+}
+
+// requireCapability runs after requireOperator and rejects a grant whose scope does not include the
+// capability. The caller stays signed in.
+func requireCapability(capability domain.OperatorCapability) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !currentScope(c).Allows(capability) {
+			writeError(c, "Operator capability check failed", domain.ErrOperatorCapability)
+			return
+		}
+		c.Next()
+	}
+}
+
+func currentScope(c *gin.Context) domain.OperatorScope {
+	value, exists := c.Get(contextScope)
+	if !exists {
+		return ""
+	}
+	if scope, ok := value.(domain.OperatorScope); ok {
+		return scope
+	}
+	return ""
 }
 
 // writeError maps operator-starter failures to their public status and error code. Unexpected
@@ -219,6 +254,8 @@ func writeError(c *gin.Context, message string, err error) {
 		response.AbortWithCode(c, http.StatusForbidden, domain.CodeAccountDisabled, "Account access is disabled")
 	case errors.Is(err, domain.ErrOperatorForbidden):
 		response.AbortWithCode(c, http.StatusForbidden, domain.CodeOperatorForbidden, "Operator access is required")
+	case errors.Is(err, domain.ErrOperatorCapability):
+		response.AbortWithCode(c, http.StatusForbidden, domain.CodeOperatorCapability, "Operator grant does not allow this")
 	case errors.Is(err, domain.ErrOperatorTargetProtected):
 		response.AbortWithCode(c, http.StatusConflict, domain.CodeOperatorTargetProtected, "Operator accounts cannot be changed here")
 	case errors.Is(err, domain.ErrInvalidInput):

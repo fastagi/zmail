@@ -497,6 +497,7 @@ TABLE platform_accounts
 TABLE platform_operators
   COLUMN user_id bigint NOT NULL
   COLUMN granted_at timestamp with time zone NOT NULL
+  COLUMN scope character varying(16) NOT NULL DEFAULT 'full'::character varying
 
 TABLE rate_limit_buckets
   COLUMN key_hash bytea NOT NULL
@@ -877,6 +878,7 @@ CONSTRAINT platform_accounts.platform_accounts_role_id_fkey FOREIGN KEY (role_id
 CONSTRAINT platform_accounts.platform_accounts_status_check CHECK (((status)::text = ANY ((ARRAY['invited'::character varying, 'awaiting_confirmation'::character varying, 'active'::character varying, 'timed_out'::character varying, 'needs_review'::character varying, 'retired'::character varying])::text[])))
 CONSTRAINT platform_operators.fk_platform_operators_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT platform_operators.platform_operators_pkey PRIMARY KEY (user_id)
+CONSTRAINT platform_operators.platform_operators_scope_check CHECK (((scope)::text = ANY ((ARRAY['full'::character varying, 'mail_metrics'::character varying])::text[])))
 CONSTRAINT rate_limit_buckets.rate_limit_buckets_hits_check CHECK ((hits >= 1))
 CONSTRAINT rate_limit_buckets.rate_limit_buckets_key_hash_check CHECK ((octet_length(key_hash) = 32))
 CONSTRAINT rate_limit_buckets.rate_limit_buckets_pkey PRIMARY KEY (key_hash)

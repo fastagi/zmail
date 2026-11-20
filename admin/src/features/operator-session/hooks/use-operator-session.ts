@@ -1,8 +1,14 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError, csrf } from '@/http/client';
 import { operatorSessionService } from '@/features/operator-session/services/operator-session-service';
-import type { OperatorSession, SignInInput } from '@/features/operator-session/types';
+import { isFeatureEnabled } from '@/config/env';
+import type {
+  OperatorCapability,
+  OperatorSession,
+  SignInInput,
+} from '@/features/operator-session/types';
 
 export const operatorSessionQueryKey = ['operator', 'session'] as const;
 
@@ -59,4 +65,33 @@ export function useSignOut() {
 export async function recoverCsrfToken(): Promise<void> {
   const session = await operatorSessionService.current();
   csrf.set(session.csrf_token);
+}
+
+/**
+ * Whether the signed-in operator's grant includes a capability. UX only: the API authorizes every
+ * request. Builds without operator sign-in have no session and show every screen.
+ */
+export function useOperatorCapability(capability: OperatorCapability): boolean {
+  const operatorEnabled = isFeatureEnabled('operator');
+  const session = useQuery({ ...operatorSessionQueryOptions(), enabled: operatorEnabled });
+  if (!operatorEnabled) {
+    return true;
+  }
+  return session.data?.capabilities.includes(capability) ?? false;
+}
+
+/** The capabilities of the signed-in operator, or every capability when sign-in is not built in. */
+export function useOperatorCapabilities(): ReadonlySet<OperatorCapability> {
+  const manage = useOperatorCapability('operator:manage');
+  const metrics = useOperatorCapability('mail_metrics:read');
+  return useMemo(() => {
+    const granted = new Set<OperatorCapability>();
+    if (manage) {
+      granted.add('operator:manage');
+    }
+    if (metrics) {
+      granted.add('mail_metrics:read');
+    }
+    return granted;
+  }, [manage, metrics]);
 }

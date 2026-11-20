@@ -129,14 +129,16 @@ func InitApplication() (*app.Application, error) {
 	operatorHandler := organization.NewOperatorHandler(organizationRepository)
 	webhookOperatorHandler := webhook.NewOperatorHandler(webhookService)
 	notificationOperatorHandler := notification.NewOperatorHandler(notificationRepository)
+	mailboxRepository := mailbox.NewRepository(db)
+	operatorMetricsHandler := mailbox.NewOperatorMetricsHandler(mailboxRepository, organizationRepository)
 	surfaces := operator.Surfaces{
 		Settings:      settingHandler,
 		Organizations: operatorHandler,
 		Webhooks:      webhookOperatorHandler,
 		Notifications: notificationOperatorHandler,
+		MailMetrics:   operatorMetricsHandler,
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, configConfig, surfaces)
-	mailboxRepository := mailbox.NewRepository(db)
 	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
 	domainProvider := mailtransport.NewDomainProvider(configConfig)
 	transport := mailtransport.New(configConfig)
@@ -294,14 +296,16 @@ func InitApplicationWithConfig(cfg *config.Config) (*app.Application, error) {
 	operatorHandler := organization.NewOperatorHandler(organizationRepository)
 	webhookOperatorHandler := webhook.NewOperatorHandler(webhookService)
 	notificationOperatorHandler := notification.NewOperatorHandler(notificationRepository)
+	mailboxRepository := mailbox.NewRepository(db)
+	operatorMetricsHandler := mailbox.NewOperatorMetricsHandler(mailboxRepository, organizationRepository)
 	surfaces := operator.Surfaces{
 		Settings:      settingHandler,
 		Organizations: operatorHandler,
 		Webhooks:      webhookOperatorHandler,
 		Notifications: notificationOperatorHandler,
+		MailMetrics:   operatorMetricsHandler,
 	}
 	handler2 := operator.NewHandler(operatorService, authAbuseGuard, cfg, surfaces)
-	mailboxRepository := mailbox.NewRepository(db)
 	membershipDirectory := mailbox.NewMembershipDirectory(organizationRepository)
 	domainProvider := mailtransport.NewDomainProvider(cfg)
 	transport := mailtransport.New(cfg)

@@ -7,12 +7,14 @@ import { featureManifest } from '@/config/feature-manifest';
 import { ApiHealthPanel } from '@/features/system/components/api-health-panel';
 import { AttentionPanel } from '@/features/system/components/attention-panel';
 import { OperatorSystemPanel } from '@/features/system/components/operator-system-panel';
+import { useOperatorCapability } from '@/features/operator-session/hooks/use-operator-session';
 import { useApiReadiness } from '@/features/system/hooks/use-api-readiness';
 import { cn } from '@/lib/cn';
 
 export function OverviewPage() {
   const { t } = useTranslation();
   const readiness = useApiReadiness();
+  const canManage = useOperatorCapability('operator:manage');
   const apiAvailable = readiness.data?.status === 'up' || readiness.data?.status === 'degraded';
 
   const metrics = [
@@ -96,7 +98,7 @@ export function OverviewPage() {
       </div>
 
       <div className="content-grid">
-        <AttentionPanel />
+        {canManage ? <AttentionPanel /> : null}
         <ApiHealthPanel />
         <SectionCard
           icon={PackageCheck}
@@ -114,7 +116,7 @@ export function OverviewPage() {
             ))}
           </dl>
         </SectionCard>
-        {isFeatureEnabled('operator') ? <OperatorSystemPanel /> : null}
+        {isFeatureEnabled('operator') && canManage ? <OperatorSystemPanel /> : null}
       </div>
     </div>
   );

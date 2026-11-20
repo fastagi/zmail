@@ -11,6 +11,7 @@ import (
 
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/modules/mailbox"
 	"github.com/fastagi/zmail/api/internal/modules/notification"
 	"github.com/fastagi/zmail/api/internal/modules/organization"
 	"github.com/fastagi/zmail/api/internal/modules/webhook"
@@ -134,4 +135,33 @@ func TestStarterSurfacesRejectCallersBeforeAnyLookup(t *testing.T) {
 	})
 	require.Equal(t, http.StatusForbidden, withoutCSRF.Code)
 	assert.Equal(t, "OPERATOR.CSRF_REJECTED", errorCode(t, withoutCSRF))
+}
+
+func TestMailMetricsMountOnlyWithMailboxAndOrganization(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	metrics := []string{
+		"operator.mail-metrics.show",
+		"operator.mail-metrics-organizations.index",
+		"operator.outbound-messages.index",
+	}
+	for _, test := range []struct {
+		optional []string
+		mounted  bool
+	}{
+		{optional: []string{config.StarterOperator, config.StarterMailbox}},
+		{optional: []string{config.StarterOperator, config.StarterOrganization}},
+		{optional: []string{config.StarterOperator, config.StarterOrganization, config.StarterMailbox}, mounted: true},
+	} {
+		cfg := &config.Config{}
+		cfg.Starters.Optional = test.optional
+		surfaces := allSurfaces()
+		surfaces.MailMetrics = &mailbox.OperatorMetricsHandler{}
+		routes := router.New(gin.New()).Prefix("/v1")
+		NewHandler(nil, nil, cfg, surfaces).RegisterRoutes(routes)
+		names := routes.Routes()
+		for _, name := range metrics {
+			_, exists := names[name]
+			assert.Equal(t, test.mounted, exists, "%v %s", test.optional, name)
+		}
+	}
 }

@@ -29,12 +29,15 @@ export function ConsoleHeader() {
     '/console/settings': t('navigation.settings'),
     '/console/organizations': t('navigation.organizations'),
     '/console/notifications': t('navigation.notifications'),
+    '/console/operations': t('navigation.operations'),
   };
   const currentPage =
     pageTitles[pathname] ??
     (pathname.startsWith('/console/organizations/')
       ? t('navigation.organizations')
-      : t('navigation.overview'));
+      : pathname.startsWith('/console/operations/')
+        ? t('navigation.operations')
+        : t('navigation.overview'));
   const themeLabel = dark ? t('preferences.light') : t('preferences.dark');
 
   return (

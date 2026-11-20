@@ -37,10 +37,12 @@ func (c *OperatorGrantCommand) Name() string { return "operator:grant" }
 func (c *OperatorGrantCommand) Description() string {
 	return "Grant platform-operator access to an account"
 }
-func (c *OperatorGrantCommand) Usage() string { return "operator:grant <email>" }
+func (c *OperatorGrantCommand) Usage() string {
+	return "operator:grant <email> [--scope=full|mail-metrics]"
+}
 
 func (c *OperatorGrantCommand) Run(args []string) error {
-	email, err := operatorEmailArgument("operator:grant", args)
+	email, scope, err := parseOperatorGrantArguments(args)
 	if err != nil {
 		return err
 	}
@@ -50,19 +52,45 @@ func (c *OperatorGrantCommand) Run(args []string) error {
 	}
 	ctx, stop := operatorCommandContext()
 	defer stop()
-	grant, created, err := runtime.grants.GrantOperator(ctx, email)
+	grant, change, err := runtime.grants.GrantOperator(ctx, email, scope)
 	if err != nil {
 		return operatorCommandError(err)
 	}
-	if !created {
-		c.output.Info("%s is already a platform operator", grant.Email)
+	if change == domain.OperatorGrantUnchanged {
+		c.output.Info("%s is already a platform operator with scope %s", grant.Email, grant.Scope)
 		return nil
 	}
-	if auditErr := recordOperatorCommandAudit(ctx, runtime.audit, "grant", grant.UserID); auditErr != nil {
+	if auditErr := recordOperatorCommandAudit(ctx, runtime.audit, "grant", grant.UserID, grant.Scope); auditErr != nil {
 		c.output.Warning("Operator granted, but audit persistence failed")
 	}
-	c.output.Success("Granted platform-operator access to %s", grant.Email)
+	c.output.Success("Granted platform-operator access with scope %s to %s", grant.Scope, grant.Email)
 	return nil
+}
+
+// parseOperatorGrantArguments reads `<email> [--scope=full|mail-metrics]`; the scope defaults to full.
+func parseOperatorGrantArguments(args []string) (string, domain.OperatorScope, error) {
+	scope := domain.OperatorScopeFull
+	positional := make([]string, 0, 1)
+	for _, arg := range args {
+		value, isScope := strings.CutPrefix(arg, "--scope=")
+		if !isScope {
+			positional = append(positional, arg)
+			continue
+		}
+		switch strings.TrimSpace(value) {
+		case "full":
+			scope = domain.OperatorScopeFull
+		case "mail-metrics":
+			scope = domain.OperatorScopeMailMetrics
+		default:
+			return "", "", fmt.Errorf("operator:grant --scope must be full or mail-metrics")
+		}
+	}
+	email, err := operatorEmailArgument("operator:grant", positional)
+	if err != nil {
+		return "", "", err
+	}
+	return email, scope, nil
 }
 
 // OperatorRevokeCommand removes platform-operator access from an account.
@@ -99,7 +127,7 @@ func (c *OperatorRevokeCommand) Run(args []string) error {
 		c.output.Info("%s is not a platform operator", email)
 		return nil
 	}
-	if auditErr := recordOperatorCommandAudit(ctx, runtime.audit, "revoke", userID); auditErr != nil {
+	if auditErr := recordOperatorCommandAudit(ctx, runtime.audit, "revoke", userID, ""); auditErr != nil {
 		c.output.Warning("Operator revoked, but audit persistence failed")
 	}
 	c.output.Success("Revoked platform-operator access from %s", email)
@@ -139,10 +167,11 @@ func (c *OperatorListCommand) Run(args []string) error {
 			strconv.FormatUint(uint64(grant.UserID), 10),
 			grant.Username,
 			grant.Email,
+			string(grant.Scope),
 			grant.GrantedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		}
 	}
-	c.output.Table([]string{"USER ID", "USERNAME", "EMAIL", "GRANTED AT"}, rows)
+	c.output.Table([]string{"USER ID", "USERNAME", "EMAIL", "SCOPE", "GRANTED AT"}, rows)
 	return nil
 }
 
@@ -186,12 +215,13 @@ func operatorCommandContext() (context.Context, context.CancelFunc) {
 }
 
 // recordOperatorCommandAudit records a grant change with the system as actor and the account's user
-// ID as target. The email is not stored in the audit record.
+// ID as target. The email is not stored in the audit record; a grant records its scope.
 func recordOperatorCommandAudit(
 	ctx context.Context,
 	recorder domain.AuditLogRecorder,
 	operation string,
 	userID uint,
+	scope domain.OperatorScope,
 ) error {
 	if recorder == nil {
 		return errOperatorCommandUnavailable
@@ -209,6 +239,14 @@ func recordOperatorCommandAudit(
 		Path:       command,
 		RouteName:  "console.operator." + operation,
 		StatusCode: 200,
-		Metadata:   map[string]any{"operation": operation},
+		Metadata:   operatorAuditMetadata(operation, scope),
 	})
+}
+
+func operatorAuditMetadata(operation string, scope domain.OperatorScope) map[string]any {
+	metadata := map[string]any{"operation": operation}
+	if scope != "" {
+		metadata["scope"] = string(scope)
+	}
+	return metadata
 }

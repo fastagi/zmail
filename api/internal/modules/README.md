@@ -20,7 +20,7 @@ selected; optional starters are enabled with `OPTIONAL_STARTERS`.
 | `setting` | optional | `user`, `audit`, `organization` | 1 | Finite typed app, organization, and user overrides with versioned replacement. |
 | `usage` | optional | `user`, `audit`, `organization` | 1 | Trusted idempotent metering, atomic quota decisions, and private summaries. |
 | `webhook` | optional | `user`, `audit`, `organization` | 1 | Organization-owned outbound endpoints with signed durable delivery, retries, and replay. |
-| `operator` | optional | `user`, `audit` | 1 | Platform operators: CLI-managed grants and the Admin Console cookie session. |
+| `operator` | optional | `user`, `audit` | 2 | Platform operators: CLI-managed grants and the Admin Console cookie session. |
 | `mailbox` | optional | `user`, `audit`, `apikey`, `organization` | 29 | Organization mailboxes that send through Cloudflare Email Service and receive from its Email Worker. |
 <!-- starter-catalog:end -->
 

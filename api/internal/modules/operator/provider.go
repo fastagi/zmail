@@ -25,6 +25,9 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 		assembly.WithStarterSummary("Platform operators: CLI-managed grants and the Admin Console cookie session."),
 		assembly.WithStarterDependencies(config.StarterUser, config.StarterAudit),
 		assembly.WithStarterModule(handler),
-		assembly.WithStarterMigrationNames("2026_10_01_000000_create_platform_operators_table"),
+		assembly.WithStarterMigrationNames(
+			"2026_10_01_000000_create_platform_operators_table",
+			"2026_11_29_090000_add_platform_operator_scope",
+		),
 	)
 }

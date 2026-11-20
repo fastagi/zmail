@@ -11,10 +11,11 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 )
 
-// grantPO is one platform-operator grant. The row either exists or it does not; it is never updated.
+// grantPO is one platform-operator grant. Only its scope is ever updated.
 type grantPO struct {
 	UserID    uint      `gorm:"column:user_id;primaryKey"`
 	GrantedAt time.Time `gorm:"column:granted_at"`
+	Scope     string    `gorm:"column:scope"`
 }
 
 func (grantPO) TableName() string {
@@ -23,8 +24,9 @@ func (grantPO) TableName() string {
 
 type grantStore interface {
 	isOperator(ctx context.Context, userID uint) (bool, error)
+	grantScope(ctx context.Context, userID uint) (scope domain.OperatorScope, found bool, err error)
 	operatorIDs(ctx context.Context, userIDs []uint) (map[uint]bool, error)
-	insertGrant(ctx context.Context, userID uint, now time.Time) (created bool, grantedAt time.Time, err error)
+	upsertGrant(ctx context.Context, userID uint, scope domain.OperatorScope, now time.Time) (domain.OperatorGrantChange, time.Time, error)
 	deleteGrant(ctx context.Context, userID uint) (bool, error)
 	listGrants(ctx context.Context) ([]grantPO, error)
 	ping(ctx context.Context) error
@@ -58,6 +60,21 @@ func (r *repository) isOperator(ctx context.Context, userID uint) (bool, error) 
 	return count > 0, nil
 }
 
+func (r *repository) grantScope(ctx context.Context, userID uint) (domain.OperatorScope, bool, error) {
+	db, err := r.conn(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	var rows []grantPO
+	if err := db.Where("user_id = ?", userID).Limit(1).Find(&rows).Error; err != nil {
+		return "", false, err
+	}
+	if len(rows) == 0 {
+		return "", false, nil
+	}
+	return domain.OperatorScope(rows[0].Scope), true, nil
+}
+
 func (r *repository) operatorIDs(ctx context.Context, userIDs []uint) (map[uint]bool, error) {
 	result := make(map[uint]bool, len(userIDs))
 	if len(userIDs) == 0 {
@@ -77,27 +94,41 @@ func (r *repository) operatorIDs(ctx context.Context, userIDs []uint) (map[uint]
 	return result, nil
 }
 
-func (r *repository) insertGrant(ctx context.Context, userID uint, now time.Time) (bool, time.Time, error) {
+// upsertGrant creates the grant or changes its scope. The original grant time is kept.
+func (r *repository) upsertGrant(
+	ctx context.Context,
+	userID uint,
+	scope domain.OperatorScope,
+	now time.Time,
+) (domain.OperatorGrantChange, time.Time, error) {
 	db, err := r.conn(ctx)
 	if err != nil {
-		return false, time.Time{}, err
+		return "", time.Time{}, err
 	}
-	row := grantPO{UserID: userID, GrantedAt: now.UTC()}
+	row := grantPO{UserID: userID, GrantedAt: now.UTC(), Scope: string(scope)}
 	insert := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	if insert.Error != nil {
-		return false, time.Time{}, insert.Error
+		return "", time.Time{}, insert.Error
 	}
 	if insert.RowsAffected == 1 {
-		return true, row.GrantedAt, nil
+		return domain.OperatorGrantCreated, row.GrantedAt, nil
+	}
+	update := db.Model(&grantPO{}).Where("user_id = ? AND scope <> ?", userID, string(scope)).
+		Update("scope", string(scope))
+	if update.Error != nil {
+		return "", time.Time{}, update.Error
 	}
 	var existing grantPO
 	if err := db.Where("user_id = ?", userID).First(&existing).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return false, time.Time{}, domain.ErrConflict
+			return "", time.Time{}, domain.ErrConflict
 		}
-		return false, time.Time{}, err
+		return "", time.Time{}, err
 	}
-	return false, existing.GrantedAt, nil
+	if update.RowsAffected == 1 {
+		return domain.OperatorGrantScopeChanged, existing.GrantedAt, nil
+	}
+	return domain.OperatorGrantUnchanged, existing.GrantedAt, nil
 }
 
 func (r *repository) deleteGrant(ctx context.Context, userID uint) (bool, error) {

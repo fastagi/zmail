@@ -39,6 +39,7 @@ var ProviderSet = wire.NewSet(
 	NewService,
 	wire.Bind(new(Service), new(*service)),
 	NewHandler,
+	NewOperatorMetricsHandler,
 )
 
 // NewMembershipDirectory reads memberships through the organization starter's repository.

@@ -1,6 +1,6 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { navigationItems } from '@/components/layout/navigation';
+import { visibleNavigationItems } from '@/components/layout/navigation';
 import {
   Sidebar,
   SidebarContent,
@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/sidebar';
 import { env } from '@/config/env';
 import { OperatorMenu } from '@/features/operator-session/components/operator-menu';
+import { useOperatorCapabilities } from '@/features/operator-session/hooks/use-operator-session';
 import { useApiReadiness } from '@/features/system/hooks/use-api-readiness';
 import { cn } from '@/lib/cn';
 
@@ -24,6 +25,7 @@ export function AppSidebar() {
   const { t } = useTranslation();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const { setOpenMobile } = useSidebar();
+  const navigationItems = visibleNavigationItems(useOperatorCapabilities());
 
   return (
     <Sidebar
