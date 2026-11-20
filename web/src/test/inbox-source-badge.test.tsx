@@ -77,7 +77,7 @@ function option(subject: string) {
 }
 
 describe('inbox source badge', () => {
-  it('marks Gmail and Outlook copies beside the role tag and nothing for Zmail mail', () => {
+  it('marks Gmail and Outlook copies on the sender line and nothing for Zmail mail', () => {
     renderList([
       row(1, 'From Gmail', 'gmail'),
       row(2, 'From Outlook', 'outlook'),
@@ -88,8 +88,8 @@ describe('inbox source badge', () => {
     const gmail = within(option('From Gmail')).getByText('Gmail');
     expect(gmail).toHaveAttribute('data-source', 'gmail');
     expect(gmail).toHaveAttribute('title', 'Synced from a bound Gmail account (read-only)');
-    // The badge sits right after the role tag.
-    expect(gmail.previousElementSibling).toHaveTextContent('Design');
+    // The badge follows the sender; the mailbox label moved to the subject line.
+    expect(gmail.previousElementSibling).toHaveTextContent('Bob');
     expect(within(option('From Outlook')).getByText('Outlook')).toHaveAttribute(
       'data-source',
       'outlook'

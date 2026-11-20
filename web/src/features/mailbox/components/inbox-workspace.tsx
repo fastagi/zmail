@@ -518,13 +518,14 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   else if (urlState.q !== '') title = t('inbox.search.results', { q: urlState.q });
   else if (urlState.view === 'all') title = t('inbox.title');
   else title = t(`inbox.views.${urlState.view}`);
-  // Unnarrowed, the subtitle counts what the caller reads: readable mailboxes and visible roles.
+  // Unnarrowed, the subtitle counts what the caller reads: readable mailboxes and visible roles
+  // (the roles only when there are any).
+  const shownRoleCount = visibleRoles(mailboxes.data, roleList, canManage).length;
   const subtitle =
     urlState.box === null && urlState.role === null && urlState.q === ''
-      ? t('inbox.subtitle', {
-          mailboxes: readable.length,
-          roles: visibleRoles(mailboxes.data, roleList, canManage).length,
-        })
+      ? shownRoleCount > 0
+        ? t('inbox.subtitle', { mailboxes: readable.length, roles: shownRoleCount })
+        : t('inbox.subtitleMailboxes', { mailboxes: readable.length })
       : undefined;
   const sendable = mailboxes.data.filter(mailbox => mailbox.access.send);
   const sendableIds = new Set(sendable.map(mailbox => mailbox.id));
@@ -541,11 +542,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           setDraft({ mailbox: from, draft: emptyDraft, fromOptions: sendable });
         }
       : null;
-  // Rows name their role only while the list spans roles.
-  const roleTags =
-    urlState.box === null && urlState.role === null
-      ? new Map<number, MailRole>(roleList.map(role => [role.id, role]))
-      : null;
+  // Rows name their mailbox, tinted by its role, unless the list is one mailbox.
+  const roleTags = new Map<number, MailRole>(roleList.map(role => [role.id, role]));
   const emptyTitle =
     urlState.q !== ''
       ? t('inbox.empty.search')
@@ -654,6 +652,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         label={title}
         pages={pages}
         roles={roleTags}
+        showMailbox={urlState.box === null}
         sendable={sendableIds}
         timeZone={timeZone}
         selectedId={openItem?.id ?? null}

@@ -238,6 +238,7 @@ export function InboxList({
   label,
   pages,
   roles = null,
+  showMailbox = false,
   sendable,
   timeZone,
   selectedId,
@@ -249,8 +250,10 @@ export function InboxList({
   /** The listbox's name: the list's title. */
   label: string;
   pages: readonly InboxPage[];
-  /** The roles by id for the rows' role tags; null hides the tags (a list narrowed to one). */
+  /** The roles by id, which color the rows' mailbox labels. */
   roles?: ReadonlyMap<number, MailRole> | null;
+  /** Whether rows name the mailbox that received them: off for a list of one mailbox. */
+  showMailbox?: boolean;
   /** The mailboxes that may send, whose rows hint at the archive and delete keys. */
   sendable: ReadonlySet<number>;
   /** The inbox's zone, in which each row's time is shown. */
@@ -374,12 +377,6 @@ export function InboxList({
                     {t('inbox.threadCount', { count })}
                   </span>
                 ) : null}
-                {role ? (
-                  <span className="flex min-w-0 shrink items-center gap-1 rounded-full bg-row-selected px-[7px] text-[11px] text-text-muted group-aria-selected:bg-bg-surface">
-                    <LabelDot color={role.color} className="size-1.5" />
-                    <span className="truncate">{role.name}</span>
-                  </span>
-                ) : null}
                 {item.source === 'gmail' || item.source === 'outlook' ? (
                   <span
                     data-source={item.source}
@@ -406,13 +403,18 @@ export function InboxList({
                   {rowTime(item.created_at)}
                 </time>
               </span>
-              <span
-                className={cn(
-                  'mt-0.5 block truncate',
-                  unread ? 'font-semibold text-text-main' : 'text-text-subtle'
-                )}
-              >
-                {item.subject || t('list.noSubject')}
+              <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                {showMailbox ? (
+                  <MailboxLabel address={item.mailbox_address} role={role} />
+                ) : null}
+                <span
+                  className={cn(
+                    'min-w-0 truncate',
+                    unread ? 'font-semibold text-text-main' : 'text-text-subtle'
+                  )}
+                >
+                  {item.subject || t('list.noSubject')}
+                </span>
               </span>
               {item.triage ? <TriageReasonLine triage={item.triage} /> : null}
               {item.snippet ? (
@@ -432,6 +434,24 @@ export function InboxList({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The mailbox that received a row, like a Gmail label before the subject: the address's local
+ * part, tinted by the mailbox's role, with the full address (and the role) on hover.
+ */
+function MailboxLabel({ address, role }: { address: string; role: MailRole | undefined }) {
+  const at = address.lastIndexOf('@');
+  const name = at > 0 ? address.slice(0, at) : address;
+  return (
+    <span
+      title={role ? `${address} · ${role.name}` : address}
+      className="flex max-w-[45%] shrink-0 items-center gap-1 rounded-[5px] bg-row-selected px-1.5 text-[11.5px] leading-[18px] text-text-muted group-aria-selected:bg-bg-surface"
+    >
+      {role ? <LabelDot color={role.color} className="size-1.5" /> : null}
+      <span className="truncate">{name}</span>
+    </span>
   );
 }
 
