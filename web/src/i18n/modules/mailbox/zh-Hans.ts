@@ -136,6 +136,7 @@ const messages = {
     },
     viewByMailbox: '按邮箱查看',
     openInMailbox: '在邮箱中打开',
+    sort: { label: '邮箱排序', default: '默认顺序', address: '邮箱地址 A–Z', unread: '未读最多优先' },
     filterMailbox: '查看邮箱 {address} 的邮件',
     clearMailbox: '显示全部邮箱',
     threadCount: '（{count}）',

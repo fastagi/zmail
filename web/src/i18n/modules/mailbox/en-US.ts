@@ -141,6 +141,7 @@ const messages = {
     },
     viewByMailbox: 'View by mailbox',
     openInMailbox: 'Open in mailbox',
+    sort: { label: 'Sort mailboxes', default: 'Default order', address: 'Address (A–Z)', unread: 'Most unread first' },
     filterMailbox: 'Filter by mailbox {address}',
     clearMailbox: 'Show all mailboxes',
     threadCount: '({count})',

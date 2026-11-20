@@ -1,20 +1,26 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
-import Link from 'next/link';
-import { CalendarDays, Inbox, Lock, PenLine, Send, Settings2, Star } from 'lucide-react';
+import { lazy, Suspense, useState, type ReactNode } from 'react';
+import {
+  ArrowDownWideNarrow,
+  CalendarDays,
+  Inbox,
+  Lock,
+  PenLine,
+  Send,
+  Settings2,
+  Star,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
-import { ROUTES } from '@/constants/routes';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
-import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { SendQuotaCard } from '@/features/mailbox/components/send-quota-card';
-import { mailOrganizationHref } from '@/features/mailbox/hooks/use-mail-organization';
 import type { InboxCounts, InboxView, MailRole, Mailbox } from '@/features/mailbox/types';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
+
+const InboxSidebarFooter = lazy(() => import('./inbox-sidebar-footer'));
 
 const viewIcons = {
   all: Inbox,
@@ -24,15 +30,6 @@ const viewIcons = {
 } as const satisfies Record<InboxView, unknown>;
 
 const viewOrder: readonly InboxView[] = ['all', 'today', 'pending', 'sent'];
-
-/** The other mail pages, linked from the sidebar footer. */
-const footerLinks = [
-  ['mail', ROUTES.CONSOLE.EMAILS],
-  ['broadcasts', ROUTES.CONSOLE.MAIL_BROADCASTS],
-  ['contacts', ROUTES.CONSOLE.MAIL_CONTACTS],
-  ['developers', ROUTES.CONSOLE.DEVELOPERS],
-  ['manage', ROUTES.CONSOLE.MAIL_DOMAIN],
-] as const;
 
 /** A role narrowing of the list: a role id, or `none` for the mailboxes without one. */
 export type InboxRoleFilter = number | 'none';
@@ -65,6 +62,8 @@ interface SidebarGroup {
  */
 export function InboxSidebar({
   organization,
+  sort,
+  onSort,
   counts,
   mailboxes,
   roles,
@@ -82,6 +81,8 @@ export function InboxSidebar({
 }: {
   /** The organization's name, or its picker. */
   organization: ReactNode;
+  sort: string;
+  onSort: (value: string) => void;
   counts: InboxCounts | undefined;
   /** Every mailbox the caller has any access to. */
   mailboxes: readonly Mailbox[];
@@ -101,7 +102,6 @@ export function InboxSidebar({
   onShortcuts: () => void;
 }) {
   const t = useT('mailbox');
-  const organizationId = useMailOrganizationId();
   const views = counts?.views;
   const viewNumber: Record<InboxView, number | undefined> = {
     all: views?.all_unread,
@@ -120,7 +120,17 @@ export function InboxSidebar({
   const wide = rail ? 'hidden lg:flex' : 'flex';
   const railIcon = rail ? 'size-4 shrink-0 lg:hidden' : 'hidden';
 
-  const groups = sidebarGroups(mailboxes, roles ?? [], canManage, {
+  const ordered =
+    sort === 'default'
+      ? mailboxes
+      : [...mailboxes].sort((a, b) => {
+          if (sort === 'unread') {
+            const difference = (unreadByMailbox.get(b.id) ?? 0) - (unreadByMailbox.get(a.id) ?? 0);
+            if (difference) return difference;
+          }
+          return a.address.localeCompare(b.address);
+        });
+  const groups = sidebarGroups(ordered, roles ?? [], canManage, {
     ungroupedName: t('inbox.groups.ungrouped'),
     unreadByRole,
     ungroupedUnread: counts?.ungrouped_unread ?? 0,
@@ -241,6 +251,22 @@ export function InboxSidebar({
           <p className="min-w-0 flex-1 truncate text-[11px] tracking-[0.06em] text-text-faint">
             {flat ? t('inbox.groups.mailboxes') : t('inbox.groups.label')}
           </p>
+          <label
+            title={t('inbox.sort.label')}
+            className="relative grid size-7 shrink-0 place-items-center rounded-md text-text-muted hover:bg-nav-hover focus-within:ring-2"
+          >
+            <ArrowDownWideNarrow aria-hidden="true" className="size-4" />
+            <select
+              aria-label={t('inbox.sort.label')}
+              className="absolute inset-0 size-full cursor-pointer opacity-0"
+              value={sort}
+              onChange={event => onSort(event.target.value)}
+            >
+              <option value="default">{t('inbox.sort.default')}</option>
+              <option value="address">{t('inbox.sort.address')}</option>
+              <option value="unread">{t('inbox.sort.unread')}</option>
+            </select>
+          </label>
           {canManage ? (
             <Button
               type="button"
@@ -258,7 +284,7 @@ export function InboxSidebar({
         </div>
         {rail ? <div className="h-4 lg:hidden" aria-hidden="true" /> : null}
         {flat
-          ? mailboxes.map(mailbox =>
+          ? ordered.map(mailbox =>
               mailbox.access.view ? (
                 <MailboxRow
                   key={mailbox.id}
@@ -336,28 +362,13 @@ export function InboxSidebar({
 
       <div className="min-h-4 flex-1" aria-hidden="true" />
       <div className={cn('flex-col', wide)}>
-        <SendQuotaCard canManage={canManage} sentWaiting={views?.sent_waiting ?? 0} />
-        <nav
-          aria-label={t('inbox.footer.label')}
-          className="flex flex-wrap gap-x-2.5 gap-y-1 px-2 pt-2.5 text-text-muted"
-        >
-          {footerLinks.map(([key, path]) => (
-            <Link
-              key={key}
-              href={mailOrganizationHref(path, organizationId)}
-              className="rounded-sm transition-colors focus-ring first:mr-auto hover:text-text-main motion-reduce:transition-none"
-            >
-              {t(`inbox.footer.${key}`)}
-            </Link>
-          ))}
-          <button
-            type="button"
-            className="rounded-sm transition-colors focus-ring hover:text-text-main motion-reduce:transition-none"
-            onClick={onShortcuts}
-          >
-            {t('inbox.footer.shortcuts')}
-          </button>
-        </nav>
+        <Suspense fallback={null}>
+          <InboxSidebarFooter
+            canManage={canManage}
+            sentWaiting={views?.sent_waiting ?? 0}
+            onShortcuts={onShortcuts}
+          />
+        </Suspense>
       </div>
     </div>
   );
@@ -459,7 +470,10 @@ function MailboxRow({
       {unread > 0 ? (
         <span
           aria-hidden="true"
-          className={cn('shrink-0 text-xs text-text-faint tabular-nums', rail && 'hidden lg:inline')}
+          className={cn(
+            'shrink-0 text-xs text-text-faint tabular-nums',
+            rail && 'hidden lg:inline'
+          )}
         >
           {unread}
         </span>
