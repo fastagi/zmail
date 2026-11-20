@@ -1470,7 +1470,7 @@ messages are never masked, and stored mail is never changed.
 
 - A code is 4–8 digits, `123 456` or `123-456`, or 6–8 letters and digits with at least one of
   each, within 40 characters after or 20 characters before a keyword such as `code`, `OTP`,
-  `PIN`, `verification`, `2FA`, `验证码`, or `动态码`. Numbers that belong to a date, time,
+  `PIN`, `verification`, `2FA`, or the Chinese words for verification code and dynamic code. Numbers that belong to a date, time,
   decimal, version, amount, or `#` color are not codes. A code shows as `••••••`.
 - A sensitive link is an `http` or `https` URL whose path or query contains `reset`, `recover`,
   `verify`, `confirm`, `magic`, `token`, `login`, `signin`, `auth`, `otp`, `password`, or

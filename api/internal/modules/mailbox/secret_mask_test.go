@@ -76,12 +76,13 @@ func TestMaskSecretsInTextMasksSensitiveLinks(t *testing.T) {
 }
 
 func TestMaskSecretsInHTMLMasksTextAndLinks(t *testing.T) {
+	yourCodeIs := "您的验证码："
 	in := `<html><head><style>.c{color:#a1b2c3} .code{font:12px}</style></head>` +
-		`<body><p style="color:#123456">您的验证码：</p><p><b>482913</b></p>` +
+		`<body><p style="color:#123456">` + yourCodeIs + `</p><p><b>482913</b></p>` +
 		`<a href="https://id.example.com/verify?t=XYZ" class="btn">Verify</a>` +
 		`<a href="https://example.com/help">Help</a></body></html>`
 	want := `<html><head><style>.c{color:#a1b2c3} .code{font:12px}</style></head>` +
-		`<body><p style="color:#123456">您的验证码：</p><p><b>••••••</b></p>` +
+		`<body><p style="color:#123456">` + yourCodeIs + `</p><p><b>••••••</b></p>` +
 		`<a href="https://id.example.com/••••" class="btn">Verify</a>` +
 		`<a href="https://example.com/help">Help</a></body></html>`
 	got, masked := maskSecretsInHTML(in)

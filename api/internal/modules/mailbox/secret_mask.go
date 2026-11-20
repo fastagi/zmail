@@ -28,7 +28,15 @@ const (
 
 // secretKeywords say a nearby number is a one-time code. ASCII keywords match whole words only.
 var secretKeywords = []string{
-	"验证码", "校验码", "动态码", "确认码", "登录码", "安全码", "激活码", "口令", "动态密码",
+	"\u9a8c\u8bc1\u7801",       // Chinese "verification code"
+	"\u6821\u9a8c\u7801",       // Chinese "check code"
+	"\u52a8\u6001\u7801",       // Chinese "dynamic code"
+	"\u786e\u8ba4\u7801",       // Chinese "confirmation code"
+	"\u767b\u5f55\u7801",       // Chinese "login code"
+	"\u5b89\u5168\u7801",       // Chinese "security code"
+	"\u6fc0\u6d3b\u7801",       // Chinese "activation code"
+	"\u53e3\u4ee4",             // Chinese "passphrase"
+	"\u52a8\u6001\u5bc6\u7801", // Chinese "dynamic password"
 	"code", "otp", "passcode", "pin", "verification", "verify", "one-time", "2fa", "security code",
 	"login code",
 }
