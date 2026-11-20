@@ -10,23 +10,35 @@ import (
 var localPartPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`)
 
 // reservedLocalParts are role addresses that RFC 2142 and common practice give to the domain
-// operator. Letting a user claim one would let them receive mail meant for the operator.
+// operator. On the shared domain the operator is Zmail, so letting a user claim one would let them
+// receive mail meant for the operator. An organization's own domain is operated by the
+// organization, which may claim them.
 var reservedLocalParts = map[string]struct{}{
 	"abuse": {}, "admin": {}, "administrator": {}, "hostmaster": {}, "mailer-daemon": {},
 	"no-reply": {}, "noreply": {}, "postmaster": {}, "root": {}, "security": {},
 	"support": {}, "webmaster": {},
 }
 
-// normalizeLocalPart validates the requested local part and returns its canonical form.
+// normalizeLocalPart validates the requested local part and returns its canonical form. Whether a
+// role address is free depends on the domain; see checkReservedLocalPart.
 func normalizeLocalPart(raw string) (string, error) {
 	localPart := strings.ToLower(strings.TrimSpace(raw))
 	if !localPartPattern.MatchString(localPart) || strings.Contains(localPart, "..") {
 		return "", ErrMailboxAddressInvalid
 	}
-	if _, reserved := reservedLocalParts[localPart]; reserved {
-		return "", ErrMailboxAddressReserved
-	}
 	return localPart, nil
+}
+
+// checkReservedLocalPart answers ErrMailboxAddressReserved for a role address on the shared
+// domain. Role addresses on an organization's own domain are allowed.
+func checkReservedLocalPart(localPart, addressDomain, sharedDomain string) error {
+	if addressDomain != sharedDomain {
+		return nil
+	}
+	if _, reserved := reservedLocalParts[localPart]; reserved {
+		return ErrMailboxAddressReserved
+	}
+	return nil
 }
 
 // normalizeRecipient accepts a bare address and returns it lowercased. Display names are

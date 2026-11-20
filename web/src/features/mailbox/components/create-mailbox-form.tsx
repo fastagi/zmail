@@ -118,7 +118,9 @@ export function CreateMailboxForm({
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
-    const normalized = normalizeLocalPart(localPart);
+    const normalized = normalizeLocalPart(localPart, {
+      sharedDomain: chosen.kind !== 'organization',
+    });
     if (!normalized.ok) {
       setError(
         t(normalized.reason === 'reserved' ? 'errors.addressReserved' : 'errors.addressInvalid')

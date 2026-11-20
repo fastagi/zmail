@@ -139,8 +139,9 @@ has no browser route: only the mail edge calls it.
 - `local_part` is trimmed and lowercased. It is 1 to 64 characters of lowercase ASCII letters and
   digits, with single inner `.`, `_`, or `-`. Anything else is `422 MAILBOX.ADDRESS_INVALID`.
 - Role addresses (`abuse`, `admin`, `administrator`, `hostmaster`, `mailer-daemon`, `no-reply`,
-  `noreply`, `postmaster`, `root`, `security`, `support`, `webmaster`) are
-  `422 MAILBOX.ADDRESS_RESERVED`.
+  `noreply`, `postmaster`, `root`, `security`, `support`, `webmaster`) on the shared domain are
+  `422 MAILBOX.ADDRESS_RESERVED`. On a domain the organization connected, the organization
+  operates the domain and may create them.
 - `display_name` is optional, at most 120 characters, and may not contain `<`, `>`, or `"`; a
   violation is also `422 MAILBOX.ADDRESS_INVALID`.
 - The address is `<local_part>@<domain>`. Without `domain`, or with the shared domain, it is the
@@ -295,7 +296,7 @@ message content, unread count, or access.
 | `error_code` | Meaning |
 |---|---|
 | `MAILBOX.ADDRESS_INVALID` | No `@`, a bad local part, or a bad display name |
-| `MAILBOX.ADDRESS_RESERVED` | A role address |
+| `MAILBOX.ADDRESS_RESERVED` | A role address on the shared domain |
 | `MAILBOX.ADDRESS_TAKEN` | The address is or was a mailbox |
 | `MAILBOX.IMPORT_DUPLICATE_ROW` | An earlier row has the same address, ignoring case |
 | `MAILBOX.DOMAIN_NOT_FOUND` | The domain is neither the shared domain nor one the organization connected |
