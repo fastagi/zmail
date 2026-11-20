@@ -1,7 +1,7 @@
 import { ApiErrorCode } from '@/http/codes';
 import type { AuthStatus } from '@/features/auth/types';
 
-export type AuthField = 'email' | 'name' | 'password';
+export type AuthField = 'code' | 'email' | 'name' | 'password';
 export type AuthSessionFailureStatus = Extract<
   AuthStatus,
   'forbidden' | 'unauthenticated' | 'unavailable'

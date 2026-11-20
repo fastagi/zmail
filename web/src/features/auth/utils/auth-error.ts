@@ -14,6 +14,9 @@ type AuthErrorKey = Extract<
   | 'auth.loginFailed'
   | 'auth.logoutFailed'
   | 'auth.registerFailed'
+  | 'auth.registrationCodeExpired'
+  | 'auth.registrationCodeInvalid'
+  | 'auth.registrationCodeRequired'
   | 'errors.authUnavailable'
   | 'errors.forbidden'
   | 'errors.networkError'
@@ -41,6 +44,13 @@ export function resolveAuthErrorKey(error: unknown, action: AuthAction): AuthErr
 
   if (action === 'register' && errorCode === ApiErrorCode.USER_EMAIL_ALREADY_EXISTS) {
     return 'auth.emailAlreadyExists';
+  }
+
+  if (action === 'register') {
+    const codeKey = registrationCodeErrorKey(errorCode);
+    if (codeKey) {
+      return codeKey;
+    }
   }
 
   if (errorCode === ApiErrorCode.AUTH_ACCOUNT_DISABLED) {
@@ -86,4 +96,15 @@ export function resolveAuthErrorKey(error: unknown, action: AuthAction): AuthErr
   }
 
   return fallbackKeyByAction[action];
+}
+
+const registrationCodeErrorKeys: Readonly<Record<string, AuthErrorKey>> = {
+  [ApiErrorCode.AUTH_REGISTRATION_EMAIL_CODE_REQUIRED]: 'auth.registrationCodeRequired',
+  [ApiErrorCode.AUTH_REGISTRATION_EMAIL_CODE_INVALID]: 'auth.registrationCodeInvalid',
+  [ApiErrorCode.AUTH_REGISTRATION_EMAIL_CODE_EXPIRED]: 'auth.registrationCodeExpired',
+};
+
+/** Returns the copy for a registration-code failure, or undefined for any other error. */
+export function registrationCodeErrorKey(errorCode: string | undefined): AuthErrorKey | undefined {
+  return errorCode ? registrationCodeErrorKeys[errorCode] : undefined;
 }

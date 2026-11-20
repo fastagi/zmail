@@ -37,7 +37,13 @@ export interface AdapterSession extends AuthResponse {
 }
 
 type AdapterOperation =
-  'login' | 'logout' | 'register' | 'session' | 'password-reset' | 'password-reset-confirm';
+  | 'login'
+  | 'logout'
+  | 'register'
+  | 'register-email-code'
+  | 'session'
+  | 'password-reset'
+  | 'password-reset-confirm';
 
 interface GoApiUser {
   id: number;
@@ -116,6 +122,7 @@ export class GoApiAuthAdapter {
           password: input.password,
           email: input.email,
           nickname: input.name,
+          email_code: input.code,
         },
       },
       incomingHeaders,
@@ -192,6 +199,22 @@ export class GoApiAuthAdapter {
     }
 
     return { ok: true, data: { success: true } };
+  }
+
+  /** Asks the API to mail a registration code. The API answers the same whether the address is taken. */
+  async requestRegistrationEmailCode(
+    email: string,
+    incomingHeaders: Headers,
+    signal?: AbortSignal
+  ): Promise<AdapterResult<{ success: true }>> {
+    const result = await this.request(
+      'register-email-code',
+      'register/email-codes',
+      { method: 'POST', body: { email } },
+      incomingHeaders,
+      signal
+    );
+    return result.ok ? { ok: true, data: { success: true } } : result;
   }
 
   /** Asks the API to email a reset token. The API answers the same whether the address exists. */
@@ -341,7 +364,9 @@ function isActiveGoApiUser(value: unknown): boolean {
 function authFieldMap(operation: AdapterOperation): Readonly<Record<string, string>> {
   switch (operation) {
     case 'register':
-      return { email: 'email', nickname: 'name', password: 'password' };
+      return { email: 'email', nickname: 'name', password: 'password', email_code: 'code' };
+    case 'register-email-code':
+      return { email: 'email' };
     case 'login':
       return { username: 'email', password: 'password' };
     case 'password-reset':

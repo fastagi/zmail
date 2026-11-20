@@ -107,6 +107,7 @@ describe('GoApiAuthAdapter', () => {
         name: 'Ada Lovelace',
         email: 'ada@example.com',
         password: 'secret-123',
+        code: '042917',
       },
       new Headers({ 'x-request-id': 'req-register-1' })
     );
@@ -127,6 +128,7 @@ describe('GoApiAuthAdapter', () => {
       password: 'secret-123',
       email: 'ada@example.com',
       nickname: 'Ada Lovelace',
+      email_code: '042917',
     });
 
     const [loginUrl, loginInit] = fetchMock.mock.calls[1];
@@ -184,6 +186,7 @@ describe('GoApiAuthAdapter', () => {
           name: 'Ada',
           email: 'ada@example.com',
           password: 'secret-123',
+          code: '042917',
         },
         new Headers()
       )

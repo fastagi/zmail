@@ -28,6 +28,19 @@ vi.mock('@/features/auth/hooks/use-auth', () => ({
   useRegister: () => mutations.register,
 }));
 
+vi.mock('@/features/auth/services/auth-service', () => ({
+  authService: { requestRegistrationCode: vi.fn().mockResolvedValue({ success: true }) },
+}));
+
+/** Registration details appear once a code is sent; the error under test then renders with them. */
+async function sendRegistrationCode(error: unknown) {
+  fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ann@example.com' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send code' }));
+  await screen.findByLabelText('Full Name');
+  mutations.register.error = error;
+  fireEvent.change(screen.getByLabelText('Verification code'), { target: { value: '1' } });
+}
+
 function renderWithMessages(children: React.ReactNode) {
   return render(
     <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
@@ -102,8 +115,8 @@ describe('auth form error feedback', () => {
     expect(screen.getByText('demo@example.test / demo-password')).toBeInTheDocument();
   });
 
-  it('associates server field ownership with localized registration errors', () => {
-    mutations.register.error = new ApiError(
+  it('associates server field ownership with localized registration errors', async () => {
+    const error = new ApiError(
       'backend validation detail',
       ApiErrorCode.COMMON_VALIDATION_FAILED,
       422,
@@ -116,6 +129,7 @@ describe('auth form error feedback', () => {
     );
 
     renderWithMessages(<RegisterForm />);
+    await sendRegistrationCode(error);
 
     expect(screen.getByRole('alert')).toHaveTextContent('Please review the highlighted fields');
     expect(screen.getByLabelText('Full Name')).toHaveAttribute('aria-invalid', 'true');
@@ -143,10 +157,11 @@ describe('auth form error feedback', () => {
     expect(email.closest('form')).toHaveAttribute('aria-busy', 'true');
   });
 
-  it('exposes registration metadata and disables edits while pending', () => {
-    mutations.register.isPending = true;
-
+  it('exposes registration metadata and disables edits while pending', async () => {
     renderWithMessages(<RegisterForm />);
+    await sendRegistrationCode(null);
+    mutations.register.isPending = true;
+    fireEvent.change(screen.getByLabelText('Verification code'), { target: { value: '12' } });
 
     const name = screen.getByLabelText('Full Name');
     expect(name).toHaveAttribute('name', 'name');

@@ -71,6 +71,10 @@ func (m *fakeUserMailer) SendWelcomeEmail(context.Context, string, string) error
 	return nil
 }
 
+func (m *fakeUserMailer) SendRegistrationCodeEmail(context.Context, string, string) error {
+	return nil
+}
+
 func (r *fakeRepo) Create(ctx context.Context, user *domain.User) error {
 	if r.createFn != nil {
 		return r.createFn(ctx, user)

@@ -14,9 +14,10 @@ type SentMail struct {
 	Subject        string
 	HTML           string
 	IdempotencyKey string
-	// Kind is "generic", "password_reset", or "welcome".
+	// Kind is "generic", "password_reset", "registration_code", or "welcome".
 	Kind string
-	// Token and Username carry the template inputs of the typed helpers.
+	// Token and Username carry the template inputs of the typed helpers; Token holds the code of a
+	// registration_code message.
 	Token    string
 	Username string
 }
@@ -57,6 +58,11 @@ func (m *FakeMailer) SendEmailIdempotent(_ context.Context, to []string, subject
 // SendPasswordResetEmail records a password reset message and its token.
 func (m *FakeMailer) SendPasswordResetEmail(_ context.Context, to, token string) error {
 	return m.record(SentMail{To: []string{to}, Kind: "password_reset", Token: token})
+}
+
+// SendRegistrationCodeEmail records a registration code message and its code.
+func (m *FakeMailer) SendRegistrationCodeEmail(_ context.Context, to, code string) error {
+	return m.record(SentMail{To: []string{to}, Kind: "registration_code", Token: code})
 }
 
 // SendWelcomeEmail records a welcome message.

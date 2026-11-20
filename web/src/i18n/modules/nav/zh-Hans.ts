@@ -21,6 +21,7 @@ const messages = {
   adminDomains: '域名管理',
   adminSharedMailboxes: '公共邮箱',
   adminPlatformAccounts: '平台账号',
+  adminAiTriage: 'AI 分流',
   developers: '开发者',
   // fastbuild:slot web.i18n.nav.zh-hans
 } as const satisfies LocaleMessageShape<NavMessages>;

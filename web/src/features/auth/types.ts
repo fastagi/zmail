@@ -27,6 +27,8 @@ export interface RegisterRequest {
   name: string;
   email: string;
   password: string;
+  /** The 6-digit code mailed to `email` by the registration-code request. */
+  code: string;
 }
 
 export interface AuthResponse {

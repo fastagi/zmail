@@ -150,6 +150,9 @@ stop_server() {
 start_server() {
   local settings="$1"
   (
+    # Kest has no system mailer, so flows register without email codes unless their settings
+    # turn codes back on (register_email_code.kestenv does).
+    export AUTH_REGISTRATION_EMAIL_CODE_REQUIRED=false
     if [[ -f "${settings}" ]]; then
       set -a
       # shellcheck disable=SC1090

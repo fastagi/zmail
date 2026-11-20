@@ -95,6 +95,14 @@ describe('organization admin area', () => {
     expect(link).toHaveAttribute('aria-current', 'page');
   });
 
+  it('lists the AI triage page', () => {
+    state.pathname = '/console/admin/ai-triage';
+    renderWithMessages(<AdminShell>content</AdminShell>);
+    const link = screen.getByRole('link', { name: 'AI triage' });
+    expect(link).toHaveAttribute('href', '/console/admin/ai-triage?org=1');
+    expect(link).toHaveAttribute('aria-current', 'page');
+  });
+
   it('marks Domains current on a zone DNS page', () => {
     state.pathname = '/console/admin/domains/9/dns';
     renderWithMessages(<AdminShell>content</AdminShell>);

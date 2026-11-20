@@ -8,6 +8,12 @@ Notable changes to FastBuild. Downstream migration steps for each change are in
 
 ### Added
 
+- **Registration email codes.** Self-registration proves the address: `POST /v1/register/email-codes`
+  mails a 6-digit code (10 minutes, 5 attempts, one per minute and 5 per hour per address, nothing
+  mailed to an address that has an account), and `POST /v1/register` takes `email_code`. The Web
+  sign-up page sends the code first, with a 60-second resend countdown.
+  `AUTH_REGISTRATION_EMAIL_CODE_REQUIRED` defaults to `true`. Migration
+  `2026_11_27_090000_create_registration_email_codes`.
 - **Mailbox organize.** Every message has a placement: `default` (Inbox or Sent), `archive`,
   a mailbox `folder`, or `trash`, where it is deleted for good after 30 days by
   `mail:broadcast:work`. Mailboxes gain up to 100 shared folders and 100 shared colored labels

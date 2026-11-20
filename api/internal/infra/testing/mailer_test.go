@@ -16,6 +16,7 @@ type mailService interface {
 	SendEmailIdempotent(ctx context.Context, to []string, subject, html, key string) error
 	SendPasswordResetEmail(ctx context.Context, to, token string) error
 	SendWelcomeEmail(ctx context.Context, to, username string) error
+	SendRegistrationCodeEmail(ctx context.Context, to, code string) error
 }
 
 var (
@@ -44,6 +45,16 @@ func TestFakeMailerRecordsAndAsserts(t *testing.T) {
 	}
 	if len(mailer.Sent()) != 2 {
 		t.Fatalf("sent %d messages", len(mailer.Sent()))
+	}
+}
+
+func TestFakeMailerRecordsRegistrationCodes(t *testing.T) {
+	mailer := NewFakeMailer()
+	if err := mailer.SendRegistrationCodeEmail(context.Background(), "new@example.test", "123456"); err != nil {
+		t.Fatal(err)
+	}
+	if sent := mailer.AssertSent(t, "new@example.test", "registration_code"); sent.Token != "123456" {
+		t.Fatalf("code = %q", sent.Token)
 	}
 }
 

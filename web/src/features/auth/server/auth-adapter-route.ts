@@ -74,6 +74,21 @@ export async function requestPasswordResetWithGoApi(
   return privateAuthResponse(apiSuccessResponse({ success: true }));
 }
 
+export async function requestRegistrationEmailCodeWithGoApi(
+  request: Request,
+  email: string
+): Promise<NextResponse> {
+  const result = await configuredAdapter().requestRegistrationEmailCode(
+    email,
+    request.headers,
+    request.signal
+  );
+  if (!result.ok) {
+    return adapterErrorResponse(result.error);
+  }
+  return privateAuthResponse(apiSuccessResponse({ success: true }));
+}
+
 export async function confirmPasswordResetWithGoApi(
   request: Request,
   input: { token: string; password: string }

@@ -25,6 +25,27 @@ describe('auth error presentation', () => {
     ).toBe('auth.emailAlreadyExists');
   });
 
+  it('maps registration code failures before the generic 400 fallback', () => {
+    expect(
+      resolveAuthErrorKey(
+        new ApiError('raw', ApiErrorCode.AUTH_REGISTRATION_EMAIL_CODE_INVALID, 400),
+        'register'
+      )
+    ).toBe('auth.registrationCodeInvalid');
+    expect(
+      resolveAuthErrorKey(
+        new ApiError('raw', ApiErrorCode.AUTH_REGISTRATION_EMAIL_CODE_EXPIRED, 400),
+        'register'
+      )
+    ).toBe('auth.registrationCodeExpired');
+    expect(
+      resolveAuthErrorKey(
+        new ApiError('raw', ApiErrorCode.AUTH_REGISTRATION_EMAIL_CODE_REQUIRED, 400),
+        'register'
+      )
+    ).toBe('auth.registrationCodeRequired');
+  });
+
   it('prefers canonical error codes over conflicting HTTP status fallbacks', () => {
     expect(
       resolveAuthErrorKey(

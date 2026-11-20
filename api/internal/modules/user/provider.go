@@ -43,7 +43,7 @@ func NewUserMailer(service *email.Service) UserMailer {
 func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 	return assembly.NewStaticStarterManifest(
 		config.StarterUser,
-		assembly.WithStarterSummary("Registration, sign-in, revocable sessions, profile, and password reset."),
+		assembly.WithStarterSummary("Registration with email codes, sign-in, revocable sessions, profile, and password reset."),
 		assembly.WithStarterModule(handler),
 		assembly.WithStarterMigrationNames(
 			"2025_06_18_000000_create_users_table",
@@ -51,6 +51,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_04_27_000001_add_unique_index_to_users_username",
 			"2026_04_27_000003_create_authentication_sessions_table",
 			"2026_10_04_000000_add_audience_to_authentication_sessions",
+			"2026_11_27_090000_create_registration_email_codes",
 			"2025_06_18_000001_seed_default_users",
 		),
 		assembly.WithStarterSeederNames("users"),

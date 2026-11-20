@@ -484,6 +484,16 @@ TABLE rate_limit_buckets
   COLUMN hits bigint NOT NULL
   COLUMN window_end timestamp with time zone NOT NULL
 
+TABLE registration_email_codes
+  COLUMN id bigint NOT NULL DEFAULT nextval('registration_email_codes_id_seq'::regclass)
+  COLUMN email character varying(100) NOT NULL
+  COLUMN code_hash character(64) NOT NULL
+  COLUMN expires_at timestamp with time zone NOT NULL
+  COLUMN attempts integer NOT NULL DEFAULT 0
+  COLUMN consumed_at timestamp with time zone
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE settings
   COLUMN id bigint NOT NULL DEFAULT nextval('settings_id_seq'::regclass)
   COLUMN scope character varying(24) NOT NULL
@@ -842,6 +852,10 @@ CONSTRAINT platform_operators.platform_operators_pkey PRIMARY KEY (user_id)
 CONSTRAINT rate_limit_buckets.rate_limit_buckets_hits_check CHECK ((hits >= 1))
 CONSTRAINT rate_limit_buckets.rate_limit_buckets_key_hash_check CHECK ((octet_length(key_hash) = 32))
 CONSTRAINT rate_limit_buckets.rate_limit_buckets_pkey PRIMARY KEY (key_hash)
+CONSTRAINT registration_email_codes.registration_email_codes_attempts_check CHECK ((attempts >= 0))
+CONSTRAINT registration_email_codes.registration_email_codes_code_hash_check CHECK ((code_hash ~ '^[0-9a-f]{64}$'::text))
+CONSTRAINT registration_email_codes.registration_email_codes_email_check CHECK (((email)::text = lower((email)::text)))
+CONSTRAINT registration_email_codes.registration_email_codes_pkey PRIMARY KEY (id)
 CONSTRAINT settings.fk_settings_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT settings.fk_settings_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT settings.settings_key_check CHECK (((length((key)::text) >= 1) AND (length((key)::text) <= 96)))
@@ -1083,6 +1097,8 @@ INDEX CREATE UNIQUE INDEX platform_accounts_pkey ON platform_accounts USING btre
 INDEX CREATE UNIQUE INDEX platform_operators_pkey ON platform_operators USING btree (user_id)
 INDEX CREATE INDEX idx_rate_limit_buckets_window_end ON rate_limit_buckets USING btree (window_end)
 INDEX CREATE UNIQUE INDEX rate_limit_buckets_pkey ON rate_limit_buckets USING btree (key_hash)
+INDEX CREATE INDEX idx_registration_email_codes_email_created_at ON registration_email_codes USING btree (email, created_at DESC)
+INDEX CREATE UNIQUE INDEX registration_email_codes_pkey ON registration_email_codes USING btree (id)
 INDEX CREATE INDEX idx_settings_organization ON settings USING btree (organization_id, subject_id)
 INDEX CREATE UNIQUE INDEX idx_settings_scope_subject_key ON settings USING btree (scope, subject_id, key)
 INDEX CREATE INDEX idx_settings_user ON settings USING btree (user_id, subject_id)
