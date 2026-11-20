@@ -11,6 +11,22 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — AI triage (offline part)
+
+### Low — Two new tables and a mailbox switch for AI triage
+
+Run migrations: `2026_11_26_090000_add_mail_triage` creates `mail_triage` (one row per inbound
+message queued for or given a triage result) and `mail_triage_settings` (one row per organization),
+and adds `mailboxes.ai_triage_enabled boolean NOT NULL DEFAULT false`. The new tables lock nothing
+existing; the column has a constant default, which PostgreSQL 11+ records in the catalog only, so
+`mailboxes` is not rewritten. Rolling back `2026_11_22_090000_add_mail_roles` now needs this
+migration rolled back first.
+
+Nothing changes until an operator opts in: `AI_TRIAGE_PROVIDER` defaults to `disabled`, and every
+organization and mailbox switch defaults off. `AI_TRIAGE_PROVIDER=fake` is for tests and local
+demos and refuses to start with `APP_ENV=production`. Results are written by a new worker,
+`fastbuild mail:triage:work --batch=20 --poll=5s`; run it only once a provider is configured.
+
 ## Unreleased — Shared mailbox administration
 
 Organization owners and admins get an admin area in the Web console with a shared-mailbox page:

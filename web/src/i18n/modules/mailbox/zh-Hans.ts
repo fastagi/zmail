@@ -196,6 +196,7 @@ const messages = {
       reply: '回复',
       replyAll: '全部回复',
       forward: '转发',
+      triage: '改判 AI 分流',
       compose: '写邮件',
       search: '搜索',
       help: '快捷键帮助',
@@ -1390,6 +1391,40 @@ const messages = {
     dnsRecordInvalid: '请检查记录：名称、内容、TTL 和优先级必须符合记录类型。',
     dnsRecordLocked: 'Zmail 邮件依赖此记录或名称，不能在这里写入。要修改，请先删除对应的邮件域名。',
     dnsRecordRejected: 'Cloudflare 拒绝了该记录。',
+  },
+  triage: {
+    label: 'AI 分流',
+    hint: 'AI 按“需要你回复、有期限、只需知道”排好了。分错了可以按 Shift F 纠正，它会记住。',
+    tabs: {
+      label: 'AI 分流',
+      all: '全部',
+      reply: '需要回复',
+      deadline: '有期限',
+      fyi: '只需知道',
+    },
+    categories: {
+      reply: '需回复',
+      deadline: '有期限',
+      fyi: '知悉',
+      review: '待确认',
+    },
+    manual: '由读信人改判',
+    pending: '尚未分流。',
+    change: '改判',
+    changeTitle: '这封信属于',
+    changed: '已改判',
+    draft: {
+      generate: '生成回复草稿',
+      generating: '正在生成…',
+      title: 'AI 回复草稿',
+      basis: '依据：{items}',
+      use: '用这个草稿回复',
+      again: '重新生成',
+    },
+    errors: {
+      unavailable: '本组织未开启 AI 分流。',
+      modelFailed: 'AI 暂时无法生成草稿，请稍后再试。',
+    },
   },
 } as const satisfies LocaleMessageShape<MailboxMessages>;
 

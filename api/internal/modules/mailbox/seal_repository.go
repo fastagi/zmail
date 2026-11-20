@@ -90,7 +90,9 @@ func (r *repository) HandOverMailbox(ctx context.Context, mailboxID uint, sealed
 				"owner_user_id": nil,
 				"owner_left_at": nil,
 				"sealed_before": sealedBefore,
-				"updated_at":    time.Now().UTC(),
+				// The previous owner's AI triage consent does not carry over.
+				"ai_triage_enabled": false,
+				"updated_at":        time.Now().UTC(),
 			})
 		if result.Error != nil {
 			return result.Error

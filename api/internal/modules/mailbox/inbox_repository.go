@@ -217,6 +217,10 @@ func checkInboxQuery(query domain.InboxQuery) error {
 	if query.Query != "" && query.View != domain.InboxViewAll {
 		return fmt.Errorf("%w: inbox search outside the all view", domain.ErrInvalidInput)
 	}
+	if len(query.Triage) > 0 && ((query.View != domain.InboxViewAll && query.View != domain.InboxViewToday) ||
+		query.GroupThreads || query.Query != "") {
+		return fmt.Errorf("%w: inbox triage filter", domain.ErrInvalidInput)
+	}
 	if query.GroupThreads && (inboxDirection(query.View) == "" || query.View == domain.InboxViewToday ||
 		query.Unread != nil || query.Query != "") {
 		return fmt.Errorf("%w: inbox thread grouping", domain.ErrInvalidInput)
@@ -255,6 +259,15 @@ func inboxFilters(query domain.InboxQuery, args map[string]any) string {
 	}
 	if query.Unread != nil {
 		filters += " AND " + negatedIf(unreadByMember, !*query.Unread)
+	}
+	if len(query.Triage) > 0 {
+		filters += ` AND EXISTS (SELECT 1 FROM mail_triage WHERE mail_triage.message_id = mail_messages.id
+		    AND mail_triage.status IN @triage_visible AND mail_triage.category IN @triage_categories)`
+		categories := make([]string, 0, len(query.Triage))
+		for _, category := range query.Triage {
+			categories = append(categories, string(category))
+		}
+		args["triage_visible"], args["triage_categories"] = visibleTriageStatuses(), categories
 	}
 	return filters
 }

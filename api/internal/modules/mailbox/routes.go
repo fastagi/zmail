@@ -132,6 +132,11 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.webhook_setting.update").WhereNumber("mailbox_id")
 		auth.PUT("/mailboxes/:mailbox_id/role-assignment", h.AssignMailboxRole).
 			Name("mailboxes.role_assignment.update").WhereNumber("mailbox_id")
+		auth.PUT("/mailboxes/:mailbox_id/triage-setting", h.SetMailboxTriageSetting).
+			Name("mailboxes.triage_setting.update").WhereNumber("mailbox_id")
+
+		auth.GET("/mail-triage-setting", h.GetTriageSetting).Name("mail_triage_setting.show")
+		auth.PUT("/mail-triage-setting", h.UpdateTriageSetting).Name("mail_triage_setting.update")
 
 		auth.GET("/mailboxes/:mailbox_id/messages", h.ListMessages).
 			Name("mailboxes.messages.index").WhereNumber("mailbox_id")
@@ -141,6 +146,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.messages.show").WhereNumber("mailbox_id").WhereNumber("message_id")
 		auth.POST("/mailboxes/:mailbox_id/messages/:message_id/reveal", h.RevealMessage).
 			Name("mailboxes.messages.reveal").WhereNumber("mailbox_id").WhereNumber("message_id")
+		auth.PUT("/mailboxes/:mailbox_id/messages/:message_id/triage", h.UpdateMessageTriage).
+			Name("mailboxes.messages.triage.update").WhereNumber("mailbox_id").WhereNumber("message_id")
+		auth.POST("/mailboxes/:mailbox_id/messages/:message_id/reply-drafts", h.CreateReplyDraft).
+			Name("mailboxes.messages.reply_drafts.store").WhereNumber("mailbox_id").WhereNumber("message_id")
 		auth.GET("/mailboxes/:mailbox_id/messages/:message_id/attachments/:attachment_id", h.DownloadAttachment).
 			Name("mailboxes.messages.attachments.show").
 			WhereNumber("mailbox_id").WhereNumber("message_id").WhereNumber("attachment_id")

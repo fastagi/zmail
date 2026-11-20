@@ -13,6 +13,7 @@ export type MailShortcut =
   | 'reply'
   | 'replyAll'
   | 'forward'
+  | 'triage'
   | 'compose'
   | 'search'
   | 'help'
@@ -32,6 +33,8 @@ const singleKeys: Readonly<Record<string, MailShortcut>> = {
   r: 'reply',
   a: 'replyAll',
   f: 'forward',
+  // Shift+F: `f` is Forward, so the AI triage menu takes the capital.
+  F: 'triage',
   c: 'compose',
   '/': 'search',
   '?': 'help',

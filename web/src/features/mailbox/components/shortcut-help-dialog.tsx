@@ -23,6 +23,7 @@ const rows: readonly (readonly [MailShortcut, readonly string[]])[] = [
   ['reply', ['R']],
   ['replyAll', ['A']],
   ['forward', ['F']],
+  ['triage', ['⇧F']],
   ['compose', ['C']],
   ['search', ['/']],
   ['help', ['?']],
