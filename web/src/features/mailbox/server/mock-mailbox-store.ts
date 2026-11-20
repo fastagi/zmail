@@ -426,7 +426,9 @@ export class MockMailboxStore {
     input: Omit<CreateMailboxInput, 'type'> & { type?: unknown },
     addressDomain: string = MOCK_MAILBOX_DOMAIN
   ): MockMailboxCreateResult {
-    const localPart = normalizeLocalPart(input.local_part);
+    const localPart = normalizeLocalPart(input.local_part, {
+      sharedDomain: addressDomain === MOCK_MAILBOX_DOMAIN,
+    });
     if (!localPart.ok) return { ok: false, error: localPart.reason };
     const displayName = normalizeDisplayName(input.display_name ?? '');
     if (displayName === null) return { ok: false, error: 'invalid' };
@@ -580,7 +582,9 @@ export class MockMailboxStore {
       if (members === null) return fail(ApiErrorCode.MAILBOX_ACCESS_INVALID);
       const missing = members.filter(member => !emails.has(member.email)).map(item => item.email);
       if (missing.length > 0) return fail(ApiErrorCode.MAILBOX_IMPORT_MEMBER_NOT_FOUND, missing);
-      const localPart = normalizeLocalPart(address.slice(0, at));
+      const localPart = normalizeLocalPart(address.slice(0, at), {
+        sharedDomain: address.slice(at + 1).toLowerCase() === MOCK_MAILBOX_DOMAIN,
+      });
       if (!localPart.ok) {
         return fail(
           localPart.reason === 'reserved'
@@ -600,7 +604,8 @@ export class MockMailboxStore {
         return fail(ApiErrorCode.MAILBOX_ADDRESS_TAKEN);
       }
       if (dryRun) {
-        if (planned >= MAILBOX_MAX_PER_ORGANIZATION) return fail(ApiErrorCode.MAILBOX_LIMIT_REACHED);
+        if (planned >= MAILBOX_MAX_PER_ORGANIZATION)
+          return fail(ApiErrorCode.MAILBOX_LIMIT_REACHED);
         planned += 1;
         return outcome('valid');
       }

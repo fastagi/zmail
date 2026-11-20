@@ -358,6 +358,9 @@ func (s *service) planMailbox(
 	if err != nil {
 		return nil, err
 	}
+	if err = checkReservedLocalPart(localPart, addressDomain, s.settings.Domain); err != nil {
+		return nil, err
+	}
 	mailbox := &domain.Mailbox{
 		OrganizationID: viewer.OrganizationID,
 		CreatedBy:      viewer.UserID,

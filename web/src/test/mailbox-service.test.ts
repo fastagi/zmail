@@ -69,18 +69,30 @@ describe('mailbox service boundary', () => {
 
     // A page whose meta lacks `next_cursor` is not the documented page.
     const { next_cursor: _dropped, ...withoutCursor } = meta;
-    getEnvelope.mockResolvedValueOnce({ code: 0, message: 'success', data: [], meta: withoutCursor });
+    getEnvelope.mockResolvedValueOnce({
+      code: 0,
+      message: 'success',
+      data: [],
+      meta: withoutCursor,
+    });
     await expect(mailboxAdminService.directory(7, {})).rejects.toMatchObject({
       errorCode: ClientErrorCode.INVALID_RESPONSE,
     });
 
     const get = vi.spyOn(request, 'get').mockResolvedValue([]);
     await mailboxService.list(7, 'usable');
-    expect(get).toHaveBeenCalledWith('/mailboxes', { headers: header, params: { scope: 'usable' } });
+    expect(get).toHaveBeenCalledWith('/mailboxes', {
+      headers: header,
+      params: { scope: 'usable' },
+    });
 
     const put = vi.spyOn(request, 'put').mockResolvedValue(accessMailbox());
     await mailboxAdminService.rename(7, 12, 'Billing');
-    expect(put).toHaveBeenCalledWith('/mailboxes/12', { display_name: 'Billing' }, { headers: header });
+    expect(put).toHaveBeenCalledWith(
+      '/mailboxes/12',
+      { display_name: 'Billing' },
+      { headers: header }
+    );
 
     const result = {
       dry_run: true,
@@ -431,6 +443,12 @@ describe('mailbox service boundary', () => {
     }
     for (const reserved of ['postmaster', 'Admin', 'no-reply', 'mailer-daemon']) {
       expect(normalizeLocalPart(reserved), reserved).toEqual({ ok: false, reason: 'reserved' });
+    }
+    for (const role of ['support', 'Admin', 'postmaster']) {
+      expect(normalizeLocalPart(role, { sharedDomain: false }), role).toEqual({
+        ok: true,
+        value: role.toLowerCase(),
+      });
     }
     expect(normalizeDisplayName('  Hello   Team ')).toBe('Hello Team');
     expect(normalizeDisplayName('Bad <name>')).toBeNull();
