@@ -1,0 +1,6 @@
+# Server settings for transactional_mail.flow.md (sourced by run_local.sh; test values only).
+OPTIONAL_STARTERS=organization,mailbox
+MAILBOX_DOMAIN=mail.localhost
+MAILBOX_TRANSACTIONAL_ENABLED=true
+MAILBOX_SECRET_ENCRYPTION_KEY="$(openssl rand -hex 24)"
+MAILBOX_DAILY_TRANSACTIONAL_LIMIT=2
