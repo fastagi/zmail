@@ -82,6 +82,9 @@ type OperatorOutboundMessage struct {
 	LastEvent        string     `json:"last_event"`
 	CreatedAt        time.Time  `json:"created_at"`
 	SendAttemptedAt  *time.Time `json:"send_attempted_at"`
+	// BroadcastID names the organization broadcast that created the message, or is null. Only
+	// such messages have a body an operator with mail_content:read may read.
+	BroadcastID *uint `json:"broadcast_id"`
 }
 
 type platformMailStore interface {
@@ -90,6 +93,8 @@ type platformMailStore interface {
 	platformOrganizationCounts(ctx context.Context, from, to time.Time) (map[uint]platformStatusCounts, error)
 	platformMailboxCounts(ctx context.Context) (map[uint]int64, error)
 	platformOutbound(ctx context.Context, filter outboundFilter, page, perPage int) ([]platformOutboundRow, int64, error)
+	readBroadcastContent(ctx context.Context, request broadcastContentRequest) (*broadcastContentRow, error)
+	contentAccessAudits(ctx context.Context, filter contentAuditFilter, page, perPage int) ([]MailContentAccessAuditPO, int64, error)
 }
 
 // OperatorMetricsHandler serves platform-wide mail metrics and the outbound log to the starter that
@@ -100,6 +105,8 @@ type OperatorMetricsHandler struct {
 	store                  platformMailStore
 	organizationsDirectory domain.PlatformOrganizationDirectory
 	now                    func() time.Time
+	// errors maps refused content reads; nil uses response.DefaultErrorMapper.
+	errors *response.ErrorMapper
 }
 
 // NewOperatorMetricsHandler creates the operator-facing mail metrics handler.
@@ -307,6 +314,7 @@ func (h *OperatorMetricsHandler) outbound(
 			MailboxID: row.MailboxID, MailboxAddress: row.MailboxAddress, FromAddress: row.FromAddress,
 			Subject: row.Subject, Status: row.Status, FailureCode: row.FailureCode, LastEvent: row.LastEvent,
 			CreatedAt: row.CreatedAt.UTC(), SendAttemptedAt: utcPointer(row.SendAttemptedAt),
+			BroadcastID: row.BroadcastID,
 		}
 	}
 	return messages, total, nil

@@ -173,10 +173,12 @@ type platformOutboundRow struct {
 	LastEvent       string
 	CreatedAt       time.Time
 	SendAttemptedAt *time.Time
+	BroadcastID     *uint
 }
 
 // platformOutbound lists one UTC day of counted messages, newest first. It selects metadata only:
-// never a body, recipients, or attachments.
+// never a body, recipients, or attachments. broadcast_id marks the messages whose body an operator
+// with mail_content:read may read.
 func (r *repository) platformOutbound(
 	ctx context.Context,
 	filter outboundFilter,
@@ -206,7 +208,7 @@ func (r *repository) platformOutbound(
 		Select(`mail_messages.id, mailboxes.organization_id, mail_messages.mailbox_id,
 			mailboxes.address AS mailbox_address, mail_messages.from_address, mail_messages.subject,
 			mail_messages.status, mail_messages.failure_code, mail_messages.last_event,
-			mail_messages.created_at, mail_messages.send_attempted_at`).
+			mail_messages.created_at, mail_messages.send_attempted_at, ` + broadcastOfMessage + ` AS broadcast_id`).
 		Order("mail_messages.created_at DESC, mail_messages.id DESC").
 		Offset((page - 1) * perPage).
 		Limit(perPage).

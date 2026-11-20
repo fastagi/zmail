@@ -11,11 +11,16 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 )
 
-// grantPO is one platform-operator grant. Only its scope is ever updated.
+// grantPO is one platform-operator grant. Only its scope and content flag are ever updated.
 type grantPO struct {
-	UserID    uint      `gorm:"column:user_id;primaryKey"`
-	GrantedAt time.Time `gorm:"column:granted_at"`
-	Scope     string    `gorm:"column:scope"`
+	UserID      uint      `gorm:"column:user_id;primaryKey"`
+	GrantedAt   time.Time `gorm:"column:granted_at"`
+	Scope       string    `gorm:"column:scope"`
+	MailContent bool      `gorm:"column:mail_content"`
+}
+
+func (row grantPO) access() domain.OperatorAccess {
+	return domain.OperatorAccess{Scope: domain.OperatorScope(row.Scope), MailContent: row.MailContent}
 }
 
 func (grantPO) TableName() string {
@@ -24,9 +29,9 @@ func (grantPO) TableName() string {
 
 type grantStore interface {
 	isOperator(ctx context.Context, userID uint) (bool, error)
-	grantScope(ctx context.Context, userID uint) (scope domain.OperatorScope, found bool, err error)
+	grantAccess(ctx context.Context, userID uint) (access domain.OperatorAccess, found bool, err error)
 	operatorIDs(ctx context.Context, userIDs []uint) (map[uint]bool, error)
-	upsertGrant(ctx context.Context, userID uint, scope domain.OperatorScope, now time.Time) (domain.OperatorGrantChange, time.Time, error)
+	upsertGrant(ctx context.Context, userID uint, access domain.OperatorAccess, now time.Time) (domain.OperatorGrantChange, time.Time, error)
 	deleteGrant(ctx context.Context, userID uint) (bool, error)
 	listGrants(ctx context.Context) ([]grantPO, error)
 	ping(ctx context.Context) error
@@ -60,19 +65,19 @@ func (r *repository) isOperator(ctx context.Context, userID uint) (bool, error) 
 	return count > 0, nil
 }
 
-func (r *repository) grantScope(ctx context.Context, userID uint) (domain.OperatorScope, bool, error) {
+func (r *repository) grantAccess(ctx context.Context, userID uint) (domain.OperatorAccess, bool, error) {
 	db, err := r.conn(ctx)
 	if err != nil {
-		return "", false, err
+		return domain.OperatorAccess{}, false, err
 	}
 	var rows []grantPO
 	if err := db.Where("user_id = ?", userID).Limit(1).Find(&rows).Error; err != nil {
-		return "", false, err
+		return domain.OperatorAccess{}, false, err
 	}
 	if len(rows) == 0 {
-		return "", false, nil
+		return domain.OperatorAccess{}, false, nil
 	}
-	return domain.OperatorScope(rows[0].Scope), true, nil
+	return rows[0].access(), true, nil
 }
 
 func (r *repository) operatorIDs(ctx context.Context, userIDs []uint) (map[uint]bool, error) {
@@ -94,18 +99,19 @@ func (r *repository) operatorIDs(ctx context.Context, userIDs []uint) (map[uint]
 	return result, nil
 }
 
-// upsertGrant creates the grant or changes its scope. The original grant time is kept.
+// upsertGrant creates the grant or sets its scope and content flag. The original grant time is kept.
 func (r *repository) upsertGrant(
 	ctx context.Context,
 	userID uint,
-	scope domain.OperatorScope,
+	access domain.OperatorAccess,
 	now time.Time,
 ) (domain.OperatorGrantChange, time.Time, error) {
 	db, err := r.conn(ctx)
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	row := grantPO{UserID: userID, GrantedAt: now.UTC(), Scope: string(scope)}
+	scope := string(access.Scope)
+	row := grantPO{UserID: userID, GrantedAt: now.UTC(), Scope: scope, MailContent: access.MailContent}
 	insert := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	if insert.Error != nil {
 		return "", time.Time{}, insert.Error
@@ -113,8 +119,9 @@ func (r *repository) upsertGrant(
 	if insert.RowsAffected == 1 {
 		return domain.OperatorGrantCreated, row.GrantedAt, nil
 	}
-	update := db.Model(&grantPO{}).Where("user_id = ? AND scope <> ?", userID, string(scope)).
-		Update("scope", string(scope))
+	update := db.Model(&grantPO{}).
+		Where("user_id = ? AND (scope <> ? OR mail_content <> ?)", userID, scope, access.MailContent).
+		Updates(map[string]any{"scope": scope, "mail_content": access.MailContent})
 	if update.Error != nil {
 		return "", time.Time{}, update.Error
 	}

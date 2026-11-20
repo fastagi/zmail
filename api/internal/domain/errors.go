@@ -103,6 +103,9 @@ var (
 	ErrOperatorForbidden       = errors.New("caller is not a platform operator")
 	ErrOperatorCapability      = errors.New("operator grant does not include this capability")
 	ErrOperatorTargetProtected = errors.New("target account holds an operator grant")
+	// ErrOperatorContentNotEligible: the message exists in the organization but is not an outbound
+	// organization broadcast, so no operator may read its body.
+	ErrOperatorContentNotEligible = errors.New("message body is not readable by operators")
 )
 
 // Events

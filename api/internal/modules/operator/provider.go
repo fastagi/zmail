@@ -28,6 +28,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 		assembly.WithStarterMigrationNames(
 			"2026_10_01_000000_create_platform_operators_table",
 			"2026_11_29_090000_add_platform_operator_scope",
+			"2026_12_01_090000_add_platform_operator_mail_content",
 		),
 	)
 }

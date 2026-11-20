@@ -38,11 +38,11 @@ func (c *OperatorGrantCommand) Description() string {
 	return "Grant platform-operator access to an account"
 }
 func (c *OperatorGrantCommand) Usage() string {
-	return "operator:grant <email> [--scope=full|mail-metrics]"
+	return "operator:grant <email> [--scope=full|mail-metrics][,mail-content]"
 }
 
 func (c *OperatorGrantCommand) Run(args []string) error {
-	email, scope, err := parseOperatorGrantArguments(args)
+	email, access, err := parseOperatorGrantArguments(args)
 	if err != nil {
 		return err
 	}
@@ -52,24 +52,28 @@ func (c *OperatorGrantCommand) Run(args []string) error {
 	}
 	ctx, stop := operatorCommandContext()
 	defer stop()
-	grant, change, err := runtime.grants.GrantOperator(ctx, email, scope)
+	grant, change, err := runtime.grants.GrantOperator(ctx, email, access)
 	if err != nil {
 		return operatorCommandError(err)
 	}
 	if change == domain.OperatorGrantUnchanged {
-		c.output.Info("%s is already a platform operator with scope %s", grant.Email, grant.Scope)
+		c.output.Info("%s is already a platform operator with scope %s", grant.Email, grantScopeLabel(grant.Access()))
 		return nil
 	}
-	if auditErr := recordOperatorCommandAudit(ctx, runtime.audit, "grant", grant.UserID, grant.Scope); auditErr != nil {
+	granted := grant.Access()
+	if auditErr := recordOperatorCommandAudit(ctx, runtime.audit, "grant", grant.UserID, &granted); auditErr != nil {
 		c.output.Warning("Operator granted, but audit persistence failed")
 	}
-	c.output.Success("Granted platform-operator access with scope %s to %s", grant.Scope, grant.Email)
+	c.output.Success("Granted platform-operator access with scope %s to %s", grantScopeLabel(granted), grant.Email)
 	return nil
 }
 
-// parseOperatorGrantArguments reads `<email> [--scope=full|mail-metrics]`; the scope defaults to full.
-func parseOperatorGrantArguments(args []string) (string, domain.OperatorScope, error) {
-	scope := domain.OperatorScopeFull
+const operatorGrantScopeUsage = "operator:grant --scope must be full or mail-metrics, optionally followed by ,mail-content"
+
+// parseOperatorGrantArguments reads `<email> [--scope=full|mail-metrics][,mail-content]`. The scope
+// defaults to full; content is granted only when named, whatever the scope.
+func parseOperatorGrantArguments(args []string) (string, domain.OperatorAccess, error) {
+	access := domain.OperatorAccess{Scope: domain.OperatorScopeFull}
 	positional := make([]string, 0, 1)
 	for _, arg := range args {
 		value, isScope := strings.CutPrefix(arg, "--scope=")
@@ -77,20 +81,48 @@ func parseOperatorGrantArguments(args []string) (string, domain.OperatorScope, e
 			positional = append(positional, arg)
 			continue
 		}
-		switch strings.TrimSpace(value) {
-		case "full":
-			scope = domain.OperatorScopeFull
-		case "mail-metrics":
-			scope = domain.OperatorScopeMailMetrics
-		default:
-			return "", "", fmt.Errorf("operator:grant --scope must be full or mail-metrics")
+		parsed, err := parseOperatorGrantScope(value)
+		if err != nil {
+			return "", domain.OperatorAccess{}, err
 		}
+		access = parsed
 	}
 	email, err := operatorEmailArgument("operator:grant", positional)
 	if err != nil {
-		return "", "", err
+		return "", domain.OperatorAccess{}, err
 	}
-	return email, scope, nil
+	return email, access, nil
+}
+
+func parseOperatorGrantScope(value string) (domain.OperatorAccess, error) {
+	parts := strings.Split(value, ",")
+	if len(parts) > 2 {
+		return domain.OperatorAccess{}, errors.New(operatorGrantScopeUsage)
+	}
+	var access domain.OperatorAccess
+	switch strings.TrimSpace(parts[0]) {
+	case "full":
+		access.Scope = domain.OperatorScopeFull
+	case "mail-metrics":
+		access.Scope = domain.OperatorScopeMailMetrics
+	default:
+		return domain.OperatorAccess{}, errors.New(operatorGrantScopeUsage)
+	}
+	if len(parts) == 2 {
+		if strings.TrimSpace(parts[1]) != "mail-content" {
+			return domain.OperatorAccess{}, errors.New(operatorGrantScopeUsage)
+		}
+		access.MailContent = true
+	}
+	return access, nil
+}
+
+// grantScopeLabel names a grant as the CLI flag does, e.g. "mail_metrics+mail_content".
+func grantScopeLabel(access domain.OperatorAccess) string {
+	if access.MailContent {
+		return string(access.Scope) + "+mail_content"
+	}
+	return string(access.Scope)
 }
 
 // OperatorRevokeCommand removes platform-operator access from an account.
@@ -127,7 +159,7 @@ func (c *OperatorRevokeCommand) Run(args []string) error {
 		c.output.Info("%s is not a platform operator", email)
 		return nil
 	}
-	if auditErr := recordOperatorCommandAudit(ctx, runtime.audit, "revoke", userID, ""); auditErr != nil {
+	if auditErr := recordOperatorCommandAudit(ctx, runtime.audit, "revoke", userID, nil); auditErr != nil {
 		c.output.Warning("Operator revoked, but audit persistence failed")
 	}
 	c.output.Success("Revoked platform-operator access from %s", email)
@@ -168,10 +200,11 @@ func (c *OperatorListCommand) Run(args []string) error {
 			grant.Username,
 			grant.Email,
 			string(grant.Scope),
+			strconv.FormatBool(grant.MailContent),
 			grant.GrantedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		}
 	}
-	c.output.Table([]string{"USER ID", "USERNAME", "EMAIL", "SCOPE", "GRANTED AT"}, rows)
+	c.output.Table([]string{"USER ID", "USERNAME", "EMAIL", "SCOPE", "CONTENT", "GRANTED AT"}, rows)
 	return nil
 }
 
@@ -215,13 +248,14 @@ func operatorCommandContext() (context.Context, context.CancelFunc) {
 }
 
 // recordOperatorCommandAudit records a grant change with the system as actor and the account's user
-// ID as target. The email is not stored in the audit record; a grant records its scope.
+// ID as target. The email is not stored in the audit record; a grant records its scope and content
+// flag.
 func recordOperatorCommandAudit(
 	ctx context.Context,
 	recorder domain.AuditLogRecorder,
 	operation string,
 	userID uint,
-	scope domain.OperatorScope,
+	access *domain.OperatorAccess,
 ) error {
 	if recorder == nil {
 		return errOperatorCommandUnavailable
@@ -239,14 +273,15 @@ func recordOperatorCommandAudit(
 		Path:       command,
 		RouteName:  "console.operator." + operation,
 		StatusCode: 200,
-		Metadata:   operatorAuditMetadata(operation, scope),
+		Metadata:   operatorAuditMetadata(operation, access),
 	})
 }
 
-func operatorAuditMetadata(operation string, scope domain.OperatorScope) map[string]any {
+func operatorAuditMetadata(operation string, access *domain.OperatorAccess) map[string]any {
 	metadata := map[string]any{"operation": operation}
-	if scope != "" {
-		metadata["scope"] = string(scope)
+	if access != nil {
+		metadata["scope"] = string(access.Scope)
+		metadata["mail_content"] = access.MailContent
 	}
 	return metadata
 }

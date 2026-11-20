@@ -84,6 +84,7 @@ export function useOperatorCapability(capability: OperatorCapability): boolean {
 export function useOperatorCapabilities(): ReadonlySet<OperatorCapability> {
   const manage = useOperatorCapability('operator:manage');
   const metrics = useOperatorCapability('mail_metrics:read');
+  const content = useOperatorCapability('mail_content:read');
   return useMemo(() => {
     const granted = new Set<OperatorCapability>();
     if (manage) {
@@ -92,6 +93,9 @@ export function useOperatorCapabilities(): ReadonlySet<OperatorCapability> {
     if (metrics) {
       granted.add('mail_metrics:read');
     }
+    if (content) {
+      granted.add('mail_content:read');
+    }
     return granted;
-  }, [manage, metrics]);
+  }, [manage, metrics, content]);
 }

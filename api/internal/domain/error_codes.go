@@ -181,4 +181,6 @@ const (
 	CodeOperatorOriginRejected  = "OPERATOR.ORIGIN_REJECTED"
 	CodeOperatorCSRFRejected    = "OPERATOR.CSRF_REJECTED"
 	CodeOperatorTargetProtected = "OPERATOR.TARGET_PROTECTED"
+	// CodeOperatorContentNotEligible: only organization broadcast bodies are readable by operators.
+	CodeOperatorContentNotEligible = "OPERATOR.CONTENT_NOT_ELIGIBLE"
 )

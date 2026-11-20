@@ -1,4 +1,4 @@
-import { ArrowLeft, Search, Send, X } from 'lucide-react';
+import { ArrowLeft, FileText, Search, Send, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SectionCard } from '@/components/layout/section-card';
@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { StatusBadge } from '@/components/ui/status-badge';
+import { BroadcastContentDialog } from '@/features/mail-operations/components/broadcast-content-dialog';
 import { DayPicker } from '@/features/mail-operations/components/day-picker';
 import { LoadFailure } from '@/features/mail-operations/components/load-failure';
 import { useOutboundMessages } from '@/features/mail-operations/hooks/use-mail-operations';
@@ -25,6 +26,7 @@ import {
   outboundStatuses,
   todayUtc,
 } from '@/features/mail-operations/types';
+import { useOperatorCapability } from '@/features/operator-session/hooks/use-operator-session';
 
 interface OutboundMessagesPageProps {
   search: OutboundMessageSearch;
@@ -59,6 +61,9 @@ export function OutboundMessagesPage({
 }: OutboundMessagesPageProps) {
   const { t } = useTranslation();
   const messages = useOutboundMessages(search);
+  // UX only: the API checks mail_content:read and the broadcast rule on every read.
+  const canReadContent = useOperatorCapability('mail_content:read');
+  const [reading, setReading] = useState<OutboundMessage | null>(null);
   const [status, setStatus] = useState<string>(search.status ?? '');
   const [organizationId, setOrganizationId] = useState(
     search.organization_id ? String(search.organization_id) : '',
@@ -150,6 +155,31 @@ export function OutboundMessagesPage({
           ? t(`mailOperations.receipt.${message.last_event as (typeof knownReceipts)[number]}`)
           : t('mailOperations.messages.noReceipts'),
     },
+    ...(canReadContent
+      ? [
+          {
+            id: 'actions',
+            header: t('mailOperations.messages.columns.actions'),
+            className: 'whitespace-nowrap',
+            // Only broadcast messages have a readable body; every other row has no action.
+            cell: (message: OutboundMessage) =>
+              message.broadcast_id ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={t('mailOperations.messages.viewContentOf', {
+                    subject: message.subject || t('mailOperations.messages.noSubject'),
+                  })}
+                  onClick={() => setReading(message)}
+                >
+                  <FileText aria-hidden="true" />
+                  {t('mailOperations.messages.viewContent')}
+                </Button>
+              ) : null,
+          } satisfies DataTableColumn<OutboundMessage>,
+        ]
+      : []),
   ];
 
   return (
@@ -272,6 +302,7 @@ export function OutboundMessagesPage({
           onPageChange={(page) => onSearchChange({ ...search, page })}
         />
       </SectionCard>
+      <BroadcastContentDialog message={reading} onClose={() => setReading(null)} />
     </div>
   );
 }

@@ -28,6 +28,20 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			metrics.Use(requireCapability(domain.OperatorCapabilityMailMetrics))
 			h.registerMetricsRoutes(metrics)
 		})
+		if h.mailMetrics != nil {
+			operator.Group("", func(content *router.Router) {
+				content.Use(requireCapability(domain.OperatorCapabilityMailContent))
+				content.POST("/outbound-messages/:organization_id/:message_id/content", h.mailMetrics.ReadBroadcastContent).
+					Name("operator.outbound-message-content.read").WhereNumber("organization_id").WhereNumber("message_id")
+			})
+			// The access records are readable by whoever may read content and by full operators,
+			// who oversee the platform without reading bodies themselves.
+			operator.Group("", func(audits *router.Router) {
+				audits.Use(requireCapability(domain.OperatorCapabilityMailContent, domain.OperatorCapabilityManage))
+				audits.GET("/content-access-audits", h.mailMetrics.ContentAccessAudits).
+					Name("operator.content-access-audits.index")
+			})
+		}
 	})
 }
 
