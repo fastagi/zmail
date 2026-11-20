@@ -11,45 +11,20 @@ import (
 // MaxImportRows bounds one import request.
 const MaxImportRows = 500
 
-// MailboxImportRow is one row of an import file: a shared mailbox's full address, its display
-// name, and its members as email[:permission] segments separated by semicolons.
-type MailboxImportRow struct {
-	Address     string
-	DisplayName string
-	Members     string
-}
-
-// MailboxImportStatus is the outcome of one import row.
-type MailboxImportStatus string
-
-const (
-	// MailboxImportValid is a dry-run row that would be created.
-	MailboxImportValid MailboxImportStatus = "valid"
-	// MailboxImportCreated is a row whose mailbox was created.
-	MailboxImportCreated MailboxImportStatus = "created"
-	// MailboxImportFailed is a row that was not, or would not be, created.
-	MailboxImportFailed MailboxImportStatus = "failed"
+// The import types live in the domain so operator commands share them; these aliases keep the
+// module's names.
+type (
+	MailboxImportRow       = domain.MailboxImportRow
+	MailboxImportStatus    = domain.MailboxImportStatus
+	MailboxImportRowResult = domain.MailboxImportRowResult
+	MailboxImportResult    = domain.MailboxImportResult
 )
 
-// MailboxImportRowResult is the outcome of one row; Row counts from 1 in request order.
-type MailboxImportRowResult struct {
-	Row       int
-	Address   string
-	Status    MailboxImportStatus
-	MailboxID uint
-	// ErrorCode is the public error code of a failed row, empty otherwise.
-	ErrorCode string
-	// MissingEmails are the member emails of no organization member, never nil.
-	MissingEmails []string
-}
-
-// MailboxImportResult is the outcome of an import, one result per row in request order.
-type MailboxImportResult struct {
-	DryRun    bool
-	Succeeded int
-	Failed    int
-	Rows      []MailboxImportRowResult
-}
+const (
+	MailboxImportValid   = domain.MailboxImportValid
+	MailboxImportCreated = domain.MailboxImportCreated
+	MailboxImportFailed  = domain.MailboxImportFailed
+)
 
 // importMember is one parsed segment of a members cell.
 type importMember struct {

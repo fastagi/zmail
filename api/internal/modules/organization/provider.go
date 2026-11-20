@@ -19,6 +19,7 @@ var ProviderSet = wire.NewSet(
 	NewMembershipEventPublisher,
 	NewService,
 	wire.Bind(new(Service), new(*service)),
+	wire.Bind(new(domain.OrganizationAdministrator), new(*service)),
 	NewContextResolver,
 	NewHandler,
 	NewOperatorHandler,

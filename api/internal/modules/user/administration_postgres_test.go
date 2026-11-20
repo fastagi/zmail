@@ -112,6 +112,18 @@ func TestUserAdministrationPostgres(t *testing.T) {
 		assert.Zero(t, active, "enabling does not restore sessions")
 	})
 
+	t.Run("finds one account by email ignoring case and spaces", func(t *testing.T) {
+		user, err := svc.FindUserByEmail(ctx, "  BOB@example.TEST ")
+		require.NoError(t, err)
+		assert.Equal(t, "Bob", user.Username)
+		assert.Empty(t, user.Password, "the hash never leaves the user starter")
+
+		_, err = svc.FindUserByEmail(ctx, "nobody@example.test")
+		require.ErrorIs(t, err, domain.ErrUserNotFound)
+		_, err = svc.FindUserByEmail(ctx, "  ")
+		require.ErrorIs(t, err, domain.ErrUserNotFound)
+	})
+
 	t.Run("unknown accounts are not found", func(t *testing.T) {
 		_, err := svc.SetUserActive(ctx, 999999, false)
 		require.ErrorIs(t, err, domain.ErrUserNotFound)
