@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
+import { InboxTriagePanel } from '@/features/mailbox/components/inbox-triage';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-list';
 import {
@@ -37,6 +38,16 @@ export type InboxReaderNavigation = Omit<
   ReaderProps,
   'mailboxId' | 'mailboxAddress' | 'canSend' | 'canOrganize'
 >;
+
+/**
+ * The AI triage block of the pane, given only while the organization's triage is on: the override
+ * menu's state, which the `F` key opens, and what "use this draft" does with a reply draft.
+ */
+export interface InboxTriagePaneProps {
+  menuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
+  onUseDraft: (message: MailMessage, body: string) => void;
+}
 
 /** What the keyboard asks of the open row; the caller checks the mailbox's access first. */
 export interface InboxPaneActions {
@@ -90,6 +101,7 @@ export function InboxReadingPane({
   navigation,
   onUnavailable,
   actionsRef,
+  triage = null,
 }: {
   item: InboxItem;
   access: Mailbox['access'] | null;
@@ -97,6 +109,7 @@ export function InboxReadingPane({
   navigation: InboxReaderNavigation;
   onUnavailable: () => void;
   actionsRef?: RefObject<InboxPaneActions | null>;
+  triage?: InboxTriagePaneProps | null;
 }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
@@ -312,7 +325,19 @@ export function InboxReadingPane({
           </Button>
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto py-[34px]">{body}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto py-[34px]">
+        {triage && !unavailable && item.direction === 'inbound' ? (
+          <InboxTriagePanel
+            item={item}
+            replyTarget={replyTarget}
+            canSend={access.send}
+            menuOpen={triage.menuOpen}
+            onMenuOpenChange={triage.onMenuOpenChange}
+            onUseDraft={triage.onUseDraft}
+          />
+        ) : null}
+        {body}
+      </div>
     </div>
   );
 }

@@ -270,6 +270,29 @@ export const mailDnsRecordPatchSchema = strictObject({
 });
 
 export const mailboxTypeSchema = union([literal('personal'), literal('shared')]);
+
+/** AI triage categories; `review` means the model could not decide (`contracts/MAILBOXES.md`). */
+export const MAIL_TRIAGE_CATEGORIES = ['reply', 'deadline', 'fyi', 'review'] as const;
+export const mailTriageCategorySchema = union([
+  literal('reply'),
+  literal('deadline'),
+  literal('fyi'),
+  literal('review'),
+]);
+/** A message's triage result, shared by every reader; `reason` is empty for a manual decision. */
+export const mailTriageSchema = strictObject({
+  category: mailTriageCategorySchema,
+  reason: string(),
+  due_at: nullable(timestampSchema),
+  source: union([literal('ai'), literal('manual')]),
+});
+/** The caller's unread inbound mail by triage category. */
+export const inboxTriageCountsSchema = strictObject({
+  reply: nonnegativeIntegerSchema,
+  deadline: nonnegativeIntegerSchema,
+  fyi: nonnegativeIntegerSchema,
+  review: nonnegativeIntegerSchema,
+});
 /** Each level includes the previous one. */
 export const mailboxPermissionSchema = union([literal('view'), literal('send'), literal('manage')]);
 export const MAILBOX_PERMISSIONS = ['view', 'send', 'manage'] as const;
@@ -296,6 +319,8 @@ export const mailboxSchema = strictObject({
   // Mail created before this instant is sealed; set once at handover.
   sealed_before: nullable(timestampSchema),
   webhooks_enabled: boolean(),
+  // The mailbox's AI triage switch. Optional until every API emits it.
+  ai_triage_enabled: optional(boolean()),
   access: mailboxAccessSchema,
   // The caller's own unread count; 0 without `view`.
   unread_count: nonnegativeIntegerSchema,
@@ -464,6 +489,8 @@ export const inboxItemSchema = strictObject({
   role_id: nullable(safeIdSchema),
   snippet: string(),
   thread: optional(mailThreadSummarySchema),
+  // The AI triage result; null while the organization's triage is off. Optional until every API emits it.
+  triage: optional(nullable(mailTriageSchema)),
 });
 
 const cursorPageMetaSchema = strictObject({
@@ -496,6 +523,8 @@ export const inboxCountsSchema = strictObject({
   mailboxes: array(strictObject({ mailbox_id: safeIdSchema, unread: nonnegativeIntegerSchema })),
   today_starts_at: timestampSchema,
   today_ends_at: timestampSchema,
+  // Unread mail by AI triage category; null while the organization's triage is off, which hides it.
+  triage: optional(nullable(inboxTriageCountsSchema)),
 });
 
 /** The most mail roles an organization holds. */

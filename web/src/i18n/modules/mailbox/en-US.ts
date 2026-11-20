@@ -202,6 +202,7 @@ const messages = {
       reply: 'Reply',
       replyAll: 'Reply all',
       forward: 'Forward',
+      triage: 'Change the AI triage',
       compose: 'New message',
       search: 'Search',
       help: 'Keyboard shortcuts',
@@ -1283,6 +1284,40 @@ const messages = {
     dnsRecordLocked:
       'Zmail mail relies on this record or name, so it cannot be written here. To change it, remove the mail domain first.',
     dnsRecordRejected: 'Cloudflare refused the record.',
+  },
+  triage: {
+    label: 'AI triage',
+    hint: 'AI sorted your mail into needs your reply, has a deadline, and just so you know. If one is wrong, press Shift F to correct it; it learns from you.',
+    tabs: {
+      label: 'AI triage',
+      all: 'Everything',
+      reply: 'Needs your reply',
+      deadline: 'Has a deadline',
+      fyi: 'Just so you know',
+    },
+    categories: {
+      reply: 'Reply',
+      deadline: 'Deadline',
+      fyi: 'FYI',
+      review: 'Check this',
+    },
+    manual: 'Set by a reader',
+    pending: 'Not sorted yet.',
+    change: 'Change',
+    changeTitle: 'This message is',
+    changed: 'Triage updated',
+    draft: {
+      generate: 'Draft a reply',
+      generating: 'Drafting…',
+      title: 'AI reply draft',
+      basis: 'Based on: {items}',
+      use: 'Reply with this draft',
+      again: 'Draft again',
+    },
+    errors: {
+      unavailable: 'AI triage is off for this organization.',
+      modelFailed: 'The AI could not draft a reply. Try again later.',
+    },
   },
 } as const;
 

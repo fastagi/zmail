@@ -3,6 +3,9 @@ import type { infer as Infer } from 'zod/mini';
 import type {
   createMailboxSchema,
   inboxCountsSchema,
+  inboxTriageCountsSchema,
+  mailTriageCategorySchema,
+  mailTriageSchema,
   inboxItemSchema,
   inboxPageEnvelopeSchema,
   mailboxAccessEventPageEnvelopeSchema,
@@ -220,11 +223,16 @@ export interface InboxFilters {
   unread?: boolean;
   q?: string;
   group?: 'thread';
+  /** AI triage categories; only with `all` or `today`, never with `group` or `q`. */
+  triage?: MailTriageCategory[];
   tz: string;
 }
 
 export type InboxItem = Infer<typeof inboxItemSchema>;
 export type InboxCounts = Infer<typeof inboxCountsSchema>;
+export type MailTriageCategory = Infer<typeof mailTriageCategorySchema>;
+export type MailTriage = Infer<typeof mailTriageSchema>;
+export type InboxTriageCounts = Infer<typeof inboxTriageCountsSchema>;
 
 export interface InboxPage {
   items: InboxItem[];

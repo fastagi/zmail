@@ -3350,6 +3350,8 @@ describe('mailbox browser route boundary', () => {
         mailboxes: [],
         today_starts_at: '2026-11-18T00:00:00Z',
         today_ends_at: '2026-11-19T00:00:00Z',
+        // The organization's AI triage is off.
+        triage: null,
       });
 
       const created = async (body: Record<string, unknown>) =>
@@ -3390,6 +3392,7 @@ describe('mailbox browser route boundary', () => {
         ],
         today_starts_at: '2026-11-18T16:00:00Z',
         today_ends_at: '2026-11-19T16:00:00Z',
+        triage: null,
       });
       // Each mailbox's count is its unread_count in the mailbox list.
       const listed = (await (await route.listMailboxesRoute(request('/api/mailboxes'))).json())

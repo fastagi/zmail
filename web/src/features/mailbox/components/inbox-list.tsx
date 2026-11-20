@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { rowUnread } from '@/features/mailbox/components/message-list';
 import { MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
@@ -404,6 +405,7 @@ export function InboxList({
               >
                 {item.subject || t('list.noSubject')}
               </span>
+              {item.triage ? <TriageReasonLine triage={item.triage} /> : null}
               {item.snippet ? (
                 <span className="block truncate text-text-muted">{item.snippet}</span>
               ) : null}
