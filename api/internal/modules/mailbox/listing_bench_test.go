@@ -44,6 +44,7 @@ var benchScene struct {
 func TestMain(m *testing.M) {
 	code := m.Run()
 	dropBenchScene()
+	dropInboxScene()
 	os.Exit(code)
 }
 

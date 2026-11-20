@@ -919,6 +919,7 @@ INDEX CREATE INDEX idx_mail_messages_trgm_from_name ON mail_messages USING gin (
 INDEX CREATE INDEX idx_mail_messages_trgm_subject ON mail_messages USING gin (subject public.gin_trgm_ops)
 INDEX CREATE INDEX idx_mail_messages_trgm_text_body ON mail_messages USING gin (text_body public.gin_trgm_ops)
 INDEX CREATE INDEX idx_mail_messages_trgm_to_addresses ON mail_messages USING gin (to_addresses public.gin_trgm_ops)
+INDEX CREATE INDEX idx_mail_messages_unread ON mail_messages USING btree (mailbox_id, id) INCLUDE (created_at) WHERE (((direction)::text = 'inbound'::text) AND ((placement)::text = 'default'::text))
 INDEX CREATE INDEX idx_mail_messages_waiting ON mail_messages USING btree (id) WHERE (queued_reason IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_roles_name ON mail_roles USING btree (organization_id, lower((name)::text))
