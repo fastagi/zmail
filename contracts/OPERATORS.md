@@ -5,8 +5,9 @@ Console. It depends on the default `user` and `audit` starters and is selected w
 `OPTIONAL_STARTERS=operator`. When it is not selected, no `/v1/operator` route and no `operator:*`
 command exists.
 
-Implementation plans: [`admin-operator-console.md`](../docs/plans/admin-operator-console.md) and
-[`admin-operator-starters.md`](../docs/plans/admin-operator-starters.md).
+Implementation plans: [`admin-operator-console.md`](../docs/plans/admin-operator-console.md),
+[`admin-operator-starters.md`](../docs/plans/admin-operator-starters.md), and
+[`admin-mail-operations.plan.md`](../docs/plans/admin-mail-operations.plan.md).
 
 ## Operators
 
@@ -14,14 +15,22 @@ A platform operator is a user with a current operator grant. Grants are created 
 from the CLI on a host with database access:
 
 ```bash
-fastbuild operator:grant <email>
+fastbuild operator:grant <email> [--scope=full|mail-metrics]
 fastbuild operator:revoke <email>
 fastbuild operator:list
 ```
 
-Granting or revoking twice is a no-op. Each change writes an audit record with the system as actor
-and the account's user ID as target. Deleting an account removes its grant. A grant is not an
-organization role and not a permission key.
+A grant has one scope, which decides its capabilities:
+
+| Scope | Capabilities | Allows |
+|---|---|---|
+| `full` (default) | `operator:manage`, `mail_metrics:read` | Every operator route |
+| `mail_metrics` | `mail_metrics:read` | Sign-in, [Mail Metrics](#mail-metrics), and the read-only [Organizations](#organizations) routes |
+
+Granting the same scope twice, or revoking twice, is a no-op; granting another scope changes the
+grant's scope. Each change writes an audit record with the system as actor and the account's user
+ID as target. Deleting an account removes its grant. A grant is not an organization role and not a
+permission key: organization owners and admins receive no capability from their role.
 
 ## Browser Session
 
@@ -48,11 +57,12 @@ Unsafe operator requests are recorded by the audit middleware with the operator 
 
 | Operation | Method and path | Request | Success |
 |---|---|---|---|
-| Sign in | `POST /v1/operator/session` | `Origin`; `{ identifier, password }` | `200 { operator, csrf_token }`, sets the cookie |
-| Current operator | `GET /v1/operator/session` | Cookie | `200 { operator, csrf_token }` |
+| Sign in | `POST /v1/operator/session` | `Origin`; `{ identifier, password }` | `200 { operator, csrf_token, capabilities }`, sets the cookie |
+| Current operator | `GET /v1/operator/session` | Cookie | `200 { operator, csrf_token, capabilities }` |
 | Sign out | `DELETE /v1/operator/session` | Cookie, `Origin`, `X-CSRF-Token` | `204`, expires the cookie |
 
-`operator` is `{ id, username, email, nickname }`. `identifier` is a username or email of at most
+`operator` is `{ id, username, email, nickname }`; `capabilities` lists the grant's capabilities
+from the table above. `identifier` is a username or email of at most
 100 characters; `password` is at most 128 characters.
 
 Sign-in checks the operator grant after verifying credentials and before creating a session, so a
@@ -74,6 +84,7 @@ Sign-out without a cookie, or with an already revoked session, returns `204` and
 | Wrong credentials, unknown or disabled account at sign-in | 401 | `AUTH.INVALID_CREDENTIALS` |
 | Session whose account was later disabled | 403 | `AUTH.ACCOUNT_DISABLED` |
 | Caller has no operator grant | 403 | `OPERATOR.FORBIDDEN` |
+| Caller's grant does not include the route's capability | 403 | `OPERATOR.CAPABILITY_REQUIRED` |
 | `Origin` missing on an unsafe method, or present on any method and not allowed by the operator starter | 403 | `OPERATOR.ORIGIN_REJECTED` |
 | `Origin` outside both `CORS_ALLOW_ORIGINS` and `OPERATOR_ALLOWED_ORIGINS` | 403 | none: the kernel CORS policy rejects it before routing |
 | `X-CSRF-Token` missing or not bound to this session | 403 | `OPERATOR.CSRF_REJECTED` |
@@ -82,11 +93,14 @@ Sign-out without a cookie, or with an already revoked session, returns `204` and
 | Persistence unavailable | 503 | `COMMON.SERVICE_UNAVAILABLE` |
 
 On `401` or `OPERATOR.FORBIDDEN` the Admin Console returns to sign-in. On
+`OPERATOR.CAPABILITY_REQUIRED` it stays signed in and shows the view as not permitted. On
 `OPERATOR.CSRF_REJECTED` it refetches `GET /v1/operator/session` once and retries.
 
 ## Users
 
-All routes require an operator session; unsafe methods also require `Origin` and `X-CSRF-Token`.
+All routes require an operator session with `operator:manage`; unsafe methods also require `Origin`
+and `X-CSRF-Token`. Unless a section says otherwise, every operator route below needs
+`operator:manage`.
 
 | Operation | Method and path | Success |
 |---|---|---|
@@ -152,7 +166,8 @@ setting's business change to that record.
 
 Registered only when the `organization` starter is also selected; otherwise these paths return
 `404`. An operator is not an organization member: these routes apply no membership check and never
-set organization context. They are read-only.
+set organization context. They are read-only and need `mail_metrics:read` (which every `full` grant
+has), so the mail metrics views can open an organization's member list.
 
 | Operation | Method and path | Success |
 |---|---|---|
@@ -170,6 +185,56 @@ excluded from both the list and `member_count`.
   ID. `per_page` is 1–100 (default 15). Invalid values return `400 COMMON.INVALID_INPUT`.
 - An unknown organization returns `404 ORGANIZATION.NOT_FOUND`. Operator scope is global, so this
   discloses only that the ID does not exist.
+
+## Mail Metrics
+
+Registered only when the `mailbox` and `organization` starters are also selected; every route needs
+`mail_metrics:read`. They read only and return no message body, HTML, recipient, or attachment.
+
+| Operation | Method and path | Success |
+|---|---|---|
+| Overview | `GET /v1/operator/mail-metrics?date=&days=` | `200 mail metrics` |
+| Organizations for a day | `GET /v1/operator/mail-metrics/organizations?date=&q=&page=&per_page=` | `200` paginated `mail organization` list |
+| Outbound log | `GET /v1/operator/outbound-messages?date=&organization_id=&mailbox_id=&status=&page=&per_page=` | `200` paginated `outbound message` list |
+
+- `date` is a UTC calendar day `YYYY-MM-DD`, default today (UTC); a future day returns
+  `400 COMMON.INVALID_INPUT`. A day runs from 00:00 UTC to the next 00:00 UTC.
+- `days` is 1–31 (default 7): the trend ends on `date`, oldest first, one entry per day including
+  empty days.
+- `per_page` is 1–100 (default 20). `q` is at most 100 characters and matches the organization name
+  case-insensitively as a literal substring. `status` is `sent`, `failed`, or `queued`.
+  `organization_id` and `mailbox_id` are positive integers. Invalid values return
+  `400 COMMON.INVALID_INPUT`.
+
+Counting rules:
+
+- A counted message is an outbound message sent through Zmail (not a synced Gmail or Outlook copy)
+  stored in a mailbox that is not deleted and belongs to an organization. It counts once, on the UTC
+  day its record was created, under its current status: `sent`, `failed`, or `queued`. Test sends and
+  the messages a broadcast created count; inbound mail, broadcast recipients that have no message
+  yet, and transactional messages do not.
+- `delivered`, `bounced`, and `complained` count the day's messages with at least one receipt of
+  that kind, so duplicate receipts never change a number. They are a separate view from the status
+  counts.
+- `organizations` counts every existing organization, including those with no mail or mailbox.
+  `members` counts distinct users with a membership in any organization (a user in two organizations
+  counts once); deleted accounts are excluded and `disabled_members` reports how many are disabled.
+  An organization row's `members` counts its memberships the same way.
+- Membership and mail counts are aggregated separately and then joined, so member counts never
+  multiply mail counts.
+
+A mail metrics overview is `{ date, organizations, members, disabled_members, mailboxes, day, trend }`
+with `day = { sent, failed, queued, delivered, bounced, complained }` and
+`trend = [{ date, sent, failed, queued }]`.
+
+A mail organization is `{ id, name, members, mailboxes, sent, failed, queued }`. Every organization
+matching `q` is listed, including those with zero mail, ordered by `sent` descending and then by
+ascending organization ID.
+
+An outbound message is `{ id, organization_id, organization_name, mailbox_id, mailbox_address,
+from_address, subject, status, failure_code, last_event, created_at, send_attempted_at }`, ordered by
+`created_at` and then `id`, both descending. `last_event` summarizes the delivery receipts as in
+[`MAILBOXES.md`](MAILBOXES.md) and is empty when none arrived; `send_attempted_at` may be `null`.
 
 ## Webhooks
 

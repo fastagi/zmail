@@ -101,6 +101,7 @@ var (
 	ErrServiceUnavailable = errors.New("required service unavailable")
 
 	ErrOperatorForbidden       = errors.New("caller is not a platform operator")
+	ErrOperatorCapability      = errors.New("operator grant does not include this capability")
 	ErrOperatorTargetProtected = errors.New("target account holds an operator grant")
 )
 

@@ -11,6 +11,39 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Platform mail operations (metrics and outbound log)
+
+Read-only platform mail metrics for the Admin Console, behind a new operator grant scope.
+Contract: `contracts/OPERATORS.md`, Operators and Mail Metrics. Plan:
+`docs/plans/admin-mail-operations.plan.md`.
+
+### Medium — Operator grants have a scope; organization reads accept metrics-only grants
+
+`platform_operators` gains `scope` (`full` or `mail_metrics`). Every existing grant becomes `full`
+and keeps exactly what it allowed. `fastbuild operator:grant <email>` still grants `full`;
+`--scope=mail-metrics` grants only the read-only mail metrics, the outbound log, and the operator
+organization reads (`GET /v1/operator/organizations`, `/:id`, `/:id/members`). Granting another
+scope to an existing operator changes the scope. `operator:list` adds a SCOPE column.
+
+`GET`/`POST /v1/operator/session` add `capabilities`. A session whose grant does not cover a route
+gets `403 OPERATOR.CAPABILITY_REQUIRED` (new code) instead of `OPERATOR.FORBIDDEN`; a client that
+signs out on `OPERATOR.FORBIDDEN` should stay signed in on the new code. A fork that calls
+`domain.OperatorGrantStore.GrantOperator` must pass a scope and read a `domain.OperatorGrantChange`.
+
+New routes (with the `mailbox` and `organization` starters): `GET /v1/operator/mail-metrics`,
+`GET /v1/operator/mail-metrics/organizations`, `GET /v1/operator/outbound-messages`. They never
+return message bodies.
+
+### Low — Operator scope migration
+
+Run migrations: `2026_11_29_090000_add_platform_operator_scope` adds
+`platform_operators.scope varchar(16) NOT NULL DEFAULT 'full'` and the CHECK
+`platform_operators_scope_check`. The constant default is recorded in the catalog only (PostgreSQL
+11+), so the table is not rewritten; adding the CHECK scans the grants table, which holds a handful
+of rows, under a brief `ACCESS EXCLUSIVE` lock that blocks operator sign-in and operator requests
+for that moment only. No other table is locked. Rolling back deletes every `mail_metrics` grant
+first, because without the column it would read as a full grant; re-grant them after rolling forward.
+
 ## Unreleased — External mailboxes (offline part)
 
 Read-only external mailboxes: the data model, the sync worker, message `source`, and two connection

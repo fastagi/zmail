@@ -177,6 +177,7 @@ const (
 	CodeMailDNSRecordRejected            = "MAILBOX.DNS_RECORD_REJECTED"
 
 	CodeOperatorForbidden       = "OPERATOR.FORBIDDEN"
+	CodeOperatorCapability      = "OPERATOR.CAPABILITY_REQUIRED"
 	CodeOperatorOriginRejected  = "OPERATOR.ORIGIN_REJECTED"
 	CodeOperatorCSRFRejected    = "OPERATOR.CSRF_REJECTED"
 	CodeOperatorTargetProtected = "OPERATOR.TARGET_PROTECTED"

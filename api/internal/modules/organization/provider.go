@@ -14,6 +14,7 @@ var ProviderSet = wire.NewSet(
 	NewRepository,
 	wire.Bind(new(domain.OrganizationRepository), new(*repository)),
 	wire.Bind(new(domain.OrganizationInvitationRepository), new(*repository)),
+	wire.Bind(new(domain.PlatformOrganizationDirectory), new(*repository)),
 	NewInvitationPolicy,
 	NewInvitationMailer,
 	NewMembershipEventPublisher,
