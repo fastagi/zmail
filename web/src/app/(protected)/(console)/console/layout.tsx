@@ -265,6 +265,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
         {/* Fixed Sidebar */}
         <div className={cn('relative hidden shrink-0 md:block', compactNav ? 'w-14' : 'w-[220px]')}>
           <aside
+            data-compact={compactNav}
             className={cn(
               'absolute inset-y-0 left-0 z-40 flex flex-col overflow-hidden border-r bg-background',
               compactNav
@@ -281,6 +282,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                     <Link
                       key={item.href}
                       href={item.href}
+                      title={compactNav ? t(item.titleKey) : undefined}
                       aria-current={isActive ? 'page' : undefined}
                       className={cn(
                         'group flex items-center gap-3 rounded-lg px-3 py-2 transition-all duration-150 hover:text-primary active:scale-[0.99]',
@@ -305,6 +307,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                     <Link
                       key={item.href}
                       href={item.href}
+                      title={compactNav ? t(item.titleKey) : undefined}
                       aria-current={isActive ? 'page' : undefined}
                       className={cn(
                         'flex items-center gap-3 rounded-lg px-3 py-2 transition-all hover:text-primary',

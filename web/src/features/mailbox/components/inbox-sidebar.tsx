@@ -60,8 +60,8 @@ interface SidebarGroup {
  * roles holding a mailbox they can see. Owners and admins get "Manage roles" beside the heading.
  * At the bottom: today's sending, links to the other mail pages, and the shortcut help.
  *
- * `rail` folds it to an icon rail between 1024 and 1279px wide (§11.11); the full sidebar, with
- * the mailboxes, the quota card, and the links, shows from 1280px and in the narrow-screen sheet.
+ * `rail` folds it to an icon rail between 768 and 1023px wide (§11.11); the full sidebar, with
+ * the mailboxes, the quota card, and the links, shows from 1024px and in the narrow-screen sheet.
  */
 export function InboxSidebar({
   organization,
@@ -113,12 +113,12 @@ export function InboxSidebar({
   const narrowed = box !== null || role !== null;
   const unreadByMailbox = new Map(counts?.mailboxes.map(item => [item.mailbox_id, item.unread]));
   const unreadByRole = new Map(counts?.roles.map(item => [item.role_id, item.unread]));
-  // In the rail, labels stay for assistive technology and come back from 1280px.
+  // In the rail, labels stay for assistive technology and come back from 1024px.
   const label = rail
-    ? 'sr-only xl:not-sr-only xl:min-w-0 xl:flex-1 xl:truncate'
+    ? 'sr-only lg:not-sr-only lg:min-w-0 lg:flex-1 lg:truncate'
     : 'min-w-0 flex-1 truncate';
-  const wide = rail ? 'hidden xl:flex' : 'flex';
-  const railIcon = rail ? 'size-4 shrink-0 xl:hidden' : 'hidden';
+  const wide = rail ? 'hidden lg:flex' : 'flex';
+  const railIcon = rail ? 'size-4 shrink-0 lg:hidden' : 'hidden';
 
   const groups = sidebarGroups(mailboxes, roles ?? [], canManage, {
     ungroupedName: t('inbox.groups.ungrouped'),
@@ -156,12 +156,12 @@ export function InboxSidebar({
       <div
         className={cn(
           'flex items-center gap-2.5 pb-[18px]',
-          rail ? 'justify-center xl:justify-start xl:px-2' : 'px-2'
+          rail ? 'justify-center lg:justify-start lg:px-2' : 'px-2'
         )}
       >
         <ZmailMark />
-        <div className={cn('min-w-0 flex-1', rail && 'hidden xl:block')}>{organization}</div>
-        <Kbd aria-hidden="true" className={cn(rail && 'hidden xl:inline-flex')}>
+        <div className={cn('min-w-0 flex-1', rail && 'hidden lg:block')}>{organization}</div>
+        <Kbd aria-hidden="true" className={cn(rail && 'hidden lg:inline-flex')}>
           ⌘K
         </Kbd>
       </div>
@@ -173,13 +173,13 @@ export function InboxSidebar({
           title={rail ? t('actions.compose') : undefined}
           className={cn(
             'mx-1 mb-3.5 flex h-9 shrink-0 items-center gap-2 rounded-[9px] border border-border-main bg-bg-surface px-3 text-left text-text-main shadow-xs transition-colors focus-ring hover:bg-nav-hover motion-reduce:transition-none',
-            rail && 'justify-center px-0 xl:justify-start xl:px-3'
+            rail && 'justify-center px-0 lg:justify-start lg:px-3'
           )}
           onClick={onCompose}
         >
           <PenLine className="size-[15px] shrink-0" aria-hidden="true" />
           <span className={label}>{t('actions.compose')}</span>
-          <Kbd aria-hidden="true" className={cn(rail && 'hidden xl:inline-flex')}>
+          <Kbd aria-hidden="true" className={cn(rail && 'hidden lg:inline-flex')}>
             C
           </Kbd>
         </button>
@@ -213,7 +213,7 @@ export function InboxSidebar({
                   variant="outline"
                   className={cn(
                     'shrink-0 px-1.5 text-[0.6875rem]',
-                    rail && 'hidden xl:inline-flex'
+                    rail && 'hidden lg:inline-flex'
                   )}
                 >
                   {t('inbox.views.queued')}
@@ -225,7 +225,7 @@ export function InboxSidebar({
                   className={cn(
                     'shrink-0 text-xs tabular-nums',
                     item === 'all' ? 'font-semibold text-brand' : 'text-text-faint',
-                    rail && 'hidden xl:inline'
+                    rail && 'hidden lg:inline'
                   )}
                 >
                   {count}
@@ -256,7 +256,7 @@ export function InboxSidebar({
             </Button>
           ) : null}
         </div>
-        {rail ? <div className="h-4 xl:hidden" aria-hidden="true" /> : null}
+        {rail ? <div className="h-4 lg:hidden" aria-hidden="true" /> : null}
         {flat
           ? mailboxes.map(mailbox =>
               mailbox.access.view ? (
@@ -306,7 +306,7 @@ export function InboxSidebar({
                     aria-hidden="true"
                     className={cn(
                       'shrink-0 text-xs text-text-faint tabular-nums',
-                      rail && 'hidden xl:inline'
+                      rail && 'hidden lg:inline'
                     )}
                   >
                     {group.unread}
@@ -370,7 +370,7 @@ function navRowClass(selected: boolean, rail: boolean): string {
     selected
       ? 'bg-nav-selected font-semibold text-text-main'
       : 'text-text-subtle hover:bg-nav-hover',
-    rail && 'justify-center px-0 xl:justify-start xl:px-3'
+    rail && 'justify-center px-0 lg:justify-start lg:px-3'
   );
 }
 
@@ -430,7 +430,7 @@ function MailboxRow({
       className={cn(
         'flex h-[30px] w-full min-w-0 shrink-0 items-center gap-2.5 rounded-[8px] pr-3 text-left text-[12.5px] transition-colors focus-ring motion-reduce:transition-none',
         flat ? 'pl-3' : 'pl-[29px]',
-        rail && 'justify-center px-0 xl:justify-start xl:px-3',
+        rail && 'justify-center px-0 lg:justify-start lg:px-3',
         selected
           ? 'bg-blue-50 font-semibold text-blue-800 dark:bg-blue-950/65 dark:text-blue-200'
           : 'text-text-subtle hover:bg-nav-hover',
@@ -441,7 +441,7 @@ function MailboxRow({
       {rail ? (
         <span
           aria-hidden="true"
-          className="flex size-5 shrink-0 items-center justify-center rounded-full bg-row-selected text-[11px] font-semibold text-text-muted uppercase xl:hidden"
+          className="flex size-5 shrink-0 items-center justify-center rounded-full bg-row-selected text-[11px] font-semibold text-text-muted uppercase lg:hidden"
         >
           {mailbox.address.charAt(0)}
         </span>
@@ -449,7 +449,7 @@ function MailboxRow({
       <span
         className={cn(
           'min-w-0 flex-1 truncate',
-          rail && 'sr-only xl:not-sr-only xl:min-w-0 xl:flex-1 xl:truncate'
+          rail && 'sr-only lg:not-sr-only lg:min-w-0 lg:flex-1 lg:truncate'
         )}
       >
         {mailbox.address}
@@ -459,7 +459,7 @@ function MailboxRow({
       {unread > 0 ? (
         <span
           aria-hidden="true"
-          className={cn('shrink-0 text-xs text-text-faint tabular-nums', rail && 'hidden xl:inline')}
+          className={cn('shrink-0 text-xs text-text-faint tabular-nums', rail && 'hidden lg:inline')}
         >
           {unread}
         </span>

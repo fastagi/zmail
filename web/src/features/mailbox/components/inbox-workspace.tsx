@@ -255,11 +255,11 @@ type ReadyScope = Extract<MailOrganizationScope, { status: 'ready' }>;
  * 248px sidebar, the 470px list grouped by thread, and the reading pane), filling the console's
  * content area. One mailbox's own workspace stays one click away under `?mailbox=`.
  *
- * Responsive (§11.11): three panes from 1280px; from 1024px the sidebar folds to an icon rail;
- * below 1024px the list and the open mail take turns, with a way back; below 768px the sidebar
- * opens as a sheet. While the organization and the mailboxes load, the three panes show as
- * skeletons; without an organization, and when there is nothing to list, the page keeps the
- * console's ordinary header and frame.
+ * Responsive (§11.11): three panes from 1024px (the console navigation folds to icons
+ * here); below 1024px the sidebar folds to an icon rail and the list and the open mail take
+ * turns, with a way back; below 768px the sidebar opens as a sheet. While the organization and
+ * the mailboxes load, the three panes show as skeletons; without an organization, and when
+ * there is nothing to list, the page keeps the console's ordinary header and frame.
  */
 export function InboxWorkspace() {
   const t = useT('mailbox');
@@ -731,7 +731,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   return (
     <div className="flex h-full min-h-0 bg-bg-canvas text-[13px] leading-normal antialiased">
       <MailShortcuts bindings={shortcuts} />
-      <aside className="hidden w-14 flex-none flex-col overflow-y-auto px-2 pt-[18px] pb-3.5 md:flex xl:w-[248px] xl:px-3">
+      <aside className="hidden w-14 flex-none flex-col overflow-y-auto px-2 pt-[18px] pb-3.5 md:flex lg:w-[248px] lg:px-3">
         <InboxSidebar
           {...sidebarProps}
           rail
@@ -1024,7 +1024,7 @@ function ReaderSkeleton() {
 function InboxSkeleton() {
   return (
     <div className="flex h-full min-h-0 bg-bg-canvas" aria-hidden="true" data-inbox-skeleton="">
-      <div className="hidden w-14 flex-none flex-col gap-2 px-2 pt-[18px] md:flex xl:w-[248px] xl:px-3">
+      <div className="hidden w-14 flex-none flex-col gap-2 px-2 pt-[18px] md:flex lg:w-[248px] lg:px-3">
         <Skeleton className="h-9 w-full" />
         <Skeleton className="h-40 w-full" />
       </div>

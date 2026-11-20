@@ -75,7 +75,7 @@ function useRowTime(zone: string): (iso: string) => string {
  * The head of the unified inbox list (§11.0, §11.5): the serif title with its subtitle, a way out
  * of a narrowing (back to every mailbox, or into that mailbox's own workspace), the search field,
  * and the All / Unread tabs. `unreadCount` is shown on the Unread tab when the counts know it for
- * this listing. `onShowSidebar` opens the mailboxes below 1280px, where the sidebar is a rail or
+ * this listing. `onShowSidebar` opens the mailboxes below 1024px, where the sidebar is a rail or
  * hidden.
  */
 export function InboxListHeader({
@@ -167,7 +167,7 @@ export function InboxListHeader({
             variant="ghost"
             aria-label={t('inbox.showSidebar')}
             title={t('inbox.showSidebar')}
-            className="-ml-2 shrink-0 xl:hidden"
+            className="-ml-2 shrink-0 lg:hidden"
             onClick={onShowSidebar}
           >
             <PanelLeft className="size-4" />
