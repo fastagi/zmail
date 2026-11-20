@@ -514,6 +514,14 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         : urlState.view === 'all'
           ? t('inbox.empty.view')
           : t(`inbox.empty.${urlState.view}`);
+  const emptyHint =
+    urlState.q !== ''
+      ? t('inbox.empty.searchHint')
+      : urlState.unread
+        ? t('inbox.empty.unreadHint')
+        : urlState.view === 'all'
+          ? t('inbox.empty.viewHint')
+          : t(`inbox.empty.${urlState.view}Hint`);
 
   /** Moves the open row by `delta`; past the last loaded row, opens the first of the next page. */
   const step = (delta: 1 | -1) => {
@@ -592,11 +600,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         <EmptyState
           icon={<Inbox className="size-5" aria-hidden="true" />}
           title={emptyTitle}
-          description={
-            urlState.view === 'all' && urlState.q === '' && !urlState.unread
-              ? t('inbox.empty.viewHint')
-              : undefined
-          }
+          description={emptyHint}
         />
       </div>
     );

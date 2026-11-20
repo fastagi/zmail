@@ -169,6 +169,11 @@ const messages = {
       noMailboxesMember: '本组织的所有者或管理员可以给你邮箱的访问权限。',
       view: '还没有邮件',
       viewHint: '你能阅读的邮箱收到的邮件会出现在这里。',
+      todayHint: '今天收到的邮件会出现在这里，无论是否已读。',
+      pendingHint: '给需要回头处理的邮件加星（S），它会在这里等你。',
+      sentHint: '从你能阅读的邮箱发出的邮件会出现在这里。',
+      unreadHint: '邮件都读完了。',
+      searchHint: '搜索会匹配主题、发件人和收件人。换个关键词试试。',
     },
     unavailable: '你已无法查看这封邮件。它所在邮箱的访问权限可能已变更，列表已刷新。',
     actions: {

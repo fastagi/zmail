@@ -423,6 +423,32 @@ describe('unified inbox', () => {
     expect(screen.getByText('No mail yet')).toBeInTheDocument();
   });
 
+  it('each empty listing says what would show there', () => {
+    state.inbox.data = listing([[]]);
+    const cases: [string, string, string][] = [
+      ['?view=today', 'No new mail today', 'Mail that arrives today shows here, read or not.'],
+      [
+        '?view=pending',
+        'Nothing starred to follow up',
+        'Star mail you need to come back to (S) and it waits here.',
+      ],
+      ['?view=sent', 'No sent mail yet', 'Mail sent from the mailboxes you read shows here.'],
+      ['?tab=unread', 'No unread mail', 'You are all caught up.'],
+      [
+        '?q=invoice',
+        'No mail matches this search',
+        'Search matches the subject, the sender, and the recipients. Try other words.',
+      ],
+    ];
+    for (const [query, title, hint] of cases) {
+      window.history.replaceState(null, '', `/console/mailboxes${query}`);
+      const { unmount } = renderRoute();
+      expect(screen.getByText(title)).toBeInTheDocument();
+      expect(screen.getByText(hint)).toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it('a row whose mailbox became unreadable shows the unavailable notice and refetches list and mailboxes', async () => {
     state.thread.data = undefined;
     state.thread.error = new ApiError('gone', ApiErrorCode.MAILBOX_NOT_FOUND, 404);
