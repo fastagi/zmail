@@ -33,7 +33,10 @@ import {
   useMailOrganizationId,
 } from '@/features/mailbox/components/mail-organization';
 import { EmptyState, ErrorAlert } from '@/features/mailbox/components/mail-shared';
-import { useExportMailboxes, useMailboxDirectory } from '@/features/mailbox/hooks/use-mailbox';
+import {
+  useExportMailboxes,
+  useMailboxDirectory,
+} from '@/features/mailbox/hooks/use-mailbox-admin';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
 import type { MailboxDirectoryEntry, MailboxDirectoryFilters } from '@/features/mailbox/types';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';

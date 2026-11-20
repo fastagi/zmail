@@ -70,6 +70,9 @@ vi.mock('@/features/organization/hooks/use-organizations', () => {
   };
 });
 vi.mock('@/features/mailbox/services/mailbox-service', () => ({ mailboxService: service }));
+vi.mock('@/features/mailbox/services/mailbox-admin-service', () => ({
+  mailboxAdminService: service,
+}));
 
 const created = '2026-11-16T10:00:00Z';
 

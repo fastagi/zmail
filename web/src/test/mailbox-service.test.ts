@@ -19,6 +19,7 @@ import {
   normalizeRecipient,
   splitRecipients,
 } from '@/features/mailbox/schemas';
+import { mailboxAdminService } from '@/features/mailbox/services/mailbox-admin-service';
 import { mailboxService, parseMailMessage } from '@/features/mailbox/services/mailbox-service';
 import {
   isAccessConflict,
@@ -59,7 +60,7 @@ describe('mailbox service boundary', () => {
     const getEnvelope = vi
       .spyOn(request, 'getEnvelope')
       .mockResolvedValueOnce({ code: 0, message: 'success', data: [entry], meta });
-    const page = await mailboxService.directory(7, { type: 'shared', q: ' sa ' }, 'abc');
+    const page = await mailboxAdminService.directory(7, { type: 'shared', q: ' sa ' }, 'abc');
     expect(page).toEqual({ items: [entry], meta });
     expect(getEnvelope).toHaveBeenCalledWith('/mailbox-directory', {
       headers: header,
@@ -69,7 +70,7 @@ describe('mailbox service boundary', () => {
     // A page whose meta lacks `next_cursor` is not the documented page.
     const { next_cursor: _dropped, ...withoutCursor } = meta;
     getEnvelope.mockResolvedValueOnce({ code: 0, message: 'success', data: [], meta: withoutCursor });
-    await expect(mailboxService.directory(7, {})).rejects.toMatchObject({
+    await expect(mailboxAdminService.directory(7, {})).rejects.toMatchObject({
       errorCode: ClientErrorCode.INVALID_RESPONSE,
     });
 
@@ -78,7 +79,7 @@ describe('mailbox service boundary', () => {
     expect(get).toHaveBeenCalledWith('/mailboxes', { headers: header, params: { scope: 'usable' } });
 
     const put = vi.spyOn(request, 'put').mockResolvedValue(accessMailbox());
-    await mailboxService.rename(7, 12, 'Billing');
+    await mailboxAdminService.rename(7, 12, 'Billing');
     expect(put).toHaveBeenCalledWith('/mailboxes/12', { display_name: 'Billing' }, { headers: header });
 
     const result = {
@@ -98,7 +99,7 @@ describe('mailbox service boundary', () => {
     };
     const post = vi.spyOn(request, 'post').mockResolvedValue(result);
     const rows = [{ address: 'sales@mail.example.com', display_name: '', members: 'a@b.co' }];
-    await expect(mailboxService.importMailboxes(7, rows, true)).resolves.toEqual(result);
+    await expect(mailboxAdminService.importMailboxes(7, rows, true)).resolves.toEqual(result);
     expect(post).toHaveBeenCalledWith(
       '/mailbox-imports',
       { dry_run: true, rows },
@@ -109,7 +110,7 @@ describe('mailbox service boundary', () => {
       blob: new Blob(['address']),
       disposition: 'attachment; filename="shared-mailboxes-20261119.csv"',
     });
-    const exported = await mailboxService.exportMailboxes(7, 'shared');
+    const exported = await mailboxAdminService.exportMailboxes(7, 'shared');
     expect(exported.filename).toBe('shared-mailboxes-20261119.csv');
     expect(getFile).toHaveBeenCalledWith('/mailbox-exports', {
       headers: header,
@@ -117,7 +118,7 @@ describe('mailbox service boundary', () => {
     });
     // Without a usable disposition the name falls back to the type.
     getFile.mockResolvedValueOnce({ blob: new Blob(['address']), disposition: null });
-    expect((await mailboxService.exportMailboxes(7, 'personal')).filename).toBe(
+    expect((await mailboxAdminService.exportMailboxes(7, 'personal')).filename).toBe(
       'personal-mailboxes.csv'
     );
   });

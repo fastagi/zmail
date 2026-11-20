@@ -17,7 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { saveFile, useImportMailboxes } from '@/features/mailbox/hooks/use-mailbox';
+import { saveFile, useImportMailboxes } from '@/features/mailbox/hooks/use-mailbox-admin';
 import type {
   MailboxImportResult,
   MailboxImportRowInput,

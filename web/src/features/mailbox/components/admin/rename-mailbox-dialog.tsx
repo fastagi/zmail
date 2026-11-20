@@ -15,7 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { useRenameMailbox } from '@/features/mailbox/hooks/use-mailbox';
+import { useRenameMailbox } from '@/features/mailbox/hooks/use-mailbox-admin';
 import { MAILBOX_DISPLAY_NAME_MAX_LENGTH, normalizeDisplayName } from '@/features/mailbox/schemas';
 import type { MailboxDirectoryEntry } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
