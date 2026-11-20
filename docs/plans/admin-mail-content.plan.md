@@ -1,6 +1,6 @@
 # Platform Mail Operations (Slice 2: Broadcast Content and Its Audit): Implementation Plan
 
-Spec: [admin-mail-operations.zh-CN.md](admin-mail-operations.zh-CN.md) (权限和上线边界, 验收样例 row 4).
+Spec: [admin-mail-operations.zh-CN.md](admin-mail-operations.zh-CN.md) (sections on permissions and launch boundary, and acceptance example row 4).
 Builds on slice 1, [admin-mail-operations.plan.md](admin-mail-operations.plan.md): the operator
 grant scope, capabilities, the outbound log, and the Operations area of the Admin Console.
 
