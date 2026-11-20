@@ -783,6 +783,7 @@ function MessageRows({
               </Button>
               <button
                 type="button"
+                data-row-id={row.id}
                 aria-current={current ? 'true' : undefined}
                 className="flex min-w-0 flex-1 items-start gap-3 rounded-md px-2 py-2 text-left focus-ring hover:bg-accent/70 active:bg-accent"
                 onClick={() => onOpen(row)}

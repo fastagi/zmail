@@ -731,6 +731,19 @@ describe('mailbox workspace', () => {
     Object.assign(state.update, { isPending: false, variables: undefined });
   });
 
+  it('returns the focus to the row when the reader closes', () => {
+    state.detail.data = message({ html_body: '' });
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+    const back = screen.getByRole('button', { name: 'Back to list' });
+    back.focus();
+
+    fireEvent.click(back);
+
+    expect(screen.queryByRole('button', { name: 'Back to list' })).toBeNull();
+    expect(rowButton('Unread question')).toHaveFocus();
+  });
+
   it('shows no code panel for a message with nothing masked', () => {
     state.detail.data = message({ html_body: '' });
     renderWorkspace();
