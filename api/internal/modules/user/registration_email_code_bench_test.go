@@ -81,8 +81,8 @@ func explainRegistration(b *testing.B, scene *registrationCodeScene, fn func(*re
 	if err != nil {
 		b.Fatal(err)
 	}
-	if err := fn(NewRepository(recorded)); err != nil {
-		b.Fatal(err)
+	if runErr := fn(NewRepository(recorded)); runErr != nil {
+		b.Fatal(runErr)
 	}
 	plans, err := testplatform.ExplainAnalyze(scene.db, recorder.Statements())
 	if err != nil {

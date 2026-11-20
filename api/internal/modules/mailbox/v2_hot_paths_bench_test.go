@@ -250,8 +250,8 @@ func explainV2Once(b *testing.B, forbidden []string, fn func(*repository, domain
 	if err != nil {
 		b.Fatal(err)
 	}
-	if err := fn(NewRepository(recorded), organization.NewRepository(recorded)); err != nil {
-		b.Fatalf("explain run: %v", err)
+	if runErr := fn(NewRepository(recorded), organization.NewRepository(recorded)); runErr != nil {
+		b.Fatalf("explain run: %v", runErr)
 	}
 	plans, err := testplatform.ExplainAnalyze(v2Scene.db, recorder.Statements())
 	if err != nil {

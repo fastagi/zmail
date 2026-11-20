@@ -37,7 +37,7 @@ func Record(db *gorm.DB) (*gorm.DB, *SQLRecorder, error) {
 		if tx.Statement.SQL.Len() == 0 {
 			return
 		}
-		statement := tx.Dialector.Explain(tx.Statement.SQL.String(), tx.Statement.Vars...)
+		statement := tx.Explain(tx.Statement.SQL.String(), tx.Statement.Vars...)
 		recorder.mu.Lock()
 		recorder.statements = append(recorder.statements, statement)
 		recorder.mu.Unlock()
