@@ -136,6 +136,7 @@ const messages = {
     },
     viewByMailbox: '按邮箱查看',
     openInMailbox: '在邮箱中打开',
+    filterMailbox: '查看邮箱 {address} 的邮件',
     clearMailbox: '显示全部邮箱',
     threadCount: '（{count}）',
     loadingMore: '正在加载更多…',

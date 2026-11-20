@@ -377,6 +377,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   }, [rejected, filtered, timeZone, replaceParams]);
 
   const { refetch: refetchInbox, hasNextPage, isFetchingNextPage, fetchNextPage } = inbox;
+  const refetchCounts = counts.refetch;
   const refetchMailboxes = mailboxes.refetch;
   const loadMore = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
@@ -384,7 +385,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const refreshListing = useCallback(() => {
     void refetchInbox();
     void refetchMailboxes();
-  }, [refetchInbox, refetchMailboxes]);
+    void refetchCounts();
+  }, [refetchInbox, refetchMailboxes, refetchCounts]);
 
   const pages = inbox.data?.pages ?? [];
   const rows = pages.flatMap(page => page.items);
@@ -612,6 +614,9 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     },
   };
 
+  // Narrowing starts a new listing: a search typed for the previous one no longer applies.
+  const onBox = (mailboxId: number) =>
+    setListing({ [BOX_PARAM]: String(mailboxId), [ROLE_PARAM]: null, [SEARCH_PARAM]: null });
   let list: React.ReactNode;
   if (inbox.isPending || resetting) {
     list = <InboxListSkeleton />;
@@ -655,6 +660,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         showMailbox={urlState.box === null}
         sendable={sendableIds}
         timeZone={timeZone}
+        onFilterMailbox={onBox}
         selectedId={openItem?.id ?? null}
         onOpen={row => setOpenParam(row.id)}
         onLoadMore={loadMore}
@@ -677,9 +683,6 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   };
   const onView = (view: InboxView) =>
     setListing({ [VIEW_PARAM]: view === 'all' ? null : view, [SEARCH_PARAM]: null });
-  // Narrowing starts a new listing: a search typed for the previous one no longer applies.
-  const onBox = (mailboxId: number) =>
-    setListing({ [BOX_PARAM]: String(mailboxId), [ROLE_PARAM]: null, [SEARCH_PARAM]: null });
   const onRole = (role: InboxRoleFilter) =>
     setListing({ [ROLE_PARAM]: String(role), [BOX_PARAM]: null, [SEARCH_PARAM]: null });
   const runCommand = (command: PaletteCommand) => {
@@ -749,7 +752,10 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         )}
       >
         <InboxListHeader
+          onRefresh={refreshListing}
+          refreshing={!zoneReady || inbox.isFetching || counts.isFetching || mailboxes.isFetching}
           title={title}
+          mailboxSelected={narrowedTo !== null}
           subtitle={subtitle}
           unread={urlState.unread}
           unreadCount={listingUnread(counts.data, urlState)}
@@ -823,11 +829,18 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             />
           </Suspense>
         ) : (
-          <div className="flex h-full min-h-48 items-center justify-center">
-            <p className="flex items-center gap-2 text-text-muted">
-              <MailOpen className="size-4" aria-hidden="true" />
-              {t('list.readerEmpty')}
-            </p>
+          <div className="flex h-full min-h-48 flex-col items-center justify-center gap-5 px-6 text-center">
+            <div
+              aria-hidden="true"
+              className="relative grid h-28 w-40 place-items-center motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 rounded-full bg-blue-50 dark:bg-blue-950/70"
+            >
+              <div className="absolute left-8 top-4 h-14 w-20 -rotate-12 rounded-lg border border-blue-200 bg-blue-100 dark:border-blue-800 dark:bg-blue-900" />
+              <div className="absolute right-8 top-4 h-14 w-20 rotate-12 rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950" />
+              <div className="z-10 mt-4 grid h-16 w-24 place-items-center rounded-xl border border-blue-200 bg-bg-surface text-blue-600 shadow-sm dark:border-blue-800 dark:text-blue-300">
+                <MailOpen className="size-7" strokeWidth={1.5} />
+              </div>
+            </div>
+            <p className="text-sm text-text-muted">{t('list.readerEmpty')}</p>
           </div>
         )}
       </section>

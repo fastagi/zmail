@@ -9,6 +9,7 @@ import {
   Home,
   Bell,
   LogOut,
+  ArrowUpLeft,
   Palette,
   Building2,
   FolderOpen,
@@ -66,6 +67,11 @@ interface NavItem {
 
 export default function ConsoleLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const compactNav = isNavigationItemActive(pathname, ROUTES.CONSOLE.MAILBOXES);
+  const navLabelClass = cn(
+    'whitespace-nowrap',
+    compactNav && 'opacity-0 motion-safe:transition-opacity group-hover/rail:opacity-100 group-focus-within/rail:opacity-100'
+  );
   const t = useT();
   const user = useAuthStore.use.user();
   const { mutate: logout, isPending: isLoggingOut } = useLogout();
@@ -257,58 +263,70 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
       {/* Body: Sidebar + Main Content */}
       <div className="flex h-0 grow overflow-hidden">
         {/* Fixed Sidebar */}
-        <aside className="hidden w-[220px] shrink-0 border-r bg-background md:flex md:flex-col">
-          <div className="flex flex-1 flex-col overflow-y-auto py-2">
-            <nav className="grid items-start px-2 text-sm font-medium">
-              {mainNavItems.map(item => {
-                const IconComponent = item.icon;
-                const isActive = isNavigationItemActive(pathname, item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      'group flex items-center gap-3 rounded-lg px-3 py-2 transition-all duration-150 hover:text-primary active:scale-[0.99]',
-                      isActive
-                        ? 'bg-muted font-semibold text-primary shadow-2xs'
-                        : 'text-text-subtle hover:bg-muted/50'
-                    )}
-                  >
-                    <IconComponent className="h-4.5 w-4.5 transition-transform duration-150 group-hover:scale-110" />
-                    {t(item.titleKey)}
-                  </Link>
-                );
-              })}
-            </nav>
-          </div>
-          <div className="mt-auto p-4">
-            <nav className="grid items-start gap-1 text-sm font-medium">
-              {secondaryNavItems.map(item => {
-                const IconComponent = item.icon;
-                const isActive = isNavigationItemActive(pathname, item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      'flex items-center gap-3 rounded-lg px-3 py-2 transition-all hover:text-primary',
-                      isActive ? 'bg-muted text-primary' : 'text-text-subtle hover:bg-muted/50'
-                    )}
-                  >
-                    <IconComponent className="h-4.5 w-4.5" />
-                    {t(item.titleKey)}
-                  </Link>
-                );
-              })}
-            </nav>
-            <Link
-              href={ROUTES.SITE.HOME}
-              className="flex h-8 items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
-            >
-              <span>{t('console.returnToSite')}</span>
-            </Link>
-          </div>
-        </aside>
+        <div className={cn('relative hidden shrink-0 md:block', compactNav ? 'w-14' : 'w-[220px]')}>
+          <aside
+            className={cn(
+              'absolute inset-y-0 left-0 z-40 flex flex-col overflow-hidden border-r bg-background',
+              compactNav
+                ? 'group/rail w-14 motion-safe:transition-[width,box-shadow] motion-safe:duration-200 hover:w-[220px] hover:shadow-lg focus-within:w-[220px] focus-within:shadow-lg'
+                : 'w-full'
+            )}
+          >
+            <div className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto py-2">
+              <nav className="grid items-start px-2 text-sm font-medium">
+                {mainNavItems.map(item => {
+                  const IconComponent = item.icon;
+                  const isActive = isNavigationItemActive(pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={cn(
+                        'group flex items-center gap-3 rounded-lg px-3 py-2 transition-all duration-150 hover:text-primary active:scale-[0.99]',
+                        isActive
+                          ? 'bg-muted font-semibold text-primary shadow-2xs'
+                          : 'text-text-subtle hover:bg-muted/50'
+                      )}
+                    >
+                      <IconComponent className="h-4.5 w-4.5 shrink-0 transition-transform duration-150 group-hover:scale-110" />
+                      <span className={navLabelClass}>{t(item.titleKey)}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+            <div className={cn('mt-auto', compactNav ? 'p-2' : 'p-4')}>
+              <nav className="grid items-start gap-1 text-sm font-medium">
+                {secondaryNavItems.map(item => {
+                  const IconComponent = item.icon;
+                  const isActive = isNavigationItemActive(pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg px-3 py-2 transition-all hover:text-primary',
+                        isActive ? 'bg-muted text-primary' : 'text-text-subtle hover:bg-muted/50'
+                      )}
+                    >
+                      <IconComponent className="h-4.5 w-4.5 shrink-0" />
+                      <span className={navLabelClass}>{t(item.titleKey)}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+              <Link
+                href={ROUTES.SITE.HOME}
+                className="flex h-8 items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+              >
+                {compactNav && <ArrowUpLeft className="mx-3 size-4 shrink-0" aria-hidden="true" />}
+                <span className={navLabelClass}>{t('console.returnToSite')}</span>
+              </Link>
+            </div>
+          </aside>
+        </div>
 
         {/* Scrollable Main Content */}
         <main key={pathname} className="animate-enter h-full min-w-0 w-full overflow-y-auto">

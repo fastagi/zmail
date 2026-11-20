@@ -469,6 +469,16 @@ describe('unified inbox', () => {
     }
   });
 
+  it('refreshes messages and unread counts while keeping the open message', () => {
+    renderRoute();
+    fireEvent.click(rowButton('Launch plan'));
+    const url = window.location.href;
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh mailbox' }));
+    expect(state.inbox.refetch).toHaveBeenCalledTimes(1);
+    expect(state.counts.refetch).toHaveBeenCalledTimes(1);
+    expect(window.location.href).toBe(url);
+  });
+
   it('a row whose mailbox became unreadable shows the unavailable notice and refetches list and mailboxes', async () => {
     state.thread.data = undefined;
     state.thread.error = new ApiError('gone', ApiErrorCode.MAILBOX_NOT_FOUND, 404);
@@ -963,7 +973,7 @@ describe('unified inbox', () => {
     // hello@ under Design.
     fireEvent.keyDown(dialog, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(within(rowButton('Invoice')).getByTitle('hello@mail.example.com · Design')).toBeVisible();
+    expect(within(rowButton('Invoice')).getByText('Design')).toBeVisible();
     expect(within(groupsNav()).queryByRole('button', { name: /^hello@/u })).toBeNull();
     fireEvent.click(within(groupsNav()).getByRole('button', { name: /^Design/u }));
     expect(mailboxButton(/^hello@/u)).toBeInTheDocument();
@@ -989,24 +999,21 @@ describe('unified inbox', () => {
     state.inbox.data = listing([[{ ...threadRow(), role_id: 3 }, singleRow()]]);
     const { unmount } = renderRoute();
 
-    // Like a Gmail label: the mailbox's local part, its full address on hover, also for rows
-    // of a mailbox without a role.
-    const sales = within(rowButton('Launch plan')).getByTitle(/^sales@mail\.example\.com/u);
-    expect(sales).toHaveTextContent(/^sales$/u);
-    expect(sales).toHaveAttribute('title', 'sales@mail.example.com · Design');
-    expect(within(rowButton('Invoice')).getByTitle('hello@mail.example.com')).toHaveTextContent(
-      /^hello$/u
-    );
+    const sales = screen.getByRole('button', { name: 'Filter by mailbox sales@mail.example.com' });
+    expect(sales).toHaveTextContent('sales@mail.example.com');
+    expect(screen.getByRole('button', { name: 'Filter by mailbox hello@mail.example.com' })).toBeVisible();
+    fireEvent.click(sales);
+    expect(window.location.search).toContain('box=2');
     unmount();
 
     // A role still spans its mailboxes; a single mailbox needs no label.
     window.history.replaceState(null, '', '/console/mailboxes?role=3');
     let view = renderRoute();
-    expect(within(rowButton('Launch plan')).getByTitle(/^sales@/u)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Filter by mailbox sales@mail.example.com' })).toBeInTheDocument();
     view.unmount();
     window.history.replaceState(null, '', '/console/mailboxes?box=2');
     view = renderRoute();
-    expect(within(rowButton('Launch plan')).queryByTitle(/^sales@/u)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Filter by mailbox sales@mail.example.com' })).toBeNull();
     view.unmount();
   });
 

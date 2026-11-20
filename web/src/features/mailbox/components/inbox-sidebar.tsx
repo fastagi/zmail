@@ -432,7 +432,7 @@ function MailboxRow({
         flat ? 'pl-3' : 'pl-[29px]',
         rail && 'justify-center px-0 xl:justify-start xl:px-3',
         selected
-          ? 'bg-nav-selected font-semibold text-text-main'
+          ? 'bg-blue-50 font-semibold text-blue-800 dark:bg-blue-950/65 dark:text-blue-200'
           : 'text-text-subtle hover:bg-nav-hover',
         className
       )}
