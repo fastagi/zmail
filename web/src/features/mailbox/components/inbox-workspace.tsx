@@ -11,13 +11,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  ComposeDialog,
   emptyDraft,
   forwardDraft,
   quotedReplyDraft,
   replyAllDraft,
   type ComposeDraft,
-} from '@/features/mailbox/components/compose-dialog';
+} from '@/features/mailbox/components/compose-drafts';
 import {
   InboxList,
   InboxListHeader,
@@ -97,6 +96,10 @@ const InboxReadingPane = lazy(async () => ({
 }));
 const ShortcutHelpDialog = lazy(async () => ({
   default: (await import('@/features/mailbox/components/shortcut-help-dialog')).ShortcutHelpDialog,
+}));
+// The composer loads when it first opens.
+const ComposeDialog = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/compose-dialog')).ComposeDialog,
 }));
 // The triage tabs load only for an organization with AI triage on.
 const InboxTriageTabs = lazy(async () => ({
@@ -889,13 +892,15 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       ) : null}
 
       {draft && draft.mailbox.access.send ? (
-        <ComposeDialog
-          mailbox={draft.mailbox}
-          fromOptions={draft.fromOptions}
-          draft={draft.draft}
-          onClose={() => setDraft(null)}
-          onStored={() => setDraft(null)}
-        />
+        <Suspense fallback={null}>
+          <ComposeDialog
+            mailbox={draft.mailbox}
+            fromOptions={draft.fromOptions}
+            draft={draft.draft}
+            onClose={() => setDraft(null)}
+            onStored={() => setDraft(null)}
+          />
+        </Suspense>
       ) : null}
     </div>
   );
