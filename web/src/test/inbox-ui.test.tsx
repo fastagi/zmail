@@ -334,6 +334,46 @@ describe('unified inbox', () => {
     expect(new URLSearchParams(window.location.search).get('open')).toBeNull();
   });
 
+  it('archive takes the row out of the list at once and puts it back when it fails', async () => {
+    const listingKey = (view: 'all' | 'today') =>
+      mailboxKeys.inbox(1, {
+        view,
+        tz: 'UTC',
+        ...(view === 'all' ? { group: 'thread' as const } : {}),
+      });
+    const seeded = { pages: [{ items: [threadRow(), singleRow()], meta: meta(false) }] };
+    queryClient.setQueryData(listingKey('all'), { ...seeded, pageParams: [undefined] });
+    queryClient.setQueryData(listingKey('today'), { ...seeded, pageParams: [undefined] });
+    let fail!: (reason: unknown) => void;
+    state.updateInbox.mutateAsync.mockReturnValue(
+      new Promise((_resolve, reject) => {
+        fail = reject;
+      })
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+    const ids = (view: 'all' | 'today') =>
+      queryClient
+        .getQueryData<typeof seeded>(listingKey(view))
+        ?.pages.flatMap(page => page.items.map(item => item.id));
+
+    const toolbar = await screen.findByRole('toolbar', { name: 'Conversation actions' });
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Archive' }));
+
+    // Before the server answers: the pane is closed and the row is gone, except from Today.
+    expect(new URLSearchParams(window.location.search).get('open')).toBeNull();
+    expect(ids('all')).toEqual([12]);
+    expect(ids('today')).toEqual([31, 12]);
+    expect(toast.success).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fail(new ApiError('down', ApiErrorCode.COMMON_SERVICE_UNAVAILABLE, 503));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(ids('all')).toEqual([31, 12]));
+    expect(toast.error).toHaveBeenCalled();
+  });
+
   it('trash sends a single row id with placement trash', async () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=12');
     renderRoute();
@@ -1218,6 +1258,35 @@ describe('inbox keyboard shortcuts', () => {
     press('Escape');
 
     expect(openParam()).toBeNull();
+    // The focus comes back to the row that was open, which Tab now reaches.
+    expect(rowButton('Invoice')).toHaveFocus();
+    expect(rowButton('Invoice')).toHaveAttribute('tabindex', '0');
+    expect(rowButton('Launch plan')).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('closing the mail from a control in the pane returns the focus to its row', async () => {
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    const back = await screen.findByRole('button', { name: 'Back to list' });
+    back.focus();
+
+    fireEvent.click(back);
+
+    expect(openParam()).toBeNull();
+    expect(rowButton('Invoice')).toHaveFocus();
+  });
+
+  it('closing the mail leaves the focus alone when it is elsewhere', async () => {
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    await readingPaneLoaded();
+    const search = screen.getByRole('searchbox', { name: 'Search all mail' });
+    search.focus();
+
+    press('Escape', search);
+
+    expect(openParam()).toBeNull();
+    expect(search).toHaveFocus();
   });
 
   it('s stars optimistically and rolls back on error', async () => {

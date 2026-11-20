@@ -286,9 +286,33 @@ export function InboxList({
   }, [selectedId]);
 
   const items = pages.flatMap(page => page.items);
-  const focusable = items.some(item => item.id === selectedId)
-    ? selectedId
-    : (items[0]?.id ?? null);
+  // The row last open, and where it stood, so closing it gives the focus back to the list.
+  const [lastOpen, setLastOpen] = useState<{ id: number; index: number } | null>(null);
+  const selectedIndex = items.findIndex(item => item.id === selectedId);
+  if (selectedIndex >= 0 && (lastOpen?.id !== selectedId || lastOpen.index !== selectedIndex)) {
+    setLastOpen({ id: items[selectedIndex].id, index: selectedIndex });
+  }
+  // Without an open row, the last open one (or, once it left the list, the row now in its place)
+  // is the one Tab reaches.
+  const resting =
+    lastOpen === null
+      ? undefined
+      : (items.find(item => item.id === lastOpen.id) ??
+        items[Math.min(lastOpen.index, items.length - 1)]);
+  const focusable = selectedIndex >= 0 ? selectedId : (resting?.id ?? items[0]?.id ?? null);
+
+  // Closing the open mail returns the focus to its row when the focus went with the mail.
+  const wasOpen = useRef(selectedId);
+  useEffect(() => {
+    const closed = wasOpen.current !== null && selectedId === null;
+    wasOpen.current = selectedId;
+    if (!closed || focusable === null) return;
+    const active = document.activeElement;
+    const lost =
+      active === null || active === document.body || active.closest('[data-reading-pane]') !== null;
+    if (!lost) return;
+    list.current?.querySelector<HTMLElement>(`[data-row-id="${String(focusable)}"]`)?.focus();
+  }, [selectedId, focusable]);
   /** Enter and Space open the focused row; the arrow keys move between rows. */
   const keyDown = (event: KeyboardEvent<HTMLLIElement>, item: InboxItem) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -317,6 +341,7 @@ export function InboxList({
             <li
               key={item.id}
               role="option"
+              data-row-id={item.id}
               aria-selected={selected}
               tabIndex={item.id === focusable ? 0 : -1}
               className={cn(

@@ -726,6 +726,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
 
       <section
         aria-label={t('inbox.readingPane')}
+        data-reading-pane=""
         className={cn(
           'my-2.5 mr-2.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[14px] border border-border-main bg-bg-surface max-md:ml-2.5',
           'lg:rounded-l-none lg:border-l-0',
