@@ -23,7 +23,7 @@ const service = vi.hoisted(() => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
-  usePathname: () => '/console/mail-domain',
+  usePathname: () => '/console/admin/domains',
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/features/organization/hooks/use-organizations', () => ({

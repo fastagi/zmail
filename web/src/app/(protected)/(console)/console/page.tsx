@@ -4,7 +4,6 @@ import {
   ArrowUpRight,
   Code2,
   FileText,
-  Globe,
   Inbox,
   KeyRound,
   Mail,
@@ -62,12 +61,6 @@ export default async function ConsoleHomePage() {
       description: t('home.quickLinks.mailboxes.description'),
       href: ROUTES.CONSOLE.MAILBOXES,
       icon: Mail,
-    },
-    {
-      title: t('home.quickLinks.domain.title'),
-      description: t('home.quickLinks.domain.description'),
-      href: ROUTES.CONSOLE.MAIL_DOMAIN,
-      icon: Globe,
     },
     {
       title: t('home.quickLinks.apiAccess.title'),

@@ -46,10 +46,6 @@ const messages = {
         title: 'Mailboxes',
         description: 'Create team addresses, read the inbox, reply, and send mail.',
       },
-      domain: {
-        title: 'Domain',
-        description: 'Connect your own domains; Zmail sets up their mail records.',
-      },
       apiAccess: {
         title: 'API access',
         description: 'Manage user-owned API keys and account settings.',
@@ -74,7 +70,7 @@ const messages = {
       featuresAfter: '.',
     },
     gettingStarted: {
-      domain: 'Connect your domain under Domain, or use the shared domain.',
+      domain: 'Connect your domain under Admin console, Domains, or use the shared domain.',
       mailbox: 'Create a sending address under Mailboxes, such as hello@your-domain.',
       contacts: 'Create a list under Contacts and import contacts.',
       template: 'Save a product update under Templates.',
