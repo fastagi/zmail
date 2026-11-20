@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
-import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage';
+import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-reason';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { rowUnread } from '@/features/mailbox/components/message-list';
 import { MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';

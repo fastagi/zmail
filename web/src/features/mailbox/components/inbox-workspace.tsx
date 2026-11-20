@@ -29,12 +29,6 @@ import type {
   InboxReaderNavigation,
 } from '@/features/mailbox/components/inbox-reading-pane';
 import {
-  INBOX_TRIAGE_TABS,
-  InboxTriageTabs,
-  triageTabCategories,
-  type InboxTriageTab,
-} from '@/features/mailbox/components/inbox-triage';
-import {
   InboxSidebar,
   visibleRoles,
   type InboxRoleFilter,
@@ -68,6 +62,11 @@ import {
   type MailOrganizationScope,
 } from '@/features/mailbox/hooks/use-mail-organization';
 import { INBOX_VIEWS, MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
+import {
+  INBOX_TRIAGE_TABS,
+  triageTabCategories,
+  type InboxTriageTab,
+} from '@/features/mailbox/triage-tabs';
 import type {
   InboxCounts,
   InboxFilters,
@@ -98,6 +97,10 @@ const InboxReadingPane = lazy(async () => ({
 }));
 const ShortcutHelpDialog = lazy(async () => ({
   default: (await import('@/features/mailbox/components/shortcut-help-dialog')).ShortcutHelpDialog,
+}));
+// The triage tabs load only for an organization with AI triage on.
+const InboxTriageTabs = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/inbox-triage')).InboxTriageTabs,
 }));
 const CommandPalette = lazy(async () => ({
   default: (await import('@/features/mailbox/components/command-palette')).CommandPalette,
@@ -766,11 +769,13 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         {triageCounts !== null &&
         urlState.q === '' &&
         (urlState.view === 'all' || urlState.view === 'today') ? (
-          <InboxTriageTabs
-            counts={triageCounts}
-            active={urlState.triage}
-            onChange={tab => setListing({ [TRIAGE_PARAM]: tab })}
-          />
+          <Suspense fallback={null}>
+            <InboxTriageTabs
+              counts={triageCounts}
+              active={urlState.triage}
+              onChange={tab => setListing({ [TRIAGE_PARAM]: tab })}
+            />
+          </Suspense>
         ) : null}
         <div data-scroll-pane className="min-h-0 flex-1 overflow-y-auto">
           {list}

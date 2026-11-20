@@ -562,10 +562,7 @@ export const mailboxService = {
     if (roleId !== undefined && roleId !== 'none') validId(roleId);
     if (mailboxId !== undefined) validId(mailboxId);
     if (
-      triage !== undefined &&
-      (triage.length === 0 ||
-        new Set(triage).size !== triage.length ||
-        triage.some(category => !(MAIL_TRIAGE_CATEGORIES as readonly string[]).includes(category)))
+      triage?.some(category => !(MAIL_TRIAGE_CATEGORIES as readonly string[]).includes(category))
     ) {
       throw invalidResponse();
     }

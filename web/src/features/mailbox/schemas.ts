@@ -273,18 +273,13 @@ export const mailboxTypeSchema = union([literal('personal'), literal('shared')])
 
 /** AI triage categories; `review` means the model could not decide (`contracts/MAILBOXES.md`). */
 export const MAIL_TRIAGE_CATEGORIES = ['reply', 'deadline', 'fyi', 'review'] as const;
-export const mailTriageCategorySchema = union([
-  literal('reply'),
-  literal('deadline'),
-  literal('fyi'),
-  literal('review'),
-]);
+export const mailTriageCategorySchema = literal(MAIL_TRIAGE_CATEGORIES);
 /** A message's triage result, shared by every reader; `reason` is empty for a manual decision. */
 export const mailTriageSchema = strictObject({
   category: mailTriageCategorySchema,
   reason: string(),
   due_at: nullable(timestampSchema),
-  source: union([literal('ai'), literal('manual')]),
+  source: literal(['ai', 'manual']),
 });
 /** The caller's unread inbound mail by triage category. */
 export const inboxTriageCountsSchema = strictObject({

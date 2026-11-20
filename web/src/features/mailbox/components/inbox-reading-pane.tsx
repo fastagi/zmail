@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
-import { InboxTriagePanel } from '@/features/mailbox/components/inbox-triage';
+import { InboxTriagePanel } from '@/features/mailbox/components/inbox-triage-panel';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-list';
 import {

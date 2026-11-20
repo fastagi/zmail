@@ -249,12 +249,12 @@ describe('unified inbox AI triage', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
-  it('shows the tabs with unread counts and lists one tab without grouping', () => {
+  it('shows the tabs with unread counts and lists one tab without grouping', async () => {
     state.counts.data = { ...counts(), triage: { reply: 2, deadline: 1, fyi: 4, review: 1 } };
     state.inbox.data = listing([[threadRow(), { ...singleRow(), triage: replyTriage() }]]);
     renderRoute();
 
-    expect(screen.getByText(/AI sorted your mail/u)).toBeInTheDocument();
+    expect(await screen.findByText(/AI sorted your mail/u)).toBeInTheDocument();
     const tabs = screen.getByRole('tablist', { name: 'AI triage' });
     expect(within(tabs).getByRole('tab', { name: 'Everything' })).toHaveAttribute(
       'aria-selected',
