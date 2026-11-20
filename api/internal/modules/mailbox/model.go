@@ -25,10 +25,12 @@ type MailboxPO struct {
 	SealedBefore    *time.Time
 	WebhooksEnabled bool `gorm:"not null;default:false"`
 	// RoleID is the mail role the mailbox is grouped under; nil when it is ungrouped.
-	RoleID    *uint
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt
+	RoleID *uint
+	// AITriageEnabled queues the mailbox's inbound mail for AI triage.
+	AITriageEnabled bool `gorm:"column:ai_triage_enabled;not null;default:false"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       gorm.DeletedAt
 }
 
 func (MailboxPO) TableName() string {
@@ -53,6 +55,7 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 		// WebhooksEnabled is only meaningful for shared mailboxes; the schema enforces it too.
 		WebhooksEnabled: po.WebhooksEnabled,
 		RoleID:          po.RoleID,
+		AITriageEnabled: po.AITriageEnabled,
 		CreatedAt:       po.CreatedAt,
 		UpdatedAt:       po.UpdatedAt,
 	}

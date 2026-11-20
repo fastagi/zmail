@@ -282,9 +282,12 @@ type Mailbox struct {
 	UnreadCount int
 	// RoleID is the mail role the mailbox is grouped under; nil when it is ungrouped. A mail role
 	// groups mailboxes for display and grants nothing.
-	RoleID    *uint
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	RoleID *uint
+	// AITriageEnabled queues the mailbox's inbound mail for AI triage when the organization's
+	// switch is on too.
+	AITriageEnabled bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // MailMessage is one stored inbound or outbound message.

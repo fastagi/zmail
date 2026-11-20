@@ -121,14 +121,15 @@ type MailTriageExample struct {
 // MailTriageClaim is a pending row the worker holds, with what it needs to decide whether to call
 // the model.
 type MailTriageClaim struct {
-	Triage             MailTriage
-	OrganizationID     uint
-	OrganizationOn     bool
-	MailboxOn          bool
-	MailboxPersonal    bool
-	MailboxOwnerLeft   bool
-	MailboxRoleName    string
-	OrganizationCapSet bool
+	Triage           MailTriage
+	OrganizationID   uint
+	OrganizationOn   bool
+	MailboxOn        bool
+	MailboxPersonal  bool
+	MailboxOwnerLeft bool
+	MailboxRoleName  string
+	// OrganizationCap is the organization's daily cap; 0 without saved settings.
+	OrganizationCap int
 }
 
 // MailTriageRepository stores triage rows and settings.
@@ -140,12 +141,12 @@ type MailTriageRepository interface {
 	// EnqueueTriage adds a pending row for an inbound message when its organization's and its
 	// mailbox's switches are on, in the caller's transaction. It reports whether it added one.
 	EnqueueTriage(ctx context.Context, messageID, mailboxID uint, now time.Time) (bool, error)
-	// ClaimTriage locks up to limit due pending rows with FOR UPDATE SKIP LOCKED in the caller's
-	// transaction, oldest due first.
+	// ClaimTriage locks up to limit due pending rows with FOR UPDATE SKIP LOCKED, oldest due
+	// first, and leases them to the caller.
 	ClaimTriage(ctx context.Context, now time.Time, limit int) ([]MailTriageClaim, error)
 	// ReserveTriageCall takes one model call of the organization's day; false when the day's cap
 	// is reached or the organization switch is off.
-	ReserveTriageCall(ctx context.Context, organizationID uint, cap int, now time.Time) (bool, error)
+	ReserveTriageCall(ctx context.Context, organizationID uint, limit int, now time.Time) (bool, error)
 	// SaveTriage writes the worker's outcome for a claimed row.
 	SaveTriage(ctx context.Context, triage MailTriage) error
 	// OverrideTriage upserts a person's decision.

@@ -71,6 +71,8 @@ type Settings struct {
 	// limits; 0 takes the defaults.
 	TransactionalRecipientPerMinute int
 	TransactionalKeyPerSecond       int
+	// Triage selects the AI triage model and its instance cap; the zero value is disabled.
+	Triage config.AITriageConfig
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -324,6 +326,10 @@ type service struct {
 	// encryptor seals queued transactional content; nil without SecretEncryptionKey.
 	encryptor      *crypto.AESEncryptor
 	fingerprintKey []byte
+	// triage stores AI triage rows and settings; nil when repo does not implement it.
+	triage domain.MailTriageRepository
+	// triageModel classifies and drafts; settings.Triage selects it.
+	triageModel TriageModel
 }
 
 var _ Service = (*service)(nil)
@@ -358,6 +364,10 @@ func NewService(
 	if seam, ok := repo.(domain.PlatformAccountRepository); ok {
 		ledger = seam
 	}
+	var triage domain.MailTriageRepository
+	if seam, ok := repo.(domain.MailTriageRepository); ok {
+		triage = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -373,6 +383,7 @@ func NewService(
 		background: func(run func()) { go run() },
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
 		recordAudit: auditstarter.RecordChange,
+		triage:      triage, triageModel: newTriageModel(settings.Triage),
 	}
 }
 
@@ -438,6 +449,7 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.SimulatorDomain = resolved.SimulatorDomain
 	settings.TransactionalRecipientPerMinute = resolved.TransactionalRecipientPerMinute
 	settings.TransactionalKeyPerSecond = resolved.TransactionalKeyPerSecond
+	settings.Triage = cfg.AITriage
 	return settings
 }
 
@@ -1161,6 +1173,9 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		var createErr error
 		if created, createErr = s.repo.CreateInboundMessage(tx, message); createErr != nil || !created {
 			return nil, createErr
+		}
+		if enqueueErr := s.enqueueTriage(tx, message); enqueueErr != nil {
+			return nil, enqueueErr
 		}
 		notification := mailNotificationFor(mailbox, message)
 		notification.Type = WebhookMailReceived
