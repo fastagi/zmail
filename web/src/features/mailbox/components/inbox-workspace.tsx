@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { AlertCircle, Inbox, Mail, MailOpen, Settings2 } from 'lucide-react';
+import { AlertCircle, Inbox, Mail, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -830,16 +830,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           </Suspense>
         ) : (
           <div className="flex h-full min-h-48 flex-col items-center justify-center gap-5 px-6 text-center">
-            <div
-              aria-hidden="true"
-              className="relative grid h-28 w-40 place-items-center motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 rounded-full bg-blue-50 dark:bg-blue-950/70"
-            >
-              <div className="absolute left-8 top-4 h-14 w-20 -rotate-12 rounded-lg border border-blue-200 bg-blue-100 dark:border-blue-800 dark:bg-blue-900" />
-              <div className="absolute right-8 top-4 h-14 w-20 rotate-12 rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950" />
-              <div className="z-10 mt-4 grid h-16 w-24 place-items-center rounded-xl border border-blue-200 bg-bg-surface text-blue-600 shadow-sm dark:border-blue-800 dark:text-blue-300">
-                <MailOpen className="size-7" strokeWidth={1.5} />
-              </div>
-            </div>
+            <span aria-hidden="true" className="h-28 w-40 bg-[url('/inbox-letters.svg')] bg-contain bg-center bg-no-repeat motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 dark:brightness-75" />
             <p className="text-sm text-text-muted">{t('list.readerEmpty')}</p>
           </div>
         )}
