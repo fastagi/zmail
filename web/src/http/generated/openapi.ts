@@ -3398,7 +3398,7 @@ export interface components {
             /** @description Pass as `cursor` to read the next, older page; null on the last page. */
             next_cursor: string | null;
             per_page: number;
-            /** @description The organization's personal-lane send attempts in the rolling 24 hours, including those of deleted mailboxes, so the rows can add up to less. */
+            /** @description The organization's personal-lane send attempts in the rolling 24 hours, the figure the limit is checked against. */
             sent_last_24h: number;
         };
         MailboxDirectoryPageResponse: {

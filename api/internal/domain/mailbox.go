@@ -876,6 +876,9 @@ type MailboxRepository interface {
 	FindMailbox(ctx context.Context, organizationID, id uint) (*Mailbox, error)
 	FindMailboxByAddress(ctx context.Context, address string) (*Mailbox, error)
 	DeleteMailbox(ctx context.Context, organizationID, id uint) error
+	// UpdateMailboxDisplayName sets the display name of a live mailbox of the organization, or
+	// reports the module's not-found error.
+	UpdateMailboxDisplayName(ctx context.Context, organizationID, id uint, displayName string) error
 
 	// FindMailboxMember returns the member row of one membership on a mailbox, or nil without error
 	// when the membership has none.

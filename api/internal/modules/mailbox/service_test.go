@@ -277,6 +277,57 @@ func (r *fakeRepository) ListUsableMailboxes(ctx context.Context, organizationID
 	return usable, nil
 }
 
+func (r *fakeRepository) UpdateMailboxDisplayName(_ context.Context, organizationID, id uint, displayName string) error {
+	mailbox, ok := r.mailboxes[id]
+	if !ok || mailbox.OrganizationID != organizationID {
+		return ErrMailboxNotFound
+	}
+	mailbox.DisplayName = displayName
+	return nil
+}
+
+func (r *fakeRepository) ListMailboxDirectory(_ context.Context, organizationID uint, filter domain.MailboxDirectoryFilter, sentSince time.Time) ([]*domain.MailboxDirectoryEntry, error) {
+	var entries []*domain.MailboxDirectoryEntry
+	query := strings.ToLower(filter.Query)
+	for _, mailbox := range r.mailboxes {
+		if mailbox.OrganizationID != organizationID || (filter.Type != "" && mailbox.Type != filter.Type) ||
+			(filter.BeforeID != 0 && mailbox.ID >= filter.BeforeID) ||
+			(query != "" && !strings.Contains(strings.ToLower(mailbox.Address), query) && !strings.Contains(strings.ToLower(mailbox.DisplayName), query)) {
+			continue
+		}
+		copied := *mailbox
+		entry := &domain.MailboxDirectoryEntry{Mailbox: &copied}
+		for key := range r.members {
+			if key[0] == mailbox.ID {
+				entry.MemberCount++
+			}
+		}
+		for _, message := range r.messages {
+			if message.MailboxID == mailbox.ID && message.Direction == domain.MailDirectionOutbound &&
+				(message.SendLane == "" || message.SendLane == domain.SendLanePersonal) &&
+				message.SendAttemptedAt != nil && !message.SendAttemptedAt.Before(sentSince) {
+				entry.SentLast24h++
+			}
+		}
+		entries = append(entries, entry)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Mailbox.ID > entries[j].Mailbox.ID })
+	if filter.Limit > 0 && len(entries) > filter.Limit {
+		entries = entries[:filter.Limit]
+	}
+	return entries, nil
+}
+
+func (r *fakeRepository) CountMailboxes(_ context.Context, organizationID uint) (int64, error) {
+	var count int64
+	for _, mailbox := range r.mailboxes {
+		if mailbox.OrganizationID == organizationID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (r *fakeRepository) FindMailbox(_ context.Context, organizationID, id uint) (*domain.Mailbox, error) {
 	mailbox, ok := r.mailboxes[id]
 	if !ok || mailbox.OrganizationID != organizationID {

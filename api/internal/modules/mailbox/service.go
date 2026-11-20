@@ -146,6 +146,11 @@ type Service interface {
 	// MaxMailboxes is the configured per-organization mailbox limit.
 	MaxMailboxes() int
 	DeleteMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) error
+	// MailboxDirectory lists one page of the organization's mailboxes with member counts and send
+	// attempts; only owners and admins may.
+	MailboxDirectory(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailboxDirectoryFilter) (*MailboxDirectoryPage, error)
+	// RenameMailbox changes a mailbox's display name; only owners and admins may.
+	RenameMailbox(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, displayName string) (*domain.Mailbox, error)
 	// ListMessages lists a mailbox's messages, or with filter.GroupThreads one row per thread, each
 	// row the newest message of its thread in the view with its Thread filled.
 	ListMessages(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, filter domain.MailMessageFilter) ([]*domain.MailMessage, int64, error)
@@ -293,6 +298,8 @@ type service struct {
 	inbox domain.MailInboxRepository
 	// roles stores mail roles; nil when repo does not implement it.
 	roles domain.MailRoleRepository
+	// directory reads the administration directory; nil when repo does not implement it.
+	directory domain.MailboxDirectoryRepository
 	// domains, zones, and domainProvider serve organization domains; nil when a test does not
 	// need them.
 	domains        domain.MailDomainRepository
@@ -356,6 +363,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailRoleRepository); ok {
 		roles = seam
 	}
+	var directory domain.MailboxDirectoryRepository
+	if seam, ok := repo.(domain.MailboxDirectoryRepository); ok {
+		directory = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -365,7 +376,7 @@ func NewService(
 	return &service{
 		transactional: transactional, accounts: accounts, transactionalLimits: newTransactionalLimits(limits, settings),
 		encryptor: encryptor, fingerprintKey: fingerprintKey,
-		repo: repo, inbox: inbox, roles: roles, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
+		repo: repo, inbox: inbox, roles: roles, directory: directory, memberships: memberships, templates: templates, contacts: contacts, broadcasts: broadcasts,
 		organize: organize, domains: domains, zones: zones,
 		domainProvider: domainProvider, transport: transport, notifier: notifier, settings: settings, now: time.Now,
 		background: func(run func()) { go run() },

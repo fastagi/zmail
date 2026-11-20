@@ -63,6 +63,8 @@ func newHandlerFixtureWith(t *testing.T, organization *domain.OrganizationContex
 	router.GET("/mailboxes", handler.ListMailboxes)
 	router.POST("/mailboxes", handler.CreateMailbox)
 	router.DELETE("/mailboxes/:mailbox_id", handler.DeleteMailbox)
+	router.PUT("/mailboxes/:mailbox_id", handler.UpdateMailbox)
+	router.GET("/mailbox-directory", handler.ListMailboxDirectory)
 	router.GET("/mailboxes/:mailbox_id/messages", handler.ListMessages)
 	router.POST("/mailboxes/:mailbox_id/messages", handler.SendMessage)
 	router.GET("/mail-messages", handler.ListLog)

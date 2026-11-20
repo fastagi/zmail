@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 )
@@ -298,9 +297,9 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 	if err != nil {
 		return nil, err
 	}
-	displayName := strings.Join(strings.Fields(input.DisplayName), " ")
-	if len(displayName) > 120 || strings.ContainsAny(displayName, "<>\"") {
-		return nil, fmt.Errorf("%w: display name", ErrMailboxAddressInvalid)
+	displayName, err := normalizeDisplayName(input.DisplayName)
+	if err != nil {
+		return nil, err
 	}
 	if err = validateMailboxAccess(input); err != nil {
 		return nil, err

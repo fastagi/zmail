@@ -11670,8 +11670,8 @@ components:
           minimum: 1
         sent_last_24h:
           type: integer
-          description: The organization's personal-lane send attempts in the rolling 24 hours, including those
-            of deleted mailboxes, so the rows can add up to less.
+          description: The organization's personal-lane send attempts in the rolling 24 hours, the figure the
+            limit is checked against.
           minimum: 0
         mailbox_count:
           type: integer

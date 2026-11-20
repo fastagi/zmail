@@ -238,8 +238,9 @@ as before for the workspace.
 `member_count` is the members of a shared mailbox (0 for a personal one). `sent_last_24h` counts the
 mailbox's personal-lane send attempts whose provider call started in the rolling 24 hours, failed ones
 included: the same predicate as the personal lane of [Lane Usage](#lane-usage). In `meta`,
-`daily_send_limit` is that lane's limit and `sent_last_24h` the organization's attempts in it, which
-still count a deleted mailbox's sends, so the rows can add up to less. `mailbox_count` counts the
+`daily_send_limit` is that lane's limit and `sent_last_24h` the organization's attempts in it, the
+figure the limit is checked against. Deleting a mailbox deletes its mail, so its attempts leave both
+figures; the rows of every page together add up to `sent_last_24h`. `mailbox_count` counts the
 organization's live mailboxes and `max_mailboxes` is `MAILBOX_MAX_PER_ORGANIZATION`. Entries carry no
 message content, unread count, or access.
 
