@@ -91,6 +91,11 @@ recorded but has no special rights to it. A removed member loses access on their
 | Replace a mail role | `PUT /api/mail-roles/:roleId` | `PUT /v1/mail-roles/:role_id` | `200` envelope |
 | Delete a mail role | `DELETE /api/mail-roles/:roleId` | `DELETE /v1/mail-roles/:role_id` | `204` |
 | Set a mailbox's mail role | `PUT /api/mailboxes/:id/role-assignment` | `PUT /v1/mailboxes/:mailbox_id/role-assignment` | `200` envelope |
+| Read the AI triage setting | `GET /api/mail-triage-setting` | `GET /v1/mail-triage-setting` | `200` envelope |
+| Replace the AI triage setting | `PUT /api/mail-triage-setting` | `PUT /v1/mail-triage-setting` | `200` envelope |
+| Mailbox AI triage switch | `PUT /api/mailboxes/:id/triage-setting` | `PUT /v1/mailboxes/:mailbox_id/triage-setting` | `200` envelope |
+| Set a message's triage | `PUT /api/mailboxes/:id/messages/:messageId/triage` | `PUT /v1/mailboxes/:mailbox_id/messages/:message_id/triage` | `200` envelope |
+| Draft a reply | `POST /api/mailboxes/:id/messages/:messageId/reply-drafts` | `POST /v1/mailboxes/:mailbox_id/messages/:message_id/reply-drafts` | `200` envelope |
 | List platform accounts | `GET /api/platform-accounts` | `GET /v1/platform-accounts` | Paginated envelope |
 | Add a platform account | `POST /api/platform-accounts` | `POST /v1/platform-accounts` | `201` envelope |
 | Replace a platform account | `PUT /api/platform-accounts/:accountId` | `PUT /v1/platform-accounts/:account_id` | `200` envelope |
@@ -170,6 +175,7 @@ has no browser route: only the mail edge calls it.
     "awaiting_handover": false,
     "sealed_before": null,
     "webhooks_enabled": false,
+    "ai_triage_enabled": false,
     "access": { "view": false, "send": false, "manage_members": true, "administer": true, "see_history": true, "organize": false },
     "unread_count": 0,
     "created_at": "2026-11-16T10:00:00Z",
@@ -186,8 +192,9 @@ controls from it. `awaiting_handover` is `true` while a personal mailbox's owner
 organization and nobody has taken it over (see [Departure And Handover](#departure-and-handover)).
 `sealed_before` is the seal boundary set at handover, `null` when nothing is sealed.
 `webhooks_enabled` is the [webhook switch](#webhook-switch); it is always `false` on a personal
-mailbox. `role_id` is the [mail role](#mail-roles) the mailbox belongs to, `null` when it has none;
-clients that do not know it ignore it.
+mailbox. `ai_triage_enabled` is the mailbox's [AI triage](#ai-triage) switch. `role_id` is the
+[mail role](#mail-roles) the mailbox belongs to, `null` when it has none; clients that do not know it
+ignore it.
 
 Deleting a mailbox deletes its messages in the same transaction; the address stays reserved and
 later mail for it is answered `404 MAILBOX.RECIPIENT_NOT_FOUND`. A mailbox on a connected domain
@@ -1470,13 +1477,14 @@ own stars.
 | `unread` | `true` or `false`, as in the single-mailbox list; outbound messages are always read |
 | `q` | Search, only with `view=all`; the same rules, matching, and 2-second limit as the single-mailbox search |
 | `group` | `thread`, only with `view` `all` or `sent`, and never with `unread` or `q` |
+| `triage` | Comma-separated distinct [triage](#ai-triage) categories, such as `reply,review`; only with `view` `all` or `today`, and never with `group` or `q`. Matches nothing while the organization's AI triage is off. |
 | `tz` | The IANA time zone that defines today, at most 64 characters; defaults to `UTC` |
 | `cursor` | `meta.next_cursor` from the previous page, unchanged |
 | `per_page` | 1 to 100, default 15; an integer outside the range is clamped |
 
 Filters combine with AND. Each parameter may appear once. A repeated parameter, `page`, an unknown
 value, a malformed `cursor`, a `tz` that is not a known IANA zone (including `Local` and an empty
-value), `q` with a view other than `all`, or `group` outside its rule is
+value), `q` with a view other than `all`, or `group` or `triage` outside its rule is
 `400 COMMON.INVALID_INPUT`. An unreadable, missing, or foreign `mailbox_id` or `role_id` answers an
 empty page, never `403` or `404`, so the filters cannot probe what exists.
 
@@ -1519,7 +1527,8 @@ Each item has every field of the single-mailbox list item, plus `mailbox_address
 mailbox's mail role now, so moving a mailbox to another role relabels its old mail), and `snippet`:
 the first 400 characters of the text body with whitespace runs collapsed to one space, trimmed, and
 cut to 140 characters; it is empty for mail without a text body. `read` and `starred` are the
-caller's own. There is no body, `message_id`, `in_reply_to`, event list, or attachment list.
+caller's own. `triage` is the message's [triage result](#ai-triage) or `null`. There is no body,
+`message_id`, `in_reply_to`, event list, or attachment list.
 
 With `group=thread`, each row is the newest message of one thread of one mailbox in the view and
 carries `thread`, exactly as in the [single-mailbox list](#listing-and-search). A thread that gets a
@@ -1538,7 +1547,8 @@ they may read:
     "ungrouped_unread": 2,
     "mailboxes": [{ "mailbox_id": 12, "unread": 3 }, { "mailbox_id": 14, "unread": 1 }],
     "today_starts_at": "2026-11-18T16:00:00Z",
-    "today_ends_at": "2026-11-19T16:00:00Z"
+    "today_ends_at": "2026-11-19T16:00:00Z",
+    "triage": { "reply": 2, "deadline": 1, "fyi": 5, "review": 0 }
   }
 }
 ```
@@ -1554,6 +1564,53 @@ they may read:
   (`queued_reason` `send_limit`); it is not organization usage.
 - A caller with no readable mailbox gets zeros and empty arrays. Sealed messages and the trash are
   never counted.
+- `triage` counts the caller's unread inbound messages in `default` by triage category; it is `null`
+  while the organization's AI triage is off, and clients hide triage when it is.
+
+### AI Triage
+
+AI triage sorts new inbound mail into `reply` (the reader should answer), `deadline` (it carries a
+date), `fyi` (information only), and `review` (the model could not decide), with a one-line reason.
+It is off by default at three levels, and all three must be on for mail to be queued:
+
+1. The instance names a model with `AI_TRIAGE_PROVIDER`. Without one, `available` is `false` and the
+   feature cannot be turned on (`409 MAILBOX.TRIAGE_UNAVAILABLE`).
+2. The organization switch, `GET` and `PUT /v1/mail-triage-setting`. Any member reads it; owners and
+   admins replace it with every field: `{ "enabled": true, "daily_message_cap": 500,
+   "draft_enabled": true }`. The response adds `available`, `instance_daily_cap`, and `updated_at`
+   (`null` until saved). `daily_message_cap` is 1 to 100000; the effective cap is the lower of it
+   and the instance cap, counted per UTC day, and mail over it waits for the next day.
+3. The mailbox switch, `PUT /v1/mailboxes/:mailbox_id/triage-setting` with `{ "enabled": true }`,
+   answering the mailbox. A personal mailbox's switch belongs to its owner alone; a shared
+   mailbox's needs `manage_members`. Handover turns it off.
+
+Only mail received while every switch is on is queued; turning triage on never classifies older
+mail, and a message whose switches turn off before the worker reaches it is skipped. The worker
+(`mail:triage:work`) classifies queued mail in batches; a model failure is retried after 1 and
+5 minutes, and the third failure leaves the message in `review` with an empty reason.
+
+A result is shared by every reader of the mailbox and shown only to callers who may read the
+message: `{ "category": "deadline", "reason": "Asks for the contract by Friday",
+"due_at": "2026-11-21T00:00:00Z", "source": "ai" }`. `due_at` is only for `deadline` and may be
+`null`. While the organization switch is off, no result, filter, or count is shown.
+
+`PUT /v1/mailboxes/:mailbox_id/messages/:message_id/triage` with `{ "category": "reply" }` records
+a reader's own decision and needs `view`. It answers the result with `source` `manual` and an empty
+reason; the model never overwrites it. `review` cannot be chosen, `due_at` is only for `deadline`
+and lies within one year back and five years ahead, and an outbound message is
+`422 COMMON.VALIDATION_FAILED`.
+
+`POST /v1/mailboxes/:mailbox_id/messages/:message_id/reply-drafts` has no body and needs `send` on
+the mailbox and the organization's `draft_enabled`. It answers
+`{ "body": "...", "basis": [{ "kind": "message", "id": 9021, "label": "Contract" }] }`: plain text
+for the reader to edit and the thread messages or templates it relied on. The draft is never stored
+or sent, and a model failure is `502 MAILBOX.TRIAGE_MODEL_FAILED`.
+
+The model reads only the [masked](#masked-secrets) form of mail, placed in the prompt as data it must
+not follow. Triage sees the sender, subject, text body (8000 characters at most), the mailbox's mail
+role, and up to 10 recent manual decisions of the mailbox; a draft sees the masked thread up to the
+message, the organization's template names, and the mail role. Every setting change writes an audit
+entry. All responses are `Cache-Control: private, no-store`.
 
 ### Idempotency
 
@@ -2170,3 +2227,5 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.DNS_RECORD_LOCKED` | 409 |
 | `MAILBOX.DNS_RECORD_INVALID` | 422 |
 | `MAILBOX.DNS_RECORD_REJECTED` | 422 |
+| `MAILBOX.TRIAGE_UNAVAILABLE` | 409 |
+| `MAILBOX.TRIAGE_MODEL_FAILED` | 502 |

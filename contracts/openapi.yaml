@@ -5498,6 +5498,55 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/triage-setting:
+    put:
+      operationId: setMailboxTriageSetting
+      summary: Turn AI triage for a mailbox on or off
+      description: A personal mailbox's switch belongs to its owner alone; a shared mailbox's needs
+        `manage_members`. Turning it on needs an instance model (`409 MAILBOX.TRIAGE_UNAVAILABLE`
+        otherwise). Only mail received while both this switch and the organization switch are on is
+        queued; earlier mail is never classified.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetMailboxTriageSettingRequest'
+      responses:
+        '200':
+          description: The mailbox after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: AI triage is off for the organization, or the instance has no model
+            (`MAILBOX.TRIAGE_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/role-assignment:
     put:
       operationId: setMailboxRoleAssignment
@@ -5869,6 +5918,101 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/triage:
+    put:
+      operationId: updateMailMessageTriage
+      summary: Set an inbound message's triage category by hand
+      description: Needs `view` on the mailbox. The decision replaces the AI result for every reader and
+        is never overwritten by the model. `review` cannot be chosen; `due_at` is only for `deadline` and
+        lies within one year back and five years ahead. Outbound mail is `422 COMMON.VALIDATION_FAILED`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailMessageID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailTriageRequest'
+      responses:
+        '200':
+          description: The message's triage result after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTriageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: AI triage is off for the organization, or the instance has no model
+            (`MAILBOX.TRIAGE_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/reply-drafts:
+    post:
+      operationId: createMailReplyDraft
+      summary: Draft a reply to an inbound message
+      description: Needs `send` on the mailbox and the organization's draft switch. The model reads only
+        the masked thread up to this message, the organization's template names, and the mailbox's mail
+        role. The draft is returned once and never stored or sent; the request has no body and the
+        response is never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailMessageID'
+      responses:
+        '200':
+          description: The draft and what it relied on.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailReplyDraftResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: AI triage or drafts are off for the organization, or the instance has no model
+            (`MAILBOX.TRIAGE_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '502':
+          description: The model failed or returned nothing usable (`MAILBOX.TRIAGE_MODEL_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/messages/{message_id}/attachments/{attachment_id}:
@@ -7191,6 +7335,16 @@ paths:
             type: string
             enum:
               - thread
+        - name: triage
+          in: query
+          required: false
+          description: 'Keep only messages whose triage result is one of these comma-separated, distinct
+            categories, for example `reply,review`. Only with `view` `all` or `today`, and without `group`
+            and `q`. While the organization''s AI triage is off it matches nothing.'
+          schema:
+            type: string
+            pattern: '^(reply|deadline|fyi|review)(,(reply|deadline|fyi|review)){0,3}$'
+            maxLength: 32
         - name: tz
           in: query
           required: false
@@ -7677,6 +7831,75 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-triage-setting:
+    get:
+      operationId: getMailTriageSetting
+      summary: Read the organization's AI triage switches
+      description: Any member may read them; clients hide triage when `available` or `enabled` is false.
+        The response is never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The switches; defaults until an owner or admin saves them.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTriageSettingResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailTriageSetting
+      summary: Replace the organization's AI triage switches
+      description: Organization owners and admins only. Every field is required. Turning triage on needs
+        an instance model (`409 MAILBOX.TRIAGE_UNAVAILABLE` otherwise); turning it off always succeeds.
+        The effective daily cap is the lower of `daily_message_cap` and the instance cap.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailTriageSettingRequest'
+      responses:
+        '200':
+          description: The switches after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailTriageSettingResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: AI triage is off for the organization, or the instance has no model
+            (`MAILBOX.TRIAGE_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
         '422':
           $ref: '#/components/responses/ValidationFailed'
         '503':
@@ -8591,6 +8814,8 @@ components:
         - MAILBOX.DNS_RECORD_INVALID
         - MAILBOX.DNS_RECORD_LOCKED
         - MAILBOX.DNS_RECORD_REJECTED
+        - MAILBOX.TRIAGE_UNAVAILABLE
+        - MAILBOX.TRIAGE_MODEL_FAILED
     FieldErrors:
       type: object
       additionalProperties:
@@ -11331,6 +11556,7 @@ components:
         - awaiting_handover
         - sealed_before
         - webhooks_enabled
+        - ai_triage_enabled
         - access
         - unread_count
         - created_at
@@ -11366,6 +11592,10 @@ components:
         webhooks_enabled:
           type: boolean
           description: Whether mail webhooks are published for this mailbox; always false for a personal one.
+        ai_triage_enabled:
+          type: boolean
+          description: Whether new inbound mail of this mailbox is queued for AI triage. Triage also needs
+            the organization switch; handover turns it off.
         access:
           $ref: '#/components/schemas/MailboxAccess'
         unread_count:
@@ -12226,6 +12456,7 @@ components:
         - starred
         - thread_id
         - trashed_at
+        - triage
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -12326,6 +12557,12 @@ components:
           description: Present only with `group=thread`; summarizes the message's thread in the view, as in
             the single-mailbox list.
           $ref: '#/components/schemas/MailThreadSummary'
+        triage:
+          description: The message's AI triage result, shared by every reader; null while the organization's
+            AI triage is off, before the message is classified, and for outbound mail.
+          oneOf:
+            - $ref: '#/components/schemas/MailTriage'
+            - type: 'null'
     InboxCursorPageResponse:
       type: object
       additionalProperties: false
@@ -12360,6 +12597,7 @@ components:
         - mailboxes
         - today_starts_at
         - today_ends_at
+        - triage
       properties:
         views:
           type: object
@@ -12438,6 +12676,224 @@ components:
           type: string
           format: date-time
           description: The start of the next day in the requested time zone, in UTC; exclusive.
+        triage:
+          description: The caller's unread inbound messages in `default` by triage category; null while the
+            organization's AI triage is off, which is how clients know to hide it.
+          oneOf:
+            - $ref: '#/components/schemas/InboxTriageCounts'
+            - type: 'null'
+    MailTriageCategory:
+      type: string
+      description: '`reply` needs the reader''s answer, `deadline` carries a date, `fyi` is for
+        information, `review` means the model could not decide.'
+      enum:
+        - reply
+        - deadline
+        - fyi
+        - review
+    MailTriage:
+      type: object
+      additionalProperties: false
+      description: A message's triage result as every reader of the mailbox sees it.
+      required:
+        - category
+        - reason
+        - due_at
+        - source
+      properties:
+        category:
+          $ref: '#/components/schemas/MailTriageCategory'
+        reason:
+          type: string
+          maxLength: 120
+          description: One masked line explaining the category; empty for a manual decision.
+        due_at:
+          description: The deadline; only for `deadline`, and null when none was found.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        source:
+          type: string
+          enum:
+            - ai
+            - manual
+    InboxTriageCounts:
+      type: object
+      additionalProperties: false
+      required:
+        - reply
+        - deadline
+        - fyi
+        - review
+      properties:
+        reply:
+          type: integer
+          minimum: 0
+        deadline:
+          type: integer
+          minimum: 0
+        fyi:
+          type: integer
+          minimum: 0
+        review:
+          type: integer
+          minimum: 0
+    MailTriageSetting:
+      type: object
+      additionalProperties: false
+      required:
+        - available
+        - enabled
+        - daily_message_cap
+        - draft_enabled
+        - instance_daily_cap
+        - updated_at
+      properties:
+        available:
+          type: boolean
+          description: False when the instance has no AI triage model; triage cannot be turned on.
+        enabled:
+          type: boolean
+        daily_message_cap:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: Messages classified per UTC day at most; later ones wait for the next day.
+        draft_enabled:
+          type: boolean
+          description: Whether members with `send` may ask for reply drafts.
+        instance_daily_cap:
+          type: integer
+          minimum: 0
+          description: The instance ceiling; the effective cap is the lower of the two. 0 when unavailable.
+        updated_at:
+          description: Null until an owner or admin saves the switches.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+    UpdateMailTriageSettingRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - daily_message_cap
+        - draft_enabled
+      properties:
+        enabled:
+          type: boolean
+        daily_message_cap:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        draft_enabled:
+          type: boolean
+    SetMailboxTriageSettingRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+    UpdateMailTriageRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - category
+      properties:
+        category:
+          type: string
+          enum:
+            - reply
+            - deadline
+            - fyi
+        due_at:
+          description: Only with `deadline`.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+    MailReplyDraftBasis:
+      type: object
+      additionalProperties: false
+      required:
+        - kind
+        - id
+        - label
+      properties:
+        kind:
+          type: string
+          enum:
+            - message
+            - template
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        label:
+          type: string
+          description: The message subject or template name.
+    MailReplyDraft:
+      type: object
+      additionalProperties: false
+      required:
+        - body
+        - basis
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: Plain text for the reader to edit; never stored.
+        basis:
+          type: array
+          maxItems: 60
+          items:
+            $ref: '#/components/schemas/MailReplyDraftBasis'
+    MailTriageSettingResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailTriageSetting'
+    MailReplyDraftResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailReplyDraft'
+    MailTriageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/MailTriage'
+            - type: 'null'
     InboxCountsResponse:
       type: object
       additionalProperties: false
