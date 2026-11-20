@@ -122,6 +122,7 @@ const messages = {
       mail: 'Mail',
       broadcasts: 'Broadcasts',
       contacts: 'Contacts',
+      developers: 'Developers',
       manage: 'Manage',
       shortcuts: 'Shortcuts',
     },

@@ -30,6 +30,15 @@ const state = vi.hoisted(() => {
 });
 
 vi.mock('sonner', () => ({ toast }));
+// The webhook feature is on, so the console shows all five tabs.
+vi.mock('@/config/features', async importOriginal => {
+  const original = await importOriginal<typeof import('@/config/features')>();
+  return {
+    ...original,
+    isWebFeatureEnabled: (feature: Parameters<typeof original.isWebFeatureEnabled>[0]) =>
+      feature === 'webhook' || original.isWebFeatureEnabled(feature),
+  };
+});
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: state.replace }),
   usePathname: () => '/console/developers',

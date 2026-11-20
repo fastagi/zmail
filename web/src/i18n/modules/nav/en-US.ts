@@ -15,6 +15,7 @@ const messages = {
   mailContacts: 'Contacts',
   mailTemplates: 'Templates',
   mailDomain: 'Domain',
+  developers: 'Developers',
   // fastbuild:slot web.i18n.nav.en-us
 } as const;
 

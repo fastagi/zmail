@@ -109,6 +109,13 @@ export function QuickStartTab({
   const templates = useMailTemplates(organization.id, 'transactional');
   const firstMessage = useTransactionalLog(organization.id, { mode }, { perPage: 1 });
   const [created, setCreated] = useState<CreatedKey | null>(null);
+  // Switching the key mode drops a key created in the other mode, plaintext included: it is shown
+  // once, on the page it was created on.
+  const [createdForMode, setCreatedForMode] = useState(mode);
+  if (createdForMode !== mode) {
+    setCreatedForMode(mode);
+    setCreated(null);
+  }
   const [chosenTemplateId, setChosenTemplateId] = useState<number | null>(null);
   const [sent, setSent] = useState<TransactionalMessage | null>(null);
   const [now] = useState(() => Date.now());
@@ -294,6 +301,8 @@ function KeyPanel({
             plaintext: result.plaintext_key,
             revealed: false,
           });
+          // The plaintext now lives only in the page state; the mutation result drops it.
+          createKey.reset();
         },
       }
     );
@@ -335,11 +344,7 @@ function KeyPanel({
             <Button
               type="button"
               variant="outline"
-              onClick={() => {
-                // The mutation result holds the plaintext too; drop it with the page state.
-                createKey.reset();
-                onSaved();
-              }}
+              onClick={onSaved}
             >
               {t('start.keySaved')}
             </Button>

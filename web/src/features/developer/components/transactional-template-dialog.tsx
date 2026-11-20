@@ -466,6 +466,7 @@ export function TransactionalTemplateDialog({
                 </div>
               )}
               <p className="text-xs text-muted-foreground">{t('dialog.secretHint')}</p>
+              <p className="text-xs text-muted-foreground">{t('dialog.sampleHint')}</p>
             </fieldset>
             {formError ? (
               <Alert variant="destructive">

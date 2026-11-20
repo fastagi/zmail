@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeveloperConsole } from '@/features/developer';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
+import {
+  CLIENT_MESSAGE_NAMESPACES,
+  developerMessageNamespaces,
+} from '@/i18n/client-message-namespaces';
+import { selectMessageNamespaces } from '@/i18n/message-selection';
 import { messages } from '@/i18n/modules';
 
 const state = vi.hoisted(() => {
@@ -18,6 +23,7 @@ const state = vi.hoisted(() => {
   });
   return {
     search: '',
+    webhookEnabled: false,
     replace: vi.fn(),
     organizations: query(),
     domains: query(),
@@ -45,6 +51,14 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => state.organizations,
 }));
+vi.mock('@/config/features', async importOriginal => {
+  const original = await importOriginal<typeof import('@/config/features')>();
+  return {
+    ...original,
+    isWebFeatureEnabled: (feature: Parameters<typeof original.isWebFeatureEnabled>[0]) =>
+      feature === 'webhook' ? state.webhookEnabled : original.isWebFeatureEnabled(feature),
+  };
+});
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useMailboxDomains: () => state.domains,
 }));
@@ -65,6 +79,7 @@ describe('developer quick start and send log', () => {
 
   beforeEach(() => {
     state.search = 'org=1';
+    state.webhookEnabled = false;
     state.replace.mockReset();
     state.organizations.data = organizations();
     state.domains.data = [
@@ -112,6 +127,10 @@ describe('developer quick start and send log', () => {
     const key = screen.getByTestId('quick-start-key');
     await waitFor(() => expect(key).toHaveTextContent('fastbuild_test_ab12cd••••9z8y'));
     expect(container.textContent).not.toContain(plaintext);
+    // The create mutation's result held the plaintext too; it is dropped as soon as the page has it.
+    expect(
+      JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state))
+    ).not.toContain(plaintext);
 
     fireEvent.click(screen.getByRole('button', { name: 'Show and copy' }));
     await waitFor(() => expect(key).toHaveTextContent(plaintext));
@@ -133,6 +152,31 @@ describe('developer quick start and send log', () => {
         JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state))
       ).not.toContain(plaintext)
     );
+  });
+
+  it('switching the key mode drops a created key, plaintext included', async () => {
+    state.search = 'org=1&tab=start&mode=test';
+    const plaintext = 'fastbuild_test_ab12cd_SECRETVALUE9z8y';
+    apiKeys.create.mockResolvedValue({
+      api_key: apiKey({ key_prefix: 'fastbuild_test_ab12cd', mode: 'test' }),
+      plaintext_key: plaintext,
+    });
+    const { container, rerender } = renderConsole();
+    fireEvent.click(await screen.findByRole('button', { name: 'Create a test key' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('quick-start-key')).toHaveTextContent('fastbuild_test_ab12cd••••9z8y')
+    );
+
+    state.search = 'org=1&tab=start&mode=live';
+    rerender(wrap(queryClient));
+    await screen.findByRole('button', { name: 'Create a live key' });
+    state.search = 'org=1&tab=start&mode=test';
+    rerender(wrap(queryClient));
+
+    expect(await screen.findByRole('button', { name: 'Create a test key' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show and copy' })).toBeNull();
+    expect(screen.getByTestId('quick-start-key')).not.toHaveTextContent('9z8y');
+    expect(container.textContent).not.toContain(plaintext);
   });
 
   it('counts only an own key with exactly the transactional scope in the current mode', async () => {
@@ -389,6 +433,71 @@ describe('developer quick start and send log', () => {
     );
   });
 });
+
+describe('developer console webhook feature gate', () => {
+  beforeEach(() => {
+    state.organizations.data = organizations();
+    state.domains.data = [domain({ domain: 'acme.example', kind: 'organization' })];
+    state.templates.data = [summary()];
+    state.template.data = template();
+    developer.log.mockReset().mockResolvedValue(page([]));
+    apiKeys.list.mockReset().mockResolvedValue(keyPage([]));
+  });
+
+  it('hides the Webhooks tab and falls back to the quick start while the feature is off', async () => {
+    state.webhookEnabled = false;
+    state.search = 'org=1&tab=webhooks&mode=live';
+    const missing = renderWithLayoutMessages(false);
+
+    const tablist = await screen.findByRole('tablist');
+    expect(within(tablist).queryByRole('tab', { name: 'Webhooks' })).toBeNull();
+    expect(within(tablist).getByRole('tab', { name: 'Quick start' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('shows the Webhooks tab with the webhook messages while the feature is on', async () => {
+    state.webhookEnabled = true;
+    state.search = 'org=1&tab=start&mode=live';
+    expect(developerMessageNamespaces(true)).toContain('webhook');
+    expect(developerMessageNamespaces(false)).not.toContain('webhook');
+    const missing = renderWithLayoutMessages(true);
+
+    const tablist = await screen.findByRole('tablist');
+    expect(within(tablist).getByRole('tab', { name: 'Webhooks' })).toBeInTheDocument();
+    expect(missing).toEqual([]);
+  });
+});
+
+/**
+ * Renders the console with exactly the namespaces the route serializes (the global ones plus the
+ * developer layout's selection) and returns the message keys it failed to find.
+ */
+function renderWithLayoutMessages(webhookEnabled: boolean): string[] {
+  const missing: string[] = [];
+  const selected = selectMessageNamespaces(messages, [
+    ...CLIENT_MESSAGE_NAMESPACES.global,
+    ...CLIENT_MESSAGE_NAMESPACES.console,
+    ...developerMessageNamespaces(webhookEnabled),
+  ]);
+  queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <NextIntlClientProvider
+        locale="en-US"
+        messages={selected as unknown as AbstractIntlMessages}
+        onError={error => missing.push(error.message)}
+      >
+        <DeveloperConsole />
+      </NextIntlClientProvider>
+    </QueryClientProvider>
+  );
+  return missing;
+}
 
 function organizations() {
   const now = '2026-11-16T10:00:00Z';

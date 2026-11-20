@@ -30,26 +30,6 @@ interface DeliveryListOptions extends ListOptions {
   status?: WebhookDelivery['status'];
 }
 
-// The catalog the real API lists with the mailbox and webhook starters: the starter test event,
-// the mailbox mail events, and the transactional mail events of contracts/MAILBOXES.md "Webhooks".
-const MOCK_WEBHOOK_EVENT_TYPES = [
-  'webhook.test',
-  'mail.message.sent',
-  'mail.message.failed',
-  'mail.message.received',
-  'mail.message.delivered',
-  'mail.message.delivery_delayed',
-  'mail.message.bounced',
-  'mail.message.complained',
-  'mail.message.suppressed',
-  'email.sent',
-  'email.delivered',
-  'email.bounced',
-  'email.complained',
-  'email.suppressed',
-  'email.failed',
-] as const;
-
 export class MockWebhookStore {
   private endpoints: WebhookEndpoint[] = [];
   private deliveries: WebhookDelivery[] = [];
@@ -77,8 +57,12 @@ export class MockWebhookStore {
     this.nextDeliveryId = 1;
   }
 
-  eventTypes(): readonly string[] {
-    return [...MOCK_WEBHOOK_EVENT_TYPES];
+  // The framework boundary: the shipped mock catalog is only the starter test event. The real API
+  // also lists product types (the mailbox `mail.message.*` and transactional `email.*` events of
+  // contracts/MAILBOXES.md), so in mock mode the developer console's Webhooks tab has no `email.*`
+  // type to pick; UI tests supply those types through their own service mocks.
+  eventTypes(): readonly ['webhook.test'] {
+    return ['webhook.test'];
   }
 
   listEndpoints(

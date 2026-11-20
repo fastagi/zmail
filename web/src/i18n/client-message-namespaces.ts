@@ -18,3 +18,14 @@ export const CLIENT_MESSAGE_NAMESPACES = {
   developer: ['developer', 'mailbox'],
   // fastbuild:slot web.i18n.client-namespaces
 } as const satisfies Record<string, readonly ModuleName[]>;
+
+/**
+ * The developer console's namespaces: its Webhooks tab renders the webhook feature's management
+ * UI, so the webhook namespace comes along when that feature is on (and the tab shows).
+ */
+export function developerMessageNamespaces(webhookEnabled: boolean): readonly ModuleName[] {
+  return [
+    ...CLIENT_MESSAGE_NAMESPACES.developer,
+    ...(webhookEnabled ? CLIENT_MESSAGE_NAMESPACES.webhook : []),
+  ];
+}

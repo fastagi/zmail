@@ -108,7 +108,8 @@ export function SuppressionList({ organizationId }: { organizationId: number }) 
       {remove.error ? (
         <ErrorAlert
           message={errorMessage(remove.error)}
-          retryLabel={tm('actions.retry')}
+          // The removal is not repeated: reloading shows whether the address is still listed.
+          retryLabel={t('limits.suppressions.reload')}
           onRetry={() => {
             remove.reset();
             void list.refetch();

@@ -142,7 +142,7 @@ const messages = {
       '推送失败后约隔 1 分钟、5 分钟、15 分钟、1 小时重试，之后间隔逐渐拉长，最长相隔 24 小时，前后约三天、最多 10 次；之后只有运维人员可以重放。',
   },
   limits: {
-    lanesTitle: '今日外发额度',
+    lanesTitle: '近 24 小时外发额度',
     lanesDescription: '事务邮件走单独的通道：营销群发用满了，注册验证码照样能发。',
     lanesLabel: '发信通道',
     lanes: {
@@ -231,6 +231,7 @@ const messages = {
       noMatchTitle: '这个地址不在名单中',
       noMatchDescription: '查找只匹配完整地址。',
       older: '更早',
+      reload: '重新加载名单',
     },
   },
   disabled: {
@@ -250,7 +251,8 @@ const messages = {
     variables: '变量',
     noVariables: '这个模板没有变量。',
     secretSuffix: '· 秘密',
-    sampleNote: '预览使用保存的示例值填充变量。秘密变量在发送日志和 Webhook 中一律遮住。',
+    sampleNote:
+      '预览使用保存的示例值填充变量。请填写虚构的示例，不要填真实的验证码或链接：示例值按原样保存，所有成员都能看到。发出后，秘密变量在发送日志中会被遮住；Webhook 从不携带变量。',
     preview: '收件人看到的样子',
     previewTitle: '模板预览',
     previewUnavailable: '这个模板无法预览。',
@@ -285,6 +287,7 @@ const messages = {
     fallbackFor: '{name} 的默认值',
     sampleFor: '{name} 的示例值',
     secretHint: '秘密变量总是必填，且不能有默认值。',
+    sampleHint: '示例值只用于预览。它们按原样保存、所有成员可见，请填写虚构的示例，不要填真实的秘密值。',
     noDomain: '创建事务模板前，请先验证一个发信域名。',
     fallbackMismatch: '必填变量不能有默认值；可选变量的每一处使用都需要默认值。',
     save: '保存',

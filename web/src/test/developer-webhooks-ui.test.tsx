@@ -3,7 +3,11 @@ import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DeveloperWebhooksTab } from '@/features/developer/components/developer-webhooks-tab';
-import { MockWebhookStore } from '@/features/webhook/server/mock-webhook-store';
+import {
+  CLIENT_MESSAGE_NAMESPACES,
+  developerMessageNamespaces,
+} from '@/i18n/client-message-namespaces';
+import { selectMessageNamespaces } from '@/i18n/message-selection';
 import { messages } from '@/i18n/modules';
 
 const EMAIL_EVENTS = [
@@ -106,6 +110,25 @@ describe('developer webhooks tab', () => {
     );
   });
 
+  it('renders with the namespaces the developer layout selects when the webhook feature is on', () => {
+    const missing: string[] = [];
+    const selected = selectMessageNamespaces(messages, [
+      ...CLIENT_MESSAGE_NAMESPACES.global,
+      ...developerMessageNamespaces(true),
+    ]);
+    render(
+      <NextIntlClientProvider
+        locale="en-US"
+        messages={selected as unknown as AbstractIntlMessages}
+        onError={error => missing.push(error.message)}
+      >
+        <DeveloperWebhooksTab organizationId={1} />
+      </NextIntlClientProvider>
+    );
+    expect(screen.getByRole('button', { name: 'Create endpoint' })).toBeInTheDocument();
+    expect(missing).toEqual([]);
+  });
+
   it('describes every email event', () => {
     renderWithMessages(<DeveloperWebhooksTab organizationId={1} />);
     const list = screen.getByRole('list', { name: 'Events' });
@@ -139,15 +162,6 @@ describe('developer webhooks tab', () => {
     expect(note.textContent).toMatch(/up to 24 hours apart, over about three days/u);
     expect(note.textContent).toMatch(/only an operator can replay it/u);
     expect(note.textContent).not.toMatch(/30 minutes|delivery list/u);
-  });
-});
-
-describe('mock webhook event catalog', () => {
-  it('lists the six transactional email events', () => {
-    const eventTypes = new MockWebhookStore().eventTypes();
-    expect(eventTypes).toContain('webhook.test');
-    expect(eventTypes).toContain('mail.message.sent');
-    for (const eventType of EMAIL_EVENTS) expect(eventTypes).toContain(eventType);
   });
 });
 

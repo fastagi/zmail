@@ -30,6 +30,7 @@ const footerLinks = [
   ['mail', ROUTES.CONSOLE.EMAILS],
   ['broadcasts', ROUTES.CONSOLE.MAIL_BROADCASTS],
   ['contacts', ROUTES.CONSOLE.MAIL_CONTACTS],
+  ['developers', ROUTES.CONSOLE.DEVELOPERS],
   ['manage', ROUTES.CONSOLE.MAIL_DOMAIN],
 ] as const;
 

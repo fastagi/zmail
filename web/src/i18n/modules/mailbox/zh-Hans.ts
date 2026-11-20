@@ -117,6 +117,7 @@ const messages = {
       mail: '邮件',
       broadcasts: '群发',
       contacts: '联系人',
+      developers: '开发者',
       manage: '管理',
       shortcuts: '快捷键',
     },

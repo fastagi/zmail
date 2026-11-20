@@ -15,10 +15,11 @@ function oneOf<T extends string>(allowed: readonly T[], value: string | null, fa
 
 /**
  * The console's tab and key mode, kept in `?tab=` and `?mode=` so a reload or a shared link shows
- * the same view. Unknown values fall back to the quick start in live mode; other query
- * parameters, such as the organization, are kept.
+ * the same view. Unknown values, and tabs not in `tabs` (such as Webhooks while the webhook
+ * feature is off), fall back to the quick start in live mode; other query parameters, such as the
+ * organization, are kept.
  */
-export function useDeveloperTab(): {
+export function useDeveloperTab(tabs: readonly DeveloperTab[] = DEVELOPER_TABS): {
   tab: DeveloperTab;
   mode: DeveloperMode;
   setTab: (tab: DeveloperTab) => void;
@@ -31,7 +32,7 @@ export function useDeveloperTab(): {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const tab = oneOf(DEVELOPER_TABS, searchParams.get('tab'), 'start');
+  const tab = oneOf(tabs, searchParams.get('tab'), 'start');
   const mode = oneOf(DEVELOPER_MODES, searchParams.get('mode'), 'live');
 
   const update = (patch: Readonly<Record<string, string | null>>) => {

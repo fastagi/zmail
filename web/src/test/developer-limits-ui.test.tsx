@@ -111,6 +111,24 @@ describe('developer limits and protection tab', () => {
     expect(developer.suppressions.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('a failed removal offers to reload the list, not to retry the removal', async () => {
+    developer.removeSuppression.mockRejectedValue(
+      new ApiError('down', ApiErrorCode.COMMON_SERVICE_UNAVAILABLE, 503)
+    );
+    renderTab({ canManage: true });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove full-box@example.org' }));
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+    const reload = await screen.findByRole('button', { name: 'Reload list' });
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    const reads = developer.suppressions.mock.calls.length;
+    fireEvent.click(reload);
+    await waitFor(() => expect(developer.suppressions.mock.calls.length).toBeGreaterThan(reads));
+    expect(developer.removeSuppression).toHaveBeenCalledTimes(1);
+  });
+
   it('cancelling the confirmation removes nothing', async () => {
     renderTab({ canManage: true });
 

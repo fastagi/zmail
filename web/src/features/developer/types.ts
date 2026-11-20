@@ -22,6 +22,11 @@ import type {
 export const DEVELOPER_TABS = ['start', 'templates', 'logs', 'limits', 'webhooks'] as const;
 export type DeveloperTab = (typeof DEVELOPER_TABS)[number];
 
+/** The tabs the console shows: the Webhooks tab needs the `webhook` feature. */
+export function developerTabs(webhookEnabled: boolean): readonly DeveloperTab[] {
+  return webhookEnabled ? DEVELOPER_TABS : DEVELOPER_TABS.filter(tab => tab !== 'webhooks');
+}
+
 /** Which API keys the console shows: live keys deliver, test keys only render and record. */
 export const DEVELOPER_MODES = ['live', 'test'] as const;
 export type DeveloperMode = (typeof DEVELOPER_MODES)[number];

@@ -166,7 +166,7 @@ const messages = {
     limitOnly: '{limit} per 24 hours',
     waiting: {
       transactional: '{count} waiting',
-      broadcast: '{count} recipients waiting',
+      broadcast: '{count, plural, one {# recipient waiting} other {# recipients waiting}}',
       personal: '{count} waiting',
     },
     window: 'Counted over the last 24 hours, failed attempts included.',
@@ -238,6 +238,7 @@ const messages = {
       noMatchTitle: 'This address is not on the list',
       noMatchDescription: 'The search matches the exact address only.',
       older: 'Older',
+      reload: 'Reload list',
     },
   },
   disabled: {
@@ -259,7 +260,7 @@ const messages = {
     noVariables: 'This template has no variables.',
     secretSuffix: '· secret',
     sampleNote:
-      'The preview fills variables with the saved sample values. Secret values are masked in the send log and in webhooks.',
+      'The preview fills variables with the saved sample values. Use made-up examples, never real codes or links: sample values are stored as typed and every member can see them. Once sent, secret values are masked in the send log; webhooks never carry variables.',
     preview: 'What the recipient sees',
     previewTitle: 'Template preview',
     previewUnavailable: 'This template cannot be previewed.',
@@ -295,6 +296,8 @@ const messages = {
     fallbackFor: 'Fallback for {name}',
     sampleFor: 'Sample value for {name}',
     secretHint: 'A secret is always required and never has a fallback.',
+    sampleHint:
+      'Sample values only fill the preview. They are stored as typed and visible to every member, so use made-up examples, never real secrets.',
     noDomain: 'Verify a sending domain before creating a transactional template.',
     fallbackMismatch:
       'A required variable has no fallback, and every use of an optional variable needs one.',

@@ -4,13 +4,14 @@ import { PlugZap } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
 import { Button } from '@/components/ui/button';
+import { isWebFeatureEnabled } from '@/config/features';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { QuickStartTab } from '@/features/developer/components/quick-start-tab';
 import { SendLogTab } from '@/features/developer/components/send-log-tab';
 import { TransactionalTemplatesTab } from '@/features/developer/components/transactional-templates-tab';
 import { useDeveloperTab } from '@/features/developer/hooks/use-developer-tab';
-import { DEVELOPER_MODES, DEVELOPER_TABS, type DeveloperTab } from '@/features/developer/types';
+import { DEVELOPER_MODES, developerTabs, type DeveloperTab } from '@/features/developer/types';
 import {
   MailOrganizationBoundary,
   MailPageHeader,
@@ -103,14 +104,16 @@ function DeveloperTabs({
   domains: readonly MailboxDomain[];
 }) {
   const t = useT('developer');
-  const { tab, mode, setTab, setMode } = useDeveloperTab();
+  // The Webhooks tab is the webhook feature's UI: hidden, with its messages, while it is off.
+  const tabs = developerTabs(isWebFeatureEnabled('webhook'));
+  const { tab, mode, setTab, setMode } = useDeveloperTab(tabs);
 
   return (
     <Tabs value={tab} onValueChange={value => setTab(value as DeveloperTab)} className="gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="max-w-full overflow-x-auto">
           <TabsList>
-            {DEVELOPER_TABS.map(item => (
+            {tabs.map(item => (
               <TabsTrigger key={item} value={item}>
                 {t(`tabs.${item}`)}
               </TabsTrigger>
@@ -141,7 +144,7 @@ function DeveloperTabs({
           </span>
         </div>
       </div>
-      {DEVELOPER_TABS.map(item => (
+      {tabs.map(item => (
         <TabsContent key={item} value={item}>
           {item === 'start' ? (
             <QuickStartTab organization={organization} mode={mode} domains={domains} />
