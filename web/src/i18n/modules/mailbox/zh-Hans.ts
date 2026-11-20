@@ -137,6 +137,12 @@ const messages = {
     clearMailbox: '显示全部邮箱',
     threadCount: '（{count}）',
     loadingMore: '正在加载更多…',
+    source: {
+      gmail: 'Gmail',
+      gmailTitle: '从绑定的 Gmail 账号同步（只读）',
+      outlook: 'Outlook',
+      outlookTitle: '从绑定的 Outlook 账号同步（只读）',
+    },
     views: {
       label: '收件视图',
       all: '全部收件',

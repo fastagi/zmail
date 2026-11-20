@@ -380,6 +380,15 @@ export function InboxList({
                     <span className="truncate">{role.name}</span>
                   </span>
                 ) : null}
+                {item.source === 'gmail' || item.source === 'outlook' ? (
+                  <span
+                    data-source={item.source}
+                    title={t(`inbox.source.${item.source}Title`)}
+                    className="shrink-0 rounded-full border border-border px-[6px] text-[11px] text-text-muted"
+                  >
+                    {t(`inbox.source.${item.source}`)}
+                  </span>
+                ) : null}
                 <span className="flex-1" />
                 {sendable.has(item.mailbox_id) ? (
                   <span
