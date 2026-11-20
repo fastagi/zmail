@@ -523,10 +523,13 @@ func toMailMessageCountsResponse(counts domain.MailMessageCounts) MailMessageCou
 // MailMessageResponse is the full shape of a message.
 type MailMessageResponse struct {
 	MailMessageSummaryResponse
-	TextBody  string `json:"text_body"`
-	HTMLBody  string `json:"html_body"`
-	MessageID string `json:"message_id"`
-	InReplyTo string `json:"in_reply_to"`
+	TextBody string `json:"text_body"`
+	HTMLBody string `json:"html_body"`
+	// SecretsMasked is true when codes or sign-in links of an inbound message were masked; the
+	// reveal endpoint returns the original.
+	SecretsMasked bool   `json:"secrets_masked"`
+	MessageID     string `json:"message_id"`
+	InReplyTo     string `json:"in_reply_to"`
 	// Events is the delivery history of an outbound message, oldest first.
 	Events []MailEventResponse `json:"events"`
 	// Attachments lists the files of the message without their content.
@@ -638,7 +641,7 @@ func toMailMessageSummary(message *domain.MailMessage) MailMessageSummaryRespons
 		From:            MailAddressResponse{Address: message.FromAddress, Name: message.FromName},
 		To:              to,
 		Cc:              cc,
-		Subject:         message.Subject,
+		Subject:         maskedSubject(message),
 		Read:            message.Read,
 		FailureCode:     message.FailureCode,
 		QueuedReason:    queuedReasonOf(message),
@@ -707,8 +710,25 @@ func toMailMessageResponse(message *domain.MailMessage) *MailMessageResponse {
 	if message == nil {
 		return nil
 	}
+	response := toRevealedMailMessageResponse(message)
+	content := maskInboundSecrets(message)
+	response.Subject = content.Subject
+	response.TextBody = content.TextBody
+	response.HTMLBody = content.HTMLBody
+	response.SecretsMasked = content.Masked
+	return response
+}
+
+// toRevealedMailMessageResponse is the full message with nothing masked; only the reveal endpoint
+// returns it.
+func toRevealedMailMessageResponse(message *domain.MailMessage) *MailMessageResponse {
+	if message == nil {
+		return nil
+	}
+	summary := toMailMessageSummary(message)
+	summary.Subject = message.Subject
 	return &MailMessageResponse{
-		MailMessageSummaryResponse: toMailMessageSummary(message),
+		MailMessageSummaryResponse: summary,
 		TextBody:                   message.TextBody,
 		HTMLBody:                   message.HTMLBody,
 		MessageID:                  message.MessageID,
