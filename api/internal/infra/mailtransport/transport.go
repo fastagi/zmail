@@ -60,6 +60,8 @@ func (e *Error) Error() string {
 // Result is what the provider reported when it accepted a message. A recipient appears in at
 // most one list; a provider that reports nothing per recipient leaves them all empty.
 type Result struct {
+	// RFCMessageID is the wire identifier when the provider assigns it.
+	RFCMessageID string
 	// MessageID is the provider's identifier for the message, without angle brackets. Later
 	// delivery events name the message by it.
 	MessageID string

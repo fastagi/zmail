@@ -624,11 +624,12 @@ func (r *fakeRepository) CreateInboundMessage(ctx context.Context, message *doma
 	return true, err
 }
 
-func (r *fakeRepository) UpdateMessageDelivery(_ context.Context, id uint, status domain.MailStatus, messageID, failureCode string) error {
+func (r *fakeRepository) UpdateMessageDelivery(_ context.Context, id uint, status domain.MailStatus, messageID, rfcMessageID, failureCode string) error {
 	message, ok := r.messages[id]
 	if !ok {
 		return ErrMailMessageNotFound
 	}
+	message.RFCMessageID = rfcMessageID
 	message.Status, message.MessageID, message.FailureCode = status, messageID, failureCode
 	return nil
 }
@@ -1187,9 +1188,9 @@ type cancelingRepository struct {
 	updateContextErr error
 }
 
-func (r *cancelingRepository) UpdateMessageDelivery(ctx context.Context, id uint, status domain.MailStatus, messageID, failureCode string) error {
+func (r *cancelingRepository) UpdateMessageDelivery(ctx context.Context, id uint, status domain.MailStatus, messageID, rfcMessageID, failureCode string) error {
 	r.updateContextErr = ctx.Err()
-	return r.fakeRepository.UpdateMessageDelivery(ctx, id, status, messageID, failureCode)
+	return r.fakeRepository.UpdateMessageDelivery(ctx, id, status, messageID, rfcMessageID, failureCode)
 }
 
 func TestSendMessageValidatesInput(t *testing.T) {
@@ -1995,6 +1996,20 @@ func (f *queueFixture) storedThread(t *testing.T, id uint) uint {
 		t.Fatalf("message %d has no thread_id", id)
 	}
 	return *stored.ThreadID
+}
+
+func TestInboundReplyUsesProviderAssignedMessageID(t *testing.T) {
+	f := newQueueFixture(t)
+	const wireID = "assigned@provider.example"
+	f.transport.result = mailtransport.Result{MessageID: wireID, RFCMessageID: wireID}
+	sent := f.mustSend(t, "Hello", false)
+	if got := f.stored(t, sent.ID).RFCMessageID; got != wireID {
+		t.Fatalf("stored RFC Message-ID = %q, want %q", got, wireID)
+	}
+	reply := f.receiveReply(t, f.team, "reply@sender.test", "In-Reply-To: <"+wireID+">")
+	if got := f.storedThread(t, reply.ID); got != sent.ID {
+		t.Fatalf("reply thread = %d, want original thread %d", got, sent.ID)
+	}
 }
 
 func TestInboundReplyToOutboundJoinsThread(t *testing.T) {

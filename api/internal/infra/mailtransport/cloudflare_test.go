@@ -196,7 +196,7 @@ func TestCloudflareSendsAttachmentsAsBase64(t *testing.T) {
 	}
 }
 
-func TestCloudflareSendsMessageIDAndReferences(t *testing.T) {
+func TestCloudflareUsesProviderMessageIDAndSendsReferences(t *testing.T) {
 	var body map[string]any
 	transport := cloudflareAgainst(t, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -204,7 +204,7 @@ func TestCloudflareSendsMessageIDAndReferences(t *testing.T) {
 		_, _ = w.Write([]byte(`{"success":true,"errors":[],"result":{"message_id":"<provider@cf.example>","delivered":["bob@example.com"]}}`))
 	})
 
-	_, err := transport.Send(context.Background(), Message{
+	result, err := transport.Send(context.Background(), Message{
 		FromAddress: "hello@mail.example", To: []string{"bob@example.com"}, Subject: "Re: Hi", TextBody: "text",
 		MessageID:  "0123456789abcdef0123456789abcdef@mail.example",
 		InReplyTo:  "parent@example.com",
@@ -216,8 +216,8 @@ func TestCloudflareSendsMessageIDAndReferences(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 	headers, _ := body["headers"].(map[string]any)
-	if headers["Message-ID"] != "<0123456789abcdef0123456789abcdef@mail.example>" {
-		t.Fatalf("Message-ID = %v; want our own id in angle brackets", headers["Message-ID"])
+	if _, exists := headers["Message-ID"]; exists || result.RFCMessageID != "provider@cf.example" {
+		t.Fatalf("unexpected wire Message-ID: header=%v result=%q", headers["Message-ID"], result.RFCMessageID)
 	}
 	if headers["In-Reply-To"] != "<parent@example.com>" {
 		t.Fatalf("In-Reply-To = %v", headers["In-Reply-To"])
