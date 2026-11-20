@@ -163,7 +163,8 @@ export function MessageActions({
           type="button"
           size="sm"
           variant="ghost"
-          loading={update.isPending}
+          // Only marking unread spins here; a star shows at once on its own button.
+          loading={update.isPending && update.variables?.read !== undefined}
           icon={<MailOpen className="size-4" />}
           onClick={() =>
             void run(() => update.mutateAsync({ messageId: message.id, read: false }), null, true)

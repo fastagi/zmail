@@ -720,6 +720,17 @@ describe('mailbox workspace', () => {
     expect(screen.getByRole('button', { name: 'Show codes' })).toBeInTheDocument();
   });
 
+  it('keeps Mark unread usable while a star is on its way', () => {
+    state.detail.data = message({ html_body: '' });
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+    Object.assign(state.update, { isPending: true, variables: { messageId: 11, starred: true } });
+    fireEvent.click(rowButton('Old news'));
+
+    expect(screen.getByRole('button', { name: 'Mark unread' })).toBeEnabled();
+    Object.assign(state.update, { isPending: false, variables: undefined });
+  });
+
   it('shows no code panel for a message with nothing masked', () => {
     state.detail.data = message({ html_body: '' });
     renderWorkspace();
