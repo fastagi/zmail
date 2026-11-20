@@ -2545,6 +2545,242 @@ describe('mailbox browser route boundary', () => {
     expect(publicHeaders.get('organization-id')).toBeNull();
   });
 
+  it('forwards the directory, rename, import, and export routes with only documented input', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+    fetchMock.mockImplementation(async input => {
+      if (String(input).includes('/mailbox-exports')) {
+        return new Response('﻿address\r\n', {
+          headers: {
+            'content-type': 'text/csv; charset=utf-8',
+            'content-disposition': 'attachment; filename="shared-mailboxes-20261119.csv"',
+          },
+        });
+      }
+      return Response.json({ code: 0, message: 'success', data: [] });
+    });
+    const route = await loadRoute();
+
+    await route.listMailboxDirectoryRoute(
+      request('/api/mailbox-directory?type=shared&q=sa&cursor=abc&per_page=20&page=3&x=1')
+    );
+    await route.listMailboxesRoute(request('/api/mailboxes?scope=usable'));
+    await route.updateMailboxRoute(
+      request('/api/mailboxes/12', {
+        method: 'PUT',
+        body: JSON.stringify({ display_name: 'Billing', extra: true }),
+      }),
+      '12'
+    );
+    await route.importMailboxesRoute(
+      request('/api/mailbox-imports', {
+        method: 'POST',
+        body: JSON.stringify({
+          dry_run: true,
+          rows: [{ address: 'sales@mail.example.com', display_name: '', members: 'a@b.co' }],
+        }),
+      })
+    );
+    const exported = await route.exportMailboxesRoute(request('/api/mailbox-exports?type=shared'));
+
+    const calls = fetchMock.mock.calls.map(([url, init]) => {
+      const target = new URL(String(url));
+      return `${init?.method ?? 'GET'} ${target.pathname}${target.search}`;
+    });
+    expect(calls).toEqual([
+      'GET /v1/mailbox-directory?type=shared&q=sa&cursor=abc&per_page=20',
+      'GET /v1/mailboxes?scope=usable',
+      'PUT /v1/mailboxes/12',
+      'POST /v1/mailbox-imports',
+      'GET /v1/mailbox-exports?type=shared',
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      display_name: 'Billing',
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual({
+      dry_run: true,
+      rows: [{ address: 'sales@mail.example.com', display_name: '', members: 'a@b.co' }],
+    });
+    expect(exported.status).toBe(200);
+    expect(exported.headers.get('content-disposition')).toBe(
+      'attachment; filename="shared-mailboxes-20261119.csv"'
+    );
+
+    // Refused here, in proxy mode too: an unknown scope, a bad export type, 501 rows.
+    fetchMock.mockClear();
+    await expectError(
+      await route.listMailboxesRoute(request('/api/mailboxes?scope=all')),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    await expectError(
+      await route.exportMailboxesRoute(request('/api/mailbox-exports?type=all')),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    const rows = Array.from({ length: 501 }, (_, index) => ({
+      address: `box${index}@mail.example.com`,
+      display_name: '',
+      members: 'a@b.co',
+    }));
+    await expectError(
+      await route.importMailboxesRoute(
+        request('/api/mailbox-imports', {
+          method: 'POST',
+          body: JSON.stringify({ dry_run: true, rows }),
+        })
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    await expectError(
+      await route.importMailboxesRoute(
+        request('/api/mailbox-imports', {
+          method: 'POST',
+          body: JSON.stringify({ rows: rows.slice(0, 1) }),
+        })
+      ),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // A cross-origin rename is refused before its body is read.
+    const crossOrigin = request('/api/mailboxes/12', {
+      method: 'PUT',
+      body: JSON.stringify({ display_name: 'Billing' }),
+      origin: 'https://evil.example.com',
+    });
+    const response = await route.updateMailboxRoute(crossOrigin, '12');
+    expect(response.status).toBe(403);
+    expect(crossOrigin.bodyUsed).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('serves the directory, rename, import, and export from the mock to managers only', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    const route = await loadRoute();
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    await create(route, {
+      local_part: 'team',
+      type: 'shared',
+      members: [
+        { user_id: 3, permission: 'view' },
+        { user_id: 2, permission: 'manage' },
+      ],
+    });
+    await create(route, { local_part: 'ana', type: 'personal', owner_user_id: 3 });
+
+    const directory = await route.listMailboxDirectoryRoute(
+      request('/api/mailbox-directory?type=shared&per_page=1')
+    );
+    expect(directory.status).toBe(200);
+    const page = await directory.json();
+    expect(page.data).toHaveLength(1);
+    expect(page.data[0]).toMatchObject({ address: 'team@mail.example.com', member_count: 2 });
+    expect(page.meta).toMatchObject({
+      per_page: 1,
+      has_more: false,
+      next_cursor: null,
+      daily_send_limit: 200,
+      mailbox_count: 2,
+    });
+
+    const renamed = await route.updateMailboxRoute(
+      request(`/api/mailboxes/${page.data[0].id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ display_name: ' Team inbox ' }),
+      }),
+      String(page.data[0].id)
+    );
+    await expect(renamed.json()).resolves.toMatchObject({ data: { display_name: 'Team inbox' } });
+
+    const imported = await route.importMailboxesRoute(
+      request('/api/mailbox-imports', {
+        method: 'POST',
+        body: JSON.stringify({
+          dry_run: true,
+          rows: [
+            { address: 'Sales@mail.example.com', display_name: '', members: 'member@example.com' },
+            { address: 'sales@mail.example.com', display_name: '', members: 'member@example.com' },
+            { address: 'help@mail.example.com', display_name: '', members: 'nobody@else.test' },
+            { address: 'team@mail.example.com', display_name: '', members: 'member@example.com' },
+          ],
+        }),
+      })
+    );
+    const result = (await imported.json()).data;
+    expect(result).toMatchObject({ dry_run: true, succeeded: 1, failed: 3 });
+    expect(
+      result.rows.map((row: { status: string; error_code: string | null }) => [
+        row.status,
+        row.error_code,
+      ])
+    ).toEqual([
+      ['valid', null],
+      ['failed', 'MAILBOX.IMPORT_DUPLICATE_ROW'],
+      ['failed', 'MAILBOX.IMPORT_MEMBER_NOT_FOUND'],
+      ['failed', 'MAILBOX.ADDRESS_TAKEN'],
+    ]);
+    expect(result.rows[2].missing_emails).toEqual(['nobody@else.test']);
+
+    const exported = await route.exportMailboxesRoute(request('/api/mailbox-exports?type=shared'));
+    expect(exported.headers.get('content-disposition')).toMatch(
+      /^attachment; filename="shared-mailboxes-\d{8}\.csv"$/u
+    );
+    const csv = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await exported.arrayBuffer());
+    expect(csv.split('\r\n').slice(0, 2)).toEqual([
+      '﻿address,display_name,members,member_count,sent_last_24h,created_at',
+      expect.stringMatching(
+        /^team@mail\.example\.com,Team inbox,member@example\.com:view;operator@example\.com:manage,2,0,/u
+      ),
+    ]);
+
+    getSessionUser.mockResolvedValue(mockUser('demo-member'));
+    await expectError(
+      await route.listMailboxDirectoryRoute(request('/api/mailbox-directory')),
+      403,
+      'PERMISSION.DENIED'
+    );
+    await expectError(
+      await route.updateMailboxRoute(
+        request('/api/mailboxes/1', { method: 'PUT', body: JSON.stringify({ display_name: 'x' }) }),
+        '1'
+      ),
+      403,
+      'PERMISSION.DENIED'
+    );
+    await expectError(
+      await route.importMailboxesRoute(
+        request('/api/mailbox-imports', {
+          method: 'POST',
+          body: JSON.stringify({ dry_run: true, rows: [] }),
+        })
+      ),
+      403,
+      'PERMISSION.DENIED'
+    );
+    await expectError(
+      await route.exportMailboxesRoute(request('/api/mailbox-exports?type=shared')),
+      403,
+      'PERMISSION.DENIED'
+    );
+    // The member's own mailboxes: `team@` (view) and their personal `ana@`.
+    const usable = await (
+      await route.listMailboxesRoute(request('/api/mailboxes?scope=usable'))
+    ).json();
+    expect(usable.data.map((item: { address: string }) => item.address)).toEqual([
+      'team@mail.example.com',
+      'ana@mail.example.com',
+    ]);
+    await expectError(
+      await route.listMailboxesRoute(request('/api/mailboxes?scope=all')),
+      422,
+      'COMMON.VALIDATION_FAILED'
+    );
+  });
+
   it('forwards only the fixed production paths, methods, and whitelisted query', async () => {
     process.env.API_ADAPTER_ENABLED = 'true';
     process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';

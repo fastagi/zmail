@@ -11,6 +11,44 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Shared mailbox administration
+
+Organization owners and admins get an admin area in the Web console with a shared-mailbox page:
+`GET /v1/mailbox-directory`, `PUT /v1/mailboxes/:mailbox_id` (rename), `POST /v1/mailbox-imports`,
+and `GET /v1/mailbox-exports`. Contract: `contracts/MAILBOXES.md`, Mailbox Directory and Import And
+Export.
+
+### Medium — The per-organization mailbox limit is configurable
+
+`MAILBOX_MAX_PER_ORGANIZATION` (default `50`, valid `1` to `5000`) replaces the fixed limit of 50;
+anything outside the range fails startup. `domain.MaxMailboxesPerOrganization` is gone: a fork that
+bounded a query by it uses `domain.MailboxesPerOrganizationCeiling` (5000), and a fork that checked
+the limit reads `Service.MaxMailboxes()`. Lowering the value below an organization's count keeps its
+mailboxes; only new creates and import rows answer `409 MAILBOX.LIMIT_REACHED`.
+`GET /v1/mailboxes` may now return up to 5000 items, and `scope=usable` narrows it to the caller's own
+mailboxes; the Web workspace uses that scope.
+
+### Medium — The migration locks `mail_messages` while it builds the directory index
+
+Run migrations: `2026_11_25_090000_add_mailbox_directory_index` adds
+`idx_mail_messages_mailbox_send_attempted`, a partial B-tree index on
+`(mailbox_id, send_lane, send_attempted_at)` for outbound mail, which the directory's per-mailbox send
+counts read. It is built inside the migration's transaction, so on a large `mail_messages` table it
+blocks inbound delivery and sends until the build ends.
+
+A large installation builds the index beforehand, without blocking writes, and the migration then
+skips it. Run this before the migration, outside a transaction, as a role that owns `mail_messages`:
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_messages_mailbox_send_attempted
+  ON mail_messages (mailbox_id, send_lane, send_attempted_at)
+  WHERE direction = 'outbound';
+```
+
+If the `CONCURRENTLY` build fails, drop the invalid index
+(`DROP INDEX CONCURRENTLY idx_mail_messages_mailbox_send_attempted;`) and build it again before
+migrating. Down drops the index and loses nothing.
+
 ## Unreleased — Platform account ledger
 
 ### Low — Two new tables for platform accounts

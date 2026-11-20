@@ -30,6 +30,22 @@ const nextConfig: NextConfig = {
   agentRules: false,
   turbopack: {},
 
+  // The domain pages moved into the organization admin area; Next.js keeps the query, `org` included.
+  async redirects() {
+    return [
+      {
+        source: '/console/mail-domain',
+        destination: '/console/admin/domains',
+        permanent: false,
+      },
+      {
+        source: '/console/mail-domain/:zoneId/dns',
+        destination: '/console/admin/domains/:zoneId/dns',
+        permanent: false,
+      },
+    ];
+  },
+
   // Browser response policy only. Cache ownership remains route-specific.
   async headers() {
     return [

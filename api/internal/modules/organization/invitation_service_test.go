@@ -254,3 +254,11 @@ func TestServiceAcceptInvitationHashesToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, uint(42), membership.OrganizationID)
 }
+
+func (r *invitationRepositoryStub) FindMembershipsByEmails(context.Context, uint, []string) ([]*domain.OrganizationMembership, error) {
+	return nil, nil
+}
+
+func (r *invitationRepositoryStub) ListMembershipsByUserIDs(context.Context, uint, []uint) ([]*domain.OrganizationMembership, error) {
+	return nil, nil
+}

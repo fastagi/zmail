@@ -220,16 +220,17 @@ function PanelBody({ mailbox, onRefresh }: { mailbox: Mailbox; onRefresh: () => 
 }
 
 type RunResult = { ok: true } | { ok: false; key: MailboxErrorKey; stale: boolean };
-type Run = (change: () => Promise<unknown>, success?: string) => Promise<RunResult>;
+export type Run = (change: () => Promise<unknown>, success?: string) => Promise<RunResult>;
 
-function MembersSection({
+/** The members of a shared mailbox with their permissions; needs `manage_members`. */
+export function MembersSection({
   mailbox,
   members,
   people,
   nameOf,
   run,
 }: {
-  mailbox: Mailbox;
+  mailbox: Pick<Mailbox, 'id'>;
   members: ReturnType<typeof useMailboxMembers>;
   people: MailboxPerson[];
   nameOf: (userId: number | null) => string;
@@ -693,6 +694,10 @@ function useEventText(nameOf: (userId: number | null) => string) {
           detail.enabled === true ? 'access.history.webhooksOn' : 'access.history.webhooksOff',
           { actor }
         );
+      case 'renamed':
+        return typeof detail.to === 'string' && detail.to !== ''
+          ? t('access.history.renamed', { actor, name: detail.to })
+          : t('access.history.renamedCleared', { actor });
     }
   };
 }

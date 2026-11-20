@@ -26,8 +26,11 @@ export const ROUTES = {
     SETTINGS: '/console/settings',
     MAILBOXES: '/console/mailboxes',
     EMAILS: '/console/emails',
-    MAIL_DOMAIN: '/console/mail-domain',
-    MAIL_ZONE_DNS: '/console/mail-domain/:zoneId/dns',
+    // The organization admin area: owners and admins only.
+    ADMIN: '/console/admin',
+    ADMIN_MAILBOXES: '/console/admin/mailboxes',
+    MAIL_DOMAIN: '/console/admin/domains',
+    MAIL_ZONE_DNS: '/console/admin/domains/:zoneId/dns',
     MAIL_TEMPLATES: '/console/mail-templates',
     MAIL_CONTACTS: '/console/mail-contacts',
     MAIL_BROADCASTS: '/console/mail-broadcasts',

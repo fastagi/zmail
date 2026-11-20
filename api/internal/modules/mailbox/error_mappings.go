@@ -1,89 +1,115 @@
 package mailbox
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/pkg/response"
 )
 
+// mailboxErrorCodes is the one table of this starter's domain errors with their public status
+// and error code. HTTP errors and import row results both read it.
+var mailboxErrorCodes = []struct {
+	err    error
+	status int
+	code   string
+}{
+	{ErrMailboxNotFound, http.StatusNotFound, domain.CodeMailboxNotFound},
+	{ErrMailboxAddressTaken, http.StatusConflict, domain.CodeMailboxAddressTaken},
+	{ErrMailboxAddressInvalid, http.StatusUnprocessableEntity, domain.CodeMailboxAddressInvalid},
+	{ErrMailboxAddressReserved, http.StatusUnprocessableEntity, domain.CodeMailboxAddressReserved},
+	{ErrMailboxLimitReached, http.StatusConflict, domain.CodeMailboxLimitReached},
+	{ErrMailboxAccessInvalid, http.StatusUnprocessableEntity, domain.CodeMailboxAccessInvalid},
+	{ErrMailboxAccessConflict, http.StatusConflict, domain.CodeMailboxAccessConflict},
+	{ErrMailMessageNotFound, http.StatusNotFound, domain.CodeMailMessageNotFound},
+	{ErrMailMessageInvalid, http.StatusUnprocessableEntity, domain.CodeMailMessageInvalid},
+	{ErrMailSendLimitReached, http.StatusTooManyRequests, domain.CodeMailSendLimitReached},
+	{ErrMailDeliveryFailed, http.StatusBadGateway, domain.CodeMailDeliveryFailed},
+	{ErrMailIdempotencyConflict, http.StatusConflict, domain.CodeMailIdempotencyConflict},
+	{ErrMailIdempotencyKeyInvalid, http.StatusUnprocessableEntity, domain.CodeMailIdempotencyKeyInvalid},
+	{ErrMailSendInProgress, http.StatusConflict, domain.CodeMailSendInProgress},
+	{ErrMailSenderNotConfigured, http.StatusServiceUnavailable, domain.CodeMailSenderNotConfigured},
+	{ErrMailInboundDisabled, http.StatusServiceUnavailable, domain.CodeMailInboundDisabled},
+	{ErrMailInboundSignature, http.StatusUnauthorized, domain.CodeMailInboundSignature},
+	{ErrMailInboundUnparseable, http.StatusUnprocessableEntity, domain.CodeMailInboundUnparseable},
+	{ErrMailInboundTooLarge, http.StatusRequestEntityTooLarge, domain.CodeMailInboundTooLarge},
+	{ErrMailDeliveryEventInvalid, http.StatusUnprocessableEntity, domain.CodeMailDeliveryEventInvalid},
+	{ErrMailRecipientNotFound, http.StatusNotFound, domain.CodeMailRecipientNotFound},
+	{ErrMailTemplateNotFound, http.StatusNotFound, domain.CodeMailTemplateNotFound},
+	{ErrMailTemplateInvalid, http.StatusUnprocessableEntity, domain.CodeMailTemplateInvalid},
+	{ErrMailTemplateNameTaken, http.StatusConflict, domain.CodeMailTemplateNameTaken},
+	{ErrMailTemplateLimitReached, http.StatusConflict, domain.CodeMailTemplateLimitReached},
+	{ErrMailTemplateKeyTaken, http.StatusConflict, domain.CodeMailTemplateKeyTaken},
+	{ErrMailTemplateKindImmutable, http.StatusConflict, domain.CodeMailTemplateKindImmutable},
+	{ErrMailTemplateKindMismatch, http.StatusUnprocessableEntity, domain.CodeMailTemplateKindMismatch},
+	{ErrMailContactNotFound, http.StatusNotFound, domain.CodeMailContactNotFound},
+	{ErrMailContactExists, http.StatusConflict, domain.CodeMailContactExists},
+	{ErrMailContactInvalid, http.StatusUnprocessableEntity, domain.CodeMailContactInvalid},
+	{ErrMailContactLimitReached, http.StatusConflict, domain.CodeMailContactLimitReached},
+	{ErrMailContactListNotFound, http.StatusNotFound, domain.CodeMailContactListNotFound},
+	{ErrMailContactListNameTaken, http.StatusConflict, domain.CodeMailContactListNameTaken},
+	{ErrMailContactListLimit, http.StatusConflict, domain.CodeMailContactListLimitReached},
+	{ErrMailContactImportInvalid, http.StatusUnprocessableEntity, domain.CodeMailContactImportInvalid},
+	{ErrMailBroadcastNotFound, http.StatusNotFound, domain.CodeMailBroadcastNotFound},
+	{ErrMailBroadcastInvalid, http.StatusUnprocessableEntity, domain.CodeMailBroadcastInvalid},
+	{ErrMailBroadcastNotEditable, http.StatusConflict, domain.CodeMailBroadcastNotEditable},
+	{ErrMailBroadcastNoRecipients, http.StatusUnprocessableEntity, domain.CodeMailBroadcastNoRecipients},
+	{ErrMailBroadcastDisabled, http.StatusServiceUnavailable, domain.CodeMailBroadcastDisabled},
+	{ErrMailUnsubscribeInvalid, http.StatusNotFound, domain.CodeMailUnsubscribeInvalid},
+	{ErrMailDomainNotFound, http.StatusNotFound, domain.CodeMailDomainNotFound},
+	{ErrMailDomainInvalid, http.StatusUnprocessableEntity, domain.CodeMailDomainInvalid},
+	{ErrMailDomainTaken, http.StatusConflict, domain.CodeMailDomainTaken},
+	{ErrMailDomainLimitReached, http.StatusUnprocessableEntity, domain.CodeMailDomainLimitReached},
+	{ErrMailDomainZoneNotFound, http.StatusUnprocessableEntity, domain.CodeMailDomainZoneNotFound},
+	{ErrMailDomainInUse, http.StatusConflict, domain.CodeMailDomainInUse},
+	{ErrMailDomainNotVerified, http.StatusUnprocessableEntity, domain.CodeMailDomainNotVerified},
+	{ErrMailDomainsDisabled, http.StatusNotFound, domain.CodeMailDomainsDisabled},
+	{ErrMailDomainProviderFailed, http.StatusBadGateway, domain.CodeMailDomainProviderFailed},
+	{ErrMailZoneNotFound, http.StatusNotFound, domain.CodeMailZoneNotFound},
+	{ErrMailZonePending, http.StatusConflict, domain.CodeMailZonePending},
+	{ErrMailZoneInUse, http.StatusConflict, domain.CodeMailZoneInUse},
+	{ErrMailZoneStillDelegated, http.StatusConflict, domain.CodeMailZoneStillDelegated},
+	{ErrMailZoneLimitReached, http.StatusUnprocessableEntity, domain.CodeMailZoneLimitReached},
+	{ErrMailDNSRecordNotFound, http.StatusNotFound, domain.CodeMailDNSRecordNotFound},
+	{ErrMailDNSRecordInvalid, http.StatusUnprocessableEntity, domain.CodeMailDNSRecordInvalid},
+	{ErrMailDNSRecordLocked, http.StatusConflict, domain.CodeMailDNSRecordLocked},
+	{ErrMailDNSRecordRejected, http.StatusUnprocessableEntity, domain.CodeMailDNSRecordRejected},
+	{ErrMailTemplateVariablesMissing, http.StatusUnprocessableEntity, domain.CodeMailTemplateVariablesMissing},
+	{ErrMailFolderNotFound, http.StatusNotFound, domain.CodeMailFolderNotFound},
+	{ErrMailLabelNotFound, http.StatusNotFound, domain.CodeMailLabelNotFound},
+	{ErrMailFolderNameTaken, http.StatusConflict, domain.CodeMailFolderNameTaken},
+	{ErrMailLabelNameTaken, http.StatusConflict, domain.CodeMailLabelNameTaken},
+	{ErrMailFolderLimitReached, http.StatusUnprocessableEntity, domain.CodeMailFolderLimitReached},
+	{ErrMailLabelLimitReached, http.StatusUnprocessableEntity, domain.CodeMailLabelLimitReached},
+	{ErrMailRoleNotFound, http.StatusNotFound, domain.CodeMailRoleNotFound},
+	{ErrMailRoleNameTaken, http.StatusConflict, domain.CodeMailRoleNameTaken},
+	{ErrPlatformAccountNotFound, http.StatusNotFound, domain.CodePlatformAccountNotFound},
+	{ErrPlatformAccountTaken, http.StatusConflict, domain.CodePlatformAccountTaken},
+	{ErrMailRoleLimitReached, http.StatusUnprocessableEntity, domain.CodeMailRoleLimitReached},
+	{ErrTransactionalMessageNotFound, http.StatusNotFound, domain.CodeMailTransactionalMessageNotFound},
+	{ErrTransactionalDisabled, http.StatusServiceUnavailable, domain.CodeMailTransactionalDisabled},
+	{ErrMailRecipientRateLimited, http.StatusTooManyRequests, domain.CodeMailRecipientRateLimited},
+	{ErrTransactionalRateLimited, http.StatusTooManyRequests, domain.CodeRateLimited},
+	{ErrMailSearchTooBroad, http.StatusUnprocessableEntity, domain.CodeMailSearchTooBroad},
+	{ErrMailboxImportDuplicateRow, http.StatusUnprocessableEntity, domain.CodeMailboxImportDuplicateRow},
+	{ErrMailboxImportMemberNotFound, http.StatusUnprocessableEntity, domain.CodeMailboxImportMemberNotFound},
+}
+
 // RegisterErrorMappings maps this starter's own domain errors to public status and error codes.
 func (h *Handler) RegisterErrorMappings(mapper *response.ErrorMapper) {
-	mapper.Register(ErrMailboxNotFound, http.StatusNotFound, domain.CodeMailboxNotFound)
-	mapper.Register(ErrMailboxAddressTaken, http.StatusConflict, domain.CodeMailboxAddressTaken)
-	mapper.Register(ErrMailboxAddressInvalid, http.StatusUnprocessableEntity, domain.CodeMailboxAddressInvalid)
-	mapper.Register(ErrMailboxAddressReserved, http.StatusUnprocessableEntity, domain.CodeMailboxAddressReserved)
-	mapper.Register(ErrMailboxLimitReached, http.StatusConflict, domain.CodeMailboxLimitReached)
-	mapper.Register(ErrMailboxAccessInvalid, http.StatusUnprocessableEntity, domain.CodeMailboxAccessInvalid)
-	mapper.Register(ErrMailboxAccessConflict, http.StatusConflict, domain.CodeMailboxAccessConflict)
-	mapper.Register(ErrMailMessageNotFound, http.StatusNotFound, domain.CodeMailMessageNotFound)
-	mapper.Register(ErrMailMessageInvalid, http.StatusUnprocessableEntity, domain.CodeMailMessageInvalid)
-	mapper.Register(ErrMailSendLimitReached, http.StatusTooManyRequests, domain.CodeMailSendLimitReached)
-	mapper.Register(ErrMailDeliveryFailed, http.StatusBadGateway, domain.CodeMailDeliveryFailed)
-	mapper.Register(ErrMailIdempotencyConflict, http.StatusConflict, domain.CodeMailIdempotencyConflict)
-	mapper.Register(ErrMailIdempotencyKeyInvalid, http.StatusUnprocessableEntity, domain.CodeMailIdempotencyKeyInvalid)
-	mapper.Register(ErrMailSendInProgress, http.StatusConflict, domain.CodeMailSendInProgress)
-	mapper.Register(ErrMailSenderNotConfigured, http.StatusServiceUnavailable, domain.CodeMailSenderNotConfigured)
-	mapper.Register(ErrMailInboundDisabled, http.StatusServiceUnavailable, domain.CodeMailInboundDisabled)
-	mapper.Register(ErrMailInboundSignature, http.StatusUnauthorized, domain.CodeMailInboundSignature)
-	mapper.Register(ErrMailInboundUnparseable, http.StatusUnprocessableEntity, domain.CodeMailInboundUnparseable)
-	mapper.Register(ErrMailInboundTooLarge, http.StatusRequestEntityTooLarge, domain.CodeMailInboundTooLarge)
-	mapper.Register(ErrMailDeliveryEventInvalid, http.StatusUnprocessableEntity, domain.CodeMailDeliveryEventInvalid)
-	mapper.Register(ErrMailRecipientNotFound, http.StatusNotFound, domain.CodeMailRecipientNotFound)
-	mapper.Register(ErrMailTemplateNotFound, http.StatusNotFound, domain.CodeMailTemplateNotFound)
-	mapper.Register(ErrMailTemplateInvalid, http.StatusUnprocessableEntity, domain.CodeMailTemplateInvalid)
-	mapper.Register(ErrMailTemplateNameTaken, http.StatusConflict, domain.CodeMailTemplateNameTaken)
-	mapper.Register(ErrMailTemplateLimitReached, http.StatusConflict, domain.CodeMailTemplateLimitReached)
-	mapper.Register(ErrMailTemplateKeyTaken, http.StatusConflict, domain.CodeMailTemplateKeyTaken)
-	mapper.Register(ErrMailTemplateKindImmutable, http.StatusConflict, domain.CodeMailTemplateKindImmutable)
-	mapper.Register(ErrMailTemplateKindMismatch, http.StatusUnprocessableEntity, domain.CodeMailTemplateKindMismatch)
-	mapper.Register(ErrMailContactNotFound, http.StatusNotFound, domain.CodeMailContactNotFound)
-	mapper.Register(ErrMailContactExists, http.StatusConflict, domain.CodeMailContactExists)
-	mapper.Register(ErrMailContactInvalid, http.StatusUnprocessableEntity, domain.CodeMailContactInvalid)
-	mapper.Register(ErrMailContactLimitReached, http.StatusConflict, domain.CodeMailContactLimitReached)
-	mapper.Register(ErrMailContactListNotFound, http.StatusNotFound, domain.CodeMailContactListNotFound)
-	mapper.Register(ErrMailContactListNameTaken, http.StatusConflict, domain.CodeMailContactListNameTaken)
-	mapper.Register(ErrMailContactListLimit, http.StatusConflict, domain.CodeMailContactListLimitReached)
-	mapper.Register(ErrMailContactImportInvalid, http.StatusUnprocessableEntity, domain.CodeMailContactImportInvalid)
-	mapper.Register(ErrMailBroadcastNotFound, http.StatusNotFound, domain.CodeMailBroadcastNotFound)
-	mapper.Register(ErrMailBroadcastInvalid, http.StatusUnprocessableEntity, domain.CodeMailBroadcastInvalid)
-	mapper.Register(ErrMailBroadcastNotEditable, http.StatusConflict, domain.CodeMailBroadcastNotEditable)
-	mapper.Register(ErrMailBroadcastNoRecipients, http.StatusUnprocessableEntity, domain.CodeMailBroadcastNoRecipients)
-	mapper.Register(ErrMailBroadcastDisabled, http.StatusServiceUnavailable, domain.CodeMailBroadcastDisabled)
-	mapper.Register(ErrMailUnsubscribeInvalid, http.StatusNotFound, domain.CodeMailUnsubscribeInvalid)
-	mapper.Register(ErrMailDomainNotFound, http.StatusNotFound, domain.CodeMailDomainNotFound)
-	mapper.Register(ErrMailDomainInvalid, http.StatusUnprocessableEntity, domain.CodeMailDomainInvalid)
-	mapper.Register(ErrMailDomainTaken, http.StatusConflict, domain.CodeMailDomainTaken)
-	mapper.Register(ErrMailDomainLimitReached, http.StatusUnprocessableEntity, domain.CodeMailDomainLimitReached)
-	mapper.Register(ErrMailDomainZoneNotFound, http.StatusUnprocessableEntity, domain.CodeMailDomainZoneNotFound)
-	mapper.Register(ErrMailDomainInUse, http.StatusConflict, domain.CodeMailDomainInUse)
-	mapper.Register(ErrMailDomainNotVerified, http.StatusUnprocessableEntity, domain.CodeMailDomainNotVerified)
-	mapper.Register(ErrMailDomainsDisabled, http.StatusNotFound, domain.CodeMailDomainsDisabled)
-	mapper.Register(ErrMailDomainProviderFailed, http.StatusBadGateway, domain.CodeMailDomainProviderFailed)
-	mapper.Register(ErrMailZoneNotFound, http.StatusNotFound, domain.CodeMailZoneNotFound)
-	mapper.Register(ErrMailZonePending, http.StatusConflict, domain.CodeMailZonePending)
-	mapper.Register(ErrMailZoneInUse, http.StatusConflict, domain.CodeMailZoneInUse)
-	mapper.Register(ErrMailZoneStillDelegated, http.StatusConflict, domain.CodeMailZoneStillDelegated)
-	mapper.Register(ErrMailZoneLimitReached, http.StatusUnprocessableEntity, domain.CodeMailZoneLimitReached)
-	mapper.Register(ErrMailDNSRecordNotFound, http.StatusNotFound, domain.CodeMailDNSRecordNotFound)
-	mapper.Register(ErrMailDNSRecordInvalid, http.StatusUnprocessableEntity, domain.CodeMailDNSRecordInvalid)
-	mapper.Register(ErrMailDNSRecordLocked, http.StatusConflict, domain.CodeMailDNSRecordLocked)
-	mapper.Register(ErrMailDNSRecordRejected, http.StatusUnprocessableEntity, domain.CodeMailDNSRecordRejected)
-	mapper.Register(ErrMailTemplateVariablesMissing, http.StatusUnprocessableEntity, domain.CodeMailTemplateVariablesMissing)
-	mapper.Register(ErrMailFolderNotFound, http.StatusNotFound, domain.CodeMailFolderNotFound)
-	mapper.Register(ErrMailLabelNotFound, http.StatusNotFound, domain.CodeMailLabelNotFound)
-	mapper.Register(ErrMailFolderNameTaken, http.StatusConflict, domain.CodeMailFolderNameTaken)
-	mapper.Register(ErrMailLabelNameTaken, http.StatusConflict, domain.CodeMailLabelNameTaken)
-	mapper.Register(ErrMailFolderLimitReached, http.StatusUnprocessableEntity, domain.CodeMailFolderLimitReached)
-	mapper.Register(ErrMailLabelLimitReached, http.StatusUnprocessableEntity, domain.CodeMailLabelLimitReached)
-	mapper.Register(ErrMailRoleNotFound, http.StatusNotFound, domain.CodeMailRoleNotFound)
-	mapper.Register(ErrMailRoleNameTaken, http.StatusConflict, domain.CodeMailRoleNameTaken)
-	mapper.Register(ErrPlatformAccountNotFound, http.StatusNotFound, domain.CodePlatformAccountNotFound)
-	mapper.Register(ErrPlatformAccountTaken, http.StatusConflict, domain.CodePlatformAccountTaken)
-	mapper.Register(ErrMailRoleLimitReached, http.StatusUnprocessableEntity, domain.CodeMailRoleLimitReached)
-	mapper.Register(ErrTransactionalMessageNotFound, http.StatusNotFound, domain.CodeMailTransactionalMessageNotFound)
-	mapper.Register(ErrTransactionalDisabled, http.StatusServiceUnavailable, domain.CodeMailTransactionalDisabled)
-	mapper.Register(ErrMailRecipientRateLimited, http.StatusTooManyRequests, domain.CodeMailRecipientRateLimited)
-	mapper.Register(ErrTransactionalRateLimited, http.StatusTooManyRequests, domain.CodeRateLimited)
-	mapper.Register(ErrMailSearchTooBroad, http.StatusUnprocessableEntity, domain.CodeMailSearchTooBroad)
+	for _, entry := range mailboxErrorCodes {
+		mapper.Register(entry.err, entry.status, entry.code)
+	}
+}
+
+// importErrorCode is the public error code of an import row's failure; an error outside the
+// table is COMMON.INTERNAL.
+func importErrorCode(err error) string {
+	for _, entry := range mailboxErrorCodes {
+		if errors.Is(err, entry.err) {
+			return entry.code
+		}
+	}
+	return response.ErrorCodeInternal
 }

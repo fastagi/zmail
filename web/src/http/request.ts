@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
+import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, type AxiosResponse } from 'axios';
 import { env } from '@/config/env';
 import {
   ClientErrorCode,
@@ -7,7 +7,7 @@ import {
   type ErrorCodeValue,
 } from './codes';
 
-type ResponseMode = 'data' | 'envelope';
+type ResponseMode = 'data' | 'envelope' | 'response';
 
 /** Axios request options accepted by HttpClient. */
 export type RequestConfig = AxiosRequestConfig & {
@@ -128,6 +128,9 @@ class HttpClient {
         if (config.fastbuildResponseMode === 'envelope') {
           return data;
         }
+        if (config.fastbuildResponseMode === 'response') {
+          return response;
+        }
         // Standard payload extraction for { code, data, message } responses.
         return data && typeof data === 'object' && 'data' in data ? data.data : data;
       },
@@ -158,6 +161,24 @@ class HttpClient {
       url,
       requestConfig
     );
+  }
+
+  /**
+   * Reads a file download as a Blob with its `Content-Disposition`; errors still arrive as the
+   * JSON error envelope and become an ApiError.
+   */
+  public async getFile(
+    url: string,
+    config: RequestConfig = {}
+  ): Promise<{ blob: Blob; disposition: string | null }> {
+    const requestConfig: RequestConfig = {
+      ...config,
+      responseType: 'blob',
+      fastbuildResponseMode: 'response',
+    };
+    const response = await this.instance.get<Blob, AxiosResponse<Blob>>(url, requestConfig);
+    const raw: unknown = response.headers['content-disposition'];
+    return { blob: response.data, disposition: typeof raw === 'string' ? raw : null };
   }
 
   public post<T = unknown, D = unknown>(url: string, data?: D, config?: RequestConfig): Promise<T> {

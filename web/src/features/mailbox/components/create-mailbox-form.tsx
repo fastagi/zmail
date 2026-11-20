@@ -48,13 +48,20 @@ interface MemberDraft {
 export function CreateMailboxForm({
   domain,
   domains,
-  count,
+  mailboxCount,
+  fixedType,
   onCreated,
 }: {
   domain: MailboxDomain;
   /** The shared domain and the organization's verified domains. */
   domains: MailboxDomain[];
-  count: number;
+  /**
+   * The organization's mailbox count, when the caller knows it; the limit is then checked here
+   * too. Without it the API's `409 MAILBOX.LIMIT_REACHED` is the only check.
+   */
+  mailboxCount?: number;
+  /** Creates only this type and hides the type choice. */
+  fixedType?: MailboxType;
   onCreated: (mailbox: Mailbox) => void;
 }) {
   const t = useT('mailbox');
@@ -65,14 +72,15 @@ export function CreateMailboxForm({
   const [localPart, setLocalPart] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [addressDomain, setAddressDomain] = useState(domain.domain);
-  const [type, setType] = useState<MailboxType>('shared');
+  const [chosenType, setType] = useState<MailboxType>('shared');
+  const type = fixedType ?? chosenType;
   const [owner, setOwner] = useState('');
   const [nextKey, setNextKey] = useState(2);
   const [members, setMembers] = useState<MemberDraft[]>([
     { key: 1, userId: '', permission: 'send' },
   ]);
   const [error, setError] = useState<string | null>(null);
-  const limitReached = count >= domain.max_mailboxes;
+  const limitReached = mailboxCount !== undefined && mailboxCount >= domain.max_mailboxes;
   // A domain removed or unverified since the form opened falls back to the shared one.
   const chosen = domains.find(item => item.domain === addressDomain) ?? domain;
 
@@ -221,36 +229,41 @@ export function CreateMailboxForm({
             />
           </div>
 
-          <fieldset className="space-y-2">
-            <legend id={ids.type} className="text-sm font-medium">
-              {t('create.type')}
-            </legend>
-            <div role="radiogroup" aria-labelledby={ids.type} className="space-y-2">
-              {(['shared', 'personal'] as const).map(option => (
-                <div key={option} className="flex items-start gap-2 text-sm">
-                  <input
-                    id={`${ids.type}-${option}`}
-                    type="radio"
-                    name={`${ids.type}-type`}
-                    value={option}
-                    className="mt-1"
-                    checked={type === option}
-                    disabled={create.isPending}
-                    aria-describedby={`${ids.type}-${option}-hint`}
-                    onChange={() => setType(option)}
-                  />
-                  <div>
-                    <label htmlFor={`${ids.type}-${option}`} className="block font-medium">
-                      {t(`create.${option}`)}
-                    </label>
-                    <p id={`${ids.type}-${option}-hint`} className="text-xs text-muted-foreground">
-                      {t(option === 'shared' ? 'create.sharedHint' : 'create.personalHint')}
-                    </p>
+          {fixedType ? null : (
+            <fieldset className="space-y-2">
+              <legend id={ids.type} className="text-sm font-medium">
+                {t('create.type')}
+              </legend>
+              <div role="radiogroup" aria-labelledby={ids.type} className="space-y-2">
+                {(['shared', 'personal'] as const).map(option => (
+                  <div key={option} className="flex items-start gap-2 text-sm">
+                    <input
+                      id={`${ids.type}-${option}`}
+                      type="radio"
+                      name={`${ids.type}-type`}
+                      value={option}
+                      className="mt-1"
+                      checked={type === option}
+                      disabled={create.isPending}
+                      aria-describedby={`${ids.type}-${option}-hint`}
+                      onChange={() => setType(option)}
+                    />
+                    <div>
+                      <label htmlFor={`${ids.type}-${option}`} className="block font-medium">
+                        {t(`create.${option}`)}
+                      </label>
+                      <p
+                        id={`${ids.type}-${option}-hint`}
+                        className="text-xs text-muted-foreground"
+                      >
+                        {t(option === 'shared' ? 'create.sharedHint' : 'create.personalHint')}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </fieldset>
+                ))}
+              </div>
+            </fieldset>
+          )}
 
           {people.status === 'loading' ? (
             <p className="text-sm text-muted-foreground">{t('create.membersLoading')}</p>

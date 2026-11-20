@@ -551,14 +551,16 @@ describe('mailbox workspace', () => {
     expect(screen.queryByText('backend text')).toBeNull();
   });
 
-  it('replaces the create form with the limit once it is reached', () => {
+  it('leaves the mailbox limit to the API, since the workspace lists only usable mailboxes', () => {
     state.domains.data = [domain(2)];
     renderWorkspace();
     openManage();
 
-    expect(screen.getByText(/reached the limit of 2 mailboxes/u)).toBeInTheDocument();
-    expect(screen.queryByLabelText('Address')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Create mailbox' })).toBeNull();
+    // The listed mailboxes are not the organization's count, so the form stays; a create past
+    // the limit answers `409 MAILBOX.LIMIT_REACHED`, shown as the limit error.
+    expect(screen.queryByText(/reached the limit of 2 mailboxes/u)).toBeNull();
+    expect(screen.getByLabelText('Address')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create mailbox' })).toBeInTheDocument();
   });
 
   it('deletes a mailbox only after confirmation', async () => {

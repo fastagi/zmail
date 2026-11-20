@@ -39,7 +39,7 @@ func createOwner(t *testing.T, db *gorm.DB, id uint) {
 func createMailbox(t *testing.T, repo *repository, address string) *domain.Mailbox {
 	t.Helper()
 	mailbox := &domain.Mailbox{OrganizationID: 1, Address: address, DisplayName: "Owner", Type: domain.MailboxTypeShared}
-	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(context.Background(), mailbox, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("CreateMailbox(%q): %v", address, err)
 	}
 	// as(1) works the mailbox, like the creator a service-created mailbox gets as its manager.
@@ -66,7 +66,7 @@ func TestRepositoryKeepsAReleasedAddressReserved(t *testing.T) {
 
 	mailbox := createMailbox(t, repo, "hello@mail.example")
 	duplicate := &domain.Mailbox{OrganizationID: 2, Address: "hello@mail.example"}
-	if err := repo.CreateMailbox(ctx, duplicate, domain.MaxMailboxesPerOrganization); !errors.Is(err, ErrMailboxAddressTaken) {
+	if err := repo.CreateMailbox(ctx, duplicate, domain.MailboxesPerOrganizationCeiling); !errors.Is(err, ErrMailboxAddressTaken) {
 		t.Fatalf("duplicate address error = %v", err)
 	}
 
@@ -77,7 +77,7 @@ func TestRepositoryKeepsAReleasedAddressReserved(t *testing.T) {
 		t.Fatalf("deleted mailbox lookup error = %v", err)
 	}
 	// The next owner must not inherit mail addressed to the previous one.
-	if err := repo.CreateMailbox(ctx, duplicate, domain.MaxMailboxesPerOrganization); !errors.Is(err, ErrMailboxAddressTaken) {
+	if err := repo.CreateMailbox(ctx, duplicate, domain.MailboxesPerOrganizationCeiling); !errors.Is(err, ErrMailboxAddressTaken) {
 		t.Fatalf("released address error = %v; want ErrMailboxAddressTaken", err)
 	}
 }
@@ -297,7 +297,7 @@ func TestRepositoryStoresOneOutboundMessagePerIdempotencyKey(t *testing.T) {
 	createOwner(t, db, 2)
 	mailbox := createMailbox(t, repo, "hello@mail.example")
 	foreign := &domain.Mailbox{OrganizationID: 2, Address: "other@mail.example"}
-	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(ctx, foreign, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	outbound := func(mailboxID uint, key string) *domain.MailMessage {
@@ -409,7 +409,7 @@ func TestRepositoryListsTheLogAcrossAnOrganizationsMailboxes(t *testing.T) {
 	first := createMailbox(t, repo, "first@mail.example")
 	second := createMailbox(t, repo, "second@mail.example")
 	foreign := &domain.Mailbox{OrganizationID: 2, Address: "foreign@mail.example"}
-	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(ctx, foreign, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	add := func(mailboxID uint, direction domain.MailDirection, status domain.MailStatus, from, to, subject string) {
@@ -494,7 +494,7 @@ func TestRepositoryCountsMailPerDay(t *testing.T) {
 	createOwner(t, db, 2)
 	mailbox := createMailbox(t, repo, "hello@mail.example")
 	foreign := &domain.Mailbox{OrganizationID: 2, Address: "foreign@mail.example"}
-	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(ctx, foreign, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	add := func(mailboxID uint, direction domain.MailDirection, status domain.MailStatus, at time.Time) {
@@ -985,7 +985,7 @@ func TestRepositoryFiltersMailboxMessagesBySearchAndUnread(t *testing.T) {
 	first := createMailbox(t, repo, "first@mail.example")
 	second := createMailbox(t, repo, "second@mail.example")
 	foreign := &domain.Mailbox{OrganizationID: 2, Address: "foreign@mail.example"}
-	if err := repo.CreateMailbox(ctx, foreign, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(ctx, foreign, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 

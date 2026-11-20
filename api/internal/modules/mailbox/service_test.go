@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,47 @@ func (f *fakeMemberships) FindForUser(_ context.Context, organizationID, userID 
 	return &domain.OrganizationMembership{
 		ID: id, OrganizationID: organizationID, UserID: userID, Role: domain.OrganizationRoleMember,
 	}, nil
+}
+
+// FindMembershipsByEmails finds user n by u<n>@people.test, ignoring case, unless n is absent.
+// Every other email, other@people.test of organization 8 included, belongs to no member here.
+func (f *fakeMemberships) FindMembershipsByEmails(ctx context.Context, organizationID uint, emails []string) ([]*domain.OrganizationMembership, error) {
+	found := make([]*domain.OrganizationMembership, 0, len(emails))
+	for _, email := range emails {
+		email = strings.ToLower(strings.TrimSpace(email))
+		digits, ok := strings.CutPrefix(email, "u")
+		if !ok {
+			continue
+		}
+		if digits, ok = strings.CutSuffix(digits, "@people.test"); !ok {
+			continue
+		}
+		userID, err := strconv.ParseUint(digits, 10, 32)
+		if err != nil || userID == 0 {
+			continue
+		}
+		membership, err := f.FindForUser(ctx, organizationID, uint(userID))
+		if err != nil {
+			continue
+		}
+		membership.User = &domain.User{ID: uint(userID), Email: email}
+		found = append(found, membership)
+	}
+	return found, nil
+}
+
+// ListMembershipsByUserIDs gives user n the email u<n>@people.test, unless n is absent.
+func (f *fakeMemberships) ListMembershipsByUserIDs(ctx context.Context, organizationID uint, userIDs []uint) ([]*domain.OrganizationMembership, error) {
+	found := make([]*domain.OrganizationMembership, 0, len(userIDs))
+	for _, userID := range userIDs {
+		membership, err := f.FindForUser(ctx, organizationID, userID)
+		if err != nil {
+			continue
+		}
+		membership.User = &domain.User{ID: userID, Email: fmt.Sprintf("u%d@people.test", userID)}
+		found = append(found, membership)
+	}
+	return found, nil
 }
 
 // fakeRepository is an in-memory domain.MailboxRepository for service tests.
@@ -257,6 +299,102 @@ func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID, reader
 	}
 	sort.Slice(owned, func(i, j int) bool { return owned[i].ID < owned[j].ID })
 	return owned, nil
+}
+
+func (r *fakeRepository) ListUsableMailboxes(ctx context.Context, organizationID, membershipID, userID uint, includeAwaitingHandover bool) ([]*domain.Mailbox, error) {
+	all, err := r.ListMailboxes(ctx, organizationID, membershipID)
+	if err != nil {
+		return nil, err
+	}
+	usable := make([]*domain.Mailbox, 0, len(all))
+	for _, mailbox := range all {
+		personal := mailbox.Type == domain.MailboxTypePersonal
+		_, member := r.members[[2]uint{mailbox.ID, membershipID}]
+		owned := personal && mailbox.OwnerUserID != nil && *mailbox.OwnerUserID == userID
+		awaiting := includeAwaitingHandover && personal && mailbox.OwnerLeftAt != nil
+		if owned || member || awaiting {
+			usable = append(usable, mailbox)
+		}
+	}
+	return usable, nil
+}
+
+func (r *fakeRepository) UpdateMailboxDisplayName(_ context.Context, organizationID, id uint, displayName string) error {
+	mailbox, ok := r.mailboxes[id]
+	if !ok || mailbox.OrganizationID != organizationID {
+		return ErrMailboxNotFound
+	}
+	mailbox.DisplayName = displayName
+	return nil
+}
+
+func (r *fakeRepository) ListMailboxDirectory(_ context.Context, organizationID uint, filter domain.MailboxDirectoryFilter, sentSince time.Time) ([]*domain.MailboxDirectoryEntry, error) {
+	var entries []*domain.MailboxDirectoryEntry
+	query := strings.ToLower(filter.Query)
+	for _, mailbox := range r.mailboxes {
+		if mailbox.OrganizationID != organizationID || (filter.Type != "" && mailbox.Type != filter.Type) ||
+			(filter.BeforeID != 0 && mailbox.ID >= filter.BeforeID) ||
+			(query != "" && !strings.Contains(strings.ToLower(mailbox.Address), query) && !strings.Contains(strings.ToLower(mailbox.DisplayName), query)) {
+			continue
+		}
+		copied := *mailbox
+		entry := &domain.MailboxDirectoryEntry{Mailbox: &copied}
+		for key := range r.members {
+			if key[0] == mailbox.ID {
+				entry.MemberCount++
+			}
+		}
+		for _, message := range r.messages {
+			if message.MailboxID == mailbox.ID && message.Direction == domain.MailDirectionOutbound &&
+				(message.SendLane == "" || message.SendLane == domain.SendLanePersonal) &&
+				message.SendAttemptedAt != nil && !message.SendAttemptedAt.Before(sentSince) {
+				entry.SentLast24h++
+			}
+		}
+		entries = append(entries, entry)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Mailbox.ID > entries[j].Mailbox.ID })
+	if filter.Limit > 0 && len(entries) > filter.Limit {
+		entries = entries[:filter.Limit]
+	}
+	return entries, nil
+}
+
+func (r *fakeRepository) CountMailboxes(_ context.Context, organizationID uint) (int64, error) {
+	var count int64
+	for _, mailbox := range r.mailboxes {
+		if mailbox.OrganizationID == organizationID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (r *fakeRepository) ListMembersOfMailboxes(_ context.Context, mailboxIDs []uint) ([]*domain.MailboxMember, error) {
+	var members []*domain.MailboxMember
+	for _, member := range r.members {
+		if slices.Contains(mailboxIDs, member.MailboxID) {
+			copied := *member
+			members = append(members, &copied)
+		}
+	}
+	sort.Slice(members, func(i, j int) bool {
+		if members[i].MailboxID != members[j].MailboxID {
+			return members[i].MailboxID < members[j].MailboxID
+		}
+		return members[i].UserID < members[j].UserID
+	})
+	return members, nil
+}
+
+func (r *fakeRepository) MailboxAddressUsed(_ context.Context, address string) (bool, error) {
+	address = strings.ToLower(strings.TrimSpace(address))
+	for _, mailbox := range r.mailboxes {
+		if mailbox.Address == address {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *fakeRepository) FindMailbox(_ context.Context, organizationID, id uint) (*domain.Mailbox, error) {

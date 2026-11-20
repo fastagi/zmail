@@ -835,3 +835,37 @@ func TestLoad_MailboxTransactionalSettings(t *testing.T) {
 		t.Fatalf("configured = %+v", resolved)
 	}
 }
+
+func TestMailboxMaxPerOrganization(t *testing.T) {
+	withoutEnv(t, "MAILBOX_MAX_PER_ORGANIZATION")
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("DB_ENABLED", "false")
+
+	cfg, err := LoadFresh()
+	if err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	if cfg.Mailbox.MaxPerOrganization != 50 || DefaultMailboxMaxPerOrganization != 50 {
+		t.Fatalf("unset limit = %d; want 50", cfg.Mailbox.MaxPerOrganization)
+	}
+
+	t.Setenv("MAILBOX_MAX_PER_ORGANIZATION", "5000")
+	if cfg, err = LoadFresh(); err != nil {
+		t.Fatalf("LoadFresh() error = %v", err)
+	}
+	if cfg.Mailbox.MaxPerOrganization != 5000 {
+		t.Fatalf("limit = %d; want 5000", cfg.Mailbox.MaxPerOrganization)
+	}
+
+	for _, raw := range []string{"0", "5001"} {
+		cfg.Mailbox.MaxPerOrganization = 0
+		t.Setenv("MAILBOX_MAX_PER_ORGANIZATION", raw)
+		if cfg, err = LoadFresh(); err != nil {
+			t.Fatalf("LoadFresh() error = %v", err)
+		}
+		err = validateMailboxConfig(cfg.Mailbox, true, false)
+		if err == nil || err.Error() != "MAILBOX_MAX_PER_ORGANIZATION must be between 1 and 5000" {
+			t.Fatalf("limit %s: error = %v", raw, err)
+		}
+	}
+}

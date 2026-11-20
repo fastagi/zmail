@@ -12,6 +12,10 @@ var (
 	ErrMailboxAddressInvalid  = errors.New("mailbox address is invalid")
 	ErrMailboxAddressReserved = errors.New("mailbox address is reserved")
 	ErrMailboxLimitReached    = errors.New("mailbox limit reached")
+	// ErrMailboxImportDuplicateRow is an import row whose address an earlier row of the file names.
+	ErrMailboxImportDuplicateRow = errors.New("mailbox import row repeats an earlier address")
+	// ErrMailboxImportMemberNotFound is an import row naming an email of no organization member.
+	ErrMailboxImportMemberNotFound = errors.New("mailbox import member is not in the organization")
 	// ErrMailboxAccessInvalid rejects a mailbox type, owner, member, or permission that cannot be applied.
 	ErrMailboxAccessInvalid = errors.New("mailbox access is invalid")
 	// ErrMailboxAccessConflict rejects an access change the mailbox's current type does not allow.

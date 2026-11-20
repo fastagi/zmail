@@ -211,7 +211,7 @@ func TestInboxListsOnlyReadableMailboxes(t *testing.T) {
 	repo := f.inboxRepo()
 	createOwner(t, repo.db, 99)
 	foreign := &domain.Mailbox{OrganizationID: 99, Address: "foreign@mail.example", Type: domain.MailboxTypeShared}
-	if err := repo.CreateMailbox(context.Background(), foreign, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := repo.CreateMailbox(context.Background(), foreign, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("create foreign mailbox: %v", err)
 	}
 	f.receive(t, foreign, "Foreign news")

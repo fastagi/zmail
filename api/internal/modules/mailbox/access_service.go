@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 )
@@ -13,6 +12,11 @@ import (
 // starter owns memberships; the mailbox starter only reads them through this seam.
 type membershipDirectory interface {
 	FindForUser(ctx context.Context, organizationID, userID uint) (*domain.OrganizationMembership, error)
+	// FindMembershipsByEmails returns the organization's memberships whose account email equals one
+	// of emails ignoring case, with User and its Email loaded.
+	FindMembershipsByEmails(ctx context.Context, organizationID uint, emails []string) ([]*domain.OrganizationMembership, error)
+	// ListMembershipsByUserIDs returns the organization's memberships of userIDs with account emails.
+	ListMembershipsByUserIDs(ctx context.Context, organizationID uint, userIDs []uint) ([]*domain.OrganizationMembership, error)
 }
 
 // CreateMailboxInput is a request to create a mailbox.
@@ -119,6 +123,34 @@ func (s *service) visibleMailboxes(ctx context.Context, viewer domain.Organizati
 		}
 	}
 	return visible, nil
+}
+
+// usableMailboxes lists the mailboxes the viewer can read or send from, plus, for owners and admins,
+// personal mailboxes awaiting handover, each with the viewer's access filled in. It reads only the
+// viewer's own mailboxes, so it stays cheap however many mailboxes the organization owns.
+func (s *service) usableMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error) {
+	manager := viewer.Role.CanManageOrganization()
+	mailboxes, err := s.repo.ListUsableMailboxes(ctx, viewer.OrganizationID, viewer.MembershipID, viewer.UserID, manager)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.ListMembershipMailboxMembers(ctx, viewer.OrganizationID, viewer.MembershipID)
+	if err != nil {
+		return nil, err
+	}
+	members := make(map[uint]*domain.MailboxMember, len(rows))
+	for _, row := range rows {
+		members[row.MailboxID] = row
+	}
+	usable := make([]*domain.Mailbox, 0, len(mailboxes))
+	for _, mailbox := range mailboxes {
+		mailbox.Access = domain.MailboxAccessFor(mailbox, viewer, members[mailbox.ID])
+		awaiting := manager && mailbox.Type == domain.MailboxTypePersonal && mailbox.OwnerLeftAt != nil
+		if mailbox.Access.View || mailbox.Access.Send || (awaiting && mailbox.Access.Any()) {
+			usable = append(usable, mailbox)
+		}
+	}
+	return usable, nil
 }
 
 // readableMailboxIDs lists the mailboxes whose mail the viewer may read.
@@ -266,15 +298,13 @@ func (s *service) setMember(ctx context.Context, viewer domain.OrganizationConte
 // organization domain), and stores the mailbox, its members, and its access events in one
 // transaction. Only owners and admins may.
 func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationContext, input CreateMailboxInput) (*domain.Mailbox, error) {
-	normalized, err := normalizeLocalPart(input.LocalPart)
-	if err != nil {
+	if _, err := normalizeLocalPart(input.LocalPart); err != nil {
 		return nil, err
 	}
-	displayName := strings.Join(strings.Fields(input.DisplayName), " ")
-	if len(displayName) > 120 || strings.ContainsAny(displayName, "<>\"") {
-		return nil, fmt.Errorf("%w: display name", ErrMailboxAddressInvalid)
+	if _, err := normalizeDisplayName(input.DisplayName); err != nil {
+		return nil, err
 	}
-	if err = validateMailboxAccess(input); err != nil {
+	if err := validateMailboxAccess(input); err != nil {
 		return nil, err
 	}
 	if !viewer.Role.CanManageOrganization() {
@@ -282,6 +312,7 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 	}
 	var owner *domain.OrganizationMembership
 	var members []resolvedMember
+	var err error
 	if input.Type == domain.MailboxTypePersonal {
 		if owner, err = s.currentMembership(ctx, viewer.OrganizationID, input.OwnerUserID); err != nil {
 			return nil, err
@@ -289,7 +320,40 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 	} else if members, err = s.resolveMembers(ctx, viewer.OrganizationID, input.Members); err != nil {
 		return nil, err
 	}
+	plan, err := s.planMailbox(ctx, viewer, input, members, owner)
+	if err != nil {
+		return nil, err
+	}
+	return s.commitMailbox(ctx, viewer, plan)
+}
 
+// mailboxPlan is a checked mailbox not stored yet: its row, its connected domain (nil on the
+// shared domain without one), and its owner or first members.
+type mailboxPlan struct {
+	mailbox   *domain.Mailbox
+	connected *domain.MailDomain
+	owner     *domain.OrganizationMembership
+	members   []resolvedMember
+}
+
+// planMailbox checks everything a create can check without writing: the address, the display
+// name, the domain, and that no mailbox, live or deleted, holds the address. Owner and members
+// are already resolved.
+func (s *service) planMailbox(
+	ctx context.Context,
+	viewer domain.OrganizationContext,
+	input CreateMailboxInput,
+	members []resolvedMember,
+	owner *domain.OrganizationMembership,
+) (*mailboxPlan, error) {
+	localPart, err := normalizeLocalPart(input.LocalPart)
+	if err != nil {
+		return nil, err
+	}
+	displayName, err := normalizeDisplayName(input.DisplayName)
+	if err != nil {
+		return nil, err
+	}
 	addressDomain, connected, err := s.mailboxDomainFor(ctx, viewer.OrganizationID, input.Domain)
 	if err != nil {
 		return nil, err
@@ -297,7 +361,7 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 	mailbox := &domain.Mailbox{
 		OrganizationID: viewer.OrganizationID,
 		CreatedBy:      viewer.UserID,
-		Address:        normalized + "@" + addressDomain,
+		Address:        localPart + "@" + addressDomain,
 		DisplayName:    displayName,
 		Type:           input.Type,
 	}
@@ -305,37 +369,62 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 		ownerID := owner.UserID
 		mailbox.OwnerUserID = &ownerID
 	}
-	if connected != nil {
-		// Claim the address before routing mail to it, so a taken address never gets a rule.
-		if _, findErr := s.repo.FindMailboxByAddress(ctx, mailbox.Address); findErr == nil {
-			return nil, ErrMailboxAddressTaken
-		} else if !errors.Is(findErr, ErrMailboxNotFound) {
-			return nil, findErr
-		}
-		// A send-only domain receives elsewhere, so Email Routing is never used for its addresses.
-		if receives(connected) {
-			ruleID, ruleErr := s.domainProvider.CreateRoutingRule(ctx, connected.ZoneID, mailbox.Address, s.settings.EmailWorker)
-			if ruleErr != nil {
-				return nil, providerError(ruleErr)
-			}
-			mailbox.RoutingRuleID = ruleID
-		}
+	// Claim the address before routing mail to it, so a taken address never gets a rule.
+	if err = s.ensureAddressFree(ctx, mailbox.Address); err != nil {
+		return nil, err
 	}
-	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
-		if createErr := s.repo.CreateMailbox(tx, mailbox, domain.MaxMailboxesPerOrganization); createErr != nil {
+	return &mailboxPlan{mailbox: mailbox, connected: connected, owner: owner, members: members}, nil
+}
+
+// ensureAddressFree answers ErrMailboxAddressTaken when a mailbox holds the address. A deleted
+// mailbox keeps its address, so the check sees deleted mailboxes where the repository can.
+func (s *service) ensureAddressFree(ctx context.Context, address string) error {
+	if s.directory != nil {
+		used, err := s.directory.MailboxAddressUsed(ctx, address)
+		if err != nil {
+			return err
+		}
+		if used {
+			return ErrMailboxAddressTaken
+		}
+		return nil
+	}
+	if _, err := s.repo.FindMailboxByAddress(ctx, address); err == nil {
+		return ErrMailboxAddressTaken
+	} else if !errors.Is(err, ErrMailboxNotFound) {
+		return err
+	}
+	return nil
+}
+
+// commitMailbox stores a planned mailbox: the routing rule of a receiving connected domain, then
+// the row, the created event, and one member_set event per member in one transaction under the
+// organization's mailbox limit. A failed store removes the rule again.
+func (s *service) commitMailbox(ctx context.Context, viewer domain.OrganizationContext, plan *mailboxPlan) (*domain.Mailbox, error) {
+	mailbox := plan.mailbox
+	// A send-only domain receives elsewhere, so Email Routing is never used for its addresses.
+	if plan.connected != nil && receives(plan.connected) {
+		ruleID, ruleErr := s.domainProvider.CreateRoutingRule(ctx, plan.connected.ZoneID, mailbox.Address, s.settings.EmailWorker)
+		if ruleErr != nil {
+			return nil, providerError(ruleErr)
+		}
+		mailbox.RoutingRuleID = ruleID
+	}
+	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if createErr := s.repo.CreateMailbox(tx, mailbox, s.MaxMailboxes()); createErr != nil {
 			return createErr
 		}
 		detail := map[string]any{"type": string(mailbox.Type)}
 		var subject uint
-		if owner != nil {
-			subject = owner.UserID
+		if plan.owner != nil {
+			subject = plan.owner.UserID
 		} else {
-			detail["members"] = len(members)
+			detail["members"] = len(plan.members)
 		}
 		if recordErr := s.recordAccess(tx, mailbox, domain.MailboxAccessCreated, viewer.UserID, subject, detail); recordErr != nil {
 			return recordErr
 		}
-		for _, member := range members {
+		for _, member := range plan.members {
 			if _, setErr := s.setMember(tx, viewer, mailbox, member); setErr != nil {
 				return setErr
 			}
@@ -343,7 +432,7 @@ func (s *service) CreateMailbox(ctx context.Context, viewer domain.OrganizationC
 		return nil
 	})
 	if err != nil {
-		if connected != nil {
+		if plan.connected != nil {
 			s.removeRoutingRule(ctx, mailbox)
 		}
 		return nil, err

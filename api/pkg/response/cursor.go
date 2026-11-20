@@ -45,3 +45,21 @@ type MetaResponse struct {
 func SuccessWithMeta(c *gin.Context, items, meta any) {
 	c.JSON(http.StatusOK, MetaResponse{Code: 0, Message: "success", Data: items, Meta: meta})
 }
+
+// SuccessCursorPageWithMeta writes one keyset page whose meta adds resource-specific keys to the
+// generic paging keys. per_page, has_more, and next_cursor always describe the page itself, even
+// when extra names them too.
+func SuccessCursorPageWithMeta(c *gin.Context, items any, perPage int, nextCursor string, extra map[string]any) {
+	meta := make(map[string]any, len(extra)+3)
+	for key, value := range extra {
+		meta[key] = value
+	}
+	meta["per_page"] = perPage
+	meta["has_more"] = nextCursor != ""
+	if nextCursor != "" {
+		meta["next_cursor"] = nextCursor
+	} else {
+		meta["next_cursor"] = nil
+	}
+	c.JSON(http.StatusOK, MetaResponse{Code: 0, Message: "success", Data: items, Meta: meta})
+}

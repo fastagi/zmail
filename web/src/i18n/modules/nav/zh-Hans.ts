@@ -17,7 +17,9 @@ const messages = {
   mailBroadcasts: '群发',
   mailContacts: '联系人',
   mailTemplates: '模板',
-  mailDomain: '域名',
+  admin: '管理后台',
+  adminDomains: '域名管理',
+  adminSharedMailboxes: '公共邮箱',
   developers: '开发者',
   // fastbuild:slot web.i18n.nav.zh-hans
 } as const satisfies LocaleMessageShape<NavMessages>;

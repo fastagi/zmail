@@ -46,10 +46,6 @@ const messages = {
         title: '邮箱',
         description: '创建团队邮箱地址，查看收件箱、回复和发送日常邮件。',
       },
-      domain: {
-        title: '域名',
-        description: '绑定自有域名，Zmail 自动配置收发信记录。',
-      },
       apiAccess: {
         title: 'API 访问',
         description: '管理用户 API 密钥与个人账号设置。',
@@ -74,7 +70,7 @@ const messages = {
       featuresAfter: '下的新路由公开它们。',
     },
     gettingStarted: {
-      domain: '在「域名」绑定自己的域名，或直接使用共享域名。',
+      domain: '在「管理后台 › 域名管理」绑定自己的域名，或直接使用共享域名。',
       mailbox: '在「邮箱」创建发件地址，例如 hello@你的域名。',
       contacts: '在「联系人」新建名单并导入联系人。',
       template: '在「模板」保存一封产品更新邮件。',

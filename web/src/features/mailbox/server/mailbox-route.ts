@@ -1,6 +1,6 @@
 import 'server-only';
 
-import type { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 import { apiErrorResponse, apiJsonBodyErrorResponse } from '@/app/api/_shared/error-response';
 import { readJsonBody } from '@/app/api/_shared/json-body';
@@ -39,6 +39,17 @@ import {
   MAIL_DNS_RECORD_ID_PATTERN,
   MAIL_DNS_RECORD_NAME_MAX_LENGTH,
   MAILBOX_ACCESS_EVENTS_MAX_PAGE_SIZE,
+  MAILBOX_DIRECTORY_CURSOR_MAX_LENGTH,
+  MAILBOX_DIRECTORY_DEFAULT_PAGE_SIZE,
+  MAILBOX_DIRECTORY_MAX_PAGE_SIZE,
+  MAILBOX_DIRECTORY_QUERY_MAX_LENGTH,
+  MAILBOX_EXPORT_MAX_BYTES,
+  MAILBOX_IMPORT_ADDRESS_MAX_LENGTH,
+  MAILBOX_IMPORT_DISPLAY_NAME_MAX_LENGTH,
+  MAILBOX_IMPORT_MAX_ROWS,
+  MAILBOX_IMPORT_MEMBERS_MAX_LENGTH,
+  MAILBOX_LIST_SCOPES,
+  MAILBOX_MAX_PER_ORGANIZATION,
   MAIL_ATTACHMENT_NAME_MAX_LENGTH,
   MAIL_ATTACHMENT_TYPE_MAX_LENGTH,
   MAIL_MAX_ATTACHMENTS,
@@ -93,8 +104,10 @@ import {
   type MockDnsRecordResult,
 } from '@/features/mailbox/server/mock-zone-store';
 import {
+  MOCK_DAILY_SEND_LIMIT,
   mockMailboxStore,
   type MailboxViewer,
+  type MockDirectoryQuery,
   type MockInboxQuery,
   type MockAccessError,
   type MockAccessResult,
@@ -127,6 +140,8 @@ import type {
   MailDnsRecordInput,
   MailDnsRecordPatch,
   MailDnsRecordType,
+  MailboxImportRowInput,
+  MailboxListScope,
   MailboxPermission,
   MailTemplateInput,
   MailTemplateKind,
@@ -175,6 +190,8 @@ type Parsed<T> = { ok: true; value: T } | { ok: false; response: NextResponse };
 const routeIdPattern = /^[1-9]\d{0,15}$/u;
 const defaultPerPage = 15;
 const maxMailboxBodyBytes = 8 * 1_024;
+// 500 rows at their longest cells, with JSON escaping.
+const maxMailboxImportBodyBytes = 4 * 1_024 * 1_024;
 const maxMessageChangeBodyBytes = 16 * 1_024;
 const maxOrganizeBodyBytes = 4 * 1_024;
 // A 4096-character record content with JSON escaping.
@@ -705,6 +722,11 @@ const dnsRecordTypes: readonly MailDnsRecordType[] = ['A', 'AAAA', 'CNAME', 'TXT
 export async function listMailboxesRoute(request: Request): Promise<NextResponse> {
   const target = await resolveMailboxReadRoute(request);
   if (!target.available) return target.response;
+  const rawScope = new URL(request.url).searchParams.get('scope') ?? '';
+  if (rawScope !== '' && !(MAILBOX_LIST_SCOPES as readonly string[]).includes(rawScope)) {
+    return validationFailed({ scope: ['The scope field is invalid'] });
+  }
+  const scope = rawScope === '' ? undefined : (rawScope as MailboxListScope);
 
   if (target.backend === 'go-api') {
     return forwardAuthenticatedGoApi(request, {
@@ -712,9 +734,157 @@ export async function listMailboxesRoute(request: Request): Promise<NextResponse
       path: 'mailboxes',
       accessToken: target.accessToken,
       organizationId: String(target.organizationId),
+      ...(scope ? { searchParams: new URLSearchParams({ scope }) } : {}),
     });
   }
-  return success(mockMailboxStore.list(target.organizationId, viewerOf(target)));
+  return success(mockMailboxStore.list(target.organizationId, viewerOf(target), scope));
+}
+
+/**
+ * One page of the administration directory; owners and admins only. Only `type`, `q`, `cursor`,
+ * and `per_page` reach the API, checked here as the API checks them.
+ */
+export async function listMailboxDirectoryRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const query = parseDirectoryQuery(new URL(request.url).searchParams);
+  if (!query.ok) return query.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mailbox-directory',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: query.value.forward,
+    });
+  }
+  if (query.value.mock.beforeId === 0) return invalidInput('Invalid directory cursor');
+  const page = mockMailboxStore.directory(target.organizationId, viewerOf(target), query.value.mock);
+  if (!page.ok) return forbidden();
+  const { items, nextBeforeId, mailboxCount, sentLast24h } = page.value;
+  return NextResponse.json(
+    {
+      code: 0,
+      message: 'success',
+      data: items,
+      meta: {
+        per_page: query.value.mock.perPage,
+        has_more: nextBeforeId !== null,
+        next_cursor: nextBeforeId === null ? null : encodeDirectoryCursor(nextBeforeId),
+        daily_send_limit: MOCK_DAILY_SEND_LIMIT,
+        sent_last_24h: sentLast24h,
+        mailbox_count: mailboxCount,
+        max_mailboxes: MAILBOX_MAX_PER_ORGANIZATION,
+      },
+    },
+    { headers: privateMailboxHeaders() }
+  );
+}
+
+/** Renames a mailbox; owners and admins only, refused before the body is read. */
+export async function updateMailboxRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const body = await jsonObject(request, maxMailboxBodyBytes);
+  if (!body.ok) return body.response;
+  const { display_name: displayName } = body.value;
+  if (!boundedString(displayName, MAILBOX_IMPORT_DISPLAY_NAME_MAX_LENGTH)) {
+    return validationFailed({ display_name: ['The display_name field is invalid'] });
+  }
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mailboxes/${mailboxId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { display_name: displayName },
+      fieldMap: { display_name: 'display_name' },
+    });
+  }
+  const result = mockMailboxStore.rename(
+    target.organizationId,
+    mailboxId.value,
+    viewerOf(target),
+    displayName
+  );
+  if (result.ok) return success(result.mailbox);
+  if (result.error === 'forbidden') return forbidden();
+  if (result.error === 'mailbox_not_found') return mailboxNotFound();
+  return failure(422, ApiErrorCode.MAILBOX_ADDRESS_INVALID, 'Mailbox display name is invalid');
+}
+
+/** Checks or creates shared mailboxes from spreadsheet rows; owners and admins only. */
+export async function importMailboxesRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const body = await jsonObject(request, maxMailboxImportBodyBytes);
+  if (!body.ok) return body.response;
+  const input = mailboxImportBody(body.value);
+  if (!input.ok) return input.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'mailbox-imports',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: { dry_run: 'dry_run', rows: 'rows' },
+    });
+  }
+  const organizationId = target.organizationId;
+  const result = mockMailboxStore.importRows(
+    organizationId,
+    viewerOf(target),
+    input.value.rows,
+    input.value.dry_run,
+    name => mockDomainStore.resolve(organizationId, name)
+  );
+  return result.ok ? success(result.value) : forbidden();
+}
+
+/**
+ * The CSV file of every mailbox of one type; owners and admins only. An API file is passed on as
+ * an opaque download with its attachment name.
+ */
+export async function exportMailboxesRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const type = new URL(request.url).searchParams.get('type');
+  if (type !== 'shared' && type !== 'personal') {
+    return validationFailed({ type: ['The type field is invalid'] });
+  }
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mailbox-exports',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: new URLSearchParams({ type }),
+      responseType: 'binary',
+      maxResponseBytes: MAILBOX_EXPORT_MAX_BYTES,
+    });
+  }
+  const file = mockMailboxStore.exportCsv(target.organizationId, viewerOf(target), type);
+  if (!file.ok) return forbidden();
+  const headers = privateMailboxHeaders();
+  headers.set('content-type', 'application/octet-stream');
+  headers.set('x-content-type-options', 'nosniff');
+  headers.set('content-security-policy', "default-src 'none'; sandbox");
+  headers.set('content-disposition', `attachment; filename="${file.filename}"`);
+  return new NextResponse(new TextEncoder().encode(file.csv), { status: 200, headers });
 }
 
 export async function createMailboxRoute(request: Request): Promise<NextResponse> {
@@ -3653,6 +3823,98 @@ function parseStatsDays(values: string[]): Parsed<number> {
 }
 
 /** Mirrors the API: a missing or malformed number uses the fallback. */
+interface DirectoryQuery {
+  forward: URLSearchParams;
+  mock: MockDirectoryQuery;
+}
+
+/** The directory query as the API checks it; anything undocumented is dropped. */
+function parseDirectoryQuery(query: URLSearchParams): Parsed<DirectoryQuery> {
+  const forward = new URLSearchParams();
+  const mock: MockDirectoryQuery = { perPage: MAILBOX_DIRECTORY_DEFAULT_PAGE_SIZE };
+  const errors: Record<string, string[]> = {};
+  const type = query.get('type');
+  if (type !== null && type !== '') {
+    if (type === 'shared' || type === 'personal') {
+      forward.set('type', type);
+      mock.type = type;
+    } else {
+      errors.type = ['The type field is invalid'];
+    }
+  }
+  const q = query.get('q');
+  if (q !== null && q !== '') {
+    if (Array.from(q).length > MAILBOX_DIRECTORY_QUERY_MAX_LENGTH) {
+      errors.q = ['The q field is too long'];
+    } else {
+      forward.set('q', q);
+      mock.q = q;
+    }
+  }
+  const cursor = query.get('cursor');
+  if (cursor !== null && cursor !== '') {
+    if (cursor.length > MAILBOX_DIRECTORY_CURSOR_MAX_LENGTH) {
+      errors.cursor = ['The cursor field is invalid'];
+    } else {
+      forward.set('cursor', cursor);
+      // The mock reads its own tokens; the route refuses a malformed one, as the API does.
+      mock.beforeId = decodeDirectoryCursor(cursor) ?? 0;
+    }
+  }
+  const perPage = query.get('per_page');
+  if (perPage !== null && perPage !== '') {
+    const value = /^[1-9]\d{0,8}$/u.test(perPage) ? Number(perPage) : 0;
+    if (value < 1 || value > MAILBOX_DIRECTORY_MAX_PAGE_SIZE) {
+      errors.per_page = ['The per_page field is invalid'];
+    } else {
+      forward.set('per_page', perPage);
+      mock.perPage = value;
+    }
+  }
+  if (Object.keys(errors).length > 0) return { ok: false, response: validationFailed(errors) };
+  return { ok: true, value: { forward, mock } };
+}
+
+function encodeDirectoryCursor(id: number): string {
+  return Buffer.from(String(id)).toString('base64url');
+}
+
+function decodeDirectoryCursor(token: string): number | null {
+  const decoded = Buffer.from(token, 'base64url').toString();
+  return /^[1-9]\d{0,15}$/u.test(decoded) && Buffer.from(decoded).toString('base64url') === token
+    ? Number(decoded)
+    : null;
+}
+
+/** The import body as the API checks it, keeping only the documented fields. */
+function mailboxImportBody(
+  value: Record<string, unknown>
+): Parsed<{ dry_run: boolean; rows: MailboxImportRowInput[] }> {
+  const { dry_run: dryRun, rows } = value;
+  if (typeof dryRun !== 'boolean') {
+    return { ok: false, response: validationFailed({ dry_run: ['The dry_run field is required'] }) };
+  }
+  if (!Array.isArray(rows) || rows.length === 0 || rows.length > MAILBOX_IMPORT_MAX_ROWS) {
+    return { ok: false, response: validationFailed({ rows: ['The rows field is invalid'] }) };
+  }
+  const clean: MailboxImportRowInput[] = [];
+  for (const row of rows as unknown[]) {
+    const item = (row !== null && typeof row === 'object' ? row : {}) as Record<string, unknown>;
+    const displayName = item.display_name ?? '';
+    if (
+      !boundedString(item.address, MAILBOX_IMPORT_ADDRESS_MAX_LENGTH) ||
+      item.address === '' ||
+      !boundedString(displayName, MAILBOX_IMPORT_DISPLAY_NAME_MAX_LENGTH) ||
+      !boundedString(item.members, MAILBOX_IMPORT_MEMBERS_MAX_LENGTH) ||
+      item.members === ''
+    ) {
+      return { ok: false, response: validationFailed({ rows: ['A row is invalid'] }) };
+    }
+    clean.push({ address: item.address, display_name: displayName, members: item.members });
+  }
+  return { ok: true, value: { dry_run: dryRun, rows: clean } };
+}
+
 function positiveInteger(value: string | null, fallback: number): number {
   if (!value || !/^[1-9]\d{0,8}$/u.test(value)) return fallback;
   return Number(value);

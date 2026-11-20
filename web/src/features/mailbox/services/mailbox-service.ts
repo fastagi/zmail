@@ -27,6 +27,7 @@ import {
   mailZoneSchema,
   MAIL_DNS_RECORD_ID_PATTERN,
   mailboxAccessEventPageEnvelopeSchema,
+  MAILBOX_LIST_SCOPES,
   mailboxListSchema,
   mailboxMemberListSchema,
   mailboxMemberSchema,
@@ -88,6 +89,7 @@ import type {
   Mailbox,
   MailboxAccessEventPage,
   MailboxDomain,
+  MailboxListScope,
   MailboxMember,
   MailboxPermission,
   MailboxSealedDeletion,
@@ -288,9 +290,17 @@ export const mailboxService = {
     });
   },
 
-  async list(organizationId: number): Promise<Mailbox[]> {
+  /** Every mailbox the caller has any access to; `usable` keeps only the caller's own. */
+  async list(organizationId: number, scope?: MailboxListScope): Promise<Mailbox[]> {
+    const headers = organizationHeaders(organizationId);
+    if (scope !== undefined && !(MAILBOX_LIST_SCOPES as readonly string[]).includes(scope)) {
+      throw invalidResponse();
+    }
     const parsed = mailboxListSchema.safeParse(
-      await request.get<unknown>('/mailboxes', { headers: organizationHeaders(organizationId) })
+      await request.get<unknown>(
+        '/mailboxes',
+        scope === undefined ? { headers } : { headers, params: { scope } }
+      )
     );
     if (!parsed.success) throw invalidResponse();
     return parsed.data;
@@ -1303,6 +1313,7 @@ function validRecordId(value: string): void {
 }
 
 /** The organization the request acts in; an invalid id never leaves the browser. */
+/** The plain `filename="..."` of an attachment disposition, when it is a safe file name. */
 function organizationHeaders(organizationId: number): Record<string, string> {
   validId(organizationId);
   return { 'Organization-Id': String(organizationId) };

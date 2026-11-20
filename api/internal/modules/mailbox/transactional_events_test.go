@@ -192,7 +192,7 @@ func (f *txFixture) broadcastLane(t *testing.T) *broadcastLane {
 		t.Fatalf("seed membership: %v", err)
 	}
 	lane.mailbox = &domain.Mailbox{OrganizationID: 10, Address: "news@mail.example", DisplayName: "News", Type: domain.MailboxTypeShared}
-	if err := f.repo.CreateMailbox(ctx, lane.mailbox, domain.MaxMailboxesPerOrganization); err != nil {
+	if err := f.repo.CreateMailbox(ctx, lane.mailbox, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("CreateMailbox: %v", err)
 	}
 	addMember(t, f.repo, lane.mailbox.ID, lane.viewer, domain.MailboxPermissionManage)
