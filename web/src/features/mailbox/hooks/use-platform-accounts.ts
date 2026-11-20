@@ -26,6 +26,8 @@ export const platformAccountKeys = {
       page,
       perPage,
     ] as const,
+  roleCount: (organizationId: number, roleId: number) =>
+    [...platformAccountKeys.all(organizationId), 'role-count', roleId] as const,
   events: (organizationId: number, accountId: number, page: number) =>
     [...platformAccountKeys.all(organizationId), 'events', accountId, page] as const,
 };
@@ -42,6 +44,22 @@ export function usePlatformAccounts(
     queryFn: () => platformAccountService.list(organizationId, filters, { page, perPage }),
     enabled: validId(organizationId),
     placeholderData: keepPreviousData,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+/**
+ * How many accounts the caller may see in one mail role: a one-entry page filtered by the role,
+ * read for its total.
+ */
+export function usePlatformAccountCount(organizationId: number, roleId: number, enabled = true) {
+  return useQuery({
+    queryKey: platformAccountKeys.roleCount(organizationId, roleId),
+    queryFn: async () =>
+      (await platformAccountService.list(organizationId, { roleId }, { page: 1, perPage: 1 })).meta
+        .total,
+    enabled: enabled && validId(organizationId) && validId(roleId),
+    staleTime: 30_000,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }
