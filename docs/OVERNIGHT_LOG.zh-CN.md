@@ -14,3 +14,14 @@
   - 草案：平台运营总看板（`admin-mail-operations`，评审稿）、自建收发信边缘（有计划；生产部署需 25 端口与基础设施，不做部署）。
 - 正在做：切片 ② 设计文档。
 - 接下来：② 实施并部署 → 公共邮箱管理第一期 → ③④ 离线部分 → 运营总看板 → 自建边缘代码。
+
+## 2026-11-20 02:00 UTC
+
+- 做了什么：切片 ② 验证码遮罩完成开发（分支 `feat/verification-mask`）。
+  - 设计 `docs/plans/verification-mask.zh-CN.md`（设计决定 D1–D6 待确认）、计划 `verification-mask.plan.md`。
+  - API：来信的标题、摘要、正文、组织日志一律遮罩验证码和登录/重置链接；新增 `POST .../messages/{id}/reveal`（仅会话、同读权限、no-store、记 `mail.secret_revealed` 日志）；契约与生成类型已更新。
+  - kest 验收流 `verification_mask.flow.md` 15/15 通过。
+  - Web：阅读栏锁定面板"显示验证码"，原文只留在本次组件状态里；1440×900 浅色、深色已查看。
+  - 已知小遗留：显示原文后，线程顶部大标题仍是遮罩形式（正文已显示原文）。
+- 正在做：`make check`，然后开 PR、合并、部署。
+- 接下来：公共邮箱管理第一期。
