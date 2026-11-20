@@ -45,4 +45,6 @@ type Application struct {
 	MailBroadcasts domain.MailBroadcastDispatcher
 	// MailZones checks pending managed zones; nil when the mailbox starter is not selected.
 	MailZones domain.MailZoneChecker
+	// MailTriage classifies mail queued for AI triage; nil when the mailbox starter is not selected.
+	MailTriage domain.MailTriageWorker
 }
