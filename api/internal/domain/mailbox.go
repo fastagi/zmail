@@ -914,7 +914,7 @@ type MailboxRepository interface {
 	// CreateInboundMessage stores an inbound message with its attachments once per mailbox and dedupe key. It
 	// reports created=false and fills message with the stored row on a repeated delivery.
 	CreateInboundMessage(ctx context.Context, message *MailMessage) (created bool, err error)
-	UpdateMessageDelivery(ctx context.Context, id uint, status MailStatus, messageID, failureCode string) error
+	UpdateMessageDelivery(ctx context.Context, id uint, status MailStatus, messageID, rfcMessageID, failureCode string) error
 	// ListMessages lists one page of single messages of the mailbox matching filter, with the total.
 	// Starred and Unread use membershipID's own state. A search the database cannot finish in time
 	// reports the module's search-too-broad error.

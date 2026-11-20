@@ -189,6 +189,7 @@ func (c *Cloudflare) Send(ctx context.Context, mail Message) (Result, error) {
 			return result, &Error{Code: failureSuppressed, Permanent: true, Responded: true}
 		}
 	}
+	result.RFCMessageID = result.MessageID
 	return result, nil
 }
 
@@ -203,9 +204,7 @@ func sendHeaders(mail Message) map[string]string {
 		}
 		headers[name] = value
 	}
-	if mail.MessageID != "" {
-		headers["Message-ID"] = "<" + mail.MessageID + ">"
-	}
+	// Cloudflare sets Message-ID itself and rejects it as a custom header.
 	references := mail.References
 	if mail.InReplyTo != "" {
 		headers["In-Reply-To"] = "<" + mail.InReplyTo + ">"
