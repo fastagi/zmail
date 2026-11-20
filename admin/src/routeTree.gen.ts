@@ -19,6 +19,7 @@ import { Route as ConsolePreferencesRouteImport } from './routes/console.prefere
 import { Route as ConsoleSettingsRouteImport } from './routes/console.settings'
 import { Route as ConsoleUsersRouteImport } from './routes/console.users'
 import { Route as ConsoleOperationsIndexRouteImport } from './routes/console.operations.index'
+import { Route as ConsoleOperationsContentAccessRouteImport } from './routes/console.operations.content-access'
 import { Route as ConsoleOperationsMessagesRouteImport } from './routes/console.operations.messages'
 import { Route as ConsoleOperationsOrganizationsRouteImport } from './routes/console.operations.organizations'
 import { Route as ConsoleOrganizationsIndexRouteImport } from './routes/console.organizations.index'
@@ -74,6 +75,12 @@ const ConsoleOperationsIndexRoute = ConsoleOperationsIndexRouteImport.update({
   path: '/operations/',
   getParentRoute: () => ConsoleRoute,
 } as any)
+const ConsoleOperationsContentAccessRoute =
+  ConsoleOperationsContentAccessRouteImport.update({
+    id: '/operations/content-access',
+    path: '/operations/content-access',
+    getParentRoute: () => ConsoleRoute,
+  } as any)
 const ConsoleOperationsMessagesRoute =
   ConsoleOperationsMessagesRouteImport.update({
     id: '/operations/messages',
@@ -109,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/console/settings': typeof ConsoleSettingsRoute
   '/console/users': typeof ConsoleUsersRoute
   '/console/': typeof ConsoleIndexRoute
+  '/console/operations/content-access': typeof ConsoleOperationsContentAccessRoute
   '/console/operations/messages': typeof ConsoleOperationsMessagesRoute
   '/console/operations/organizations': typeof ConsoleOperationsOrganizationsRoute
   '/console/organizations/$organizationId': typeof ConsoleOrganizationsOrganizationIdRoute
@@ -124,6 +132,7 @@ export interface FileRoutesByTo {
   '/console/settings': typeof ConsoleSettingsRoute
   '/console/users': typeof ConsoleUsersRoute
   '/console': typeof ConsoleIndexRoute
+  '/console/operations/content-access': typeof ConsoleOperationsContentAccessRoute
   '/console/operations/messages': typeof ConsoleOperationsMessagesRoute
   '/console/operations/organizations': typeof ConsoleOperationsOrganizationsRoute
   '/console/organizations/$organizationId': typeof ConsoleOrganizationsOrganizationIdRoute
@@ -141,6 +150,7 @@ export interface FileRoutesById {
   '/console/settings': typeof ConsoleSettingsRoute
   '/console/users': typeof ConsoleUsersRoute
   '/console/': typeof ConsoleIndexRoute
+  '/console/operations/content-access': typeof ConsoleOperationsContentAccessRoute
   '/console/operations/messages': typeof ConsoleOperationsMessagesRoute
   '/console/operations/organizations': typeof ConsoleOperationsOrganizationsRoute
   '/console/organizations/$organizationId': typeof ConsoleOrganizationsOrganizationIdRoute
@@ -159,6 +169,7 @@ export interface FileRouteTypes {
     | '/console/settings'
     | '/console/users'
     | '/console/'
+    | '/console/operations/content-access'
     | '/console/operations/messages'
     | '/console/operations/organizations'
     | '/console/organizations/$organizationId'
@@ -174,6 +185,7 @@ export interface FileRouteTypes {
     | '/console/settings'
     | '/console/users'
     | '/console'
+    | '/console/operations/content-access'
     | '/console/operations/messages'
     | '/console/operations/organizations'
     | '/console/organizations/$organizationId'
@@ -190,6 +202,7 @@ export interface FileRouteTypes {
     | '/console/settings'
     | '/console/users'
     | '/console/'
+    | '/console/operations/content-access'
     | '/console/operations/messages'
     | '/console/operations/organizations'
     | '/console/organizations/$organizationId'
@@ -275,6 +288,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConsoleOperationsIndexRouteImport
       parentRoute: typeof ConsoleRoute
     }
+    '/console/operations/content-access': {
+      id: '/console/operations/content-access'
+      path: '/operations/content-access'
+      fullPath: '/console/operations/content-access'
+      preLoaderRoute: typeof ConsoleOperationsContentAccessRouteImport
+      parentRoute: typeof ConsoleRoute
+    }
     '/console/operations/messages': {
       id: '/console/operations/messages'
       path: '/operations/messages'
@@ -313,6 +333,7 @@ interface ConsoleRouteChildren {
   ConsoleSettingsRoute: typeof ConsoleSettingsRoute
   ConsoleUsersRoute: typeof ConsoleUsersRoute
   ConsoleIndexRoute: typeof ConsoleIndexRoute
+  ConsoleOperationsContentAccessRoute: typeof ConsoleOperationsContentAccessRoute
   ConsoleOperationsMessagesRoute: typeof ConsoleOperationsMessagesRoute
   ConsoleOperationsOrganizationsRoute: typeof ConsoleOperationsOrganizationsRoute
   ConsoleOrganizationsOrganizationIdRoute: typeof ConsoleOrganizationsOrganizationIdRoute
@@ -327,6 +348,7 @@ const ConsoleRouteChildren: ConsoleRouteChildren = {
   ConsoleSettingsRoute: ConsoleSettingsRoute,
   ConsoleUsersRoute: ConsoleUsersRoute,
   ConsoleIndexRoute: ConsoleIndexRoute,
+  ConsoleOperationsContentAccessRoute: ConsoleOperationsContentAccessRoute,
   ConsoleOperationsMessagesRoute: ConsoleOperationsMessagesRoute,
   ConsoleOperationsOrganizationsRoute: ConsoleOperationsOrganizationsRoute,
   ConsoleOrganizationsOrganizationIdRoute:

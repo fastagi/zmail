@@ -53,7 +53,12 @@ console has no sign-in and no protected feature:
   grants only the read-only Operations views and organization reads. Navigation hides screens the
   session's `capabilities` do not cover, but the API enforces every capability.
 - `mailbox` (with `organization`) adds the Operations views. They show counts and outbound
-  metadata only; no message body, recipient, or attachment reaches the browser.
+  metadata; no recipient or attachment reaches the browser. The one exception to "no body" is an
+  organization broadcast's sent text, for a grant with the explicit content add-on
+  (`--scope=<scope>,mail-content`): the operator enters a reason, the API stores the access record
+  first, and the console shows the text as plain text in a dialog. The read is a mutation that never
+  enters the TanStack Query cache, is dropped when the dialog closes (`gcTime: 0`), and is never
+  written to browser storage. The Content access page lists who read what, when, and why.
 - `organization`, `webhook`, and `notification` in `VITE_OPTIONAL_FEATURES` add operator screens
   for those API starters. They are support views, not tenant self-service: an operator reads any
   organization's members, webhook endpoints, and deliveries, and the notification delivery ledger,

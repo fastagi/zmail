@@ -47,16 +47,47 @@ export const outboundMessageSchema = z.object({
   last_event: z.string(),
   created_at: z.string(),
   send_attempted_at: z.string().nullable(),
+  // Set only for organization broadcast messages, the only ones whose body may be read.
+  broadcast_id: z.number().int().positive().nullable(),
+});
+
+/** Longest reason the API accepts for reading a body, in characters. */
+export const contentReasonMaxLength = 500;
+
+export const broadcastContentSchema = z.object({
+  access_id: z.number().int().positive(),
+  organization_id: z.number().int().positive(),
+  message_id: z.number().int().positive(),
+  broadcast_id: z.number().int().positive(),
+  subject: z.string(),
+  from_address: z.string(),
+  created_at: z.string(),
+  text: z.string(),
+  text_source: z.enum(['text', 'html']),
+});
+
+export const contentAccessSchema = z.object({
+  id: z.number().int().positive(),
+  viewer_user_id: z.number().int().positive(),
+  organization_id: z.number().int().positive(),
+  organization_name: z.string(),
+  message_id: z.number().int().positive(),
+  reason: z.string(),
+  accessed_at: z.string(),
 });
 
 export const mailOrganizationPageSchema = pageSchema(mailOrganizationSchema);
 export const outboundMessagePageSchema = pageSchema(outboundMessageSchema);
+export const contentAccessPageSchema = pageSchema(contentAccessSchema);
 
 export type MailMetrics = z.infer<typeof mailMetricsSchema>;
 export type MailOrganization = z.infer<typeof mailOrganizationSchema>;
 export type MailOrganizationPage = z.infer<typeof mailOrganizationPageSchema>;
 export type OutboundMessage = z.infer<typeof outboundMessageSchema>;
 export type OutboundMessagePage = z.infer<typeof outboundMessagePageSchema>;
+export type BroadcastContent = z.infer<typeof broadcastContentSchema>;
+export type ContentAccess = z.infer<typeof contentAccessSchema>;
+export type ContentAccessPage = z.infer<typeof contentAccessPageSchema>;
 
 /** Every Operations view carries the selected UTC day; absent means today. */
 export interface MailDaySearch {
@@ -73,6 +104,22 @@ export interface OutboundMessageSearch extends MailDaySearch {
   mailbox_id?: number | undefined;
   status?: OutboundStatus | undefined;
   page?: number | undefined;
+}
+
+/** Filters of the content access records; days are UTC and `to` is inclusive. */
+export interface ContentAccessSearch {
+  organization_id?: number | undefined;
+  viewer_user_id?: number | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  page?: number | undefined;
+}
+
+/** The instant after the last moment of a UTC day. */
+export function nextUtcDayStart(day: string): string {
+  const next = new Date(`${day}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next.toISOString().replace('.000Z', 'Z');
 }
 
 /** Today's calendar day in UTC, the day the API uses by default. */

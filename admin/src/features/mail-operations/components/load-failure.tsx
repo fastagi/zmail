@@ -7,13 +7,23 @@ interface LoadFailureProps {
   error: unknown;
   onRetry: () => void;
   retrying?: boolean;
+  /** Overrides the not-permitted explanation; defaults to the mail metrics one. */
+  forbiddenDescription?: string;
+  /** Overrides the failure message; defaults to the mail metrics one. */
+  unavailableMessage?: string;
 }
 
 /**
  * A failed load is never shown as zero: either the grant does not cover the view, or the request
  * failed and can be retried.
  */
-export function LoadFailure({ error, onRetry, retrying = false }: LoadFailureProps) {
+export function LoadFailure({
+  error,
+  onRetry,
+  retrying = false,
+  forbiddenDescription,
+  unavailableMessage,
+}: LoadFailureProps) {
   const { t } = useTranslation();
   if (isCapabilityError(error)) {
     return (
@@ -21,7 +31,9 @@ export function LoadFailure({ error, onRetry, retrying = false }: LoadFailurePro
         <ShieldOff aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         <div>
           <p className="font-medium">{t('mailOperations.forbidden.title')}</p>
-          <p className="text-muted-foreground">{t('mailOperations.forbidden.description')}</p>
+          <p className="text-muted-foreground">
+            {forbiddenDescription ?? t('mailOperations.forbidden.description')}
+          </p>
         </div>
       </div>
     );
@@ -29,7 +41,9 @@ export function LoadFailure({ error, onRetry, retrying = false }: LoadFailurePro
   return (
     <div role="alert" className="flex flex-wrap items-center gap-3 p-4 text-sm">
       <TriangleAlert aria-hidden="true" className="size-4 shrink-0 text-danger-strong" />
-      <p className="flex-1 text-destructive">{t('mailOperations.errors.unavailable')}</p>
+      <p className="flex-1 text-destructive">
+        {unavailableMessage ?? t('mailOperations.errors.unavailable')}
+      </p>
       <Button type="button" variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
         <RotateCw aria-hidden="true" />
         {t('mailOperations.retry')}

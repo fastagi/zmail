@@ -61,6 +61,7 @@ const message = {
   last_event: 'delivered',
   created_at: '2026-11-18T09:30:00Z',
   send_attempted_at: '2026-11-18T09:30:01Z',
+  broadcast_id: null,
 };
 
 describe('Mail operations', () => {

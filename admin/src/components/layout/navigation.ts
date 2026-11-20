@@ -1,6 +1,7 @@
 import {
   BellRing,
   Building2,
+  FileSearch,
   ChartColumn,
   Gauge,
   History,
@@ -15,8 +16,11 @@ interface NavigationEntry {
   icon: typeof Gauge;
   labelKey: string;
   to: string;
-  /** The operator capability the destination needs; absent for screens every session can open. */
-  capability?: OperatorCapability;
+  /**
+   * The operator capability the destination needs, or a list of which any one is enough; absent
+   * for screens every session can open.
+   */
+  capability?: OperatorCapability | readonly OperatorCapability[];
 }
 
 const operatorNavigation = isFeatureEnabled('operator')
@@ -50,6 +54,12 @@ const starterNavigation = [
           labelKey: 'navigation.operations',
           to: '/console/operations',
           capability: 'mail_metrics:read',
+        },
+        {
+          icon: FileSearch,
+          labelKey: 'navigation.contentAccess',
+          to: '/console/operations/content-access',
+          capability: ['mail_content:read', 'operator:manage'],
         },
       ] as const)
     : []),
@@ -97,5 +107,12 @@ export type NavigationItem = (typeof navigationItems)[number];
 export function visibleNavigationItems(
   granted: ReadonlySet<OperatorCapability>,
 ): readonly NavigationItem[] {
-  return navigationItems.filter((item) => !('capability' in item) || granted.has(item.capability));
+  return navigationItems.filter((item) => {
+    if (!('capability' in item)) {
+      return true;
+    }
+    const needed: readonly OperatorCapability[] =
+      typeof item.capability === 'string' ? [item.capability] : item.capability;
+    return needed.some((capability) => granted.has(capability));
+  });
 }
