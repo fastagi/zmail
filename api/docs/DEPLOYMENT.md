@@ -17,6 +17,9 @@ cloud, registry, rollout controller, secret store, or migration orchestrator for
 | `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends direct sends that waited for room in the organization's send limit, oldest first, then the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit, and purges trash older than 30 days. It also retries, expires, and purges transactional messages. Run it wherever the API runs. |
 | `fastbuild mail:zone:work` | Optional mailbox starter | Activates managed mail zones once their registrar delegates them, sets their pending domains up, and removes zones still pending after 14 days. |
 | `fastbuild mail:zone:release` | Optional mailbox starter | One-off operator command that removes a pending managed mail zone from Cloudflare and Zmail, so another organization can claim its apex. |
+| `fastbuild organization:show` | Optional organization starter | Read-only operator command that finds an organization by ID or connected domain and prints its owners and admins, mailbox count and limit, and domains. |
+| `fastbuild organization:grant-admin` | Optional organization starter | One-off operator command that makes an existing account an admin of an organization; a dry run unless `--commit`. |
+| `fastbuild mailbox:import` | Optional mailbox starter | One-off operator command that checks, or with `--commit` creates, shared mailboxes from a CSV file through the same service as `POST /v1/mailbox-imports`. |
 | [`deploy/kubernetes`](../../deploy/kubernetes/README.md) | Example | Hardened kustomize reference for the API, workers, retention jobs, migration job, and Web. |
 | Production deployment manifests | Downstream app | Own secrets, network policy, replicas, migrations, rollout, and rollback. |
 
@@ -302,6 +305,39 @@ The command deletes the zone at Cloudflare and in the database and logs the zone
 and its Cloudflare zone ID. It refuses an active zone: that zone serves DNS the registrar points at,
 and its organization removes it from the console once the name servers point elsewhere. Tell the
 organization that held the zone, since its pending domains disappear from its console.
+
+### Operator Organization Commands
+
+These one-off commands act on an organization without being one of its members, so they run only
+on the server, with the same image and settings as the API. None of them reads or prints a
+password or token.
+
+```bash
+/app/fastbuild organization:show --domain=example.com      # or --organization=<id>
+/app/fastbuild organization:grant-admin --organization=<id> --email=person@example.com [--commit]
+/app/fastbuild mailbox:import --organization=<id> --file=/tmp/mailboxes.csv [--actor=<user id>] [--commit]
+```
+
+`organization:show` prints the organization's ID and name, its owners and admins (user ID, email,
+role), its mailbox count against the configured limit, and its connected domains with their
+status; with `--domain` it also says whether that domain is verified.
+
+`organization:grant-admin` needs an account that already uses the email (matched ignoring case):
+it never creates an account. It adds an `admin` membership, raises a `member` to `admin`, and
+leaves an admin or owner as they are; it never grants `owner`. Without `--commit` it only prints
+what it would do. A written change is recorded in the audit log with the system as actor, as
+`add_member` or `change_role` on `organization_members`.
+
+`mailbox:import` reads a CSV file with the header `address,display_name,members`, the format of
+the console import and of `GET /v1/mailbox-exports`; other columns are ignored and at most 500 rows
+are read. A row whose `members` cell is empty gets the acting user as its one member with
+`manage`. The acting user is `--actor`, which must be an owner or admin of the organization, or
+else the organization's earliest owner. The rows go through the same import service as the
+console, so Cloudflare routing rules, the mailbox limit, validation, and mailbox access events
+behave the same. Without `--commit` it is a dry run. It prints one line per row (row, address,
+`valid`/`created`/`failed`, error code, member emails that are not in the organization) and the
+totals, and exits non-zero when any row failed. A committed import is recorded in the audit log
+with the system as actor.
 
 ## Webhook Worker And Retention
 
