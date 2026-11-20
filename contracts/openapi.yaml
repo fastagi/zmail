@@ -5841,6 +5841,36 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/messages/{message_id}/reveal:
+    post:
+      operationId: revealMailMessage
+      summary: Reveal the masked codes and sign-in links of a message
+      description: Returns the message with nothing masked, to anyone who may read it, and logs a
+        `mail.secret_revealed` event. Every other response masks one-time codes and sign-in links of
+        inbound mail. The request has no body; the response is never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailMessageID'
+      responses:
+        '200':
+          description: The message with nothing masked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/messages/{message_id}/attachments/{attachment_id}:
     get:
       operationId: downloadMailAttachment
@@ -11527,6 +11557,7 @@ components:
         - trashed_at
         - text_body
         - html_body
+        - secrets_masked
         - message_id
         - in_reply_to
         - events
@@ -11622,6 +11653,10 @@ components:
           type: string
           description: Untrusted HTML from the sender. Render it only inside a sandbox.
           maxLength: 262144
+        secrets_masked:
+          type: boolean
+          description: True when one-time codes or sign-in links of an inbound message were masked
+            in `subject`, `text_body`, or `html_body`. `revealMailMessage` returns the original.
         message_id:
           type: string
           description: RFC 5322 Message-ID without angle brackets; empty when unknown.

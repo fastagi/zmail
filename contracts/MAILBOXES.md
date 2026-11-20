@@ -67,6 +67,7 @@ recorded but has no special rights to it. A removed member loses access on their
 | List messages | `GET /api/mailboxes/:id/messages` | `GET /v1/mailboxes/:mailbox_id/messages` | Paginated envelope |
 | Send message | `POST /api/mailboxes/:id/messages` | `POST /v1/mailboxes/:mailbox_id/messages` | `201` envelope |
 | Get message | `GET /api/mailboxes/:id/messages/:messageId` | `GET /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
+| Reveal masked codes | `POST /api/mailboxes/:id/messages/:messageId/reveal` | `POST /v1/mailboxes/:mailbox_id/messages/:message_id/reveal` | `200` envelope |
 | Update a message | `PUT /api/mailboxes/:id/messages/:messageId` | `PUT /v1/mailboxes/:mailbox_id/messages/:message_id` | `200` envelope |
 | Trash or delete a message | `DELETE /api/mailboxes/:id/messages/:messageId` | `DELETE /v1/mailboxes/:mailbox_id/messages/:message_id` | `204` |
 | Update messages at once | `POST /api/mailboxes/:id/message-updates` | `POST /v1/mailboxes/:mailbox_id/message-updates` | `200` envelope |
@@ -1459,6 +1460,30 @@ Content is compared after normalization, so address case, duplicate recipients, 
 whitespace in the subject do not matter. A failed attempt is replayed rather than retried because
 the provider may have accepted it before the answer was lost; to send again on purpose, use a new
 key. Without a key, every request is a new message.
+
+### Masked Secrets
+
+Inbound mail often carries one-time codes and account links. Every response that carries the
+subject or a body of an inbound message masks them: message listings, threads, search, the
+unified inbox (`subject` and `snippet`), the organization log, and the message detail. Outbound
+messages are never masked, and stored mail is never changed.
+
+- A code is 4–8 digits, `123 456` or `123-456`, or 6–8 letters and digits with at least one of
+  each, within 40 characters after or 20 characters before a keyword such as `code`, `OTP`,
+  `PIN`, `verification`, `2FA`, or the Chinese words for verification code and dynamic code. Numbers that belong to a date, time,
+  decimal, version, amount, or `#` color are not codes. A code shows as `••••••`.
+- A sensitive link is an `http` or `https` URL whose path or query contains `reset`, `recover`,
+  `verify`, `confirm`, `magic`, `token`, `login`, `signin`, `auth`, `otp`, `password`, or
+  `activate`. In text it shows as `host/••••`; in an HTML `href` as `https://host/••••`.
+- HTML text is masked node by node; style and script contents are left alone, and every other
+  byte of the body is kept.
+
+The detail sets `secrets_masked` when anything was masked. `POST
+/v1/mailboxes/:mailbox_id/messages/:message_id/reveal` needs the same access as reading the
+message, returns it with nothing masked and `secrets_masked` `false`, answers
+`Cache-Control: private, no-store`, and logs `mail.secret_revealed` with the organization, user,
+mailbox, and message ids. API keys cannot call it. Anything that hands inbound mail to an AI
+model must use the masked form.
 
 ## Programmatic Sending
 

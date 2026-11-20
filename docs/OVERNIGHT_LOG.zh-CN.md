@@ -1,0 +1,27 @@
+# 夜间自主推进日志
+
+按 `.claude/overnight-loop-prompt.md` 执行（2026-11-20 起）。每条：做了什么 / 正在做 / 接下来。
+
+## 2026-11-20 01:35 UTC
+
+- 做了什么：部署 PR 35（未读计数索引、命令面板配色）到 zmail.im：备份 `zmail-20261120T012920Z.dump`；
+  一次性 PG18 预演（新脚本 `/opt/zmail/deploy/rehearse.sh`）迁移 39 ms，新旧 API 都就绪；生产迁移 45 ms；
+  镜像 `zmail-api:a4ccb8751644`、`zmail-web:a4ccb8751644`；冒烟通过（四容器健康、日志无错误、公网 200/401 符合预期）。
+- 盘点 `docs/plans/`：
+  - 已实现：统一收件 ①、事务邮件 ⑤、邮箱整理、邮箱权限、发送队列、自助域名、群发变量。
+  - 未实现、无需决策：v2 切片 ② 验证码遮罩；公共邮箱管理第一期（`shared-mailbox-admin`，设计已确认，计划在主检出未提交）。
+  - 只能做离线部分：③ AI 分流与草稿（需 AI 服务商密钥）、④ Gmail/Outlook 绑定（需 OAuth 应用）。
+  - 草案：平台运营总看板（`admin-mail-operations`，评审稿）、自建收发信边缘（有计划；生产部署需 25 端口与基础设施，不做部署）。
+- 正在做：切片 ② 设计文档。
+- 接下来：② 实施并部署 → 公共邮箱管理第一期 → ③④ 离线部分 → 运营总看板 → 自建边缘代码。
+
+## 2026-11-20 02:00 UTC
+
+- 做了什么：切片 ② 验证码遮罩完成开发（分支 `feat/verification-mask`）。
+  - 设计 `docs/plans/verification-mask.zh-CN.md`（设计决定 D1–D6 待确认）、计划 `verification-mask.plan.md`。
+  - API：来信的标题、摘要、正文、组织日志一律遮罩验证码和登录/重置链接；新增 `POST .../messages/{id}/reveal`（仅会话、同读权限、no-store、记 `mail.secret_revealed` 日志）；契约与生成类型已更新。
+  - kest 验收流 `verification_mask.flow.md` 15/15 通过。
+  - Web：阅读栏锁定面板"显示验证码"，原文只留在本次组件状态里；1440×900 浅色、深色已查看。
+  - 已知小遗留：显示原文后，线程顶部大标题仍是遮罩形式（正文已显示原文）。
+- 正在做：`make check`，然后开 PR、合并、部署。
+- 接下来：公共邮箱管理第一期。

@@ -154,7 +154,7 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 		if mailbox.RoleID != nil {
 			roleID = new(*mailbox.RoleID)
 		}
-		page.Items = append(page.Items, InboxItem{Message: message, RoleID: roleID, Snippet: inboxSnippet(snippets[message.ID])})
+		page.Items = append(page.Items, InboxItem{Message: message, RoleID: roleID, Snippet: inboxItemSnippet(message, snippets[message.ID])})
 	}
 	return page, nil
 }

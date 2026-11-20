@@ -124,6 +124,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.messages.store").WhereNumber("mailbox_id")
 		auth.GET("/mailboxes/:mailbox_id/messages/:message_id", h.GetMessage).
 			Name("mailboxes.messages.show").WhereNumber("mailbox_id").WhereNumber("message_id")
+		auth.POST("/mailboxes/:mailbox_id/messages/:message_id/reveal", h.RevealMessage).
+			Name("mailboxes.messages.reveal").WhereNumber("mailbox_id").WhereNumber("message_id")
 		auth.GET("/mailboxes/:mailbox_id/messages/:message_id/attachments/:attachment_id", h.DownloadAttachment).
 			Name("mailboxes.messages.attachments.show").
 			WhereNumber("mailbox_id").WhereNumber("message_id").WhereNumber("attachment_id")

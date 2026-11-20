@@ -3,6 +3,7 @@ package mailbox
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strconv"
@@ -332,6 +333,25 @@ func (h *Handler) GetMessage(c *gin.Context) {
 	}
 	privateResponse(c)
 	response.Success(c, toMailMessageResponse(message))
+}
+
+// RevealMessage returns an inbound message with its one-time codes and sign-in links unmasked,
+// to anyone who may read it, and logs that it did. It is a POST so nothing caches or prefetches it.
+func (h *Handler) RevealMessage(c *gin.Context) {
+	viewer, mailboxID, messageID, ok := messageScope(c)
+	if !ok {
+		return
+	}
+	message, err := h.service.GetMessage(c.Request.Context(), viewer, mailboxID, messageID)
+	if err != nil {
+		response.HandleError(c, "Failed to reveal mail message", err)
+		return
+	}
+	slog.InfoContext(c.Request.Context(), "mail.secret_revealed",
+		slog.Uint64("organization_id", uint64(viewer.OrganizationID)), slog.Uint64("user_id", uint64(viewer.UserID)),
+		slog.Uint64("mailbox_id", uint64(mailboxID)), slog.Uint64("message_id", uint64(messageID)))
+	privateResponse(c)
+	response.Success(c, toRevealedMailMessageResponse(message))
 }
 
 // DownloadAttachment returns the bytes of one attached file. The declared media type is never

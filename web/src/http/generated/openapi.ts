@@ -1423,6 +1423,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mailboxes/{mailbox_id}/messages/{message_id}/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal the masked codes and sign-in links of a message
+         * @description Returns the message with nothing masked, to anyone who may read it, and logs a `mail.secret_revealed` event. Every other response masks one-time codes and sign-in links of inbound mail. The request has no body; the response is never cached.
+         */
+        post: operations["revealMailMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mailboxes/{mailbox_id}/role-assignment": {
         parameters: {
             query?: never;
@@ -3905,6 +3925,8 @@ export interface components {
             queued_reason: "send_limit" | null;
             /** @description Whether the caller has read the message; per person. Outbound messages are always read. */
             read: boolean;
+            /** @description True when one-time codes or sign-in links of an inbound message were masked in `subject`, `text_body`, or `html_body`. `revealMailMessage` returns the original. */
+            secrets_masked: boolean;
             /** @description Whether the caller starred the message; per person. Always false on the API-key routes and in template test sends, which act for no viewing person. */
             starred: boolean;
             status: components["schemas"]["MailStatus"];
@@ -9904,6 +9926,38 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": string;
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    revealMailMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail message identifier. */
+                message_id: components["parameters"]["MailMessageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The message with nothing masked. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailMessageResponse"];
                 };
             };
             400: components["responses"]["OrganizationContextInvalid"];

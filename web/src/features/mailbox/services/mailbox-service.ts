@@ -628,6 +628,22 @@ export const mailboxService = {
     return parsed.data;
   },
 
+  /** The message with its masked codes and sign-in links shown; the API logs each call. */
+  async revealMessage(
+    organizationId: number,
+    mailboxId: number,
+    messageId: number
+  ): Promise<MailMessage> {
+    validId(mailboxId);
+    validId(messageId);
+    const value = await request.post<unknown>(
+      `/mailboxes/${mailboxId}/messages/${messageId}/reveal`,
+      undefined,
+      { headers: organizationHeaders(organizationId) }
+    );
+    return parseMailMessage(value, messageId);
+  },
+
   async message(
     organizationId: number,
     mailboxId: number,
@@ -1368,6 +1384,7 @@ assertContract<
   Accepts<z.input<typeof mailMessagePageEnvelopeSchema>, ContractResponse<'listMailMessages', 200>>
 >();
 assertContract<Accepts<z.input<typeof mailMessageSchema>, ContractData<'getMailMessage', 200>>>();
+assertContract<Accepts<z.input<typeof mailMessageSchema>, ContractData<'revealMailMessage', 200>>>();
 assertContract<Accepts<z.input<typeof mailMessageSchema>, ContractData<'sendMailMessage', 201>>>();
 assertContract<Sends<SendMailMessageInput, ContractRequest<'sendMailMessage'>>>();
 assertContract<

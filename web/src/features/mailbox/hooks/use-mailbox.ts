@@ -499,6 +499,18 @@ export function useMarkMailMessageRead(organizationId: number) {
  * Moves a message to the trash, or deletes one already there for good (`organize`). Either way it
  * leaves the counts and, when unread in the Inbox, the unread count in the mailbox list.
  */
+/**
+ * Shows the masked codes of one message. The original is returned to the caller only and never
+ * written to the query cache, so reopening the message masks it again.
+ */
+export function useRevealMailMessage(organizationId: number, mailboxId: number) {
+  return useMutation({
+    mutationFn: (messageId: number) =>
+      mailboxService.revealMessage(organizationId, mailboxId, messageId),
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
 export function useDeleteMailMessage(organizationId: number, mailboxId: number) {
   const queryClient = useQueryClient();
   return useMutation({

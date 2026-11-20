@@ -30,6 +30,7 @@ const state = vi.hoisted(() => {
     eventCalls: [] as { mailboxId: number; page: number; enabled: boolean }[],
     memberCalls: [] as { mailboxId: number; enabled: boolean }[],
     createMailbox: mutation(),
+    reveal: mutation(),
     deleteMailbox: mutation(),
     send: mutation(),
     update: mutation(),
@@ -90,6 +91,7 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useSendMailMessage: () => state.send,
   useUpdateMailMessage: () => state.update,
   useDeleteMailMessage: () => state.removeMessage,
+  useRevealMailMessage: () => state.reveal,
   useMailboxMembers: (_organizationId: number, mailboxId: number, enabled: boolean) => {
     state.memberCalls.push({ mailboxId, enabled });
     return state.members;
