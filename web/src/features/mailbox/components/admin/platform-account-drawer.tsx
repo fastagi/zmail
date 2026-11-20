@@ -136,23 +136,17 @@ export function PlatformAccountDrawer({
     : t('platformAccounts.form.createTitle');
   return (
     <Sheet open={open} onOpenChange={next => !next && onClose()}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
+      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-[32rem]">
         {open ? (
           <>
             <SheetHeader>
               <SheetTitle>{title}</SheetTitle>
               <SheetDescription>{t('platformAccounts.form.description')}</SheetDescription>
             </SheetHeader>
-            <div className="space-y-6 px-4 pb-6">
-              <AccountForm
-                key={account?.id ?? 'new'}
-                account={account}
-                lookups={lookups}
-                onSaved={onClose}
-              />
-              {account ? (
-                <AccountHistory key={account.id} accountId={account.id} lookups={lookups} />
-              ) : null}
+            {/* Keyed by the account, so nothing of another one stays in the form. */}
+            <div key={account?.id ?? 'new'} className="space-y-6 px-4 pb-6">
+              <AccountForm account={account} lookups={lookups} onSaved={onClose} />
+              {account ? <AccountHistory accountId={account.id} lookups={lookups} /> : null}
             </div>
           </>
         ) : null}

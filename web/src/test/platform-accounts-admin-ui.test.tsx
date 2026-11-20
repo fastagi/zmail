@@ -318,6 +318,7 @@ describe('platform account admin', () => {
         },
       ])
     );
+    const consoleError = vi.spyOn(console, 'error');
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Edit Medium @acme' }));
     const drawer = await screen.findByRole('dialog', { name: 'Edit Medium @acme' });
@@ -328,6 +329,12 @@ describe('platform account admin', () => {
     expect(await within(history).findByText('Owner: member → operator')).toBeInTheDocument();
     expect(within(history).getByText('Added as Active')).toBeInTheDocument();
     expect(ledger.events).toHaveBeenCalledWith(1, 12, { page: 1 });
+    // The form and the history are siblings; React warns about clashing keys.
+    expect(consoleError).not.toHaveBeenCalledWith(
+      expect.stringContaining('same key'),
+      expect.anything()
+    );
+    consoleError.mockRestore();
 
     await within(drawer).findByRole('option', { name: 'Design' });
     fireEvent.change(within(drawer).getByLabelText('Status'), { target: { value: 'retired' } });

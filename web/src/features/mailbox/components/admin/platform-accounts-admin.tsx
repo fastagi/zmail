@@ -401,7 +401,7 @@ function AccountRow({
         )}
       </TableCell>
       <TableCell>{role ?? none}</TableCell>
-      <TableCell className="font-mono text-xs">
+      <TableCell className={cn(account.mailbox_address && 'font-mono text-xs')}>
         {account.mailbox_address ??
           (account.mailbox_id === null ? (
             none
