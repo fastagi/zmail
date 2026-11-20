@@ -1313,6 +1313,17 @@ describe('command palette', () => {
     return { palette, input: within(palette).getByRole('combobox') };
   }
 
+  it('the palette shadow and backdrop come from the theme shadow color, not a literal', async () => {
+    renderRoute();
+    const { palette } = await openPalette();
+    const backdrop = document.querySelector('[data-state="open"].fixed.inset-0');
+    expect(backdrop).not.toBeNull();
+    for (const className of [palette.className, backdrop!.className]) {
+      expect(className).toContain('var(--shadow-color)');
+      expect(className).not.toMatch(/rgba\(|#[0-9a-f]{3,8}\b/i);
+    }
+  });
+
   it('⌘K and Ctrl+K open the palette with its actions', async () => {
     renderRoute();
 
