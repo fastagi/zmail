@@ -5082,6 +5082,155 @@ paths:
                   - $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailbox-directory:
+    get:
+      operationId: listMailboxDirectory
+      summary: List the organization's mailboxes for administration
+      description: Needs the `owner` or `admin` organization role. Keyset pages of mailbox metadata, newest
+        first, each with its member count and its 24-hour send attempts; never message content, unread
+        counts, or the caller's access. Pass `meta.next_cursor` as `cursor` for the next, older page.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: type
+          in: query
+          description: Only mailboxes of this type; absent lists both.
+          schema:
+            $ref: '#/components/schemas/MailboxType'
+        - name: q
+          in: query
+          description: A case-insensitive substring of the address or display name, 1 to 120 characters after
+            trimming. `%`, `_`, and `\` match themselves.
+          schema:
+            type: string
+            maxLength: 120
+        - name: cursor
+          in: query
+          description: Opaque keyset position from `meta.next_cursor`; absent or empty requests the newest page.
+          schema:
+            type: string
+            maxLength: 128
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 15
+      responses:
+        '200':
+          description: One page of the directory.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxDirectoryPageResponse'
+        '400':
+          description: The cursor is malformed or `page` was sent (`COMMON.INVALID_INPUT`); or the organization
+            header is missing or malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailbox-imports:
+    post:
+      operationId: importMailboxes
+      summary: Validate or create shared mailboxes from spreadsheet rows
+      description: Needs the `owner` or `admin` organization role. Each row is checked exactly like `POST
+        /v1/mailboxes`; with `dry_run` nothing is created. A real run creates every row that passes, each in its
+        own transaction, so a failed row never undoes another. No organization invitation is sent.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailboxImportRequest'
+      responses:
+        '200':
+          description: The outcome of every row, in request order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxImportResultResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailbox-exports:
+    get:
+      operationId: exportMailboxes
+      summary: Download the organization's mailboxes of one type as CSV
+      description: Needs the `owner` or `admin` organization role. The only surface that carries member email
+        addresses; columns match the import template plus counts and the creation time.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: type
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/MailboxType'
+      responses:
+        '200':
+          description: A UTF-8 CSV file with a byte order mark, at most 5000 data rows.
+          headers:
+            Cache-Control:
+              description: Always `private, no-store`.
+              schema:
+                type: string
+                const: private, no-store
+            Content-Disposition:
+              description: '`attachment; filename="shared-mailboxes-YYYYMMDD.csv"` (or `personal-mailboxes-…`),
+                dated in UTC.'
+              schema:
+                type: string
+          content:
+            text/csv:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes:
     get:
       operationId: listMailboxes
@@ -5092,6 +5241,15 @@ paths:
         - bearerSession: []
       parameters:
         - $ref: '#/components/parameters/OrganizationContext'
+        - name: scope
+          in: query
+          description: '`usable` lists only the mailboxes the caller can read or send from, plus, for owners and
+            admins, personal mailboxes awaiting handover. Absent lists every mailbox the caller has any access
+            to.'
+          schema:
+            type: string
+            enum:
+              - usable
       responses:
         '200':
           description: The mailboxes the caller has any access to, oldest first. Owners and admins see every
@@ -5106,6 +5264,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     post:
@@ -5190,6 +5350,53 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailbox
+      summary: Change a mailbox's display name
+      description: Needs the `owner` or `admin` organization role. The display name follows the create rules; an
+        empty string clears it. A change is recorded as a `renamed` access event; the current name writes
+        nothing.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailboxRequest'
+      responses:
+        '200':
+          description: The mailbox after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailboxResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: A field failed validation, or the display name is too long or contains `<`, `>`, or `"`
+            (`MAILBOX.ADDRESS_INVALID`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/members:
@@ -8256,6 +8463,8 @@ components:
         - MAILBOX.ADDRESS_INVALID
         - MAILBOX.ADDRESS_RESERVED
         - MAILBOX.LIMIT_REACHED
+        - MAILBOX.IMPORT_DUPLICATE_ROW
+        - MAILBOX.IMPORT_MEMBER_NOT_FOUND
         - MAILBOX.ACCESS_INVALID
         - MAILBOX.ACCESS_CONFLICT
         - MAILBOX.MESSAGE_NOT_FOUND
@@ -10985,7 +11194,9 @@ components:
             - organization
         max_mailboxes:
           type: integer
+          description: '`MAILBOX_MAX_PER_ORGANIZATION`, the mailboxes one organization may own (default 50).'
           minimum: 1
+          maximum: 5000
         provider:
           type: string
           description: Outbound transport. `cloudflare` delivers mail; `log` only records it and exists for development.
@@ -11265,6 +11476,7 @@ components:
         - handed_over
         - sealed_deleted
         - webhooks_changed
+        - renamed
     MailboxAccessEvent:
       type: object
       additionalProperties: false
@@ -11291,8 +11503,9 @@ components:
             - type: 'null'
         detail:
           type: object
-          description: Ids, permissions, timestamps, and counts only; never message content. A departure sets
-            `reason` to `left_organization` on `owner_left` and `member_removed`.
+          description: Ids, permissions, timestamps, counts, and display names only; never message content. A
+            departure sets `reason` to `left_organization` on `owner_left` and `member_removed`; `renamed`
+            sets `from` and `to`.
           additionalProperties: true
         created_at:
           type: string
@@ -11373,6 +11586,238 @@ components:
       properties:
         enabled:
           type: boolean
+    UpdateMailboxRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - display_name
+      properties:
+        display_name:
+          type: string
+          description: The new display name; an empty string clears it.
+          maxLength: 120
+    MailboxDirectoryEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - address
+        - display_name
+        - type
+        - owner_user_id
+        - awaiting_handover
+        - created_at
+        - member_count
+        - sent_last_24h
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        address:
+          type: string
+          minLength: 3
+          maxLength: 320
+        display_name:
+          type: string
+          maxLength: 120
+        type:
+          $ref: '#/components/schemas/MailboxType'
+        owner_user_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        awaiting_handover:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        member_count:
+          type: integer
+          description: Members of a shared mailbox; 0 for a personal one.
+          minimum: 0
+          maximum: 100
+        sent_last_24h:
+          type: integer
+          description: The mailbox's personal-lane send attempts in the rolling 24 hours, failed ones
+            included.
+          minimum: 0
+    MailboxDirectoryMeta:
+      type: object
+      additionalProperties: false
+      required:
+        - per_page
+        - has_more
+        - next_cursor
+        - daily_send_limit
+        - sent_last_24h
+        - mailbox_count
+        - max_mailboxes
+      properties:
+        per_page:
+          type: integer
+          minimum: 1
+          maximum: 100
+        has_more:
+          type: boolean
+        next_cursor:
+          description: Pass as `cursor` to read the next, older page; null on the last page.
+          type:
+            - string
+            - 'null'
+          maxLength: 128
+        daily_send_limit:
+          type: integer
+          description: The organization's personal-lane limit per rolling 24 hours.
+          minimum: 1
+        sent_last_24h:
+          type: integer
+          description: The organization's personal-lane send attempts in the rolling 24 hours, including those
+            of deleted mailboxes, so the rows can add up to less.
+          minimum: 0
+        mailbox_count:
+          type: integer
+          description: The organization's live mailboxes of every type.
+          minimum: 0
+        max_mailboxes:
+          type: integer
+          description: '`MAILBOX_MAX_PER_ORGANIZATION`.'
+          minimum: 1
+          maximum: 5000
+    MailboxDirectoryPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailboxDirectoryEntry'
+        meta:
+          $ref: '#/components/schemas/MailboxDirectoryMeta'
+    MailboxImportRow:
+      type: object
+      additionalProperties: false
+      required:
+        - address
+        - members
+      properties:
+        address:
+          type: string
+          description: '`local@domain`, on the shared domain or a verified domain of the organization.'
+          maxLength: 320
+        display_name:
+          type: string
+          maxLength: 480
+        members:
+          type: string
+          description: '`email[:permission]` joined by `;`; permission `view`, `send` (default), or `manage`.'
+          maxLength: 8192
+    MailboxImportRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - dry_run
+        - rows
+      properties:
+        dry_run:
+          type: boolean
+          description: True only validates; false creates every row that passes.
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/MailboxImportRow'
+    MailboxImportRowStatus:
+      type: string
+      enum:
+        - valid
+        - created
+        - failed
+    MailboxImportRowResult:
+      type: object
+      additionalProperties: false
+      required:
+        - row
+        - address
+        - status
+        - mailbox_id
+        - error_code
+        - missing_emails
+      properties:
+        row:
+          type: integer
+          description: One-based index into the request's rows.
+          minimum: 1
+          maximum: 500
+        address:
+          type: string
+          description: The address as sent, after the formula guard is removed.
+          maxLength: 320
+        status:
+          $ref: '#/components/schemas/MailboxImportRowStatus'
+        mailbox_id:
+          description: The created mailbox; null unless `status` is `created`.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        error_code:
+          description: Why the row failed; null unless `status` is `failed`.
+          oneOf:
+            - $ref: '#/components/schemas/ErrorCode'
+            - type: 'null'
+        missing_emails:
+          type: array
+          description: With `MAILBOX.IMPORT_MEMBER_NOT_FOUND`, the emails that are not organization members;
+            otherwise empty.
+          maxItems: 100
+          items:
+            type: string
+            maxLength: 320
+    MailboxImportResult:
+      type: object
+      additionalProperties: false
+      required:
+        - dry_run
+        - succeeded
+        - failed
+        - rows
+      properties:
+        dry_run:
+          type: boolean
+        succeeded:
+          type: integer
+          minimum: 0
+        failed:
+          type: integer
+          minimum: 0
+        rows:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/MailboxImportRowResult'
+    MailboxImportResultResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailboxImportResult'
     MailboxResponse:
       type: object
       additionalProperties: false
@@ -11401,7 +11846,7 @@ components:
           type: string
         data:
           type: array
-          maxItems: 50
+          maxItems: 5000
           items:
             $ref: '#/components/schemas/Mailbox'
     MailAddress:

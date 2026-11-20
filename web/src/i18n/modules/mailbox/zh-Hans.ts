@@ -738,6 +738,8 @@ const messages = {
       sealedDeleted: '{actor} 删除了封存历史（{messages} 封信，{broadcasts} 个群发）',
       webhooksOn: '{actor} 开启了推送到组织 webhook',
       webhooksOff: '{actor} 关闭了推送到组织 webhook',
+      renamed: '{actor} 将名称改为“{name}”',
+      renamedCleared: '{actor} 清除了名称',
     },
     conflict: '这个邮箱刚刚发生了变化。请刷新查看当前权限。',
     refresh: '刷新',

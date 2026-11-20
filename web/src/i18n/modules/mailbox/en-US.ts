@@ -762,6 +762,8 @@ const messages = {
         '{actor} deleted the sealed history ({messages} messages, {broadcasts} broadcasts)',
       webhooksOn: '{actor} turned organization webhooks on',
       webhooksOff: '{actor} turned organization webhooks off',
+      renamed: '{actor} renamed the mailbox to "{name}"',
+      renamedCleared: '{actor} cleared the display name',
     },
     conflict: 'This mailbox changed in the meantime. Refresh to see its current access.',
     refresh: 'Refresh',

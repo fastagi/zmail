@@ -94,6 +94,8 @@ const (
 	CodeMailboxAddressInvalid        = "MAILBOX.ADDRESS_INVALID"
 	CodeMailboxAddressReserved       = "MAILBOX.ADDRESS_RESERVED"
 	CodeMailboxLimitReached          = "MAILBOX.LIMIT_REACHED"
+	CodeMailboxImportDuplicateRow    = "MAILBOX.IMPORT_DUPLICATE_ROW"
+	CodeMailboxImportMemberNotFound  = "MAILBOX.IMPORT_MEMBER_NOT_FOUND"
 	CodeMailboxAccessInvalid         = "MAILBOX.ACCESS_INVALID"
 	CodeMailboxAccessConflict        = "MAILBOX.ACCESS_CONFLICT"
 	CodeMailMessageNotFound          = "MAILBOX.MESSAGE_NOT_FOUND"
