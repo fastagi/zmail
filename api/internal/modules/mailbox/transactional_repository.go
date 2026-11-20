@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"sort"
 	"time"
@@ -92,12 +93,16 @@ func (r *repository) OldestQueuedTransactional(ctx context.Context) (*time.Time,
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	var oldest *time.Time
+	// min() over no rows is NULL, which only a nullable destination can hold.
+	var oldest sql.NullTime
 	err := r.conn(ctx).Model(&TransactionalMessagePO{}).
 		Where("status = ? AND mode = ? AND NOT simulated AND (queued_reason IS NULL OR queued_reason <> ?)",
 			string(domain.TransactionalStatusQueued), string(domain.APIKeyModeLive), string(domain.TransactionalQueuedSendLimit)).
 		Select("min(created_at)").Scan(&oldest).Error
-	return oldest, err
+	if err != nil || !oldest.Valid {
+		return nil, err
+	}
+	return &oldest.Time, nil
 }
 
 func (r *repository) FindTransactionalByProviderID(ctx context.Context, providerMessageID string) (*domain.TransactionalMessage, error) {

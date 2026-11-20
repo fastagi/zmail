@@ -896,3 +896,26 @@ func mustExec(t *testing.T, db *gorm.DB, statement string, arguments ...any) {
 		t.Fatalf("exec %q: %v", statement, err)
 	}
 }
+
+func TestOldestQueuedTransactionalIsNilWithoutQueuedMessages(t *testing.T) {
+	repo, _ := openTransactionalRepository(t)
+	ctx := context.Background()
+
+	oldest, err := repo.OldestQueuedTransactional(ctx)
+	if err != nil {
+		t.Fatalf("empty queue: %v", err)
+	}
+	if oldest != nil {
+		t.Fatalf("empty queue reported %v, want nil", *oldest)
+	}
+
+	createTransactional(t, repo, newTransactional(txBase.Add(time.Minute)))
+	createTransactional(t, repo, newTransactional(txBase))
+	oldest, err = repo.OldestQueuedTransactional(ctx)
+	if err != nil {
+		t.Fatalf("queued messages: %v", err)
+	}
+	if oldest == nil || !oldest.Equal(txBase) {
+		t.Fatalf("oldest = %v, want %v", oldest, txBase)
+	}
+}
