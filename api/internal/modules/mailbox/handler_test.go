@@ -1180,3 +1180,20 @@ func TestListDomainsReportsConfiguredMax(t *testing.T) {
 		}
 	}
 }
+
+func TestSendSubjectLimitCountsCharacters(t *testing.T) {
+	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
+	if _, err := fixture.service.CreateMailbox(t.Context(), as(7), sharedWithHandlerUser("helpdesk")); err != nil {
+		t.Fatalf("CreateMailbox: %v", err)
+	}
+	send := func(subject string) (*httptest.ResponseRecorder, map[string]any) {
+		return fixture.do(http.MethodPost, "/mailboxes/1/messages",
+			`{"to":["bob@example.com"],"subject":"`+subject+`","text":"Body"}`)
+	}
+	if sent, body := send(strings.Repeat("中", domain.MaxMailSubjectLength)); sent.Code != http.StatusCreated {
+		t.Fatalf("998-character CJK subject = %d %v; want 201", sent.Code, body)
+	}
+	if sent, body := send(strings.Repeat("中", domain.MaxMailSubjectLength+1)); sent.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("999-character CJK subject = %d %v; want 422", sent.Code, body)
+	}
+}
