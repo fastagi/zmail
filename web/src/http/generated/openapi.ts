@@ -268,6 +268,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/cloudflare-connections/{connection_id}/inbound-mail-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept a signed message from an organization Worker
+         * @description The callback authenticates the connection-specific signature and accepts mail only for this organization and connection.
+         */
+        post: operations["receiveOrganizationInboundMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/external-mail-connections": {
         parameters: {
             query?: never;
@@ -550,6 +570,92 @@ export interface paths {
          * @description Only owners and admins may.
          */
         post: operations["sendMailBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current organization connection */
+        get: operations["getCloudflareConnection"];
+        put?: never;
+        /** Bind a verified zone and return one-time installation credentials */
+        post: operations["bindCloudflareConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-connection/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke this connection and erase its secrets */
+        delete: operations["unbindCloudflareConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-connection/{connection_id}/checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check read access to DNS records, sending domains and receiving rules */
+        post: operations["checkCloudflareAccess"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-connection/{connection_id}/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set up an exact domain within the selected zone */
+        post: operations["connectTenantMailDomain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List active zones available to the submitted token */
+        post: operations["previewCloudflareZones"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4035,6 +4141,53 @@ export interface components {
         MailBroadcastVariables: {
             [key: string]: string;
         };
+        MailCloudflareChecksResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                dns: boolean;
+                receiving: boolean;
+                sending: boolean;
+            };
+            message: string;
+        };
+        MailCloudflareConnection: {
+            account_id: string;
+            id: string;
+            worker: string;
+            zone_id: string;
+            zone_name: string;
+        };
+        MailCloudflareConnectionResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                connection: components["schemas"]["MailCloudflareConnection"] | null;
+            };
+            message: string;
+        };
+        MailCloudflareInstallationResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                callback_path: string;
+                connection: components["schemas"]["MailCloudflareConnection"];
+                signing_secret: string;
+            };
+            message: string;
+        };
+        MailCloudflareZone: {
+            account_id: string;
+            account_name: string;
+            id: string;
+            name: string;
+        };
+        MailCloudflareZonesResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailCloudflareZone"][];
+            message: string;
+        };
         MailContact: {
             /** Format: date-time */
             created_at: string;
@@ -7195,6 +7348,90 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    receiveOrganizationInboundMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The envelope recipient the edge accepted the message for. */
+                "X-Mailbox-Recipient": string;
+                "X-Mailbox-Signature": string;
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "message/rfc822": string;
+            };
+        };
+        responses: {
+            /** @description The message was already stored by an earlier delivery. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundMailMessageResponse"];
+                };
+            };
+            /** @description The message is stored in the recipient's mailbox. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundMailMessageResponse"];
+                };
+            };
+            /** @description The signature is missing, stale, or wrong (`MAILBOX.INBOUND_SIGNATURE_INVALID`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No mailbox has the recipient address (`MAILBOX.RECIPIENT_NOT_FOUND`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The raw message exceeds 5 MiB (`MAILBOX.INBOUND_TOO_LARGE`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not a parseable message with a sender (`MAILBOX.INBOUND_UNPARSEABLE`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Inbound mail has no shared secret configured (`MAILBOX.INBOUND_DISABLED`), or the database is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     listExternalMailConnections: {
         parameters: {
             query?: never;
@@ -7938,6 +8175,189 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    getCloudflareConnection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Get the current organization connection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailCloudflareConnectionResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    bindCloudflareConnection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    api_token: string;
+                    zone_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Bind a verified zone and return one-time installation credentials */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailCloudflareInstallationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    unbindCloudflareConnection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoke this connection and erase its secrets */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    checkCloudflareAccess: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Check read access to DNS records, sending domains and receiving rules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailCloudflareChecksResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    connectTenantMailDomain: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailDomainRequest"];
+            };
+        };
+        responses: {
+            /** @description Set up an exact domain within the selected zone */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDomainResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    previewCloudflareZones: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    api_token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description List active zones available to the submitted token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailCloudflareZonesResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     importMailContacts: {

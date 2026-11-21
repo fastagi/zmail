@@ -15,22 +15,23 @@ import (
 
 // MailDomainPO is the persistence object of a connected domain.
 type MailDomainPO struct {
-	ID             uint   `gorm:"primaryKey"`
-	OrganizationID uint   `gorm:"not null;index:idx_mail_domains_organization"`
-	Name           string `gorm:"size:253;not null;uniqueIndex:idx_mail_domains_name"`
-	ZoneID         string `gorm:"size:64;not null"`
-	ZoneName       string `gorm:"size:253;not null"`
-	MailZoneID     *uint  `gorm:"index:idx_mail_domains_mail_zone"`
-	Capability     string `gorm:"size:20;not null;default:'send_receive'"`
-	SendingTag     string `gorm:"size:64;not null;default:''"`
-	Status         string `gorm:"size:20;not null;default:'pending'"`
-	Records        string `gorm:"type:jsonb;not null;default:'[]'"`
-	LastError      string `gorm:"size:500;not null;default:''"`
-	CheckedAt      *time.Time
-	VerifiedAt     *time.Time
-	CreatedBy      uint `gorm:"not null"`
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	CloudflareConnectionID *string `gorm:"type:uuid"`
+	ID                     uint    `gorm:"primaryKey"`
+	OrganizationID         uint    `gorm:"not null;index:idx_mail_domains_organization"`
+	Name                   string  `gorm:"size:253;not null;uniqueIndex:idx_mail_domains_name"`
+	ZoneID                 string  `gorm:"size:64;not null"`
+	ZoneName               string  `gorm:"size:253;not null"`
+	MailZoneID             *uint   `gorm:"index:idx_mail_domains_mail_zone"`
+	Capability             string  `gorm:"size:20;not null;default:'send_receive'"`
+	SendingTag             string  `gorm:"size:64;not null;default:''"`
+	Status                 string  `gorm:"size:20;not null;default:'pending'"`
+	Records                string  `gorm:"type:jsonb;not null;default:'[]'"`
+	LastError              string  `gorm:"size:500;not null;default:''"`
+	CheckedAt              *time.Time
+	VerifiedAt             *time.Time
+	CreatedBy              uint `gorm:"not null"`
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 func (MailDomainPO) TableName() string {
@@ -39,21 +40,22 @@ func (MailDomainPO) TableName() string {
 
 func (po *MailDomainPO) toDomain() *domain.MailDomain {
 	mailDomain := &domain.MailDomain{
-		ID:             po.ID,
-		OrganizationID: po.OrganizationID,
-		Name:           po.Name,
-		ZoneID:         po.ZoneID,
-		ZoneName:       po.ZoneName,
-		MailZoneID:     po.MailZoneID,
-		Capability:     domain.MailDomainCapability(po.Capability),
-		SendingTag:     po.SendingTag,
-		Status:         domain.MailDomainStatus(po.Status),
-		LastError:      po.LastError,
-		CheckedAt:      po.CheckedAt,
-		VerifiedAt:     po.VerifiedAt,
-		CreatedBy:      po.CreatedBy,
-		CreatedAt:      po.CreatedAt,
-		UpdatedAt:      po.UpdatedAt,
+		CloudflareConnectionID: po.CloudflareConnectionID,
+		ID:                     po.ID,
+		OrganizationID:         po.OrganizationID,
+		Name:                   po.Name,
+		ZoneID:                 po.ZoneID,
+		ZoneName:               po.ZoneName,
+		MailZoneID:             po.MailZoneID,
+		Capability:             domain.MailDomainCapability(po.Capability),
+		SendingTag:             po.SendingTag,
+		Status:                 domain.MailDomainStatus(po.Status),
+		LastError:              po.LastError,
+		CheckedAt:              po.CheckedAt,
+		VerifiedAt:             po.VerifiedAt,
+		CreatedBy:              po.CreatedBy,
+		CreatedAt:              po.CreatedAt,
+		UpdatedAt:              po.UpdatedAt,
 	}
 	if po.Records != "" {
 		// A row written by this code always decodes; an unreadable one shows no records.
@@ -85,21 +87,22 @@ func mailDomainPO(mailDomain *domain.MailDomain) (*MailDomainPO, error) {
 		capability = domain.MailDomainSendReceive
 	}
 	return &MailDomainPO{
-		ID:             mailDomain.ID,
-		OrganizationID: mailDomain.OrganizationID,
-		Name:           mailDomain.Name,
-		ZoneID:         mailDomain.ZoneID,
-		ZoneName:       mailDomain.ZoneName,
-		MailZoneID:     mailDomain.MailZoneID,
-		Capability:     string(capability),
-		SendingTag:     mailDomain.SendingTag,
-		Status:         string(status),
-		Records:        string(encoded),
-		LastError:      truncateRunes(mailDomain.LastError, 500),
-		CheckedAt:      mailDomain.CheckedAt,
-		VerifiedAt:     mailDomain.VerifiedAt,
-		CreatedBy:      mailDomain.CreatedBy,
-		CreatedAt:      mailDomain.CreatedAt,
+		CloudflareConnectionID: mailDomain.CloudflareConnectionID,
+		ID:                     mailDomain.ID,
+		OrganizationID:         mailDomain.OrganizationID,
+		Name:                   mailDomain.Name,
+		ZoneID:                 mailDomain.ZoneID,
+		ZoneName:               mailDomain.ZoneName,
+		MailZoneID:             mailDomain.MailZoneID,
+		Capability:             string(capability),
+		SendingTag:             mailDomain.SendingTag,
+		Status:                 string(status),
+		Records:                string(encoded),
+		LastError:              truncateRunes(mailDomain.LastError, 500),
+		CheckedAt:              mailDomain.CheckedAt,
+		VerifiedAt:             mailDomain.VerifiedAt,
+		CreatedBy:              mailDomain.CreatedBy,
+		CreatedAt:              mailDomain.CreatedAt,
 	}, nil
 }
 

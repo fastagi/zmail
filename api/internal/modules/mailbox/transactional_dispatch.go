@@ -318,7 +318,7 @@ func (s *service) sendTransactionalAttempt(ctx context.Context, message *domain.
 	message.Attempts++
 	metrics.RecordSendLaneAttempt(string(domain.SendLaneTransactional))
 	callStarted := time.Now()
-	result, sendErr := s.transport.Send(ctx, mailtransport.Message{
+	result, sendErr := s.sendWithConnection(ctx, message.OrganizationID, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,
 		To:          []string{message.ToAddress},

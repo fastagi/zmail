@@ -138,6 +138,18 @@ TABLE mail_broadcasts
   COLUMN safety_override boolean NOT NULL DEFAULT false
   COLUMN variables jsonb NOT NULL DEFAULT '{}'::jsonb
 
+TABLE mail_cloudflare_connections
+  COLUMN id uuid NOT NULL
+  COLUMN organization_id bigint NOT NULL
+  COLUMN account_id text NOT NULL
+  COLUMN zone_id text NOT NULL
+  COLUMN zone_name text NOT NULL
+  COLUMN worker text NOT NULL
+  COLUMN token_cipher text NOT NULL
+  COLUMN signing_cipher text NOT NULL
+  COLUMN active boolean NOT NULL DEFAULT true
+  COLUMN created_at timestamp with time zone NOT NULL DEFAULT now()
+
 TABLE mail_contact_list_members
   COLUMN list_id bigint NOT NULL
   COLUMN contact_id bigint NOT NULL
@@ -187,6 +199,7 @@ TABLE mail_domains
   COLUMN updated_at timestamp with time zone
   COLUMN mail_zone_id bigint
   COLUMN capability character varying(20) NOT NULL DEFAULT 'send_receive'::character varying
+  COLUMN cloudflare_connection_id uuid
 
 TABLE mail_folders
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_folders_id_seq'::regclass)
@@ -760,6 +773,8 @@ CONSTRAINT mail_broadcasts.chk_mail_broadcasts_status CHECK (((status)::text = A
 CONSTRAINT mail_broadcasts.chk_mail_broadcasts_test_percent CHECK (((test_percent >= 0) AND (test_percent <= 50)))
 CONSTRAINT mail_broadcasts.fk_mail_broadcasts_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_broadcasts.mail_broadcasts_pkey PRIMARY KEY (id)
+CONSTRAINT mail_cloudflare_connections.mail_cloudflare_connections_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_cloudflare_connections.mail_cloudflare_connections_pkey PRIMARY KEY (id)
 CONSTRAINT mail_contact_list_members.fk_mail_contact_list_members_contact FOREIGN KEY (contact_id) REFERENCES mail_contacts(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_contact_list_members.fk_mail_contact_list_members_list FOREIGN KEY (list_id) REFERENCES mail_contact_lists(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_contact_list_members.mail_contact_list_members_pkey PRIMARY KEY (list_id, contact_id)
@@ -774,6 +789,7 @@ CONSTRAINT mail_domains.chk_mail_domains_capability CHECK (((capability)::text =
 CONSTRAINT mail_domains.chk_mail_domains_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'verified'::character varying])::text[])))
 CONSTRAINT mail_domains.fk_mail_domains_mail_zone FOREIGN KEY (mail_zone_id) REFERENCES mail_zones(id)
 CONSTRAINT mail_domains.fk_mail_domains_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mail_domains.mail_domains_cloudflare_connection_id_fkey FOREIGN KEY (cloudflare_connection_id) REFERENCES mail_cloudflare_connections(id)
 CONSTRAINT mail_domains.mail_domains_pkey PRIMARY KEY (id)
 CONSTRAINT mail_folders.mail_folders_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT mail_folders.mail_folders_pkey PRIMARY KEY (id)
@@ -1019,6 +1035,8 @@ INDEX CREATE UNIQUE INDEX mail_broadcast_recipients_pkey ON mail_broadcast_recip
 INDEX CREATE INDEX idx_mail_broadcasts_due ON mail_broadcasts USING btree (status, scheduled_at)
 INDEX CREATE INDEX idx_mail_broadcasts_listing ON mail_broadcasts USING btree (organization_id, id)
 INDEX CREATE UNIQUE INDEX mail_broadcasts_pkey ON mail_broadcasts USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_cloudflare_active ON mail_cloudflare_connections USING btree (organization_id) WHERE active
+INDEX CREATE UNIQUE INDEX mail_cloudflare_connections_pkey ON mail_cloudflare_connections USING btree (id)
 INDEX CREATE INDEX idx_mail_contact_list_members_contact ON mail_contact_list_members USING btree (contact_id)
 INDEX CREATE UNIQUE INDEX mail_contact_list_members_pkey ON mail_contact_list_members USING btree (list_id, contact_id)
 INDEX CREATE UNIQUE INDEX idx_mail_contact_lists_name ON mail_contact_lists USING btree (organization_id, name)
