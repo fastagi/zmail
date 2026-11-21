@@ -792,6 +792,17 @@ body Graph cannot return within the connector's bound is kept with its headers o
 the stored grant; Microsoft has no per-grant revocation, so the member removes the app's consent in
 their Microsoft account to end it there as well.
 
+### Gmail
+
+The `gmail` connector signs in on Google's consent page with the read-only Gmail scope and offline
+access. The first sync copies the backfill window newest first, a page at a time, and then follows
+the account's history from where the backfill began, so mail that arrives during the backfill is
+not missed. Only inbound mail is copied: drafts, spam, trash, and sent mail that is not also in the
+inbox are skipped; mail moved out of spam into the inbox is copied then. When Google no longer
+replays the history, the sync starts the backfill over without copies. Only a grant Google refuses
+or one that lost access to the mailbox moves the connection to `needs_reconnect`; rate limits,
+quotas, outages, and a misconfigured OAuth client are retried at the next interval.
+
 ## Domains
 
 With `MAILBOX_CUSTOM_DOMAINS_ENABLED=true`, an organization may use its own domains next to the
