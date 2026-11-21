@@ -15,6 +15,26 @@ import (
 // else, or whose feature is off.
 var ErrExternalMailConnectionNotFound = errors.New("external mail connection not found")
 
+// Errors of binding an outside account.
+var (
+	// ErrExternalMailAuthorizationNotFound hides a sign-in that is unknown, expired, used, or
+	// started by someone else.
+	ErrExternalMailAuthorizationNotFound = errors.New("external mail authorization not found")
+	// ErrExternalMailAuthorizationFailed means the provider refused the authorization code.
+	ErrExternalMailAuthorizationFailed = errors.New("external mail authorization failed")
+	// ErrExternalMailAccountMismatch means a reconnect signed in to another account.
+	ErrExternalMailAccountMismatch = errors.New("external mail account does not match the connection")
+	// ErrExternalMailAccountTaken means another member of the organization bound the account.
+	ErrExternalMailAccountTaken = errors.New("external mail account is bound by another member")
+	// ErrExternalMailConnectionLimit means the member bound the most accounts allowed.
+	ErrExternalMailConnectionLimit = errors.New("external mail connection limit reached")
+	// ErrExternalMailAuthorizationInvalid means a sign-in request is malformed: backfill out of
+	// range, or a provider that is not the reconnected connection's.
+	ErrExternalMailAuthorizationInvalid = errors.New("external mail authorization request is invalid")
+	// ErrExternalMailProviderUnavailable means the instance does not run the requested connector.
+	ErrExternalMailProviderUnavailable = errors.New("external mail provider unavailable")
+)
+
 // ExternalMailConnectionPO is the persistent object of one external mail connection.
 type ExternalMailConnectionPO struct {
 	ID                    uint   `gorm:"primaryKey"`
@@ -98,11 +118,12 @@ func (r *repository) ClaimExternalMailConnections(ctx context.Context, now, leas
 	return connections, nil
 }
 
-func (r *repository) SaveExternalMailSync(ctx context.Context, result domain.ExternalMailSyncResult) (int, bool, error) {
+func (r *repository) SaveExternalMailSync(ctx context.Context, result domain.ExternalMailSyncResult) ([]*domain.MailMessage, bool, error) {
 	if r.db == nil {
-		return 0, false, domain.ErrServiceUnavailable
+		return nil, false, domain.ErrServiceUnavailable
 	}
-	stored, applied := 0, false
+	var stored []*domain.MailMessage
+	applied := false
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{
 			"status": string(result.Status), "sync_cursor": result.Cursor,
@@ -131,13 +152,13 @@ func (r *repository) SaveExternalMailSync(ctx context.Context, result domain.Ext
 				return err
 			}
 			if created {
-				stored++
+				stored = append(stored, message)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		return 0, false, err
+		return nil, false, err
 	}
 	return stored, applied, nil
 }
@@ -220,4 +241,109 @@ func (r *repository) RevokeExternalMailConnection(ctx context.Context, organizat
 		return ErrExternalMailConnectionNotFound
 	}
 	return nil
+}
+
+func (r *repository) FindExternalMailConnectionByAccount(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string) (*domain.ExternalMailConnection, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var po ExternalMailConnectionPO
+	err := r.conn(ctx).
+		Where("organization_id = ? AND provider = ? AND lower(account_address) = lower(?)", organizationID, string(provider), address).
+		First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrExternalMailConnectionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return po.toDomain(), nil
+}
+
+func (r *repository) RebindExternalMailConnection(ctx context.Context, rebind domain.ExternalMailRebind) (*domain.ExternalMailConnection, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	updates := map[string]any{
+		"status": string(domain.ExternalMailStatusActive), "encrypted_refresh_token": rebind.EncryptedRefreshToken,
+		"last_error_code": nil, "next_sync_at": rebind.Now, "updated_at": rebind.Now,
+	}
+	if rebind.ResetCursor {
+		updates["sync_cursor"] = ""
+	}
+	var rows []ExternalMailConnectionPO
+	err := r.conn(ctx).Model(&rows).Clauses(clause.Returning{}).
+		Where("id = ?", rebind.ConnectionID).Updates(updates).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrExternalMailConnectionNotFound
+	}
+	return rows[0].toDomain(), nil
+}
+
+// ExternalMailAuthorizationPO is the persistent object of one pending sign-in.
+type ExternalMailAuthorizationPO struct {
+	ID             uint   `gorm:"primaryKey"`
+	OrganizationID uint   `gorm:"not null"`
+	UserID         uint   `gorm:"not null"`
+	Provider       string `gorm:"size:16;not null"`
+	StateHash      string `gorm:"type:char(64);not null;uniqueIndex"`
+	SealedVerifier string `gorm:"type:text;not null"`
+	ConnectionID   *uint
+	BackfillDays   int `gorm:"type:smallint;not null;default:14"`
+	ExpiresAt      time.Time
+	CreatedAt      time.Time
+}
+
+func (ExternalMailAuthorizationPO) TableName() string {
+	return "external_mail_authorizations"
+}
+
+func (r *repository) CreateExternalMailAuthorization(ctx context.Context, authorization *domain.ExternalMailAuthorization) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	po := &ExternalMailAuthorizationPO{
+		OrganizationID: authorization.OrganizationID, UserID: authorization.UserID,
+		Provider: string(authorization.Provider), StateHash: authorization.StateHash,
+		SealedVerifier: authorization.SealedVerifier, ConnectionID: authorization.ConnectionID,
+		BackfillDays: authorization.BackfillDays, ExpiresAt: authorization.ExpiresAt, CreatedAt: authorization.CreatedAt,
+	}
+	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		// Abandoned sign-ins expire within minutes; each start sweeps a bounded batch of them.
+		if err := tx.Exec(`DELETE FROM external_mail_authorizations WHERE id IN (
+			SELECT id FROM external_mail_authorizations WHERE expires_at < ? ORDER BY expires_at LIMIT 100)`,
+			authorization.CreatedAt).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(po).Error; err != nil {
+			return err
+		}
+		authorization.ID = po.ID
+		return nil
+	})
+}
+
+func (r *repository) TakeExternalMailAuthorization(ctx context.Context, stateHash string, now time.Time) (*domain.ExternalMailAuthorization, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var rows []ExternalMailAuthorizationPO
+	err := r.conn(ctx).Clauses(clause.Returning{}).
+		Where("state_hash = ?", stateHash).Delete(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 || !rows[0].ExpiresAt.After(now) {
+		return nil, ErrExternalMailAuthorizationNotFound
+	}
+	po := rows[0]
+	return &domain.ExternalMailAuthorization{
+		ID: po.ID, OrganizationID: po.OrganizationID, UserID: po.UserID,
+		Provider: domain.ExternalMailProvider(po.Provider), StateHash: po.StateHash,
+		SealedVerifier: po.SealedVerifier, ConnectionID: po.ConnectionID, BackfillDays: po.BackfillDays,
+		ExpiresAt: po.ExpiresAt, CreatedAt: po.CreatedAt,
+	}, nil
 }

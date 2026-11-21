@@ -156,6 +156,8 @@ const messages = {
       gmailTitle: 'Synced from a bound Gmail account (read-only)',
       outlook: 'Outlook',
       outlookTitle: 'Synced from a bound Outlook account (read-only)',
+      other: '{id}',
+      otherTitle: 'Synced from a bound {id} account (read-only)',
     },
     views: {
       label: 'Inbox views',

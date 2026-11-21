@@ -414,13 +414,19 @@ export function InboxList({
                       {t('inbox.threadCount', { count })}
                     </span>
                   ) : null}
-                  {item.source === 'gmail' || item.source === 'outlook' ? (
+                  {item.source && item.source !== 'zmail' ? (
                     <span
                       data-source={item.source}
-                      title={t(`inbox.source.${item.source}Title`)}
+                      title={
+                        item.source === 'gmail' || item.source === 'outlook'
+                          ? t(`inbox.source.${item.source}Title`)
+                          : t('inbox.source.otherTitle', { id: item.source })
+                      }
                       className="shrink-0 rounded-full border border-border px-[6px] text-[11px] text-text-muted"
                     >
-                      {t(`inbox.source.${item.source}`)}
+                      {item.source === 'gmail' || item.source === 'outlook'
+                        ? t(`inbox.source.${item.source}`)
+                        : t('inbox.source.other', { id: item.source })}
                     </span>
                   ) : null}
                   {role ? (

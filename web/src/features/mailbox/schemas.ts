@@ -11,6 +11,7 @@ import {
   optional,
   positive,
   record,
+  regex,
   strictObject,
   string,
   looseObject,
@@ -375,8 +376,11 @@ export const MAIL_LABEL_COLORS = [
 ] as const;
 
 /** The fields every listing shares, the log included. */
-/** `zmail` for Zmail's own mail; `gmail` and `outlook` for read-only copies of a bound account. */
-export const mailSourceSchema = union([literal('zmail'), literal('gmail'), literal('outlook')]);
+/**
+ * `zmail` for Zmail's own mail; otherwise the id of the connector that synced a read-only copy of a
+ * bound account, such as `gmail` or `outlook`. New connectors add ids without a contract change.
+ */
+export const mailSourceSchema = string().check(regex(/^[a-z][a-z0-9_]{1,15}$/u));
 
 const logSummaryShape = {
   id: safeIdSchema,

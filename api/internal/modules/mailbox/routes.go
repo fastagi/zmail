@@ -66,6 +66,11 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("platform_accounts.events.index").WhereNumber("account_id")
 		auth.POST("/platform-account-handovers", h.HandOverPlatformAccounts).Name("platform_account_handovers.store")
 
+		auth.GET("/external-mail-connectors", h.ListExternalMailConnectors).Name("external_mail_connectors.index")
+		auth.POST("/external-mail-authorizations", h.StartExternalMailAuthorization).
+			Name("external_mail_authorizations.store")
+		auth.POST("/external-mail-authorizations/completions", h.CompleteExternalMailAuthorization).
+			Name("external_mail_authorizations.completions.store")
 		auth.GET("/external-mail-connections", h.ListExternalMailConnections).Name("external_mail_connections.index")
 		auth.DELETE("/external-mail-connections/:connection_id", h.RevokeExternalMailConnection).
 			Name("external_mail_connections.destroy").WhereNumber("connection_id")

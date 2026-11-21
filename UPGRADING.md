@@ -11,6 +11,38 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mail connectors: binding, reconnecting, and open provider ids
+
+External mailboxes can now be bound and reconnected through a provider-neutral connector registry,
+and synced mail goes through the same post-store step as Zmail's own inbound mail. Contract:
+`contracts/MAILBOXES.md`, External Mailboxes. Plan: `docs/plans/mail-connectors.plan.md`.
+
+### Medium — `source` and `provider` are connector ids, not a fixed list
+
+`source` on message summaries and `provider` on connections were `gmail` or `outlook`; they are now
+any id matching `^[a-z][a-z0-9_]{1,15}$` (`zmail` stays Zmail's own mail). A client with a strict
+enum must accept any such id and render one it does not know generically. Three routes are new:
+`GET /v1/external-mail-connectors`, `POST /v1/external-mail-authorizations`, and
+`POST /v1/external-mail-authorizations/completions`, with seven `MAILBOX.EXTERNAL_*` error codes.
+`EXTERNAL_MAIL_REDIRECT_URL` names the Web callback page.
+
+### Medium — External mailboxes leave the delivery namespace; triage consent is the owner's
+
+`FindMailboxByAddress` and the address directory ignore `external` mailboxes, so inbound delivery,
+sending from an address, and address availability never resolve one. Only the owner of an
+`external` mailbox may switch AI triage on for it, as for a personal mailbox; previously an
+organization manager could. A fork that implements `ExternalMailSource` must adopt the new
+`AuthURL(ExternalMailAuthRequest)` and `Exchange(ctx, ExternalMailCodeExchange)` signatures, which
+carry the PKCE challenge and verifier.
+
+### Low — Migration `2026_12_03_090000_open_mail_connectors`
+
+Replaces the provider and source CHECKs with the connector pattern (the source CHECK is added
+`NOT VALID`, no scan), rebuilds `idx_mailboxes_address` as a partial index that skips external
+mailboxes (mailboxes is bounded per organization), and creates `external_mail_authorizations`.
+Rolling back fails while a connector other than `gmail` or `outlook`, or two external mailboxes with
+one address, exist.
+
 ## Unreleased — Platform mail operations: broadcast content and its audit
 
 Operators can read the sent text of organization broadcast messages, with a reason and an access

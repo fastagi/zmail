@@ -151,6 +151,8 @@ const messages = {
       gmailTitle: '从绑定的 Gmail 账号同步（只读）',
       outlook: 'Outlook',
       outlookTitle: '从绑定的 Outlook 账号同步（只读）',
+      other: '{id}',
+      otherTitle: '从绑定的 {id} 账号同步（只读）',
     },
     views: {
       label: '收件视图',

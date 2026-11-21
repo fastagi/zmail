@@ -736,6 +736,7 @@ func Load() (*Config, error) {
 		AITriage: loadAITriageConfig(),
 		ExternalMail: ExternalMailConfig{
 			Providers: parseExternalMailProviders(env.Get("EXTERNAL_MAIL_PROVIDERS", "")),
+			RedirectURL: strings.TrimSpace(env.Get("EXTERNAL_MAIL_REDIRECT_URL", "")),
 		},
 		Mailbox: MailboxConfig{
 			Domain:              env.Get("MAILBOX_DOMAIN", ""),
