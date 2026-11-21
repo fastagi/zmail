@@ -2,6 +2,8 @@ const messages = {
   notifications: 'Notifications',
   profile: 'Profile',
   returnToSite: 'Return to site',
+  navigation: 'Console navigation',
+  openNavigation: 'Open navigation menu',
   greeting: {
     hello: 'Hello, {name}',
     late: 'Up late, {name}',

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -24,14 +24,18 @@ vi.mock('@/config/features', () => ({
 vi.mock('@/components/theme-toggle', () => ({ ThemeToggle: () => null }));
 vi.mock('@/components/common', () => ({ LanguageSwitcher: () => null }));
 
-function renderLayout() {
-  return render(
+function layoutTree() {
+  return (
     <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
       <ConsoleLayout>
         <p>page</p>
       </ConsoleLayout>
     </NextIntlClientProvider>
   );
+}
+
+function renderLayout() {
+  return render(layoutTree());
 }
 
 describe('console navigation', () => {
@@ -54,5 +58,61 @@ describe('console navigation', () => {
 
     expect(screen.getByRole('link', { name: 'Mailboxes' })).not.toHaveAttribute('title');
     expect(screen.getByRole('complementary')).toHaveAttribute('data-compact', 'false');
+  });
+
+  // #80: a mouse click leaves DOM focus on the rail link; `focus-within` kept the
+  // rail expanded over the Mailboxes compose button until the user clicked elsewhere.
+  it('expands the compact rail for hover or keyboard focus, not for a stale click focus', () => {
+    renderLayout();
+
+    const rail = screen.getByRole('complementary');
+    expect(rail.className).not.toMatch(/focus-within/);
+    expect(rail.className).toContain('has-[:focus-visible]:w-[220px]');
+    expect(rail.className).toContain('hover:w-[220px]');
+    const label = within(rail).getByText('Mailboxes');
+    expect(label.className).not.toMatch(/focus-within/);
+    expect(label.className).toContain('group-has-[:focus-visible]/rail:opacity-100');
+  });
+
+  // #79: below the desktop breakpoint the rail is hidden; a header menu replaces it.
+  it('offers the same destinations in a mobile menu that closes on navigation', async () => {
+    const view = renderLayout();
+
+    const menuButton = screen.getByRole('button', { name: 'Open navigation menu' });
+    expect(menuButton).toHaveClass('md:hidden');
+    expect(menuButton).toHaveAttribute('aria-expanded', 'false');
+
+    menuButton.focus();
+    fireEvent.click(menuButton);
+    const sheet = await screen.findByRole('dialog', { name: 'Console navigation' });
+    expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+    const sheetNav = within(sheet).getByRole('navigation', { name: 'Console navigation' });
+    for (const name of [
+      'Console',
+      'Emails',
+      'Mailboxes',
+      'Broadcasts',
+      'Contacts',
+      'Templates',
+      'Developers',
+      'Settings',
+      'Return to site',
+    ]) {
+      expect(within(sheetNav).getByRole('link', { name })).toBeInTheDocument();
+    }
+    expect(within(sheetNav).getByRole('link', { name: 'Mailboxes' })).toHaveAttribute(
+      'aria-current',
+      'page'
+    );
+
+    fireEvent.keyDown(sheet, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(menuButton).toHaveFocus();
+
+    fireEvent.click(menuButton);
+    await screen.findByRole('dialog', { name: 'Console navigation' });
+    state.pathname = '/console/emails';
+    view.rerender(layoutTree());
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 });

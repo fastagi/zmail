@@ -1,6 +1,6 @@
 'use client';
 
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -20,6 +20,7 @@ import {
   Users,
   Megaphone,
   Code2,
+  Menu,
   // fastbuild:slot web.console.nav-icons
 } from 'lucide-react';
 
@@ -42,6 +43,8 @@ import { useAuthStore } from '@/features/auth/store/auth-store';
 import { isWebFeatureEnabled } from '@/config/features';
 import { isDevtoolsEnabled } from '@/config/devtools';
 
+import type { ConsoleNavItem } from './_components/console-mobile-nav';
+
 const OrganizationSwitcher = lazy(async () => {
   const organizationFeature =
     await import('@/features/organization/components/organization-switcher');
@@ -51,6 +54,11 @@ const OrganizationSwitcher = lazy(async () => {
 const AdminEntryLink = lazy(async () => {
   const adminFeature = await import('@/features/mailbox/components/admin/admin-entry-link');
   return { default: adminFeature.AdminEntryLink };
+});
+
+const ConsoleMobileNav = lazy(async () => {
+  const mobileNav = await import('./_components/console-mobile-nav');
+  return { default: mobileNav.ConsoleMobileNav };
 });
 
 const NotificationCenter = lazy(async () => {
@@ -70,8 +78,16 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
   const compactNav = isNavigationItemActive(pathname, ROUTES.CONSOLE.MAILBOXES);
   const navLabelClass = cn(
     'whitespace-nowrap',
-    compactNav && 'opacity-0 motion-safe:transition-opacity group-hover/rail:opacity-100 group-focus-within/rail:opacity-100'
+    // Expand for hover or keyboard focus only: a link keeps DOM focus after a
+    // mouse click, so `focus-within` left the rail open over the page (#80).
+    compactNav &&
+      'opacity-0 motion-safe:transition-opacity group-hover/rail:opacity-100 group-has-[:focus-visible]/rail:opacity-100'
   );
+  // The sheet is open only for the path it was opened on, so any navigation closes it.
+  const [mobileNavPath, setMobileNavPath] = useState<string | null>(null);
+  const [mobileNavLoaded, setMobileNavLoaded] = useState(false);
+  const mobileNavOpen = mobileNavPath === pathname;
+  const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
   const t = useT();
   const user = useAuthStore.use.user();
   const { mutate: logout, isPending: isLoggingOut } = useLogout();
@@ -167,11 +183,32 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
     },
   ];
 
+  const toMobileItem = (item: NavItem): ConsoleNavItem => ({
+    ...item,
+    active: isNavigationItemActive(pathname, item.href),
+  });
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-bg-canvas text-text-main">
       {/* Fixed Header */}
       <header className="flex h-16 shrink-0 items-center justify-between border-b bg-bg-surface px-4 md:px-6 shadow-sm z-50">
         <div className="flex min-w-0 items-center gap-2 sm:gap-4">
+          <Button
+            ref={mobileNavTriggerRef}
+            variant="ghost"
+            isIcon
+            className="-ml-2 h-9 w-9 md:hidden"
+            aria-expanded={mobileNavOpen}
+            aria-controls={mobileNavOpen ? 'console-mobile-nav' : undefined}
+            aria-haspopup="dialog"
+            onClick={() => {
+              setMobileNavLoaded(true);
+              setMobileNavPath(pathname);
+            }}
+          >
+            <Menu className="h-5 w-5" aria-hidden="true" />
+            <span className="sr-only">{t('console.openNavigation')}</span>
+          </Button>
           <Link href={ROUTES.SITE.HOME} className="flex items-center gap-2.5 group">
             <Logo className="h-8 w-8 text-primary transition-transform group-hover:scale-105" />
             <span className="hidden text-xl font-bold sm:inline">Zmail</span>
@@ -260,6 +297,19 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
         </div>
       </header>
 
+      {mobileNavLoaded ? (
+        <Suspense fallback={null}>
+          <ConsoleMobileNav
+            open={mobileNavOpen}
+            onOpenChange={open => setMobileNavPath(open ? pathname : null)}
+            mainItems={mainNavItems.map(toMobileItem)}
+            secondaryItems={secondaryNavItems.map(toMobileItem)}
+            returnHref={ROUTES.SITE.HOME}
+            triggerRef={mobileNavTriggerRef}
+          />
+        </Suspense>
+      ) : null}
+
       {/* Body: Sidebar + Main Content */}
       <div className="flex h-0 grow overflow-hidden">
         {/* Fixed Sidebar */}
@@ -269,7 +319,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
             className={cn(
               'absolute inset-y-0 left-0 z-40 flex flex-col overflow-hidden border-r bg-background',
               compactNav
-                ? 'group/rail w-14 motion-safe:transition-[width,box-shadow] motion-safe:duration-200 hover:w-[220px] hover:shadow-lg focus-within:w-[220px] focus-within:shadow-lg'
+                ? 'group/rail w-14 motion-safe:transition-[width,box-shadow] motion-safe:duration-200 hover:w-[220px] hover:shadow-lg has-[:focus-visible]:w-[220px] has-[:focus-visible]:shadow-lg'
                 : 'w-full'
             )}
           >
