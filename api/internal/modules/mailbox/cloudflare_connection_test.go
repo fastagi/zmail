@@ -15,7 +15,10 @@ type tenantConnectionRepository struct {
 	connection *CloudflareConnection
 }
 
-func (r *tenantConnectionRepository) findConnection(_ context.Context, org uint, id string) (*CloudflareConnection, error) {
+func (r *tenantConnectionRepository) findConnection(ctx context.Context, org uint, id string) (*CloudflareConnection, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	c := r.connection
 	if c == nil || (org != 0 && org != c.OrganizationID) || (id != "" && id != c.ID) {
 		return nil, nil

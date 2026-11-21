@@ -1,8 +1,9 @@
 package migrations
 
 import (
-	"github.com/fastagi/zmail/api/internal/infra/migration"
 	"gorm.io/gorm"
+
+	"github.com/fastagi/zmail/api/internal/infra/migration"
 )
 
 type organizationMailCloudflare struct{ migration.BaseMigration }

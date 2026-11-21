@@ -353,9 +353,9 @@ func (s *service) DeleteMailDomain(ctx context.Context, organizationID, id uint)
 // records the zone lacks, and checks the result. It only ever adds: a record that conflicts stays
 // as it is and is reported.
 func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
-	provider, _, err := s.domainClient(ctx, mailDomain)
-	if err != nil {
-		return nil, err
+	provider, _, clientErr := s.domainClient(ctx, mailDomain)
+	if clientErr != nil {
+		return nil, clientErr
 	}
 	var failures []error
 	if receives(mailDomain) {

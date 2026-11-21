@@ -1235,9 +1235,9 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 	}
 	if s.domains != nil {
 		_, name, _ := strings.Cut(recipient, "@")
-		d, err := s.domains.FindDomainByName(ctx, name)
-		if err != nil && !errors.Is(err, ErrMailDomainNotFound) {
-			return nil, false, err
+		d, lookupErr := s.domains.FindDomainByName(ctx, name)
+		if lookupErr != nil && !errors.Is(lookupErr, ErrMailDomainNotFound) {
+			return nil, false, lookupErr
 		}
 		if conn != nil && (d == nil || d.CloudflareConnectionID == nil || *d.CloudflareConnectionID != conn.ID || !receives(d) || mailbox.OrganizationID != conn.OrganizationID || d.OrganizationID != conn.OrganizationID) {
 			return nil, false, ErrMailInboundSignature

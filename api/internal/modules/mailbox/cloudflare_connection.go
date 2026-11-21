@@ -7,11 +7,12 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
-	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 type CloudflareConnection struct {
@@ -88,6 +89,10 @@ func (s *service) CloudflareZones(ctx context.Context, token string) ([]mailtran
 	return mailtransport.NewCloudflareDomains(config.MailboxConfig{CloudflareAPIToken: token}).AccessibleZones(ctx)
 }
 func (s *service) BindCloudflare(ctx context.Context, org uint, token, zoneID string) (*CloudflareConnection, string, error) {
+	store, ok := s.repo.(cloudflareStore)
+	if !ok {
+		return nil, "", ErrMailDomainsDisabled
+	}
 	current, err := s.GetCloudflareConnection(ctx, org)
 	if err != nil {
 		return nil, "", err
@@ -116,7 +121,7 @@ func (s *service) BindCloudflare(ctx context.Context, org uint, token, zoneID st
 		if row.SigningCipher, err = s.encryptor.EncryptString(secret); err != nil {
 			return nil, "", err
 		}
-		if err = s.repo.(cloudflareStore).insertConnection(ctx, row); err != nil {
+		if err = store.insertConnection(ctx, row); err != nil {
 			return nil, "", err
 		}
 		return row, secret, nil
@@ -135,7 +140,7 @@ func (s *service) connectionConfig(ctx context.Context, d *domain.MailDomain) (c
 	if err != nil {
 		return config.MailboxConfig{}, err
 	}
-	if row == nil || row.ZoneID != d.ZoneID || !(d.Name == row.ZoneName || strings.HasSuffix(d.Name, "."+row.ZoneName)) {
+	if row == nil || row.ZoneID != d.ZoneID || (d.Name != row.ZoneName && !strings.HasSuffix(d.Name, "."+row.ZoneName)) {
 		return config.MailboxConfig{}, ErrMailDomainsDisabled
 	}
 	token, err := s.encryptor.DecryptString(row.TokenCipher)
@@ -163,7 +168,7 @@ func (s *service) ConnectCloudflareDomain(ctx context.Context, org, actor uint, 
 	if err != nil {
 		return nil, err
 	}
-	if row == nil || !(name == row.ZoneName || strings.HasSuffix(name, "."+row.ZoneName)) {
+	if row == nil || (name != row.ZoneName && !strings.HasSuffix(name, "."+row.ZoneName)) {
 		return nil, ErrMailDomainZoneNotFound
 	}
 	if capability == "" {
