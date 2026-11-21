@@ -435,7 +435,7 @@ func TestExternalMailSavesRotatedToken(t *testing.T) {
 	}
 }
 
-// TestExternalMailCursorExpiryResyncs: when the provider no longer honours the cursor, the sync
+// TestExternalMailCursorExpiryResyncs: when the provider no longer honors the cursor, the sync
 // starts over at once from an empty cursor and stores no second copy.
 func TestExternalMailCursorExpiryResyncs(t *testing.T) {
 	f := newExternalFixture(t, config.ExternalMailSourceFake)
@@ -484,5 +484,30 @@ func TestExternalMailKeepsRotatedTokenOfFailedFetch(t *testing.T) {
 			t.Fatalf("%s: stored token %q, status %q, err %v; want the rotated token on an active connection",
 				name, stored, connection.Status, err)
 		}
+	}
+}
+
+// TestExternalMailRegistryBuildsRegisteredConnectors: a connector registered by its adapter is
+// offered when the configuration enables it, once, and not otherwise.
+func TestExternalMailRegistryBuildsRegisteredConnectors(t *testing.T) {
+	saved := externalMailConnectorBuilders
+	t.Cleanup(func() { externalMailConnectorBuilders = saved })
+	externalMailConnectorBuilders = nil
+	builder := func(cfg config.ExternalMailConfig) (ExternalMailConnector, bool) {
+		return ExternalMailConnector{
+			ID: "imap", AuthKind: ExternalMailAuthPassword, Capabilities: ExternalMailCapabilities{Read: true},
+			Source: NewFakeExternalMailSource(),
+		}, cfg.Provides(config.ExternalMailProviderIMAP)
+	}
+	registerExternalMailConnector(builder)
+	registerExternalMailConnector(builder)
+
+	enabled := newExternalMailRegistry(config.ExternalMailConfig{Providers: []string{config.ExternalMailProviderIMAP}})
+	if connectors := enabled.list(); len(connectors) != 1 || connectors[0].ID != "imap" {
+		t.Fatalf("connectors = %+v, want imap once", connectors)
+	}
+	other := newExternalMailRegistry(config.ExternalMailConfig{Providers: []string{config.ExternalMailProviderGmail}})
+	if connectors := other.list(); len(connectors) != 0 {
+		t.Fatalf("connectors = %+v, want none when the provider is not enabled", connectors)
 	}
 }
