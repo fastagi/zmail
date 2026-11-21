@@ -20,7 +20,7 @@ var (
 	// ErrExternalMailAuth means the provider refused the token (HTTP 401 or a revoked grant): the
 	// owner must bind the account again.
 	ErrExternalMailAuth = errors.New("external mail authorization failed")
-	// ErrExternalMailCursorExpired means the provider no longer honours the cursor (a Gmail
+	// ErrExternalMailCursorExpired means the provider no longer honors the cursor (a Gmail
 	// historyId that is too old, a Graph delta token that expired): the sync starts over from an
 	// empty cursor, bounded by the connection's backfill window, and stored copies are not repeated.
 	ErrExternalMailCursorExpired = errors.New("external mail cursor expired")
@@ -79,6 +79,8 @@ type ExternalMailFetch struct {
 	More bool
 	// RefreshToken is set when the provider rotated the grant during this fetch; it is sealed and
 	// saved in the transaction that stores the page. Empty keeps the stored token.
+	// A source that rotated the grant and then failed returns it next to its error, and it is
+	// saved all the same.
 	RefreshToken string
 }
 
@@ -107,7 +109,7 @@ type ExternalMailSource interface {
 	Exchange(ctx context.Context, exchange ExternalMailCodeExchange) (ExternalMailToken, ExternalMailAccount, error)
 	// Fetch returns one page of mail after the request's cursor. It returns ErrExternalMailAuth
 	// when the provider refuses the token and ErrExternalMailCursorExpired when it no longer
-	// honours the cursor.
+	// honors the cursor.
 	Fetch(ctx context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error)
 	Revoke(ctx context.Context, token ExternalMailToken) error
 }
@@ -211,23 +213,6 @@ func fakeExternalMailRegistry(source ExternalMailSource) *externalMailRegistry {
 func pkceChallenge(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
-}
-
-// disabledExternalMailSource is the default: it never reaches a provider.
-type disabledExternalMailSource struct{}
-
-func (disabledExternalMailSource) AuthURL(ExternalMailAuthRequest) string { return "" }
-
-func (disabledExternalMailSource) Exchange(context.Context, ExternalMailCodeExchange) (ExternalMailToken, ExternalMailAccount, error) {
-	return ExternalMailToken{}, ExternalMailAccount{}, ErrExternalMailUnavailable
-}
-
-func (disabledExternalMailSource) Fetch(context.Context, ExternalMailFetchRequest) (ExternalMailFetch, error) {
-	return ExternalMailFetch{}, ErrExternalMailUnavailable
-}
-
-func (disabledExternalMailSource) Revoke(context.Context, ExternalMailToken) error {
-	return ErrExternalMailUnavailable
 }
 
 // FakeExternalMailSource serves scripted mail from memory, keyed by refresh token, for tests and

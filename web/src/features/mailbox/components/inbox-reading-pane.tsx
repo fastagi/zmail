@@ -11,7 +11,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { InboxTriagePanel } from '@/features/mailbox/components/inbox-triage-panel';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { originOf, toastWithUndo } from '@/features/mailbox/components/message-actions';
-import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-list';
+import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-rows';
 import {
   MessageDetail,
   ThreadView,

@@ -33,3 +33,25 @@
 - 验证：新增 3 个测试（分页回填、令牌轮换、游标过期）和配置测试；mailbox 包与 config 包在 PostgreSQL 上全部通过。
 - 未做：同步运行记录表、限流预算、附件元数据，留给 T9。
 - 调度方式变更：负责人要求由本窗口负责调度，把后续任务并行派给多个 Opus 5.5 会话，并派验收会话。任务划分见下一条。
+
+## 2026-11-21 第一波并行会话已派出
+
+本窗口只负责调度、合并和验收。每个会话用 Opus 5.5（中等推理强度），各自一个工作树，从 `feat/connector-adapters` 切出，PR 的基准分支也是它。
+
+| 会话 | 任务 | 主要文件 | 迁移时间戳 |
+|---|---|---|---|
+| gmail-adapter | Gmail 适配器（T2） | `external_mail_gmail.go` | 无 |
+| outlook-adapter | Outlook 适配器（T3） | `external_mail_outlook.go` | 无 |
+| imap-adapter | IMAP 适配器与密码绑定接口（T4） | `external_mail_imap.go`、绑定接口 | 无 |
+| web-connect | Web 接入流程（T6） | 仅 `web/` | 无 |
+| origin-model | 来源维度与管理员连接页接口（T5） | 邮箱模型、权限、契约 | 2026_12_04 |
+| agent-feed | Agent 授权与收件流（T8） | `agent_grant_*.go` | 2026_12_05 |
+| sync-ops | 同步运行记录、限流、副本清理（T9） | 同步服务、新表 | 2026_12_06 |
+
+第一波只派 7 个而不是十几个：再多就会有两个会话改同一批文件。迁移、OpenAPI、生成的类型和 golden schema 是公共冲突点，由本窗口在合并时统一重新生成。
+
+接下来：
+
+1. 每个会话结束后，本窗口核对它的 diff 和测试结果，再合并进集成分支 `integration/connectors`（不合并到 `main`）。
+2. 第二波（依赖第一波）：共享接入（T7）、管理员连接页和 Agent 页签的 Web 界面、租户接入（T10）、以原地址回复与推送（T11）。
+3. 第三波：验收会话，在集成分支上按路线图的验收条目逐项实测。

@@ -52,3 +52,24 @@ to be carried out without further questions. Progress is recorded in
 | T11 | Reply from the original address; push subscriptions with polling fallback | C6, C7 |
 
 D2 (agent tasks with a real model) needs an AI provider key and stays blocked until one exists.
+
+## CI Rules That Local Checks Miss
+
+Learned from the first CI run; apply them before pushing.
+
+- CI runs `golangci-lint` with `govet` `enable-all` (variable shadowing fails, including `err` and
+  names reused inside closures in tests), `gofmt`, `goimports`, `unused`, `staticcheck`,
+  `bodyclose`, `exhaustive`, `nilerr`, `unconvert`, `unparam`, `wastedassign`, and `errcheck` with
+  blank assignments checked. It is not installed on this machine: run
+  `go run golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow@latest ./internal/modules/mailbox/`
+  and `gofmt -l api` at least, and remove code that became unused.
+- The exact CI linter runs without installing it, from `api/`:
+  `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 run --allow-parallel-runners ./...`
+  (the version is pinned in `.github/workflows/ci.yml`). It also enforces US spelling (`misspell`).
+  Run it before every push; it must report `0 issues`.
+- The Web build enforces a first-load budget of 1,070,000 raw bytes for every route, pinned by a
+  governance check, so it cannot be raised. Run `pnpm build` in `web/` after any Web change.
+  Every new error code adds bytes to all routes. Keep rarely used UI behind `lazy()`, and never
+  import a small helper from a large component module: `rowUnread` imported from
+  `message-list.tsx` once pulled that whole module into the inbox's first load.
+- Merge the latest `feat/connector-adapters` into the task branch before the final check.
