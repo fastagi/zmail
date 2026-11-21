@@ -33,6 +33,7 @@ import {
   type InboxRoleFilter,
   type InboxSidebarExternal,
 } from '@/features/mailbox/components/inbox-sidebar';
+import { useComposeFocusReturn } from '@/features/mailbox/components/compose-focus';
 import { MAILBOX_PARAM, readStoredMailboxId } from '@/features/mailbox/components/mailbox-params';
 import {
   MailOrganizationBoundary,
@@ -411,6 +412,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   } | null>(null);
   // Quoted dates read in the zone the list shows, as the reader's do.
   const formatter = useDateTimeFormat(timeZone);
+  // The page's composer replaces the workspace; closing it gives the focus back.
+  useComposeFocusReturn(draft?.draft.mode === 'compose');
   // Mounted from the first open on, so the dialog can animate closed.
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpMounted, setHelpMounted] = useState(false);
