@@ -418,6 +418,7 @@ const messages = {
     templateNone: 'None, write the message',
     templateHint: 'An empty variable uses the fallback written in the template.',
     draftSaved: 'Saved as a draft',
+    invalidRecipients: 'Not a plain email address: {addresses}',
   },
   emails: {
     title: 'Emails',

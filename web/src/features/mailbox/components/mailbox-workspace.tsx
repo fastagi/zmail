@@ -29,6 +29,7 @@ import {
   readStoredMailboxId,
   writeStoredMailboxId,
 } from '@/features/mailbox/components/mailbox-params';
+import { useComposeFocusReturn } from '@/features/mailbox/components/compose-focus';
 import { MailboxSwitcher } from '@/features/mailbox/components/mailbox-switcher';
 import { ManageFoldersDialog } from '@/features/mailbox/components/manage-folders-dialog';
 import { ManageLabelsDialog } from '@/features/mailbox/components/manage-labels-dialog';
@@ -249,6 +250,8 @@ function MailboxView({
   const [open, setOpen] = useState<OpenItem | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
   const [draft, setDraft] = useState<ComposeDraft | null>(null);
+  // The page's composer replaces the workspace; closing it gives the focus back.
+  useComposeFocusReturn(draft?.mode === 'compose');
   const [managing, setManaging] = useState<'folders' | 'labels' | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -450,6 +453,7 @@ function MailboxView({
           <Button
             type="button"
             className="w-full"
+            data-compose-trigger=""
             icon={<PenLine className="size-4" />}
             onClick={() => setDraft(emptyDraft)}
           >

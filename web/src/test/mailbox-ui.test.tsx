@@ -1014,7 +1014,11 @@ describe('mailbox workspace', () => {
     fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Hello' } });
     fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Body' } });
     fireEvent.click(submit);
-    expect(await within(dialog).findByText(/1 to 50 plain email addresses/u)).toBeInTheDocument();
+    // A bad address is named on the field itself (#92).
+    expect(
+      await within(dialog).findByText('Not a plain email address: Bob <bob@example.com>')
+    ).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('To')).toHaveAttribute('aria-invalid', 'true');
 
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
     fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: '   ' } });

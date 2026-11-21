@@ -406,6 +406,7 @@ const messages = {
     templateNone: '不使用，自己写',
     templateHint: '变量留空时，使用模板中写好的默认值。',
     draftSaved: '已存为草稿',
+    invalidRecipients: '不是有效的邮箱地址：{addresses}',
   },
   emails: {
     title: '收发记录',
