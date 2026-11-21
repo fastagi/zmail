@@ -743,6 +743,7 @@ const messages = {
     empty:
       'Mailboxes belong to an organization. Create an organization or join one to send and receive mail.',
     open: 'Go to organizations',
+    unavailable: 'The organization in this link is no longer available to you. Showing {name} instead.',
     lostTitle: 'No access to this organization',
     readOnly: 'Owners and admins of this organization create and delete mailboxes.',
   },

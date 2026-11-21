@@ -357,6 +357,23 @@ describe('mailbox workspace', () => {
     expect(window.location.search).toBe('?other=1&org=4');
   });
 
+  // Issue #106: a link into an organization the user was removed from says so and opens nothing.
+  it('a link to an organization the user left says so and drops its message and mailbox ids', async () => {
+    state.organizations.data = organizations(
+      organization(4, 'Acme', 'owner'),
+      organization(5, 'Globex', 'member')
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?org=9&open=76&box=3&other=1');
+    renderWorkspace();
+
+    expect(screen.getByLabelText('Organization')).toHaveValue('4');
+    await waitFor(() => expect(window.location.search).toBe('?org=4&other=1'));
+    expect(toast.error).toHaveBeenCalledWith(
+      'The organization in this link is no longer available to you. Showing Acme instead.',
+      expect.anything()
+    );
+  });
+
   it('restores the last chosen organization from sessionStorage when navigating without ?org=', () => {
     state.organizations.data = organizations(
       organization(1, 'Acme', 'owner'),

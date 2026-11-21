@@ -27,6 +27,7 @@ import {
 import { type ComposeDraft } from '@/features/mailbox/components/compose-drafts';
 import { fileToBase64, formatBytes } from '@/features/mailbox/components/mail-attachments';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
+import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useSendMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import { useMailTemplates } from '@/features/mailbox/hooks/use-mail-templates';
@@ -38,7 +39,7 @@ import {
   normalizeRecipientLists,
   splitRecipients,
 } from '@/features/mailbox/schemas';
-import type { Mailbox } from '@/features/mailbox/types';
+import type { MailAttachment, Mailbox } from '@/features/mailbox/types';
 import {
   isStoredSendFailure,
   resolveMailboxErrorKey,
@@ -107,12 +108,47 @@ export function ComposeDialog({
     writeComposeDraft(draftKey, draftToKeep({ to, cc, subject, body }, draft));
   }, [draftKey, draft, to, cc, subject, body]);
   const [files, setFiles] = useState<File[]>([]);
+  // The forwarded message's files, carried along unless removed; read only when sending.
+  const [carried, setCarried] = useState<readonly MailAttachment[]>(
+    () => draft.forwarded?.attachments ?? []
+  );
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachHintId = useId();
-  const filesTooMany = files.length > MAIL_MAX_ATTACHMENTS;
+  const filesTooMany = files.length + carried.length > MAIL_MAX_ATTACHMENTS;
   const filesTooLarge =
-    files.reduce((total, file) => total + file.size, 0) > MAIL_ATTACHMENTS_MAX_BYTES;
+    files.reduce((total, file) => total + file.size, 0) +
+      carried.reduce((total, file) => total + file.size, 0) >
+    MAIL_ATTACHMENTS_MAX_BYTES;
+
+  /** Every file to send: the forwarded ones, read from their message, then the chosen ones. */
+  const encodeAttachments = async () => {
+    const source = draft.forwarded;
+    const forwarded = source
+      ? await Promise.all(
+          carried.map(async attachment => ({
+            filename: attachment.filename,
+            ...(attachment.content_type ? { content_type: attachment.content_type } : {}),
+            content: await fileToBase64(
+              await mailboxService.fetchAttachment(
+                organizationId,
+                source.mailboxId,
+                source.messageId,
+                attachment
+              )
+            ),
+          }))
+        )
+      : [];
+    const chosen = await Promise.all(
+      files.map(async file => ({
+        filename: file.name,
+        ...(file.type ? { content_type: file.type } : {}),
+        content: await fileToBase64(file),
+      }))
+    );
+    return [...forwarded, ...chosen];
+  };
 
   const addFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const chosen = Array.from(event.target.files ?? []);
@@ -140,13 +176,7 @@ export function ComposeDialog({
         .filter(([, value]) => value !== '')
     );
     try {
-      const attachments = await Promise.all(
-        files.map(async file => ({
-          filename: file.name,
-          ...(file.type ? { content_type: file.type } : {}),
-          content: await fileToBase64(file),
-        }))
-      );
+      const attachments = await encodeAttachments();
       const stored = await send.mutateAsync({
         to: recipients.to,
         ...(recipients.cc.length > 0 ? { cc: recipients.cc } : {}),
@@ -188,13 +218,7 @@ export function ComposeDialog({
       return;
     }
     try {
-      const attachments = await Promise.all(
-        files.map(async file => ({
-          filename: file.name,
-          ...(file.type ? { content_type: file.type } : {}),
-          content: await fileToBase64(file),
-        }))
-      );
+      const attachments = await encodeAttachments();
       const stored = await send.mutateAsync({
         to: normalized.to,
         ...(normalized.cc.length > 0 ? { cc: normalized.cc } : {}),
@@ -389,8 +413,34 @@ export function ComposeDialog({
               {t('compose.attachHint')}
             </p>
           </div>
-          {files.length > 0 ? (
+          {files.length + carried.length > 0 ? (
             <ul className="divide-y rounded-md border text-sm">
+              {carried.map(attachment => (
+                <li
+                  key={`forwarded-${String(attachment.id)}`}
+                  className="flex items-center gap-3 px-3 py-1.5"
+                >
+                  <Paperclip className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate" title={attachment.filename}>
+                    {attachment.filename}
+                  </span>
+                  <span className="text-xs whitespace-nowrap text-muted-foreground">
+                    {formatBytes(attachment.size)}
+                  </span>
+                  <Button
+                    type="button"
+                    size="xs"
+                    isIcon
+                    variant="ghost"
+                    disabled={send.isPending}
+                    icon={<X className="size-3.5" />}
+                    aria-label={t('compose.removeAttachment', { name: attachment.filename })}
+                    onClick={() =>
+                      setCarried(current => current.filter(file => file.id !== attachment.id))
+                    }
+                  />
+                </li>
+              ))}
               {files.map((file, index) => (
                 // A list the user edits by position; two files may share a name.
                 <li key={index} className="flex items-center gap-3 px-3 py-1.5">

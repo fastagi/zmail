@@ -720,6 +720,7 @@ const messages = {
     emptyTitle: '还没有组织',
     empty: '邮箱属于组织。创建或加入一个组织后，即可收发邮件。',
     open: '前往组织',
+    unavailable: '你已无法访问此链接中的组织，现在显示的是 {name}。',
     lostTitle: '无权访问该组织',
     readOnly: '邮箱由该组织的所有者和管理员创建和删除。',
   },

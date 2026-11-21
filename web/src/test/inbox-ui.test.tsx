@@ -1458,6 +1458,40 @@ describe('unified inbox', () => {
     expect(screen.getByRole('list', { name: 'Conversation' })).toBeInTheDocument();
   });
 
+  // Issue #115: forwarding carries the original's files, shown in the composer and removable.
+  it('forwarding a message carries its attachments into the composer and the send', async () => {
+    const proof = { id: 5, filename: 'proof.txt', content_type: 'text/plain', size: 5 };
+    const notes = { id: 6, filename: 'notes.txt', content_type: 'text/plain', size: 2 };
+    state.detail.data = { ...message({ id: 12, mailbox_id: 1 }), attachments: [proof, notes] };
+    const fetched = vi
+      .spyOn(mailboxService, 'fetchAttachment')
+      .mockImplementation((_org, _mailbox, _message, attachment) =>
+        Promise.resolve(new Blob([attachment.id === 5 ? 'hello' : 'hi']))
+      );
+    state.send.mutateAsync.mockResolvedValue(message({ id: 40, direction: 'outbound' }));
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+
+    const toolbar = await screen.findByRole('toolbar', { name: 'Conversation actions' });
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Forward' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('proof.txt')).toBeInTheDocument();
+    expect(within(dialog).getByText('notes.txt')).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove notes.txt' }));
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'ann@example.com' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(state.send.mutateAsync).toHaveBeenCalledTimes(1));
+    expect(fetched).toHaveBeenCalledTimes(1);
+    expect(fetched).toHaveBeenCalledWith(1, 1, 12, proof);
+    expect(state.send.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [{ filename: 'proof.txt', content_type: 'text/plain', content: 'aGVsbG8=' }],
+      })
+    );
+  });
+
   it('rows expose listbox and option roles with aria-selected', () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
     renderRoute();
