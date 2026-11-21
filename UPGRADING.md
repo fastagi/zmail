@@ -17,6 +17,14 @@ External mailboxes can now be bound and reconnected through a provider-neutral c
 and synced mail goes through the same post-store step as Zmail's own inbound mail. Contract:
 `contracts/MAILBOXES.md`, External Mailboxes. Plan: `docs/plans/mail-connectors.plan.md`.
 
+### Low — Outlook connector
+
+`EXTERNAL_MAIL_PROVIDERS=outlook` with an Outlook OAuth client now syncs Outlook.com and
+Microsoft 365 Inboxes through Microsoft Graph delta. The app registration needs the delegated
+Graph permissions `Mail.Read`, `User.Read`, `offline_access`, `openid`, and `email`, and
+`EXTERNAL_MAIL_REDIRECT_URL` as a Web redirect URI. A fork with its own Outlook source should
+remove it or give its connector another id; the registry keeps the first connector per id.
+
 ### Medium — `source` and `provider` are connector ids, not a fixed list
 
 `source` on message summaries and `provider` on connections were `gmail` or `outlook`; they are now
