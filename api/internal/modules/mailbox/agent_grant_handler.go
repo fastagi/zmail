@@ -351,9 +351,7 @@ func (h *Handler) CreateAgentDraft(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
-	draft, created, err := h.service.SaveAgentDraft(c.Request.Context(), viewer, keyID, AgentDraftInput{
-		MessageID: req.MessageID, Text: req.Text, HTML: req.HTML,
-	})
+	draft, created, err := h.service.SaveAgentDraft(c.Request.Context(), viewer, keyID, AgentDraftInput(req))
 	if err != nil {
 		response.HandleError(c, "Failed to save agent draft", err)
 		return

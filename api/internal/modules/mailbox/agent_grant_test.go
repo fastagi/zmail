@@ -53,7 +53,7 @@ func newAgentFixture(t *testing.T) *agentFixture {
 	return f
 }
 
-func (f *agentFixture) addKey(t *testing.T, name string, userID uint, mode domain.APIKeyMode, scopes ...string) uint {
+func (f *agentFixture) addKey(t *testing.T, name string, userID uint, mode domain.APIKeyMode, scopes ...string) {
 	t.Helper()
 	encoded, _ := json.Marshal(scopes)
 	po := &apikey.APIKeyPO{
@@ -64,7 +64,6 @@ func (f *agentFixture) addKey(t *testing.T, name string, userID uint, mode domai
 		t.Fatalf("create key %s: %v", name, err)
 	}
 	f.keys[name] = po.ID
-	return po.ID
 }
 
 // grant issues a grant with defaults: read only, 30 days.
@@ -199,7 +198,7 @@ func TestAgentGrantIssuers(t *testing.T) {
 	}
 
 	// An admin who adds themselves as a manage member may issue; the history shows both steps.
-	if _, err := f.service.SetMailboxMember(ctx, f.admin, f.team.ID, accessAdmin, domain.MailboxPermissionManage); err != nil {
+	if _, err = f.service.SetMailboxMember(ctx, f.admin, f.team.ID, accessAdmin, domain.MailboxPermissionManage); err != nil {
 		t.Fatalf("admin joins team: %v", err)
 	}
 	f.mustGrant(t, f.admin, f.team, "admin", nil)
@@ -410,7 +409,7 @@ func TestAgentMessageReads(t *testing.T) {
 	_, err = f.service.AgentMailMessage(ctx, f.b, f.keys["b"], f.teamMessage.ID)
 	expectError(t, "mail of an ungranted mailbox", err, ErrMailMessageNotFound)
 
-	if err := f.service.RevokeAgentGrant(ctx, f.b, f.personal.ID, masked.ID); err != nil {
+	if err = f.service.RevokeAgentGrant(ctx, f.b, f.personal.ID, masked.ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	revealing := f.mustGrant(t, f.b, f.personal, "b", func(in *IssueAgentGrantInput) { in.RevealSecrets = true })
@@ -469,7 +468,7 @@ func TestAgentDrafts(t *testing.T) {
 	}
 
 	// The manager loses send: drafting stops at once.
-	if _, err := f.service.SetMailboxMember(ctx, f.admin, f.team.ID, accessE, domain.MailboxPermissionView); err != nil {
+	if _, err = f.service.SetMailboxMember(ctx, f.admin, f.team.ID, accessE, domain.MailboxPermissionView); err != nil {
 		t.Fatalf("downgrade E: %v", err)
 	}
 	_, _, err = f.service.SaveAgentDraft(ctx, f.e, f.keys["e"], AgentDraftInput{MessageID: message.ID, Text: "Again"})

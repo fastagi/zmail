@@ -64,8 +64,12 @@ func (po *MailAgentGrantPO) toDomain() *domain.MailAgentGrant {
 	}
 	// Both columns are jsonb this module writes; an unreadable value reads as no filter, which
 	// cannot happen through the service.
-	_ = json.Unmarshal([]byte(po.SenderFilters), &grant.SenderFilters)
-	_ = json.Unmarshal([]byte(po.LabelIDs), &grant.LabelIDs)
+	if json.Unmarshal([]byte(po.SenderFilters), &grant.SenderFilters) != nil {
+		grant.SenderFilters = []string{}
+	}
+	if json.Unmarshal([]byte(po.LabelIDs), &grant.LabelIDs) != nil {
+		grant.LabelIDs = []uint{}
+	}
 	return grant
 }
 

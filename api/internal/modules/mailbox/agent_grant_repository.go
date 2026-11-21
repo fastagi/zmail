@@ -326,11 +326,6 @@ func (r *repository) SaveAgentDraft(ctx context.Context, draft *domain.MailAgent
 		return false, domain.ErrServiceUnavailable
 	}
 	now := draft.UpdatedAt.UTC()
-	po := &MailAgentDraftPO{
-		OrganizationID: draft.OrganizationID, MailboxID: draft.MailboxID, GrantID: draft.GrantID, MessageID: draft.MessageID,
-		APIKeyID: draft.APIKeyID, TextBody: draft.TextBody, HTMLBody: draft.HTMLBody, Status: "pending",
-		CreatedAt: now, UpdatedAt: now,
-	}
 	// xmax = 0 tells a fresh insert from an update of the existing row.
 	var saved []struct {
 		MailAgentDraftPO
@@ -342,8 +337,8 @@ func (r *repository) SaveAgentDraft(ctx context.Context, draft *domain.MailAgent
 		ON CONFLICT (grant_id, message_id) DO UPDATE
 		  SET text_body = EXCLUDED.text_body, html_body = EXCLUDED.html_body, updated_at = EXCLUDED.updated_at
 		RETURNING *, (xmax = 0) AS inserted`, map[string]any{
-		"org": po.OrganizationID, "mailbox": po.MailboxID, "grant": po.GrantID, "message": po.MessageID,
-		"key": po.APIKeyID, "text": po.TextBody, "html": po.HTMLBody, "now": now,
+		"org": draft.OrganizationID, "mailbox": draft.MailboxID, "grant": draft.GrantID, "message": draft.MessageID,
+		"key": draft.APIKeyID, "text": draft.TextBody, "html": draft.HTMLBody, "now": now,
 	}).Scan(&saved).Error
 	if err != nil || len(saved) == 0 {
 		return false, err

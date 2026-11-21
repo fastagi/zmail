@@ -149,7 +149,8 @@ func validAgentFilterDomain(host string) bool {
 		return false
 	}
 	for _, char := range host {
-		if !(char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' || char == '.') {
+		isLetter, isDigit := char >= 'a' && char <= 'z', char >= '0' && char <= '9'
+		if !isLetter && !isDigit && char != '-' && char != '.' {
 			return false
 		}
 	}
@@ -200,8 +201,8 @@ func (s *service) IssueAgentGrant(ctx context.Context, viewer domain.Organizatio
 		APIKeyName: key.Name, APIKeyPrefix: key.KeyPrefix,
 	}
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
-		if err := s.agents.CreateAgentGrant(tx, grant, domain.MaxLiveMailAgentGrantsPerMailbox); err != nil {
-			return err
+		if createErr := s.agents.CreateAgentGrant(tx, grant, domain.MaxLiveMailAgentGrantsPerMailbox); createErr != nil {
+			return createErr
 		}
 		return s.recordAccess(tx, mailbox, MailboxAccessAgentGranted, viewer.UserID, keyUserID, map[string]any{
 			"grant_id":       grant.ID,
@@ -546,7 +547,7 @@ func (s *service) SaveAgentDraft(ctx context.Context, viewer domain.Organization
 	if chosen == nil {
 		return nil, false, fmt.Errorf("%w: the grant does not allow drafts", domain.ErrPermissionDenied)
 	}
-	if _, err := s.repo.FindMessage(ctx, chosen.mailbox.ID, input.MessageID); err != nil {
+	if _, err = s.repo.FindMessage(ctx, chosen.mailbox.ID, input.MessageID); err != nil {
 		return nil, false, err
 	}
 	now := s.now().UTC()
