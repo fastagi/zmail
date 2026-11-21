@@ -431,14 +431,38 @@ func (r *repository) CountWaitingBroadcastRecipients(ctx context.Context, organi
 	return count, err
 }
 
-func (r *repository) FinishBroadcasts(ctx context.Context, now time.Time) (int, error) {
+func (r *repository) FinishBroadcasts(ctx context.Context, now time.Time, allFailedReason string) (int, error) {
 	if r.db == nil {
 		return 0, domain.ErrServiceUnavailable
 	}
-	result := r.conn(ctx).Exec(`UPDATE mail_broadcasts b SET status = 'sent', finished_at = ?, stop_reason = '', updated_at = now()
-		WHERE b.status = 'sending'
-		  AND NOT EXISTS (SELECT 1 FROM mail_broadcast_recipients r WHERE r.broadcast_id = b.id AND r.status = 'pending')`, now)
+	// A broadcast that reached no one is not reported as sent.
+	result := r.conn(ctx).Exec(`UPDATE mail_broadcasts b SET
+			status = CASE WHEN outcome.failed THEN 'canceled' ELSE 'sent' END,
+			stop_reason = CASE WHEN outcome.failed THEN ? ELSE '' END,
+			finished_at = ?, updated_at = now()
+		FROM (
+			SELECT b2.id,
+				EXISTS (SELECT 1 FROM mail_broadcast_recipients r WHERE r.broadcast_id = b2.id AND r.status = 'failed')
+				AND NOT EXISTS (SELECT 1 FROM mail_broadcast_recipients r WHERE r.broadcast_id = b2.id AND r.status = 'sent') AS failed
+			FROM mail_broadcasts b2
+			WHERE b2.status = 'sending'
+			  AND NOT EXISTS (SELECT 1 FROM mail_broadcast_recipients r WHERE r.broadcast_id = b2.id AND r.status = 'pending')
+		) outcome
+		WHERE b.id = outcome.id AND b.status = 'sending'`, allFailedReason, now)
 	return int(result.RowsAffected), result.Error
+}
+
+func (r *repository) ListPropertyNames(ctx context.Context, organizationID, listID uint) ([]string, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	names := []string{}
+	err := r.conn(ctx).Raw(`SELECT DISTINCT key FROM mail_contacts c
+		JOIN mail_contact_list_members m ON m.contact_id = c.id
+		CROSS JOIN LATERAL jsonb_object_keys(c.properties::jsonb) AS key
+		WHERE m.list_id = ? AND c.organization_id = ? AND c.status = 'subscribed'
+		ORDER BY key`, listID, organizationID).Scan(&names).Error
+	return names, err
 }
 
 func (r *repository) PauseBroadcast(ctx context.Context, organizationID, id uint, reason string) error {
