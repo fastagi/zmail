@@ -737,6 +737,17 @@ func Load() (*Config, error) {
 		ExternalMail: ExternalMailConfig{
 			Providers:   parseExternalMailProviders(env.Get("EXTERNAL_MAIL_PROVIDERS", "")),
 			RedirectURL: strings.TrimSpace(env.Get("EXTERNAL_MAIL_REDIRECT_URL", "")),
+			OAuth: map[string]ExternalMailOAuthClient{
+				ExternalMailProviderGmail: {
+					ClientID:     env.Get("EXTERNAL_MAIL_GMAIL_CLIENT_ID", ""),
+					ClientSecret: env.Get("EXTERNAL_MAIL_GMAIL_CLIENT_SECRET", ""),
+				},
+				ExternalMailProviderOutlook: {
+					ClientID:     env.Get("EXTERNAL_MAIL_OUTLOOK_CLIENT_ID", ""),
+					ClientSecret: env.Get("EXTERNAL_MAIL_OUTLOOK_CLIENT_SECRET", ""),
+					Tenant:       env.Get("EXTERNAL_MAIL_OUTLOOK_TENANT", DefaultExternalMailOutlookTenant),
+				},
+			},
 		},
 		Mailbox: MailboxConfig{
 			Domain:              env.Get("MAILBOX_DOMAIN", ""),

@@ -149,6 +149,9 @@ type ExternalMailSyncResult struct {
 	Cursor        string
 	Status        ExternalMailStatus
 	LastErrorCode string
+	// EncryptedRefreshToken replaces the stored grant when the provider rotated it during the
+	// fetch; empty keeps the stored one.
+	EncryptedRefreshToken string
 	// SyncedAt is set when the fetch succeeded.
 	SyncedAt   *time.Time
 	NextSyncAt time.Time

@@ -35,6 +35,17 @@ organization manager could. A fork that implements `ExternalMailSource` must ado
 `AuthURL(ExternalMailAuthRequest)` and `Exchange(ctx, ExternalMailCodeExchange)` signatures, which
 carry the PKCE challenge and verifier.
 
+### Medium — `ExternalMailSource.Fetch` takes a request and may page, rotate, or expire
+
+`Fetch(ctx, ExternalMailFetchRequest)` replaces `Fetch(ctx, token, cursor)`. The request carries
+the account address, the backfill window, and the sync time. The result may set `More` (the
+connection is fetched again at once), `RefreshToken` (a rotated grant, saved with the page), and a
+source may answer `ErrExternalMailCursorExpired` (the sync restarts from an empty cursor). Real
+connectors register themselves with `registerExternalMailConnector` from their own file.
+`EXTERNAL_MAIL_PROVIDERS` now accepts `gmail`, `outlook`, and `imap`; the OAuth connectors need
+`EXTERNAL_MAIL_<PROVIDER>_CLIENT_ID`, `_CLIENT_SECRET`, and `EXTERNAL_MAIL_REDIRECT_URL`. Listing a
+provider whose adapter is not compiled in enables nothing for it.
+
 ### Low — Migration `2026_12_03_090000_open_mail_connectors`
 
 Replaces the provider and source CHECKs with the connector pattern (the source CHECK is added

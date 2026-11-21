@@ -70,15 +70,36 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	case !registered:
 		err = ErrExternalMailProviderUnavailable
 	case err == nil:
-		fetched, err = connector.Source.Fetch(ctx, ExternalMailToken{RefreshToken: refreshToken}, connection.SyncCursor)
+		fetched, err = connector.Source.Fetch(ctx, ExternalMailFetchRequest{
+			Token: ExternalMailToken{RefreshToken: refreshToken}, Cursor: connection.SyncCursor,
+			AccountAddress: connection.AccountAddress, BackfillDays: connection.BackfillDays, Now: now,
+		})
 	default:
 		// A token this instance cannot open is as unusable as one the provider refuses.
 		err = fmt.Errorf("%w: sealed token unreadable", ErrExternalMailAuth)
+	}
+	if fetched.RefreshToken != "" && fetched.RefreshToken != refreshToken {
+		// A provider that rotates grants has already spent the old one, so the new one is kept
+		// even when the rest of the fetch failed.
+		sealed, sealErr := s.sealRefreshToken(fetched.RefreshToken)
+		if sealErr != nil {
+			return sealErr
+		}
+		result.EncryptedRefreshToken = sealed
 	}
 	switch {
 	case err == nil:
 		result.Cursor, result.SyncedAt = fetched.Cursor, &now
 		result.Messages = s.externalCopies(connection, fetched.Messages, now)
+		if fetched.More {
+			// Another page is ready: fetch it in the next pass instead of after the interval.
+			result.NextSyncAt = now
+		}
+	case errors.Is(err, ErrExternalMailCursorExpired):
+		// Start over from an empty cursor at once; copies already stored are not repeated.
+		result.Cursor, result.NextSyncAt = "", now
+		slog.InfoContext(ctx, "external_mail.cursor_expired",
+			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
 	case errors.Is(err, ErrExternalMailAuth):
 		result.Status, result.LastErrorCode = domain.ExternalMailStatusNeedsReconnect, domain.ExternalMailErrorAuthFailed
 	case errors.Is(err, ErrExternalMailProviderUnavailable):
