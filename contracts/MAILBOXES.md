@@ -748,8 +748,9 @@ is `404 MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`. Both routes are session only 
 
 ### Connections
 
-`GET /v1/external-mail-connections` lists the caller's own connections in the organization, id
-ascending, at most 10; it never carries a token:
+`GET /v1/external-mail-connections` lists the caller's own connections in the organization, live
+ones first and then id ascending, at most 10; it never carries a token. Revoked connections are kept
+so a rebind restores the same mailbox, and do not count toward the limit of 10:
 
 ```json
 { "id": 3, "provider": "gmail", "account_address": "me@gmail.com", "mailbox_id": 41,

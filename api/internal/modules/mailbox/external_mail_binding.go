@@ -214,11 +214,12 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 // bindExternalAccount creates the private, read-only external mailbox of a new account and its
 // connection, due for its first sync at once.
 func (s *service) bindExternalAccount(tx context.Context, viewer domain.OrganizationContext, authorization *domain.ExternalMailAuthorization, address, sealed string) (*domain.ExternalMailConnection, error) {
-	owned, err := s.externalMail.ListExternalMailConnections(tx, viewer.OrganizationID, viewer.UserID)
+	// Revoked connections are kept for a later rebind and do not count.
+	live, err := s.externalMail.CountLiveExternalMailConnections(tx, viewer.OrganizationID, viewer.UserID)
 	if err != nil {
 		return nil, err
 	}
-	if len(owned) >= domain.MaxExternalMailConnectionsPerUser {
+	if live >= domain.MaxExternalMailConnectionsPerUser {
 		return nil, ErrExternalMailConnectionLimit
 	}
 	owner := viewer.UserID

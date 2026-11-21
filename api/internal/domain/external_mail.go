@@ -167,8 +167,11 @@ type ExternalMailRepository interface {
 	// connection stopped being active meanwhile.
 	// The returned messages are the ones newly stored, with their ids.
 	SaveExternalMailSync(ctx context.Context, result ExternalMailSyncResult) (stored []*MailMessage, applied bool, err error)
-	// ListExternalMailConnections returns the owner's connections in the organization, id ascending,
-	// at most MaxExternalMailConnectionsPerUser.
+	// CountLiveExternalMailConnections counts the owner's connections that are not revoked; the
+	// per-member limit bounds these.
+	CountLiveExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) (int, error)
+	// ListExternalMailConnections returns the owner's connections in the organization, live ones
+	// first, then id ascending, at most MaxExternalMailConnectionsPerUser.
 	ListExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) ([]*ExternalMailConnection, error)
 	// FindExternalMailConnection returns one connection of the organization.
 	FindExternalMailConnection(ctx context.Context, organizationID, id uint) (*ExternalMailConnection, error)

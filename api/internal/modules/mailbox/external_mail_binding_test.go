@@ -188,6 +188,19 @@ func TestExternalMailAccountBelongsToOneMember(t *testing.T) {
 	if _, _, err := f.service.CompleteExternalMailAuthorization(ctx, f.c, state, "one-too-many"); !errors.Is(err, ErrExternalMailConnectionLimit) {
 		t.Fatalf("binding past the limit = %v, want limit", err)
 	}
+
+	// Unbinding frees a place: revoked connections are kept for a rebind but do not count.
+	owned, _ := f.service.ListExternalMailConnections(ctx, f.c)
+	if err := f.service.RevokeExternalMailConnection(ctx, f.c, owned[0].ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	f.bind(t, f.c, domain.ExternalMailProviderOutlook, "after-unbinding")
+	owned, _ = f.service.ListExternalMailConnections(ctx, f.c)
+	for _, connection := range owned {
+		if connection.Status == domain.ExternalMailStatusRevoked {
+			t.Fatalf("the listing of %d shows a revoked connection before a live one is cut off", len(owned))
+		}
+	}
 }
 
 // TestExternalMailStartRules: a reconnect is only for the binder's own connection, an unknown

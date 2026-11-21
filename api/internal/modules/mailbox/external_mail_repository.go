@@ -196,7 +196,9 @@ func (r *repository) ListExternalMailConnections(ctx context.Context, organizati
 	var rows []ExternalMailConnectionPO
 	err := r.conn(ctx).
 		Where("organization_id = ? AND owner_user_id = ?", organizationID, ownerUserID).
-		Order("id ASC").
+		// Live connections first: they are bounded by the per-member limit, so none is cut off by
+		// revoked rows kept for a later rebind.
+		Order("(status = 'revoked'), id ASC").
 		Limit(domain.MaxExternalMailConnectionsPerUser).
 		Find(&rows).Error
 	if err != nil {
@@ -346,4 +348,15 @@ func (r *repository) TakeExternalMailAuthorization(ctx context.Context, stateHas
 		SealedVerifier: po.SealedVerifier, ConnectionID: po.ConnectionID, BackfillDays: po.BackfillDays,
 		ExpiresAt: po.ExpiresAt, CreatedAt: po.CreatedAt,
 	}, nil
+}
+
+func (r *repository) CountLiveExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) (int, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	var count int64
+	err := r.conn(ctx).Model(&ExternalMailConnectionPO{}).
+		Where("organization_id = ? AND owner_user_id = ? AND status <> ?", organizationID, ownerUserID, string(domain.ExternalMailStatusRevoked)).
+		Count(&count).Error
+	return int(count), err
 }
