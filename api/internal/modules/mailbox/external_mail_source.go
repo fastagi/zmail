@@ -20,7 +20,7 @@ var (
 	// ErrExternalMailAuth means the provider refused the token (HTTP 401 or a revoked grant): the
 	// owner must bind the account again.
 	ErrExternalMailAuth = errors.New("external mail authorization failed")
-	// ErrExternalMailCursorExpired means the provider no longer honours the cursor (a Gmail
+	// ErrExternalMailCursorExpired means the provider no longer honors the cursor (a Gmail
 	// historyId that is too old, a Graph delta token that expired): the sync starts over from an
 	// empty cursor, bounded by the connection's backfill window, and stored copies are not repeated.
 	ErrExternalMailCursorExpired = errors.New("external mail cursor expired")
@@ -109,7 +109,7 @@ type ExternalMailSource interface {
 	Exchange(ctx context.Context, exchange ExternalMailCodeExchange) (ExternalMailToken, ExternalMailAccount, error)
 	// Fetch returns one page of mail after the request's cursor. It returns ErrExternalMailAuth
 	// when the provider refuses the token and ErrExternalMailCursorExpired when it no longer
-	// honours the cursor.
+	// honors the cursor.
 	Fetch(ctx context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error)
 	Revoke(ctx context.Context, token ExternalMailToken) error
 }
