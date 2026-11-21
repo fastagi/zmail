@@ -18,7 +18,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import type { ExternalMailConnection } from '@/features/mailbox/external-mail-schemas';
 import type { InboxCounts, InboxView, MailRole, Mailbox } from '@/features/mailbox/types';
-import { isConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
+import { isOwnConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -142,14 +142,10 @@ export function InboxSidebar({
   const wide = rail ? 'hidden lg:flex' : 'flex';
   const railIcon = rail ? 'size-4 shrink-0 lg:hidden' : 'hidden';
 
-  // External mailboxes are private copies: their owner finds them under "Connected by me", and
-  // nobody else lists them among the team's.
-  const connectedIds = new Set(external?.connections?.map(item => item.mailbox_id));
-  const isConnected = (mailbox: Mailbox) =>
-    isConnectedMailbox(mailbox) || connectedIds.has(mailbox.id);
-  const teamMailboxes = mailboxes.filter(mailbox => !isConnected(mailbox));
-  // The viewer's own: only the member who connected a mailbox reads it.
-  const mine = mailboxes.filter(mailbox => isConnected(mailbox) && mailbox.access.view);
+  // A member's connected accounts are private copies: their owner finds them under "Connected by
+  // me", and nobody else lists them among the team's. A connected shared mailbox is the team's.
+  const teamMailboxes = mailboxes.filter(mailbox => !isOwnConnectedMailbox(mailbox));
+  const mine = mailboxes.filter(isOwnConnectedMailbox);
   const showConnected = external !== null && (mine.length > 0 || external.onAdd !== null);
   const ordered =
     sort === 'default'

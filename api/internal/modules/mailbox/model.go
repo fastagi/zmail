@@ -15,11 +15,13 @@ type MailboxPO struct {
 	ID             uint   `gorm:"primaryKey"`
 	OrganizationID *uint  `gorm:"index:idx_mailboxes_organization"`
 	CreatedBy      uint   `gorm:"not null"`
-	Address        string `gorm:"size:320;not null;uniqueIndex:idx_mailboxes_address,where:type <> 'external'"`
+	Address        string `gorm:"size:320;not null;uniqueIndex:idx_mailboxes_address,where:origin = 'zmail'"`
 	DisplayName    string `gorm:"size:120;not null;default:''"`
 	RoutingRuleID  string `gorm:"size:64;not null;default:''"`
 	// Type is "personal" or "shared".
-	Type            string `gorm:"size:16;not null;default:'shared'"`
+	Type string `gorm:"size:16;not null;default:'shared'"`
+	// Origin is "zmail" or "connected".
+	Origin          string `gorm:"size:16;not null;default:'zmail'"`
 	OwnerUserID     *uint
 	OwnerLeftAt     *time.Time
 	SealedBefore    *time.Time
@@ -37,6 +39,14 @@ func (MailboxPO) TableName() string {
 	return "mailboxes"
 }
 
+// mailboxOriginOf reads an unset origin as Zmail's own.
+func mailboxOriginOf(origin string) domain.MailboxOrigin {
+	if origin == "" {
+		return domain.MailboxOriginZmail
+	}
+	return domain.MailboxOrigin(origin)
+}
+
 func (po *MailboxPO) toDomain() *domain.Mailbox {
 	if po == nil {
 		return nil
@@ -49,6 +59,7 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 		DisplayName:    po.DisplayName,
 		RoutingRuleID:  po.RoutingRuleID,
 		Type:           domain.MailboxType(po.Type),
+		Origin:         mailboxOriginOf(po.Origin),
 		OwnerUserID:    po.OwnerUserID,
 		OwnerLeftAt:    po.OwnerLeftAt,
 		SealedBefore:   po.SealedBefore,

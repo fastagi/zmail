@@ -296,10 +296,13 @@ func (s *service) validPlatformAccount(ctx context.Context, organizationID uint,
 	if input.MailboxID != nil {
 		if *input.MailboxID == 0 {
 			invalid.add("mailbox_id", "must be a mailbox of the organization or null")
-		} else if _, err := s.repo.FindMailbox(ctx, organizationID, *input.MailboxID); err != nil {
+		} else if mailbox, err := s.repo.FindMailbox(ctx, organizationID, *input.MailboxID); err != nil {
 			if !errors.Is(err, ErrMailboxNotFound) {
 				return nil, err
 			}
+			invalid.add("mailbox_id", "must be a mailbox of the organization or null")
+		} else if mailbox.Connected() && mailbox.Type == domain.MailboxTypePersonal {
+			// A member's own outside account is not the organization's to link.
 			invalid.add("mailbox_id", "must be a mailbox of the organization or null")
 		}
 	}

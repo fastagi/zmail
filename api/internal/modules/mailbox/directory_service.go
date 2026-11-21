@@ -97,6 +97,10 @@ func (s *service) RenameMailbox(ctx context.Context, viewer domain.OrganizationC
 	if err != nil {
 		return nil, err
 	}
+	if mailbox.Connected() && mailbox.Type == domain.MailboxTypePersonal {
+		// A member's own outside account is not the organization's to see or rename.
+		return nil, ErrMailboxNotFound
+	}
 	if mailbox.DisplayName != normalized {
 		previous := mailbox.DisplayName
 		err = s.repo.InTransaction(ctx, func(tx context.Context) error {

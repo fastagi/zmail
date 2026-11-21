@@ -17,7 +17,9 @@ func (r *repository) ListMailboxDirectory(ctx context.Context, organizationID ui
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	query := r.conn(ctx).Where("organization_id = ?", organizationID)
+	// A connected personal mailbox is a member's own outside account, never the organization's to list.
+	query := r.conn(ctx).Where("organization_id = ? AND NOT (origin = ? AND type = ?)", organizationID,
+		string(domain.MailboxOriginConnected), string(domain.MailboxTypePersonal))
 	if filter.Type != "" {
 		query = query.Where("type = ?", string(filter.Type))
 	}
@@ -83,7 +85,9 @@ func (r *repository) CountMailboxes(ctx context.Context, organizationID uint) (i
 		return 0, domain.ErrServiceUnavailable
 	}
 	var count int64
-	err := r.conn(ctx).Model(&MailboxPO{}).Where("organization_id = ?", organizationID).Count(&count).Error
+	// The count is the one the organization's mailbox limit bounds: Zmail's own mailboxes.
+	err := r.conn(ctx).Model(&MailboxPO{}).
+		Where("organization_id = ? AND origin = ?", organizationID, string(domain.MailboxOriginZmail)).Count(&count).Error
 	return count, err
 }
 
@@ -111,7 +115,7 @@ func (r *repository) MailboxAddressUsed(ctx context.Context, address string) (bo
 	}
 	var count int64
 	if err := r.conn(ctx).Unscoped().Model(&MailboxPO{}).
-		Where("address = ? AND type <> ?", strings.ToLower(strings.TrimSpace(address)), string(domain.MailboxTypeExternal)).
+		Where("address = ? AND origin = ?", strings.ToLower(strings.TrimSpace(address)), string(domain.MailboxOriginZmail)).
 		Count(&count).Error; err != nil {
 		return false, err
 	}
