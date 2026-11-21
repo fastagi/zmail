@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/metrics"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 const (
@@ -269,11 +271,32 @@ func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domai
 	if !owner && !viewer.Role.CanManageOrganization() {
 		return ErrExternalMailConnectionNotFound
 	}
-	event := domain.MailboxAccessConnectionRevoked
 	if !owner {
-		event = domain.MailboxAccessConnectionForceRevoked
+		return s.forceDisconnect(ctx, viewer, connection)
 	}
-	return s.revokeConnection(ctx, connection, viewer.UserID, event)
+	return s.revokeConnection(ctx, connection, viewer.UserID, domain.MailboxAccessConnectionRevoked)
+}
+
+// forceDisconnect revokes another member's connection for an owner or admin, records it in the
+// mailbox's access history, and, when it changed anything, in the organization audit log so other
+// managers see who disconnected which connection. Neither carries the outside address.
+func (s *service) forceDisconnect(ctx context.Context, viewer domain.OrganizationContext, connection *domain.ExternalMailConnection) error {
+	live := connection.Status != domain.ExternalMailStatusRevoked
+	if err := s.revokeConnection(ctx, connection, viewer.UserID, domain.MailboxAccessConnectionForceRevoked); err != nil {
+		return err
+	}
+	if live {
+		metadata := map[string]any{"provider": string(connection.Provider), "reason": "forced_disconnect"}
+		if connection.OwnerUserID != nil {
+			metadata["owner_user_id"] = *connection.OwnerUserID
+		}
+		s.auditChange(ctx, auditstarter.Change{
+			Action: "delete", Resource: "external_mail_connections", TargetType: "external_mail_connection",
+			TargetID: strconv.FormatUint(uint64(connection.ID), 10), Result: domain.AuditResultSuccess,
+			Metadata: metadata,
+		})
+	}
+	return nil
 }
 
 // revokeConnection hands a live connection's grant back to its provider, then marks it revoked and
@@ -288,6 +311,12 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 		if err := s.externalMail.RevokeExternalMailConnection(tx, connection.OrganizationID, connection.ID, s.now().UTC()); err != nil {
 			return err
 		}
+		// A revoked account's copies never reach the model again, whoever revoked it.
+		if s.triage != nil {
+			if err := s.triage.StopMailboxTriage(tx, connection.MailboxID); err != nil {
+				return err
+			}
+		}
 		return s.recordConnectionEvent(tx, connection, event, actorUserID)
 	})
 	if err != nil {
@@ -297,6 +326,26 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
 		slog.String("event", string(event)))
 	return nil
+}
+
+// deleteConnectedMailbox revokes the mailbox's connection, then soft-deletes the mailbox, in one
+// transaction. A mailbox without a connection is deleted as it is.
+func (s *service) deleteConnectedMailbox(ctx context.Context, viewer domain.OrganizationContext, mailbox *domain.Mailbox) error {
+	return s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if s.externalMail != nil {
+			connection, err := s.externalMail.FindExternalMailConnectionByMailbox(tx, mailbox.OrganizationID, mailbox.ID)
+			switch {
+			case errors.Is(err, ErrExternalMailConnectionNotFound):
+			case err != nil:
+				return err
+			default:
+				if err := s.revokeConnection(tx, connection, viewer.UserID, domain.MailboxAccessConnectionRevoked); err != nil {
+					return err
+				}
+			}
+		}
+		return s.repo.DeleteMailbox(tx, mailbox.OrganizationID, mailbox.ID)
+	})
 }
 
 // recordConnectionEvent writes a connection event to its mailbox's access history. The detail names

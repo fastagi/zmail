@@ -103,7 +103,7 @@ func (s *service) checkAccess(
 // visibleMailboxes lists the organization's mailboxes the viewer has any access to, each with the
 // viewer's access filled in.
 func (s *service) visibleMailboxes(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.Mailbox, error) {
-	mailboxes, err := s.repo.ListMailboxes(ctx, viewer.OrganizationID, viewer.MembershipID)
+	mailboxes, err := s.repo.ListMailboxes(ctx, viewer.OrganizationID, viewer.MembershipID, viewer.UserID)
 	if err != nil {
 		return nil, err
 	}

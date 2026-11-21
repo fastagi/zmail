@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 // TestConnectedMailboxIsHiddenFromManagers: an admin's mailbox lists, directory and its count,
@@ -344,5 +346,244 @@ func TestForcedDisconnectRevokesAndIsRecorded(t *testing.T) {
 				t.Fatalf("event detail = %v; want connection_id and provider, never the address", event.Detail)
 			}
 		}
+	}
+}
+
+// createConnected stores a member's connected personal mailbox with the given address directly.
+func createConnected(t *testing.T, repo *repository, organizationID, ownerUserID uint, address string) *domain.Mailbox {
+	t.Helper()
+	mailbox := &domain.Mailbox{OrganizationID: organizationID, CreatedBy: ownerUserID, Address: address,
+		Type: domain.MailboxTypePersonal, Origin: domain.MailboxOriginConnected, OwnerUserID: &ownerUserID}
+	if err := repo.CreateMailbox(context.Background(), mailbox, 0); err != nil {
+		t.Fatalf("CreateMailbox(%q): %v", address, err)
+	}
+	return mailbox
+}
+
+// TestConnectedAddressesStayOutOfDomains: a member's connected copy of an address on an
+// organization domain gets no routing rule and neither blocks nor reveals itself to a domain
+// deletion.
+func TestConnectedAddressesStayOutOfDomains(t *testing.T) {
+	repo := openDomainRepository(t)
+	ctx := context.Background()
+	mailDomain := &domain.MailDomain{OrganizationID: 1, Name: "news.example.com", ZoneID: "z", ZoneName: "example.com", CreatedBy: 1}
+	if err := repo.CreateDomain(ctx, mailDomain, 10); err != nil {
+		t.Fatalf("CreateDomain: %v", err)
+	}
+	createConnected(t, repo, 1, 7, "member@news.example.com")
+
+	listed, err := repo.ListMailboxesWithoutRoutingRule(ctx, 1, "news.example.com")
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("unrouted mailboxes = %+v, %v; want none for a connected address", listed, err)
+	}
+	if err := repo.DeleteDomain(ctx, 1, mailDomain.ID); err != nil {
+		t.Fatalf("DeleteDomain with only a connected address on it: %v", err)
+	}
+}
+
+// TestListingsNeverLoadOtherMembersConnectedMailboxes: the repository reads behind mailbox lists
+// and the unified inbox drop another member's connected personal mailbox in SQL, keep the
+// viewer's own, and a connected mailbox is created whatever the organization's limit.
+func TestListingsNeverLoadOtherMembersConnectedMailboxes(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	repo := f.repo.(*repository)
+	ctx := context.Background()
+	has := func(ids []uint) bool { return slices.Contains(ids, f.mailbox.ID) }
+
+	for _, viewer := range []domain.OrganizationContext{f.admin, f.b} {
+		listed, err := repo.ListMailboxes(ctx, accessOrg, viewer.MembershipID, viewer.UserID)
+		if err != nil {
+			t.Fatalf("ListMailboxes: %v", err)
+		}
+		rows, err := repo.ListMailboxAccessRows(ctx, accessOrg, viewer.MembershipID, viewer.UserID)
+		if err != nil {
+			t.Fatalf("ListMailboxAccessRows: %v", err)
+		}
+		listedIDs, rowIDs := []uint{}, []uint{}
+		for _, mailbox := range listed {
+			listedIDs = append(listedIDs, mailbox.ID)
+		}
+		for _, row := range rows {
+			rowIDs = append(rowIDs, row.Mailbox.ID)
+		}
+		owner := viewer.UserID == accessB
+		if has(listedIDs) != owner || has(rowIDs) != owner {
+			t.Fatalf("viewer %d loads the connected mailbox: listing %v, access rows %v; want %v",
+				viewer.UserID, has(listedIDs), has(rowIDs), owner)
+		}
+	}
+
+	extra := createConnected(t, repo, accessOrg, accessB, "second@gmail.example")
+	if extra.ID == 0 {
+		t.Fatal("a connected mailbox was not created under a zero organization limit")
+	}
+	if err := repo.CreateMailbox(ctx, &domain.Mailbox{OrganizationID: accessOrg, Address: "x@mail.example", Type: domain.MailboxTypeShared}, 0); !errors.Is(err, ErrMailboxLimitReached) {
+		t.Fatalf("a Zmail mailbox under a zero limit: err = %v, want limit reached", err)
+	}
+}
+
+// TestConnectedTriageStopsWhenTheConnectionDoes: leaving the organization turns the connected
+// mailbox's triage switch off and drops its pending rows, and a connected mailbox whose connection
+// is not active neither queues nor hands rows to the model.
+func TestConnectedTriageStopsWhenTheConnectionDoes(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	repo := f.repo.(*repository)
+	f.service.settings.Triage = config.AITriageConfig{Provider: config.AITriageProviderFake, DailyCap: 100}
+	ctx := context.Background()
+	f.switchTriage(t, true)
+	if _, err := f.service.SetMailboxTriage(ctx, f.b, f.mailbox.ID, true); err != nil {
+		t.Fatalf("owner switching triage on: %v", err)
+	}
+	f.source.Deliver(externalTestToken, externalMessage("g-1", "Pending", time.Time{}))
+	f.sync(t)
+	pending := func() int64 {
+		t.Helper()
+		var count int64
+		if err := repo.db.Model(&MailTriagePO{}).Where("mailbox_id = ? AND status = ?", f.mailbox.ID, "pending").Count(&count).Error; err != nil {
+			t.Fatalf("count pending triage: %v", err)
+		}
+		return count
+	}
+	if pending() != 1 {
+		t.Fatalf("pending triage rows before leaving = %d, want 1", pending())
+	}
+
+	// A connection that is no longer active blocks queueing and claiming on its own.
+	if err := repo.db.Exec(`UPDATE external_mail_connections SET status = 'needs_reconnect' WHERE id = ?`, f.connection.ID).Error; err != nil {
+		t.Fatalf("mark needs_reconnect: %v", err)
+	}
+	extra := &domain.MailMessage{MailboxID: f.mailbox.ID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,
+		FromAddress: "x@sender.test", Subject: "Late", ExternalID: "g-late", Source: domain.MailSourceGmail, DedupeKey: "late"}
+	if _, err := repo.CreateInboundMessage(ctx, extra); err != nil {
+		t.Fatalf("CreateInboundMessage: %v", err)
+	}
+	if queued, err := repo.EnqueueTriage(ctx, extra.ID, f.mailbox.ID, f.service.now()); err != nil || queued {
+		t.Fatalf("EnqueueTriage on an inactive connection = %v, %v; want not queued", queued, err)
+	}
+	claims, err := repo.ClaimTriage(ctx, f.service.now().Add(time.Hour), 10)
+	if err != nil || len(claims) != 1 || claims[0].MailboxOn {
+		t.Fatalf("claims = %+v, %v; want the pending row with its mailbox off", claims, err)
+	}
+	if err := repo.db.Exec(`UPDATE external_mail_connections SET status = 'active' WHERE id = ?`, f.connection.ID).Error; err != nil {
+		t.Fatalf("mark active: %v", err)
+	}
+	if err := repo.db.Exec(`UPDATE mail_triage SET status = 'pending' WHERE mailbox_id = ?`, f.mailbox.ID).Error; err != nil {
+		t.Fatalf("reset pending: %v", err)
+	}
+
+	f.leave(t, f.b, f.service.now())
+	if pending() != 0 {
+		t.Fatalf("pending triage rows after leaving = %d, want 0", pending())
+	}
+	mailbox, err := f.repo.FindMailbox(ctx, accessOrg, f.mailbox.ID)
+	if err != nil || mailbox.AITriageEnabled {
+		t.Fatalf("connected mailbox after leaving = %+v, %v; want triage off", mailbox, err)
+	}
+}
+
+// TestDeletingAConnectedMailboxRevokesItsConnection: no stored grant outlives its mailbox. A
+// connected shared mailbox (the only kind a manager administers) is deleted together with its
+// connection's revoke: the grant is handed back and the token erased.
+func TestDeletingAConnectedMailboxRevokesItsConnection(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	repo := f.repo.(*repository)
+	ctx := context.Background()
+	if err := repo.db.Exec(`UPDATE mailboxes SET type = 'shared', owner_user_id = NULL WHERE id = ?`, f.mailbox.ID).Error; err != nil {
+		t.Fatalf("make the mailbox shared: %v", err)
+	}
+	if err := f.service.DeleteMailbox(ctx, f.admin, f.mailbox.ID); err != nil {
+		t.Fatalf("DeleteMailbox: %v", err)
+	}
+	connection := f.reload(t)
+	if connection.Status != domain.ExternalMailStatusRevoked || connection.EncryptedRefreshToken != "" || connection.RevokedAt == nil {
+		t.Fatalf("connection after deleting its mailbox = %+v; want revoked, token erased, revoked_at set", connection)
+	}
+	if !f.source.Revoked(externalTestToken) {
+		t.Fatal("the grant was not handed back when its mailbox was deleted")
+	}
+	if _, err := f.repo.FindMailbox(ctx, accessOrg, f.mailbox.ID); !errors.Is(err, ErrMailboxNotFound) {
+		t.Fatalf("mailbox after delete: err = %v, want not found", err)
+	}
+}
+
+// TestForcedDisconnectIsAudited: a forced disconnect lands in the organization audit log with the
+// connection and provider, never the address; repeating it records nothing more, and the owner's
+// own revoke is not a forced disconnect.
+func TestForcedDisconnectIsAudited(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	ctx := context.Background()
+	var changes []auditstarter.Change
+	f.service.recordAudit = func(_ context.Context, change auditstarter.Change) { changes = append(changes, change) }
+
+	carol := f.bind(t, f.c, domain.ExternalMailProviderOutlook, "carol")
+	if err := f.service.ForceDisconnectExternalMailConnection(ctx, f.admin, f.connection.ID); err != nil {
+		t.Fatalf("ForceDisconnectExternalMailConnection: %v", err)
+	}
+	if err := f.service.ForceDisconnectExternalMailConnection(ctx, f.admin, f.connection.ID); err != nil {
+		t.Fatalf("repeated forced disconnect: %v", err)
+	}
+	// The manager using the owner's route is a forced disconnect too; the owner's own revoke is not.
+	if err := f.service.RevokeExternalMailConnection(ctx, f.admin, carol.ID); err != nil {
+		t.Fatalf("manager revoke: %v", err)
+	}
+	second := f.bind(t, f.d, domain.ExternalMailProviderGmail, "dan")
+	if err := f.service.RevokeExternalMailConnection(ctx, f.d, second.ID); err != nil {
+		t.Fatalf("owner revoke: %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("audit changes = %+v; want two forced disconnects", changes)
+	}
+	first := changes[0]
+	if first.Resource != "external_mail_connections" || first.TargetID != fmt.Sprint(f.connection.ID) ||
+		first.Metadata["provider"] != "gmail" || first.Metadata["owner_user_id"] != uint(accessB) {
+		t.Fatalf("audit change = %+v", first)
+	}
+	if strings.Contains(fmt.Sprint(changes), "@") {
+		t.Fatalf("the audit log carries an address: %+v", changes)
+	}
+}
+
+// TestRevokedAccountOfAnotherMemberIsReboundFresh: an account bound by a member stays theirs while
+// live, but once their connection is revoked a member who proves control of the account gets it:
+// the old copies, mailbox, and connection are purged in the binding's transaction and recorded,
+// and the account is bound into a new mailbox.
+func TestRevokedAccountOfAnotherMemberIsReboundFresh(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	repo := f.repo.(*repository)
+	ctx := context.Background()
+	carol := f.bind(t, f.c, domain.ExternalMailProviderGmail, "shared")
+	f.source.Deliver("fake-shared", externalMessage("g-old", "Carol's copy", time.Time{}))
+	f.sync(t)
+
+	// While Carol's connection is live, Dan is refused.
+	state := f.signIn(t, f.d, ExternalMailAuthorizationInput{Provider: domain.ExternalMailProviderGmail})
+	if _, _, err := f.service.CompleteExternalMailAuthorization(ctx, f.d, state, "shared"); !errors.Is(err, ErrExternalMailAccountTaken) {
+		t.Fatalf("binding a live account of another member = %v, want taken", err)
+	}
+
+	if err := f.service.ForceDisconnectExternalMailConnection(ctx, f.admin, carol.ID); err != nil {
+		t.Fatalf("force disconnect: %v", err)
+	}
+	dan := f.bind(t, f.d, domain.ExternalMailProviderGmail, "shared")
+	if dan.ID == carol.ID || dan.MailboxID == carol.MailboxID || dan.OwnerUserID == nil || *dan.OwnerUserID != accessD {
+		t.Fatalf("Dan's connection = %+v; want a new connection and mailbox of his own", dan)
+	}
+	if _, err := f.service.externalMail.FindExternalMailConnection(ctx, accessOrg, carol.ID); !errors.Is(err, ErrExternalMailConnectionNotFound) {
+		t.Fatalf("Carol's old connection: err = %v, want purged", err)
+	}
+	var copies int64
+	if err := repo.db.Model(&MailMessagePO{}).Where("mailbox_id = ?", carol.MailboxID).Count(&copies).Error; err != nil || copies != 0 {
+		t.Fatalf("Carol's copies after the rebind = %d, %v; want none", copies, err)
+	}
+	if _, err := f.repo.FindMailbox(ctx, accessOrg, carol.MailboxID); !errors.Is(err, ErrMailboxNotFound) {
+		t.Fatalf("Carol's old mailbox: err = %v, want deleted", err)
+	}
+	var reason string
+	if err := repo.db.Raw(`SELECT detail->>'reason' FROM mailbox_access_events WHERE mailbox_id = ? AND type = 'copies_purged' AND actor_user_id = ?`,
+		carol.MailboxID, accessD).Scan(&reason).Error; err != nil || reason != "rebound" {
+		t.Fatalf("copies_purged reason = %q, %v; want rebound by Dan", reason, err)
+	}
+	if listed, _, err := f.service.ListMessages(ctx, f.d, dan.MailboxID, domain.MailMessageFilter{Page: 1, PerPage: 10}); err != nil || len(listed) != 0 {
+		t.Fatalf("Dan's new mailbox holds %d messages, %v; want none of Carol's copies", len(listed), err)
 	}
 }

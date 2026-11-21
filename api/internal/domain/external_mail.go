@@ -190,6 +190,8 @@ type ExternalMailRepository interface {
 	// ListExternalMailConnectionDirectory returns up to limit connections of the organization in any
 	// state, id descending, below beforeID when it is not zero.
 	ListExternalMailConnectionDirectory(ctx context.Context, organizationID, beforeID uint, limit int) ([]*ExternalMailConnection, error)
+	// FindExternalMailConnectionByMailbox returns the connection of a connected mailbox, in any state.
+	FindExternalMailConnectionByMailbox(ctx context.Context, organizationID, mailboxID uint) (*ExternalMailConnection, error)
 	// FindExternalMailConnection returns one connection of the organization.
 	FindExternalMailConnection(ctx context.Context, organizationID, id uint) (*ExternalMailConnection, error)
 	// RevokeExternalMailConnection marks the connection revoked, clears its token and cursor, and

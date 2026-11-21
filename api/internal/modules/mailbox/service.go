@@ -691,6 +691,11 @@ func (s *service) DeleteMailbox(ctx context.Context, viewer domain.OrganizationC
 	if err != nil {
 		return err
 	}
+	if mailbox.Connected() {
+		// No stored grant outlives its mailbox: the connection is revoked, its token erased and
+		// handed back, in the transaction that deletes the mailbox.
+		return s.deleteConnectedMailbox(ctx, viewer, mailbox)
+	}
 	if err := s.repo.DeleteMailbox(ctx, viewer.OrganizationID, mailboxID); err != nil {
 		return err
 	}

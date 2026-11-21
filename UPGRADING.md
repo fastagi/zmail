@@ -37,6 +37,20 @@ mailbox limit counts `origin = 'zmail'` only. Managers use the new
 mailbox never sends, never gets `organize`, never awaits a handover, and the handover routes refuse
 it. `domain.ExternalMailRepository` gains `ListExternalMailConnectionDirectory`.
 
+### Medium — Connected accounts: ownership, revoke side effects, and audit
+
+Within one organization and connector an outside account belongs to one member while their
+connection is live; a `revoked` connection of another member no longer blocks a new binder, whose
+binding purges the old copies and mailbox at once (`copies_purged`, reason `rebound`). Any revoke
+turns the connected mailbox's AI triage off and drops its queued messages, and triage skips a
+connected mailbox whose connection is not active. Deleting a connected mailbox revokes its
+connection first. A forced disconnect is also written to the organization audit log. Domain
+routing, domain deletion, and operator mailbox counts ignore connected mailboxes.
+`domain.MailboxRepository.ListMailboxes` and `domain.MailInboxRepository.ListMailboxAccessRows`
+take the viewer's user id and drop other members' connected personal mailboxes in SQL;
+`domain.MailTriageRepository` gains `StopMailboxTriage` and `domain.ExternalMailRepository` gains
+`FindExternalMailConnectionByMailbox`. `CreateMailbox` ignores the limit for a connected mailbox.
+
 ### Low — Migration `2026_12_04_090000_add_mailbox_origin`
 
 Adds `mailboxes.origin varchar(16) NOT NULL DEFAULT 'zmail'` (catalog only, no rewrite) with

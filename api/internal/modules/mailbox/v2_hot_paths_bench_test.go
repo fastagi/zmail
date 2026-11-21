@@ -289,7 +289,7 @@ func explainV2Once(b *testing.B, forbidden []string, fn func(*repository, domain
 // v2InboxList does what the service does for one page: access rows, the triage switch, the page,
 // its snippets, and its triage results.
 func v2InboxList(ctx context.Context, repo *repository, query domain.InboxQuery) ([]*domain.MailMessage, error) {
-	if _, err := repo.ListMailboxAccessRows(ctx, v2InboxOrganization, v2InboxMembership); err != nil {
+	if _, err := repo.ListMailboxAccessRows(ctx, v2InboxOrganization, v2InboxMembership, 1); err != nil {
 		return nil, err
 	}
 	if _, err := repo.FindTriageSettings(ctx, v2InboxOrganization); err != nil {

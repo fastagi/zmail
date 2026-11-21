@@ -55,6 +55,9 @@ var externalMailPurgeBatch = 1000
 const (
 	externalMailPurgeRetention = "retention"
 	externalMailPurgeOwner     = "owner"
+	// externalMailPurgeRebound purges a revoked connection of another member whose account a new
+	// binder proved control of.
+	externalMailPurgeRebound = "rebound"
 )
 
 // externalMailBackoff is the wait before the next fetch after failures failed fetches in a row:

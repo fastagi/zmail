@@ -245,7 +245,7 @@ func (s *service) accessRows(ctx context.Context, viewer domain.OrganizationCont
 	if s.inbox == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	rows, err := s.inbox.ListMailboxAccessRows(ctx, viewer.OrganizationID, viewer.MembershipID)
+	rows, err := s.inbox.ListMailboxAccessRows(ctx, viewer.OrganizationID, viewer.MembershipID, viewer.UserID)
 	if err != nil {
 		return nil, err
 	}

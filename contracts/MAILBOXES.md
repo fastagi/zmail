@@ -355,6 +355,12 @@ where its mail comes from:
   absent from their mailbox lists, the directory and its `mailbox_count`, the export, the unified
   inbox and its counts, and every route of it answers them `404`. Owners and admins see connected
   accounts only in the [connection directory](#connection-directory), with the address masked.
+  Domain receiving and domain deletion ignore connected mailboxes too: an address on an
+  organization domain gets no routing rule because of one, and never keeps the domain from being
+  deleted. Operator mailbox counts count Zmail mailboxes only.
+- Deleting a connected mailbox (only a connected shared one has `administer`) revokes its connection
+  in the same operation: the grant is handed back and the token erased, so no stored grant outlives
+  its mailbox.
 
 Every mailbox is one of two types:
 
@@ -729,12 +735,16 @@ one. The first sync looks back 14 days unless the binding asked for 1 to 90.
 Connector ids match `^[a-z][a-z0-9_]{1,15}$`; a new connector adds ids without a contract change, so
 clients render an id they do not know generically. A connected mailbox carries the outside account's
 address, but that address is never Zmail's to deliver to: inbound delivery, sending, and the address
-check ignore connected mailboxes, and two members may each bind their own copy of an address.
+check ignore connected mailboxes. Within one organization and connector an outside account belongs
+to one member at a time; the same address may still exist under another connector or as a Zmail
+mailbox, which is all the relaxed address index allows.
 
 Every newly stored message, delivered by Zmail or synced, goes through the same post-store step in
 the transaction that stores it: it is queued for [AI triage](#ai-triage) when the switches allow,
-and announced as `mail.message.received` (webhooks still publish for shared mailboxes only). Only an
-connected personal mailbox's owner may switch triage on for it.
+and announced as `mail.message.received` (webhooks still publish for shared mailboxes only). Only a
+connected personal mailbox's owner may switch triage on for it. A connected mailbox whose connection
+is not `active` queues nothing for triage and hands no queued message to the model, and any revoke,
+including the one when the owner leaves, turns its switch off and drops its queued messages.
 
 While the instance enables no connector (`EXTERNAL_MAIL_PROVIDERS` empty, the default) the connector
 list is empty, starting a sign-in answers `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`, the connection
@@ -760,7 +770,8 @@ sign-in up, whatever the outcome, then exchanges the code with the PKCE verifier
 | New in the organization for this connector | `201`: a private, read-only connected personal mailbox and an active connection, synced at once (`connection_bound`) |
 | The caller's own connection, in any state | `200`: the same connection, active, error cleared, synced at once; mailbox and history kept (a `revoked` one backfills again, without copies) (`connection_reconnected`) |
 | A reconnect that signed in to another account | `409 MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`; nothing changes |
-| Bound by another member | `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` |
+| Bound by another member, connection not `revoked` | `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` |
+| Bound by another member whose connection is `revoked` (they left, unbound it, or were disconnected) | `201`: the old connection's copies, mailbox, and connection are deleted for good at once (`copies_purged` with `reason` `rebound` and the caller as actor), then the account is bound into a new mailbox; `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` only while the sync worker holds the old connection |
 | A new account past the caller's 10 | `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT` |
 
 On a `409` the grant is handed back to the provider. A refused code is
@@ -940,6 +951,36 @@ strands copies. A purge only ever touches the connection's own mailbox, and only
 holds synced copies; a purge that fails is logged and retried an hour later without holding up the
 connections revoked after it. A claimed connection whose mailbox is gone is not fetched: its grant
 is handed back, it is revoked, and its run is recorded as `dropped`.
+
+### Connection Directory
+
+Owners and admins learn that members connected outside accounts, and can disconnect them, without
+ever seeing the account's mail or full address. Members get `403 PERMISSION.DENIED` on both routes.
+
+`GET /v1/external-mail-connection-directory` returns keyset pages of every connection of the
+organization in any status, newest first (`cursor`, `per_page` 1 to 100, default 15; `page` is
+`400 COMMON.INVALID_INPUT`). It is empty while external mail is off, and never cached:
+
+```json
+{ "id": 3, "provider": "gmail", "status": "active", "masked_account_address": "st***@gmail.com",
+  "owner_user_id": 5, "owner_display_name": "stark", "last_synced_at": "2026-11-20T08:00:00Z",
+  "created_at": "2026-11-19T08:00:00Z" }
+```
+
+The mask keeps the first two characters of the local part (one when it is that short) and the
+domain. `owner_display_name` is the owner's nickname, or username without one, while they are a
+member, otherwise `null`. No token, mailbox id, message, or count is ever returned.
+
+`DELETE /v1/external-mail-connection-directory/:connection_id` force-disconnects any connection of
+the organization with the effect of the owner's unbind and writes `connection_force_disconnected`
+to the connected mailbox's history. A revoked connection answers `204` again and writes nothing;
+another organization's id, and any id while external mail is off, is
+`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. A forced disconnect that changed anything is also
+written to the organization audit log (resource `external_mail_connections`, the connection id,
+`provider`, and `owner_user_id`; never the address), so every owner and admin can see who
+disconnected which account. The owner may bind the account again afterwards, which restores the
+same mailbox like any rebind of their own; until then another member who proves control of the
+account may bind it instead (see [Binding](#binding)).
 
 ## Domains
 

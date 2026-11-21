@@ -84,13 +84,14 @@ func (r *repository) CountInboxViews(
 }
 
 // ListMailboxAccessRows is bounded by the organization's mailbox limit.
-func (r *repository) ListMailboxAccessRows(ctx context.Context, organizationID, membershipID uint) ([]domain.MailboxAccessRow, error) {
+func (r *repository) ListMailboxAccessRows(ctx context.Context, organizationID, membershipID, viewerUserID uint) ([]domain.MailboxAccessRow, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
 	var boxes []MailboxPO
 	err := r.conn(ctx).
 		Where("organization_id = ?", organizationID).
+		Where(visibleToViewer, viewerUserID).
 		Order("id ASC").
 		Limit(domain.MailboxesPerOrganizationCeiling).
 		Find(&boxes).Error

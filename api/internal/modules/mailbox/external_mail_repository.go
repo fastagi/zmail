@@ -292,6 +292,21 @@ func (r *repository) ListExternalMailConnectionDirectory(ctx context.Context, or
 	return connections, nil
 }
 
+func (r *repository) FindExternalMailConnectionByMailbox(ctx context.Context, organizationID, mailboxID uint) (*domain.ExternalMailConnection, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var po ExternalMailConnectionPO
+	err := r.conn(ctx).Where("organization_id = ? AND mailbox_id = ?", organizationID, mailboxID).First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrExternalMailConnectionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return po.toDomain(), nil
+}
+
 func (r *repository) FindExternalMailConnection(ctx context.Context, organizationID, id uint) (*domain.ExternalMailConnection, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable

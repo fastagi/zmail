@@ -891,7 +891,7 @@ type MailboxRepository interface {
 	CreateMailbox(ctx context.Context, mailbox *Mailbox, limit int) error
 	// ListMailboxes lists the organization's mailboxes. UnreadCount is what readerMembershipID has
 	// not read of each mailbox's inbound mail in default (the Inbox) after its seal boundary.
-	ListMailboxes(ctx context.Context, organizationID, readerMembershipID uint) ([]*Mailbox, error)
+	ListMailboxes(ctx context.Context, organizationID, readerMembershipID, viewerUserID uint) ([]*Mailbox, error)
 	// ListUsableMailboxes lists, with unread counts as ListMailboxes, the organization's live
 	// mailboxes that are personal and owned by userID or hold a member row of membershipID, and
 	// with includeAwaitingHandover also every personal mailbox whose owner left.

@@ -122,7 +122,7 @@ func (s *service) ForceDisconnectExternalMailConnection(ctx context.Context, vie
 	if err != nil {
 		return err
 	}
-	return s.revokeConnection(ctx, connection, viewer.UserID, domain.MailboxAccessConnectionForceRevoked)
+	return s.forceDisconnect(ctx, viewer, connection)
 }
 
 // maskAccountAddress keeps the first two characters of the local part (one when it is that short)

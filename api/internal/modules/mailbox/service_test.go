@@ -281,7 +281,7 @@ func (r *fakeRepository) CreateMailbox(_ context.Context, mailbox *domain.Mailbo
 	return nil
 }
 
-func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID, readerMembershipID uint) ([]*domain.Mailbox, error) {
+func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID, readerMembershipID, _ uint) ([]*domain.Mailbox, error) {
 	var owned []*domain.Mailbox
 	for _, mailbox := range r.mailboxes {
 		if mailbox.OrganizationID == organizationID {
@@ -302,7 +302,7 @@ func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID, reader
 }
 
 func (r *fakeRepository) ListUsableMailboxes(ctx context.Context, organizationID, membershipID, userID uint, includeAwaitingHandover bool) ([]*domain.Mailbox, error) {
-	all, err := r.ListMailboxes(ctx, organizationID, membershipID)
+	all, err := r.ListMailboxes(ctx, organizationID, membershipID, 0)
 	if err != nil {
 		return nil, err
 	}
