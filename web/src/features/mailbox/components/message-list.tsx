@@ -58,17 +58,11 @@ import type {
   UpdateMailMessagesInput,
 } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
+import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-rows';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
-/** The message ids a row stands for: a thread row acts on the thread's messages in the view. */
-export function rowMessageIds(row: MailMessageSummary): number[] {
-  return row.thread?.message_ids ?? [row.id];
-}
-
-export function rowUnread(row: MailMessageSummary): boolean {
-  return row.thread ? row.thread.unread : row.direction === 'inbound' && !row.read;
-}
+export { rowMessageIds, rowUnread };
 
 function rowStarred(row: MailMessageSummary): boolean {
   return row.thread?.starred ?? row.starred;
