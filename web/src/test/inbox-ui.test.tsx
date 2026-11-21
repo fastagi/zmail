@@ -453,11 +453,11 @@ describe('unified inbox', () => {
     expect(new URLSearchParams(window.location.search).has('new')).toBe(false);
   });
 
-  it('offers to name a team when the user has none', () => {
+  it('offers to name a team when the user has none', async () => {
     state.organizations.data = page([]);
     renderRoute();
 
-    expect(screen.getByLabelText('Team name')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Team name')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create team' })).toBeInTheDocument();
   });
 
