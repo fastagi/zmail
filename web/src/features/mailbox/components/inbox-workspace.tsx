@@ -375,6 +375,9 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const [connectMounted, setConnectMounted] = useState(false);
   const [manageExternalOpen, setManageExternalOpen] = useState(false);
   const [manageExternalMounted, setManageExternalMounted] = useState(false);
+  // Where focus goes back when the external mailbox dialogs close, shared because each opens the
+  // other: the sidebar control that started the flow.
+  const externalReturnFocus = useRef<HTMLElement | null>(null);
   const openConnect = () => {
     setManageExternalOpen(false);
     setConnectMounted(true);
@@ -518,6 +521,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             onOpenChange={setConnectOpen}
             organizationId={organizationId}
             connectors={connectorList}
+            returnFocusRef={externalReturnFocus}
           />
         </Suspense>
       ) : null}
@@ -530,6 +534,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             connections={connections.data}
             error={!connections.data && connections.isError}
             onAdd={externalOn ? openConnect : null}
+            returnFocusRef={externalReturnFocus}
           />
         </Suspense>
       ) : null}

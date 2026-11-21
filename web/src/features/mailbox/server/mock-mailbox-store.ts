@@ -2272,6 +2272,8 @@ function logSummaryOf(message: MailMessage): Omit<MailLogEntry, 'mailbox_address
     queued_reason: message.queued_reason,
     last_event: message.last_event,
     attachment_count: message.attachment_count,
+    // As in the API: the connector id for a synced copy, `zmail` for Zmail's own mail.
+    source: message.source ?? 'zmail',
     template_id: message.template_id,
     created_at: message.created_at,
   };
