@@ -72,7 +72,7 @@ describe('callback page module graph', () => {
   function staticMailboxImports(file: string): string[] {
     const source = readFileSync(file, 'utf8');
     return Array.from(
-      source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'(@\/features\/mailbox\/[^']+)';/gmsu),
+      source.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'(@\/features\/mailbox\/[^']+)';/gmu),
       match => match[1]
     );
   }
@@ -99,6 +99,6 @@ describe('callback page module graph', () => {
       seen.add(specifier);
       queue.push(...staticMailboxImports(fileOf(specifier)));
     }
-    for (const module of heavy) expect([...seen]).not.toContain(module);
+    for (const specifier of heavy) expect([...seen]).not.toContain(specifier);
   });
 });

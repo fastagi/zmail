@@ -14,7 +14,6 @@ import { liveRefresh, mailboxKeys, validId } from '@/features/mailbox/hooks/mail
 import { mailboxService } from '@/features/mailbox/services/mailbox-service';
 import type {
   CreateMailboxInput,
-  InboxFilters,
   InboxItem,
   InboxPage,
   MailDnsRecordInput,
@@ -28,7 +27,6 @@ import type {
   MailMessageFilters,
   MailMessagePage,
   MailMessageSummary,
-  MailboxDirectoryFilters,
   MailboxListScope,
   MailboxPermission,
   SendMailMessageInput,
