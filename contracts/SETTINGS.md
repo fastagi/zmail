@@ -36,7 +36,7 @@ The shipped catalog is intentionally small:
 
 | Scope | Key | Kind | Visibility | Default |
 |---|---|---|---|---|
-| app | `branding.display_name` | string | public | `FastBuild` |
+| app | `branding.display_name` | string | public | `Zmail` |
 | app | `localization.locale` | enum | public | `en-US` |
 | organization | `localization.locale` | enum | private | `en-US` |
 | user | `localization.locale` | enum | private | `en-US` |

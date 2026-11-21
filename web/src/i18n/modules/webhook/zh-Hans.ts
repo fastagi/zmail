@@ -61,7 +61,7 @@ const messages = {
     title: '一次性签名密钥',
     description: '关闭后无法再次查看此明文密钥。',
     warningTitle: '立即安全保存',
-    warning: 'FastBuild 只持久化加密密文；列表和投递记录不会返回明文。',
+    warning: 'Zmail 只持久化加密密文；列表和投递记录不会返回明文。',
     label: '签名密钥',
     overlap: '旧密钥将在 {time} 后停止签名。',
   },

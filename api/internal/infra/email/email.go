@@ -331,9 +331,9 @@ func (s *Service) SendRegistrationCodeEmail(ctx context.Context, to, code string
 
 // SendWelcomeEmail sends a welcome email.
 func (s *Service) SendWelcomeEmail(ctx context.Context, to, username string) error {
-	subject := "Welcome to FastBuild"
+	subject := "Welcome to Zmail"
 	htmlContent := fmt.Sprintf(`
-		<h2>Welcome to FastBuild</h2>
+		<h2>Welcome to Zmail</h2>
 		<p>Dear %s,</p>
 		<p>Thank you for registering as our user!</p>
 		<p>If you have any questions, please feel free to contact our support team.</p>

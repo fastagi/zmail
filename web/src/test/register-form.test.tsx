@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { env } from '@/config/env';
 import { RegisterForm } from '@/features/auth/components/register-form';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -15,6 +16,10 @@ const mutation = vi.hoisted(() => ({
 }));
 const service = vi.hoisted(() => ({ requestRegistrationCode: vi.fn() }));
 
+vi.mock('@/config/env', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/config/env')>();
+  return { ...actual, env: { ...actual.env } };
+});
 vi.mock('@/features/auth/hooks/use-auth', () => ({ useRegister: () => mutation }));
 vi.mock('@/features/auth/services/auth-service', () => ({ authService: service }));
 vi.mock('next/navigation', () => ({
@@ -43,6 +48,8 @@ describe('two-step registration form', () => {
     mutation.reset.mockReset();
     service.requestRegistrationCode.mockReset();
     service.requestRegistrationCode.mockResolvedValue({ success: true });
+    env.NEXT_PUBLIC_TERMS_URL = 'https://legal.example.com/terms';
+    env.NEXT_PUBLIC_PRIVACY_URL = 'https://legal.example.com/privacy';
   });
 
   afterEach(() => {
@@ -88,6 +95,52 @@ describe('two-step registration form', () => {
     fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'Ann' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret-123' } });
     fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign Up' }));
+
+    expect(mutation.mutate).toHaveBeenCalledWith({
+      name: 'Ann',
+      email: 'ann@example.com',
+      password: 'secret-123',
+      code: '042917',
+    });
+  });
+
+  it('links the consent to the configured Terms of Service and Privacy Policy', async () => {
+    renderForm();
+    await sendCode();
+
+    const terms = screen.getByRole('link', { name: 'Terms of Service' });
+    const privacy = screen.getByRole('link', { name: 'Privacy Policy' });
+    expect(terms).toHaveAttribute('href', 'https://legal.example.com/terms');
+    expect(privacy).toHaveAttribute('href', 'https://legal.example.com/privacy');
+    for (const link of [terms, privacy]) {
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    }
+    expect(screen.getByRole('button', { name: 'Sign Up' })).toBeDisabled();
+  });
+
+  it('asks consent only for the one configured document', async () => {
+    env.NEXT_PUBLIC_PRIVACY_URL = undefined;
+    renderForm();
+    await sendCode();
+
+    expect(screen.getByRole('link', { name: 'Terms of Service' })).toBeInTheDocument();
+    expect(screen.queryByText(/Privacy Policy/u)).toBeNull();
+    expect(screen.getByRole('checkbox')).toBeInTheDocument();
+  });
+
+  it('asks no consent when no legal document is configured', async () => {
+    env.NEXT_PUBLIC_TERMS_URL = undefined;
+    env.NEXT_PUBLIC_PRIVACY_URL = undefined;
+    renderForm();
+    await sendCode();
+
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByText(/Terms of Service/u)).toBeNull();
+    fireEvent.change(screen.getByLabelText('Verification code'), { target: { value: '042917' } });
+    fireEvent.change(screen.getByLabelText('Full Name'), { target: { value: 'Ann' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret-123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sign Up' }));
 
     expect(mutation.mutate).toHaveBeenCalledWith({

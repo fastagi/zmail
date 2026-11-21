@@ -61,7 +61,7 @@ const messages = {
     description: 'This plaintext secret cannot be viewed again after closing.',
     warningTitle: 'Store it securely now',
     warning:
-      'FastBuild persists only encrypted material; lists and delivery records never return plaintext.',
+      'Zmail persists only encrypted material; lists and delivery records never return plaintext.',
     label: 'Signing secret',
     overlap: 'The previous secret will stop signing after {time}.',
   },

@@ -65,6 +65,16 @@ export const publicEnvSchema = z.object({
     .url()
     .refine((value) => /^https?:\/\//i.test(value), 'Must be an http(s) URL')
     .optional(),
+  NEXT_PUBLIC_TERMS_URL: z
+    .string()
+    .url()
+    .refine((value) => /^https?:\/\//i.test(value), 'Must be an http(s) URL')
+    .optional(),
+  NEXT_PUBLIC_PRIVACY_URL: z
+    .string()
+    .url()
+    .refine((value) => /^https?:\/\//i.test(value), 'Must be an http(s) URL')
+    .optional(),
   NODE_ENV: z.enum(['development', 'production', 'test']),
 });
 
