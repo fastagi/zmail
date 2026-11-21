@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -19,31 +19,27 @@ import {
 } from '@/features/mailbox/components/thread-view';
 import {
   markInboxRowRead,
-  removeInboxRow,
   useUpdateInboxMessage,
   useUpdateInboxMessages,
 } from '@/features/mailbox/hooks/use-inbox';
 import {
+  mailboxKeys,
   useMailMessage,
   useMailThread,
   useMarkMailMessageRead,
 } from '@/features/mailbox/hooks/use-mailbox';
-import type { InboxItem, MailMessage, Mailbox } from '@/features/mailbox/types';
+import type { InboxItem, InboxPage, MailMessage, Mailbox } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
-/**
- * What the reading pane does besides the row's own mailbox: moving through the list, replying, and
- * `onRowLeft`, which opens the row after `item` (or goes back to the list) once it was archived or
- * deleted.
- */
+/** What the reading pane does besides the row's own mailbox: moving through the list, replying. */
 export type InboxReaderNavigation = Omit<
   ReaderProps,
   'mailboxId' | 'mailboxAddress' | 'canSend' | 'canOrganize' | 'onLeave'
-> & { onRowLeft: (item: InboxItem) => void };
+>;
 
 /**
  * The AI triage block of the pane, given only while the organization's triage is on: the override
@@ -176,8 +172,21 @@ export function InboxReadingPane({
     moving.current.add(target.id);
     const messageIds = rowMessageIds(target);
     const origin = originOf(target);
-    const rollback = removeInboxRow(queryClient, organizationId, target.id);
-    navigation.onRowLeft(target);
+    // The row leaves every cached listing at once, and the row after it opens (or the list).
+    const queryKey = mailboxKeys.inboxes(organizationId);
+    const snapshot = queryClient.getQueriesData<InfiniteData<InboxPage>>({ queryKey });
+    queryClient.setQueriesData<InfiniteData<InboxPage>>({ queryKey }, listing =>
+      listing?.pages
+        ? {
+            ...listing,
+            pages: listing.pages.map(page => ({
+              ...page,
+              items: page.items.filter(row => row.id !== target.id),
+            })),
+          }
+        : listing
+    );
+    (navigation.onNext ?? navigation.onClose)();
     try {
       await updateInbox.mutateAsync({
         mailboxId: target.mailbox_id,
@@ -195,7 +204,7 @@ export function InboxReadingPane({
             })
       );
     } catch (failure) {
-      rollback();
+      for (const [key, listing] of snapshot) queryClient.setQueryData(key, listing);
       toast.error(t(resolveMailboxErrorKey(failure)));
     } finally {
       moving.current.delete(target.id);
@@ -244,7 +253,6 @@ export function InboxReadingPane({
       </div>
     );
   } else {
-    // `onRowLeft` rides along unused: moves live in this pane's toolbar, not in the article.
     const reader: ReaderProps = {
       ...navigation,
       mailboxId: item.mailbox_id,

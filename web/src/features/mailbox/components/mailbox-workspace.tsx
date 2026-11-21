@@ -66,7 +66,6 @@ import {
   useUpdateMailMessages,
 } from '@/features/mailbox/hooks/use-mailbox';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
-import { isTyping, modalOpen } from '@/features/mailbox/hooks/use-mail-shortcuts';
 import type {
   MailMessage,
   MailMessageFilters,
@@ -328,7 +327,14 @@ function MailboxView({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-      if (isTyping(event.target) || modalOpen()) return;
+      const target = event.target;
+      if (
+        (target instanceof HTMLElement &&
+          (target.isContentEditable || target.closest('input, textarea, select') !== null)) ||
+        document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"]') !== null
+      ) {
+        return;
+      }
       event.preventDefault();
       setOpen(null);
     };
