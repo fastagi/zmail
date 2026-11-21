@@ -57,7 +57,7 @@ func TestExternalMailBindCreatesPrivateConnection(t *testing.T) {
 	if err != nil || mailbox.Type != domain.MailboxTypeExternal || mailbox.OwnerUserID == nil || *mailbox.OwnerUserID != accessC {
 		t.Fatalf("mailbox = %+v, err %v; want carol's external mailbox", mailbox, err)
 	}
-	if _, _, err := f.service.ListMessages(context.Background(), f.b, connection.MailboxID, domain.MailMessageFilter{Page: 1, PerPage: 10}); err == nil {
+	if _, _, listErr := f.service.ListMessages(context.Background(), f.b, connection.MailboxID, domain.MailMessageFilter{Page: 1, PerPage: 10}); listErr == nil {
 		t.Fatal("a colleague listed the new external mailbox")
 	}
 
@@ -316,20 +316,20 @@ func TestExternalMailBindingHTTP(t *testing.T) {
 	}
 
 	start := func(payload string) (string, int, map[string]any) {
-		status, body := f.callWith(t, f.c, http.MethodPost, "/external-mail-authorizations", payload)
-		data, _ := body["data"].(map[string]any)
+		code, answer := f.callWith(t, f.c, http.MethodPost, "/external-mail-authorizations", payload)
+		data, _ := answer["data"].(map[string]any)
 		authorizationURL, _ := data["authorization_url"].(string)
 		parsed, _ := url.Parse(authorizationURL)
 		if parsed == nil {
-			return "", status, body
+			return "", code, answer
 		}
-		return parsed.Query().Get("state"), status, body
+		return parsed.Query().Get("state"), code, answer
 	}
-	if _, status, body := start(`{}`); status != http.StatusUnprocessableEntity || body["error_code"] != domain.CodeExternalMailAuthorizationInvalid {
-		t.Fatalf("start without provider = %d %v", status, body)
+	if _, code, answer := start(`{}`); code != http.StatusUnprocessableEntity || answer["error_code"] != domain.CodeExternalMailAuthorizationInvalid {
+		t.Fatalf("start without provider = %d %v", code, answer)
 	}
-	if _, status, body := start(`{"provider":"gmail","backfill_days":91}`); status != http.StatusUnprocessableEntity {
-		t.Fatalf("start with a long backfill = %d %v", status, body)
+	if _, code, answer := start(`{"provider":"gmail","backfill_days":91}`); code != http.StatusUnprocessableEntity {
+		t.Fatalf("start with a long backfill = %d %v", code, answer)
 	}
 	state, status, body := start(`{"provider":"gmail","backfill_days":30}`)
 	if status != http.StatusCreated || state == "" {
@@ -435,7 +435,7 @@ func TestExternalMailSavesRotatedToken(t *testing.T) {
 	}
 }
 
-// TestExternalMailCursorExpiryResyncs: when the provider no longer honours the cursor, the sync
+// TestExternalMailCursorExpiryResyncs: when the provider no longer honors the cursor, the sync
 // starts over at once from an empty cursor and stores no second copy.
 func TestExternalMailCursorExpiryResyncs(t *testing.T) {
 	f := newExternalFixture(t, config.ExternalMailSourceFake)
@@ -453,5 +453,61 @@ func TestExternalMailCursorExpiryResyncs(t *testing.T) {
 	}
 	if stored := len(f.storedExternal(t)); stored != 2 {
 		t.Fatalf("stored %d messages after the resync, want 2 without copies", stored)
+	}
+}
+
+// rotatingFailure rotates the grant and then fails the fetch, as a provider that redeems the
+// refresh token before a throttled or expired read does.
+type rotatingFailure struct {
+	*FakeExternalMailSource
+	next string
+	fail error
+}
+
+func (s rotatingFailure) Fetch(context.Context, ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	return ExternalMailFetch{RefreshToken: s.next}, s.fail
+}
+
+// TestExternalMailKeepsRotatedTokenOfFailedFetch: a grant rotated before a fetch failed is saved,
+// whether the failure is retried later or restarts the sync.
+func TestExternalMailKeepsRotatedTokenOfFailedFetch(t *testing.T) {
+	for name, failure := range map[string]error{
+		"a retryable failure": errors.New("throttled"),
+		"an expired cursor":   ErrExternalMailCursorExpired,
+	} {
+		f := newExternalFixture(t, config.ExternalMailSourceFake)
+		f.service.externalConnectors = fakeExternalMailRegistry(rotatingFailure{f.source, "refresh-b-2", failure})
+		f.sync(t)
+		connection := f.reload(t)
+		stored, err := f.service.encryptor.DecryptString(connection.EncryptedRefreshToken)
+		if err != nil || stored != "refresh-b-2" || connection.Status != domain.ExternalMailStatusActive {
+			t.Fatalf("%s: stored token %q, status %q, err %v; want the rotated token on an active connection",
+				name, stored, connection.Status, err)
+		}
+	}
+}
+
+// TestExternalMailRegistryBuildsRegisteredConnectors: a connector registered by its adapter is
+// offered when the configuration enables it, once, and not otherwise.
+func TestExternalMailRegistryBuildsRegisteredConnectors(t *testing.T) {
+	saved := externalMailConnectorBuilders
+	t.Cleanup(func() { externalMailConnectorBuilders = saved })
+	externalMailConnectorBuilders = nil
+	builder := func(cfg config.ExternalMailConfig) (ExternalMailConnector, bool) {
+		return ExternalMailConnector{
+			ID: "imap", AuthKind: ExternalMailAuthPassword, Capabilities: ExternalMailCapabilities{Read: true},
+			Source: NewFakeExternalMailSource(),
+		}, cfg.Provides(config.ExternalMailProviderIMAP)
+	}
+	registerExternalMailConnector(builder)
+	registerExternalMailConnector(builder)
+
+	enabled := newExternalMailRegistry(config.ExternalMailConfig{Providers: []string{config.ExternalMailProviderIMAP}})
+	if connectors := enabled.list(); len(connectors) != 1 || connectors[0].ID != "imap" {
+		t.Fatalf("connectors = %+v, want imap once", connectors)
+	}
+	other := newExternalMailRegistry(config.ExternalMailConfig{Providers: []string{config.ExternalMailProviderGmail}})
+	if connectors := other.list(); len(connectors) != 0 {
+		t.Fatalf("connectors = %+v, want none when the provider is not enabled", connectors)
 	}
 }
