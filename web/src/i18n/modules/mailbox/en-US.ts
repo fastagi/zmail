@@ -1620,6 +1620,7 @@ const messages = {
     },
     callback: {
       title: 'Connecting your mailbox',
+      failedTitle: 'Could not connect your mailbox',
       working: 'Finishing the connection…',
       connected: 'Connected. Syncing the last {days} days of mail.',
       connectedRecent: 'Connected. Syncing your recent mail.',
@@ -1656,7 +1657,8 @@ const messages = {
       reconnect: 'Reconnect',
       disconnect: 'Disconnect',
       confirmTitle: 'Disconnect {address}?',
-      confirm: 'Syncing stops now. Mail already synced is kept for 30 days.',
+      confirm:
+        'Syncing stops now. Mail already synced is kept for a limited time and then deleted.',
       confirmAction: 'Disconnect',
       cancel: 'Cancel',
       disconnected: 'Disconnected {address}',

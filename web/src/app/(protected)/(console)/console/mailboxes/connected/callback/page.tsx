@@ -15,8 +15,14 @@ export default async function ExternalMailCallbackPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-1 flex-col gap-6 px-4 py-16">
-      <h1 className="text-center text-xl font-semibold">{t('external.callback.title')}</h1>
-      <Suspense fallback={null}>
+      {/* The callback owns the heading, which follows its state; this one holds its place. */}
+      <Suspense
+        fallback={
+          <h1 className="text-center text-xl font-semibold outline-none">
+            {t('external.callback.title')}
+          </h1>
+        }
+      >
         <ExternalMailCallback />
       </Suspense>
     </div>

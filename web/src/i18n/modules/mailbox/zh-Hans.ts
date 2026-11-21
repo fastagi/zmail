@@ -1547,6 +1547,7 @@ const messages = {
     },
     callback: {
       title: '正在接入邮箱',
+      failedTitle: '无法接入邮箱',
       working: '正在完成接入…',
       connected: '已接入，正在同步最近 {days} 天的邮件。',
       connectedRecent: '已接入，正在同步最近的邮件。',
@@ -1582,7 +1583,7 @@ const messages = {
       reconnect: '重新连接',
       disconnect: '断开',
       confirmTitle: '断开 {address}？',
-      confirm: '同步会立即停止。已同步的邮件保留 30 天。',
+      confirm: '同步会立即停止。已同步的邮件会保留一段时间，之后被删除。',
       confirmAction: '断开',
       cancel: '取消',
       disconnected: '已断开 {address}',
