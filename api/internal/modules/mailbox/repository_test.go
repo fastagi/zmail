@@ -12,6 +12,7 @@ import (
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/modules/apikey"
 )
 
 // mailboxOwnerPO stands in for the organizations table so the owner rows exist without
@@ -27,7 +28,8 @@ func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	db := testplatform.OpenPostgres(
 		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{},
 		// Triage reads a connected mailbox's connection status.
-		&ExternalMailConnectionPO{})
+		&ExternalMailConnectionPO{},
+		&MailAgentGrantPO{}, &MailAgentEventPO{}, &MailAgentAuditPO{}, &MailAgentDraftPO{}, &apikey.APIKeyPO{})
 	return NewRepository(db), db
 }
 

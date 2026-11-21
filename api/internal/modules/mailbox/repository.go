@@ -237,6 +237,12 @@ func (r *repository) DeleteMailbox(ctx context.Context, organizationID, id uint)
 		if result.RowsAffected == 0 {
 			return ErrMailboxNotFound
 		}
+		// Agent grants, their feed, drafts, and audit never outlive the mailbox.
+		for _, table := range []string{"mail_agent_events", "mail_agent_drafts", "mail_agent_audit", "mail_agent_grants"} {
+			if err := tx.Exec("DELETE FROM "+table+" WHERE mailbox_id = ?", id).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Where("mailbox_id = ?", id).Delete(&MailboxMemberPO{}).Error; err != nil {
 			return err
 		}

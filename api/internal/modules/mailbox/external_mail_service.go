@@ -317,6 +317,17 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 				return err
 			}
 		}
+		// Nor an agent: the mailbox's grants end and its drafts go with the connection.
+		reason := domain.MailAgentRevokedConnectionRevoked
+		if event == domain.MailboxAccessConnectionRevokedLeave {
+			reason = domain.MailAgentRevokedOwnerLeft
+		}
+		if err := s.endAgentMailbox(tx, domain.MailAgentGrantRevocation{
+			OrganizationID: connection.OrganizationID, MailboxID: connection.MailboxID,
+			Reason: reason, RevokedBy: actorUserID,
+		}); err != nil {
+			return err
+		}
 		return s.recordConnectionEvent(tx, connection, event, actorUserID)
 	})
 	if err != nil {
