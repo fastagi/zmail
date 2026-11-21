@@ -419,6 +419,7 @@ const messages = {
     template: 'Template',
     templateNone: 'None, write the message',
     templateHint: 'An empty variable uses the fallback written in the template.',
+    draftSaved: 'Saved as a draft',
   },
   emails: {
     title: 'Emails',

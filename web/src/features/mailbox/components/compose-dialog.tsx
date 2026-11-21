@@ -18,6 +18,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  composeDraftKey,
+  readComposeDraft,
+  writeComposeDraft,
+} from '@/features/mailbox/components/compose-draft-store';
 import { type ComposeDraft } from '@/features/mailbox/components/compose-drafts';
 import { fileToBase64, formatBytes } from '@/features/mailbox/components/mail-attachments';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
@@ -86,10 +91,13 @@ export function ComposeDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
   const templateHintId = useId();
-  const [to, setTo] = useState(draft.to);
-  const [cc, setCc] = useState(draft.cc ?? '');
-  const [subject, setSubject] = useState(draft.subject);
-  const [body, setBody] = useState(draft.body ?? '');
+  // A draft kept when the dialog last closed takes the place of the starting text.
+  const draftKey = composeDraftKey(organizationId, draft);
+  const [kept] = useState(() => readComposeDraft(draftKey));
+  const [to, setTo] = useState(kept?.to ?? draft.to);
+  const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
+  const [subject, setSubject] = useState(kept?.subject ?? draft.subject);
+  const [body, setBody] = useState(kept?.body ?? draft.body ?? '');
   const [files, setFiles] = useState<File[]>([]);
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -139,6 +147,7 @@ export function ComposeDialog({
       });
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
+      writeComposeDraft(draftKey, null);
       onStored?.();
       onClose();
     } catch (failure) {
@@ -187,6 +196,7 @@ export function ComposeDialog({
       });
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
+      writeComposeDraft(draftKey, null);
       onStored?.();
       onClose();
     } catch (failure) {
@@ -194,6 +204,28 @@ export function ComposeDialog({
       setErrorKey(resolveMailboxErrorKey(failure));
       if (isStoredSendFailure(failure)) onStored?.();
     }
+  };
+
+  /**
+   * Closing never asks: what was written is kept as this browser's draft and the dialog says so.
+   * Nothing written, or only the starting text, keeps no draft.
+   */
+  const dismiss = () => {
+    if (send.isPending) return;
+    const written = { to, cc, subject, body };
+    const empty = Object.values(written).every(value => value.trim() === '');
+    const untouched =
+      to === draft.to &&
+      cc === (draft.cc ?? '') &&
+      subject === draft.subject &&
+      body === (draft.body ?? '');
+    if (empty || untouched) {
+      writeComposeDraft(draftKey, null);
+    } else {
+      writeComposeDraft(draftKey, written);
+      toast.success(t('compose.draftSaved'));
+    }
+    onClose();
   };
 
   const titleKey =
@@ -394,7 +426,7 @@ export function ComposeDialog({
         ) : null}
       </DialogBody>
       <DialogFooter className="mt-4">
-        <Button type="button" variant="outline" disabled={send.isPending} onClick={onClose}>
+        <Button type="button" variant="outline" disabled={send.isPending} onClick={dismiss}>
           {t('actions.cancel')}
         </Button>
         <Button type="submit" loading={send.isPending} icon={<Send className="size-4" />}>
@@ -421,7 +453,7 @@ export function ComposeDialog({
       </section>
     );
   return (
-    <Dialog open onOpenChange={open => !open && !send.isPending && onClose()}>
+    <Dialog open onOpenChange={open => !open && dismiss()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t(titleKey)}</DialogTitle>

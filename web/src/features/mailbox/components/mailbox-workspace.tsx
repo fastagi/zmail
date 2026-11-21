@@ -320,6 +320,28 @@ function MailboxView({
     document.querySelector<HTMLElement>(`[data-row-id="${String(closed)}"]`)?.focus();
   }, [open]);
 
+  // Esc closes the reader, unless the key went to a field, a dialog, or a control that used it.
+  const reading = open !== null;
+  useEffect(() => {
+    if (!reading) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const target = event.target;
+      if (
+        (target instanceof HTMLElement &&
+          (target.isContentEditable || target.closest('input, textarea, select') !== null)) ||
+        document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"]') !== null
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setOpen(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [reading]);
+
   // Another row starts the reader at its top, not where the last one was scrolled to.
   const readerPane = useRef<HTMLElement | null>(null);
   const openRowId = open?.rowId ?? null;
@@ -356,6 +378,12 @@ function MailboxView({
     onNext:
       openIndex >= 0 && openIndex < rows.length - 1 ? () => openRow(rows[openIndex + 1]) : null,
     onClose: () => setOpen(null),
+    // A message moved out of the view hands the reader to the next row, or back to the list.
+    onLeave: () => {
+      const next = openIndex >= 0 ? rows[openIndex + 1] : undefined;
+      if (next) openRow(next);
+      else setOpen(null);
+    },
     onReply: (message: MailMessage) => setDraft(quotedReplyDraft(message, replyCopy)),
     onReplyAll: (message: MailMessage) =>
       setDraft(replyAllDraft(message, mailbox.address, replyCopy)),
