@@ -1,5 +1,6 @@
 'use client';
 
+import { useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Building2, Check, ChevronsUpDown } from 'lucide-react';
@@ -34,6 +35,13 @@ const queryScopedConsolePaths = new Set<string>([
   ROUTES.CONSOLE.DEVELOPERS,
 ]);
 
+// The trigger's label depends on cached organizations and session storage, neither of which the
+// server render has; it shows the server's label until hydration so a lazily hydrated boundary that
+// finds the list already cached does not mismatch the server HTML.
+const subscribeToHydration = () => () => undefined;
+const getClientHydrationSnapshot = () => true;
+const getServerHydrationSnapshot = () => false;
+
 function rememberOrganization(organizationId: number): void {
   try {
     window.sessionStorage.setItem(ACTIVE_ORGANIZATION_STORAGE_KEY, String(organizationId));
@@ -57,7 +65,12 @@ export function OrganizationSwitcher() {
   const searchParams = useSearchParams();
   const t = useT();
   const organizations = useOrganizations();
-  const items = organizations.data?.items ?? [];
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot
+  );
+  const items = hydrated ? (organizations.data?.items ?? []) : [];
 
   const pathMatch = organizationPath.exec(pathname);
   const queryOrg = searchParams.get('org') ?? '';

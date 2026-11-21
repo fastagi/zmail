@@ -2,7 +2,17 @@
 
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import {
+  Archive,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Forward,
+  Info,
+  Reply,
+  ReplyAll,
+  Trash2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -281,37 +291,41 @@ export function InboxReadingPane({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-[52px] shrink-0 items-center gap-3.5 border-b border-border-subtle px-3 text-xs text-text-muted sm:px-7">
+      <div className="@container flex h-[52px] shrink-0 items-center gap-2 border-b border-border-subtle px-3 text-xs text-text-muted sm:gap-3.5 sm:px-7">
         <Button
           type="button"
           size="sm"
           variant="ghost"
           icon={<ArrowLeft className="size-4" />}
           className="-ml-2 shrink-0 lg:hidden"
+          title={t('actions.back')}
           onClick={navigation.onClose}
         >
-          {t('actions.back')}
+          <span className="@max-xl:sr-only">{t('actions.back')}</span>
         </Button>
         {!unavailable && access.send ? (
           <div
             role="toolbar"
             aria-label={t('inbox.actions.label')}
-            className="flex min-w-0 flex-1 items-center gap-3.5 overflow-x-auto"
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto @xl:gap-3.5"
           >
             <ToolbarAction
               label={t('actions.reply')}
+              icon={<Reply className="size-4" />}
               keyCap="R"
               disabled={!replyTarget}
               onClick={reply}
             />
             <ToolbarAction
               label={t('actions.replyAll')}
+              icon={<ReplyAll className="size-4" />}
               keyCap="A"
               disabled={!replyTarget}
               onClick={replyAll}
             />
             <ToolbarAction
               label={t('actions.forward')}
+              icon={<Forward className="size-4" />}
               keyCap="F"
               disabled={!newest}
               onClick={forward}
@@ -319,11 +333,13 @@ export function InboxReadingPane({
             <span className="flex-1" />
             <ToolbarAction
               label={t('inbox.actions.archive')}
+              icon={<Archive className="size-4" />}
               keyCap="E"
               onClick={() => void move('archive')}
             />
             <ToolbarAction
               label={t('inbox.actions.trash')}
+              icon={<Trash2 className="size-4" />}
               keyCap="#"
               onClick={() => void move('trash')}
             />
@@ -378,27 +394,36 @@ export function InboxReadingPane({
 /** A labelled toolbar action with its key cap; the cap is not part of its name. */
 function ToolbarAction({
   label,
+  icon,
   keyCap,
   disabled = false,
   onClick,
 }: {
   label: string;
+  icon: ReactNode;
   keyCap: string;
   disabled?: boolean;
   onClick: () => void;
 }) {
+  // A narrow pane (below 36rem) shows each action as its icon, keeping the label as its name and
+  // tooltip, so Archive and Delete stay in view instead of scrolling off the bar.
   return (
     <button
       type="button"
       disabled={disabled}
+      title={`${label} (${keyCap})`}
       className={cn(
         'inline-flex shrink-0 items-center gap-1.5 rounded-md whitespace-nowrap text-text-muted focus-ring hover:text-text-main motion-reduce:transition-none',
+        '@max-xl:size-8 @max-xl:justify-center @max-xl:hover:bg-accent',
         'disabled:pointer-events-none disabled:opacity-50'
       )}
       onClick={onClick}
     >
-      {label}
-      <Kbd aria-hidden="true" className="max-md:hidden">
+      <span aria-hidden="true" className="@xl:hidden">
+        {icon}
+      </span>
+      <span className="@max-xl:sr-only">{label}</span>
+      <Kbd aria-hidden="true" className="@max-xl:hidden">
         {keyCap}
       </Kbd>
     </button>
