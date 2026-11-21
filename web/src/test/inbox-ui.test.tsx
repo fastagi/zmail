@@ -1781,6 +1781,20 @@ describe('inbox keyboard shortcuts', () => {
     expect(screen.getByLabelText('Message')).toHaveValue('Line one\nLine two');
   });
 
+  it('never offers a connected mailbox as a sender, even with send access', async () => {
+    state.mailboxes.data = [
+      { ...externalMailbox(3, 'me@gmail.com'), access: { ...noAccess(), view: true, send: true } },
+      mailbox(1, 'hello'),
+    ];
+    window.history.replaceState(null, '', '/console/mailboxes?box=3');
+    renderRoute();
+
+    press('c');
+    const from = await screen.findByLabelText('From');
+    expect(from).toHaveValue('1');
+    expect(within(from).queryByRole('option', { name: 'me@gmail.com' })).toBeNull();
+  });
+
   it('c defaults the sender to the narrowed mailbox', async () => {
     window.localStorage.setItem('zmail.mailbox.1', '1');
     window.history.replaceState(null, '', '/console/mailboxes?box=2');
