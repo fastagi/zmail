@@ -20,7 +20,7 @@ func TestDefaultCatalogOwnsFiniteScopedDefinitions(t *testing.T) {
 	definition, ok := catalog.Definition(domain.SettingScopeApp, "branding.display_name")
 	require.True(t, ok)
 	assert.Equal(t, domain.SettingVisibilityPublic, definition.Visibility)
-	assert.Equal(t, "FastBuild", definition.Default)
+	assert.Equal(t, "Zmail", definition.Default)
 }
 
 func TestCatalogRejectsDuplicateAndPublicTenantDefinitions(t *testing.T) {

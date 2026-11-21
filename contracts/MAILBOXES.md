@@ -1756,8 +1756,8 @@ without it, sending is `503 MAILBOX.BROADCAST_DISABLED`.
 | `scheduled` | Recipients are fixed; sending starts at `scheduled_at`. |
 | `sending` | The worker is sending its recipients. |
 | `paused` | Recipients stay pending and nothing is sent; `stop_reason` says why. |
-| `sent` | No recipient is pending. |
-| `canceled` | Stopped; recipients not yet sent became `canceled`. |
+| `sent` | No recipient is pending, and a recipient was sent or none failed. |
+| `canceled` | Stopped; recipients not yet sent became `canceled`. A broadcast that ends with failed recipients and none sent is `canceled` with `stop_reason` `all_recipients_failed`, never `sent`. |
 
 `POST /v1/mail-broadcasts` creates a draft from `name`, `mailbox_id`, `template_id`, `list_id`,
 and the optional `unsubscribe_label`, `test_percent`, `test_wait_minutes`, and `variables`. Each must belong to the organization.
@@ -1772,6 +1772,12 @@ and is `409 MAILBOX.BROADCAST_NOT_EDITABLE` in any other state.
 - The template is copied into the broadcast, so later edits to the template do not change it.
 - One recipient is added per contact of the list whose status is `subscribed`. A list without one
   is `422 MAILBOX.BROADCAST_NO_RECIPIENTS`, and the draft stays a draft.
+- A template variable without a fallback that no recipient could fill (it is not in the
+  broadcast's `variables`, not `email`, `first_name`, `last_name`, or `unsubscribe_url`, and not a
+  property of any subscribed contact of the list) is
+  `422 MAILBOX.TEMPLATE_VARIABLES_MISSING` with one field error per variable, named
+  `variables.<name>`, and the draft stays a draft. A variable only some contacts lack still fails
+  just those recipients when they are sent.
 - Without `scheduled_at`, or with a time in the past, the broadcast is `sending`; otherwise it is
   `scheduled`, at most a year ahead.
 
@@ -1806,6 +1812,8 @@ webhooks apply to it.
   shared value of the same name), then the contact's `email`, `first_name`, `last_name`, and
   `unsubscribe_url`. A variable without a value or fallback fails that recipient with
   `template.variables_missing`.
+- When no recipient is pending the broadcast ends: `sent`, or `canceled` with `stop_reason`
+  `all_recipients_failed` when recipients failed and none was sent.
 - If the template does not use `{{unsubscribe_url}}`, a small link with `unsubscribe_label` (or
   `Unsubscribe`) is added at the end of the HTML body and the text body.
 - Every message carries `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`,

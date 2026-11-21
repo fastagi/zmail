@@ -98,6 +98,19 @@ describe('environment config contract', () => {
     expect(config.env).not.toHaveProperty('API_CLIENT_IP_HEADER');
   });
 
+  it('reads the optional legal document URLs and rejects non-http(s) ones', async () => {
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_TERMS_URL', 'https://legal.example.com/terms');
+    vi.stubEnv('NEXT_PUBLIC_PRIVACY_URL', '');
+    const config = await import('@/config/env');
+    expect(config.env.NEXT_PUBLIC_TERMS_URL).toBe('https://legal.example.com/terms');
+    expect(config.env.NEXT_PUBLIC_PRIVACY_URL).toBeUndefined();
+
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_PRIVACY_URL', 'javascript:alert(1)');
+    await expect(import('@/config/env')).rejects.toThrow('NEXT_PUBLIC_PRIVACY_URL');
+  });
+
   it('requires a private upstream when the production adapter is enabled', async () => {
     vi.resetModules();
     vi.stubEnv('NODE_ENV', 'production');

@@ -199,6 +199,9 @@ func (h *Handler) SendBroadcast(c *gin.Context) {
 		return
 	}
 	broadcast, err := h.service.SendBroadcast(c.Request.Context(), viewer, id, req.ScheduledAt)
+	if err != nil && respondMissingVariablesAt(c, err, "variables.") {
+		return
+	}
 	respondBroadcast(c, broadcast, err, false)
 }
 

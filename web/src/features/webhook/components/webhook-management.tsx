@@ -468,7 +468,9 @@ function EndpointDialog({
           <DialogTitle>{t(endpoint ? 'form.editTitle' : 'form.createTitle')}</DialogTitle>
           <DialogDescription>{t('form.description')}</DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit}>
+        {/* The form sits between DialogContent and DialogBody, so it must be a bounded flex column
+            for DialogBody to scroll and keep the footer actions inside the viewport. */}
+        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
           <DialogBody className="space-y-5">
             {formError || mutationError ? (
               <Alert variant="destructive">

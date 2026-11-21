@@ -38,6 +38,9 @@ Environment:
 
 Seeded accounts (password "secret"): admin@example.com is a platform operator, user@example.com is
 a regular user.
+
+System mail (registration codes, password resets, invitations) is not sent: the API writes each
+message to its log as an "email.log_delivery" line prefixed [api], so read the code from there.
 USAGE
 }
 
@@ -100,6 +103,10 @@ api_environment() {
   export MAILBOX_INBOUND_SECRET=zmail-local-only-mailbox-inbound-secret-0123456789
   # Broadcast unsubscribe links point at the local Web console.
   export MAILBOX_PUBLIC_URL="http://localhost:${WEB_PORT}"
+  # System mail (registration codes, password resets) goes to the API log instead of a provider;
+  # the API accepts MAIL_PROVIDER=log only when APP_ENV is development.
+  export MAIL_PROVIDER=log
+  export MAIL_FROM="Zmail <noreply@mail.localhost>"
 }
 
 prepare_api() {
@@ -212,6 +219,7 @@ up() {
   fi
 
   log "Stack is up. Sign in with admin@example.com / secret (operator) or user@example.com / secret."
+  wants api && log "Registration and password-reset codes appear in the [api] log as email.log_delivery."
   wants web && log "Web:   http://localhost:${WEB_PORT}"
   wants admin && log "Admin: http://127.0.0.1:${ADMIN_PORT}"
   wants api && log "API:   http://127.0.0.1:${API_PORT}"

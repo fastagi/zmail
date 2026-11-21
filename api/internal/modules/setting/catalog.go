@@ -47,7 +47,7 @@ func NewDefaultCatalog() (*Catalog, error) {
 			domain.SettingScopeApp,
 			"branding.display_name",
 			domain.SettingVisibilityPublic,
-			"FastBuild",
+			"Zmail",
 			1,
 			80,
 		),

@@ -90,6 +90,7 @@ def main() -> int:
             "same lease token",
             "most ten attempts",
             "never store response bodies",
+            "A test delivery for an endpoint that is disabled or not subscribed to `webhook.test` returns",
             "Deliberate Deferrals",
         ),
     )

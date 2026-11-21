@@ -53,6 +53,7 @@ func cloneSettingTime(value *time.Time) *time.Time {
 	if value == nil {
 		return nil
 	}
-	copy := *value
-	return &copy
+	// Timestamps are serialized in UTC regardless of the host or driver time zone.
+	utc := value.UTC()
+	return &utc
 }
