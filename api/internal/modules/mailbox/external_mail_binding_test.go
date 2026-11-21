@@ -57,7 +57,7 @@ func TestExternalMailBindCreatesPrivateConnection(t *testing.T) {
 	if err != nil || mailbox.Type != domain.MailboxTypeExternal || mailbox.OwnerUserID == nil || *mailbox.OwnerUserID != accessC {
 		t.Fatalf("mailbox = %+v, err %v; want carol's external mailbox", mailbox, err)
 	}
-	if _, _, err := f.service.ListMessages(context.Background(), f.b, connection.MailboxID, domain.MailMessageFilter{Page: 1, PerPage: 10}); err == nil {
+	if _, _, listErr := f.service.ListMessages(context.Background(), f.b, connection.MailboxID, domain.MailMessageFilter{Page: 1, PerPage: 10}); listErr == nil {
 		t.Fatal("a colleague listed the new external mailbox")
 	}
 
@@ -316,20 +316,20 @@ func TestExternalMailBindingHTTP(t *testing.T) {
 	}
 
 	start := func(payload string) (string, int, map[string]any) {
-		status, body := f.callWith(t, f.c, http.MethodPost, "/external-mail-authorizations", payload)
-		data, _ := body["data"].(map[string]any)
+		code, answer := f.callWith(t, f.c, http.MethodPost, "/external-mail-authorizations", payload)
+		data, _ := answer["data"].(map[string]any)
 		authorizationURL, _ := data["authorization_url"].(string)
 		parsed, _ := url.Parse(authorizationURL)
 		if parsed == nil {
-			return "", status, body
+			return "", code, answer
 		}
-		return parsed.Query().Get("state"), status, body
+		return parsed.Query().Get("state"), code, answer
 	}
-	if _, status, body := start(`{}`); status != http.StatusUnprocessableEntity || body["error_code"] != domain.CodeExternalMailAuthorizationInvalid {
-		t.Fatalf("start without provider = %d %v", status, body)
+	if _, code, answer := start(`{}`); code != http.StatusUnprocessableEntity || answer["error_code"] != domain.CodeExternalMailAuthorizationInvalid {
+		t.Fatalf("start without provider = %d %v", code, answer)
 	}
-	if _, status, body := start(`{"provider":"gmail","backfill_days":91}`); status != http.StatusUnprocessableEntity {
-		t.Fatalf("start with a long backfill = %d %v", status, body)
+	if _, code, answer := start(`{"provider":"gmail","backfill_days":91}`); code != http.StatusUnprocessableEntity {
+		t.Fatalf("start with a long backfill = %d %v", code, answer)
 	}
 	state, status, body := start(`{"provider":"gmail","backfill_days":30}`)
 	if status != http.StatusCreated || state == "" {

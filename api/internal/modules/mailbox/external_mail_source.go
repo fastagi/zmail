@@ -158,23 +158,6 @@ func pkceChallenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-// disabledExternalMailSource is the default: it never reaches a provider.
-type disabledExternalMailSource struct{}
-
-func (disabledExternalMailSource) AuthURL(ExternalMailAuthRequest) string { return "" }
-
-func (disabledExternalMailSource) Exchange(context.Context, ExternalMailCodeExchange) (ExternalMailToken, ExternalMailAccount, error) {
-	return ExternalMailToken{}, ExternalMailAccount{}, ErrExternalMailUnavailable
-}
-
-func (disabledExternalMailSource) Fetch(context.Context, ExternalMailToken, string) (ExternalMailFetch, error) {
-	return ExternalMailFetch{}, ErrExternalMailUnavailable
-}
-
-func (disabledExternalMailSource) Revoke(context.Context, ExternalMailToken) error {
-	return ErrExternalMailUnavailable
-}
-
 // FakeExternalMailSource serves scripted mail from memory, keyed by refresh token, for tests and
 // local demos. Its cursor is the number of a token's messages already delivered, so a fetch after
 // a reset cursor returns the same messages again, as a reconnect does.
