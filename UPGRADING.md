@@ -11,6 +11,41 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mail connectors: sync runs, backoff, provider budget, and retention
+
+The connector sync is now operable. Contract: `contracts/MAILBOXES.md`, External Mailboxes (Sync
+Budget, Sync Runs, Retention Of Revoked Copies). Migration `2026_12_06_090000_add_external_mail_sync_ops`.
+
+### High — Revoked external copies are deleted after 30 days
+
+Revoking a connection (by its member, a manager, or a member leaving) now sets `revoked_at`, and the
+`mail:external:sync` worker deletes the copies, the external mailbox, and the connection once
+`EXTERNAL_MAIL_REVOKED_RETENTION` (default `720h`) has passed. Connections revoked before the upgrade
+start their retention at the migration, so their copies are deleted one retention after the upgrade;
+raise the retention to keep them longer. Binding the
+account again before the deadline cancels the deletion. `POST
+/v1/external-mail-connections/:connection_id/purges` lets the member delete them at once
+(`409 MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` while the connection is bound), and the access history
+gains the `copies_purged` event type.
+
+### Medium — Failed fetches back off; passes are budgeted per provider
+
+An `external.fetch_failed` fetch now retries after 2, 4, 8 ... minutes, at most an hour, with jitter,
+instead of every two minutes. A pass takes due connections round-robin across providers, at most
+`EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS` (default 20) per provider, and a connection with more pages
+waits `EXTERNAL_MAIL_MIN_FETCH_SPACING` (default `5s`) before the next page instead of being fetched in
+the very next pass. `ExternalMailRepository.ClaimExternalMailConnections` takes a
+`domain.ExternalMailClaim`, and the repository gains the `ExternalMailOpsRepository` methods; a fork
+with its own implementation must add them.
+
+### Low — Sync runs and metrics
+
+Each fetch writes a row to `external_mail_sync_runs` (latest 50 per connection, 14 days), readable by
+the connection's member through `GET /v1/external-mail-connections/:connection_id/sync-runs`. The
+`external_mail.synced` and `external_mail.sync_failed` log events gain `outcome`, `latency_ms`,
+`page_size`, and `more`, and Prometheus gains `zmail_external_mail_syncs_total{provider,outcome}`,
+`zmail_external_mail_sync_seconds{provider}`, and `zmail_external_mail_copies_purged_total`.
+
 ## Unreleased — Mail connectors: binding, reconnecting, and open provider ids
 
 External mailboxes can now be bound and reconnected through a provider-neutral connector registry,

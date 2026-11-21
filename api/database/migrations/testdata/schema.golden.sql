@@ -101,6 +101,19 @@ TABLE external_mail_connections
   COLUMN next_sync_at timestamp with time zone NOT NULL
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
+  COLUMN consecutive_failures smallint NOT NULL DEFAULT 0
+  COLUMN revoked_at timestamp with time zone
+
+TABLE external_mail_sync_runs
+  COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_sync_runs_id_seq'::regclass)
+  COLUMN connection_id bigint NOT NULL
+  COLUMN started_at timestamp with time zone NOT NULL
+  COLUMN finished_at timestamp with time zone NOT NULL
+  COLUMN outcome character varying(24) NOT NULL
+  COLUMN fetched_count integer NOT NULL DEFAULT 0
+  COLUMN stored_count integer NOT NULL DEFAULT 0
+  COLUMN more boolean NOT NULL DEFAULT false
+  COLUMN error_code character varying(64)
 
 TABLE mail_attachments
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_attachments_id_seq'::regclass)
@@ -776,12 +789,18 @@ CONSTRAINT external_mail_authorizations.external_mail_authorizations_state_hash_
 CONSTRAINT external_mail_authorizations.external_mail_authorizations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT external_mail_connections.chk_external_mail_connections_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
 CONSTRAINT external_mail_connections.external_mail_connections_backfill_days_check CHECK (((backfill_days >= 1) AND (backfill_days <= 90)))
+CONSTRAINT external_mail_connections.external_mail_connections_consecutive_failures_check CHECK ((consecutive_failures >= 0))
 CONSTRAINT external_mail_connections.external_mail_connections_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT external_mail_connections.external_mail_connections_mailbox_id_key UNIQUE (mailbox_id)
 CONSTRAINT external_mail_connections.external_mail_connections_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT external_mail_connections.external_mail_connections_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT external_mail_connections.external_mail_connections_pkey PRIMARY KEY (id)
 CONSTRAINT external_mail_connections.external_mail_connections_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'needs_reconnect'::character varying, 'revoked'::character varying])::text[])))
+CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES external_mail_connections(id) ON DELETE CASCADE
+CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_fetched_count_check CHECK ((fetched_count >= 0))
+CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_outcome_check CHECK (((outcome)::text = ANY ((ARRAY['ok'::character varying, 'auth_failed'::character varying, 'fetch_failed'::character varying, 'cursor_expired'::character varying, 'provider_unavailable'::character varying, 'dropped'::character varying])::text[])))
+CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_pkey PRIMARY KEY (id)
+CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_stored_count_check CHECK ((stored_count >= 0))
 CONSTRAINT mail_attachments.chk_mail_attachments_size CHECK (((size >= 0) AND (size = octet_length(content))))
 CONSTRAINT mail_attachments.fk_mail_attachments_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_attachments.mail_attachments_pkey PRIMARY KEY (id)
@@ -1046,8 +1065,12 @@ INDEX CREATE INDEX idx_external_mail_authorizations_expiry ON external_mail_auth
 INDEX CREATE UNIQUE INDEX external_mail_connections_mailbox_id_key ON external_mail_connections USING btree (mailbox_id)
 INDEX CREATE UNIQUE INDEX external_mail_connections_pkey ON external_mail_connections USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_external_mail_connections_account ON external_mail_connections USING btree (organization_id, provider, lower((account_address)::text))
-INDEX CREATE INDEX idx_external_mail_connections_due ON external_mail_connections USING btree (next_sync_at) WHERE ((status)::text = 'active'::text)
+INDEX CREATE INDEX idx_external_mail_connections_due ON external_mail_connections USING btree (provider, next_sync_at, id) WHERE ((status)::text = 'active'::text)
 INDEX CREATE INDEX idx_external_mail_connections_owner ON external_mail_connections USING btree (organization_id, owner_user_id)
+INDEX CREATE INDEX idx_external_mail_connections_revoked ON external_mail_connections USING btree (revoked_at, id) WHERE ((status)::text = 'revoked'::text)
+INDEX CREATE UNIQUE INDEX external_mail_sync_runs_pkey ON external_mail_sync_runs USING btree (id)
+INDEX CREATE INDEX idx_external_mail_sync_runs_connection ON external_mail_sync_runs USING btree (connection_id, id DESC)
+INDEX CREATE INDEX idx_external_mail_sync_runs_started ON external_mail_sync_runs USING btree (started_at, id)
 INDEX CREATE INDEX idx_mail_attachments_message ON mail_attachments USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_attachments_pkey ON mail_attachments USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_broadcast_recipients_contact ON mail_broadcast_recipients USING btree (broadcast_id, contact_id)

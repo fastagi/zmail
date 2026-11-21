@@ -74,6 +74,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.GET("/external-mail-connections", h.ListExternalMailConnections).Name("external_mail_connections.index")
 		auth.DELETE("/external-mail-connections/:connection_id", h.RevokeExternalMailConnection).
 			Name("external_mail_connections.destroy").WhereNumber("connection_id")
+		auth.GET("/external-mail-connections/:connection_id/sync-runs", h.ListExternalMailSyncRuns).
+			Name("external_mail_connections.sync_runs.index").WhereNumber("connection_id")
+		auth.POST("/external-mail-connections/:connection_id/purges", h.PurgeExternalMailCopies).
+			Name("external_mail_connections.purges.store").WhereNumber("connection_id")
 
 		auth.GET("/transactional-mail-log", h.ListTransactionalLog).Name("transactional_mail_log.index")
 		auth.GET("/transactional-mail-log/:message_id", h.GetTransactionalLogEntry).

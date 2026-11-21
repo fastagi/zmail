@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/metrics"
 )
 
 const (
@@ -40,7 +41,10 @@ func (s *service) SyncExternalMail(ctx context.Context, limit int) (int, error) 
 		return 0, nil
 	}
 	now := s.now().UTC()
-	connections, err := s.externalMail.ClaimExternalMailConnections(ctx, now, now.Add(externalMailSyncInterval), limit)
+	connections, err := s.externalMail.ClaimExternalMailConnections(ctx, domain.ExternalMailClaim{
+		Now: now, LeaseUntil: now.Add(externalMailSyncInterval), Limit: limit,
+		PerProvider: s.settings.ExternalMail.Sync.FetchesPerPass(),
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -52,17 +56,22 @@ func (s *service) SyncExternalMail(ctx context.Context, limit int) (int, error) 
 			return len(connections), err
 		}
 	}
-	return len(connections), nil
+	// Housekeeping is bounded and does not count as handled connections, so it never keeps the
+	// worker from waiting between passes.
+	return len(connections), s.maintainExternalMail(ctx, now)
 }
 
-// syncExternalConnection fetches one claimed connection and records the outcome. A refused token
-// moves the connection to needs_reconnect, which stops polling; any other fetch failure keeps it
-// active for the next interval with the cursor unchanged.
+// syncExternalConnection fetches one claimed connection and records the outcome with a sync run.
+// A refused token moves the connection to needs_reconnect, which stops polling; any other fetch
+// failure keeps it active with the cursor unchanged and backs off.
 func (s *service) syncExternalConnection(ctx context.Context, connection *domain.ExternalMailConnection, now time.Time) error {
 	result := domain.ExternalMailSyncResult{
 		ConnectionID: connection.ID, MailboxID: connection.MailboxID, Cursor: connection.SyncCursor,
 		Status: domain.ExternalMailStatusActive, NextSyncAt: now.Add(externalMailSyncInterval), Now: now,
+		ConsecutiveFailures: connection.ConsecutiveFailures,
 	}
+	spacing := s.settings.ExternalMail.Sync.Spacing()
+	startedAt, started := s.now().UTC(), time.Now()
 	connector, registered := s.externalConnectors.lookup(connection.Provider)
 	refreshToken, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
 	var fetched ExternalMailFetch
@@ -78,13 +87,15 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		// A token this instance cannot open is as unusable as one the provider refuses.
 		err = fmt.Errorf("%w: sealed token unreadable", ErrExternalMailAuth)
 	}
+	latency := time.Since(started)
+	outcome := domain.ExternalMailSyncOK
 	switch {
 	case err == nil:
-		result.Cursor, result.SyncedAt = fetched.Cursor, &now
+		result.Cursor, result.SyncedAt, result.ConsecutiveFailures = fetched.Cursor, &now, 0
 		result.Messages = s.externalCopies(connection, fetched.Messages, now)
 		if fetched.More {
-			// Another page is ready: fetch it in the next pass instead of after the interval.
-			result.NextSyncAt = now
+			// Another page is ready: fetch it after the spacing instead of after the interval.
+			result.NextSyncAt = now.Add(spacing)
 		}
 		if fetched.RefreshToken != "" && fetched.RefreshToken != refreshToken {
 			sealed, sealErr := s.sealRefreshToken(fetched.RefreshToken)
@@ -94,17 +105,27 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 			result.EncryptedRefreshToken = sealed
 		}
 	case errors.Is(err, ErrExternalMailCursorExpired):
-		// Start over from an empty cursor at once; copies already stored are not repeated.
-		result.Cursor, result.NextSyncAt = "", now
+		// Start over from an empty cursor after the spacing; copies already stored are not repeated.
+		outcome = domain.ExternalMailSyncCursorExpired
+		result.Cursor, result.NextSyncAt, result.ConsecutiveFailures = "", now.Add(spacing), 0
 		slog.InfoContext(ctx, "external_mail.cursor_expired",
 			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
 	case errors.Is(err, ErrExternalMailAuth):
+		outcome = domain.ExternalMailSyncAuthFailed
 		result.Status, result.LastErrorCode = domain.ExternalMailStatusNeedsReconnect, domain.ExternalMailErrorAuthFailed
 	case errors.Is(err, ErrExternalMailProviderUnavailable):
 		// The connection keeps its grant and cursor and resumes when the connector is enabled again.
+		outcome = domain.ExternalMailSyncProviderUnavailable
 		result.LastErrorCode = domain.ExternalMailErrorProviderUnavailable
 	default:
+		outcome = domain.ExternalMailSyncFetchFailed
 		result.LastErrorCode = domain.ExternalMailErrorFetchFailed
+		result.ConsecutiveFailures = min(connection.ConsecutiveFailures+1, maxConsecutiveFailures)
+		result.NextSyncAt = now.Add(externalMailBackoff(result.ConsecutiveFailures, externalMailJitter))
+	}
+	result.Run = &domain.ExternalMailSyncRun{
+		ConnectionID: connection.ID, StartedAt: startedAt, FinishedAt: s.now().UTC(), Outcome: outcome,
+		Fetched: len(fetched.Messages), More: err == nil && fetched.More, ErrorCode: result.LastErrorCode,
 	}
 	mailbox, err := s.repo.FindMailbox(ctx, connection.OrganizationID, connection.MailboxID)
 	if errors.Is(err, ErrMailboxNotFound) {
@@ -138,10 +159,17 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	if saveErr != nil {
 		return saveErr
 	}
+	metrics.RecordExternalMailSync(string(connection.Provider), string(result.Run.Outcome), latency)
 	attributes := []any{
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.Uint64("mailbox_id", uint64(connection.MailboxID)),
 		slog.String("provider", string(connection.Provider)), slog.String("status", string(result.Status)),
+		slog.String("outcome", string(result.Run.Outcome)), slog.Int64("latency_ms", latency.Milliseconds()),
+		slog.Int("page_size", result.Run.Fetched), slog.Bool("more", result.Run.More),
 		slog.Int("fetched", len(result.Messages)), slog.Int("stored", len(stored)), slog.Bool("applied", applied),
+	}
+	if result.LastErrorCode != "" && result.Run.Outcome != domain.ExternalMailSyncDropped {
+		attributes = append(attributes, slog.Int("consecutive_failures", result.ConsecutiveFailures),
+			slog.Time("next_sync_at", result.NextSyncAt))
 	}
 	if result.LastErrorCode != "" {
 		slog.WarnContext(ctx, "external_mail.sync_failed", append(attributes, slog.String("error_code", result.LastErrorCode))...)
@@ -188,7 +216,8 @@ func (s *service) ListExternalMailConnections(ctx context.Context, viewer domain
 
 // RevokeExternalMailConnection unbinds an account: its owner may, and so may owners and admins for
 // offboarding. The provider grant is revoked on a best-effort basis, then the connection stops for
-// good and its token is erased. Mail already synced stays in the external mailbox.
+// good and its token is erased. Mail already synced stays in the external mailbox until the
+// retention ends or the owner purges it.
 func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domain.OrganizationContext, id uint) error {
 	if !s.externalMailAvailable() {
 		return ErrExternalMailConnectionNotFound

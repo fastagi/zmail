@@ -33,7 +33,7 @@ type externalFixture struct {
 func newExternalFixture(t *testing.T, providers ...string) *externalFixture {
 	t.Helper()
 	repo, db := openRepository(t)
-	if err := db.AutoMigrate(&ExternalMailConnectionPO{}, &ExternalMailAuthorizationPO{}); err != nil {
+	if err := db.AutoMigrate(&ExternalMailConnectionPO{}, &ExternalMailAuthorizationPO{}, &ExternalMailSyncRunPO{}); err != nil {
 		t.Fatalf("migrate external mail connections: %v", err)
 	}
 	createOwner(t, db, accessOrg)

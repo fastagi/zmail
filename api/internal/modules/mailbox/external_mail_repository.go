@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -50,6 +51,8 @@ type ExternalMailConnectionPO struct {
 	SyncCursor            string  `gorm:"type:text;not null;default:''"`
 	BackfillDays          int     `gorm:"type:smallint;not null;default:14"`
 	NextSyncAt            time.Time
+	ConsecutiveFailures   int `gorm:"type:smallint;not null;default:0"`
+	RevokedAt             *time.Time
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }
@@ -64,7 +67,8 @@ func (po *ExternalMailConnectionPO) toDomain() *domain.ExternalMailConnection {
 		Provider: domain.ExternalMailProvider(po.Provider), AccountAddress: po.AccountAddress,
 		OwnerUserID: po.OwnerUserID, Status: domain.ExternalMailStatus(po.Status), LastSyncedAt: po.LastSyncedAt,
 		EncryptedRefreshToken: po.EncryptedRefreshToken, SyncCursor: po.SyncCursor, BackfillDays: po.BackfillDays,
-		NextSyncAt: po.NextSyncAt, CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
+		NextSyncAt: po.NextSyncAt, ConsecutiveFailures: po.ConsecutiveFailures, RevokedAt: po.RevokedAt,
+		CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
 	}
 	if po.LastErrorCode != nil {
 		connection.LastErrorCode = *po.LastErrorCode
@@ -95,27 +99,68 @@ func (r *repository) CreateExternalMailConnection(ctx context.Context, connectio
 	return nil
 }
 
-func (r *repository) ClaimExternalMailConnections(ctx context.Context, now, leaseUntil time.Time, limit int) ([]*domain.ExternalMailConnection, error) {
+func (r *repository) ClaimExternalMailConnections(ctx context.Context, claim domain.ExternalMailClaim) ([]*domain.ExternalMailConnection, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	var rows []ExternalMailConnectionPO
-	err := r.conn(ctx).Raw(`UPDATE external_mail_connections SET next_sync_at = ?
-		WHERE id IN (
-		  SELECT id FROM external_mail_connections
-		  WHERE status = 'active' AND next_sync_at <= ?
-		  ORDER BY next_sync_at, id
-		  LIMIT ?
-		  FOR UPDATE SKIP LOCKED)
-		RETURNING *`, leaseUntil, now, limit).Scan(&rows).Error
+	if claim.Limit <= 0 {
+		return nil, nil
+	}
+	perProvider := claim.PerProvider
+	if perProvider <= 0 || perProvider > claim.Limit {
+		perProvider = claim.Limit
+	}
+	// The providers come from a loose index scan of the due index, one lookup each, so a provider
+	// with many connections costs no more than one with few. Each provider offers its oldest due
+	// connections up to its share; the pass then takes the first of every provider, the second of
+	// every provider, and so on, so a provider that is down or backlogged cannot starve the others.
+	var rows []claimedExternalMailConnection
+	err := r.conn(ctx).Raw(`WITH RECURSIVE providers AS (
+		  (SELECT provider FROM external_mail_connections WHERE status = 'active' ORDER BY provider LIMIT 1)
+		  UNION ALL
+		  SELECT (SELECT c.provider FROM external_mail_connections c
+		          WHERE c.status = 'active' AND c.provider > p.provider ORDER BY c.provider LIMIT 1)
+		  FROM providers p WHERE p.provider IS NOT NULL
+		), ranked AS (
+		  SELECT due.id, row_number() OVER (PARTITION BY p.provider ORDER BY due.next_sync_at, due.id) AS turn,
+		    due.next_sync_at AS due_at
+		  FROM providers p
+		  CROSS JOIN LATERAL (
+		    SELECT id, next_sync_at FROM external_mail_connections
+		    WHERE status = 'active' AND provider = p.provider AND next_sync_at <= ?
+		    ORDER BY next_sync_at, id
+		    LIMIT ?
+		    FOR UPDATE SKIP LOCKED) due
+		  WHERE p.provider IS NOT NULL
+		), chosen AS (
+		  SELECT id, turn FROM ranked ORDER BY turn, due_at, id LIMIT ?
+		)
+		UPDATE external_mail_connections c SET next_sync_at = ?
+		FROM chosen WHERE c.id = chosen.id
+		RETURNING c.*, chosen.turn`, claim.Now, perProvider, claim.Limit, claim.LeaseUntil).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Turn != rows[j].Turn {
+			return rows[i].Turn < rows[j].Turn
+		}
+		if rows[i].Provider != rows[j].Provider {
+			return rows[i].Provider < rows[j].Provider
+		}
+		return rows[i].ID < rows[j].ID
+	})
 	connections := make([]*domain.ExternalMailConnection, 0, len(rows))
 	for i := range rows {
 		connections = append(connections, rows[i].toDomain())
 	}
 	return connections, nil
+}
+
+// claimedExternalMailConnection is a claimed row with its round-robin turn.
+type claimedExternalMailConnection struct {
+	ExternalMailConnectionPO
+	Turn int
 }
 
 func (r *repository) SaveExternalMailSync(ctx context.Context, result domain.ExternalMailSyncResult) ([]*domain.MailMessage, bool, error) {
@@ -128,6 +173,7 @@ func (r *repository) SaveExternalMailSync(ctx context.Context, result domain.Ext
 		updates := map[string]any{
 			"status": string(result.Status), "sync_cursor": result.Cursor,
 			"next_sync_at": result.NextSyncAt, "updated_at": result.Now,
+			"consecutive_failures": min(result.ConsecutiveFailures, maxConsecutiveFailures),
 		}
 		if result.LastErrorCode == "" {
 			updates["last_error_code"] = nil
@@ -146,20 +192,29 @@ func (r *repository) SaveExternalMailSync(ctx context.Context, result domain.Ext
 		update := tx.Model(&ExternalMailConnectionPO{}).
 			Where("id = ? AND status = ?", result.ConnectionID, string(domain.ExternalMailStatusActive)).
 			Updates(updates)
-		if update.Error != nil || update.RowsAffected == 0 {
+		if update.Error != nil {
 			return update.Error
 		}
-		applied = true
-		for _, message := range result.Messages {
-			created, err := createExternalMessage(tx, result.MailboxID, message)
-			if err != nil {
-				return err
-			}
-			if created {
-				stored = append(stored, message)
+		applied = update.RowsAffected > 0
+		if applied {
+			for _, message := range result.Messages {
+				created, err := createExternalMessage(tx, result.MailboxID, message)
+				if err != nil {
+					return err
+				}
+				if created {
+					stored = append(stored, message)
+				}
 			}
 		}
-		return nil
+		if result.Run == nil {
+			return nil
+		}
+		result.Run.Stored = len(stored)
+		if !applied {
+			result.Run.Outcome, result.Run.ErrorCode = domain.ExternalMailSyncDropped, ""
+		}
+		return recordExternalMailSyncRun(tx, result.Run)
 	})
 	if err != nil {
 		return nil, false, err
@@ -238,7 +293,7 @@ func (r *repository) RevokeExternalMailConnection(ctx context.Context, organizat
 		Where("organization_id = ? AND id = ?", organizationID, id).
 		Updates(map[string]any{
 			"status": string(domain.ExternalMailStatusRevoked), "encrypted_refresh_token": "", "sync_cursor": "",
-			"updated_at": now,
+			"consecutive_failures": 0, "revoked_at": gorm.Expr("COALESCE(revoked_at, ?)", now), "updated_at": now,
 		})
 	if result.Error != nil {
 		return result.Error
@@ -273,6 +328,8 @@ func (r *repository) RebindExternalMailConnection(ctx context.Context, rebind do
 	updates := map[string]any{
 		"status": string(domain.ExternalMailStatusActive), "encrypted_refresh_token": rebind.EncryptedRefreshToken,
 		"last_error_code": nil, "next_sync_at": rebind.Now, "updated_at": rebind.Now,
+		// A rebind before the retention ends keeps the copies: the purge is cancelled.
+		"consecutive_failures": 0, "revoked_at": nil,
 	}
 	if rebind.ResetCursor {
 		updates["sync_cursor"] = ""

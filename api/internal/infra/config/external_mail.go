@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 )
 
 // External mail connectors an instance may enable. The OAuth connectors need the client of an OAuth
@@ -52,6 +53,75 @@ type ExternalMailConfig struct {
 	RedirectURL string
 	// OAuth holds the OAuth client of each enabled OAuth connector, keyed by provider.
 	OAuth map[string]ExternalMailOAuthClient
+	// Sync bounds how hard the sync worker reads providers and how long revoked copies stay.
+	Sync ExternalMailSyncConfig
+}
+
+// Defaults of the sync budget and the retention of revoked copies.
+const (
+	// DefaultExternalMailProviderFetchesPerPass matches the worker's default batch, so one provider
+	// alone keeps the full batch while several share it round-robin.
+	DefaultExternalMailProviderFetchesPerPass = 20
+	MaxExternalMailProviderFetchesPerPass     = 1000
+	// DefaultExternalMailMinFetchSpacing separates two fetches of one connection that has more
+	// pages ready, so a long backfill cannot occupy every pass.
+	DefaultExternalMailMinFetchSpacing = 5 * time.Second
+	MaxExternalMailMinFetchSpacing     = 10 * time.Minute
+	// DefaultExternalMailRevokedRetention is how long copies of a revoked connection stay before
+	// the worker deletes them: 30 days.
+	DefaultExternalMailRevokedRetention = 720 * time.Hour
+	MinExternalMailRevokedRetention     = time.Hour
+	MaxExternalMailRevokedRetention     = 8760 * time.Hour
+)
+
+// ExternalMailSyncConfig is the sync worker's budget. A zero field takes its default, so a
+// configuration built in code needs none of them.
+type ExternalMailSyncConfig struct {
+	// ProviderFetchesPerPass caps the fetches of one provider in one worker pass.
+	ProviderFetchesPerPass int
+	// MinFetchSpacing is the least time between two fetches of one connection.
+	MinFetchSpacing time.Duration
+	// RevokedRetention is how long the copies of a revoked connection are kept.
+	RevokedRetention time.Duration
+}
+
+// FetchesPerPass returns the per-provider cap, or its default.
+func (c ExternalMailSyncConfig) FetchesPerPass() int {
+	if c.ProviderFetchesPerPass <= 0 {
+		return DefaultExternalMailProviderFetchesPerPass
+	}
+	return c.ProviderFetchesPerPass
+}
+
+// Spacing returns the per-connection spacing, or its default.
+func (c ExternalMailSyncConfig) Spacing() time.Duration {
+	if c.MinFetchSpacing <= 0 {
+		return DefaultExternalMailMinFetchSpacing
+	}
+	return c.MinFetchSpacing
+}
+
+// Retention returns the retention of revoked copies, or its default.
+func (c ExternalMailSyncConfig) Retention() time.Duration {
+	if c.RevokedRetention <= 0 {
+		return DefaultExternalMailRevokedRetention
+	}
+	return c.RevokedRetention
+}
+
+// validateExternalMailSyncConfig refuses a budget outside its bounds; zero takes the default.
+func validateExternalMailSyncConfig(c ExternalMailSyncConfig) error {
+	if c.ProviderFetchesPerPass < 0 || c.ProviderFetchesPerPass > MaxExternalMailProviderFetchesPerPass {
+		return fmt.Errorf("EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS must be between 1 and %d", MaxExternalMailProviderFetchesPerPass)
+	}
+	if c.MinFetchSpacing != 0 && (c.MinFetchSpacing < time.Second || c.MinFetchSpacing > MaxExternalMailMinFetchSpacing) {
+		return fmt.Errorf("EXTERNAL_MAIL_MIN_FETCH_SPACING must be between 1s and %s", MaxExternalMailMinFetchSpacing)
+	}
+	if c.RevokedRetention != 0 && (c.RevokedRetention < MinExternalMailRevokedRetention || c.RevokedRetention > MaxExternalMailRevokedRetention) {
+		return fmt.Errorf("EXTERNAL_MAIL_REVOKED_RETENTION must be between %s and %s",
+			MinExternalMailRevokedRetention, MaxExternalMailRevokedRetention)
+	}
+	return nil
 }
 
 // Provides reports whether the list enables the provider.
@@ -92,6 +162,9 @@ func parseExternalMailProviders(raw string) []string {
 // real connector, an OAuth connector without its client or the redirect URL, and an enabled
 // feature without the key that seals grants.
 func validateExternalMailConfig(c ExternalMailConfig, secretKey string, production bool) error {
+	if err := validateExternalMailSyncConfig(c.Sync); err != nil {
+		return err
+	}
 	for _, provider := range c.Providers {
 		switch provider {
 		case ExternalMailSourceFake:

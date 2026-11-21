@@ -111,6 +111,8 @@ recorded but has no special rights to it. A removed member loses access on their
 | Finish binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations/completions` | `201` new, `200` restored |
 | List the caller's external mailboxes | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 10 items |
 | Unbind an external mailbox | none yet | `DELETE /v1/external-mail-connections/:connection_id` | `204` |
+| List a connection's latest sync runs | none yet | `GET /v1/external-mail-connections/:connection_id/sync-runs` | `200` envelope, at most 50 items |
+| Delete a revoked connection's copies at once | none yet | `POST /v1/external-mail-connections/:connection_id/purges` | `200` done, `202` finishing in the background |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
 | Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
 | Send a transactional message | none | `POST /v1/transactional-messages` | `202`, or `200` for a repeat |
@@ -435,6 +437,7 @@ per page:
 | `sealed_deleted` | An admin deletes the sealed history | `null` | `{ "deleted_messages", "deleted_broadcasts" }` |
 | `webhooks_changed` | The webhook switch changes | `null` | `{ "enabled" }` |
 | `renamed` | An admin changes the display name | `null` | `{ "from", "to" }` |
+| `copies_purged` | The copies of a revoked external connection are deleted, with the mailbox | The member who bound the account | `{ "connection_id", "provider", "reason" }` (`retention` or `owner`) |
 
 `actor_user_id` is `null` for a change Zmail made itself, such as `owner_left`, `owner_returned`,
 and `member_removed` for a departure. `detail` holds ids, permissions, timestamps, counts, and display
@@ -765,17 +768,78 @@ so a rebind restores the same mailbox, and do not count toward the limit of 10:
 | `revoked` | Unbound; never synced again |
 
 A provider failure that is not about the grant keeps the connection `active` with
-`last_error_code` `external.fetch_failed` and retries at the next interval. A connection whose
+`last_error_code` `external.fetch_failed` and retries with exponential backoff: two minutes after
+the first failure in a row, then 4, 8, 16, 32 minutes, and at most one hour, each less up to a fifth
+of random jitter. A successful fetch resets the backoff to the two-minute interval. A connection whose
 connector the instance no longer runs stays `active` with its grant and records
 `external.provider_unavailable` until the connector is enabled again.
 
 `DELETE /v1/external-mail-connections/:connection_id` unbinds: the member who bound the account, or
 an `owner` or `admin`, may. The grant is revoked at the provider on a best-effort basis, the stored
 token is erased, and syncing stops for good, including a fetch already running. Mail already synced
-stays in the external mailbox. Unbinding a revoked connection answers `204` again. A member who leaves the organization has every connection there revoked the same way at once:
+stays in the external mailbox until the retention below ends or the member purges it. Unbinding a
+revoked connection answers `204` again. A member who leaves the organization has every connection there revoked the same way at once:
 the accounts are their own, so nothing awaits a handover, and the copies stay readable by nobody.
 Binding the account again after rejoining restores the same mailbox without copies. Another member's
 connection and another organization's id are `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+
+### Sync Budget
+
+Each pass of the `mail:external:sync` worker takes due connections round-robin across providers:
+the oldest due connection of every provider, then the second of every provider, and so on, and at
+most `EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS` (20 by default) of one provider. One provider's
+outage or one large backfill therefore never starves the others. A connection whose provider has
+another page ready is fetched again after `EXTERNAL_MAIL_MIN_FETCH_SPACING` (5 seconds by default)
+instead of after the interval, as is one whose cursor the provider no longer honours.
+
+### Sync Runs
+
+Every fetch records one sync run, in the transaction that saves its result. A run holds times,
+counts, and codes, never message data. The worker keeps a connection's latest 50 runs and none older
+than 14 days.
+
+`GET /v1/external-mail-connections/:connection_id/sync-runs` lists the latest runs of the caller's
+own connection, newest first, at most 50. Anyone else, an `owner` or `admin` included, gets
+`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached:
+
+```json
+{ "id": 912, "started_at": "2026-11-20T08:00:00Z", "finished_at": "2026-11-20T08:00:01Z",
+  "outcome": "ok", "fetched_count": 25, "stored_count": 24, "more": true, "error_code": null }
+```
+
+| `outcome` | Meaning | `error_code` |
+|---|---|---|
+| `ok` | A page was saved | `null` |
+| `auth_failed` | The provider refused the grant; the connection needs reconnecting | `external.auth_failed` |
+| `fetch_failed` | Any other provider failure; the next attempt backs off | `external.fetch_failed` |
+| `cursor_expired` | The provider no longer honoured the cursor; the sync starts over within the backfill window without repeating stored copies | `null` |
+| `provider_unavailable` | The instance no longer runs the connector | `external.provider_unavailable` |
+| `dropped` | The connection was revoked or lost its grant while the fetch ran; nothing fetched was stored | `null` |
+
+`fetched_count` is how many messages the provider returned and `stored_count` how many were new;
+`more` says the provider had another page ready.
+
+### Retention Of Revoked Copies
+
+Revoking a connection, by its member, an `owner` or `admin`, or because the member left the
+organization, starts a retention of `EXTERNAL_MAIL_REVOKED_RETENTION` (720 hours, 30 days, by
+default). Binding the same account again before it ends keeps the mailbox and its copies and cancels
+the deletion. When it ends, the worker deletes the copies for good in bounded batches, then deletes
+the external mailbox and the connection with its sync runs, and writes `copies_purged` to the
+mailbox's access history with `{ "connection_id", "provider", "reason": "retention" }`. Binding the
+account afterwards starts a new mailbox.
+
+`POST /v1/external-mail-connections/:connection_id/purges` deletes the copies of the caller's own
+revoked connection at once, the same way, with `reason` `owner` and the caller as the actor:
+
+| Case | Answer |
+|---|---|
+| Every copy, the mailbox, and the connection are deleted | `200` `{ "deleted_messages": 120, "completed": true }` |
+| More copies than one request deletes | `202` `{ "deleted_messages": 5000, "completed": false }`: the rest is due at once and the worker deletes it in its next passes |
+| The connection is not revoked | `409 MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` |
+| Another member's connection, an `owner` or `admin` included, or external mail is off | `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` |
+
+A purge only ever touches the connection's own mailbox.
 
 ## Domains
 
@@ -2450,6 +2514,7 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.TRIAGE_UNAVAILABLE` | 409 |
 | `MAILBOX.TRIAGE_MODEL_FAILED` | 502 |
 | `MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` | 404 |
+| `MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` | 409 |
 
 ### Organization Cloudflare discovery
 

@@ -8787,7 +8787,9 @@ paths:
       summary: Unbind an external mailbox
       description: The member who bound the account, or an `owner` or `admin`, may unbind it. The grant is
         revoked at the provider on a best-effort basis, the stored token is erased, and the connection is
-        never synced again; mail already synced stays in the external mailbox. Unbinding a revoked
+        never synced again; mail already synced stays in the external mailbox until the retention
+        (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) ends, when the worker deletes it with the
+        mailbox, unless the account is bound again before. Unbinding a revoked
         connection succeeds again. Another member's connection, another organization's id, and any id
         while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
       tags:
@@ -8807,6 +8809,91 @@ paths:
         '404':
           description: The organization (`ORGANIZATION.NOT_FOUND`) or the connection
             (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-connections/{connection_id}/sync-runs:
+    get:
+      operationId: listExternalMailSyncRuns
+      summary: List a connection's latest sync runs
+      description: Lists the latest fetches of the caller's own connection, newest first, at most 50.
+        Each fetch records one run with its times, outcome, counts, and error code, never message data;
+        the worker keeps a connection's latest 50 runs and none older than 14 days. Another member's
+        connection, an `owner` or `admin` included, another organization's id, and any id while external
+        mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/ExternalMailConnectionID'
+      responses:
+        '200':
+          description: The connection's latest runs, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailSyncRunListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the caller's connection
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-connections/{connection_id}/purges:
+    post:
+      operationId: purgeExternalMailCopies
+      summary: Delete a revoked connection's copies at once
+      description: Deletes for good the synced copies of the caller's own revoked connection instead of
+        waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then
+        deletes the external mailbox and the connection with its sync runs and writes `copies_purged`
+        with reason `owner` to the mailbox's access history. When more copies are left than one request
+        deletes, the rest is due at once and the worker deletes it in its next passes. Only the member
+        who bound the account may purge; anyone else, an `owner` or `admin` included, gets `404`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/ExternalMailConnectionID'
+      responses:
+        '200':
+          description: Every copy, the mailbox, and the connection are deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailPurgeResponse'
+        '202':
+          description: Some copies are deleted; the worker deletes the rest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailPurgeResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the caller's connection
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The connection is still bound; revoke it first (`MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED`).
           content:
             application/json:
               schema:
@@ -9849,6 +9936,7 @@ components:
         - MAILBOX.EXTERNAL_ACCOUNT_TAKEN
         - MAILBOX.EXTERNAL_CONNECTION_LIMIT
         - MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE
+        - MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED
     FieldErrors:
       type: object
       additionalProperties:
@@ -13195,6 +13283,7 @@ components:
         - sealed_deleted
         - webhooks_changed
         - renamed
+        - copies_purged
     MailboxAccessEvent:
       type: object
       additionalProperties: false
@@ -14523,8 +14612,9 @@ components:
               format: date-time
             - type: 'null'
         last_error_code:
-          description: The latest failed sync, `external.auth_failed`, `external.fetch_failed`, or
-            `external.provider_unavailable` (the instance no longer runs the connector); null after a success.
+          description: The latest failed sync, `external.auth_failed`, `external.fetch_failed` (retried
+            with exponential backoff from two minutes up to an hour), or `external.provider_unavailable`
+            (the instance no longer runs the connector); null after a success.
           oneOf:
             - type: string
               maxLength: 64
@@ -14549,6 +14639,101 @@ components:
           maxItems: 10
           items:
             $ref: '#/components/schemas/ExternalMailConnection'
+    ExternalMailSyncRun:
+      type: object
+      additionalProperties: false
+      description: One fetch of a connection. It never carries message data.
+      required:
+        - id
+        - started_at
+        - finished_at
+        - outcome
+        - fetched_count
+        - stored_count
+        - more
+        - error_code
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+          description: '`ok` saved a page; `auth_failed` lost the grant; `fetch_failed` is any other
+            provider failure and backs off; `cursor_expired` started over from an empty cursor;
+            `provider_unavailable` means the instance no longer runs the connector; `dropped` means the
+            connection was revoked or lost its grant while the fetch ran, so nothing was stored.'
+          enum:
+            - ok
+            - auth_failed
+            - fetch_failed
+            - cursor_expired
+            - provider_unavailable
+            - dropped
+        fetched_count:
+          description: Messages the provider returned.
+          type: integer
+          minimum: 0
+        stored_count:
+          description: Messages that were new and stored.
+          type: integer
+          minimum: 0
+        more:
+          description: The provider had another page ready.
+          type: boolean
+        error_code:
+          description: The connection error code of a failed fetch; null otherwise.
+          oneOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+    ExternalMailSyncRunListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/ExternalMailSyncRun'
+    ExternalMailPurgeResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - deleted_messages
+            - completed
+          properties:
+            deleted_messages:
+              description: Copies this request deleted.
+              type: integer
+              minimum: 0
+            completed:
+              description: True when no copy is left and the mailbox and connection are deleted.
+              type: boolean
     MailTriageCategory:
       type: string
       description: '`reply` needs the reader''s answer, `deadline` carries a date, `fyi` is for
