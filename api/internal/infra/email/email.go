@@ -1,5 +1,5 @@
 // Package email provides the outbound system email capability, delivered through Resend or
-// Cloudflare Email Sending.
+// Cloudflare Email Sending, or recorded in the API log by the development-only log provider.
 package email
 
 import (
@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/mail"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -145,6 +147,9 @@ func normalizedTimeout(timeout time.Duration) time.Duration {
 
 // IsConfigured reports whether this adapter can attempt provider delivery.
 func (s *Service) IsConfigured() bool {
+	if s != nil && s.provider == config.EmailProviderLog {
+		return s.from != ""
+	}
 	return s != nil && s.from != "" && s.apiKey != "" && s.endpoint != "" && s.client != nil
 }
 
@@ -183,6 +188,10 @@ func (s *Service) sendEmail(
 	}
 	if err := validateMessage(to, subject, htmlContent); err != nil {
 		return err
+	}
+	if s.provider == config.EmailProviderLog {
+		s.logDelivery(ctx, to, subject, htmlContent)
+		return nil
 	}
 
 	payload, err := s.encodeRequest(to, subject, htmlContent)
@@ -331,4 +340,23 @@ func (s *Service) SendWelcomeEmail(ctx context.Context, to, username string) err
 	`, html.EscapeString(username))
 
 	return s.SendEmail(ctx, []string{to}, subject, htmlContent)
+}
+
+var (
+	htmlTagPattern    = regexp.MustCompile(`<[^>]*>`)
+	whitespacePattern = regexp.MustCompile(`\s+`)
+)
+
+// logDelivery records a message for local development. Configuration validation admits the log
+// provider only when APP_ENV is development, because the text includes one-time codes and tokens.
+func (s *Service) logDelivery(ctx context.Context, to []string, subject, htmlContent string) {
+	text := html.UnescapeString(htmlTagPattern.ReplaceAllString(htmlContent, " "))
+	text = strings.TrimSpace(whitespacePattern.ReplaceAllString(text, " "))
+	slog.InfoContext(ctx, "email.log_delivery",
+		"detail", "MAIL_PROVIDER=log: this message was written to the log instead of being sent",
+		"from", s.from,
+		"to", strings.Join(to, ", "),
+		"subject", subject,
+		"text", text,
+	)
 }

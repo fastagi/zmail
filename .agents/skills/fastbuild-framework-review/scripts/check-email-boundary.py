@@ -42,8 +42,11 @@ def main() -> int:
             "DefaultEmailRequestTimeout = 10 * time.Second",
             "RequestTimeout time.Duration",
             'env.GetDuration("MAIL_REQUEST_TIMEOUT", DefaultEmailRequestTimeout)',
-            "validateEmailConfig(cfg.Email)",
+            "validateEmailConfig(cfg.Email, cfg.App.Env)",
             "MAIL_FROM and RESEND_API_KEY must be configured together",
+            # The log provider writes codes and reset tokens to the log, so it stays development-only.
+            'strings.EqualFold(strings.TrimSpace(appEnv), "development")',
+            "MAIL_PROVIDER log is accepted only when APP_ENV is development",
         ),
     )
     require_all(
