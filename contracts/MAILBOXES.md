@@ -1954,7 +1954,10 @@ Anyone else who can see the mailbox gets `403 PERMISSION.DENIED`; someone with n
 
 - `api_key_id` must name a live (not test), unexpired, unrevoked key holding `mail:agent` (or `*`),
   whose owner is a current member of the organization with `view` on the mailbox: for a personal or
-  connected mailbox that is only the owner; for a shared mailbox any member with `view`.
+  connected mailbox that is only the owner; for a shared mailbox any member with `view`. A key of
+  anyone other than the issuer is refused with one undifferentiated `422 MAILBOX.AGENT_GRANT_INVALID`
+  whatever is wrong with it (unknown, another organization's, inactive, a test key, without the
+  scope, or its owner unable to read the mailbox); only the issuer's own keys get a specific reason.
 - `capabilities` must include `read`; `draft` is optional and needs the key's owner to have `send`.
 - `reveal_secrets` (default `false`) returns one-time codes and sign-in links unmasked; every such
   read is audited as `read_revealed`.
@@ -1962,12 +1965,17 @@ Anyone else who can see the mailbox gets `403 PERMISSION.DENIED`; someone with n
   sender address exactly; a domain (a leading `@` is ignored) matches that domain and its
   subdomains. `filters.label_ids`: at most 20 labels of the mailbox; a message matches when it
   carries one of them as its event is written (labels applied on arrival; a label a person adds
-  later does not create an event). Empty filters match every message.
+  later does not create an event). Empty filters match every message. Filters narrow what is
+  delivered; they are not authentication. A sender filter compares the message's `From` header,
+  which a sender can forge: Zmail stores no SPF, DKIM, or DMARC verdict for inbound mail today, so it
+  cannot refuse a spoofed sender. An agent must not treat a matching sender as proof of identity.
 - `expires_at` is required, in the future, and at most 90 days ahead.
 
-A request that breaks these rules is `422 MAILBOX.AGENT_GRANT_INVALID`. A key holds at most one live
-grant per mailbox (`409 MAILBOX.AGENT_GRANT_EXISTS`), and a mailbox at most 10 live grants
-(`409 MAILBOX.AGENT_GRANT_LIMIT`). Issuing writes an `agent_granted` access event.
+A request that breaks these rules is `422 MAILBOX.AGENT_GRANT_INVALID`. A key holds at most one
+working grant per mailbox (`409 MAILBOX.AGENT_GRANT_EXISTS`), and a mailbox at most 10 working
+grants (`409 MAILBOX.AGENT_GRANT_LIMIT`). A grant is working while it is live, its key is neither
+deleted, revoked, nor expired, and its key's owner can still read the mailbox; a grant that stopped
+working holds no slot and receives no events. Issuing writes an `agent_granted` access event.
 
 A grant:
 
@@ -1987,7 +1995,10 @@ mailbox's grants newest first (`page`, `per_page`). `DELETE
 already ended grant; an id that is not a grant of the mailbox is `404 MAILBOX.AGENT_GRANT_NOT_FOUND`.
 `GET /v1/mailboxes/:mailbox_id/agent-grants/:grant_id/activity` returns the grant's newest 100 audit
 rows, newest first: `{ "id", "grant_id", "api_key_id", "message_id", "action", "created_at" }` with
-`action` `read`, `read_revealed`, or `draft`. Audit rows never hold a subject or a body.
+`action` `read`, `read_revealed`, or `draft`. Audit rows never hold a subject or a body and are kept
+90 days (`MAIL_AGENT_AUDIT_RETENTION`). Like sealed mail, grants and audit rows created before a
+mailbox's seal boundary are hidden from everyone: they are not listed, and their ids answer
+`404 MAILBOX.AGENT_GRANT_NOT_FOUND`.
 
 A grant stops working at once, on every agent route, when any of these happens:
 
@@ -1996,9 +2007,9 @@ A grant stops working at once, on every agent route, when any of these happens:
 | A manager of the grants revokes it | `revoke_reason` `revoked` |
 | `expires_at` passes | `status` `expired` |
 | The key is revoked or expires | Authentication fails (`401`) |
-| The key's owner leaves the organization | Every grant of their keys is revoked (`left_organization`) |
+| The key's owner leaves the organization | Every grant of their keys is revoked (`left_organization`), and the drafts of their personal mailboxes deleted |
 | The key's owner is removed from a shared mailbox | Their grants of it are revoked (`member_removed`) |
-| A personal mailbox is handed over | Its grants are revoked (`handed_over`) |
+| A personal mailbox is handed over | Its grants are revoked (`handed_over`) and its drafts deleted, before its history is sealed |
 | The key's owner no longer has `view` for any other reason, or the mailbox is deleted | The grant is ignored until it would apply again |
 
 Every agent request checks the grant, the mailbox, and the key owner's current access; the
@@ -2039,7 +2050,10 @@ in the organization, ascending:
   stores the cursor only after it has handled the page. Within an organization, event ids become
   visible in id order, so a cursor never skips an event committed later.
 - A key without a working grant gets an empty feed. Events are kept 30 days
-  (`mail:agent-events:prune`).
+  (`MAIL_AGENT_EVENT_RETENTION`); every `mail:broadcast:work` pass deletes older events and audit
+  rows in small batches, and `mail:agent-events:prune` deletes old events at once.
+- Each key may make 600 requests a minute across the feed and message reads
+  (`MAIL_AGENT_READS_PER_MINUTE`); past that it gets `429 COMMON.RATE_LIMITED` with `Retry-After`.
 
 ### Reading And Drafting
 
@@ -2069,7 +2083,8 @@ one pending draft per message: the first answers `201`, a later one replaces its
 ```
 
 `GET /v1/mailboxes/:mailbox_id/agent-drafts` (session, `send` on the mailbox) pages the mailbox's
-drafts newest first. Nothing sends a draft; a person replies through [Send](#send).
+drafts newest first, only while their message exists and is not sealed. Nothing sends a draft; a
+person replies through [Send](#send).
 
 ## Transactional Mail
 

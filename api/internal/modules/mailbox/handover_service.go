@@ -68,8 +68,9 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 		if _, upsertErr := s.repo.UpsertMailboxMember(tx, member, domain.MaxMailboxMembers); upsertErr != nil {
 			return upsertErr
 		}
-		// Agent grants of the personal mailbox end with it; the successor issues their own.
-		if revokeErr := s.revokeAgentGrants(tx, domain.MailAgentGrantRevocation{
+		// Agent grants and drafts of the personal mailbox end with it, before its history is
+		// sealed; the successor issues their own.
+		if revokeErr := s.endAgentMailbox(tx, domain.MailAgentGrantRevocation{
 			OrganizationID: mailbox.OrganizationID, MailboxID: mailbox.ID,
 			Reason: domain.MailAgentRevokedHandedOver, RevokedBy: viewer.UserID,
 		}); revokeErr != nil {
@@ -159,6 +160,13 @@ func (s *service) MemberRemoved(ctx context.Context, event domain.OrganizationMe
 			if recordErr := s.recordAccess(tx, mailbox, domain.MailboxAccessOwnerLeft, 0, event.UserID,
 				map[string]any{"reason": reasonLeftOrganization}); recordErr != nil {
 				return recordErr
+			}
+			// Nobody may read the mailbox until a handover, so its agent drafts go now.
+			if endErr := s.endAgentMailbox(tx, domain.MailAgentGrantRevocation{
+				OrganizationID: event.OrganizationID, MailboxID: mailbox.ID,
+				Reason: domain.MailAgentRevokedOwnerLeft, At: at,
+			}); endErr != nil {
+				return endErr
 			}
 		}
 		granted, err := s.repo.MailboxesGrantedTo(tx, event.OrganizationID, event.MembershipID)

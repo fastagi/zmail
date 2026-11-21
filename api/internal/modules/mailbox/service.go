@@ -77,6 +77,8 @@ type Settings struct {
 	Triage config.AITriageConfig
 	// ExternalMail enables read-only external mailboxes; the zero value is off.
 	ExternalMail config.ExternalMailConfig
+	// MailAgent bounds agent feed retention and agent reads; the zero value takes the defaults.
+	MailAgent config.MailAgentConfig
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -368,6 +370,8 @@ type service struct {
 	externalConnectors *externalMailRegistry
 	// agents stores agent grants, their feed, audit, and drafts; nil when repo does not implement it.
 	agents domain.MailAgentRepository
+	// agentReads limits the agent route requests of each API key per minute.
+	agentReads ratelimit.Store
 }
 
 var _ Service = (*service)(nil)
@@ -435,7 +439,7 @@ func NewService(
 		recordAudit: auditstarter.RecordChange,
 		triage:      triage, triageModel: newTriageModel(settings.Triage),
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
-		agents: agents,
+		agents: agents, agentReads: newAgentReadLimit(limits, settings),
 	}
 }
 
@@ -507,6 +511,7 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.TransactionalKeyPerSecond = resolved.TransactionalKeyPerSecond
 	settings.Triage = cfg.AITriage
 	settings.ExternalMail = cfg.ExternalMail
+	settings.MailAgent = cfg.MailAgent
 	return settings
 }
 

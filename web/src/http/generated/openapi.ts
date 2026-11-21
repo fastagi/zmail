@@ -1543,7 +1543,7 @@ export interface paths {
         put?: never;
         /**
          * Let an API key receive the mailbox's new mail
-         * @description Same issuers as the listing. The key must be a live, active key with `mail:agent` whose owner is a current member with `view` on the mailbox (`send` for `draft`). Writes an `agent_granted` access event. See MAILBOXES.md, Agent Grants.
+         * @description Same issuers as the listing. The key must be a live, active key with `mail:agent` whose owner is a current member with `view` on the mailbox (`send` for `draft`); a key of anyone but the issuer gets one undifferentiated refusal. Sender filters compare the forgeable `From` header and are not authentication. Writes an `agent_granted` access event. See MAILBOXES.md, Agent Grants.
          */
         post: operations["issueMailboxAgentGrant"];
         delete?: never;
@@ -7452,6 +7452,16 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description The key made more agent requests this minute than allowed (`COMMON.RATE_LIMITED`); see `Retry-After`. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -7483,6 +7493,16 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The key made more agent requests this minute than allowed (`COMMON.RATE_LIMITED`); see `Retry-After`. */
+            429: {
+                headers: {
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };

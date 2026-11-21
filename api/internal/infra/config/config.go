@@ -105,6 +105,7 @@ type Config struct {
 	Mailbox        MailboxConfig
 	AITriage       AITriageConfig
 	ExternalMail   ExternalMailConfig
+	MailAgent      MailAgentConfig
 	Audit          AuditConfig
 	Operator       OperatorConfig
 	R2             R2Config
@@ -734,6 +735,11 @@ func Load() (*Config, error) {
 			PendingTTL:         env.GetDuration("ASSET_PENDING_TTL", DefaultAssetPendingTTL),
 		},
 		AITriage: loadAITriageConfig(),
+		MailAgent: MailAgentConfig{
+			EventRetention: env.GetDuration("MAIL_AGENT_EVENT_RETENTION", DefaultMailAgentEventRetention),
+			AuditRetention: env.GetDuration("MAIL_AGENT_AUDIT_RETENTION", DefaultMailAgentAuditRetention),
+			ReadsPerMinute: env.GetInt("MAIL_AGENT_READS_PER_MINUTE", DefaultMailAgentReadsPerMinute),
+		},
 		ExternalMail: ExternalMailConfig{
 			Providers:   parseExternalMailProviders(env.Get("EXTERNAL_MAIL_PROVIDERS", "")),
 			RedirectURL: strings.TrimSpace(env.Get("EXTERNAL_MAIL_REDIRECT_URL", "")),
@@ -1113,6 +1119,9 @@ func validate(cfg *Config) error {
 		return err
 	}
 	if err := validateExternalMailConfig(cfg.ExternalMail, cfg.Mailbox.SecretEncryptionKey, isProd); err != nil {
+		return err
+	}
+	if err := validateMailAgentConfig(cfg.MailAgent); err != nil {
 		return err
 	}
 

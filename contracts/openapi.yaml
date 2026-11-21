@@ -6308,8 +6308,9 @@ paths:
       operationId: issueMailboxAgentGrant
       summary: Let an API key receive the mailbox's new mail
       description: Same issuers as the listing. The key must be a live, active key with `mail:agent` whose owner
-        is a current member with `view` on the mailbox (`send` for `draft`). Writes an `agent_granted` access
-        event. See MAILBOXES.md, Agent Grants.
+        is a current member with `view` on the mailbox (`send` for `draft`); a key of anyone but the issuer gets
+        one undifferentiated refusal. Sender filters compare the forgeable `From` header and are not
+        authentication. Writes an `agent_granted` access event. See MAILBOXES.md, Agent Grants.
       tags:
         - Mailboxes
       security:
@@ -7708,6 +7709,18 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '429':
+          description: The key made more agent requests this minute than allowed (`COMMON.RATE_LIMITED`); see
+            `Retry-After`.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/agent-mail-messages/{message_id}:
@@ -7739,6 +7752,18 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '429':
+          description: The key made more agent requests this minute than allowed (`COMMON.RATE_LIMITED`); see
+            `Retry-After`.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/agent-mail-drafts:

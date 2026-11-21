@@ -1,7 +1,9 @@
 package mailbox
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -249,6 +251,15 @@ func (h *Handler) ListAgentDrafts(c *gin.Context) {
 	response.Success(c, paginator)
 }
 
+// respondAgentError sets Retry-After when the key used up its requests, then answers the error.
+func respondAgentError(c *gin.Context, message string, err error) {
+	var retry *RetryAfterError
+	if errors.As(err, &retry) {
+		c.Header("Retry-After", strconv.Itoa(max(1, int(math.Ceil(retry.RetryAfter.Seconds())))))
+	}
+	response.HandleError(c, message, err)
+}
+
 // agentScope is the key owner's verified membership and the authenticated key's id.
 func agentScope(c *gin.Context) (domain.OrganizationContext, uint, bool) {
 	viewer, ok := organizationScope(c)
@@ -300,7 +311,7 @@ func (h *Handler) ListAgentMailEvents(c *gin.Context) {
 	}
 	feed, err := h.service.AgentMailEvents(c.Request.Context(), viewer, keyID, after, limit)
 	if err != nil {
-		response.HandleError(c, "Failed to read agent mail events", err)
+		respondAgentError(c, "Failed to read agent mail events", err)
 		return
 	}
 	// fastbuild:bounded-list max=100 reason=one feed page, capped by MaxMailAgentFeedPage
@@ -330,7 +341,7 @@ func (h *Handler) GetAgentMailMessage(c *gin.Context) {
 	}
 	read, err := h.service.AgentMailMessage(c.Request.Context(), viewer, keyID, messageID)
 	if err != nil {
-		response.HandleError(c, "Failed to get agent mail message", err)
+		respondAgentError(c, "Failed to get agent mail message", err)
 		return
 	}
 	privateResponse(c)

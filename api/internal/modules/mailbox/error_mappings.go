@@ -100,6 +100,7 @@ var mailboxErrorCodes = []struct {
 	{ErrMailAgentGrantInvalid, http.StatusUnprocessableEntity, domain.CodeMailAgentGrantInvalid},
 	{ErrMailAgentGrantLimit, http.StatusConflict, domain.CodeMailAgentGrantLimit},
 	{ErrMailAgentGrantExists, http.StatusConflict, domain.CodeMailAgentGrantExists},
+	{ErrMailAgentRateLimited, http.StatusTooManyRequests, domain.CodeRateLimited},
 	{ErrMailRoleLimitReached, http.StatusUnprocessableEntity, domain.CodeMailRoleLimitReached},
 	{ErrTransactionalMessageNotFound, http.StatusNotFound, domain.CodeMailTransactionalMessageNotFound},
 	{ErrTransactionalDisabled, http.StatusServiceUnavailable, domain.CodeMailTransactionalDisabled},

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 )
 
 // Access history entries of agent grants.
@@ -19,6 +20,33 @@ const (
 
 // agentEventPruneBatch is how many feed events one prune statement deletes.
 const agentEventPruneBatch = 1000
+
+// ruleMailAgentReads names the per-key limit of the agent routes.
+const ruleMailAgentReads = "mail_agent_reads"
+
+// ErrMailAgentRateLimited means an API key made too many agent requests in a minute.
+var ErrMailAgentRateLimited = errors.New("too many agent mail requests")
+
+func newAgentReadLimit(stores *ratelimit.Stores, settings Settings) ratelimit.Store {
+	if stores == nil {
+		stores = ratelimit.NewMemoryStores()
+	}
+	return stores.New(ratelimit.Rule{
+		Name: ruleMailAgentReads, Max: settings.MailAgent.Resolved().ReadsPerMinute, Window: time.Minute,
+	})
+}
+
+// takeAgentRead spends one request of the key's per-minute allowance.
+func (s *service) takeAgentRead(ctx context.Context, keyID uint) error {
+	if s.agentReads == nil {
+		return nil
+	}
+	allowed, _, resetAt := s.agentReads.Take(ctx, fmt.Sprintf("key:%d", keyID))
+	if allowed {
+		return nil
+	}
+	return &RetryAfterError{Err: ErrMailAgentRateLimited, RetryAfter: time.Until(resetAt)}
+}
 
 // AgentGrantService is agent grants as people manage them and as agents use them.
 type AgentGrantService interface {
@@ -189,7 +217,7 @@ func (s *service) IssueAgentGrant(ctx context.Context, viewer domain.Organizatio
 	if err != nil {
 		return nil, err
 	}
-	key, err := s.checkAgentKey(ctx, viewer.OrganizationID, mailbox, input.APIKeyID, canDraft, now)
+	key, err := s.checkAgentKey(ctx, viewer, mailbox, input.APIKeyID, canDraft, now)
 	if err != nil {
 		return nil, err
 	}
@@ -257,10 +285,16 @@ func (s *service) agentLabelFilters(ctx context.Context, mailboxID uint, ids []u
 	return normalized, nil
 }
 
+// errForeignAgentKey is the one answer about a key of someone other than the issuer, whatever is
+// wrong with it: unknown, another organization's, inactive, a test key, without the scope, or its
+// owner unable to read the mailbox. Only the issuer's own keys get a reason.
+var errForeignAgentKey = agentGrantInvalid("api_key_id must name an active mail:agent key of a member who can read this mailbox")
+
 // checkAgentKey accepts a live, unexpired, unrevoked key with the mail:agent scope whose owner is
-// a current member who can read the mailbox, and send from it when the grant drafts. It returns
-// the key.
-func (s *service) checkAgentKey(ctx context.Context, organizationID uint, mailbox *domain.Mailbox, keyID uint, canDraft bool, now time.Time) (*domain.APIKey, error) {
+// a current member who can read the mailbox, and send from it when the grant drafts. The key is
+// considered only once its owner is known to be a member of the issuer's organization, and a key
+// of anyone else than the issuer fails with one undifferentiated error. It returns the key.
+func (s *service) checkAgentKey(ctx context.Context, issuer domain.OrganizationContext, mailbox *domain.Mailbox, keyID uint, canDraft bool, now time.Time) (*domain.APIKey, error) {
 	if keyID == 0 {
 		return nil, agentGrantInvalid("api_key_id is required")
 	}
@@ -268,31 +302,41 @@ func (s *service) checkAgentKey(ctx context.Context, organizationID uint, mailbo
 	if err != nil {
 		return nil, err
 	}
-	if key == nil || !key.IsActive(now) {
-		return nil, agentGrantInvalid("api_key_id must name an active API key")
+	if key == nil {
+		return nil, errForeignAgentKey
 	}
-	if key.Mode == domain.APIKeyModeTest {
-		return nil, agentGrantInvalid("a test API key cannot hold an agent grant")
+	own := key.UserID == issuer.UserID
+	refuse := func(reason string) error {
+		if own {
+			return agentGrantInvalid(reason)
+		}
+		return errForeignAgentKey
 	}
-	if !key.HasScope(ScopeMailAgent) {
-		return nil, agentGrantInvalid("the API key needs the mail:agent scope")
-	}
-	owner, err := s.agentKeyOwner(ctx, organizationID, key.UserID)
+	owner, err := s.agentKeyOwner(ctx, issuer.OrganizationID, key.UserID)
 	if err != nil {
 		return nil, err
 	}
 	if owner == nil {
-		return nil, agentGrantInvalid("the API key's owner is not a member of the organization")
+		return nil, errForeignAgentKey
+	}
+	if !key.IsActive(now) {
+		return nil, refuse("api_key_id must name an active API key")
+	}
+	if key.Mode == domain.APIKeyModeTest {
+		return nil, refuse("a test API key cannot hold an agent grant")
+	}
+	if !key.HasScope(ScopeMailAgent) {
+		return nil, refuse("the API key needs the mail:agent scope")
 	}
 	access, err := s.accessFor(ctx, *owner, mailbox)
 	if err != nil {
 		return nil, err
 	}
 	if !access.View {
-		return nil, agentGrantInvalid("the API key's owner cannot read this mailbox")
+		return nil, refuse("the API key's owner cannot read this mailbox")
 	}
 	if canDraft && !access.Send {
-		return nil, agentGrantInvalid("the draft capability needs an API key whose owner can send from this mailbox")
+		return nil, refuse("the draft capability needs an API key whose owner can send from this mailbox")
 	}
 	return key, nil
 }
@@ -316,7 +360,7 @@ func (s *service) ListAgentGrants(ctx context.Context, viewer domain.Organizatio
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.agents.ListAgentGrants(ctx, mailbox.ID, page, pageSize)
+	return s.agents.ListAgentGrants(ctx, mailbox.ID, mailbox.SealedBefore, page, pageSize)
 }
 
 func (s *service) RevokeAgentGrant(ctx context.Context, viewer domain.OrganizationContext, mailboxID, grantID uint) error {
@@ -324,7 +368,7 @@ func (s *service) RevokeAgentGrant(ctx context.Context, viewer domain.Organizati
 	if err != nil {
 		return err
 	}
-	if _, err := s.agents.FindAgentGrant(ctx, mailbox.ID, grantID); err != nil {
+	if _, err := s.agents.FindAgentGrant(ctx, mailbox.ID, grantID, mailbox.SealedBefore); err != nil {
 		return err
 	}
 	return s.repo.InTransaction(ctx, func(tx context.Context) error {
@@ -369,10 +413,10 @@ func (s *service) AgentGrantActivity(ctx context.Context, viewer domain.Organiza
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.agents.FindAgentGrant(ctx, mailbox.ID, grantID); err != nil {
+	if _, err := s.agents.FindAgentGrant(ctx, mailbox.ID, grantID, mailbox.SealedBefore); err != nil {
 		return nil, err
 	}
-	return s.agents.ListAgentAudit(ctx, grantID, domain.MaxMailAgentActivity)
+	return s.agents.ListAgentAudit(ctx, grantID, mailbox.SealedBefore, domain.MaxMailAgentActivity)
 }
 
 func (s *service) ListAgentDrafts(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, page, pageSize int) ([]*domain.MailAgentDraft, int64, error) {
@@ -444,6 +488,9 @@ func (s *service) AgentMailEvents(ctx context.Context, viewer domain.Organizatio
 	if limit < 1 || limit > domain.MaxMailAgentFeedPage {
 		return nil, fmt.Errorf("%w: limit must be between 1 and %d", domain.ErrInvalidInput, domain.MaxMailAgentFeedPage)
 	}
+	if err := s.takeAgentRead(ctx, keyID); err != nil {
+		return nil, err
+	}
 	grants, err := s.effectiveAgentGrants(ctx, viewer, keyID)
 	if err != nil {
 		return nil, err
@@ -489,6 +536,9 @@ func (s *service) agentMessageGrants(ctx context.Context, viewer domain.Organiza
 }
 
 func (s *service) AgentMailMessage(ctx context.Context, viewer domain.OrganizationContext, keyID, messageID uint) (*AgentMailRead, error) {
+	if err := s.takeAgentRead(ctx, keyID); err != nil {
+		return nil, err
+	}
 	grants, err := s.agentMessageGrants(ctx, viewer, keyID, messageID)
 	if err != nil {
 		return nil, err
@@ -606,6 +656,32 @@ func (s *service) appendAgentEvents(tx context.Context, mailbox *domain.Mailbox,
 		})
 	}
 	return s.agents.AppendAgentEvents(tx, mailbox.OrganizationID, events)
+}
+
+// endAgentMailbox revokes a mailbox's grants and deletes its drafts, which quote mail that is
+// about to be sealed or that nobody may read any more. It runs in the caller's transaction.
+func (s *service) endAgentMailbox(ctx context.Context, revocation domain.MailAgentGrantRevocation) error {
+	if s.agents == nil {
+		return nil
+	}
+	if err := s.revokeAgentGrants(ctx, revocation); err != nil {
+		return err
+	}
+	return s.agents.DeleteAgentDrafts(ctx, revocation.MailboxID)
+}
+
+// PruneExpiredAgentMail deletes up to limit feed events and audit rows past their retention.
+func (s *service) PruneExpiredAgentMail(ctx context.Context, now time.Time, limit int) (int, error) {
+	if s.agents == nil || limit < 1 {
+		return 0, nil
+	}
+	retention := s.settings.MailAgent.Resolved()
+	events, err := s.agents.PruneAgentEvents(ctx, now.Add(-retention.EventRetention), limit)
+	if err != nil || int(events) >= limit {
+		return int(events), err
+	}
+	audit, err := s.agents.PruneAgentAudit(ctx, now.Add(-retention.AuditRetention), limit-int(events))
+	return int(events + audit), err
 }
 
 // PruneAgentMailEvents deletes feed events created before a time, in batches.

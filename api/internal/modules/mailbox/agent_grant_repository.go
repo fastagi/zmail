@@ -29,6 +29,19 @@ type agentKeyRow struct {
 	RevokedAt *time.Time
 }
 
+// effectiveAgentGrant keeps grants (aliased g) that still work at @now: live, their key neither
+// deleted, revoked, nor expired, and their key's owner still able to read the mailbox (a member
+// row of a shared mailbox, or the present owner of any other). It runs in the statement that
+// writes events and in the one that counts a mailbox's live slots, so a grant that stopped
+// working neither accumulates events nor holds a slot.
+const effectiveAgentGrant = `g.revoked_at IS NULL AND g.expires_at > @now
+	AND EXISTS (SELECT 1 FROM api_keys AS k WHERE k.id = g.api_key_id AND k.deleted_at IS NULL
+	  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > @now))
+	AND EXISTS (SELECT 1 FROM mailboxes AS box WHERE box.id = g.mailbox_id AND box.deleted_at IS NULL AND (
+	  (box.type = 'shared' AND EXISTS (SELECT 1 FROM mailbox_members AS m
+	    WHERE m.mailbox_id = box.id AND m.user_id = g.key_user_id))
+	  OR (box.type <> 'shared' AND box.owner_user_id = g.key_user_id AND box.owner_left_at IS NULL)))`
+
 func (r *repository) FindAgentKey(ctx context.Context, keyID uint) (*domain.APIKey, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
@@ -88,20 +101,21 @@ func (r *repository) CreateAgentGrant(ctx context.Context, grant *domain.MailAge
 			}
 			return lock.Error
 		}
-		live := db.Model(&MailAgentGrantPO{}).
-			Where("mailbox_id = ? AND revoked_at IS NULL AND expires_at > ?", grant.MailboxID, grant.CreatedAt)
-		var sameKey int64
-		if err := live.Session(&gorm.Session{}).Where("api_key_id = ?", grant.APIKeyID).Count(&sameKey).Error; err != nil {
+		var counts struct {
+			Live    int64
+			SameKey int64
+		}
+		err := db.Raw(`SELECT count(*) AS live, count(*) FILTER (WHERE g.api_key_id = @key) AS same_key
+			FROM mail_agent_grants AS g WHERE g.mailbox_id = @mailbox AND `+effectiveAgentGrant,
+			map[string]any{"mailbox": grant.MailboxID, "key": grant.APIKeyID, "now": grant.CreatedAt.UTC()}).
+			Scan(&counts).Error
+		if err != nil {
 			return err
 		}
-		if sameKey > 0 {
+		if counts.SameKey > 0 {
 			return ErrMailAgentGrantExists
 		}
-		var count int64
-		if err := live.Session(&gorm.Session{}).Count(&count).Error; err != nil {
-			return err
-		}
-		if count >= int64(maxLive) {
+		if counts.Live >= int64(maxLive) {
 			return ErrMailAgentGrantLimit
 		}
 		if err := db.Create(po).Error; err != nil {
@@ -112,12 +126,21 @@ func (r *repository) CreateAgentGrant(ctx context.Context, grant *domain.MailAge
 	})
 }
 
-func (r *repository) FindAgentGrant(ctx context.Context, mailboxID, grantID uint) (*domain.MailAgentGrant, error) {
+// afterSeal keeps rows created at or after a mailbox's seal boundary, like sealed mail.
+func afterSeal(query *gorm.DB, column string, sealedBefore *time.Time) *gorm.DB {
+	if sealedBefore == nil {
+		return query
+	}
+	return query.Where(column+" >= ?", sealedBefore.UTC())
+}
+
+func (r *repository) FindAgentGrant(ctx context.Context, mailboxID, grantID uint, sealedBefore *time.Time) (*domain.MailAgentGrant, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailAgentGrantPO
-	if err := r.conn(ctx).Where("id = ? AND mailbox_id = ?", grantID, mailboxID).First(&po).Error; err != nil {
+	query := afterSeal(r.conn(ctx).Where("id = ? AND mailbox_id = ?", grantID, mailboxID), "created_at", sealedBefore)
+	if err := query.First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailAgentGrantNotFound
 		}
@@ -126,19 +149,20 @@ func (r *repository) FindAgentGrant(ctx context.Context, mailboxID, grantID uint
 	return po.toDomain(), nil
 }
 
-func (r *repository) ListAgentGrants(ctx context.Context, mailboxID uint, page, pageSize int) ([]*domain.MailAgentGrant, int64, error) {
+func (r *repository) ListAgentGrants(ctx context.Context, mailboxID uint, sealedBefore *time.Time, page, pageSize int) ([]*domain.MailAgentGrant, int64, error) {
 	if r.db == nil {
 		return nil, 0, domain.ErrServiceUnavailable
 	}
 	var total int64
-	if err := r.conn(ctx).Model(&MailAgentGrantPO{}).Where("mailbox_id = ?", mailboxID).Count(&total).Error; err != nil {
+	counted := afterSeal(r.conn(ctx).Model(&MailAgentGrantPO{}).Where("mailbox_id = ?", mailboxID), "created_at", sealedBefore)
+	if err := counted.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var rows []mailAgentGrantRow
-	err := r.conn(ctx).Table("mail_agent_grants AS g").
+	err := afterSeal(r.conn(ctx).Table("mail_agent_grants AS g").
 		Select("g.*, COALESCE(k.name, '') AS api_key_name, COALESCE(k.key_prefix, '') AS api_key_prefix").
 		Joins("LEFT JOIN api_keys AS k ON k.id = g.api_key_id").
-		Where("g.mailbox_id = ?", mailboxID).
+		Where("g.mailbox_id = ?", mailboxID), "g.created_at", sealedBefore).
 		Order("g.id DESC").Offset((page - 1) * pageSize).Limit(pageSize).
 		Scan(&rows).Error
 	if err != nil {
@@ -158,18 +182,28 @@ func (r *repository) listGrants(query *gorm.DB) ([]*domain.MailAgentGrant, error
 	if err := query.Order("id").Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	return grantsOf(rows), nil
+}
+
+func grantsOf(rows []MailAgentGrantPO) []*domain.MailAgentGrant {
 	grants := make([]*domain.MailAgentGrant, 0, len(rows))
 	for i := range rows {
 		grants = append(grants, rows[i].toDomain())
 	}
-	return grants, nil
+	return grants
 }
 
 func (r *repository) ListLiveAgentGrantsOfMailbox(ctx context.Context, mailboxID uint, now time.Time) ([]*domain.MailAgentGrant, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	return r.listGrants(r.conn(ctx).Where("mailbox_id = ? AND revoked_at IS NULL AND expires_at > ?", mailboxID, now.UTC()))
+	var rows []MailAgentGrantPO
+	err := r.conn(ctx).Raw(`SELECT g.* FROM mail_agent_grants AS g WHERE g.mailbox_id = @mailbox AND `+effectiveAgentGrant+` ORDER BY g.id`,
+		map[string]any{"mailbox": mailboxID, "now": now.UTC()}).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return grantsOf(rows), nil
 }
 
 func (r *repository) ListLiveAgentGrantsOfKey(ctx context.Context, organizationID, keyID uint, now time.Time) ([]*domain.MailAgentGrant, error) {
@@ -306,12 +340,13 @@ func (r *repository) AddAgentAudit(ctx context.Context, entry *domain.MailAgentA
 	return nil
 }
 
-func (r *repository) ListAgentAudit(ctx context.Context, grantID uint, limit int) ([]*domain.MailAgentAuditEntry, error) {
+func (r *repository) ListAgentAudit(ctx context.Context, grantID uint, sealedBefore *time.Time, limit int) ([]*domain.MailAgentAuditEntry, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
 	var rows []MailAgentAuditPO
-	if err := r.conn(ctx).Where("grant_id = ?", grantID).Order("id DESC").Limit(limit).Find(&rows).Error; err != nil {
+	query := afterSeal(r.conn(ctx).Where("grant_id = ?", grantID), "created_at", sealedBefore)
+	if err := query.Order("id DESC").Limit(limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	entries := make([]*domain.MailAgentAuditEntry, 0, len(rows))
@@ -351,7 +386,11 @@ func (r *repository) ListAgentDrafts(ctx context.Context, mailboxID uint, page, 
 	if r.db == nil {
 		return nil, 0, domain.ErrServiceUnavailable
 	}
-	query := r.conn(ctx).Model(&MailAgentDraftPO{}).Where("mailbox_id = ?", mailboxID)
+	// A draft quotes its message: it shows only while the message does, never once it is deleted
+	// or sealed.
+	query := r.conn(ctx).Model(&MailAgentDraftPO{}).Where("mail_agent_drafts.mailbox_id = ?", mailboxID).
+		Where(`EXISTS (SELECT 1 FROM mail_messages WHERE mail_messages.id = mail_agent_drafts.message_id
+		  AND ` + unsealedMessage + `)`)
 	var total int64
 	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -365,6 +404,22 @@ func (r *repository) ListAgentDrafts(ctx context.Context, mailboxID uint, page, 
 		drafts = append(drafts, rows[i].toDomain())
 	}
 	return drafts, total, nil
+}
+
+func (r *repository) DeleteAgentDrafts(ctx context.Context, mailboxID uint) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Where("mailbox_id = ?", mailboxID).Delete(&MailAgentDraftPO{}).Error
+}
+
+func (r *repository) PruneAgentAudit(ctx context.Context, before time.Time, limit int) (int64, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	result := r.conn(ctx).Exec(`DELETE FROM mail_agent_audit WHERE id IN (
+		SELECT id FROM mail_agent_audit WHERE created_at < ? ORDER BY id LIMIT ?)`, before.UTC(), limit)
+	return result.RowsAffected, result.Error
 }
 
 func (r *repository) PruneAgentEvents(ctx context.Context, before time.Time, limit int) (int64, error) {

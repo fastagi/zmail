@@ -34,10 +34,6 @@ type agentFixture struct {
 func newAgentFixture(t *testing.T) *agentFixture {
 	t.Helper()
 	ext := newExternalFixture(t, config.ExternalMailSourceFake)
-	db := ext.repo.(*repository).db
-	if err := db.AutoMigrate(&apikey.APIKeyPO{}); err != nil {
-		t.Fatalf("migrate agent tables: %v", err)
-	}
 	f := &agentFixture{externalFixture: ext, e: viewerOf(accessOrg, accessE, domain.OrganizationRoleMember), keys: map[string]uint{}}
 	if _, err := f.service.SetMailboxMember(context.Background(), f.admin, f.team.ID, accessE, domain.MailboxPermissionManage); err != nil {
 		t.Fatalf("add E as manager: %v", err)
@@ -223,7 +219,7 @@ func TestAgentGrantIssuers(t *testing.T) {
 	if !containsAccessType(types, MailboxAccessAgentGranted) || !containsAccessType(types, MailboxAccessAgentRevoked) {
 		t.Fatalf("team access history = %v; want agent_granted and agent_revoked", types)
 	}
-	revoked, _ := f.service.agents.FindAgentGrant(ctx, f.team.ID, teamC.ID)
+	revoked, _ := f.service.agents.FindAgentGrant(ctx, f.team.ID, teamC.ID, nil)
 	if revoked.Status(f.service.now()) != domain.MailAgentGrantRevoked || revoked.RevokeReason != domain.MailAgentRevokedByPerson || *revoked.RevokedBy != accessE {
 		t.Fatalf("revoked grant = %+v", revoked)
 	}
@@ -770,7 +766,7 @@ func TestAgentEventPrune(t *testing.T) {
 	f.deliver(t, f.personal, "alice@sender.test", "Old", "body", "p1")
 	f.advance(31 * 24 * time.Hour)
 	fresh := f.deliver(t, f.personal, "alice@sender.test", "Fresh", "body", "p2")
-	deleted, err := f.service.PruneAgentMailEvents(context.Background(), f.service.now().Add(-domain.MailAgentEventRetention))
+	deleted, err := f.service.PruneAgentMailEvents(context.Background(), f.service.now().Add(-30*24*time.Hour))
 	if err != nil || deleted != 1 {
 		t.Fatalf("PruneAgentMailEvents = %d, %v", deleted, err)
 	}

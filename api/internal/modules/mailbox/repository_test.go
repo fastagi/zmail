@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/modules/apikey"
 	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
 )
 
@@ -26,7 +27,7 @@ func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
 		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{},
-		&MailAgentGrantPO{}, &MailAgentEventPO{}, &MailAgentAuditPO{}, &MailAgentDraftPO{})
+		&MailAgentGrantPO{}, &MailAgentEventPO{}, &MailAgentAuditPO{}, &MailAgentDraftPO{}, &apikey.APIKeyPO{})
 	return NewRepository(db), db
 }
 

@@ -94,8 +94,17 @@ organization event ids become visible in id order. A key reads only its organiza
 The lock is taken only when a live matching grant exists, so organizations without agents pay
 nothing.
 
-**Retention.** `mail:agent-events:prune [--before=<RFC3339>]` deletes events older than 30 days in
-batches. Audit rows and grants are kept.
+**Retention.** Every `mail:broadcast:work` pass deletes events older than `MAIL_AGENT_EVENT_RETENTION`
+(30 days) and audit rows older than `MAIL_AGENT_AUDIT_RETENTION` (90 days) in bounded batches;
+`mail:agent-events:prune [--before=<RFC3339>]` deletes old events at once. Grants are kept.
+
+**Review hardening.** A grant that stopped working (key deleted, revoked, or expired; owner lost the
+mailbox) receives no events and holds no slot: one SQL condition checks it where events are written
+and where slots are counted. Handover and an owner's departure delete the mailbox's drafts in the
+same transaction, and the draft list only shows drafts of existing, unsealed messages. Grants and
+audit rows from before a seal boundary are hidden. Keys of anyone but the issuer get one
+undifferentiated refusal. Each key gets `MAIL_AGENT_READS_PER_MINUTE` (600) agent requests a minute.
+Sender filters read the forgeable `From` header; no SPF, DKIM, or DMARC verdict is stored today.
 
 ## 6. State
 

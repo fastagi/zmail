@@ -13,8 +13,6 @@ const (
 	MaxMailAgentGrantLifetime = 90 * 24 * time.Hour
 	// MaxMailAgentGrantFilters bounds each filter list of a grant.
 	MaxMailAgentGrantFilters = 20
-	// MailAgentEventRetention is how long feed events are kept.
-	MailAgentEventRetention = 30 * 24 * time.Hour
 	// MaxMailAgentFeedPage is the most events one feed read returns.
 	MaxMailAgentFeedPage = 100
 	// DefaultMailAgentFeedPage is the page size of a feed read without limit.
@@ -211,14 +209,16 @@ type MailAgentGrantRevocation struct {
 type MailAgentRepository interface {
 	// FindAgentKey reads an API key by id, deleted keys excluded; nil when there is none.
 	FindAgentKey(ctx context.Context, keyID uint) (*APIKey, error)
-	// CreateAgentGrant stores a grant under the mailbox's row lock. It refuses a second live grant
-	// of the same key and mailbox, and a grant past maxLive live grants of the mailbox.
+	// CreateAgentGrant stores a grant under the mailbox's row lock. It refuses a second effective
+	// grant of the same key and mailbox, and a grant past maxLive effective grants of the mailbox.
 	CreateAgentGrant(ctx context.Context, grant *MailAgentGrant, maxLive int) error
-	// FindAgentGrant reads one grant of a mailbox.
-	FindAgentGrant(ctx context.Context, mailboxID, grantID uint) (*MailAgentGrant, error)
-	// ListAgentGrants pages a mailbox's grants, newest first, with their keys' names.
-	ListAgentGrants(ctx context.Context, mailboxID uint, page, pageSize int) ([]*MailAgentGrant, int64, error)
-	// ListLiveAgentGrantsOfMailbox lists the live grants of a mailbox at now.
+	// FindAgentGrant reads one grant of a mailbox; a grant created before sealedBefore is hidden.
+	FindAgentGrant(ctx context.Context, mailboxID, grantID uint, sealedBefore *time.Time) (*MailAgentGrant, error)
+	// ListAgentGrants pages a mailbox's grants created at or after sealedBefore, newest first,
+	// with their keys' names.
+	ListAgentGrants(ctx context.Context, mailboxID uint, sealedBefore *time.Time, page, pageSize int) ([]*MailAgentGrant, int64, error)
+	// ListLiveAgentGrantsOfMailbox lists the effective grants of a mailbox at now: live, their key
+	// usable, and their key's owner still able to read the mailbox.
 	ListLiveAgentGrantsOfMailbox(ctx context.Context, mailboxID uint, now time.Time) ([]*MailAgentGrant, error)
 	// ListLiveAgentGrantsOfKey lists the live grants of a key in an organization at now.
 	ListLiveAgentGrantsOfKey(ctx context.Context, organizationID, keyID uint, now time.Time) ([]*MailAgentGrant, error)
@@ -233,18 +233,26 @@ type MailAgentRepository interface {
 	ListAgentMessageEvents(ctx context.Context, grantIDs []uint, messageID uint) ([]*MailAgentEvent, error)
 	// AddAgentAudit records one agent read or draft.
 	AddAgentAudit(ctx context.Context, entry *MailAgentAuditEntry) error
-	// ListAgentAudit reads a grant's newest audit rows.
-	ListAgentAudit(ctx context.Context, grantID uint, limit int) ([]*MailAgentAuditEntry, error)
+	// ListAgentAudit reads a grant's newest audit rows created at or after sealedBefore.
+	ListAgentAudit(ctx context.Context, grantID uint, sealedBefore *time.Time, limit int) ([]*MailAgentAuditEntry, error)
 	// SaveAgentDraft stores the pending draft of a grant and message, replacing its body when one
 	// exists; created reports a new draft.
 	SaveAgentDraft(ctx context.Context, draft *MailAgentDraft) (created bool, err error)
-	// ListAgentDrafts pages a mailbox's drafts, newest first.
+	// ListAgentDrafts pages a mailbox's drafts of visible, unsealed messages, newest first.
 	ListAgentDrafts(ctx context.Context, mailboxID uint, page, pageSize int) ([]*MailAgentDraft, int64, error)
+	// DeleteAgentDrafts deletes every draft of a mailbox.
+	DeleteAgentDrafts(ctx context.Context, mailboxID uint) error
 	// PruneAgentEvents deletes up to limit events created before a time and returns how many.
 	PruneAgentEvents(ctx context.Context, before time.Time, limit int) (int64, error)
+	// PruneAgentAudit deletes up to limit audit rows created before a time and returns how many.
+	PruneAgentAudit(ctx context.Context, before time.Time, limit int) (int64, error)
 }
 
-// MailAgentEventPruner deletes agent feed events past retention; the operator command runs it.
+// MailAgentEventPruner deletes agent feed events and audit rows past retention.
 type MailAgentEventPruner interface {
+	// PruneAgentMailEvents deletes every feed event created before a time; the operator command runs it.
 	PruneAgentMailEvents(ctx context.Context, before time.Time) (int64, error)
+	// PruneExpiredAgentMail deletes up to limit events and audit rows past their configured
+	// retention; the mail worker runs it every pass.
+	PruneExpiredAgentMail(ctx context.Context, now time.Time, limit int) (int, error)
 }

@@ -35,9 +35,13 @@ also revoke the agent grants they affect, in the same transaction.
 The migration only creates `mail_agent_grants`, `mail_agent_events`, `mail_agent_audit`, and
 `mail_agent_drafts`; it locks no existing table. Every newly stored inbound message reads the
 mailbox's live grants (a partial index keeps this one cheap lookup) and, only when one matches,
-writes its events under a per-organization transaction lock. Schedule
-`mail:agent-events:prune [--before=<RFC3339>]` daily to delete feed events older than 30 days. The
-mailbox repository reads `api_keys` (never writes it) to check a key when a grant is issued.
+writes its events under a per-organization transaction lock. Every
+`mail:broadcast:work` pass deletes feed events older than `MAIL_AGENT_EVENT_RETENTION` (default
+`720h`) and agent audit rows older than `MAIL_AGENT_AUDIT_RETENTION` (default `2160h`) in small
+batches; `mail:agent-events:prune [--before=<RFC3339>]` deletes old events at once.
+`MAIL_AGENT_READS_PER_MINUTE` (default 600) limits each key's agent requests. The mailbox
+repository reads `api_keys` (never writes it) to check a key when a grant is issued and when it
+decides which grants still receive mail.
 
 ## Unreleased — Mail connectors: binding, reconnecting, and open provider ids
 
