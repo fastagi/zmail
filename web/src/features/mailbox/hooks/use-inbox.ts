@@ -191,26 +191,19 @@ function readRow(item: InboxItem): InboxItem {
 }
 
 /**
- * Changes the row in every cached unified inbox listing of the organization before the server
+ * Rewrites the rows of every cached unified inbox listing of the organization before the server
  * answers. Answers the function that puts those listings back as they were, for a failed request.
  */
-function patchInboxRow(
+function editInboxRows(
   queryClient: QueryClient,
   organizationId: number,
-  rowId: number,
-  change: (item: InboxItem) => InboxItem
+  edit: (items: InboxItem[]) => InboxItem[]
 ): () => void {
   const queryKey = mailboxKeys.inboxes(organizationId);
   const snapshot = queryClient.getQueriesData<InboxListing>({ queryKey });
   queryClient.setQueriesData<InboxListing>({ queryKey }, listing =>
     listing?.pages
-      ? {
-          ...listing,
-          pages: listing.pages.map(page => ({
-            ...page,
-            items: page.items.map(item => (item.id === rowId ? change(item) : item)),
-          })),
-        }
+      ? { ...listing, pages: listing.pages.map(page => ({ ...page, items: edit(page.items) })) }
       : listing
   );
   return () => {
@@ -218,32 +211,30 @@ function patchInboxRow(
   };
 }
 
+/** Changes the row in every cached listing at once; answers the rollback. */
+function patchInboxRow(
+  queryClient: QueryClient,
+  organizationId: number,
+  rowId: number,
+  change: (item: InboxItem) => InboxItem
+): () => void {
+  return editInboxRows(queryClient, organizationId, items =>
+    items.map(item => (item.id === rowId ? change(item) : item))
+  );
+}
+
 /**
- * Takes the row out of every cached unified inbox listing of the organization at once, for an
- * archive or a delete that has not been answered yet. Answers the function that puts those
- * listings back as they were, for a failed request.
+ * Takes the row out of every cached listing at once, for an archive or a delete that has not been
+ * answered yet; answers the rollback.
  */
 export function removeInboxRow(
   queryClient: QueryClient,
   organizationId: number,
   rowId: number
 ): () => void {
-  const queryKey = mailboxKeys.inboxes(organizationId);
-  const snapshot = queryClient.getQueriesData<InboxListing>({ queryKey });
-  queryClient.setQueriesData<InboxListing>({ queryKey }, listing =>
-    listing?.pages
-      ? {
-          ...listing,
-          pages: listing.pages.map(page => ({
-            ...page,
-            items: page.items.filter(item => item.id !== rowId),
-          })),
-        }
-      : listing
+  return editInboxRows(queryClient, organizationId, items =>
+    items.filter(item => item.id !== rowId)
   );
-  return () => {
-    for (const [key, listing] of snapshot) queryClient.setQueryData(key, listing);
-  };
 }
 
 /** Shows the row read in every cached listing at once; answers the rollback. */

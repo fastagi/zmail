@@ -19,11 +19,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  type ComposeDraft,
   composeDraftKey,
   readComposeDraft,
   writeComposeDraft,
-} from '@/features/mailbox/components/compose-drafts';
+} from '@/features/mailbox/components/compose-draft-store';
+import { type ComposeDraft } from '@/features/mailbox/components/compose-drafts';
 import { fileToBase64, formatBytes } from '@/features/mailbox/components/mail-attachments';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
