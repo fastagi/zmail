@@ -15,6 +15,7 @@ cloud, registry, rollout controller, secret store, or migration orchestrator for
 | `fastbuild notification:work` | Optional notification starter | Processes durable email deliveries with bounded database leases. |
 | `fastbuild webhook:work` | Optional webhook starter | Processes signed outbound deliveries with bounded network calls and database leases. |
 | `fastbuild mail:broadcast:work` | Optional mailbox starter | Sends direct sends that waited for room in the organization's send limit, oldest first, then the recipients of scheduled and running broadcasts, one message per contact, with database leases and the organization's send limit, and purges trash older than 30 days. It also retries, expires, and purges transactional messages. Run it wherever the API runs. |
+| `fastbuild mail:external:sync` | Optional mailbox starter | Syncs members' connected outside accounts (`EXTERNAL_MAIL_PROVIDERS`) into their read-only connected mailboxes, each at most every two minutes, with row leases and backoff. It exits at once while no connector is enabled. Run it wherever the API runs once connectors are on. |
 | `fastbuild mail:zone:work` | Optional mailbox starter | Activates managed mail zones once their registrar delegates them, sets their pending domains up, and removes zones still pending after 14 days. |
 | `fastbuild mail:triage:work` | Optional mailbox starter | Classifies inbound mail queued for AI triage with the model `AI_TRIAGE_PROVIDER` selects, within each organization's daily cap, with leases, 1- and 5-minute retries, and `review` after three failed calls. Run it only once a provider is configured; with `disabled` it only defers queued rows. |
 | `fastbuild mail:zone:release` | Optional mailbox starter | One-off operator command that removes a pending managed mail zone from Cloudflare and Zmail, so another organization can claim its apex. |
@@ -230,6 +231,22 @@ when the window has room.
 The same worker sends direct messages that waited for the send limit and deletes for good mailbox
 trash older than 30 days. Run it wherever the API runs, even without broadcasts: without it, waiting
 messages are never sent and the trash is never purged.
+
+## External Mail Sync Worker
+
+When `EXTERNAL_MAIL_PROVIDERS` enables connectors, deploy the same image as a separate long-running
+worker:
+
+```bash
+/app/fastbuild mail:external:sync --batch=20 --poll=30s
+```
+
+It needs the same database, `EXTERNAL_MAIL_*` settings, and `MAILBOX_SECRET_ENCRYPTION_KEY` as HTTP
+replicas. Connections are claimed with row leases, so several workers can run. Without it, bound
+accounts are never synced. While `EXTERNAL_MAIL_PROVIDERS` is empty it exits at once with status 0,
+so run it only once connectors are on, or under a restart policy that does not restart a clean
+exit. Copies of revoked connections are deleted by `mail:broadcast:work`, not by this worker, once
+`EXTERNAL_MAIL_REVOKED_RETENTION` has passed, whether or not connectors are on.
 
 ## Transactional Mail
 

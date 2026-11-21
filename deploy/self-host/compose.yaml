@@ -68,12 +68,25 @@ x-api-environment: &api-environment
   MAIL_PROVIDER: ${MAIL_PROVIDER:-cloudflare}
   MAIL_FROM: ${MAIL_FROM:-}
   WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:?missing in .env}
+  # Mail connectors: members' own outside accounts, synced read-only by external-mail-worker. Off
+  # while EXTERNAL_MAIL_PROVIDERS is empty; see "Mail Connectors" in README.md.
+  EXTERNAL_MAIL_PROVIDERS: ${EXTERNAL_MAIL_PROVIDERS:-}
+  EXTERNAL_MAIL_REDIRECT_URL: ${EXTERNAL_MAIL_REDIRECT_URL:-}
+  EXTERNAL_MAIL_GMAIL_CLIENT_ID: ${EXTERNAL_MAIL_GMAIL_CLIENT_ID:-}
+  EXTERNAL_MAIL_GMAIL_CLIENT_SECRET: ${EXTERNAL_MAIL_GMAIL_CLIENT_SECRET:-}
+  EXTERNAL_MAIL_OUTLOOK_CLIENT_ID: ${EXTERNAL_MAIL_OUTLOOK_CLIENT_ID:-}
+  EXTERNAL_MAIL_OUTLOOK_CLIENT_SECRET: ${EXTERNAL_MAIL_OUTLOOK_CLIENT_SECRET:-}
+  EXTERNAL_MAIL_OUTLOOK_TENANT: ${EXTERNAL_MAIL_OUTLOOK_TENANT:-common}
+  # Revoked copies are deleted by broadcast-worker after this, whether or not connectors are on.
+  EXTERNAL_MAIL_REVOKED_RETENTION: ${EXTERNAL_MAIL_REVOKED_RETENTION:-720h}
+  # Seals the connectors' grants; at least 32 characters when EXTERNAL_MAIL_PROVIDERS is set.
+  MAILBOX_SECRET_ENCRYPTION_KEY: ${MAILBOX_SECRET_ENCRYPTION_KEY:-}
   AI_ENABLED: "false"
   LOG_LEVEL: ${ZMAIL_LOG_LEVEL:-info}
   LOG_JSON: "true"
   TZ: UTC
 
-# The API's runtime role, shared by the server and both workers.
+# The API's runtime role, shared by the server and every worker.
 x-app-database: &app-database
   DB_USERNAME: zmail_app
   DB_PASSWORD: ${POSTGRES_APP_PASSWORD:?missing in .env}
@@ -217,6 +230,16 @@ services:
   broadcast-worker:
     <<: *worker
     entrypoint: ["/app/fastbuild", "mail:broadcast:work", "--batch=25", "--poll=2s"]
+    environment:
+      <<: [*api-environment, *app-database]
+
+  # Copies new mail from members' connected outside accounts. The command exits at once while
+  # EXTERNAL_MAIL_PROVIDERS is empty, so the service runs only in the `external-mail` profile
+  # (COMPOSE_PROFILES=external-mail in .env), which is turned on together with the connectors.
+  external-mail-worker:
+    <<: *worker
+    profiles: [external-mail]
+    entrypoint: ["/app/fastbuild", "mail:external:sync", "--batch=20", "--poll=30s"]
     environment:
       <<: [*api-environment, *app-database]
 

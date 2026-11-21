@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -203,6 +204,114 @@ func TestExternalMailAccountBelongsToOneMember(t *testing.T) {
 	}
 }
 
+// TestExternalMailRestoreRespectsTheLimit: restoring a revoked connection makes it live again, so
+// it is refused at the member's limit and the grant handed back; reconnecting a connection that is
+// still live changes nothing in the count and is never refused.
+func TestExternalMailRestoreRespectsTheLimit(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	ctx := context.Background()
+	first := f.bind(t, f.c, domain.ExternalMailProviderGmail, "c0")
+	for i := 1; i < domain.MaxExternalMailConnectionsPerUser; i++ {
+		f.bind(t, f.c, domain.ExternalMailProviderGmail, fmt.Sprintf("c%d", i))
+	}
+	if err := f.service.RevokeExternalMailConnection(ctx, f.c, first.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	f.bind(t, f.c, domain.ExternalMailProviderGmail, "c-new")
+
+	for name, input := range map[string]ExternalMailAuthorizationInput{
+		"sign-in again":   {Provider: domain.ExternalMailProviderGmail},
+		"reconnect by id": {ConnectionID: &first.ID},
+	} {
+		state := f.signIn(t, f.c, input)
+		if _, _, err := f.service.CompleteExternalMailAuthorization(ctx, f.c, state, "c0"); !errors.Is(err, ErrExternalMailConnectionLimit) {
+			t.Fatalf("%s: restoring a revoked connection at the limit = %v, want limit", name, err)
+		}
+		if !f.source.Revoked("fake-c0") {
+			t.Fatalf("%s: the refused grant was not handed back to the provider", name)
+		}
+	}
+	if live, _ := f.service.externalMail.CountLiveExternalMailConnections(ctx, accessOrg, accessC); live != domain.MaxExternalMailConnectionsPerUser {
+		t.Fatalf("live connections = %d, want %d", live, domain.MaxExternalMailConnectionsPerUser)
+	}
+	if again, _ := f.service.externalMail.FindExternalMailConnection(ctx, accessOrg, first.ID); again.Status != domain.ExternalMailStatusRevoked {
+		t.Fatalf("the refused connection is %q, want revoked", again.Status)
+	}
+
+	// A live connection is reconnected at the limit: it already counts.
+	state := f.signIn(t, f.c, ExternalMailAuthorizationInput{Provider: domain.ExternalMailProviderGmail})
+	if _, created, err := f.service.CompleteExternalMailAuthorization(ctx, f.c, state, "c1"); err != nil || created {
+		t.Fatalf("reconnecting a live connection at the limit = created %v, err %v", created, err)
+	}
+	// So is one that needs reconnecting.
+	f.source.FailAuth("fake-c2")
+	f.sync(t)
+	lost, _ := f.service.externalMail.FindExternalMailConnectionByAccount(ctx, accessOrg, domain.ExternalMailProviderGmail, "c2@external.invalid")
+	if lost == nil || lost.Status != domain.ExternalMailStatusNeedsReconnect {
+		t.Fatalf("connection after a refused grant = %+v, want needs_reconnect", lost)
+	}
+	state = f.signIn(t, f.c, ExternalMailAuthorizationInput{ConnectionID: &lost.ID})
+	if restored, _, err := f.service.CompleteExternalMailAuthorization(ctx, f.c, state, "c2"); err != nil ||
+		restored.Status != domain.ExternalMailStatusActive {
+		t.Fatalf("reconnecting a needs_reconnect connection at the limit = %+v, err %v", restored, err)
+	}
+
+	// Freeing a place lets the revoked connection back.
+	if err := f.service.RevokeExternalMailConnection(ctx, f.c, lost.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	state = f.signIn(t, f.c, ExternalMailAuthorizationInput{ConnectionID: &first.ID})
+	if restored, created, err := f.service.CompleteExternalMailAuthorization(ctx, f.c, state, "c0"); err != nil || created || restored.ID != first.ID {
+		t.Fatalf("restoring below the limit = %+v, created %v, err %v", restored, created, err)
+	}
+}
+
+// TestExternalMailLimitHoldsUnderConcurrency: two completions racing for the member's last place,
+// one restoring a revoked connection and one binding a new account, never both pass the limit.
+func TestExternalMailLimitHoldsUnderConcurrency(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	ctx := context.Background()
+	revoked := f.bind(t, f.c, domain.ExternalMailProviderGmail, "c0")
+	if err := f.service.RevokeExternalMailConnection(ctx, f.c, revoked.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	for i := 1; i < domain.MaxExternalMailConnectionsPerUser; i++ {
+		f.bind(t, f.c, domain.ExternalMailProviderGmail, fmt.Sprintf("c%d", i))
+	}
+	codes := []string{"c0", "c-new"}
+	states := make([]string, len(codes))
+	for i := range codes {
+		states[i] = f.signIn(t, f.c, ExternalMailAuthorizationInput{Provider: domain.ExternalMailProviderGmail})
+	}
+	errs := make([]error, len(codes))
+	var wg sync.WaitGroup
+	for i := range codes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, errs[i] = f.service.CompleteExternalMailAuthorization(ctx, f.c, states[i], codes[i])
+		}()
+	}
+	wg.Wait()
+	succeeded, limited := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, ErrExternalMailConnectionLimit):
+			limited++
+		default:
+			t.Fatalf("completion: %v", err)
+		}
+	}
+	if succeeded != 1 || limited != 1 {
+		t.Fatalf("racing completions: %d succeeded, %d limited; want 1 and 1", succeeded, limited)
+	}
+	if live, _ := f.service.externalMail.CountLiveExternalMailConnections(ctx, accessOrg, accessC); live != domain.MaxExternalMailConnectionsPerUser {
+		t.Fatalf("live connections = %d, want %d", live, domain.MaxExternalMailConnectionsPerUser)
+	}
+}
+
 // TestExternalMailStartRules: a reconnect is only for the binder's own connection, an unknown
 // connector is unavailable, and the backfill is bounded.
 func TestExternalMailStartRules(t *testing.T) {
@@ -328,8 +437,10 @@ func TestExternalMailBindingHTTP(t *testing.T) {
 	if _, code, answer := start(`{}`); code != http.StatusUnprocessableEntity || answer["error_code"] != domain.CodeExternalMailAuthorizationInvalid {
 		t.Fatalf("start without provider = %d %v", code, answer)
 	}
-	if _, code, answer := start(`{"provider":"gmail","backfill_days":91}`); code != http.StatusUnprocessableEntity {
-		t.Fatalf("start with a long backfill = %d %v", code, answer)
+	for _, payload := range []string{`{"provider":"gmail","backfill_days":91}`, `{"provider":"gmail","backfill_days":-1}`} {
+		if _, code, answer := start(payload); code != http.StatusUnprocessableEntity || answer["error_code"] != domain.CodeExternalMailAuthorizationInvalid {
+			t.Fatalf("start with %s = %d %v", payload, code, answer)
+		}
 	}
 	state, status, body := start(`{"provider":"gmail","backfill_days":30}`)
 	if status != http.StatusCreated || state == "" {

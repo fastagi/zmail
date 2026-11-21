@@ -112,6 +112,24 @@ func TestIMAPCredentialBindingLimits(t *testing.T) {
 	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.d, imapInput(server, "one-more@imap.test")); !errors.Is(err, ErrExternalMailConnectionLimit) {
 		t.Fatalf("past the limit = %v, want limit", err)
 	}
+	// Restoring a revoked connection takes a live place again, so it is refused at the limit;
+	// posting the credentials of a live connection again is not.
+	owned, _ := f.service.ListExternalMailConnections(ctx, f.d)
+	if err := f.service.RevokeExternalMailConnection(ctx, f.d, owned[0].ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.d, imapInput(server, "one-more@imap.test")); err != nil {
+		t.Fatalf("bind into the freed place: %v", err)
+	}
+	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.d, imapInput(server, owned[0].AccountAddress)); !errors.Is(err, ErrExternalMailConnectionLimit) {
+		t.Fatalf("restoring a revoked connection at the limit = %v, want limit", err)
+	}
+	if restored, created, err := f.service.BindExternalMailCredentials(ctx, f.d, imapInput(server, owned[1].AccountAddress)); err != nil || created || restored.ID != owned[1].ID {
+		t.Fatalf("restoring a live connection at the limit = %+v, created %v, err %v", restored, created, err)
+	}
+	if live, _ := f.service.externalMail.CountLiveExternalMailConnections(ctx, accessOrg, accessD); live != domain.MaxExternalMailConnectionsPerUser {
+		t.Fatalf("live connections = %d, want %d", live, domain.MaxExternalMailConnectionsPerUser)
+	}
 
 	f.service.externalCredentialLimits = newExternalMailCredentialLimits(ratelimit.NewMemoryStores())
 	wrong := imapInput(server, "carol@imap.test")
@@ -313,6 +331,9 @@ func TestIMAPCredentialsHTTP(t *testing.T) {
 		"no password":   {f.d, `{"provider":"imap","host":"127.0.0.1","username":"dave@imap.test"}`, http.StatusUnprocessableEntity, domain.CodeValidationFailed},
 		"long password": {f.d, payload("dave@imap.test", "guess-"+strings.Repeat("x", 400), server.port), http.StatusUnprocessableEntity, domain.CodeValidationFailed},
 		"oauth":         {f.d, `{"provider":"gmail","host":"127.0.0.1","username":"d@x.test","password":"guess-4"}`, http.StatusNotFound, domain.CodeExternalMailProviderUnavailable},
+		// The backfill range is the binding's own rule, answered as on the OAuth start route.
+		"long backfill":     {f.d, `{"provider":"imap","host":"127.0.0.1","username":"d@x.test","password":"guess-5","backfill_days":91}`, http.StatusUnprocessableEntity, domain.CodeExternalMailAuthorizationInvalid},
+		"negative backfill": {f.d, `{"provider":"imap","host":"127.0.0.1","username":"d@x.test","password":"guess-6","backfill_days":-1}`, http.StatusUnprocessableEntity, domain.CodeExternalMailAuthorizationInvalid},
 	} {
 		status, raw, body := call(want.viewer, want.body)
 		if status != want.status || body["error_code"] != want.code {

@@ -112,7 +112,9 @@ func (h *Handler) ListExternalMailConnectors(c *gin.Context) {
 type startExternalMailAuthorizationRequest struct {
 	Provider     string `json:"provider" binding:"omitempty,max=16"`
 	ConnectionID *uint  `json:"connection_id" binding:"omitempty,min=1"`
-	BackfillDays int    `json:"backfill_days" binding:"omitempty,min=1,max=90"`
+	// BackfillDays is checked by the service, which answers MAILBOX.EXTERNAL_AUTHORIZATION_INVALID
+	// out of range, as the credentials route does.
+	BackfillDays int `json:"backfill_days"`
 }
 
 // ExternalMailAuthorizationResponse is where to send the browser.
