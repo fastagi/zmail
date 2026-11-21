@@ -121,13 +121,13 @@ func TestIMAPCredentialBindingLimits(t *testing.T) {
 			t.Fatalf("guess = %v", err)
 		}
 	}
-	_, _, _, before := server.servedLogins()
+	before := server.servedLogins()
 	var retry *RetryAfterError
 	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.c, wrong); !errors.As(err, &retry) ||
 		!errors.Is(err, ErrExternalMailCredentialsRateLimited) || retry.RetryAfter <= 0 {
 		t.Fatalf("past the rate limit = %v, want a rate limit with Retry-After", err)
 	}
-	if _, _, _, after := server.servedLogins(); after != before {
+	if after := server.servedLogins(); after != before {
 		t.Fatal("a rate-limited attempt reached the server")
 	}
 	if _, created, err := f.service.BindExternalMailCredentials(ctx, f.b, imapInput(server, "b@imap.test")); err != nil || !created {
@@ -135,15 +135,16 @@ func TestIMAPCredentialBindingLimits(t *testing.T) {
 	}
 }
 
-func (f *fakeIMAPServer) servedLogins() ([]string, []uint32, int, int) {
-	commands, bodies, connections := f.served()
+// servedLogins counts the LOGIN commands the server received.
+func (f *fakeIMAPServer) servedLogins() int {
+	commands, _, _ := f.served()
 	logins := 0
 	for _, command := range commands {
 		if strings.Contains(command, " LOGIN ") {
 			logins++
 		}
 	}
-	return commands, bodies, connections, logins
+	return logins
 }
 
 // TestIMAPSyncStoresMessagesOnce: the sync worker reads a bound IMAP account through the adapter

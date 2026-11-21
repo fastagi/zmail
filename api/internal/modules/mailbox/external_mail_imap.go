@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/mail"
 	"net/netip"
@@ -169,7 +170,7 @@ func (s *imapSource) VerifyPassword(ctx context.Context, input ExternalMailPassw
 		return ExternalMailToken{}, ExternalMailAccount{}, err
 	}
 	defer session.close()
-	if _, err := session.selectInbox(); err != nil {
+	if _, err = session.selectInbox(); err != nil {
 		return ExternalMailToken{}, ExternalMailAccount{}, err
 	}
 	sealed, err := json.Marshal(credentials)
@@ -325,7 +326,7 @@ func (s *imapSource) dial(ctx context.Context, credentials imapCredentials) (*tl
 			ServerName: credentials.Host, MinVersion: tls.VersionTLS12, RootCAs: s.policy.RootCAs,
 		})
 		if err := conn.HandshakeContext(ctx); err != nil {
-			_ = raw.Close()
+			closeQuietly(raw)
 			lastErr = err
 			continue
 		}
@@ -350,10 +351,9 @@ func (s *imapSource) open(ctx context.Context, credentials imapCredentials) (*im
 		return nil, err
 	}
 	session := &imapSession{conn: conn, reader: bufio.NewReaderSize(conn, 32<<10), timeout: s.commandTimeout}
-	// A cancelled context closes the connection, which ends any read in progress.
-	session.stop = context.AfterFunc(ctx, func() { _ = conn.Close() })
-	_ = conn.SetDeadline(time.Now().Add(s.commandTimeout))
-	greeting, err := session.readLine()
+	// A canceled context closes the connection, which ends any read in progress.
+	session.stop = context.AfterFunc(ctx, func() { closeQuietly(conn) })
+	greeting, err := session.readGreeting()
 	if err != nil {
 		session.close()
 		return nil, fmt.Errorf("%w: no greeting: %v", ErrExternalMailServerUnreachable, err)
@@ -369,27 +369,49 @@ func (s *imapSource) open(ctx context.Context, credentials imapCredentials) (*im
 	return session, nil
 }
 
+// readGreeting reads the server's first line within one command timeout.
+func (s *imapSession) readGreeting() (string, error) {
+	if err := s.conn.SetDeadline(time.Now().Add(s.timeout)); err != nil {
+		return "", err
+	}
+	return s.readLine()
+}
+
 // close says goodbye on a best-effort basis and closes the connection.
 func (s *imapSession) close() {
 	if s.stop != nil {
 		s.stop()
 	}
-	_ = s.conn.SetDeadline(time.Now().Add(2 * time.Second))
-	if _, err := s.send("LOGOUT"); err == nil {
-		_, _ = s.finish(imapHandlers{})
+	s.timeout = 2 * time.Second
+	if err := s.send("LOGOUT"); err == nil {
+		if _, err := s.finish(imapHandlers{}); err != nil {
+			slog.Debug("external_mail.imap_logout_failed", slog.String("error", err.Error()))
+		}
 	}
-	_ = s.conn.Close()
+	closeQuietly(s.conn)
 }
 
-// send writes a tagged command and returns its tag.
-func (s *imapSession) send(command string) (string, error) {
-	s.tag++
-	tag := "Z" + strconv.Itoa(s.tag)
-	_ = s.conn.SetDeadline(time.Now().Add(s.timeout))
-	if _, err := io.WriteString(s.conn, tag+" "+command+"\r\n"); err != nil {
-		return "", err
+// closeQuietly closes a connection whose close error changes nothing for the caller.
+func closeQuietly(closer io.Closer) {
+	if err := closer.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		slog.Debug("external_mail.imap_close_failed", slog.String("error", err.Error()))
 	}
-	return tag, nil
+}
+
+// send writes a command under the next tag, which finish then waits for.
+func (s *imapSession) send(command string) error {
+	s.tag++
+	if err := s.conn.SetDeadline(time.Now().Add(s.timeout)); err != nil {
+		return err
+	}
+	_, err := io.WriteString(s.conn, "Z"+strconv.Itoa(s.tag)+" "+command+"\r\n")
+	return err
+}
+
+// skip consumes n bytes the reader already peeked at.
+func (s *imapSession) skip(n int) error {
+	_, err := s.reader.Discard(n)
+	return err
 }
 
 // imapStatus is the tagged completion of a command.
@@ -414,8 +436,10 @@ func (s *imapSession) finish(handlers imapHandlers) (imapStatus, error) {
 			return imapStatus{}, err
 		}
 		if string(peek) == "* " {
-			_, _ = s.reader.Discard(2)
-			if err := s.readUntagged(handlers); err != nil {
+			if err = s.skip(2); err != nil {
+				return imapStatus{}, err
+			}
+			if err = s.readUntagged(handlers); err != nil {
 				return imapStatus{}, err
 			}
 			continue
@@ -446,16 +470,18 @@ func (s *imapSession) readUntagged(handlers imapHandlers) error {
 		return err
 	}
 	second := ""
-	if next, err := s.reader.Peek(1); err == nil && next[0] == ' ' {
-		_, _ = s.reader.ReadByte()
+	if next, peekErr := s.reader.Peek(1); peekErr == nil && next[0] == ' ' {
+		if err = s.skip(1); err != nil {
+			return err
+		}
 		if second, err = s.readWord(); err != nil {
 			return err
 		}
 	}
 	if _, numeric := parseUID(first); numeric && strings.EqualFold(second, "FETCH") {
-		fetched, err := s.readFetch()
-		if err != nil {
-			return err
+		fetched, fetchErr := s.readFetch()
+		if fetchErr != nil {
+			return fetchErr
 		}
 		if handlers.fetch != nil {
 			handlers.fetch(fetched)
@@ -484,7 +510,9 @@ func (s *imapSession) readWord() (string, error) {
 			break
 		}
 		word = append(word, next[0])
-		_, _ = s.reader.ReadByte()
+		if err := s.skip(1); err != nil {
+			return "", err
+		}
 	}
 	return string(word), nil
 }
@@ -562,7 +590,9 @@ func trailingLiteral(line []byte) (int64, bool) {
 func (s *imapSession) login(username, password string) error {
 	s.tag++
 	tag := "Z" + strconv.Itoa(s.tag)
-	_ = s.conn.SetDeadline(time.Now().Add(s.timeout))
+	if err := s.conn.SetDeadline(time.Now().Add(s.timeout)); err != nil {
+		return fmt.Errorf("%w: %v", ErrExternalMailServerUnreachable, err)
+	}
 	parts := []string{tag + " LOGIN "}
 	for i, value := range []string{username, password} {
 		if i > 0 {
@@ -624,7 +654,7 @@ type imapInbox struct {
 // selectInbox opens INBOX with EXAMINE, the read-only form of SELECT, so syncing never changes
 // the account: no \Recent flag is consumed, and messages are read with BODY.PEEK.
 func (s *imapSession) selectInbox() (imapInbox, error) {
-	if _, err := s.send("EXAMINE INBOX"); err != nil {
+	if err := s.send("EXAMINE INBOX"); err != nil {
 		return imapInbox{}, err
 	}
 	var inbox imapInbox
@@ -666,7 +696,7 @@ func responseCode(line, name string) (uint32, bool) {
 
 // search runs UID SEARCH with the criteria.
 func (s *imapSession) search(criteria string) ([]uint32, error) {
-	if _, err := s.send("UID SEARCH " + criteria); err != nil {
+	if err := s.send("UID SEARCH " + criteria); err != nil {
 		return nil, err
 	}
 	var uids []uint32
@@ -758,7 +788,7 @@ func (s *imapSession) fetch(uids []uint32, items string) (map[uint32]imapFetched
 	for i, uid := range uids {
 		set[i] = strconv.FormatUint(uint64(uid), 10)
 	}
-	if _, err := s.send("UID FETCH " + strings.Join(set, ",") + " " + items); err != nil {
+	if err := s.send("UID FETCH " + strings.Join(set, ",") + " " + items); err != nil {
 		return nil, err
 	}
 	results := map[uint32]imapFetched{}
@@ -792,9 +822,17 @@ func (s *imapSession) readFetch() (imapFetched, error) {
 		case name == "UID":
 			fetched.uid, _ = parseUID(item.atom)
 		case name == "RFC822.SIZE":
-			fetched.size, _ = strconv.ParseInt(item.atom, 10, 64)
+			size, err := strconv.ParseInt(item.atom, 10, 64)
+			if err != nil || size < 0 {
+				// A size that does not parse is treated as too large to download.
+				size = math.MaxInt64
+			}
+			fetched.size = size
 		case name == "INTERNALDATE":
-			fetched.internalDate, _ = time.Parse("2-Jan-2006 15:04:05 -0700", strings.TrimSpace(string(item.text)))
+			// A date that does not parse stays zero, and the sync time is used instead.
+			if date, err := time.Parse("2-Jan-2006 15:04:05 -0700", strings.TrimSpace(string(item.text))); err == nil {
+				fetched.internalDate = date
+			}
 		case strings.HasPrefix(name, "BODY[") || name == "RFC822":
 			fetched.body, fetched.oversized = item.text, item.oversized
 		}
@@ -835,7 +873,9 @@ func (s *imapSession) readValue(depth int) (imapValue, error) {
 				return imapValue{}, err
 			}
 			if next[0] == ')' {
-				_, _ = s.reader.ReadByte()
+				if err = s.skip(1); err != nil {
+					return imapValue{}, err
+				}
 				if value.list == nil {
 					value.list = []imapValue{}
 				}
@@ -920,7 +960,9 @@ func (s *imapSession) readValue(depth int) (imapValue, error) {
 				return imapValue{}, errors.New("imap: atom too long")
 			}
 			atom = append(atom, b)
-			_, _ = s.reader.ReadByte()
+			if err := s.skip(1); err != nil {
+				return imapValue{}, err
+			}
 		}
 		if strings.EqualFold(string(atom), "NIL") {
 			return imapValue{}, nil
@@ -938,6 +980,8 @@ func (s *imapSession) skipSpaces() error {
 		if next[0] != ' ' {
 			return nil
 		}
-		_, _ = s.reader.ReadByte()
+		if err := s.skip(1); err != nil {
+			return err
+		}
 	}
 }
