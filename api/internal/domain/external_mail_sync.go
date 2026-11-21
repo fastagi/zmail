@@ -15,7 +15,7 @@ const (
 	ExternalMailSyncAuthFailed ExternalMailSyncOutcome = "auth_failed"
 	// ExternalMailSyncFetchFailed is any other provider failure; the next attempt backs off.
 	ExternalMailSyncFetchFailed ExternalMailSyncOutcome = "fetch_failed"
-	// ExternalMailSyncCursorExpired means the provider no longer honoured the cursor; the sync
+	// ExternalMailSyncCursorExpired means the provider no longer honored the cursor; the sync
 	// starts over from an empty one.
 	ExternalMailSyncCursorExpired ExternalMailSyncOutcome = "cursor_expired"
 	// ExternalMailSyncProviderUnavailable means the instance no longer runs the connector.

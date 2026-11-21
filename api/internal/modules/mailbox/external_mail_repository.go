@@ -328,7 +328,7 @@ func (r *repository) RebindExternalMailConnection(ctx context.Context, rebind do
 	updates := map[string]any{
 		"status": string(domain.ExternalMailStatusActive), "encrypted_refresh_token": rebind.EncryptedRefreshToken,
 		"last_error_code": nil, "next_sync_at": rebind.Now, "updated_at": rebind.Now,
-		// A rebind before the retention ends keeps the copies: the purge is cancelled.
+		// A rebind before the retention ends keeps the copies: the purge is canceled.
 		"consecutive_failures": 0, "revoked_at": nil,
 	}
 	if rebind.ResetCursor {

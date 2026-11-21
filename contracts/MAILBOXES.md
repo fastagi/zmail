@@ -811,7 +811,7 @@ own connection, newest first, at most 50. Anyone else, an `owner` or `admin` inc
 | `ok` | A page was saved | `null` |
 | `auth_failed` | The provider refused the grant; the connection needs reconnecting | `external.auth_failed` |
 | `fetch_failed` | Any other provider failure; the next attempt backs off | `external.fetch_failed` |
-| `cursor_expired` | The provider no longer honoured the cursor; the sync starts over within the backfill window without repeating stored copies | `null` |
+| `cursor_expired` | The provider no longer honored the cursor; the sync starts over within the backfill window without repeating stored copies | `null` |
 | `provider_unavailable` | The instance no longer runs the connector | `external.provider_unavailable` |
 | `dropped` | The connection was revoked or lost its grant while the fetch ran; nothing fetched was stored | `null` |
 
