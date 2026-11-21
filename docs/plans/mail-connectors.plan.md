@@ -64,6 +64,10 @@ Open decisions for slice 3 are in §8.
 
 ## 5. Delivery Slices
 
+The product roadmap, role adaptation, and interaction design for these slices are in
+[mail-connectors-roadmap.zh-CN.md](mail-connectors-roadmap.zh-CN.md); that document renumbers
+them as iterations C1–C7 and D1–D2.
+
 | Slice | Content | External dependency |
 |---|---|---|
 | **1 (this PR)** | C1–C7: registry, open provider ids, address namespace fix, authorization and completion endpoints, provider discovery, unified ingest, tests, contract | None |
