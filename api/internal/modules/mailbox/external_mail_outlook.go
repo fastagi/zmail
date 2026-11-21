@@ -174,7 +174,7 @@ func (s *outlookMailSource) Fetch(ctx context.Context, request ExternalMailFetch
 		link = s.initialDeltaURL(folder.Folder, request)
 	}
 	var page outlookDeltaPage
-	if err := s.graphGet(ctx, grant.AccessToken, link, outlookMaxPageResponse, &page); err != nil {
+	if err = s.graphGet(ctx, grant.AccessToken, link, outlookMaxPageResponse, &page); err != nil {
 		return ExternalMailFetch{}, err
 	}
 	switch {
@@ -334,7 +334,10 @@ func (s *outlookMailSource) redeem(ctx context.Context, form url.Values) (outloo
 		var failure struct {
 			Error string `json:"error"`
 		}
-		_ = json.Unmarshal(body, &failure)
+		if json.Unmarshal(body, &failure) != nil {
+			// A body that is not JSON carries no error code.
+			failure.Error = ""
+		}
 		if failure.Error == "invalid_grant" || resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized {
 			return outlookGrant{}, fmt.Errorf("%w: token endpoint answered %d %s", ErrExternalMailAuth, resp.StatusCode, outlookErrorCode(failure.Error))
 		}
@@ -376,7 +379,10 @@ func (s *outlookMailSource) graphGet(ctx context.Context, accessToken, link stri
 				Code string `json:"code"`
 			} `json:"error"`
 		}
-		_ = json.Unmarshal(body, &failure)
+		if json.Unmarshal(body, &failure) != nil {
+			// A body that is not JSON carries no error code.
+			failure.Error.Code = ""
+		}
 		code := failure.Error.Code
 		switch {
 		case resp.StatusCode == http.StatusUnauthorized || strings.EqualFold(code, "invalid_grant"):
@@ -395,7 +401,7 @@ func (s *outlookMailSource) graphGet(ctx context.Context, accessToken, link stri
 	return nil
 }
 
-// outlookSyncStateCode reports the Graph error codes of a delta token it no longer honours.
+// outlookSyncStateCode reports the Graph error codes of a delta token it no longer honors.
 func outlookSyncStateCode(code string) bool {
 	switch strings.ToLower(code) {
 	case "syncstatenotfound", "resyncrequired", "syncstateinvalid":

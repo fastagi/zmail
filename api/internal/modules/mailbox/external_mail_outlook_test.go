@@ -63,8 +63,8 @@ func newFakeMicrosoft(t *testing.T) *fakeMicrosoft {
 }
 
 // source returns an Outlook source pointed at the fake server.
-func (f *fakeMicrosoft) source(tenant string) *outlookMailSource {
-	source := newOutlookMailSource(config.ExternalMailOAuthClient{ClientID: "client-1", ClientSecret: "secret-1", Tenant: tenant})
+func (f *fakeMicrosoft) source() *outlookMailSource {
+	source := newOutlookMailSource(config.ExternalMailOAuthClient{ClientID: "client-1", ClientSecret: "secret-1"})
 	source.loginBaseURL = f.server.URL + "/login"
 	source.graphBaseURL = f.server.URL + "/v1.0"
 	return source
@@ -297,7 +297,7 @@ func TestOutlookExchange(t *testing.T) {
 			}
 			ms.codes["code-1"] = pkceChallenge("verifier-1")
 			ms.tokenFail = tt.tokenFail
-			token, account, err := ms.source("").Exchange(context.Background(), ExternalMailCodeExchange{
+			token, account, err := ms.source().Exchange(context.Background(), ExternalMailCodeExchange{
 				Code: tt.code, CodeVerifier: tt.verifier, RedirectURI: "https://app.example/callback",
 			})
 			if tt.wantAuthErr {
@@ -332,7 +332,7 @@ func TestOutlookDeltaRounds(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		ms.deliver(outlookTestMessage(fmt.Sprintf("m-%d", i), fmt.Sprintf("Message %d", i), outlookTestNow.Add(-time.Duration(i)*time.Hour)))
 	}
-	source := ms.source("")
+	source := ms.source()
 
 	token, cursor := "rt-0", ""
 	var got []string
@@ -422,7 +422,7 @@ func TestOutlookMessageMapping(t *testing.T) {
 		map[string]any{"name": "References", "value": "<a@sender.example> <root@sender.example>"},
 	}
 	ms.deliver(message)
-	fetched, err := ms.source("").Fetch(context.Background(), ExternalMailFetchRequest{
+	fetched, err := ms.source().Fetch(context.Background(), ExternalMailFetchRequest{
 		Token: ExternalMailToken{RefreshToken: "rt-0"}, BackfillDays: 3, Now: outlookTestNow,
 	})
 	if err != nil || len(fetched.Messages) != 1 {
@@ -471,7 +471,7 @@ func TestOutlookFetchErrors(t *testing.T) {
 			ms := newFakeMicrosoft(t)
 			ms.grantRefreshToken("rt-0")
 			ms.graphFail, ms.tokenFail = tt.graph, tt.token
-			_, err := ms.source("").Fetch(context.Background(), ExternalMailFetchRequest{
+			_, err := ms.source().Fetch(context.Background(), ExternalMailFetchRequest{
 				Token: ExternalMailToken{RefreshToken: "rt-0"}, BackfillDays: 14, Now: outlookTestNow,
 			})
 			if err == nil {
@@ -501,7 +501,7 @@ func TestOutlookCursorRefusesForeignHost(t *testing.T) {
 	t.Cleanup(evil.Close)
 	ms := newFakeMicrosoft(t)
 	ms.grantRefreshToken("rt-0")
-	source := ms.source("")
+	source := ms.source()
 
 	for _, link := range []string{
 		evil.URL + "/v1.0/me/mailFolders/inbox/messages/delta?$deltatoken=1",
@@ -534,7 +534,7 @@ func TestOutlookCursorRefusesForeignHost(t *testing.T) {
 // folder's link and starts a first round for the new one.
 func TestOutlookCursorAddsFolders(t *testing.T) {
 	ms := newFakeMicrosoft(t)
-	source := ms.source("")
+	source := ms.source()
 	source.folders = []string{"inbox", "archive"}
 	link := ms.server.URL + "/v1.0/me/mailFolders/inbox/messages/delta?$deltatoken=4"
 	stored, _ := json.Marshal(outlookCursor{Version: outlookCursorVersion, Folders: []*outlookFolderState{{Folder: "inbox", Link: link}}})
@@ -553,7 +553,7 @@ func TestOutlookCursorAddsFolders(t *testing.T) {
 
 func TestOutlookRevokeIsLocal(t *testing.T) {
 	ms := newFakeMicrosoft(t)
-	if err := ms.source("").Revoke(context.Background(), ExternalMailToken{RefreshToken: "rt-0"}); err != nil {
+	if err := ms.source().Revoke(context.Background(), ExternalMailToken{RefreshToken: "rt-0"}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	if ms.lastForm != nil || ms.deltaCalls != 0 {
@@ -611,7 +611,7 @@ func TestOutlookSyncStoresOnceAndRotatesToken(t *testing.T) {
 	}
 	f.service.externalConnectors = &externalMailRegistry{connectors: []ExternalMailConnector{{
 		ID: domain.ExternalMailProviderOutlook, AuthKind: ExternalMailAuthOAuth2,
-		Capabilities: ExternalMailCapabilities{Read: true}, Source: ms.source(""),
+		Capabilities: ExternalMailCapabilities{Read: true}, Source: ms.source(),
 	}}}
 	if err := f.repo.(*repository).db.Exec(`UPDATE external_mail_connections SET provider = ? WHERE id = ?`,
 		domain.ExternalMailProviderOutlook, f.connection.ID).Error; err != nil {
