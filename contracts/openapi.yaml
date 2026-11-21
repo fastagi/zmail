@@ -14651,6 +14651,8 @@ components:
         - stored_count
         - more
         - error_code
+        - timed_out
+        - throttled
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
@@ -14690,6 +14692,13 @@ components:
             - type: string
               maxLength: 64
             - type: 'null'
+        timed_out:
+          description: The fetch hit its deadline (`EXTERNAL_MAIL_FETCH_TIMEOUT`); the outcome is `fetch_failed`.
+          type: boolean
+        throttled:
+          description: The connection already fetched the most pages in a row allowed at once
+            (`EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES`), so its next page waits the spacing.
+          type: boolean
     ExternalMailSyncRunListResponse:
       type: object
       additionalProperties: false

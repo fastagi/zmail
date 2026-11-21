@@ -3794,6 +3794,10 @@ export interface components {
             started_at: string;
             /** @description Messages that were new and stored. */
             stored_count: number;
+            /** @description The connection already fetched the most pages in a row allowed at once (`EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES`), so its next page waits the spacing. */
+            throttled: boolean;
+            /** @description The fetch hit its deadline (`EXTERNAL_MAIL_FETCH_TIMEOUT`); the outcome is `fetch_failed`. */
+            timed_out: boolean;
         };
         ExternalMailSyncRunListResponse: {
             /** @constant */

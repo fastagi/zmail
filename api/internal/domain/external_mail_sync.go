@@ -48,6 +48,11 @@ type ExternalMailSyncRun struct {
 	More bool
 	// ErrorCode is the connection error code of a failed fetch; empty otherwise.
 	ErrorCode string
+	// TimedOut means the fetch hit its deadline; the outcome is fetch_failed.
+	TimedOut bool
+	// Throttled means the next page waits the spacing because the connection already fetched
+	// the most pages in a row allowed at once.
+	Throttled bool
 }
 
 // ExternalMailClaim asks for due connections, round-robin across providers.

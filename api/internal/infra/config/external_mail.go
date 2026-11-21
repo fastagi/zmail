@@ -72,6 +72,14 @@ const (
 	DefaultExternalMailRevokedRetention = 720 * time.Hour
 	MinExternalMailRevokedRetention     = time.Hour
 	MaxExternalMailRevokedRetention     = 8760 * time.Hour
+	// DefaultExternalMailFetchTimeout bounds one fetch, so a slow or hostile provider cannot stall
+	// the sequential pass.
+	DefaultExternalMailFetchTimeout = 60 * time.Second
+	MaxExternalMailFetchTimeout     = 10 * time.Minute
+	// DefaultExternalMailMaxImmediatePages is how many pages in a row one connection may fetch at
+	// once before each further page waits the spacing.
+	DefaultExternalMailMaxImmediatePages = 20
+	MaxExternalMailMaxImmediatePages     = 1000
 )
 
 // ExternalMailSyncConfig is the sync worker's budget. A zero field takes its default, so a
@@ -83,6 +91,26 @@ type ExternalMailSyncConfig struct {
 	MinFetchSpacing time.Duration
 	// RevokedRetention is how long the copies of a revoked connection are kept.
 	RevokedRetention time.Duration
+	// FetchTimeout bounds one fetch of one connection.
+	FetchTimeout time.Duration
+	// MaxImmediatePages is how many pages in a row are fetched again at once.
+	MaxImmediatePages int
+}
+
+// Timeout returns the fetch deadline, or its default.
+func (c ExternalMailSyncConfig) Timeout() time.Duration {
+	if c.FetchTimeout <= 0 {
+		return DefaultExternalMailFetchTimeout
+	}
+	return c.FetchTimeout
+}
+
+// ImmediatePages returns the bound on immediate refetches, or its default.
+func (c ExternalMailSyncConfig) ImmediatePages() int {
+	if c.MaxImmediatePages <= 0 {
+		return DefaultExternalMailMaxImmediatePages
+	}
+	return c.MaxImmediatePages
 }
 
 // FetchesPerPass returns the per-provider cap, or its default.
@@ -116,6 +144,12 @@ func validateExternalMailSyncConfig(c ExternalMailSyncConfig) error {
 	}
 	if c.MinFetchSpacing != 0 && (c.MinFetchSpacing < time.Second || c.MinFetchSpacing > MaxExternalMailMinFetchSpacing) {
 		return fmt.Errorf("EXTERNAL_MAIL_MIN_FETCH_SPACING must be between 1s and %s", MaxExternalMailMinFetchSpacing)
+	}
+	if c.FetchTimeout != 0 && (c.FetchTimeout < time.Second || c.FetchTimeout > MaxExternalMailFetchTimeout) {
+		return fmt.Errorf("EXTERNAL_MAIL_FETCH_TIMEOUT must be between 1s and %s", MaxExternalMailFetchTimeout)
+	}
+	if c.MaxImmediatePages < 0 || c.MaxImmediatePages > MaxExternalMailMaxImmediatePages {
+		return fmt.Errorf("EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES must be between 1 and %d", MaxExternalMailMaxImmediatePages)
 	}
 	if c.RevokedRetention != 0 && (c.RevokedRetention < MinExternalMailRevokedRetention || c.RevokedRetention > MaxExternalMailRevokedRetention) {
 		return fmt.Errorf("EXTERNAL_MAIL_REVOKED_RETENTION must be between %s and %s",

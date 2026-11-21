@@ -470,3 +470,103 @@ func TestExternalMailSyncRunsHTTP(t *testing.T) {
 		}
 	}
 }
+
+// blockingSource never answers: it waits until its context ends, as a hung provider would.
+type blockingSource struct{ *FakeExternalMailSource }
+
+func (blockingSource) Fetch(ctx context.Context, _ ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	<-ctx.Done()
+	return ExternalMailFetch{}, ctx.Err()
+}
+
+// TestExternalMailFetchDeadlineKeepsThePassMoving: a provider that hangs is cut off at the fetch
+// deadline, recorded as a timed-out fetch_failed run with backoff, and the pass goes on to the
+// next connection.
+func TestExternalMailFetchDeadlineKeepsThePassMoving(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.service.settings.ExternalMail.Sync.FetchTimeout = 50 * time.Millisecond
+	outlook := f.addConnection(t, domain.ExternalMailProviderOutlook, "outlook-0")
+	read := ExternalMailCapabilities{Read: true}
+	f.service.externalConnectors = &externalMailRegistry{connectors: []ExternalMailConnector{
+		{ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: blockingSource{f.source}},
+		{ID: domain.ExternalMailProviderOutlook, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: f.source},
+	}}
+
+	started := time.Now()
+	if handled := f.sync(t); handled != 2 {
+		t.Fatalf("the pass handled %d connections, want both", handled)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("the pass took %v; the hung fetch was not cut off", elapsed)
+	}
+	if f.source.Fetches("outlook-0") != 1 {
+		t.Fatal("the connection after the hung one was not fetched")
+	}
+	runs := f.runs(t)
+	if len(runs) != 1 || runs[0].Outcome != domain.ExternalMailSyncFetchFailed || !runs[0].TimedOut ||
+		runs[0].ErrorCode != domain.ExternalMailErrorFetchFailed {
+		t.Fatalf("hung connection's runs = %+v, want one timed-out fetch_failed", runs)
+	}
+	connection := f.reload(t)
+	if connection.Status != domain.ExternalMailStatusActive || connection.ConsecutiveFailures != 1 ||
+		!connection.NextSyncAt.After(f.service.now().UTC()) {
+		t.Fatalf("after the timeout: %+v, want active, one failure, backing off", connection)
+	}
+	other, err := f.service.ListExternalMailSyncRuns(context.Background(), f.b, outlook.ID)
+	if err != nil || len(other) != 1 || other[0].Outcome != domain.ExternalMailSyncOK || other[0].TimedOut {
+		t.Fatalf("other connection's runs = %+v, %v; want one ok", other, err)
+	}
+}
+
+// endlessSource always reports another page, as a broken or hostile provider might.
+type endlessSource struct{ *FakeExternalMailSource }
+
+func (endlessSource) Fetch(_ context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	return ExternalMailFetch{Cursor: request.Cursor + "+", More: true}, nil
+}
+
+// TestExternalMailImmediateRefetchesAreBounded: a source that always answers More is fetched again
+// at once only up to the bound; afterwards each page waits the spacing, and the runs say so.
+func TestExternalMailImmediateRefetchesAreBounded(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.service.settings.ExternalMail.Sync.MaxImmediatePages = 3
+	f.service.externalConnectors = fakeExternalMailRegistry(endlessSource{f.source})
+
+	for pass := range 3 {
+		if handled := f.sync(t); handled != 1 {
+			t.Fatalf("pass %d handled %d connections, want an immediate refetch", pass, handled)
+		}
+	}
+	if handled := f.sync(t); handled != 0 {
+		t.Fatal("the connection was fetched at once past the bound")
+	}
+	if connection := f.reload(t); connection.ConsecutiveMore != 3 ||
+		!connection.NextSyncAt.Equal(f.service.now().UTC().Add(config.DefaultExternalMailMinFetchSpacing)) {
+		t.Fatalf("after the bound: %d pages in a row, next %v; want 3 and one spacing later", connection.ConsecutiveMore, connection.NextSyncAt)
+	}
+	f.advance(config.DefaultExternalMailMinFetchSpacing)
+	if handled := f.sync(t); handled != 1 {
+		t.Fatalf("after the spacing the pass handled %d connections, want 1", handled)
+	}
+	runs := f.runs(t)
+	want := []bool{true, true, false, false}
+	if len(runs) != len(want) {
+		t.Fatalf("recorded %d runs, want %d", len(runs), len(want))
+	}
+	for i, run := range runs {
+		if run.Throttled != want[i] || !run.More || run.Outcome != domain.ExternalMailSyncOK {
+			t.Fatalf("run %d = %+v, want throttled %v", i, run, want[i])
+		}
+	}
+
+	// A page without more ends the streak.
+	f.service.externalConnectors = fakeExternalMailRegistry(f.source)
+	if err := f.repo.(*repository).db.Exec(`UPDATE external_mail_connections SET sync_cursor = '' WHERE id = ?`, f.connection.ID).Error; err != nil {
+		t.Fatalf("reset cursor: %v", err)
+	}
+	f.advance(config.DefaultExternalMailMinFetchSpacing)
+	f.sync(t)
+	if connection := f.reload(t); connection.ConsecutiveMore != 0 {
+		t.Fatalf("pages in a row after a last page = %d, want 0", connection.ConsecutiveMore)
+	}
+}

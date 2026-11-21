@@ -31,10 +31,13 @@ account again before the deadline cancels the deletion. `POST
 ### Medium — Failed fetches back off; passes are budgeted per provider
 
 An `external.fetch_failed` fetch now retries after 2, 4, 8 ... minutes, at most an hour, with jitter,
-instead of every two minutes. A pass takes due connections round-robin across providers, at most
-`EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS` (default 20) per provider, and a connection with more pages
-waits `EXTERNAL_MAIL_MIN_FETCH_SPACING` (default `5s`) before the next page instead of being fetched in
-the very next pass. `ExternalMailRepository.ClaimExternalMailConnections` takes a
+instead of every two minutes. Each fetch has a deadline, `EXTERNAL_MAIL_FETCH_TIMEOUT` (default
+`60s`); a fetch that hits it is `fetch_failed`. A pass takes due connections round-robin across
+providers, at most `EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS` (default 20) per provider. A connection
+with more pages is fetched again at once for at most `EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES` (default 20)
+pages in a row, then waits `EXTERNAL_MAIL_MIN_FETCH_SPACING` (default `5s`) before each further page.
+An `ExternalMailSource` must honor its context: a fetch that ignores cancellation still holds the pass
+until it returns. `ExternalMailRepository.ClaimExternalMailConnections` takes a
 `domain.ExternalMailClaim`, and the repository gains the `ExternalMailOpsRepository` methods; a fork
 with its own implementation must add them.
 

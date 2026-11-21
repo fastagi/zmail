@@ -15,6 +15,9 @@ import (
 // be purged: it must be revoked first.
 var ErrExternalMailConnectionNotRevoked = errors.New("external mail connection is not revoked")
 
+// errExternalMailFetchTimeout is a fetch that ran past its deadline; it counts as fetch_failed.
+var errExternalMailFetchTimeout = errors.New("external mail fetch timed out")
+
 const (
 	// externalMailMaxBackoff caps the wait after repeated fetch failures.
 	externalMailMaxBackoff = time.Hour

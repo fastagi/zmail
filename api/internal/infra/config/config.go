@@ -752,6 +752,8 @@ func Load() (*Config, error) {
 				ProviderFetchesPerPass: env.GetInt("EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS", DefaultExternalMailProviderFetchesPerPass),
 				MinFetchSpacing:        env.GetDuration("EXTERNAL_MAIL_MIN_FETCH_SPACING", DefaultExternalMailMinFetchSpacing),
 				RevokedRetention:       env.GetDuration("EXTERNAL_MAIL_REVOKED_RETENTION", DefaultExternalMailRevokedRetention),
+				FetchTimeout:           env.GetDuration("EXTERNAL_MAIL_FETCH_TIMEOUT", DefaultExternalMailFetchTimeout),
+				MaxImmediatePages:      env.GetInt("EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES", DefaultExternalMailMaxImmediatePages),
 			},
 		},
 		Mailbox: MailboxConfig{

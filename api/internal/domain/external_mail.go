@@ -138,6 +138,8 @@ type ExternalMailConnection struct {
 	NextSyncAt time.Time
 	// ConsecutiveFailures counts failed fetches in a row; it sets the backoff.
 	ConsecutiveFailures int
+	// ConsecutiveMore counts pages in a row that reported more; it bounds immediate refetches.
+	ConsecutiveMore int
 	// RevokedAt is when the connection was revoked; its copies are deleted a retention later.
 	RevokedAt *time.Time
 	CreatedAt time.Time
@@ -162,6 +164,8 @@ type ExternalMailSyncResult struct {
 	Now        time.Time
 	// ConsecutiveFailures is the connection's failed fetches in a row after this one.
 	ConsecutiveFailures int
+	// ConsecutiveMore is the connection's pages in a row that reported more after this one.
+	ConsecutiveMore int
 	// Run is recorded with the result; its Stored count and a dropped outcome are filled in by
 	// the save.
 	Run *ExternalMailSyncRun

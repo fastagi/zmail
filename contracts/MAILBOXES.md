@@ -787,9 +787,13 @@ connection and another organization's id are `404 MAILBOX.EXTERNAL_CONNECTION_NO
 Each pass of the `mail:external:sync` worker takes due connections round-robin across providers:
 the oldest due connection of every provider, then the second of every provider, and so on, and at
 most `EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS` (20 by default) of one provider. One provider's
-outage or one large backfill therefore never starves the others. A connection whose provider has
-another page ready is fetched again after `EXTERNAL_MAIL_MIN_FETCH_SPACING` (5 seconds by default)
-instead of after the interval, as is one whose cursor the provider no longer honours.
+outage or one large backfill therefore never starves the others. Each fetch has its own deadline,
+`EXTERNAL_MAIL_FETCH_TIMEOUT` (60 seconds by default): a fetch that hits it is `fetch_failed`, backs
+off, and the pass moves on to the next connection. A connection whose provider has another page
+ready is fetched again at once, for at most `EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES` (20 by default)
+pages in a row; after that each further page waits `EXTERNAL_MAIL_MIN_FETCH_SPACING` (5 seconds by
+default), so one backfill cannot monopolize the worker. A connection whose cursor the provider no
+longer honors starts over after the same spacing.
 
 ### Sync Runs
 
@@ -803,7 +807,8 @@ own connection, newest first, at most 50. Anyone else, an `owner` or `admin` inc
 
 ```json
 { "id": 912, "started_at": "2026-11-20T08:00:00Z", "finished_at": "2026-11-20T08:00:01Z",
-  "outcome": "ok", "fetched_count": 25, "stored_count": 24, "more": true, "error_code": null }
+  "outcome": "ok", "fetched_count": 25, "stored_count": 24, "more": true, "error_code": null,
+  "timed_out": false, "throttled": false }
 ```
 
 | `outcome` | Meaning | `error_code` |
@@ -816,7 +821,9 @@ own connection, newest first, at most 50. Anyone else, an `owner` or `admin` inc
 | `dropped` | The connection was revoked or lost its grant while the fetch ran; nothing fetched was stored | `null` |
 
 `fetched_count` is how many messages the provider returned and `stored_count` how many were new;
-`more` says the provider had another page ready.
+`more` says the provider had another page ready. `timed_out` marks a `fetch_failed` fetch that hit
+its deadline, and `throttled` a page after which the next one waits the spacing because the
+connection already fetched the most pages in a row allowed at once.
 
 ### Retention Of Revoked Copies
 

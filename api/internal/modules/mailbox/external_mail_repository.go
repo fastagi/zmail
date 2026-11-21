@@ -52,6 +52,7 @@ type ExternalMailConnectionPO struct {
 	BackfillDays          int     `gorm:"type:smallint;not null;default:14"`
 	NextSyncAt            time.Time
 	ConsecutiveFailures   int `gorm:"type:smallint;not null;default:0"`
+	ConsecutiveMore       int `gorm:"type:smallint;not null;default:0"`
 	RevokedAt             *time.Time
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
@@ -67,7 +68,7 @@ func (po *ExternalMailConnectionPO) toDomain() *domain.ExternalMailConnection {
 		Provider: domain.ExternalMailProvider(po.Provider), AccountAddress: po.AccountAddress,
 		OwnerUserID: po.OwnerUserID, Status: domain.ExternalMailStatus(po.Status), LastSyncedAt: po.LastSyncedAt,
 		EncryptedRefreshToken: po.EncryptedRefreshToken, SyncCursor: po.SyncCursor, BackfillDays: po.BackfillDays,
-		NextSyncAt: po.NextSyncAt, ConsecutiveFailures: po.ConsecutiveFailures, RevokedAt: po.RevokedAt,
+		NextSyncAt: po.NextSyncAt, ConsecutiveFailures: po.ConsecutiveFailures, ConsecutiveMore: po.ConsecutiveMore, RevokedAt: po.RevokedAt,
 		CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
 	}
 	if po.LastErrorCode != nil {
@@ -174,6 +175,7 @@ func (r *repository) SaveExternalMailSync(ctx context.Context, result domain.Ext
 			"status": string(result.Status), "sync_cursor": result.Cursor,
 			"next_sync_at": result.NextSyncAt, "updated_at": result.Now,
 			"consecutive_failures": min(result.ConsecutiveFailures, maxConsecutiveFailures),
+			"consecutive_more":     min(result.ConsecutiveMore, maxConsecutiveFailures),
 		}
 		if result.LastErrorCode == "" {
 			updates["last_error_code"] = nil
@@ -293,7 +295,7 @@ func (r *repository) RevokeExternalMailConnection(ctx context.Context, organizat
 		Where("organization_id = ? AND id = ?", organizationID, id).
 		Updates(map[string]any{
 			"status": string(domain.ExternalMailStatusRevoked), "encrypted_refresh_token": "", "sync_cursor": "",
-			"consecutive_failures": 0, "revoked_at": gorm.Expr("COALESCE(revoked_at, ?)", now), "updated_at": now,
+			"consecutive_failures": 0, "consecutive_more": 0, "revoked_at": gorm.Expr("COALESCE(revoked_at, ?)", now), "updated_at": now,
 		})
 	if result.Error != nil {
 		return result.Error
@@ -329,7 +331,7 @@ func (r *repository) RebindExternalMailConnection(ctx context.Context, rebind do
 		"status": string(domain.ExternalMailStatusActive), "encrypted_refresh_token": rebind.EncryptedRefreshToken,
 		"last_error_code": nil, "next_sync_at": rebind.Now, "updated_at": rebind.Now,
 		// A rebind before the retention ends keeps the copies: the purge is canceled.
-		"consecutive_failures": 0, "revoked_at": nil,
+		"consecutive_failures": 0, "consecutive_more": 0, "revoked_at": nil,
 	}
 	if rebind.ResetCursor {
 		updates["sync_cursor"] = ""

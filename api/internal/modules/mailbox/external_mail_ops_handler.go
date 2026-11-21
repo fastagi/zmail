@@ -18,6 +18,8 @@ type ExternalMailSyncRunResponse struct {
 	StoredCount  int       `json:"stored_count"`
 	More         bool      `json:"more"`
 	ErrorCode    *string   `json:"error_code"`
+	TimedOut     bool      `json:"timed_out"`
+	Throttled    bool      `json:"throttled"`
 }
 
 // ListExternalMailSyncRuns lists the latest sync runs of the caller's own connection, newest
@@ -38,6 +40,7 @@ func (h *Handler) ListExternalMailSyncRuns(c *gin.Context) {
 		items = append(items, ExternalMailSyncRunResponse{
 			ID: run.ID, StartedAt: run.StartedAt.UTC(), FinishedAt: run.FinishedAt.UTC(), Outcome: string(run.Outcome),
 			FetchedCount: run.Fetched, StoredCount: run.Stored, More: run.More, ErrorCode: optionalText(run.ErrorCode),
+			TimedOut: run.TimedOut, Throttled: run.Throttled,
 		})
 	}
 	privateResponse(c)

@@ -26,6 +26,8 @@ type ExternalMailSyncRunPO struct {
 	StoredCount  int       `gorm:"not null;default:0"`
 	More         bool      `gorm:"not null;default:false"`
 	ErrorCode    *string   `gorm:"size:64"`
+	TimedOut     bool      `gorm:"not null;default:false"`
+	Throttled    bool      `gorm:"not null;default:false"`
 }
 
 func (ExternalMailSyncRunPO) TableName() string {
@@ -36,6 +38,7 @@ func (po *ExternalMailSyncRunPO) toDomain() *domain.ExternalMailSyncRun {
 	run := &domain.ExternalMailSyncRun{
 		ID: po.ID, ConnectionID: po.ConnectionID, StartedAt: po.StartedAt, FinishedAt: po.FinishedAt,
 		Outcome: domain.ExternalMailSyncOutcome(po.Outcome), Fetched: po.FetchedCount, Stored: po.StoredCount, More: po.More,
+		TimedOut: po.TimedOut, Throttled: po.Throttled,
 	}
 	if po.ErrorCode != nil {
 		run.ErrorCode = *po.ErrorCode
@@ -57,7 +60,7 @@ func recordExternalMailSyncRun(tx *gorm.DB, run *domain.ExternalMailSyncRun) err
 	po := &ExternalMailSyncRunPO{
 		ConnectionID: run.ConnectionID, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
 		Outcome: string(run.Outcome), FetchedCount: run.Fetched, StoredCount: run.Stored, More: run.More,
-		ErrorCode: optionalText(run.ErrorCode),
+		ErrorCode: optionalText(run.ErrorCode), TimedOut: run.TimedOut, Throttled: run.Throttled,
 	}
 	if err := tx.Create(po).Error; err != nil {
 		return err

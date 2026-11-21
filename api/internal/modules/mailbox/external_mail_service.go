@@ -68,9 +68,11 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	result := domain.ExternalMailSyncResult{
 		ConnectionID: connection.ID, MailboxID: connection.MailboxID, Cursor: connection.SyncCursor,
 		Status: domain.ExternalMailStatusActive, NextSyncAt: now.Add(externalMailSyncInterval), Now: now,
-		ConsecutiveFailures: connection.ConsecutiveFailures,
+		ConsecutiveFailures: connection.ConsecutiveFailures, ConsecutiveMore: connection.ConsecutiveMore,
 	}
-	spacing := s.settings.ExternalMail.Sync.Spacing()
+	budget := s.settings.ExternalMail.Sync
+	spacing := budget.Spacing()
+	timedOut, throttled := false, false
 	startedAt, started := s.now().UTC(), time.Now()
 	connector, registered := s.externalConnectors.lookup(connection.Provider)
 	refreshToken, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
@@ -79,10 +81,24 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	case !registered:
 		err = ErrExternalMailProviderUnavailable
 	case err == nil:
-		fetched, err = connector.Source.Fetch(ctx, ExternalMailFetchRequest{
+		// Each fetch has its own deadline, so a slow or hostile provider cannot stall the pass.
+		fetchCtx, cancel := context.WithTimeout(ctx, budget.Timeout())
+		fetched, err = connector.Source.Fetch(fetchCtx, ExternalMailFetchRequest{
 			Token: ExternalMailToken{RefreshToken: refreshToken}, Cursor: connection.SyncCursor,
 			AccountAddress: connection.AccountAddress, BackfillDays: connection.BackfillDays, Now: now,
 		})
+		timedOut = errors.Is(fetchCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+		cancel()
+		if err != nil && ctx.Err() != nil {
+			// The worker is stopping: nothing is recorded, and the lease hands the connection
+			// back one interval later.
+			return ctx.Err()
+		}
+		if timedOut {
+			// Whatever the source answered after its deadline is not trusted: a timeout is a
+			// fetch failure and backs off.
+			fetched, err = ExternalMailFetch{RefreshToken: fetched.RefreshToken}, errExternalMailFetchTimeout
+		}
 	default:
 		// A token this instance cannot open is as unusable as one the provider refuses.
 		err = fmt.Errorf("%w: sealed token unreadable", ErrExternalMailAuth)
@@ -102,9 +118,16 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	case err == nil:
 		result.Cursor, result.SyncedAt, result.ConsecutiveFailures = fetched.Cursor, &now, 0
 		result.Messages = s.externalCopies(connection, fetched.Messages, now)
+		result.ConsecutiveMore = 0
 		if fetched.More {
-			// Another page is ready: fetch it after the spacing instead of after the interval.
-			result.NextSyncAt = now.Add(spacing)
+			// Another page is ready: fetch it at once, until the connection has fetched the most
+			// pages in a row allowed; then each further page waits the spacing, so one backfill
+			// cannot monopolize the worker.
+			result.ConsecutiveMore = min(connection.ConsecutiveMore+1, maxConsecutiveFailures)
+			result.NextSyncAt = now
+			if result.ConsecutiveMore >= budget.ImmediatePages() {
+				result.NextSyncAt, throttled = now.Add(spacing), true
+			}
 		}
 	case errors.Is(err, ErrExternalMailCursorExpired):
 		// Start over from an empty cursor after the spacing; copies already stored are not repeated.
@@ -128,6 +151,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	result.Run = &domain.ExternalMailSyncRun{
 		ConnectionID: connection.ID, StartedAt: startedAt, FinishedAt: s.now().UTC(), Outcome: outcome,
 		Fetched: len(fetched.Messages), More: err == nil && fetched.More, ErrorCode: result.LastErrorCode,
+		TimedOut: timedOut, Throttled: throttled,
 	}
 	mailbox, err := s.repo.FindMailbox(ctx, connection.OrganizationID, connection.MailboxID)
 	if errors.Is(err, ErrMailboxNotFound) {
@@ -167,6 +191,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		slog.String("provider", string(connection.Provider)), slog.String("status", string(result.Status)),
 		slog.String("outcome", string(result.Run.Outcome)), slog.Int64("latency_ms", latency.Milliseconds()),
 		slog.Int("page_size", result.Run.Fetched), slog.Bool("more", result.Run.More),
+		slog.Bool("timed_out", timedOut), slog.Bool("throttled", throttled),
 		slog.Int("fetched", len(result.Messages)), slog.Int("stored", len(stored)), slog.Bool("applied", applied),
 	}
 	if result.LastErrorCode != "" && result.Run.Outcome != domain.ExternalMailSyncDropped {

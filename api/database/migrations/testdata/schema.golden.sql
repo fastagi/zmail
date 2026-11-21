@@ -102,6 +102,7 @@ TABLE external_mail_connections
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
   COLUMN consecutive_failures smallint NOT NULL DEFAULT 0
+  COLUMN consecutive_more smallint NOT NULL DEFAULT 0
   COLUMN revoked_at timestamp with time zone
 
 TABLE external_mail_sync_runs
@@ -114,6 +115,8 @@ TABLE external_mail_sync_runs
   COLUMN stored_count integer NOT NULL DEFAULT 0
   COLUMN more boolean NOT NULL DEFAULT false
   COLUMN error_code character varying(64)
+  COLUMN timed_out boolean NOT NULL DEFAULT false
+  COLUMN throttled boolean NOT NULL DEFAULT false
 
 TABLE mail_attachments
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_attachments_id_seq'::regclass)
@@ -790,6 +793,7 @@ CONSTRAINT external_mail_authorizations.external_mail_authorizations_user_id_fke
 CONSTRAINT external_mail_connections.chk_external_mail_connections_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
 CONSTRAINT external_mail_connections.external_mail_connections_backfill_days_check CHECK (((backfill_days >= 1) AND (backfill_days <= 90)))
 CONSTRAINT external_mail_connections.external_mail_connections_consecutive_failures_check CHECK ((consecutive_failures >= 0))
+CONSTRAINT external_mail_connections.external_mail_connections_consecutive_more_check CHECK ((consecutive_more >= 0))
 CONSTRAINT external_mail_connections.external_mail_connections_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT external_mail_connections.external_mail_connections_mailbox_id_key UNIQUE (mailbox_id)
 CONSTRAINT external_mail_connections.external_mail_connections_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
