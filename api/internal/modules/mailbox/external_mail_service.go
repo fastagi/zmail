@@ -185,22 +185,34 @@ func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domai
 	if connection.Status == domain.ExternalMailStatusRevoked {
 		return nil
 	}
-	if connection.EncryptedRefreshToken != "" {
-		if token, openErr := s.encryptor.DecryptString(connection.EncryptedRefreshToken); openErr == nil {
-			connector, registered := s.externalConnectors.lookup(connection.Provider)
-			if !registered {
-				slog.WarnContext(ctx, "external_mail.provider_revoke_skipped",
-					slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
-			} else if revokeErr := connector.Source.Revoke(ctx, ExternalMailToken{RefreshToken: token}); revokeErr != nil {
-				slog.WarnContext(ctx, "external_mail.provider_revoke_failed",
-					slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
-			}
-		}
-	}
+	s.handBackExternalGrant(ctx, connection)
 	if err := s.externalMail.RevokeExternalMailConnection(ctx, viewer.OrganizationID, id, s.now().UTC()); err != nil {
 		return err
 	}
 	slog.InfoContext(ctx, "external_mail.revoked",
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
 	return nil
+}
+
+// handBackExternalGrant revokes a connection's grant at its provider on a best-effort basis: a
+// provider that is down or no longer enabled leaves the grant to expire there, and the token is
+// erased here either way.
+func (s *service) handBackExternalGrant(ctx context.Context, connection *domain.ExternalMailConnection) {
+	if connection.EncryptedRefreshToken == "" {
+		return
+	}
+	token, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
+	if err != nil {
+		return
+	}
+	connector, registered := s.externalConnectors.lookup(connection.Provider)
+	if !registered {
+		slog.WarnContext(ctx, "external_mail.provider_revoke_skipped",
+			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
+		return
+	}
+	if err := connector.Source.Revoke(ctx, ExternalMailToken{RefreshToken: token}); err != nil {
+		slog.WarnContext(ctx, "external_mail.provider_revoke_failed",
+			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
+	}
 }

@@ -771,7 +771,9 @@ connector the instance no longer runs stays `active` with its grant and records
 `DELETE /v1/external-mail-connections/:connection_id` unbinds: the member who bound the account, or
 an `owner` or `admin`, may. The grant is revoked at the provider on a best-effort basis, the stored
 token is erased, and syncing stops for good, including a fetch already running. Mail already synced
-stays in the external mailbox. Unbinding a revoked connection answers `204` again. Another member's
+stays in the external mailbox. Unbinding a revoked connection answers `204` again. A member who leaves the organization has every connection there revoked the same way at once:
+the accounts are their own, so nothing awaits a handover, and the copies stay readable by nobody.
+Binding the account again after rejoining restores the same mailbox without copies. Another member's
 connection and another organization's id are `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
 
 ## Domains

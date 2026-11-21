@@ -345,3 +345,34 @@ func TestExternalMailBindingHTTP(t *testing.T) {
 		t.Fatalf("reconnect = %d %v", status, body)
 	}
 }
+
+// TestLeavingTheOrganizationRevokesConnections: a member who leaves stops being synced at once.
+// Their outside accounts are their own, so nothing is handed over: the grant is handed back, the
+// token erased, and the copies stay unreadable. Rejoining and binding again restores the mailbox.
+func TestLeavingTheOrganizationRevokesConnections(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.source.Deliver(externalTestToken, externalMessage("g-1", "Before leaving", time.Time{}))
+	f.sync(t)
+
+	f.leave(t, f.b, f.service.now())
+	connection := f.reload(t)
+	if connection.Status != domain.ExternalMailStatusRevoked || connection.EncryptedRefreshToken != "" {
+		t.Fatalf("after leaving: status %q, token kept %v; want revoked and erased",
+			connection.Status, connection.EncryptedRefreshToken != "")
+	}
+	if !f.source.Revoked(externalTestToken) {
+		t.Fatal("the grant was not handed back to the provider")
+	}
+	fetches := f.source.Fetches(externalTestToken)
+	f.source.Deliver(externalTestToken, externalMessage("g-2", "After leaving", time.Time{}))
+	f.advance(externalMailSyncInterval)
+	f.sync(t)
+	if f.source.Fetches(externalTestToken) != fetches {
+		t.Fatal("the account of a member who left was fetched again")
+	}
+	// The mailbox is not awaiting a handover: it is not the organization's to hand over.
+	mailbox, err := f.repo.FindMailbox(context.Background(), accessOrg, f.mailbox.ID)
+	if err != nil || mailbox.OwnerLeftAt != nil {
+		t.Fatalf("external mailbox = %+v, err %v; want no handover state", mailbox, err)
+	}
+}
