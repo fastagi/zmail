@@ -18,14 +18,20 @@ to be carried out without further questions. Progress is recorded in
    `docker compose -f compose.dev.yaml up -d --wait postgres` first when the database is down.
    This machine runs Node 25: use `pnpm` directly and `NODE_OPTIONS=--no-experimental-webstorage`
    for Vitest.
-5. Commit, push the branch, and open a pull request stacked on the previous task's branch.
+5. Commit, push the branch, and open a pull request stacked on the previous task's branch. The
+   orchestrator merges it to `main` once the conditions under Limits hold.
 6. Append an entry to the progress log: what was done, how it was verified, what is next, and any
    default decision adopted.
 
 ## Limits
 
-- Never merge a pull request, deploy, change production, or create an account at an outside
-  service. Never read or store a real credential.
+- Merging to `main` is authorized (owner's instruction of 2026-11-21: finished work goes to the
+  main branch, where separate testing watches it). The orchestrator session alone merges, and only
+  a pull request that is complete, independently reviewed with its findings fixed, green in CI, and
+  clean against `main`. Merge in dependency order with a merge commit; keep feature branches,
+  because stacked pull requests build on them. Worker sessions never merge.
+- Never deploy, change production, or create an account at an outside service. Never read or store
+  a real credential.
 - A task that needs something only the owner can supply (OAuth applications, an AI provider key,
   a production mailbox) is built and tested against a local fake server, marked `blocked: go-live`
   in the log with the exact thing needed, and the loop moves on.
