@@ -17,6 +17,14 @@ External mailboxes can now be bound and reconnected through a provider-neutral c
 and synced mail goes through the same post-store step as Zmail's own inbound mail. Contract:
 `contracts/MAILBOXES.md`, External Mailboxes. Plan: `docs/plans/mail-connectors.plan.md`.
 
+### Low — Outlook connector
+
+`EXTERNAL_MAIL_PROVIDERS=outlook` with an Outlook OAuth client now syncs Outlook.com and
+Microsoft 365 Inboxes through Microsoft Graph delta. The app registration needs the delegated
+Graph permissions `Mail.Read`, `User.Read`, `offline_access`, `openid`, and `email`, and
+`EXTERNAL_MAIL_REDIRECT_URL` as a Web redirect URI. A fork with its own Outlook source should
+remove it or give its connector another id; the registry keeps the first connector per id.
+
 ### Medium — `source` and `provider` are connector ids, not a fixed list
 
 `source` on message summaries and `provider` on connections were `gmail` or `outlook`; they are now
@@ -53,6 +61,16 @@ Replaces the provider and source CHECKs with the connector pattern (the source C
 mailboxes (mailboxes is bounded per organization), and creates `external_mail_authorizations`.
 Rolling back fails while a connector other than `gmail` or `outlook`, or two external mailboxes with
 one address, exist.
+
+### Low — The Gmail connector is real
+
+`EXTERNAL_MAIL_PROVIDERS=gmail` with `EXTERNAL_MAIL_GMAIL_CLIENT_ID` and
+`EXTERNAL_MAIL_GMAIL_CLIENT_SECRET` now binds Gmail accounts through Google's consent page (scope
+`gmail.readonly`, offline access) and syncs them over the Gmail API: a backfill page by page, then
+history from the historyId recorded when the backfill started. Its Google OAuth application must list
+`EXTERNAL_MAIL_REDIRECT_URL`. Only inbound mail is copied: drafts, spam, trash, and sent mail that is
+not also in the inbox are skipped. Connections bound with `fake` keep a cursor the connector cannot
+read; their first Gmail fetch starts the backfill over, without copies.
 
 ## Unreleased — Platform mail operations: broadcast content and its audit
 
