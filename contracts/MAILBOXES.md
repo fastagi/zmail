@@ -759,8 +759,11 @@ routes answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, and no account is syn
 
 `POST /v1/external-mail-authorizations` with `{ "provider": "gmail" }` (optionally
 `"backfill_days"`) starts a sign-in; with `{ "connection_id": 3 }` it reconnects that connection,
-which must be the caller's own. It stores a pending sign-in, single use and valid for 10 minutes,
-holding only the SHA-256 of a random `state` and the sealed PKCE verifier, and answers `201`
+which must be the caller's own. Neither `provider` nor `connection_id`, a `provider` other than the
+connection's, or a `backfill_days` outside 1 to 90 is `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`,
+as on the app password route below; `0` or no `backfill_days` takes 14. It stores a pending sign-in,
+single use and valid for 10 minutes, holding only the SHA-256 of a random `state` and the sealed
+PKCE verifier, and answers `201`
 `{ "authorization_url", "expires_at" }`. The browser goes to `authorization_url`; the provider sends
 it back to `EXTERNAL_MAIL_REDIRECT_URL` with `state` and `code`.
 
@@ -770,11 +773,11 @@ sign-in up, whatever the outcome, then exchanges the code with the PKCE verifier
 | Account signed in to | Result |
 |---|---|
 | New in the organization for this connector | `201`: a private, read-only connected personal mailbox and an active connection, synced at once (`connection_bound`) |
-| The caller's own connection, in any state | `200`: the same connection, active, error cleared, synced at once; mailbox and history kept (a `revoked` one backfills again, without copies) (`connection_reconnected`) |
+| The caller's own connection, in any state | `200`: the same connection, active, error cleared, synced at once; mailbox and history kept (a `revoked` one backfills again, without copies, and needs a free place under the limit below) (`connection_reconnected`) |
 | A reconnect that signed in to another account | `409 MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`; nothing changes |
 | Bound by another member, connection not `revoked` | `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` |
 | Bound by another member whose connection is `revoked` (they left, unbound it, or were disconnected) | `201`: the old connection's copies, mailbox, and connection are deleted for good at once (`copies_purged` with `reason` `rebound` and the caller as actor), then the account is bound into a new mailbox; `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` only while the sync worker holds the old connection |
-| A new account past the caller's 10 | `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT` |
+| A new account, or the caller's own `revoked` connection, while the caller holds 10 live (`active` or `needs_reconnect`) connections | `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT`; nothing changes. Reconnecting a live connection never hits the limit |
 
 On a `409` the grant is handed back to the provider. A refused code is
 `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`; an unknown, expired, used, or another member's `state`
