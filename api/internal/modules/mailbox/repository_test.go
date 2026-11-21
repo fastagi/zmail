@@ -11,8 +11,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/fastagi/zmail/api/internal/domain"
-	"github.com/fastagi/zmail/api/internal/modules/apikey"
 	testplatform "github.com/fastagi/zmail/api/internal/infra/testing"
+	"github.com/fastagi/zmail/api/internal/modules/apikey"
 )
 
 // mailboxOwnerPO stands in for the organizations table so the owner rows exist without
