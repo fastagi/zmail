@@ -123,7 +123,8 @@ export interface MockLedgerDirectory {
 }
 
 interface MailboxAccessState {
-  type: MailboxType;
+  /** `external` holds read-only copies of an outside account its owner bound. */
+  type: Mailbox['type'];
   ownerUserId: number | null;
   /** Set while a personal mailbox's owner is not a member of the organization. */
   ownerLeft: { at: string; throughMessageId: number } | null;
@@ -283,6 +284,18 @@ export function mailboxAccessFor(
   viewer: MailboxViewer
 ): MailboxAccess {
   const admin = viewer.role === 'owner' || viewer.role === 'admin';
+  if (access.type === 'external') {
+    // Only the member who bound the account reads it; nobody sends from it or organizes it.
+    const owner = access.ownerUserId === viewer.userId;
+    return {
+      view: owner,
+      send: false,
+      manage_members: false,
+      administer: admin,
+      see_history: owner,
+      organize: false,
+    };
+  }
   const result: MailboxAccess = {
     view: false,
     send: false,
@@ -472,6 +485,84 @@ export class MockMailboxStore {
     this.store(state, this.welcomeMessage(mailbox));
     // As in the API, a create response reports 0 unread.
     return { ok: true, mailbox: { ...this.view(state, viewer), unread_count: 0 } };
+  }
+
+  /**
+   * The `external` mailbox of a newly bound outside account, owned by `ownerUserId` alone, with a
+   * few synced copies so the development inbox shows them. The address is the outside account's,
+   * never claimed, and the mailbox does not count toward the organization's limit.
+   */
+  createExternal(
+    organizationId: number,
+    ownerUserId: number,
+    address: string,
+    provider: string,
+    backfillDays: number
+  ): number {
+    const mailbox: StoredMailbox = {
+      id: this.nextMailboxId++,
+      address,
+      display_name: address,
+      created_at: this.timestamp(),
+    };
+    const state: MailboxState = {
+      mailbox,
+      access: {
+        type: 'external',
+        ownerUserId,
+        ownerLeft: null,
+        sealedBefore: null,
+        sealedThroughMessageId: 0,
+        webhooksEnabled: false,
+        members: new Map(),
+        events: [],
+      },
+      roleId: null,
+      messages: new Map(),
+      reads: new Map(),
+      stars: new Map(),
+      folders: new Map(),
+      labels: new Map(),
+      files: new Map(),
+    };
+    this.record(state, 'created', null, ownerUserId, { type: 'external' });
+    this.mailboxesOf(organizationId).set(mailbox.id, state);
+    this.syncExternal(organizationId, mailbox.id, provider, backfillDays);
+    return mailbox.id;
+  }
+
+  /** Copies one more synced message into an external mailbox, as a sync would. */
+  syncExternal(
+    organizationId: number,
+    mailboxId: number,
+    provider: string,
+    backfillDays: number
+  ): void {
+    const state = this.mailboxesOf(organizationId).get(mailboxId);
+    if (!state || state.access.type !== 'external') return;
+    const now = this.dependencies.now().getTime();
+    const samples = [
+      { hoursAgo: 2, subject: 'Your order has shipped', from: 'orders@shop.example' },
+      { hoursAgo: 30, subject: 'Notes from Tuesday', from: 'sam@partner.example' },
+      { hoursAgo: 24 * Math.min(backfillDays, 10), subject: 'Welcome aboard', from: 'hi@news.example' },
+    ];
+    const stored = new Set([...state.messages.values()].map(message => message.message_id));
+    for (const [index, sample] of samples.entries()) {
+      // A copy is stored once per provider message id, so a rebind never adds a second one.
+      const providerMessageId = `mock-${mailboxId}-${index}@${provider}.example`;
+      if (stored.has(providerMessageId)) continue;
+      const message = this.welcomeMessage(state.mailbox);
+      this.store(state, {
+        ...message,
+        from: { address: sample.from, name: '' },
+        subject: sample.subject,
+        source: provider,
+        created_at: new Date(now - sample.hoursAgo * 60 * 60 * 1_000).toISOString(),
+        text_body: 'A read-only copy synced by the development mock connector.',
+        html_body: '<p>A read-only copy synced by the <strong>development mock</strong> connector.</p>',
+        message_id: providerMessageId,
+      });
+    }
   }
 
   /** One page of the administration directory, newest first; owners and admins only. */

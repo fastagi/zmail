@@ -41,6 +41,15 @@ The baseline captured on 2026-07-16 with Next.js 16.2.9 is:
 | `/console` | 925,000 | 884,030 | 268,755 |
 | `/console/organizations/[organizationId]` | 1,070,000 | 1,023,736 | 305,892 |
 
+The global maximum rose from 1,070,000 to 1,080,000 raw bytes on 2026-11-21 for the external
+mailbox connect flow in the unified inbox (`/console/mailboxes`, owner: the mailbox feature). Its
+base, `feat/connector-adapters`, already measured 1,070,584 raw bytes, 584 over the old maximum.
+With the connect flow the route measures 1,074,067 raw bytes. The connect dialog, the connected
+mailboxes dialog, the reconnect notice, the "Connected by me" sidebar section, the external mail
+service, and its schemas all load on demand. What stays in the first load is the connector and
+connection queries and the sidebar and reader wiring. Deferring `compose-drafts` was measured and
+reverted: it added 152 bytes, because the module is still reached from the first load.
+
 Run the supported tools from `web/`:
 
 ```bash

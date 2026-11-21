@@ -286,6 +286,11 @@ export const mailDnsRecordPatchSchema = strictObject({
 export const mailboxTypeSchema = union([literal('personal'), literal('shared')]);
 /** Every type the API reports; `external` holds read-only copies of a member's bound account. */
 export const mailboxKindSchema = union([literal('personal'), literal('shared'), literal('external')]);
+/**
+ * Where a mailbox comes from: `zmail` for Zmail's own, `connected` for a member's bound outside
+ * account. Optional until every API emits it; older APIs mark a connected mailbox `external`.
+ */
+export const mailboxOriginSchema = union([literal('zmail'), literal('connected')]);
 
 /** AI triage categories; `review` means the model could not decide (`contracts/MAILBOXES.md`). */
 export const MAIL_TRIAGE_CATEGORIES = ['reply', 'deadline', 'fyi', 'review'] as const;
@@ -338,6 +343,7 @@ export const mailboxSchema = strictObject({
   created_at: timestampSchema,
   // The mail role the mailbox belongs to; null when ungrouped. Optional until every API emits it.
   role_id: optional(nullable(safeIdSchema)),
+  origin: optional(mailboxOriginSchema),
 });
 export const mailboxListSchema = array(mailboxSchema);
 

@@ -1,6 +1,6 @@
 {
   "firstLoadUncompressedJavaScript": {
-    "maximumAnyRouteBytes": 1070000,
+    "maximumAnyRouteBytes": 1080000,
     "routeBudgetsBytes": {
       "/": 600000,
       "/login": 900000,
