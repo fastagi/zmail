@@ -27,8 +27,8 @@ to be carried out without further questions. Progress is recorded in
 
 - Merging to `main` is authorized (owner's instruction of 2026-11-21: finished work goes to the
   main branch, where separate testing watches it). The orchestrator session alone merges, and only
-  a pull request that is complete, independently reviewed with its findings fixed, green in CI, and
-  clean against `main`. Merge in dependency order with a merge commit; keep feature branches,
+  a pull request that is complete, independently reviewed with its findings fixed, passing the local
+  gate, and clean against `main`. Merge in dependency order with a merge commit; keep feature branches,
   because stacked pull requests build on them. Worker sessions never merge.
 - Never deploy, change production, or create an account at an outside service. Never read or store
   a real credential.
@@ -58,6 +58,20 @@ to be carried out without further questions. Progress is recorded in
 | T11 | Reply from the original address; push subscriptions with polling fallback | C6, C7 |
 
 D2 (agent tasks with a real model) needs an AI provider key and stays blocked until one exists.
+
+## Local Gate
+
+The owner's instruction of 2026-11-21: gate on local checks, not on GitHub Actions. Do not wait for
+or poll remote CI. The gate is `make check` from the repository root with:
+
+- Node 24 first on PATH (`/opt/homebrew/opt/node@24/bin`). The default Homebrew Node 25 on this
+  machine is broken since a `brew install` upgraded a shared library. Never run `brew install` or
+  `brew upgrade` here; report a missing tool instead.
+- `golangci-lint` v2.14.0 on PATH (the version pinned in `.github/workflows/ci.yml`).
+- `CI=true` and `FASTBUILD_TEST_POSTGRES_DSN` set, so no database test is skipped.
+
+Run it on the exact tree that will land on `main`: stacked work is merged into one integration
+branch, gated once, and then merged in dependency order.
 
 ## CI Rules That Local Checks Miss
 
