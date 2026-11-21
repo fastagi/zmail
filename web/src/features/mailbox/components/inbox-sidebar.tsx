@@ -16,11 +16,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
+import type { ExternalMailConnection } from '@/features/mailbox/external-mail-schemas';
 import type { InboxCounts, InboxView, MailRole, Mailbox } from '@/features/mailbox/types';
+import { isOwnConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
 const InboxSidebarFooter = lazy(() => import('./inbox-sidebar-footer'));
+// "Connected by me" loads only when the viewer has a connected mailbox or may add one.
+const ConnectedMailboxes = lazy(() => import('./inbox-sidebar-connected'));
 
 const viewIcons = {
   all: Inbox,
@@ -33,6 +37,17 @@ const viewOrder: readonly InboxView[] = ['all', 'today', 'pending', 'sent'];
 
 /** A role narrowing of the list: a role id, or `none` for the mailboxes without one. */
 export type InboxRoleFilter = number | 'none';
+
+/**
+ * The external mailboxes section: the viewer's own connections when known (they decorate the
+ * connected mailboxes with their provider and status), the "Add external mailbox" entry (null when
+ * the instance offers no connector), and their management.
+ */
+export interface InboxSidebarExternal {
+  connections: readonly ExternalMailConnection[] | undefined;
+  onAdd: (() => void) | null;
+  onManage: () => void;
+}
 
 /** The key of a sidebar group: a role id, or `none` for Ungrouped. */
 type GroupKey = string;
@@ -57,6 +72,10 @@ interface SidebarGroup {
  * roles holding a mailbox they can see. Owners and admins get "Manage roles" beside the heading.
  * At the bottom: today's sending, links to the other mail pages, and the shortcut help.
  *
+ * With external mail on, the list splits in two (roadmap §5.1): "Team mailboxes" above, and
+ * "Connected by me" below with the viewer's own external mailboxes, each with its provider and a
+ * status dot, and the "Add external mailbox" entry. External mailboxes never show among the team's.
+ *
  * `rail` folds it to an icon rail between 768 and 1023px wide (§11.11); the full sidebar, with
  * the mailboxes, the quota card, and the links, shows from 1024px and in the narrow-screen sheet.
  */
@@ -78,6 +97,7 @@ export function InboxSidebar({
   onManageRoles,
   onCompose,
   onShortcuts,
+  external = null,
 }: {
   /** The organization's name, or its picker. */
   organization: ReactNode;
@@ -100,6 +120,8 @@ export function InboxSidebar({
   onCompose: (() => void) | null;
   /** Opens the keyboard shortcut help. */
   onShortcuts: () => void;
+  /** The external mailboxes section; it shows while the viewer has one or may add one. */
+  external?: InboxSidebarExternal | null;
 }) {
   const t = useT('mailbox');
   const views = counts?.views;
@@ -120,10 +142,15 @@ export function InboxSidebar({
   const wide = rail ? 'hidden lg:flex' : 'flex';
   const railIcon = rail ? 'size-4 shrink-0 lg:hidden' : 'hidden';
 
+  // A member's connected accounts are private copies: their owner finds them under "Connected by
+  // me", and nobody else lists them among the team's. A connected shared mailbox is the team's.
+  const teamMailboxes = mailboxes.filter(mailbox => !isOwnConnectedMailbox(mailbox));
+  const mine = mailboxes.filter(isOwnConnectedMailbox);
+  const showConnected = external !== null && (mine.length > 0 || external.onAdd !== null);
   const ordered =
     sort === 'default'
-      ? mailboxes
-      : [...mailboxes].sort((a, b) => {
+      ? teamMailboxes
+      : [...teamMailboxes].sort((a, b) => {
           if (sort === 'unread') {
             const difference = (unreadByMailbox.get(b.id) ?? 0) - (unreadByMailbox.get(a.id) ?? 0);
             if (difference) return difference;
@@ -249,7 +276,11 @@ export function InboxSidebar({
       <nav aria-label={t('inbox.groups.label')} className="flex flex-col gap-0.5">
         <div className={cn('items-center gap-2 pt-[18px] pr-1 pb-1.5 pl-3', wide)}>
           <p className="min-w-0 flex-1 truncate text-[11px] tracking-[0.06em] text-text-faint">
-            {flat ? t('inbox.groups.mailboxes') : t('inbox.groups.label')}
+            {showConnected
+              ? t('external.sidebar.team')
+              : flat
+                ? t('inbox.groups.mailboxes')
+                : t('inbox.groups.label')}
           </p>
           <label
             title={t('inbox.sort.label')}
@@ -359,6 +390,19 @@ export function InboxSidebar({
           );
         })}
       </nav>
+
+      {external && showConnected ? (
+        <Suspense fallback={null}>
+          <ConnectedMailboxes
+            external={external}
+            mailboxes={mine}
+            unreadByMailbox={unreadByMailbox}
+            box={box}
+            rail={rail}
+            onBox={onBox}
+          />
+        </Suspense>
+      ) : null}
 
       <div className="min-h-4 flex-1" aria-hidden="true" />
       <div className={cn('flex-col', wide)}>

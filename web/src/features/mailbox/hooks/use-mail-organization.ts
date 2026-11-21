@@ -6,8 +6,9 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
 import type { Organization } from '@/features/organization/types';
 
-/** Query parameter of the mail pages that names the organization they show. */
-export const MAIL_ORGANIZATION_PARAM = 'org';
+import { MAIL_ORGANIZATION_PARAM } from '@/features/mailbox/components/mailbox-params';
+
+export { MAIL_ORGANIZATION_PARAM };
 
 const ACTIVE_ORGANIZATION_STORAGE_KEY = 'zmail.activeOrganizationId';
 

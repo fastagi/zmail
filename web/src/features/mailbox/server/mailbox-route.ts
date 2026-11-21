@@ -84,6 +84,7 @@ import {
   type PlatformAccountInput,
   type PlatformAccountStatus,
 } from '@/features/mailbox/platform-account-schemas';
+import { EXTERNAL_MAIL_CONNECTOR_ID_PATTERN } from '@/features/mailbox/external-mail-schemas';
 import { decodeInboxCursor, encodeInboxCursor } from '@/features/mailbox/server/inbox-cursor';
 import { mockTriageStore } from '@/features/mailbox/server/mock-triage-store';
 import {
@@ -4655,4 +4656,246 @@ async function forwardCloudflareManagement(
     accessToken: target.accessToken,
     organizationId: String(target.organizationId),
   });
+}
+
+/*
+ * External mailboxes (`contracts/MAILBOXES.md`, External Mailboxes): connectors, binding an outside
+ * account, and the caller's own connections. The BFF checks shapes; the API, or in development
+ * the mock with its fake connectors, judges everything else.
+ */
+
+const maxExternalMailBodyBytes = 4 * 1_024;
+
+/** The development mock of external mail loads only when a mock route first needs it. */
+async function externalMailMock() {
+  return (await import('@/features/mailbox/server/mock-external-mail-store')).mockExternalMailStore;
+}
+const maxExternalCallbackValueLength = 2_048;
+
+/** The instance's connectors; empty while external mail is off. */
+export async function listExternalMailConnectorsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'external-mail-connectors',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return success((await externalMailMock()).connectors());
+}
+
+/** The caller's own bound accounts in the organization. */
+export async function listExternalMailConnectionsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'external-mail-connections',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return success((await externalMailMock()).list(target.organizationId, target.context.user_id));
+}
+
+/** Starts a sign-in with `provider`, or reconnects the caller's `connection_id`. */
+export async function startExternalMailAuthorizationRoute(
+  request: Request
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const body = await jsonObject(request, maxExternalMailBodyBytes);
+  if (!body.ok) return body.response;
+  const { provider, backfill_days: backfillDays, connection_id: connectionId } = body.value;
+  const errors: Record<string, string[]> = {};
+  if (
+    provider !== undefined &&
+    (typeof provider !== 'string' || !EXTERNAL_MAIL_CONNECTOR_ID_PATTERN.test(provider))
+  ) {
+    errors.provider = ['must be a connector id'];
+  }
+  if (
+    backfillDays !== undefined &&
+    (typeof backfillDays !== 'number' ||
+      !Number.isSafeInteger(backfillDays) ||
+      backfillDays < 1 ||
+      backfillDays > 90)
+  ) {
+    errors.backfill_days = ['must be between 1 and 90'];
+  }
+  if (connectionId !== undefined && !positiveId(connectionId)) {
+    errors.connection_id = ['must be a positive id'];
+  }
+  if (Object.keys(errors).length > 0) return validationFailed(errors);
+  if (provider === undefined && connectionId === undefined) {
+    return failure(
+      422,
+      ApiErrorCode.MAILBOX_EXTERNAL_AUTHORIZATION_INVALID,
+      'A provider or a connection is required'
+    );
+  }
+  const input = {
+    ...(provider === undefined ? {} : { provider: provider as string }),
+    ...(backfillDays === undefined ? {} : { backfill_days: backfillDays as number }),
+    ...(connectionId === undefined ? {} : { connection_id: connectionId as number }),
+  };
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'external-mail-authorizations',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input,
+      fieldMap: {
+        provider: 'provider',
+        backfill_days: 'backfill_days',
+        connection_id: 'connection_id',
+      },
+    });
+  }
+  const result = (await externalMailMock()).start(
+    target.organizationId,
+    target.context.user_id,
+    new URL(request.url).origin,
+    input
+  );
+  if (result.ok) return success(result.value, 201);
+  switch (result.error) {
+    case 'provider_unavailable':
+      return failure(
+        404,
+        ApiErrorCode.MAILBOX_EXTERNAL_PROVIDER_UNAVAILABLE,
+        'External mail provider is unavailable'
+      );
+    case 'connection_not_found':
+      return externalConnectionNotFound();
+    default:
+      return failure(
+        422,
+        ApiErrorCode.MAILBOX_EXTERNAL_AUTHORIZATION_INVALID,
+        'External mail authorization is invalid'
+      );
+  }
+}
+
+/** Finishes a sign-in with the `state` and `code` the provider sent back. */
+export async function completeExternalMailAuthorizationRoute(
+  request: Request
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const body = await jsonObject(request, maxExternalMailBodyBytes);
+  if (!body.ok) return body.response;
+  const { state, code } = body.value;
+  const errors: Record<string, string[]> = {};
+  if (!boundedString(state, maxExternalCallbackValueLength) || state === '') {
+    errors.state = ['is required'];
+  }
+  if (!boundedString(code, maxExternalCallbackValueLength) || code === '') {
+    errors.code = ['is required'];
+  }
+  if (Object.keys(errors).length > 0) return validationFailed(errors);
+  const input = { state: state as string, code: code as string };
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'external-mail-authorizations/completions',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input,
+      fieldMap: { state: 'state', code: 'code' },
+    });
+  }
+  const userId = target.context.user_id;
+  const result = (await externalMailMock()).complete(
+    target.organizationId,
+    userId,
+    mockOrganizationStore.memberEmails(target.organizationId).get(userId) ?? '',
+    input,
+    {
+      create: (organizationId, ownerUserId, address, provider, days) =>
+        mockMailboxStore.createExternal(organizationId, ownerUserId, address, provider, days),
+      sync: (organizationId, mailboxId, provider, days) =>
+        mockMailboxStore.syncExternal(organizationId, mailboxId, provider, days),
+    }
+  );
+  if (result.ok) return success(result.value, result.status);
+  switch (result.error) {
+    case 'authorization_not_found':
+      return failure(
+        404,
+        ApiErrorCode.MAILBOX_EXTERNAL_AUTHORIZATION_NOT_FOUND,
+        'External mail authorization not found'
+      );
+    case 'provider_unavailable':
+      return failure(
+        404,
+        ApiErrorCode.MAILBOX_EXTERNAL_PROVIDER_UNAVAILABLE,
+        'External mail provider is unavailable'
+      );
+    case 'account_mismatch':
+      return failure(
+        409,
+        ApiErrorCode.MAILBOX_EXTERNAL_ACCOUNT_MISMATCH,
+        'Signed in to another account'
+      );
+    case 'account_taken':
+      return failure(
+        409,
+        ApiErrorCode.MAILBOX_EXTERNAL_ACCOUNT_TAKEN,
+        'Account is bound by another member'
+      );
+    case 'connection_limit':
+      return failure(
+        409,
+        ApiErrorCode.MAILBOX_EXTERNAL_CONNECTION_LIMIT,
+        'External connection limit reached'
+      );
+    default:
+      return failure(
+        422,
+        ApiErrorCode.MAILBOX_EXTERNAL_AUTHORIZATION_FAILED,
+        'The provider refused the sign-in'
+      );
+  }
+}
+
+/** Unbinds one connection: the member who bound it, or an owner or admin. */
+export async function revokeExternalMailConnectionRoute(
+  request: Request,
+  rawConnectionId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const connectionId = parseRouteId(rawConnectionId);
+  if (!connectionId.ok) return connectionId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `external-mail-connections/${connectionId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const revoked = (await externalMailMock()).revoke(
+    target.organizationId,
+    { userId: target.context.user_id, manages: target.context.role !== 'member' },
+    connectionId.value
+  );
+  return revoked ? apiNoContentResponse(privateMailboxHeaders()) : externalConnectionNotFound();
+}
+
+function externalConnectionNotFound(): NextResponse {
+  return failure(
+    404,
+    ApiErrorCode.MAILBOX_EXTERNAL_CONNECTION_NOT_FOUND,
+    'External mail connection not found'
+  );
 }

@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { AlertCircle, Inbox, Mail, Settings2 } from 'lucide-react';
+import { AlertCircle, Inbox, Mail, Plus, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -31,6 +31,7 @@ import {
   InboxSidebar,
   visibleRoles,
   type InboxRoleFilter,
+  type InboxSidebarExternal,
 } from '@/features/mailbox/components/inbox-sidebar';
 import { MAILBOX_PARAM, readStoredMailboxId } from '@/features/mailbox/components/mailbox-params';
 import {
@@ -54,6 +55,10 @@ import {
   useInboxTimezone,
   useMailRoles,
 } from '@/features/mailbox/hooks/use-inbox';
+import {
+  useExternalMailConnections,
+  useExternalMailConnectors,
+} from '@/features/mailbox/hooks/use-external-mail';
 import { useMailShortcuts, type MailShortcut } from '@/features/mailbox/hooks/use-mail-shortcuts';
 import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
 import {
@@ -75,6 +80,7 @@ import type {
   MailRole,
   Mailbox,
 } from '@/features/mailbox/types';
+import { isConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -115,6 +121,20 @@ const SheetContent = lazy(async () => ({
 }));
 const SheetTitle = lazy(async () => ({
   default: (await import('@/components/ui/sheet')).SheetTitle,
+}));
+// External mailboxes: the connect and manage dialogs load when opened, the reconnect notice only
+// when a connection needs it.
+const ExternalConnectDialog = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/external-connect-dialog'))
+    .ExternalConnectDialog,
+}));
+const ConnectedMailboxesDialog = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/connected-mailboxes-dialog'))
+    .ConnectedMailboxesDialog,
+}));
+const ExternalReconnectBanner = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/external-reconnect-banner'))
+    .ExternalReconnectBanner,
 }));
 const MailboxAccessPanel = lazy(async () => {
   const feature = await import('@/features/mailbox/components/mailbox-access-panel');
@@ -322,6 +342,32 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   };
   const mailboxes = useMailboxes(organizationId, { live: true });
   const roles = useMailRoles(organizationId);
+  // External mail is on while the instance lists a connector; the caller's connections are read
+  // only then, since their route answers 404 while it is off.
+  const connectors = useExternalMailConnectors(organizationId);
+  const connectorList = connectors.data ?? [];
+  const externalOn = connectorList.length > 0;
+  // Connections are also read for connected mailboxes the list already holds, so their status
+  // shows even after the instance stops offering connectors.
+  const hasConnected = (mailboxes.data ?? []).some(isConnectedMailbox);
+  const connections = useExternalMailConnections(organizationId, {
+    enabled: externalOn || hasConnected,
+  });
+  const connectionList = connections.data ?? [];
+  // Mounted from the first open on, so the dialogs can animate closed.
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [connectMounted, setConnectMounted] = useState(false);
+  const [manageExternalOpen, setManageExternalOpen] = useState(false);
+  const [manageExternalMounted, setManageExternalMounted] = useState(false);
+  const openConnect = () => {
+    setManageExternalOpen(false);
+    setConnectMounted(true);
+    setConnectOpen(true);
+  };
+  const openManageExternal = () => {
+    setManageExternalMounted(true);
+    setManageExternalOpen(true);
+  };
   const { zone: inboxZone, ready: zoneReady } = useInboxTimezone();
   // The zone the inbox refused; UTC stands in for it only while it is still the inbox's zone.
   const [refusedZone, setRefusedZone] = useState<string | null>(null);
@@ -442,6 +488,33 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     return `${pathname}?${next.toString()}`;
   };
 
+  const externalDialogs = (
+    <>
+      {connectMounted ? (
+        <Suspense fallback={null}>
+          <ExternalConnectDialog
+            open={connectOpen}
+            onOpenChange={setConnectOpen}
+            organizationId={organizationId}
+            connectors={connectorList}
+          />
+        </Suspense>
+      ) : null}
+      {manageExternalMounted ? (
+        <Suspense fallback={null}>
+          <ConnectedMailboxesDialog
+            open={manageExternalOpen}
+            onOpenChange={setManageExternalOpen}
+            organizationId={organizationId}
+            connections={connections.data}
+            error={!connections.data && connections.isError}
+            onAdd={externalOn ? openConnect : null}
+          />
+        </Suspense>
+      ) : null}
+    </>
+  );
+
   if (mailboxes.isPending) return <InboxSkeleton />;
   if (isOrganizationLost(mailboxes.error) || isOrganizationLost(inbox.error)) {
     return (
@@ -473,14 +546,30 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             canManage ? 'inbox.empty.noMailboxesManage' : 'inbox.empty.noMailboxesMember'
           )}
           action={
-            canManage ? (
-              <ManageMailboxesAction
-                mailboxes={mailboxes.data}
-                onRefresh={() => void mailboxes.refetch()}
-              />
+            canManage || externalOn ? (
+              <div className="flex flex-wrap justify-center gap-2">
+                {canManage ? (
+                  <ManageMailboxesAction
+                    mailboxes={mailboxes.data}
+                    onRefresh={() => void mailboxes.refetch()}
+                  />
+                ) : null}
+                {externalOn ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    icon={<Plus className="size-4" />}
+                    onClick={openConnect}
+                  >
+                    {t('external.sidebar.add')}
+                  </Button>
+                ) : null}
+              </div>
             ) : undefined
           }
         />
+        {externalDialogs}
       </InboxFrame>
     );
   }
@@ -688,7 +777,19 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     );
   }
 
+  const external: InboxSidebarExternal = {
+    connections: connections.data,
+    onAdd: externalOn ? openConnect : null,
+    onManage: openManageExternal,
+  };
+  const externalProvider = (mailboxId: number): string | null => {
+    const mailbox = mailboxes.data.find(item => item.id === mailboxId);
+    const bound = connectionList.find(connection => connection.mailbox_id === mailboxId);
+    if (!bound && !(mailbox && isConnectedMailbox(mailbox))) return null;
+    return bound?.provider ?? openItem?.source ?? '';
+  };
   const sidebarProps = {
+    external,
     sort,
     onSort: changeSort,
     counts: counts.data,
@@ -808,6 +909,11 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           }}
           searchRef={searchRef}
         />
+        {connectionList.some(connection => connection.status === 'needs_reconnect') ? (
+          <Suspense fallback={null}>
+            <ExternalReconnectBanner organizationId={organizationId} connections={connectionList} />
+          </Suspense>
+        ) : null}
         {triageCounts !== null &&
         urlState.q === '' &&
         (urlState.view === 'all' || urlState.view === 'today') ? (
@@ -839,6 +945,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
               key={openItem.id}
               item={openItem}
               access={openMailbox?.access ?? null}
+              externalProvider={externalProvider(openItem.mailbox_id)}
               roleName={
                 openItem.role_id === null
                   ? null
@@ -924,6 +1031,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           onRefresh={() => void mailboxes.refetch()}
         />
       ) : null}
+
+      {externalDialogs}
 
       {canManage && managingRoles ? (
         <Suspense fallback={null}>

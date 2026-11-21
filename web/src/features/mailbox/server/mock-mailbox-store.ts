@@ -123,7 +123,9 @@ export interface MockLedgerDirectory {
 }
 
 interface MailboxAccessState {
-  type: MailboxType;
+  type: Mailbox['type'];
+  /** `connected` holds read-only copies of an outside account; `zmail` is Zmail's own. */
+  origin: 'zmail' | 'connected';
   ownerUserId: number | null;
   /** Set while a personal mailbox's owner is not a member of the organization. */
   ownerLeft: { at: string; throughMessageId: number } | null;
@@ -279,10 +281,13 @@ const exportHeader = 'address,display_name,members,member_count,sent_last_24h,cr
 
 /** What a viewer may do with a mailbox: the union of role, personal ownership, and member row. */
 export function mailboxAccessFor(
-  access: Pick<MailboxAccessState, 'type' | 'ownerUserId' | 'members'>,
+  access: Pick<MailboxAccessState, 'type' | 'origin' | 'ownerUserId' | 'members'>,
   viewer: MailboxViewer
 ): MailboxAccess {
-  const admin = viewer.role === 'owner' || viewer.role === 'admin';
+  const connected = access.origin === 'connected';
+  // A connected personal mailbox is its owner's own account: the role grants nothing on it.
+  const admin =
+    (viewer.role === 'owner' || viewer.role === 'admin') && !(connected && access.type === 'personal');
   const result: MailboxAccess = {
     view: false,
     send: false,
@@ -308,7 +313,22 @@ export function mailboxAccessFor(
       result.organize = true;
     }
   }
+  if (connected) {
+    // Read-only origin: nobody sends from it or organizes it, whatever the permission.
+    result.send = false;
+    result.organize = false;
+  }
   return result;
+}
+
+/** A Zmail personal mailbox whose owner left; a connected one never awaits a handover. */
+function awaitsHandover(access: MailboxAccessState): boolean {
+  return access.type === 'personal' && access.origin === 'zmail' && access.ownerLeft !== null;
+}
+
+/** A member's own connected account, which the directory and the export never list. */
+function isMembersOwnAccount(access: MailboxAccessState): boolean {
+  return access.origin === 'connected' && access.type === 'personal';
 }
 
 function anyAccess(access: MailboxAccess): boolean {
@@ -405,7 +425,7 @@ export class MockMailboxStore {
       .flatMap(state => {
         const access = mailboxAccessFor(state.access, viewer);
         if (!anyAccess(access)) return [];
-        const awaiting = state.access.type === 'personal' && state.access.ownerLeft !== null;
+        const awaiting = awaitsHandover(state.access);
         if (
           scope === 'usable' &&
           !access.view &&
@@ -474,6 +494,85 @@ export class MockMailboxStore {
     return { ok: true, mailbox: { ...this.view(state, viewer), unread_count: 0 } };
   }
 
+  /**
+   * The `external` mailbox of a newly bound outside account, owned by `ownerUserId` alone, with a
+   * few synced copies so the development inbox shows them. The address is the outside account's,
+   * never claimed, and the mailbox does not count toward the organization's limit.
+   */
+  createExternal(
+    organizationId: number,
+    ownerUserId: number,
+    address: string,
+    provider: string,
+    backfillDays: number
+  ): number {
+    const mailbox: StoredMailbox = {
+      id: this.nextMailboxId++,
+      address,
+      display_name: address,
+      created_at: this.timestamp(),
+    };
+    const state: MailboxState = {
+      mailbox,
+      access: {
+        type: 'personal',
+        origin: 'connected',
+        ownerUserId,
+        ownerLeft: null,
+        sealedBefore: null,
+        sealedThroughMessageId: 0,
+        webhooksEnabled: false,
+        members: new Map(),
+        events: [],
+      },
+      roleId: null,
+      messages: new Map(),
+      reads: new Map(),
+      stars: new Map(),
+      folders: new Map(),
+      labels: new Map(),
+      files: new Map(),
+    };
+    this.record(state, 'created', null, ownerUserId, { type: 'personal' });
+    this.mailboxesOf(organizationId).set(mailbox.id, state);
+    this.syncExternal(organizationId, mailbox.id, provider, backfillDays);
+    return mailbox.id;
+  }
+
+  /** Copies one more synced message into an external mailbox, as a sync would. */
+  syncExternal(
+    organizationId: number,
+    mailboxId: number,
+    provider: string,
+    backfillDays: number
+  ): void {
+    const state = this.mailboxesOf(organizationId).get(mailboxId);
+    if (!state || state.access.origin !== 'connected') return;
+    const now = this.dependencies.now().getTime();
+    const samples = [
+      { hoursAgo: 2, subject: 'Your order has shipped', from: 'orders@shop.example' },
+      { hoursAgo: 30, subject: 'Notes from Tuesday', from: 'sam@partner.example' },
+      { hoursAgo: 24 * Math.min(backfillDays, 10), subject: 'Welcome aboard', from: 'hi@news.example' },
+    ];
+    const stored = new Set([...state.messages.values()].map(message => message.message_id));
+    for (const [index, sample] of samples.entries()) {
+      // A copy is stored once per provider message id, so a rebind never adds a second one.
+      const providerMessageId = `mock-${mailboxId}-${index}@${provider}.example`;
+      if (stored.has(providerMessageId)) continue;
+      const message = this.welcomeMessage(state.mailbox);
+      this.store(state, {
+        ...message,
+        from: { address: sample.from, name: '' },
+        subject: sample.subject,
+        source: provider,
+        created_at: new Date(now - sample.hoursAgo * 60 * 60 * 1_000).toISOString(),
+        text_body: 'A read-only copy synced by the development mock connector.',
+        html_body: '<p>A read-only copy synced by the <strong>development mock</strong> connector.</p>',
+        message_id: providerMessageId,
+      });
+    }
+  }
+
   /** One page of the administration directory, newest first; owners and admins only. */
   directory(
     organizationId: number,
@@ -487,6 +586,7 @@ export class MockMailboxStore {
     );
     const matching = states.filter(
       state =>
+        !isMembersOwnAccount(state.access) &&
         (query.type === undefined || state.access.type === query.type) &&
         (query.beforeId === undefined || state.mailbox.id < query.beforeId) &&
         (needle === '' ||
@@ -645,7 +745,7 @@ export class MockMailboxStore {
     if (!managesOrganization(viewer)) return { ok: false, error: 'forbidden' };
     const emails = this.dependencies.memberEmails(organizationId);
     const lines = this.statesOf(organizationId)
-      .filter(state => state.access.type === type)
+      .filter(state => state.access.type === type && !isMembersOwnAccount(state.access))
       .sort((left, right) => right.mailbox.id - left.mailbox.id)
       .slice(0, maxMockExportRows)
       .map(state => {
@@ -1370,7 +1470,7 @@ export class MockMailboxStore {
       return { ok: false, error: 'invalid' };
     }
     const { access } = found.state;
-    if (access.type !== 'personal') return { ok: false, error: 'conflict' };
+    if (access.type !== 'personal' || access.origin === 'connected') return { ok: false, error: 'conflict' };
 
     const formerOwner = access.ownerUserId;
     const boundary = access.ownerLeft ?? {
@@ -1808,6 +1908,7 @@ export class MockMailboxStore {
     const isCurrentMember = (userId: unknown): userId is number =>
       typeof userId === 'number' && this.dependencies.membershipOf(organizationId, userId) !== null;
     const base = {
+      origin: 'zmail' as const,
       ownerLeft: null,
       sealedBefore: null,
       sealedThroughMessageId: 0,
@@ -1881,7 +1982,8 @@ export class MockMailboxStore {
       forgetReads(state, userId);
       this.record(state, 'member_removed', null, userId, { reason: 'left_organization' });
     }
-    if (access.type === 'personal' && access.ownerUserId !== null) {
+    // A connected personal mailbox is the owner's own account; it never awaits a handover.
+    if (access.type === 'personal' && access.origin === 'zmail' && access.ownerUserId !== null) {
       const owner = access.ownerUserId;
       if (!isMember(owner) && !access.ownerLeft) {
         access.ownerLeft = { at: this.timestamp(), throughMessageId: this.nextMessageId - 1 };
@@ -1979,8 +2081,9 @@ export class MockMailboxStore {
     return {
       ...state.mailbox,
       type: state.access.type,
+      origin: state.access.origin,
       owner_user_id: state.access.ownerUserId,
-      awaiting_handover: state.access.type === 'personal' && state.access.ownerLeft !== null,
+      awaiting_handover: awaitsHandover(state.access),
       sealed_before: state.access.sealedBefore,
       webhooks_enabled: state.access.webhooksEnabled,
       access,
@@ -2116,7 +2219,7 @@ export class MockMailboxStore {
       ...state.mailbox,
       type: state.access.type,
       owner_user_id: state.access.ownerUserId,
-      awaiting_handover: state.access.type === 'personal' && state.access.ownerLeft !== null,
+      awaiting_handover: awaitsHandover(state.access),
       member_count: state.access.type === 'shared' ? state.access.members.size : 0,
       sent_last_24h: this.sentLast24h(state),
     };
