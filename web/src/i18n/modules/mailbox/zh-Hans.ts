@@ -26,6 +26,9 @@ const messages = {
     title: '新建邮箱',
     localPart: '地址',
     localPartPlaceholder: 'hello',
+    sharedDomainRules:
+      '@{domain} 是 Zmail 的共享域名：地址全平台唯一、先到先得，删除后不能再用。',
+    ownDomainLink: '绑定自己的域名',
     localPartHint: '使用小写字母和数字，中间可以有单个点、下划线或连字符。',
     displayName: '显示名称（可选）',
     displayNamePlaceholder: '客户支持',

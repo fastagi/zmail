@@ -38,6 +38,7 @@ export function useLogin() {
  */
 export function useRegister() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const t = useT();
 
   return useMutation({
@@ -46,7 +47,8 @@ export function useRegister() {
     retry: false,
     onSuccess: () => {
       toast.success(t('auth.accountCreated'));
-      router.replace(authConfig.routes.afterLogin);
+      // An invitee who signed up from the invitation link goes back to accept it.
+      router.replace(resolveReturnUrl(searchParams?.get('returnUrl') ?? null));
     },
   });
 }

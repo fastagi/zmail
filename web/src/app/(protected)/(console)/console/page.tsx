@@ -17,13 +17,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { isDevtoolsEnabled } from '@/config/devtools';
 import { ROUTES } from '@/constants/routes';
 import { getSessionUser } from '@/features/auth/server/session';
+import { OnboardingChecklist } from '@/features/mailbox/components/onboarding-checklist';
 import { getT } from '@/i18n/server';
 
 import { GreetingClock } from './_components/greeting-clock';
 
 /**
- * Console home (RSC): the Zmail areas a member works in, and the order a new
- * organization sets them up in.
+ * Console home (RSC): the Zmail areas a member works in, and a getting-started
+ * checklist ticked from what the team has done.
  *
  * Pattern: page is a Server Component; the only client island is
  * `GreetingClock` which re-renders the wall-clock every minute.
@@ -129,40 +130,7 @@ export default async function ConsoleHomePage() {
         ))}
       </section>
 
-      <section
-        className="animate-enter mt-10 rounded-xl border bg-bg-surface p-6"
-        style={{ animationDelay: `${quickLinks.length * 40}ms` }}
-      >
-        <div className="flex items-start gap-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Rocket className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-base font-semibold">{t('home.gettingStartedTitle')}</h2>
-            <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-sm text-text-muted">
-              {(
-                [
-                  ['domain', ROUTES.CONSOLE.MAIL_DOMAIN],
-                  ['mailbox', ROUTES.CONSOLE.MAILBOXES],
-                  ['contacts', ROUTES.CONSOLE.MAIL_CONTACTS],
-                  ['template', ROUTES.CONSOLE.MAIL_TEMPLATES],
-                  ['broadcast', ROUTES.CONSOLE.MAIL_BROADCASTS],
-                ] as const
-              ).map(([step, href]) => (
-                <li key={step}>
-                  <Link
-                    href={href}
-                    className="inline-flex items-center gap-1 transition-colors hover:text-foreground hover:underline"
-                  >
-                    <span>{t(`home.gettingStarted.${step}`)}</span>
-                    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
-                  </Link>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </div>
-      </section>
+      <OnboardingChecklist />
 
       {isDevtoolsEnabled() ? (
         <section className="mt-10 rounded-xl border bg-bg-surface p-6">
