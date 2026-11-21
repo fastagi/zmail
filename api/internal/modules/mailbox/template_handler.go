@@ -317,13 +317,18 @@ func templateScope(c *gin.Context) (organizationID, templateID uint, ok bool) {
 // respondMissingVariables answers a template send that lacked values, naming each variable as a
 // field error under template.variables.
 func respondMissingVariables(c *gin.Context, err error) bool {
+	return respondMissingVariablesAt(c, err, "template.variables.")
+}
+
+// respondMissingVariablesAt names each missing variable as a field error under prefix.
+func respondMissingVariablesAt(c *gin.Context, err error, prefix string) bool {
 	var missing *MissingVariablesError
 	if !errors.As(err, &missing) {
 		return false
 	}
 	fields := make(map[string][]string, len(missing.Names))
 	for _, name := range missing.Names {
-		fields["template.variables."+name] = []string{"is required"}
+		fields[prefix+name] = []string{"is required"}
 	}
 	c.JSON(http.StatusUnprocessableEntity, response.ValidationErrorResponse{
 		Code:      http.StatusUnprocessableEntity,

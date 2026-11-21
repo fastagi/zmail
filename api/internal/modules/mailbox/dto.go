@@ -117,8 +117,9 @@ func toMailboxAccessEventResponses(events []*domain.MailboxAccessEvent) []Mailbo
 
 // SendMailMessageRequest asks to send one message from a mailbox.
 type SendMailMessageRequest struct {
-	To []string `json:"to" binding:"required,min=1,max=50,dive,required,max=320"`
-	Cc []string `json:"cc" binding:"omitempty,max=50,dive,required,max=320"`
+	// To and Cc are checked by the service, so every recipient rule answers MESSAGE_INVALID.
+	To []string `json:"to"`
+	Cc []string `json:"cc"`
 	// Subject, Text, and HTML are required unless Template is given; the service decides.
 	Subject   string `json:"subject" binding:"max=998"`
 	Text      string `json:"text" binding:"max=262144"`
@@ -779,11 +780,20 @@ func toRevealedMailMessageResponse(message *domain.MailMessage) *MailMessageResp
 		MailMessageSummaryResponse: summary,
 		TextBody:                   message.TextBody,
 		HTMLBody:                   message.HTMLBody,
-		MessageID:                  message.MessageID,
+		MessageID:                  rfcMessageIDOf(message),
 		InReplyTo:                  message.InReplyTo,
 		Events:                     toMailEventResponses(message.Events),
 		Attachments:                toMailAttachmentResponses(message.Attachments),
 	}
+}
+
+// rfcMessageIDOf is the RFC 5322 Message-ID a client can reply to. An outbound message's
+// MessageID is the provider's id, so it never stands in for the one Zmail generated.
+func rfcMessageIDOf(message *domain.MailMessage) string {
+	if message.RFCMessageID != "" || message.Direction == domain.MailDirectionOutbound {
+		return message.RFCMessageID
+	}
+	return message.MessageID
 }
 
 func templateIDOf(message *domain.MailMessage) *uint {
