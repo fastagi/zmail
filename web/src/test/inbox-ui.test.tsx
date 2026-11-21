@@ -370,6 +370,42 @@ describe('unified inbox', () => {
     expect(within(dialog).getByRole('button', { name: 'Gmail' })).toBeEnabled();
   });
 
+  it('keeps connected mailboxes listed while connectors are off or connections are unknown', async () => {
+    // No connector offered, and the connections have not answered (pending or failed).
+    state.connectors.data = [];
+    state.connections.data = undefined;
+    state.mailboxes.data = [
+      mailbox(1, 'hello'),
+      { ...externalMailbox(42, 'old@outlook.com'), type: 'personal', origin: 'connected' },
+    ];
+    renderRoute();
+
+    const mine = (await screen.findAllByRole('navigation', { name: 'Connected by me' }))[0];
+    const row = within(mine).getByRole('button', { name: /old@outlook\.com/u });
+    expect(row.querySelector('[data-status-dot]')).toBeNull();
+    expect(within(mine).queryByRole('button', { name: 'Add external mailbox' })).toBeNull();
+    expect(
+      within(mine).queryByRole('button', { name: 'Manage connected mailboxes' })
+    ).toBeNull();
+    expect(within(groupsNav()).queryByText('old@outlook.com')).not.toBeInTheDocument();
+    fireEvent.click(row);
+    expect(new URLSearchParams(window.location.search).get('box')).toBe('42');
+  });
+
+  it('decorates a connected mailbox with its status once the connections answer', async () => {
+    state.connectors.data = [];
+    state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];
+    state.connections.data = [
+      connection({ id: 1, mailbox_id: 41, account_address: 'me@gmail.com', status: 'revoked' }),
+    ];
+    renderRoute();
+
+    const mine = (await screen.findAllByRole('navigation', { name: 'Connected by me' }))[0];
+    const row = within(mine).getByRole('button', { name: 'me@gmail.com, Gmail, Disconnected' });
+    expect(row.querySelector('[data-status-dot="revoked"]')).toHaveClass('bg-text-faint');
+    expect(within(mine).queryByRole('button', { name: 'Add external mailbox' })).toBeNull();
+  });
+
   it('shows a one-time reconnect notice for a connection that lost its grant', async () => {
     state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
     state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];

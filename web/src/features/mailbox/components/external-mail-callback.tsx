@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertCircle, Loader2 } from 'lucide-react';
@@ -14,8 +14,9 @@ import {
   useBeginExternalAuthorization,
   useCompleteExternalMailAuthorization,
 } from '@/features/mailbox/hooks/use-external-mail-actions';
-import { MAIL_ORGANIZATION_PARAM } from '@/features/mailbox/hooks/use-mail-organization';
+import { MAIL_ORGANIZATION_PARAM } from '@/features/mailbox/components/mailbox-params';
 import {
+  EXTERNAL_MAIL_CALLBACK_PATH,
   forgetAuthorization,
   recallAuthorization,
   type PendingExternalAuthorization,
@@ -82,9 +83,17 @@ function inboxHref(organizationId: number, mailboxId?: number): string {
  */
 export function ExternalMailCallback() {
   const searchParams = useSearchParams();
-  const state = searchParams.get('state') ?? '';
-  const code = searchParams.get('code') ?? '';
-  const providerError = searchParams.get('error');
+  // Read once, then taken out of the address bar before anything else happens on every path, so
+  // the single-use `state` and the `code` never stay in the history, a bookmark, or analytics.
+  const [{ state, code, providerError }] = useState(() => ({
+    state: searchParams.get('state') ?? '',
+    code: searchParams.get('code') ?? '',
+    providerError: searchParams.get('error'),
+  }));
+  useLayoutEffect(() => {
+    if (window.location.search === '' && window.location.hash === '') return;
+    window.history.replaceState(window.history.state, '', EXTERNAL_MAIL_CALLBACK_PATH);
+  }, []);
   // Session storage exists only in the browser: the server and the hydrating render show the
   // working state, and the sign-in is read once hydrated.
   const hydrated = useSyncExternalStore(

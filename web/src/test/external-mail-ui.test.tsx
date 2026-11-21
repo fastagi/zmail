@@ -14,7 +14,7 @@ import type {
   ExternalMailConnection,
   ExternalMailConnector,
 } from '@/features/mailbox/external-mail-schemas';
-import { ApiErrorCode } from '@/http/codes';
+import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { messages } from '@/i18n/modules';
 import enMailbox from '@/i18n/modules/mailbox/en-US';
@@ -156,6 +156,43 @@ describe('connect dialog', () => {
     expect(within(dialog).getByRole('button', { name: /Opening Outlook/u })).toBeDisabled();
   });
 
+  it('can be used again after Back from the provider restores the page', async () => {
+    service.start.mockResolvedValue({
+      authorization_url: 'https://accounts.example.com/auth?state=bf',
+      expires_at: '2026-11-21T10:10:00Z',
+    });
+    renderWith(
+      <ExternalConnectDialog open onOpenChange={() => {}} organizationId={7} connectors={[gmail]} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Gmail' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Gmail' }));
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: /Opening Gmail/u })).toBeDisabled();
+
+    // A page shown from the back-forward cache starts over.
+    act(() => {
+      const event = new Event('pageshow');
+      Object.defineProperty(event, 'persisted', { value: true });
+      window.dispatchEvent(event);
+    });
+    expect(await screen.findByRole('button', { name: 'Continue to Gmail' })).toBeEnabled();
+  });
+
+  it('refuses a provider page that is not https and stays put', async () => {
+    service.start.mockRejectedValue(
+      new ApiError('invalid', ClientErrorCode.INVALID_RESPONSE)
+    );
+    renderWith(
+      <ExternalConnectDialog open onOpenChange={() => {}} organizationId={7} connectors={[gmail]} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Gmail' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to Gmail' }));
+    expect(
+      await screen.findByText('The sign-in could not be started. Try again.')
+    ).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it('goes back to the providers and reports a failed start', async () => {
     service.start.mockRejectedValue(
       new ApiError('gone', ApiErrorCode.MAILBOX_EXTERNAL_PROVIDER_UNAVAILABLE, 404)
@@ -183,6 +220,11 @@ describe('callback page', () => {
       window.sessionStorage.setItem(storageKey('abc'), JSON.stringify(pending));
     }
   }
+  /** `state` and `code` leave the address bar as soon as the page has read them. */
+  function expectCleanUrl() {
+    expect(window.location.pathname).toBe('/console/mailboxes/connected/callback');
+    expect(window.location.search).toBe('');
+  }
   const newBinding = { organizationId: 7, provider: 'gmail', backfillDays: 30, connectionId: null };
   const reconnecting = { organizationId: 7, provider: 'gmail', backfillDays: null, connectionId: 3 };
 
@@ -199,6 +241,7 @@ describe('callback page', () => {
     );
 
     expect(screen.getByText('Finishing the connection…')).toBeInTheDocument();
+    expectCleanUrl();
     await waitFor(() =>
       expect(router.replace).toHaveBeenCalledWith('/console/mailboxes?org=7&box=41')
     );
@@ -217,7 +260,10 @@ describe('callback page', () => {
     });
     renderWith(<ExternalMailCallback />);
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Reconnected. Mail is syncing again.'));
+    expectCleanUrl();
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith('Reconnected. Mail is syncing again.')
+    );
     expect(router.replace).toHaveBeenCalledWith('/console/mailboxes?org=7&box=41');
   });
 
@@ -257,6 +303,7 @@ describe('callback page', () => {
     renderWith(<ExternalMailCallback />);
 
     expect(await screen.findByText(text)).toBeInTheDocument();
+    expectCleanUrl();
     expect(service.complete).toHaveBeenCalledTimes(1);
     expect(router.replace).not.toHaveBeenCalled();
     expect(screen.getByRole('link', { name: 'Back to inbox' })).toHaveAttribute(
@@ -291,6 +338,7 @@ describe('callback page', () => {
     expect(
       screen.getByText('The sign-in was cancelled, so nothing was connected.')
     ).toBeInTheDocument();
+    expectCleanUrl();
     unmount();
 
     // Without the session entry the organization is unknown, so nothing is sent.
@@ -301,11 +349,13 @@ describe('callback page', () => {
       screen.getByText('This sign-in expired or was already used. Start again from your inbox.')
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try another account' })).not.toBeInTheDocument();
+    expectCleanUrl();
     second.unmount();
 
     arrive('code=xyz', null);
     renderWith(<ExternalMailCallback />);
     expect(screen.getByText(/missing the details the provider sends back/u)).toBeInTheDocument();
+    expectCleanUrl();
     await act(async () => {});
     expect(service.complete).not.toHaveBeenCalled();
   });

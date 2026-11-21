@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
-import { liveRefresh, mailboxKeys, validId } from '@/features/mailbox/hooks/use-mailbox';
+import { liveRefresh, mailboxKeys, validId } from '@/features/mailbox/hooks/mailbox-keys';
 
 /**
  * The service, with its response schemas, loads on first use: the inbox reads the connector list

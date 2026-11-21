@@ -1,3 +1,6 @@
+/** Query parameter of the mail pages that names the organization they show. */
+export const MAIL_ORGANIZATION_PARAM = 'org';
+
 /** Query parameter naming the open mailbox; the organization stays in `org`. */
 export const MAILBOX_PARAM = 'mailbox';
 

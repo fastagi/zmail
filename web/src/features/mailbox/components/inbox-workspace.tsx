@@ -347,8 +347,13 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const connectors = useExternalMailConnectors(organizationId);
   const connectorList = connectors.data ?? [];
   const externalOn = connectorList.length > 0;
-  const connections = useExternalMailConnections(organizationId, { enabled: externalOn });
-  const connectionList = externalOn ? (connections.data ?? []) : [];
+  // Connections are also read for connected mailboxes the list already holds, so their status
+  // shows even after the instance stops offering connectors.
+  const hasConnected = (mailboxes.data ?? []).some(isConnectedMailbox);
+  const connections = useExternalMailConnections(organizationId, {
+    enabled: externalOn || hasConnected,
+  });
+  const connectionList = connections.data ?? [];
   // Mounted from the first open on, so the dialogs can animate closed.
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectMounted, setConnectMounted] = useState(false);
@@ -772,13 +777,11 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     );
   }
 
-  const external: InboxSidebarExternal | null = externalOn
-    ? {
-        connections: connectionList,
-        onAdd: openConnect,
-        onManage: openManageExternal,
-      }
-    : null;
+  const external: InboxSidebarExternal = {
+    connections: connections.data,
+    onAdd: externalOn ? openConnect : null,
+    onManage: openManageExternal,
+  };
   const externalProvider = (mailboxId: number): string | null => {
     const mailbox = mailboxes.data.find(item => item.id === mailboxId);
     const bound = connectionList.find(connection => connection.mailbox_id === mailboxId);

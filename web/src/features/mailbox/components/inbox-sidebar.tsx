@@ -23,7 +23,7 @@ import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
 const InboxSidebarFooter = lazy(() => import('./inbox-sidebar-footer'));
-// "Connected by me" loads only while external mail is on.
+// "Connected by me" loads only when the viewer has a connected mailbox or may add one.
 const ConnectedMailboxes = lazy(() => import('./inbox-sidebar-connected'));
 
 const viewIcons = {
@@ -39,11 +39,12 @@ const viewOrder: readonly InboxView[] = ['all', 'today', 'pending', 'sent'];
 export type InboxRoleFilter = number | 'none';
 
 /**
- * The external mailboxes section: the viewer's own connections, the "Add external mailbox" entry
- * (null when the instance offers no connector), and their management.
+ * The external mailboxes section: the viewer's own connections when known (they decorate the
+ * connected mailboxes with their provider and status), the "Add external mailbox" entry (null when
+ * the instance offers no connector), and their management.
  */
 export interface InboxSidebarExternal {
-  connections: readonly ExternalMailConnection[];
+  connections: readonly ExternalMailConnection[] | undefined;
   onAdd: (() => void) | null;
   onManage: () => void;
 }
@@ -119,7 +120,7 @@ export function InboxSidebar({
   onCompose: (() => void) | null;
   /** Opens the keyboard shortcut help. */
   onShortcuts: () => void;
-  /** The external mailboxes section; null while external mail is off. */
+  /** The external mailboxes section; it shows while the viewer has one or may add one. */
   external?: InboxSidebarExternal | null;
 }) {
   const t = useT('mailbox');
@@ -143,10 +144,13 @@ export function InboxSidebar({
 
   // External mailboxes are private copies: their owner finds them under "Connected by me", and
   // nobody else lists them among the team's.
-  const connectedIds = new Set(external?.connections.map(item => item.mailbox_id));
-  const teamMailboxes = mailboxes.filter(
-    mailbox => !isConnectedMailbox(mailbox) && !connectedIds.has(mailbox.id)
-  );
+  const connectedIds = new Set(external?.connections?.map(item => item.mailbox_id));
+  const isConnected = (mailbox: Mailbox) =>
+    isConnectedMailbox(mailbox) || connectedIds.has(mailbox.id);
+  const teamMailboxes = mailboxes.filter(mailbox => !isConnected(mailbox));
+  // The viewer's own: only the member who connected a mailbox reads it.
+  const mine = mailboxes.filter(mailbox => isConnected(mailbox) && mailbox.access.view);
+  const showConnected = external !== null && (mine.length > 0 || external.onAdd !== null);
   const ordered =
     sort === 'default'
       ? teamMailboxes
@@ -276,7 +280,7 @@ export function InboxSidebar({
       <nav aria-label={t('inbox.groups.label')} className="flex flex-col gap-0.5">
         <div className={cn('items-center gap-2 pt-[18px] pr-1 pb-1.5 pl-3', wide)}>
           <p className="min-w-0 flex-1 truncate text-[11px] tracking-[0.06em] text-text-faint">
-            {external
+            {showConnected
               ? t('external.sidebar.team')
               : flat
                 ? t('inbox.groups.mailboxes')
@@ -391,11 +395,11 @@ export function InboxSidebar({
         })}
       </nav>
 
-      {external ? (
+      {external && showConnected ? (
         <Suspense fallback={null}>
           <ConnectedMailboxes
             external={external}
-            mailboxes={mailboxes}
+            mailboxes={mine}
             unreadByMailbox={unreadByMailbox}
             box={box}
             rail={rail}

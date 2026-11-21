@@ -1,6 +1,6 @@
 'use client';
 
-import { Plus, Settings2 } from 'lucide-react';
+import { Mail, Plus, Settings2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import type { InboxSidebarExternal } from '@/features/mailbox/components/inbox-sidebar';
@@ -10,8 +10,10 @@ import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
 /**
- * "Connected by me": the viewer's external mailboxes, each with a provider badge and a status dot
- * (green syncing, amber needs reconnecting, grey disconnected), then "Add external mailbox".
+ * "Connected by me": the viewer's connected mailboxes from the mailbox list, so they stay listed
+ * whatever the connector list or the connections say. While the connections are known, each row
+ * carries its provider and a status dot (green syncing, amber needs reconnecting, grey
+ * disconnected). "Add external mailbox" follows while the instance offers a connector.
  */
 export default function ConnectedMailboxes({
   external,
@@ -22,6 +24,7 @@ export default function ConnectedMailboxes({
   onBox,
 }: {
   external: InboxSidebarExternal;
+  /** The viewer's connected mailboxes, in the list's order. */
   mailboxes: readonly Mailbox[];
   unreadByMailbox: Map<number, number>;
   box: number | null;
@@ -30,8 +33,8 @@ export default function ConnectedMailboxes({
 }) {
   const t = useT('mailbox');
   const wide = rail ? 'hidden lg:flex' : 'flex';
-  const readable = new Set(
-    mailboxes.filter(mailbox => mailbox.access.view).map(mailbox => mailbox.id)
+  const byMailbox = new Map(
+    (external.connections ?? []).map(connection => [connection.mailbox_id, connection])
   );
   const label = t('external.sidebar.mine');
   return (
@@ -40,7 +43,7 @@ export default function ConnectedMailboxes({
         <p className="min-w-0 flex-1 truncate text-[11px] tracking-[0.06em] text-text-faint">
           {label}
         </p>
-        {external.connections.length > 0 ? (
+        {external.connections && external.connections.length > 0 ? (
           <Button
             type="button"
             isIcon
@@ -56,60 +59,73 @@ export default function ConnectedMailboxes({
         ) : null}
       </div>
       {rail ? <div className="h-4 lg:hidden" aria-hidden="true" /> : null}
-      {external.connections.map(connection => {
-        const provider = providerName(connection.provider);
-        const status = t(`external.status.${connection.status}`);
-        const unread = unreadByMailbox.get(connection.mailbox_id) ?? 0;
-        const selectable = readable.has(connection.mailbox_id);
-        const selected = selectable && connection.mailbox_id === box;
-        const name =
-          unread > 0
-            ? t('external.sidebar.rowUnread', {
-                address: connection.account_address,
-                provider,
-                status,
-                count: unread,
-              })
-            : t('external.sidebar.row', { address: connection.account_address, provider, status });
+      {mailboxes.map(mailbox => {
+        const connection = byMailbox.get(mailbox.id);
+        const unread = unreadByMailbox.get(mailbox.id) ?? 0;
+        const selected = mailbox.id === box;
+        let name: string | undefined;
+        if (connection) {
+          const provider = providerName(connection.provider);
+          const status = t(`external.status.${connection.status}`);
+          name =
+            unread > 0
+              ? t('external.sidebar.rowUnread', {
+                  address: mailbox.address,
+                  provider,
+                  status,
+                  count: unread,
+                })
+              : t('external.sidebar.row', { address: mailbox.address, provider, status });
+        } else if (unread > 0) {
+          name = t('views.unread', { name: mailbox.address, count: unread });
+        }
         return (
           <button
-            key={connection.id}
+            key={mailbox.id}
             type="button"
             aria-label={name}
             aria-current={selected ? 'page' : undefined}
-            title={rail ? connection.account_address : undefined}
-            disabled={!selectable}
-            data-connection-status={connection.status}
+            title={rail ? mailbox.address : undefined}
+            data-connected-mailbox={mailbox.id}
+            data-connection-status={connection?.status}
             className={cn(
               'flex h-[30px] w-full min-w-0 shrink-0 items-center gap-2 rounded-[8px] pr-3 pl-3 text-left text-[12.5px] transition-colors focus-ring motion-reduce:transition-none',
-              'disabled:cursor-default disabled:opacity-60',
               rail && 'justify-center px-0 lg:justify-start lg:px-3',
               selected
                 ? 'bg-blue-50 font-semibold text-blue-800 dark:bg-blue-950/65 dark:text-blue-200'
-                : 'text-text-subtle hover:bg-nav-hover disabled:hover:bg-transparent'
+                : 'text-text-subtle hover:bg-nav-hover'
             )}
-            onClick={() => onBox(connection.mailbox_id)}
+            onClick={() => onBox(mailbox.id)}
           >
-            <span aria-hidden="true" className="relative flex size-5 shrink-0 items-center justify-center">
-              <span className="grid size-5 place-items-center rounded-md bg-row-selected text-[10px] font-semibold text-text-muted">
-                {provider.charAt(0)}
-              </span>
-              <span
-                data-status-dot={connection.status}
-                className={cn(
-                  'absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-bg-canvas',
-                  statusDotClassName(connection.status)
-                )}
-              />
-            </span>
             <span
               aria-hidden="true"
+              className="relative flex size-5 shrink-0 items-center justify-center"
+            >
+              <span className="grid size-5 place-items-center rounded-md bg-row-selected text-[10px] font-semibold text-text-muted">
+                {connection ? (
+                  providerName(connection.provider).charAt(0)
+                ) : (
+                  <Mail className="size-3" />
+                )}
+              </span>
+              {connection ? (
+                <span
+                  data-status-dot={connection.status}
+                  className={cn(
+                    'absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-bg-canvas',
+                    statusDotClassName(connection.status)
+                  )}
+                />
+              ) : null}
+            </span>
+            <span
+              aria-hidden={name ? 'true' : undefined}
               className={cn(
                 'min-w-0 flex-1 truncate',
-                rail && 'hidden lg:inline lg:min-w-0 lg:flex-1 lg:truncate'
+                rail && 'sr-only lg:not-sr-only lg:min-w-0 lg:flex-1 lg:truncate'
               )}
             >
-              {connection.account_address}
+              {mailbox.address}
             </span>
             {unread > 0 ? (
               <span

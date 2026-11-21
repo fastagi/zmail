@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
@@ -8,7 +9,7 @@ import type {
   StartExternalMailAuthorizationInput,
 } from '@/features/mailbox/external-mail-schemas';
 import { externalMailKeys } from '@/features/mailbox/hooks/use-external-mail';
-import { mailboxKeys } from '@/features/mailbox/hooks/use-mailbox';
+import { mailboxKeys } from '@/features/mailbox/hooks/mailbox-keys';
 import { navigateToProvider, rememberAuthorization } from '@/features/mailbox/utils/external-mail';
 
 /**
@@ -61,6 +62,16 @@ export function useDisconnectExternalMail(organizationId: number) {
  */
 export function useBeginExternalAuthorization(organizationId: number) {
   const start = useStartExternalMailAuthorization(organizationId);
+  const { reset } = start;
+  // Back from the provider restores this page from the back-forward cache with the sign-in still
+  // "leaving"; it starts over so the button can be used again.
+  useEffect(() => {
+    const restored = (event: PageTransitionEvent) => {
+      if (event.persisted) reset();
+    };
+    window.addEventListener('pageshow', restored);
+    return () => window.removeEventListener('pageshow', restored);
+  }, [reset]);
   const begin = (
     input:
       | { kind: 'new'; provider: string; backfillDays: number }

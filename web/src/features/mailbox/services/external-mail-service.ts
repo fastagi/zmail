@@ -138,13 +138,27 @@ export function authorizationState(authorizationUrl: string): string | null {
   }
 }
 
-function isNavigableUrl(value: string): boolean {
+/**
+ * A provider page the browser may be sent to: `https:` only, and plain `http:` only on this machine
+ * (`localhost`, `*.localhost`, `127.0.0.1`, `[::1]`), where the development mock answers its own
+ * callback page.
+ */
+export function isNavigableUrl(value: string): boolean {
+  let url: URL;
   try {
-    const url = new URL(value);
-    return url.protocol === 'https:' || url.protocol === 'http:';
+    url = new URL(value);
   } catch {
     return false;
   }
+  if (url.protocol === 'https:') return true;
+  if (url.protocol !== 'http:') return false;
+  const host = url.hostname.toLowerCase();
+  return (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '127.0.0.1' ||
+    host === '[::1]'
+  );
 }
 
 function validCallbackValue(value: string): boolean {
