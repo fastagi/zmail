@@ -17,6 +17,9 @@ const service = vi.hoisted(() => ({ requestRegistrationCode: vi.fn() }));
 
 vi.mock('@/features/auth/hooks/use-auth', () => ({ useRegister: () => mutation }));
 vi.mock('@/features/auth/services/auth-service', () => ({ authService: service }));
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
 
 function renderForm() {
   return render(
@@ -44,6 +47,21 @@ describe('two-step registration form', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('keeps the invitation page an invitee came from on the sign-in link', () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/register?returnUrl=%2Fconsole%2Forganizations%3Finvitation%3Doinv_a'
+    );
+    renderForm();
+
+    expect(screen.getByRole('link', { name: 'Sign In' })).toHaveAttribute(
+      'href',
+      '/login?returnUrl=%2Fconsole%2Forganizations%3Finvitation%3Doinv_a'
+    );
   });
 
   it('asks for the email first and reveals the rest once a code is sent', async () => {

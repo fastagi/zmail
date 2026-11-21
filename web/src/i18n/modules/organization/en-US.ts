@@ -20,6 +20,14 @@ const messages = {
   emptyTitle: 'No organizations yet',
   emptyDescription:
     'Create the first organization to start managing members and organization-owned resources.',
+  setup: {
+    title: 'Name your team',
+    description: "Your team owns its mailboxes and members. Next you'll create its first address.",
+    name: 'Team name',
+    namePlaceholder: 'For example, Acme',
+    submit: 'Create team',
+    invited: 'Were you invited? Open the link in your invitation email, or use Accept invitation on the Organizations page.',
+  },
   back: 'Back to organizations',
   contextVerified: 'Context verified',
   profile: 'Organization profile',

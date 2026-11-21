@@ -69,13 +69,25 @@ const messages = {
       featuresBetween: 'and expose them through routes under',
       featuresAfter: '.',
     },
-    gettingStarted: {
-      domain: 'Connect your domain under Admin console, Domains, or use the shared domain.',
-      mailbox: 'Create a sending address under Mailboxes, such as hello@your-domain.',
-      contacts: 'Create a list under Contacts and import contacts.',
-      template: 'Save a product update under Templates.',
-      broadcast:
-        'Under Broadcasts, pick the domain, mailbox, template, and list; send a test wave before everyone.',
+    onboarding: {
+      team: {
+        title: 'Create your team',
+        hint: 'Done.',
+      },
+      mailbox: {
+        title: 'Create your first mailbox',
+        hint: 'An address such as hello@ that your team sends and receives from.',
+      },
+      invite: {
+        title: 'Invite your colleagues',
+        hint: 'They get an email with a link to join; it ticks once someone accepts.',
+      },
+      domain: {
+        title: 'Use your own domain (optional)',
+        hint: "Send from @your-company.com instead of the shared domain. You'll change your domain's name servers once.",
+      },
+      more: 'Ready for more?',
+      moreLink: 'Send a product update to a contact list',
     },
   },
 } as const;

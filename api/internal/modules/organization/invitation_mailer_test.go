@@ -36,7 +36,7 @@ func (s *invitationEmailSenderStub) SendEmail(_ context.Context, to []string, su
 
 func TestInvitationMailerEscapesFeatureOwnedTemplate(t *testing.T) {
 	sender := &invitationEmailSenderStub{configured: true}
-	mailer := newInvitationMailer(sender)
+	mailer := newInvitationMailer(sender, "")
 	expiresAt := time.Date(2026, time.July, 22, 20, 0, 0, 0, time.UTC)
 
 	err := mailer.SendInvitation(
@@ -59,7 +59,7 @@ func TestInvitationMailerEscapesFeatureOwnedTemplate(t *testing.T) {
 
 func TestInvitationMailerRejectsUnconfiguredDelivery(t *testing.T) {
 	sender := &invitationEmailSenderStub{}
-	mailer := newInvitationMailer(sender)
+	mailer := newInvitationMailer(sender, "")
 
 	err := mailer.SendInvitation(
 		context.Background(),
@@ -74,3 +74,32 @@ func TestInvitationMailerRejectsUnconfiguredDelivery(t *testing.T) {
 }
 
 var _ invitationEmailSender = (*testplatform.FakeMailer)(nil)
+
+func TestInvitationMailerLinksToTheConsoleWhenThePublicURLIsKnown(t *testing.T) {
+	sender := &invitationEmailSenderStub{configured: true}
+	mailer := newInvitationMailer(sender, "https://zmail.example")
+
+	err := mailer.SendInvitation(
+		context.Background(),
+		"member@example.com",
+		"Acme",
+		domain.OrganizationRoleMember,
+		"oinv_abc.def+/=",
+		time.Date(2026, time.July, 22, 20, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+	assert.Contains(t, sender.html,
+		`href="https://zmail.example/invite#oinv_abc.def%2B%2F%3D"`)
+	// The token stays in the mail for anyone who cannot follow the link.
+	assert.Contains(t, sender.html, "oinv_abc.def+/=")
+}
+
+func TestInvitationMailerOmitsTheLinkWithoutAPublicURL(t *testing.T) {
+	sender := &invitationEmailSenderStub{configured: true}
+	mailer := newInvitationMailer(sender, "")
+
+	err := mailer.SendInvitation(context.Background(), "member@example.com", "Acme",
+		domain.OrganizationRoleMember, "oinv_abc", time.Now())
+	require.NoError(t, err)
+	assert.NotContains(t, sender.html, "href=")
+}

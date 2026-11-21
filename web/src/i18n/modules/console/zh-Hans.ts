@@ -69,12 +69,25 @@ const messages = {
       featuresBetween: '中添加新 feature，并通过',
       featuresAfter: '下的新路由公开它们。',
     },
-    gettingStarted: {
-      domain: '在「管理后台 › 域名管理」绑定自己的域名，或直接使用共享域名。',
-      mailbox: '在「邮箱」创建发件地址，例如 hello@你的域名。',
-      contacts: '在「联系人」新建名单并导入联系人。',
-      template: '在「模板」保存一封产品更新邮件。',
-      broadcast: '在「群发」选择域名、邮箱、模板和名单，先发测试批次再全量发送。',
+    onboarding: {
+      team: {
+        title: '创建团队',
+        hint: '已完成。',
+      },
+      mailbox: {
+        title: '开第一个邮箱',
+        hint: '例如 hello@，团队用它收信和发信。',
+      },
+      invite: {
+        title: '邀请同事',
+        hint: '对方会收到带加入链接的邮件，有人接受后这一步打勾。',
+      },
+      domain: {
+        title: '使用自己的域名（可选）',
+        hint: '用 @你的公司.com 收发信，不再用共享域名；只需在域名服务商那里改一次 NS。',
+      },
+      more: '还想做更多？',
+      moreLink: '给联系人列表群发一封产品更新',
     },
   },
 } as const satisfies LocaleMessageShape<ConsoleMessages>;

@@ -1,7 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, ArrowRight, Building2, RefreshCw } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { AlertCircle, ArrowRight, RefreshCw } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -18,14 +20,19 @@ import {
 import { getOrganizationRoute } from '@/constants/routes';
 import { AcceptOrganizationInvitationDialog } from '@/features/organization/components/accept-organization-invitation-dialog';
 import { CreateOrganizationDialog } from '@/features/organization/components/create-organization-dialog';
+import { TeamSetupCard } from '@/features/organization/components/team-setup-card';
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
 import type { OrganizationRole } from '@/features/organization/types';
 import { resolveOrganizationErrorKey } from '@/features/organization/utils/organization-error';
+import { takePendingInvitation } from '@/features/organization/utils/pending-invitation';
 import { useT } from '@/i18n';
 
 export function OrganizationDirectory() {
   const t = useT('organization');
   const query = useOrganizations();
+  const accepting = useSearchParams()?.get('accept') === '1';
+  // An invitation link left its token in this tab (see `/invite`); read once, on the first render.
+  const [pendingToken] = useState(() => (accepting ? takePendingInvitation() : null));
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
@@ -35,7 +42,7 @@ export function OrganizationDirectory() {
           <p className="max-w-2xl text-sm text-muted-foreground">{t('description')}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <AcceptOrganizationInvitationDialog />
+          <AcceptOrganizationInvitationDialog initialToken={pendingToken} />
           <CreateOrganizationDialog />
         </div>
       </div>
@@ -61,11 +68,7 @@ export function OrganizationDirectory() {
           </Alert>
         ) : null}
         {query.data?.items.length === 0 ? (
-          <div className="flex min-h-56 flex-col items-center justify-center border border-dashed p-8 text-center">
-            <Building2 className="mb-4 size-8 text-muted-foreground" aria-hidden="true" />
-            <h2 className="text-base font-medium">{t('emptyTitle')}</h2>
-            <p className="mt-1 max-w-md text-sm text-muted-foreground">{t('emptyDescription')}</p>
-          </div>
+          <TeamSetupCard className="mx-auto max-w-xl" />
         ) : null}
         {query.data && query.data.items.length > 0 ? (
           <div className="overflow-hidden rounded-md border bg-background">
