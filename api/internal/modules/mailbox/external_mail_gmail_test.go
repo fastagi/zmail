@@ -93,15 +93,13 @@ func (g *fakeGoogle) source(pageSize int) *gmailMailSource {
 	return source
 }
 
-// store adds messages; backfill ones join the listing, newest first in the order given.
-func (g *fakeGoogle) store(backfill bool, messages ...gmailMessage) {
+// store adds messages to the backfill listing, newest first in the order given.
+func (g *fakeGoogle) store(messages ...gmailMessage) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	for _, message := range messages {
 		g.messages[message.ID] = message
-		if backfill {
-			g.order = append(g.order, message.ID)
-		}
+		g.order = append(g.order, message.ID)
 	}
 }
 
@@ -145,7 +143,7 @@ func (g *fakeGoogle) writeJSON(w http.ResponseWriter, status int, body any) {
 func (g *fakeGoogle) serve(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	operation := ""
+	var operation string
 	switch {
 	case r.URL.Path == "/token":
 		operation = "token"
@@ -449,7 +447,7 @@ func TestGmailBackfillPagesThenHistory(t *testing.T) {
 	google := newFakeGoogle(t)
 	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 	for i := 7; i >= 1; i-- {
-		google.store(true, gmailTestMessage(fmt.Sprintf("b%d", i), now.Add(-time.Duration(i)*time.Hour)))
+		google.store(gmailTestMessage(fmt.Sprintf("b%d", i), now.Add(-time.Duration(i)*time.Hour)))
 	}
 	source := google.source(3)
 	ctx := context.Background()
@@ -576,7 +574,7 @@ func TestGmailFetchErrors(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			google := newFakeGoogle(t)
 			now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
-			google.store(true, gmailTestMessage("b1", now))
+			google.store(gmailTestMessage("b1", now))
 			google.arrive(gmailTestMessage("n1", now))
 			for operation, failure := range test.fail {
 				google.failing(operation, failure)
@@ -618,7 +616,7 @@ func TestGmailRotatedRefreshToken(t *testing.T) {
 	if err != nil || fetched.RefreshToken != "refresh-gmail-2" {
 		t.Fatalf("rotated fetch = %q, %v", fetched.RefreshToken, err)
 	}
-	if _, err := source.Fetch(context.Background(), request); !errors.Is(err, ErrExternalMailAuth) {
+	if _, err = source.Fetch(context.Background(), request); !errors.Is(err, ErrExternalMailAuth) {
 		t.Fatalf("the spent token: err = %v, want ErrExternalMailAuth", err)
 	}
 	request.Token.RefreshToken = "refresh-gmail-2"
@@ -798,9 +796,9 @@ func TestGmailSyncStoresOnce(t *testing.T) {
 	google.refresh = map[string]bool{externalTestToken: true}
 	now := f.service.now().UTC()
 	for i := 5; i >= 1; i-- {
-		google.store(true, gmailTestMessage(fmt.Sprintf("b%d", i), now.Add(-time.Duration(i)*time.Hour)))
+		google.store(gmailTestMessage(fmt.Sprintf("b%d", i), now.Add(-time.Duration(i)*time.Hour)))
 	}
-	google.store(true, gmailTestMessage("draft", now.Add(-time.Hour), "DRAFT"))
+	google.store(gmailTestMessage("draft", now.Add(-time.Hour), "DRAFT"))
 	source := google.source(2)
 	f.service.externalConnectors = &externalMailRegistry{connectors: []ExternalMailConnector{{
 		ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2,

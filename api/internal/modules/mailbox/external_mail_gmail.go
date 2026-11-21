@@ -159,11 +159,15 @@ type gmailCursor struct {
 
 func (c gmailCursor) encode() string {
 	c.Version = gmailCursorVersion
-	encoded, _ := json.Marshal(c)
+	encoded, err := json.Marshal(c)
+	if err != nil {
+		// Unreachable for this struct; an empty cursor would start the backfill over.
+		return ""
+	}
 	return string(encoded)
 }
 
-// decodeGmailCursor reads a cursor; one this connector did not write cannot be honoured.
+// decodeGmailCursor reads a cursor; one this connector did not write cannot be honored.
 func decodeGmailCursor(raw string) (gmailCursor, error) {
 	var cursor gmailCursor
 	if err := json.Unmarshal([]byte(raw), &cursor); err != nil || cursor.Version != gmailCursorVersion || !validHistoryID(cursor.HistoryID) {
@@ -252,7 +256,7 @@ func (g *gmailMailSource) backfillPage(ctx context.Context, accessToken string, 
 	if err := g.getJSON(ctx, accessToken, "list", "/users/me/messages", query, gmailMaxListBytes, &listed); err != nil {
 		var status *gmailStatusError
 		if cursor.PageToken != "" && errors.As(err, &status) && status.Status == http.StatusBadRequest {
-			// Google no longer honours the page token: start the backfill over.
+			// Google no longer honors the page token: start the backfill over.
 			return ExternalMailFetch{}, fmt.Errorf("%w: gmail page token refused", ErrExternalMailCursorExpired)
 		}
 		return ExternalMailFetch{}, err
@@ -491,15 +495,29 @@ func gmailPartText(header mail.Header, data string) string {
 			return ""
 		}
 	}
-	_, params, _ := mime.ParseMediaType(header.Get("Content-Type"))
+	// Parameters parsed before an invalid one are still returned and usable.
+	_, params, err := mime.ParseMediaType(header.Get("Content-Type"))
+	if err != nil && !errors.Is(err, mime.ErrInvalidMediaParameter) {
+		params = nil
+	}
 	if label := strings.TrimSpace(params["charset"]); label != "" {
-		if converted, err := charsetReader(label, strings.NewReader(string(raw))); err == nil {
-			if decoded, err := io.ReadAll(io.LimitReader(converted, maxMIMEPartBytes)); err == nil || len(decoded) > 0 {
-				raw = decoded
-			}
-		}
+		raw = gmailConvertCharset(label, raw)
 	}
 	return cleanText(string(raw))
+}
+
+// gmailConvertCharset converts text in the named charset to UTF-8; an unknown charset keeps the
+// bytes, and a conversion that breaks off keeps what was converted.
+func gmailConvertCharset(label string, raw []byte) []byte {
+	converted, err := charsetReader(label, strings.NewReader(string(raw)))
+	if err != nil {
+		return raw
+	}
+	decoded, err := io.ReadAll(io.LimitReader(converted, maxMIMEPartBytes))
+	if err != nil && len(decoded) == 0 {
+		return raw
+	}
+	return decoded
 }
 
 // gmailProfile is the Gmail users/me/profile resource.
@@ -529,7 +547,7 @@ func (g *gmailMailSource) Revoke(ctx context.Context, token ExternalMailToken) e
 	if err != nil {
 		return fmt.Errorf("gmail revoke: %w", redactURLError(err))
 	}
-	defer drainAndClose(response.Body)
+	defer response.Body.Close()
 	if response.StatusCode == http.StatusOK || response.StatusCode == http.StatusBadRequest {
 		return nil
 	}
@@ -566,11 +584,11 @@ func (g *gmailMailSource) token(ctx context.Context, operation string, form url.
 	if err != nil {
 		return gmailTokenResponse{}, fmt.Errorf("gmail %s: %w", operation, redactURLError(err))
 	}
-	defer drainAndClose(response.Body)
+	defer response.Body.Close()
 	var tokens gmailTokenResponse
 	body, readErr := readBounded(response.Body, gmailMaxTokenBytes)
 	if readErr == nil {
-		_ = json.Unmarshal(body, &tokens)
+		readErr = json.Unmarshal(body, &tokens)
 	}
 	if response.StatusCode != http.StatusOK {
 		statusErr := &gmailStatusError{Operation: operation, Status: response.StatusCode, Reason: shortReason(tokens.Error)}
@@ -580,7 +598,7 @@ func (g *gmailMailSource) token(ctx context.Context, operation string, form url.
 		return gmailTokenResponse{}, statusErr
 	}
 	if readErr != nil {
-		return gmailTokenResponse{}, fmt.Errorf("gmail %s: %w", operation, readErr)
+		return gmailTokenResponse{}, fmt.Errorf("gmail %s: malformed answer", operation)
 	}
 	if tokens.AccessToken == "" {
 		return gmailTokenResponse{}, fmt.Errorf("gmail %s: no access token in the answer", operation)
@@ -605,7 +623,7 @@ func (g *gmailMailSource) getJSON(ctx context.Context, accessToken, operation, p
 	if err != nil {
 		return fmt.Errorf("gmail %s: %w", operation, redactURLError(err))
 	}
-	defer drainAndClose(response.Body)
+	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		reason := gmailErrorReason(response.Body)
 		statusErr := &gmailStatusError{Operation: operation, Status: response.StatusCode, Reason: reason}
@@ -629,7 +647,10 @@ func (g *gmailMailSource) getJSON(ctx context.Context, accessToken, operation, p
 
 // gmailErrorReason reads the first error reason of a Google API error body.
 func gmailErrorReason(body io.Reader) string {
-	raw, _ := io.ReadAll(io.LimitReader(body, gmailMaxErrorBytes))
+	raw, err := io.ReadAll(io.LimitReader(body, gmailMaxErrorBytes))
+	if err != nil {
+		return ""
+	}
 	var decoded struct {
 		Error struct {
 			Errors []struct {
@@ -653,7 +674,10 @@ func shortReason(reason string) string {
 		return ""
 	}
 	for _, char := range reason {
-		if !(char == '_' || char == '-' || char == '.' || ('a' <= char && char <= 'z') || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9')) {
+		switch {
+		case char == '_', char == '-', char == '.':
+		case 'a' <= char && char <= 'z', 'A' <= char && char <= 'Z', '0' <= char && char <= '9':
+		default:
 			return ""
 		}
 	}
@@ -670,12 +694,6 @@ func readBounded(body io.Reader, limit int64) ([]byte, error) {
 		return nil, errGmailTooLarge
 	}
 	return raw, nil
-}
-
-// drainAndClose lets the connection be reused without reading an unbounded body.
-func drainAndClose(body io.ReadCloser) {
-	_, _ = io.Copy(io.Discard, io.LimitReader(body, gmailMaxErrorBytes))
-	_ = body.Close()
 }
 
 // redactURLError drops the request URL from a transport error: a query may carry a page token.
