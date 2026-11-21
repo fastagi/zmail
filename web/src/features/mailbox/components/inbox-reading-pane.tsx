@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ChevronLeft, ChevronRight, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -10,7 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { InboxTriagePanel } from '@/features/mailbox/components/inbox-triage-panel';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-list';
+import { originOf, toastWithUndo } from '@/features/mailbox/components/message-actions';
+import { rowMessageIds, rowUnread } from '@/features/mailbox/components/message-rows';
 import {
   MessageDetail,
   ThreadView,
@@ -22,11 +23,12 @@ import {
   useUpdateInboxMessages,
 } from '@/features/mailbox/hooks/use-inbox';
 import {
+  mailboxKeys,
   useMailMessage,
   useMailThread,
   useMarkMailMessageRead,
 } from '@/features/mailbox/hooks/use-mailbox';
-import type { InboxItem, MailMessage, Mailbox } from '@/features/mailbox/types';
+import type { InboxItem, InboxPage, MailMessage, Mailbox } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -36,7 +38,7 @@ import { cn } from '@/utils';
 /** What the reading pane does besides the row's own mailbox: moving through the list, replying. */
 export type InboxReaderNavigation = Omit<
   ReaderProps,
-  'mailboxId' | 'mailboxAddress' | 'canSend' | 'canOrganize'
+  'mailboxId' | 'mailboxAddress' | 'canSend' | 'canOrganize' | 'onLeave'
 >;
 
 /**
@@ -157,17 +159,55 @@ export function InboxReadingPane({
     onUnavailable();
   }, [unavailable, item.id, onUnavailable]);
 
+  // Rows whose archive or delete is on its way; another row may be moved meanwhile.
+  const moving = useRef(new Set<number>());
+  /**
+   * Archives or deletes the row: it leaves the list at once and the next row opens. A failed
+   * request puts the row back; a done one offers for 5 seconds to put every message back where it
+   * was.
+   */
   const move = async (placement: 'archive' | 'trash') => {
+    const target = item;
+    if (moving.current.has(target.id)) return;
+    moving.current.add(target.id);
+    const messageIds = rowMessageIds(target);
+    const origin = originOf(target);
+    // The row leaves every cached listing at once, and the row after it opens (or the list).
+    const queryKey = mailboxKeys.inboxes(organizationId);
+    const snapshot = queryClient.getQueriesData<InfiniteData<InboxPage>>({ queryKey });
+    queryClient.setQueriesData<InfiniteData<InboxPage>>({ queryKey }, listing =>
+      listing?.pages
+        ? {
+            ...listing,
+            pages: listing.pages.map(page => ({
+              ...page,
+              items: page.items.filter(row => row.id !== target.id),
+            })),
+          }
+        : listing
+    );
+    (navigation.onNext ?? navigation.onClose)();
     try {
       await updateInbox.mutateAsync({
-        mailboxId: item.mailbox_id,
-        message_ids: rowMessageIds(item),
+        mailboxId: target.mailbox_id,
+        message_ids: messageIds,
         placement,
       });
-      toast.success(t(placement === 'archive' ? 'messages.archived' : 'messages.trashed'));
-      navigation.onClose();
+      toastWithUndo(
+        t(placement === 'archive' ? 'messages.archived' : 'messages.trashed'),
+        t('actions.undo'),
+        () =>
+          updateInbox
+            .mutateAsync({ mailboxId: target.mailbox_id, message_ids: messageIds, ...origin })
+            .catch((failure: unknown) => {
+              toast.error(t(resolveMailboxErrorKey(failure)));
+            })
+      );
     } catch (failure) {
+      for (const [key, listing] of snapshot) queryClient.setQueryData(key, listing);
       toast.error(t(resolveMailboxErrorKey(failure)));
+    } finally {
+      moving.current.delete(target.id);
     }
   };
   const starred = item.thread?.starred ?? item.starred;
@@ -183,17 +223,12 @@ export function InboxReadingPane({
   const reply = () => replyTarget && navigation.onReply(replyTarget);
   const replyAll = () => replyTarget && navigation.onReplyAll(replyTarget);
   const forward = () => newest && navigation.onForward(newest);
-  const pending = updateInbox.isPending;
 
   useEffect(() => {
     if (!actionsRef || unavailable) return;
     actionsRef.current = {
-      archive: () => {
-        if (!pending) void move('archive');
-      },
-      trash: () => {
-        if (!pending) void move('trash');
-      },
+      archive: () => void move('archive'),
+      trash: () => void move('trash'),
       star: toggleStar,
       reply,
       replyAll,
@@ -285,13 +320,11 @@ export function InboxReadingPane({
             <ToolbarAction
               label={t('inbox.actions.archive')}
               keyCap="E"
-              disabled={pending}
               onClick={() => void move('archive')}
             />
             <ToolbarAction
               label={t('inbox.actions.trash')}
               keyCap="#"
-              disabled={pending}
               onClick={() => void move('trash')}
             />
           </div>

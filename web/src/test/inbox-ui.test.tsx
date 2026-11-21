@@ -337,7 +337,11 @@ describe('unified inbox', () => {
     expect(state.threadCalls).toContainEqual({ mailboxId: 2, threadId: 30 });
   });
 
-  it('archive sends the row thread message ids with placement archive', async () => {
+  it('archive removes the row at once, opens the next one, and offers a 5 second undo', async () => {
+    queryClient.setQueryData(mailboxKeys.inbox(1, { view: 'all', group: 'thread', tz: 'UTC' }), {
+      pages: [{ items: [threadRow(), singleRow()], meta: meta(false) }],
+      pageParams: [undefined],
+    });
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
     renderRoute();
 
@@ -351,11 +355,51 @@ describe('unified inbox', () => {
       message_ids: [29, 30, 31],
       placement: 'archive',
     });
-    expect(toast.success).toHaveBeenCalledWith('Archived');
-    expect(new URLSearchParams(window.location.search).get('open')).toBeNull();
+    expect(cachedRow(31)).toBeUndefined();
+    expect(new URLSearchParams(window.location.search).get('open')).toBe('12');
+    expect(toast.success).toHaveBeenCalledWith(
+      'Archived',
+      expect.objectContaining({
+        duration: 5000,
+        action: expect.objectContaining({ label: 'Undo' }) as unknown,
+      })
+    );
+
+    // Undo puts every message of the row back where it was.
+    const [, options] = toast.success.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } },
+    ];
+    await act(async () => options.action.onClick());
+    expect(state.updateInbox.mutateAsync).toHaveBeenLastCalledWith({
+      mailboxId: 2,
+      message_ids: [29, 30, 31],
+      placement: 'default',
+    });
   });
 
-  it('trash sends a single row id with placement trash', async () => {
+  it('a failed archive puts the row back and says why', async () => {
+    queryClient.setQueryData(mailboxKeys.inbox(1, { view: 'all', group: 'thread', tz: 'UTC' }), {
+      pages: [{ items: [threadRow(), singleRow()], meta: meta(false) }],
+      pageParams: [undefined],
+    });
+    state.updateInbox.mutateAsync.mockRejectedValueOnce(
+      new ApiError('down', ApiErrorCode.COMMON_SERVICE_UNAVAILABLE, 503)
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+
+    const toolbar = await screen.findByRole('toolbar', { name: 'Conversation actions' });
+    await act(async () => {
+      fireEvent.click(within(toolbar).getByRole('button', { name: 'Archive' }));
+    });
+
+    expect(cachedRow(31)).toBeDefined();
+    expect(toast.error).toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('trash on the last row sends its id and goes back to the list', async () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=12');
     renderRoute();
 
@@ -369,6 +413,7 @@ describe('unified inbox', () => {
       message_ids: [12],
       placement: 'trash',
     });
+    expect(new URLSearchParams(window.location.search).get('open')).toBeNull();
   });
 
   it('archive and trash are hidden without send', async () => {
@@ -1260,6 +1305,27 @@ describe('inbox keyboard shortcuts', () => {
     expect(openParam()).toBe('12');
   });
 
+  it('e e archives two rows in a row without waiting for the first answer', async () => {
+    // The first archive is still on its way when the second key comes.
+    state.updateInbox.mutateAsync.mockImplementationOnce(() => new Promise(() => undefined));
+    state.updateInbox.isPending = true;
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+    await readingPaneLoaded();
+
+    await act(async () => press('e'));
+    expect(openParam()).toBe('12');
+    await readingPaneLoaded();
+    await act(async () => press('e'));
+
+    expect(state.updateInbox.mutateAsync).toHaveBeenCalledTimes(2);
+    expect(state.updateInbox.mutateAsync).toHaveBeenLastCalledWith({
+      mailboxId: 1,
+      message_ids: [12],
+      placement: 'archive',
+    });
+  });
+
   it('r opens reply from the row mailbox', async () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
     renderRoute();
@@ -1429,6 +1495,35 @@ describe('inbox keyboard shortcuts', () => {
 
     expect(openParam()).toBe('40');
     expect(rowButton('Renewal')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('closing the compose dialog keeps what was written as a draft, without asking', async () => {
+    renderRoute();
+
+    press('c');
+    const subject = await screen.findByLabelText('Subject');
+    fireEvent.change(subject, { target: { value: 'Quarterly numbers' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Draft body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(toast.success).toHaveBeenCalledWith('Saved as a draft');
+
+    // The next new message starts from the draft.
+    press('c');
+    expect(await screen.findByLabelText('Subject')).toHaveValue('Quarterly numbers');
+    expect(screen.getByLabelText('Message')).toHaveValue('Draft body');
+
+    // A dialog closed with nothing written keeps no draft and says nothing.
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: '' } });
+    toast.success.mockReset();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    expect(toast.success).not.toHaveBeenCalled();
+    press('c');
+    expect(await screen.findByLabelText('Subject')).toHaveValue('');
   });
 
   it('c defaults the sender to the narrowed mailbox', async () => {

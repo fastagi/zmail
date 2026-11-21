@@ -11,6 +11,108 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mail connectors: sync runs, backoff, provider budget, and retention
+
+The connector sync is now operable. Contract: `contracts/MAILBOXES.md`, External Mailboxes (Sync
+Budget, Sync Runs, Retention Of Revoked Copies). Migration `2026_12_06_090000_add_external_mail_sync_ops`.
+
+### High — Revoked external copies are deleted after 30 days
+
+Revoking a connection (by its member, a manager, or a member leaving) now sets `revoked_at`, and the
+`mail:external:sync` worker deletes the copies, the external mailbox, and the connection once
+`EXTERNAL_MAIL_REVOKED_RETENTION` (default `720h`, at least `24h`, `90d` accepted; a value that does not
+parse stops startup) has passed. The deletion runs in the mail worker (`mail:broadcast:work`),
+whether or not `EXTERNAL_MAIL_PROVIDERS` is set; `MailBroadcastDispatcher` gains
+`PurgeRevokedExternalMail`. Connections revoked before the upgrade
+start their retention at the migration, so their copies are deleted one retention after the upgrade;
+raise the retention to keep them longer. Binding the
+account again before the deadline cancels the deletion. `POST
+/v1/external-mail-connections/:connection_id/purges` lets the member delete them at once
+(`409 MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` while the connection is bound). Each purge stores a
+`copies_purged` access event on the deleted mailbox as an audit record; it is never listed.
+
+### Medium — Failed fetches back off; passes are budgeted per provider
+
+An `external.fetch_failed` fetch now retries after 2, 4, 8 ... minutes, at most an hour, with jitter,
+instead of every two minutes. Each fetch has a deadline, `EXTERNAL_MAIL_FETCH_TIMEOUT` (default
+`60s`); a fetch that hits it is `fetch_failed`. A pass takes due connections round-robin across
+providers, at most `EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS` (default 20) per provider. A connection
+with more pages is fetched again at once for at most `EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES` (default 20)
+pages in a row, then waits `EXTERNAL_MAIL_MIN_FETCH_SPACING` (default `5s`) before each further page.
+An `ExternalMailSource` must honor its context: a fetch that ignores cancellation still holds the pass
+until it returns. `ExternalMailRepository.ClaimExternalMailConnections` takes a
+`domain.ExternalMailClaim`, and the repository gains the `ExternalMailOpsRepository` methods; a fork
+with its own implementation must add them.
+
+### Low — Sync runs and metrics
+
+Each fetch writes a row to `external_mail_sync_runs` (latest 50 per connection, 14 days), readable by
+the connection's member through `GET /v1/external-mail-connections/:connection_id/sync-runs`. The
+`external_mail.synced` and `external_mail.sync_failed` log events gain `outcome`, `latency_ms`,
+`page_size`, and `more`, and Prometheus gains `zmail_external_mail_syncs_total{provider,outcome}`,
+`zmail_external_mail_sync_seconds{provider}`, and `zmail_external_mail_copies_purged_total`.
+
+## Unreleased — Mail connectors: binding, reconnecting, and open provider ids
+
+External mailboxes can now be bound and reconnected through a provider-neutral connector registry,
+and synced mail goes through the same post-store step as Zmail's own inbound mail. Contract:
+`contracts/MAILBOXES.md`, External Mailboxes. Plan: `docs/plans/mail-connectors.plan.md`.
+
+### Low — Outlook connector
+
+`EXTERNAL_MAIL_PROVIDERS=outlook` with an Outlook OAuth client now syncs Outlook.com and
+Microsoft 365 Inboxes through Microsoft Graph delta. The app registration needs the delegated
+Graph permissions `Mail.Read`, `User.Read`, `offline_access`, `openid`, and `email`, and
+`EXTERNAL_MAIL_REDIRECT_URL` as a Web redirect URI. A fork with its own Outlook source should
+remove it or give its connector another id; the registry keeps the first connector per id.
+
+### Medium — `source` and `provider` are connector ids, not a fixed list
+
+`source` on message summaries and `provider` on connections were `gmail` or `outlook`; they are now
+any id matching `^[a-z][a-z0-9_]{1,15}$` (`zmail` stays Zmail's own mail). A client with a strict
+enum must accept any such id and render one it does not know generically. Three routes are new:
+`GET /v1/external-mail-connectors`, `POST /v1/external-mail-authorizations`, and
+`POST /v1/external-mail-authorizations/completions`, with seven `MAILBOX.EXTERNAL_*` error codes.
+`EXTERNAL_MAIL_REDIRECT_URL` names the Web callback page.
+
+### Medium — External mailboxes leave the delivery namespace; triage consent is the owner's
+
+`FindMailboxByAddress` and the address directory ignore `external` mailboxes, so inbound delivery,
+sending from an address, and address availability never resolve one. Only the owner of an
+`external` mailbox may switch AI triage on for it, as for a personal mailbox; previously an
+organization manager could. A fork that implements `ExternalMailSource` must adopt the new
+`AuthURL(ExternalMailAuthRequest)` and `Exchange(ctx, ExternalMailCodeExchange)` signatures, which
+carry the PKCE challenge and verifier.
+
+### Medium — `ExternalMailSource.Fetch` takes a request and may page, rotate, or expire
+
+`Fetch(ctx, ExternalMailFetchRequest)` replaces `Fetch(ctx, token, cursor)`. The request carries
+the account address, the backfill window, and the sync time. The result may set `More` (the
+connection is fetched again at once), `RefreshToken` (a rotated grant, saved with the page), and a
+source may answer `ErrExternalMailCursorExpired` (the sync restarts from an empty cursor). Real
+connectors register themselves with `registerExternalMailConnector` from their own file.
+`EXTERNAL_MAIL_PROVIDERS` now accepts `gmail`, `outlook`, and `imap`; the OAuth connectors need
+`EXTERNAL_MAIL_<PROVIDER>_CLIENT_ID`, `_CLIENT_SECRET`, and `EXTERNAL_MAIL_REDIRECT_URL`. Listing a
+provider whose adapter is not compiled in enables nothing for it.
+
+### Low — Migration `2026_12_03_090000_open_mail_connectors`
+
+Replaces the provider and source CHECKs with the connector pattern (the source CHECK is added
+`NOT VALID`, no scan), rebuilds `idx_mailboxes_address` as a partial index that skips external
+mailboxes (mailboxes is bounded per organization), and creates `external_mail_authorizations`.
+Rolling back fails while a connector other than `gmail` or `outlook`, or two external mailboxes with
+one address, exist.
+
+### Low — The Gmail connector is real
+
+`EXTERNAL_MAIL_PROVIDERS=gmail` with `EXTERNAL_MAIL_GMAIL_CLIENT_ID` and
+`EXTERNAL_MAIL_GMAIL_CLIENT_SECRET` now binds Gmail accounts through Google's consent page (scope
+`gmail.readonly`, offline access) and syncs them over the Gmail API: a backfill page by page, then
+history from the historyId recorded when the backfill started. Its Google OAuth application must list
+`EXTERNAL_MAIL_REDIRECT_URL`. Only inbound mail is copied: drafts, spam, trash, and sent mail that is
+not also in the inbox are skipped. Connections bound with `fake` keep a cursor the connector cannot
+read; their first Gmail fetch starts the backfill over, without copies.
+
 ## Unreleased — Platform mail operations: broadcast content and its audit
 
 Operators can read the sent text of organization broadcast messages, with a reason and an access

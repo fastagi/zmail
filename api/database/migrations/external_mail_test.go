@@ -44,7 +44,9 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 	exec(`INSERT INTO mail_messages (mailbox_id, direction, status, from_address, source, external_id, created_at, updated_at)
 		VALUES (1, 'inbound', 'received', 'bob@sender.test', 'gmail', 'g-1', now(), now())`)
 
-	// The outbound time index includes source, so it rolls back first.
+	// Later migrations that build on these tables roll back first.
+	require.NoError(t, (&addExternalMailSyncOps{}).Down(db))
+	require.NoError(t, (&openMailConnectors{}).Down(db))
 	require.NoError(t, (&addMailOutboundTimeIndex{}).Down(db))
 	require.NoError(t, (&addExternalMail{}).Down(db))
 	rolledBack := dumpSchema(t, db)
@@ -53,6 +55,8 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 
 	require.NoError(t, (&addExternalMail{}).Up(db))
 	require.NoError(t, (&addMailOutboundTimeIndex{}).Up(db))
+	require.NoError(t, (&openMailConnectors{}).Up(db))
+	require.NoError(t, (&addExternalMailSyncOps{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 
@@ -79,13 +83,13 @@ func TestExternalMailConstraints(t *testing.T) {
 	for name, statement := range map[string]string{
 		"unknown mailbox type": `INSERT INTO mailboxes (organization_id, created_by, address, type, created_at, updated_at)
 			VALUES (10, 901, 'x@mail.example', 'imap', now(), now())`,
-		"unknown message source": `INSERT INTO mail_messages (mailbox_id, direction, status, from_address, source, created_at, updated_at)
-			VALUES (2, 'inbound', 'received', 'bob@sender.test', 'imap', now(), now())`,
+		"malformed message source": `INSERT INTO mail_messages (mailbox_id, direction, status, from_address, source, created_at, updated_at)
+			VALUES (2, 'inbound', 'received', 'bob@sender.test', 'Imap!', now(), now())`,
 		"same external id twice in a mailbox": `INSERT INTO mail_messages (mailbox_id, direction, status, from_address, source, external_id, created_at, updated_at)
 			VALUES (2, 'inbound', 'received', 'bob@sender.test', 'gmail', 'g-1', now(), now())`,
-		"unknown provider":  `UPDATE external_mail_connections SET provider = 'imap' WHERE id = 1`,
-		"unknown status":    `UPDATE external_mail_connections SET status = 'paused' WHERE id = 1`,
-		"backfill too long": `UPDATE external_mail_connections SET backfill_days = 91 WHERE id = 1`,
+		"malformed provider": `UPDATE external_mail_connections SET provider = 'IMAP Mail' WHERE id = 1`,
+		"unknown status":     `UPDATE external_mail_connections SET status = 'paused' WHERE id = 1`,
+		"backfill too long":  `UPDATE external_mail_connections SET backfill_days = 91 WHERE id = 1`,
 		"second connection for the mailbox": `INSERT INTO external_mail_connections (organization_id, mailbox_id, provider, account_address, next_sync_at, created_at, updated_at)
 			VALUES (10, 2, 'outlook', 'other@outlook.example', now(), now(), now())`,
 		"same account twice ignoring case": `INSERT INTO external_mail_connections (organization_id, mailbox_id, provider, account_address, next_sync_at, created_at, updated_at)

@@ -693,6 +693,10 @@ describe('mailbox workspace', () => {
     expect(frame.getAttribute('srcdoc')).toContain('<p id="from-sender">Hi</p>');
     expect(frame.getAttribute('srcdoc')).toContain("default-src 'none'");
     expect(frame.hasAttribute('src')).toBe(false);
+    // The frame keeps a fixed height that grows with the window, and scrolls inside: sizing it to
+    // the content would need the sandbox loosened.
+    expect(frame.className).toContain('h-[min(70vh,40rem)]');
+    expect(frame.getAttribute('scrolling')).toBeNull();
     // Nothing from the sender is parsed into the application document.
     expect(container.querySelector('#from-sender')).toBeNull();
     expect(document.querySelector('script')).toBeNull();
@@ -723,7 +727,9 @@ describe('mailbox workspace', () => {
     fireEvent.click(rowButton('Unread question'));
 
     expect(
-      screen.getByText("Codes are hidden. Only this mailbox's members can see them; AI and admins can't.")
+      screen.getByText(
+        "Codes are hidden. Only this mailbox's members can see them; AI and admins can't."
+      )
     ).toBeInTheDocument();
     expect(screen.getByText('Use code •••••• now')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Your code is ••••••' })).toBeInTheDocument();
@@ -847,6 +853,45 @@ describe('mailbox workspace', () => {
     );
   });
 
+  it('archiving from the reader opens the next message, and the last one goes back to the list', async () => {
+    state.inbox.data = page([
+      summary({ id: 12, subject: 'First read', read: true }),
+      summary({ id: 11, subject: 'Second read', read: true }),
+    ]);
+    state.detail.data = message({ id: 12, html_body: '', read: true });
+    state.update.mutateAsync.mockResolvedValue(message());
+    renderWorkspace();
+
+    const reader = () => within(document.querySelector<HTMLElement>('[data-reading-pane]')!);
+    fireEvent.click(rowButton('First read'));
+    fireEvent.click(reader().getByRole('button', { name: 'Archive' }));
+    await waitFor(() =>
+      expect(state.update.mutateAsync).toHaveBeenCalledWith({ messageId: 12, placement: 'archive' })
+    );
+    await waitFor(() => expect(state.detailCalls.at(-1)).toBe(11));
+    expect(rowButton('Second read')).toHaveAttribute('aria-current', 'true');
+
+    // The last row has no next one: archiving it goes back to the list.
+    fireEvent.click(reader().getByRole('button', { name: 'Archive' }));
+    await waitFor(() => expect(state.update.mutateAsync).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Back to list' })).toBeNull()
+    );
+  });
+
+  it('Esc closes the reader, but not while typing in a field', () => {
+    renderWorkspace();
+    fireEvent.click(rowButton('Unread question'));
+    expect(screen.getByRole('button', { name: 'Back to list' })).toBeInTheDocument();
+
+    const search = screen.getByRole('searchbox');
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(screen.getByRole('button', { name: 'Back to list' })).toBeInTheDocument();
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: 'Back to list' })).toBeNull();
+  });
+
   it('undoes a move to the trash from the reader back to where the message was', async () => {
     state.inbox.data = page([summary({ id: 11, subject: 'Unread question', read: true })]);
     state.detail.data = message({ html_body: '', placement: 'folder', folder_id: 4, read: true });
@@ -960,7 +1005,7 @@ describe('mailbox workspace', () => {
   it('validates a message before sending it', async () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
     const submit = within(dialog).getByRole('button', { name: 'Send' });
 
     fireEvent.change(within(dialog).getByLabelText('To'), {
@@ -982,7 +1027,7 @@ describe('mailbox workspace', () => {
     state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
 
     fireEvent.change(within(dialog).getByLabelText('To'), {
       target: { value: 'Bob@Example.com, carol@example.com\nbob@example.com' },
@@ -1003,7 +1048,7 @@ describe('mailbox workspace', () => {
       })
     );
     expect(toast.success).toHaveBeenCalledWith('Message sent');
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'New message' })).toBeNull());
     expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'outbound', page: 1 });
   });
 
@@ -1013,8 +1058,12 @@ describe('mailbox workspace', () => {
     );
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
-    fillValidMessage(screen.getByRole('dialog'));
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send' }));
+    fillValidMessage(screen.getByRole('region', { name: 'New message' }));
+    fireEvent.click(
+      within(screen.getByRole('region', { name: 'New message' })).getByRole('button', {
+        name: 'Send',
+      })
+    );
 
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith(
@@ -1022,14 +1071,14 @@ describe('mailbox workspace', () => {
       )
     );
     expect(toast.success).not.toHaveBeenCalledWith('Message sent');
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'New message' })).toBeNull());
   });
 
   it('attaches files as base64, lets one be removed, and refuses too many', async () => {
     state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
     fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Files' } });
     fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Attached.' } });
@@ -1062,7 +1111,7 @@ describe('mailbox workspace', () => {
   it('does not send more than ten files', async () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
     fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Files' } });
     fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Attached.' } });
@@ -1121,7 +1170,7 @@ describe('mailbox workspace', () => {
     state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
 
     fireEvent.change(within(dialog).getByLabelText('Template'), { target: { value: '4' } });
     expect(within(dialog).queryByLabelText('Subject')).toBeNull();
@@ -1155,7 +1204,7 @@ describe('mailbox workspace', () => {
     );
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
     fireEvent.change(within(dialog).getByLabelText('Template'), { target: { value: '4' } });
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
@@ -1173,7 +1222,7 @@ describe('mailbox workspace', () => {
     );
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
     fillValidMessage(dialog);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
 
@@ -1184,13 +1233,13 @@ describe('mailbox workspace', () => {
     expect(toast.success).not.toHaveBeenCalled();
     // The sent folder now holds the failed attempt, so the workspace shows it behind the dialog.
     expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'outbound', page: 1 });
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'New message' })).toBeInTheDocument();
   });
 
   it('maps the other send failures to their own copy without leaving the folder', async () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'Compose' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
     fillValidMessage(dialog);
 
     const cases = [

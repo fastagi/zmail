@@ -3965,6 +3965,284 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-previews:
+    post:
+      operationId: previewCloudflareZones
+      summary: List active zones available to the submitted token
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - api_token
+              properties:
+                api_token:
+                  type: string
+      responses:
+        '200':
+          description: List active zones available to the submitted token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailCloudflareZonesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-connection:
+    get:
+      operationId: getCloudflareConnection
+      summary: Get the current organization connection
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: Get the current organization connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailCloudflareConnectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: bindCloudflareConnection
+      summary: Bind a verified zone and return one-time installation credentials
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - api_token
+              - zone_id
+              properties:
+                api_token:
+                  type: string
+                zone_id:
+                  type: string
+      responses:
+        '201':
+          description: Bind a verified zone and return one-time installation credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailCloudflareInstallationResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-connection/{connection_id}:
+    delete:
+      operationId: unbindCloudflareConnection
+      summary: Revoke this connection and erase its secrets
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Revoke this connection and erase its secrets
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-connection/{connection_id}/checks:
+    post:
+      operationId: checkCloudflareAccess
+      summary: Check read access to DNS records, sending domains and receiving rules
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Check read access to DNS records, sending domains and receiving rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailCloudflareChecksResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-connection/{connection_id}/domains:
+    post:
+      operationId: connectTenantMailDomain
+      summary: Set up an exact domain within the selected zone
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailDomainRequest'
+      responses:
+        '201':
+          description: Set up an exact domain within the selected zone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/cloudflare-connections/{connection_id}/inbound-mail-messages:
+    post:
+      operationId: receiveOrganizationInboundMessage
+      summary: Accept a signed message from an organization Worker
+      description: The callback authenticates the connection-specific signature and accepts mail only for
+        this organization and connection.
+      tags:
+      - Mailboxes
+      security: []
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: X-Mailbox-Signature
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: X-Mailbox-Recipient
+        in: header
+        required: true
+        description: The envelope recipient the edge accepted the message for.
+        schema:
+          type: string
+          minLength: 3
+          maxLength: 320
+      requestBody:
+        required: true
+        content:
+          message/rfc822:
+            schema:
+              type: string
+              format: binary
+              maxLength: 5242880
+      responses:
+        '200':
+          description: The message was already stored by an earlier delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundMailMessageResponse'
+        '201':
+          description: The message is stored in the recipient's mailbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundMailMessageResponse'
+        '401':
+          description: The signature is missing, stale, or wrong (`MAILBOX.INBOUND_SIGNATURE_INVALID`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No mailbox has the recipient address (`MAILBOX.RECIPIENT_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: The raw message exceeds 5 MiB (`MAILBOX.INBOUND_TOO_LARGE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The body is not a parseable message with a sender (`MAILBOX.INBOUND_UNPARSEABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Inbound mail has no shared secret configured (`MAILBOX.INBOUND_DISABLED`), or the
+            database is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/mail-domain-previews:
     post:
       operationId: previewMailDomain
@@ -8331,12 +8609,225 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-connectors:
+    get:
+      operationId: listExternalMailConnectors
+      summary: List the connectors outside accounts can be bound with
+      description: Lists the instance's connectors in a stable order, so a client offers one button per
+        provider without knowing them in advance. Empty while external mail is off. Never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The connectors; empty when none is enabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailConnectorListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-authorizations:
+    post:
+      operationId: startExternalMailAuthorization
+      summary: Start binding or reconnecting an outside account
+      description: Stores a pending sign-in for the caller, single use and valid for 10 minutes, and
+        answers the provider page to send the browser to. With `connection_id` it reconnects that
+        connection, which must be the caller's own. Session only; never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartExternalMailAuthorizationRequest'
+      responses:
+        '201':
+          description: The sign-in is pending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailAuthorizationResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization is not found (`ORGANIZATION.NOT_FOUND`), the instance does not run
+            the connector or external mail is off (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`), or the
+            connection is not the caller's (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Neither `provider` nor `connection_id`, a `provider` other than the connection's
+            (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`), or a malformed body (`VALIDATION.FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-authorizations/completions:
+    post:
+      operationId: completeExternalMailAuthorization
+      summary: Finish binding or reconnecting an outside account
+      description: Takes the `state` and `code` the provider returned to the callback page. The pending
+        sign-in is used up whether or not the exchange succeeds. A new account creates a private,
+        read-only `external` mailbox and its connection (`201`); the caller's own account in any state
+        is restored with the same mailbox, so synced mail is never copied twice (`200`). Session only;
+        never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteExternalMailAuthorizationRequest'
+      responses:
+        '200':
+          description: An existing connection of the caller was restored and is active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailConnectionResponse'
+        '201':
+          description: A new external mailbox and connection were created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailConnectionResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The sign-in is unknown, expired, used, or another member's
+            (`MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`), or the connector is no longer enabled
+            (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`),
+            another member bound the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), or the caller bound the
+            most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to
+            the provider.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The provider refused the code (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`), or a
+            malformed body (`VALIDATION.FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-credentials:
+    post:
+      operationId: bindExternalMailCredentials
+      summary: Bind or reconnect an outside account with an app password
+      description: For connectors whose `auth_kind` is `password` (the generic `imap` connector for iCloud,
+        Yahoo, Fastmail, QQ, 163, or a self-hosted server). The server signs in to `host` over implicit
+        TLS on port 993 with a verified certificate and opens INBOX once before anything is stored;
+        hosts that resolve to loopback, private, link-local, or unspecified addresses are refused. The
+        outcomes follow `completeExternalMailAuthorization`. A new account creates a private, read-only
+        `external` mailbox and its connection (`201`); the caller's own account in any state is restored
+        with the new password and the same mailbox (`200`), and a restore that names another host
+        starts the backfill over. The account is derived from the login, never named by the caller. The
+        password is sealed at rest, never logged, never returned, and never written to audit metadata.
+        Attempts are limited to 10 per member per 15 minutes and 30 per organization per hour. Session
+        only; never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BindExternalMailCredentialsRequest'
+      responses:
+        '200':
+          description: An existing connection of the caller was restored and is active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailConnectionResponse'
+        '201':
+          description: A new external mailbox and connection were created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailConnectionResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization is not found (`ORGANIZATION.NOT_FOUND`), or the instance does not
+            run the connector, the connector does not bind with a password, or external mail is off
+            (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another member bound the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), or the caller
+            bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: The server refused the username or password (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`);
+            the server could not be reached over TLS, its certificate did not verify, or the host is not
+            allowed, or refused the login for a transient reason (`MAILBOX.EXTERNAL_SERVER_UNREACHABLE`); a
+            value carries a control character or the backfill is out of range
+            (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); or a malformed body (`COMMON.VALIDATION_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/external-mail-connections:
     get:
       operationId: listExternalMailConnections
       summary: List the caller's bound external mailboxes
-      description: Lists the outside accounts (Gmail, Outlook) the caller bound in this organization, at
-        most 10. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty)
+      description: Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in
+        this organization, at most 10. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty)
         the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached
         and never carries a token.
       tags:
@@ -8371,7 +8862,9 @@ paths:
       summary: Unbind an external mailbox
       description: The member who bound the account, or an `owner` or `admin`, may unbind it. The grant is
         revoked at the provider on a best-effort basis, the stored token is erased, and the connection is
-        never synced again; mail already synced stays in the external mailbox. Unbinding a revoked
+        never synced again; mail already synced stays in the external mailbox until the retention
+        (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) ends, when the worker deletes it with the
+        mailbox, unless the account is bound again before. Unbinding a revoked
         connection succeeds again. Another member's connection, another organization's id, and any id
         while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
       tags:
@@ -8391,6 +8884,93 @@ paths:
         '404':
           description: The organization (`ORGANIZATION.NOT_FOUND`) or the connection
             (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-connections/{connection_id}/sync-runs:
+    get:
+      operationId: listExternalMailSyncRuns
+      summary: List a connection's latest sync runs
+      description: Lists the latest fetches of the caller's own connection, newest first, at most 50.
+        Each fetch records one run with its times, outcome, counts, and error code, never message data;
+        the worker keeps a connection's latest 50 runs and none older than 14 days. Another member's
+        connection, an `owner` or `admin` included, another organization's id, and any id while external
+        mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/ExternalMailConnectionID'
+      responses:
+        '200':
+          description: The connection's latest runs, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailSyncRunListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the caller's connection
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-connections/{connection_id}/purges:
+    post:
+      operationId: purgeExternalMailCopies
+      summary: Delete a revoked connection's copies at once
+      description: Deletes for good the synced copies of the caller's own revoked connection instead of
+        waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then
+        deletes the external mailbox and the connection with its sync runs, storing a `copies_purged`
+        audit event with reason `owner` on the deleted mailbox. When more copies are left than one request
+        deletes, the rest is due at once and the worker deletes it in its next passes. Only the member
+        who bound the account may purge; anyone else, an `owner` or `admin` included, gets `404`. The
+        route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never strands
+        copies.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/ExternalMailConnectionID'
+      responses:
+        '200':
+          description: Every copy, the mailbox, and the connection are deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailPurgeResponse'
+        '202':
+          description: Some copies are deleted; the worker deletes the rest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailPurgeResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the caller's connection
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The connection is still bound; revoke it first (`MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED`).
           content:
             application/json:
               schema:
@@ -9426,6 +10006,15 @@ components:
         - MAILBOX.TRIAGE_UNAVAILABLE
         - MAILBOX.TRIAGE_MODEL_FAILED
         - MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND
+        - MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND
+        - MAILBOX.EXTERNAL_AUTHORIZATION_INVALID
+        - MAILBOX.EXTERNAL_AUTHORIZATION_FAILED
+        - MAILBOX.EXTERNAL_ACCOUNT_MISMATCH
+        - MAILBOX.EXTERNAL_ACCOUNT_TAKEN
+        - MAILBOX.EXTERNAL_CONNECTION_LIMIT
+        - MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE
+        - MAILBOX.EXTERNAL_SERVER_UNREACHABLE
+        - MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED
     FieldErrors:
       type: object
       additionalProperties:
@@ -13937,12 +14526,169 @@ components:
             - type: 'null'
     MailSource:
       type: string
-      description: Where the message came from. `zmail` is mail Zmail itself received or sent; `gmail` and
-        `outlook` are read-only copies synced from a bound outside account into an `external` mailbox.
-      enum:
-        - zmail
-        - gmail
-        - outlook
+      description: Where the message came from. `zmail` is mail Zmail itself received or sent; any other
+        value is the id of the connector that synced a read-only copy from a bound outside account into
+        an `external` mailbox, such as `gmail` or `outlook`. New connectors add values without a
+        contract change, so clients render an unknown value generically.
+      pattern: ^[a-z][a-z0-9_]{1,15}$
+    ExternalMailConnectorID:
+      type: string
+      description: A connector id, such as `gmail` or `outlook`. The instance's connectors are listed by
+        `GET /v1/external-mail-connectors`; new connectors add values without a contract change.
+      pattern: ^[a-z][a-z0-9_]{1,15}$
+    ExternalMailConnector:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - auth_kind
+        - capabilities
+      properties:
+        id:
+          $ref: '#/components/schemas/ExternalMailConnectorID'
+        auth_kind:
+          type: string
+          description: How a member grants access; `oauth2` is the authorization code flow with PKCE.
+          enum:
+            - oauth2
+        capabilities:
+          type: object
+          additionalProperties: false
+          required:
+            - read
+          properties:
+            read:
+              type: boolean
+              description: The connector syncs the account's mail into its external mailbox.
+    ExternalMailConnectorListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 32
+          items:
+            $ref: '#/components/schemas/ExternalMailConnector'
+    StartExternalMailAuthorizationRequest:
+      type: object
+      additionalProperties: false
+      description: Give `provider` to bind a new account, or `connection_id` to reconnect one of the
+        caller's own connections (its provider is then implied; a different `provider` is refused).
+      properties:
+        provider:
+          $ref: '#/components/schemas/ExternalMailConnectorID'
+        connection_id:
+          $ref: '#/components/schemas/PositiveID'
+        backfill_days:
+          type: integer
+          minimum: 1
+          maximum: 90
+          description: How far back a new binding first reads; 14 when omitted.
+    ExternalMailAuthorizationResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - authorization_url
+            - expires_at
+          properties:
+            authorization_url:
+              type: string
+              format: uri
+              description: The provider sign-in page to send the browser to. It carries a single-use
+                `state` and an S256 PKCE challenge.
+            expires_at:
+              type: string
+              format: date-time
+              description: The sign-in must be completed before this time (10 minutes).
+    CompleteExternalMailAuthorizationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - state
+        - code
+      properties:
+        state:
+          type: string
+          minLength: 1
+          maxLength: 128
+        code:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    BindExternalMailCredentialsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - provider
+        - host
+        - username
+        - password
+      properties:
+        provider:
+          $ref: '#/components/schemas/ExternalMailConnectorID'
+        host:
+          type: string
+          description: The IMAP server, such as `imap.mail.me.com`.
+          minLength: 1
+          maxLength: 253
+        port:
+          type: integer
+          description: Implicit-TLS IMAP; only 993 is accepted.
+          minimum: 1
+          maximum: 65535
+          default: 993
+        username:
+          type: string
+          description: The login. The bound account is derived from it, never named by the caller; the
+            lowercased username when it contains `@`, otherwise `username@host`.
+          minLength: 1
+          maxLength: 320
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          description: An app password issued by the provider. Never returned.
+          minLength: 1
+          maxLength: 320
+        backfill_days:
+          type: integer
+          description: How far back the first sync reads INBOX; 14 when omitted.
+          minimum: 1
+          maximum: 90
+    ExternalMailConnectionResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ExternalMailConnection'
     ExternalMailConnection:
       type: object
       additionalProperties: false
@@ -13959,10 +14705,7 @@ components:
         id:
           $ref: '#/components/schemas/PositiveID'
         provider:
-          type: string
-          enum:
-            - gmail
-            - outlook
+          $ref: '#/components/schemas/ExternalMailConnectorID'
         account_address:
           type: string
           maxLength: 320
@@ -13986,8 +14729,9 @@ components:
               format: date-time
             - type: 'null'
         last_error_code:
-          description: The latest failed sync, `external.auth_failed` or `external.fetch_failed`; null after
-            a success.
+          description: The latest failed sync, `external.auth_failed`, `external.fetch_failed` (retried
+            with exponential backoff from two minutes up to an hour), or `external.provider_unavailable`
+            (the instance no longer runs the connector); null after a success.
           oneOf:
             - type: string
               maxLength: 64
@@ -14012,6 +14756,110 @@ components:
           maxItems: 10
           items:
             $ref: '#/components/schemas/ExternalMailConnection'
+    ExternalMailSyncRun:
+      type: object
+      additionalProperties: false
+      description: One fetch of a connection. It never carries message data.
+      required:
+        - id
+        - started_at
+        - finished_at
+        - outcome
+        - fetched_count
+        - stored_count
+        - more
+        - error_code
+        - timed_out
+        - throttled
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+          description: '`ok` saved a page; `auth_failed` lost the grant; `fetch_failed` is any other
+            provider failure and backs off; `cursor_expired` started over from an empty cursor;
+            `provider_unavailable` means the instance no longer runs the connector; `dropped` means the
+            connection was revoked or lost its grant while the fetch ran, so nothing was stored.'
+          enum:
+            - ok
+            - auth_failed
+            - fetch_failed
+            - cursor_expired
+            - provider_unavailable
+            - dropped
+        fetched_count:
+          description: Messages the provider returned.
+          type: integer
+          minimum: 0
+        stored_count:
+          description: Messages that were new and stored.
+          type: integer
+          minimum: 0
+        more:
+          description: The provider had another page ready.
+          type: boolean
+        error_code:
+          description: The connection error code of a failed fetch; null otherwise.
+          oneOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        timed_out:
+          description: The fetch hit its deadline (`EXTERNAL_MAIL_FETCH_TIMEOUT`); the outcome is `fetch_failed`.
+          type: boolean
+        throttled:
+          description: The connection already fetched the most pages in a row allowed at once
+            (`EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES`), so its next page waits the spacing.
+          type: boolean
+    ExternalMailSyncRunListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/ExternalMailSyncRun'
+    ExternalMailPurgeResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - deleted_messages
+            - completed
+          properties:
+            deleted_messages:
+              description: Copies this request deleted.
+              type: integer
+              minimum: 0
+            completed:
+              description: True when no copy is left and the mailbox and connection are deleted.
+              type: boolean
     MailTriageCategory:
       type: string
       description: '`reply` needs the reader''s answer, `deadline` carries a date, `fyi` is for
@@ -15452,6 +16300,120 @@ components:
             maxLength: 253
         suggested_capability:
           $ref: '#/components/schemas/MailDomainCapability'
+    MailCloudflareChecksResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {const: 0}
+        message: {type: string}
+        data:
+          type: object
+          required: [dns, sending, receiving]
+          properties:
+            dns: {type: boolean}
+            sending: {type: boolean}
+            receiving: {type: boolean}
+    MailCloudflareZone:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - account_id
+      - account_name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        account_id:
+          type: string
+        account_name:
+          type: string
+    MailCloudflareConnection:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - account_id
+      - zone_id
+      - zone_name
+      - worker
+      properties:
+        id:
+          type: string
+        account_id:
+          type: string
+        zone_id:
+          type: string
+        zone_name:
+          type: string
+        worker:
+          type: string
+    MailCloudflareZonesResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - message
+      - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailCloudflareZone'
+    MailCloudflareConnectionResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - message
+      - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+          - connection
+          properties:
+            connection:
+              oneOf:
+              - $ref: '#/components/schemas/MailCloudflareConnection'
+              - type: 'null'
+    MailCloudflareInstallationResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - message
+      - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+          - connection
+          - signing_secret
+          - callback_path
+          properties:
+            connection:
+              $ref: '#/components/schemas/MailCloudflareConnection'
+            signing_secret:
+              type: string
+            callback_path:
+              type: string
     MailDomainPreviewResponse:
       type: object
       additionalProperties: false

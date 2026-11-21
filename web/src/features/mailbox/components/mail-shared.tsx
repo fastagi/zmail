@@ -30,7 +30,8 @@ const frameContentPolicy =
 /**
  * The only place sender HTML is rendered. Sender HTML is untrusted: the empty sandbox runs no
  * script and gives the content an opaque origin, so it can never act as this application or read
- * its cookies.
+ * its cookies. The frame has a fixed height that follows the window (70% of it, at most 40rem) and
+ * scrolls inside: fitting it to the content would need the sandbox loosened (decided 2026-11-20).
  */
 export function MailHtmlFrame({ html, title }: { html: string; title: string }) {
   return (
@@ -39,7 +40,7 @@ export function MailHtmlFrame({ html, title }: { html: string; title: string }) 
       srcDoc={frameContentPolicy + html}
       title={title}
       referrerPolicy="no-referrer"
-      className="animate-fade h-96 w-full rounded-md border bg-white"
+      className="animate-fade h-[min(70vh,40rem)] w-full rounded-md border bg-white"
     />
   );
 }

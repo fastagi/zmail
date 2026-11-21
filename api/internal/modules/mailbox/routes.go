@@ -26,6 +26,12 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_domains.checks.store").WhereNumber("domain_id")
 		auth.POST("/mail-domains/:domain_id/receiving", h.EnableMailDomainReceiving).
 			Name("mail_domains.receiving.store").WhereNumber("domain_id")
+		auth.GET("/mail-cloudflare-connection", h.GetCloudflare).Name("mail_cloudflare_connection.show")
+		auth.POST("/mail-cloudflare-connection", h.BindCloudflare).Name("mail_cloudflare_connection.store").Middleware(middleware.BodyLimit(2048))
+		auth.DELETE("/mail-cloudflare-connection/:connection_id", h.UnbindCloudflare).Name("mail_cloudflare_connection.destroy")
+		auth.POST("/mail-cloudflare-connection/:connection_id/checks", h.CheckCloudflareAccess).Name("mail_cloudflare_connection.checks.store")
+		auth.POST("/mail-cloudflare-connection/:connection_id/domains", h.ConnectCloudflareDomain).Name("mail_cloudflare_connection.domains.store")
+		auth.POST("/mail-cloudflare-previews", h.PreviewCloudflare).Name("mail_cloudflare_previews.store").Middleware(middleware.BodyLimit(2048))
 		auth.POST("/mail-domain-previews", h.PreviewMailDomain).Name("mail_domain_previews.store")
 
 		auth.GET("/mail-zones", h.ListMailZones).Name("mail_zones.index")
@@ -60,9 +66,20 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("platform_accounts.events.index").WhereNumber("account_id")
 		auth.POST("/platform-account-handovers", h.HandOverPlatformAccounts).Name("platform_account_handovers.store")
 
+		auth.GET("/external-mail-connectors", h.ListExternalMailConnectors).Name("external_mail_connectors.index")
+		auth.POST("/external-mail-authorizations", h.StartExternalMailAuthorization).
+			Name("external_mail_authorizations.store")
+		auth.POST("/external-mail-authorizations/completions", h.CompleteExternalMailAuthorization).
+			Name("external_mail_authorizations.completions.store")
+		auth.POST("/external-mail-credentials", h.BindExternalMailCredentials).
+			Name("external_mail_credentials.store").Middleware(middleware.BodyLimit(maxExternalMailCredentialsBodyBytes))
 		auth.GET("/external-mail-connections", h.ListExternalMailConnections).Name("external_mail_connections.index")
 		auth.DELETE("/external-mail-connections/:connection_id", h.RevokeExternalMailConnection).
 			Name("external_mail_connections.destroy").WhereNumber("connection_id")
+		auth.GET("/external-mail-connections/:connection_id/sync-runs", h.ListExternalMailSyncRuns).
+			Name("external_mail_connections.sync_runs.index").WhereNumber("connection_id")
+		auth.POST("/external-mail-connections/:connection_id/purges", h.PurgeExternalMailCopies).
+			Name("external_mail_connections.purges.store").WhereNumber("connection_id")
 
 		auth.GET("/transactional-mail-log", h.ListTransactionalLog).Name("transactional_mail_log.index")
 		auth.GET("/transactional-mail-log/:message_id", h.GetTransactionalLogEntry).
@@ -210,6 +227,7 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Middleware(apikey.RequireScopesAllowingTest(ScopeMailTransactional))
 	})
 
+	r.POST("/cloudflare-connections/:connection_id/inbound-mail-messages", h.ReceiveInbound).Name("cloudflare_connections.inbound.store")
 	r.POST("/inbound-mail-messages", h.ReceiveInbound).Name("inbound_mail_messages.store")
 	r.POST("/mail-delivery-events", h.ReceiveDeliveryEvent).Name("mail_delivery_events.store")
 	// A signed token authenticates an unsubscribe; recipients and mail clients have no session.

@@ -268,6 +268,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/cloudflare-connections/{connection_id}/inbound-mail-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept a signed message from an organization Worker
+         * @description The callback authenticates the connection-specific signature and accepts mail only for this organization and connection.
+         */
+        post: operations["receiveOrganizationInboundMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-authorizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start binding or reconnecting an outside account
+         * @description Stores a pending sign-in for the caller, single use and valid for 10 minutes, and answers the provider page to send the browser to. With `connection_id` it reconnects that connection, which must be the caller's own. Session only; never cached.
+         */
+        post: operations["startExternalMailAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-authorizations/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish binding or reconnecting an outside account
+         * @description Takes the `state` and `code` the provider returned to the callback page. The pending sign-in is used up whether or not the exchange succeeds. A new account creates a private, read-only `external` mailbox and its connection (`201`); the caller's own account in any state is restored with the same mailbox, so synced mail is never copied twice (`200`). Session only; never cached.
+         */
+        post: operations["completeExternalMailAuthorization"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/external-mail-connections": {
         parameters: {
             query?: never;
@@ -277,7 +337,7 @@ export interface paths {
         };
         /**
          * List the caller's bound external mailboxes
-         * @description Lists the outside accounts (Gmail, Outlook) the caller bound in this organization, at most 10. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty) the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached and never carries a token.
+         * @description Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in this organization, at most 10. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty) the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached and never carries a token.
          */
         get: operations["listExternalMailConnections"];
         put?: never;
@@ -300,9 +360,89 @@ export interface paths {
         post?: never;
         /**
          * Unbind an external mailbox
-         * @description The member who bound the account, or an `owner` or `admin`, may unbind it. The grant is revoked at the provider on a best-effort basis, the stored token is erased, and the connection is never synced again; mail already synced stays in the external mailbox. Unbinding a revoked connection succeeds again. Another member's connection, another organization's id, and any id while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+         * @description The member who bound the account, or an `owner` or `admin`, may unbind it. The grant is revoked at the provider on a best-effort basis, the stored token is erased, and the connection is never synced again; mail already synced stays in the external mailbox until the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) ends, when the worker deletes it with the mailbox, unless the account is bound again before. Unbinding a revoked connection succeeds again. Another member's connection, another organization's id, and any id while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
          */
         delete: operations["revokeExternalMailConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-connections/{connection_id}/purges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a revoked connection's copies at once
+         * @description Deletes for good the synced copies of the caller's own revoked connection instead of waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then deletes the external mailbox and the connection with its sync runs, storing a `copies_purged` audit event with reason `owner` on the deleted mailbox. When more copies are left than one request deletes, the rest is due at once and the worker deletes it in its next passes. Only the member who bound the account may purge; anyone else, an `owner` or `admin` included, gets `404`. The route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never strands copies.
+         */
+        post: operations["purgeExternalMailCopies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-connections/{connection_id}/sync-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a connection's latest sync runs
+         * @description Lists the latest fetches of the caller's own connection, newest first, at most 50. Each fetch records one run with its times, outcome, counts, and error code, never message data; the worker keeps a connection's latest 50 runs and none older than 14 days. Another member's connection, an `owner` or `admin` included, another organization's id, and any id while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached.
+         */
+        get: operations["listExternalMailSyncRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the connectors outside accounts can be bound with
+         * @description Lists the instance's connectors in a stable order, so a client offers one button per provider without knowing them in advance. Empty while external mail is off. Never cached.
+         */
+        get: operations["listExternalMailConnectors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bind or reconnect an outside account with an app password
+         * @description For connectors whose `auth_kind` is `password` (the generic `imap` connector for iCloud, Yahoo, Fastmail, QQ, 163, or a self-hosted server). The server signs in to `host` over implicit TLS on port 993 with a verified certificate and opens INBOX once before anything is stored; hosts that resolve to loopback, private, link-local, or unspecified addresses are refused. The outcomes follow `completeExternalMailAuthorization`. A new account creates a private, read-only `external` mailbox and its connection (`201`); the caller's own account in any state is restored with the new password and the same mailbox (`200`), and a restore that names another host starts the backfill over. The account is derived from the login, never named by the caller. The password is sealed at rest, never logged, never returned, and never written to audit metadata. Attempts are limited to 10 per member per 15 minutes and 30 per organization per hour. Session only; never cached.
+         */
+        post: operations["bindExternalMailCredentials"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -550,6 +690,92 @@ export interface paths {
          * @description Only owners and admins may.
          */
         post: operations["sendMailBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current organization connection */
+        get: operations["getCloudflareConnection"];
+        put?: never;
+        /** Bind a verified zone and return one-time installation credentials */
+        post: operations["bindCloudflareConnection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-connection/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke this connection and erase its secrets */
+        delete: operations["unbindCloudflareConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-connection/{connection_id}/checks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check read access to DNS records, sending domains and receiving rules */
+        post: operations["checkCloudflareAccess"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-connection/{connection_id}/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set up an exact domain within the selected zone */
+        post: operations["connectTenantMailDomain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-cloudflare-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List active zones available to the submitted token */
+        post: operations["previewCloudflareZones"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3419,6 +3645,29 @@ export interface components {
             data: components["schemas"]["AuthenticationUser"];
             message: string;
         };
+        BindExternalMailCredentialsRequest: {
+            /** @description How far back the first sync reads INBOX; 14 when omitted. */
+            backfill_days?: number;
+            /** @description The IMAP server, such as `imap.mail.me.com`. */
+            host: string;
+            /**
+             * Format: password
+             * @description An app password issued by the provider. Never returned.
+             */
+            password: string;
+            /**
+             * @description Implicit-TLS IMAP; only 993 is accepted.
+             * @default 993
+             */
+            port: number;
+            provider: components["schemas"]["ExternalMailConnectorID"];
+            /** @description The login. The bound account is derived from it, never named by the caller; the lowercased username when it contains `@`, otherwise `username@host`. */
+            username: string;
+        };
+        CompleteExternalMailAuthorizationRequest: {
+            code: string;
+            state: string;
+        };
         CreateAPIKeyRequest: {
             /** Format: date-time */
             expires_at?: string;
@@ -3478,7 +3727,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_INVALID" | "MAILBOX.EXTERNAL_AUTHORIZATION_FAILED" | "MAILBOX.EXTERNAL_ACCOUNT_MISMATCH" | "MAILBOX.EXTERNAL_ACCOUNT_TAKEN" | "MAILBOX.EXTERNAL_CONNECTION_LIMIT" | "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE" | "MAILBOX.EXTERNAL_SERVER_UNREACHABLE" | "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -3486,19 +3735,35 @@ export interface components {
             message: string;
             request_id?: string;
         };
+        ExternalMailAuthorizationResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                /**
+                 * Format: uri
+                 * @description The provider sign-in page to send the browser to. It carries a single-use `state` and an S256 PKCE challenge.
+                 */
+                authorization_url: string;
+                /**
+                 * Format: date-time
+                 * @description The sign-in must be completed before this time (10 minutes).
+                 */
+                expires_at: string;
+            };
+            message: string;
+        };
         ExternalMailConnection: {
             account_address: string;
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["PositiveID"];
-            /** @description The latest failed sync, `external.auth_failed` or `external.fetch_failed`; null after a success. */
+            /** @description The latest failed sync, `external.auth_failed`, `external.fetch_failed` (retried with exponential backoff from two minutes up to an hour), or `external.provider_unavailable` (the instance no longer runs the connector); null after a success. */
             last_error_code: string | null;
             /** @description When a sync last succeeded; null before the first. */
             last_synced_at: string | null;
             /** @description The `external` mailbox synced mail is stored in. */
             mailbox_id: components["schemas"]["PositiveID"];
-            /** @enum {string} */
-            provider: "gmail" | "outlook";
+            provider: components["schemas"]["ExternalMailConnectorID"];
             /**
              * @description `active` connections are synced every two minutes; `needs_reconnect` lost the provider grant and waits for the owner to bind again; `revoked` was unbound and is never synced again.
              * @enum {string}
@@ -3509,6 +3774,74 @@ export interface components {
             /** @constant */
             code: 0;
             data: components["schemas"]["ExternalMailConnection"][];
+            message: string;
+        };
+        ExternalMailConnectionResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["ExternalMailConnection"];
+            message: string;
+        };
+        ExternalMailConnector: {
+            /**
+             * @description How a member grants access; `oauth2` is the authorization code flow with PKCE.
+             * @enum {string}
+             */
+            auth_kind: "oauth2";
+            capabilities: {
+                /** @description The connector syncs the account's mail into its external mailbox. */
+                read: boolean;
+            };
+            id: components["schemas"]["ExternalMailConnectorID"];
+        };
+        /** @description A connector id, such as `gmail` or `outlook`. The instance's connectors are listed by `GET /v1/external-mail-connectors`; new connectors add values without a contract change. */
+        ExternalMailConnectorID: string;
+        ExternalMailConnectorListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["ExternalMailConnector"][];
+            message: string;
+        };
+        ExternalMailPurgeResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                /** @description True when no copy is left and the mailbox and connection are deleted. */
+                completed: boolean;
+                /** @description Copies this request deleted. */
+                deleted_messages: number;
+            };
+            message: string;
+        };
+        /** @description One fetch of a connection. It never carries message data. */
+        ExternalMailSyncRun: {
+            /** @description The connection error code of a failed fetch; null otherwise. */
+            error_code: string | null;
+            /** @description Messages the provider returned. */
+            fetched_count: number;
+            /** Format: date-time */
+            finished_at: string;
+            id: components["schemas"]["PositiveID"];
+            /** @description The provider had another page ready. */
+            more: boolean;
+            /**
+             * @description `ok` saved a page; `auth_failed` lost the grant; `fetch_failed` is any other provider failure and backs off; `cursor_expired` started over from an empty cursor; `provider_unavailable` means the instance no longer runs the connector; `dropped` means the connection was revoked or lost its grant while the fetch ran, so nothing was stored.
+             * @enum {string}
+             */
+            outcome: "ok" | "auth_failed" | "fetch_failed" | "cursor_expired" | "provider_unavailable" | "dropped";
+            /** Format: date-time */
+            started_at: string;
+            /** @description Messages that were new and stored. */
+            stored_count: number;
+            /** @description The connection already fetched the most pages in a row allowed at once (`EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES`), so its next page waits the spacing. */
+            throttled: boolean;
+            /** @description The fetch hit its deadline (`EXTERNAL_MAIL_FETCH_TIMEOUT`); the outcome is `fetch_failed`. */
+            timed_out: boolean;
+        };
+        ExternalMailSyncRunListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["ExternalMailSyncRun"][];
             message: string;
         };
         FieldErrors: {
@@ -4034,6 +4367,53 @@ export interface components {
         /** @description Template values shared by every recipient, at most 100. A contact's properties override a value of the same name. `email`, `first_name`, `last_name`, and `unsubscribe_url` come from each contact and cannot be set here. Absent means none. */
         MailBroadcastVariables: {
             [key: string]: string;
+        };
+        MailCloudflareChecksResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                dns: boolean;
+                receiving: boolean;
+                sending: boolean;
+            };
+            message: string;
+        };
+        MailCloudflareConnection: {
+            account_id: string;
+            id: string;
+            worker: string;
+            zone_id: string;
+            zone_name: string;
+        };
+        MailCloudflareConnectionResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                connection: components["schemas"]["MailCloudflareConnection"] | null;
+            };
+            message: string;
+        };
+        MailCloudflareInstallationResponse: {
+            /** @constant */
+            code: 0;
+            data: {
+                callback_path: string;
+                connection: components["schemas"]["MailCloudflareConnection"];
+                signing_secret: string;
+            };
+            message: string;
+        };
+        MailCloudflareZone: {
+            account_id: string;
+            account_name: string;
+            id: string;
+            name: string;
+        };
+        MailCloudflareZonesResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailCloudflareZone"][];
+            message: string;
         };
         MailContact: {
             /** Format: date-time */
@@ -4634,11 +5014,8 @@ export interface components {
             data: components["schemas"]["MailSendLaneUsageList"];
             message: string;
         };
-        /**
-         * @description Where the message came from. `zmail` is mail Zmail itself received or sent; `gmail` and `outlook` are read-only copies synced from a bound outside account into an `external` mailbox.
-         * @enum {string}
-         */
-        MailSource: "zmail" | "gmail" | "outlook";
+        /** @description Where the message came from. `zmail` is mail Zmail itself received or sent; any other value is the id of the connector that synced a read-only copy from a bound outside account into an `external` mailbox, such as `gmail` or `outlook`. New connectors add values without a contract change, so clients render an unknown value generically. */
+        MailSource: string;
         /**
          * @description `received` for inbound messages. Outbound messages are `queued` while the provider call is in flight, then `sent` or `failed`.
          * @enum {string}
@@ -5658,6 +6035,13 @@ export interface components {
         };
         /** @enum {string} */
         SettingVisibility: "public" | "private";
+        /** @description Give `provider` to bind a new account, or `connection_id` to reconnect one of the caller's own connections (its provider is then implied; a different `provider` is refused). */
+        StartExternalMailAuthorizationRequest: {
+            /** @description How far back a new binding first reads; 14 when omitted. */
+            backfill_days?: number;
+            connection_id?: components["schemas"]["PositiveID"];
+            provider?: components["schemas"]["ExternalMailConnectorID"];
+        };
         /**
          * @description The most severe delivery event recorded for the message (see MAILBOXES.md, Delivery Events); null when none was recorded.
          * @enum {string|null}
@@ -7195,6 +7579,204 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    receiveOrganizationInboundMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The envelope recipient the edge accepted the message for. */
+                "X-Mailbox-Recipient": string;
+                "X-Mailbox-Signature": string;
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "message/rfc822": string;
+            };
+        };
+        responses: {
+            /** @description The message was already stored by an earlier delivery. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundMailMessageResponse"];
+                };
+            };
+            /** @description The message is stored in the recipient's mailbox. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboundMailMessageResponse"];
+                };
+            };
+            /** @description The signature is missing, stale, or wrong (`MAILBOX.INBOUND_SIGNATURE_INVALID`). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No mailbox has the recipient address (`MAILBOX.RECIPIENT_NOT_FOUND`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The raw message exceeds 5 MiB (`MAILBOX.INBOUND_TOO_LARGE`). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not a parseable message with a sender (`MAILBOX.INBOUND_UNPARSEABLE`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Inbound mail has no shared secret configured (`MAILBOX.INBOUND_DISABLED`), or the database is unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    startExternalMailAuthorization: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartExternalMailAuthorizationRequest"];
+            };
+        };
+        responses: {
+            /** @description The sign-in is pending. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailAuthorizationResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The organization is not found (`ORGANIZATION.NOT_FOUND`), the instance does not run the connector or external mail is off (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`), or the connection is not the caller's (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Neither `provider` nor `connection_id`, a `provider` other than the connection's (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`), or a malformed body (`VALIDATION.FAILED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    completeExternalMailAuthorization: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteExternalMailAuthorizationRequest"];
+            };
+        };
+        responses: {
+            /** @description An existing connection of the caller was restored and is active. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailConnectionResponse"];
+                };
+            };
+            /** @description A new external mailbox and connection were created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailConnectionResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The sign-in is unknown, expired, used, or another member's (`MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`), or the connector is no longer enabled (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), another member bound the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), or the caller bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to the provider. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The provider refused the code (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`), or a malformed body (`VALIDATION.FAILED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listExternalMailConnections: {
         parameters: {
             query?: never;
@@ -7263,6 +7845,195 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    purgeExternalMailCopies: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive external mail connection identifier. */
+                connection_id: components["parameters"]["ExternalMailConnectionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every copy, the mailbox, and the connection are deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailPurgeResponse"];
+                };
+            };
+            /** @description Some copies are deleted; the worker deletes the rest. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailPurgeResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the caller's connection (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The connection is still bound; revoke it first (`MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listExternalMailSyncRuns: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive external mail connection identifier. */
+                connection_id: components["parameters"]["ExternalMailConnectionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The connection's latest runs, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailSyncRunListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the caller's connection (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listExternalMailConnectors: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The connectors; empty when none is enabled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailConnectorListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    bindExternalMailCredentials: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BindExternalMailCredentialsRequest"];
+            };
+        };
+        responses: {
+            /** @description An existing connection of the caller was restored and is active. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailConnectionResponse"];
+                };
+            };
+            /** @description A new external mailbox and connection were created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailConnectionResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The organization is not found (`ORGANIZATION.NOT_FOUND`), or the instance does not run the connector, the connector does not bind with a password, or external mail is off (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Another member bound the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), or the caller bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            /** @description The server refused the username or password (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`); the server could not be reached over TLS, its certificate did not verify, or the host is not allowed, or refused the login for a transient reason (`MAILBOX.EXTERNAL_SERVER_UNREACHABLE`); a value carries a control character or the backfill is out of range (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); or a malformed body (`COMMON.VALIDATION_FAILED`). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -7938,6 +8709,189 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    getCloudflareConnection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Get the current organization connection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailCloudflareConnectionResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    bindCloudflareConnection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    api_token: string;
+                    zone_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Bind a verified zone and return one-time installation credentials */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailCloudflareInstallationResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    unbindCloudflareConnection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoke this connection and erase its secrets */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    checkCloudflareAccess: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Check read access to DNS records, sending domains and receiving rules */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailCloudflareChecksResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    connectTenantMailDomain: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                connection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MailDomainRequest"];
+            };
+        };
+        responses: {
+            /** @description Set up an exact domain within the selected zone */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDomainResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    previewCloudflareZones: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    api_token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description List active zones available to the submitted token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailCloudflareZonesResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     importMailContacts: {

@@ -81,9 +81,10 @@ type Settings struct {
 
 // InboundDelivery is one signed delivery from the mail edge.
 type InboundDelivery struct {
-	Recipient string
-	Signature string
-	Raw       []byte
+	ConnectionID string
+	Recipient    string
+	Signature    string
+	Raw          []byte
 }
 
 // DeliveryEvent is one signed provider event forwarded by the mail edge.
@@ -114,6 +115,7 @@ type SendInput struct {
 
 // Service defines the business interface of the mailbox starter.
 type Service interface {
+	CloudflareConnectionService
 	Domain() string
 	// CreateMailbox creates a personal or shared mailbox on the input's domain, the shared domain
 	// when it is empty. Only owners and admins may.
@@ -261,6 +263,10 @@ type Service interface {
 	TriageService
 	// ExternalMailService lists and revokes bound external mailboxes.
 	ExternalMailService
+	// ExternalMailBindingService binds and reconnects outside accounts.
+	ExternalMailBindingService
+	// ExternalMailOpsService shows a connection's sync history and purges revoked copies.
+	ExternalMailOpsService
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -357,8 +363,11 @@ type service struct {
 	triageModel TriageModel
 	// externalMail stores external mail connections; nil when repo does not implement it.
 	externalMail domain.ExternalMailRepository
-	// externalSource reads outside mailboxes; settings.ExternalMail selects it.
-	externalSource ExternalMailSource
+	// externalConnectors are the providers outside mailboxes can be bound with; settings.ExternalMail
+	// selects them.
+	externalConnectors *externalMailRegistry
+	// externalCredentialLimits bound password bindings per member and per organization.
+	externalCredentialLimits externalCredentialLimits
 }
 
 var _ Service = (*service)(nil)
@@ -421,7 +430,8 @@ func NewService(
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
 		recordAudit: auditstarter.RecordChange,
 		triage:      triage, triageModel: newTriageModel(settings.Triage),
-		externalMail: externalMail, externalSource: newExternalMailSource(settings.ExternalMail),
+		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
+		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 	}
 }
 
@@ -909,7 +919,7 @@ func (s *service) deliver(
 	headers map[string]string,
 ) (*domain.MailMessage, bool, error) {
 	metrics.RecordSendLaneAttempt(string(message.SendLane))
-	outcome, sendErr := s.transport.Send(ctx, mailtransport.Message{
+	outcome, sendErr := s.sendWithConnection(ctx, mailbox.OrganizationID, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,
 		To:          message.To,
@@ -1196,7 +1206,20 @@ func replyReferences(parent *domain.MailMessage) []string {
 // ReceiveInbound verifies and stores one delivery from the mail edge. A repeated delivery of
 // the same message to the same mailbox returns the stored message with created=false.
 func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) (*domain.MailMessage, bool, error) {
-	if s.settings.InboundSecret == "" {
+	secret := s.settings.InboundSecret
+	var conn *CloudflareConnection
+	if delivery.ConnectionID != "" {
+		var err error
+		conn, err = s.connection(ctx, 0, delivery.ConnectionID)
+		if err != nil || conn == nil {
+			return nil, false, ErrMailInboundSignature
+		}
+		secret, err = s.encryptor.DecryptString(conn.SigningCipher)
+		if err != nil {
+			return nil, false, ErrMailInboundSignature
+		}
+	}
+	if secret == "" {
 		return nil, false, ErrMailInboundDisabled
 	}
 	if len(delivery.Raw) == 0 {
@@ -1207,7 +1230,7 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 	}
 	recipient := strings.ToLower(strings.TrimSpace(delivery.Recipient))
 	// Verify before any lookup, so an unsigned caller cannot probe which addresses exist.
-	if !verifyInbound(s.settings.InboundSecret, delivery.Signature, recipient, delivery.Raw, s.now(), s.settings.InboundTolerance) {
+	if !verifyInbound(secret, delivery.Signature, recipient, delivery.Raw, s.now(), s.settings.InboundTolerance) {
 		return nil, false, ErrMailInboundSignature
 	}
 
@@ -1217,6 +1240,21 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 			return nil, false, ErrMailRecipientNotFound
 		}
 		return nil, false, err
+	}
+	if s.domains != nil {
+		_, name, _ := strings.Cut(recipient, "@")
+		d, lookupErr := s.domains.FindDomainByName(ctx, name)
+		if lookupErr != nil && !errors.Is(lookupErr, ErrMailDomainNotFound) {
+			return nil, false, lookupErr
+		}
+		if conn != nil && (d == nil || d.CloudflareConnectionID == nil || *d.CloudflareConnectionID != conn.ID || !receives(d) || mailbox.OrganizationID != conn.OrganizationID || d.OrganizationID != conn.OrganizationID) {
+			return nil, false, ErrMailInboundSignature
+		}
+		if conn == nil && d != nil && d.CloudflareConnectionID != nil {
+			return nil, false, ErrMailInboundSignature
+		}
+	} else if conn != nil {
+		return nil, false, ErrMailInboundSignature
 	}
 	parsed, err := parseMail(delivery.Raw)
 	if err != nil {
@@ -1255,13 +1293,7 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		if created, createErr = s.repo.CreateInboundMessage(tx, message); createErr != nil || !created {
 			return nil, createErr
 		}
-		if enqueueErr := s.enqueueTriage(tx, message); enqueueErr != nil {
-			return nil, enqueueErr
-		}
-		notification := mailNotificationFor(mailbox, message)
-		notification.Type = WebhookMailReceived
-		notification.OccurredAt = s.now().UTC()
-		return []MailNotification{notification}, nil
+		return s.afterInboundStored(tx, mailbox, message)
 	})
 	if err != nil {
 		return nil, false, err
@@ -1313,4 +1345,18 @@ func sendFingerprint(to, cc []string, subject, text, html, inReplyTo, attachment
 		write(attachments)
 	}
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// afterInboundStored is the one post-store step of every newly stored inbound message, whatever
+// its source: Zmail delivery or a synced outside account. It runs in the storing transaction, so
+// a message is queued for triage and announced exactly when it is stored. Consumers of new mail
+// (triage, webhooks, and later agent grants) attach here and nowhere else.
+func (s *service) afterInboundStored(tx context.Context, mailbox *domain.Mailbox, message *domain.MailMessage) ([]MailNotification, error) {
+	if err := s.enqueueTriage(tx, message); err != nil {
+		return nil, err
+	}
+	notification := mailNotificationFor(mailbox, message)
+	notification.Type = WebhookMailReceived
+	notification.OccurredAt = s.now().UTC()
+	return []MailNotification{notification}, nil
 }

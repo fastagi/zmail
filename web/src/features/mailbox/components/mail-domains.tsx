@@ -29,6 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { getMailZoneDnsRoute } from '@/constants/routes';
+import { CloudflareConnectionForm } from './cloudflare-connection';
 import { MailDomainTestChecklist } from '@/features/mailbox/components/mail-domain-test-checklist';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { CopyButton, ErrorAlert } from '@/features/mailbox/components/mail-shared';
@@ -123,7 +124,10 @@ export function ConnectedDomains({ enabled, canManage }: { enabled: boolean; can
             </ul>
           )}
           {canManage ? (
-            <ConnectDomainForm />
+            <>
+              <CloudflareConnectionForm key={organizationId} organizationId={organizationId} />
+              <ConnectDomainForm />
+            </>
           ) : (
             <p className="text-xs text-muted-foreground">{t('domain.connectReadOnly')}</p>
           )}

@@ -38,9 +38,15 @@ export function originOf(message: {
     : { placement: message.placement };
 }
 
-/** A success toast for a move, with an Undo action that runs `undo`. */
+/** How long a move can be undone from its toast. */
+export const UNDO_TOAST_MS = 5000;
+
+/** A success toast for a move, with an Undo action that runs `undo` for 5 seconds. */
 export function toastWithUndo(text: string, undoLabel: string, undo: () => Promise<unknown>) {
-  toast.success(text, { action: { label: undoLabel, onClick: () => void undo() } });
+  toast.success(text, {
+    duration: UNDO_TOAST_MS,
+    action: { label: undoLabel, onClick: () => void undo() },
+  });
 }
 
 /**
@@ -55,7 +61,9 @@ export function toastWithUndo(text: string, undoLabel: string, undo: () => Promi
  * - In the trash, `send` restores it to the Inbox or Sent, and `organize` deletes it for good after
  *   a confirmation.
  *
- * Every action that takes the message out of the open view calls `onClose`.
+ * Marking the message unread calls `onClose`. Every action that takes the message out of the open
+ * view (a move, a restore, a delete for good) calls `onLeave`, which opens the next message, or
+ * `onClose` without it.
  */
 export function MessageActions({
   message,
@@ -66,6 +74,7 @@ export function MessageActions({
   onReplyAll,
   onForward,
   onClose,
+  onLeave,
 }: {
   message: MailMessage;
   mailboxAddress?: string;
@@ -77,8 +86,10 @@ export function MessageActions({
   onReplyAll?: (message: MailMessage) => void;
   onForward?: (message: MailMessage) => void;
   onClose: () => void;
+  onLeave?: () => void;
 }) {
   const t = useT('mailbox');
+  const leaveView = onLeave ?? onClose;
   const organizationId = useMailOrganizationId();
   const update = useUpdateMailMessage(organizationId, message.mailbox_id);
   const remove = useDeleteMailMessage(organizationId, message.mailbox_id);
@@ -93,12 +104,16 @@ export function MessageActions({
     message.to.length + message.cc.length > 1 &&
     (recipients.cc.length > 0 || recipients.to[0] !== message.from.address.trim().toLowerCase());
 
-  /** Runs a change; on success shows `done` (when given) and leaves the message when `leave`. */
-  const run = async (action: () => Promise<unknown>, done: string | null, leave: boolean) => {
+  /** Runs a change; on success shows `done` (when given), then runs `after` (when given). */
+  const run = async (
+    action: () => Promise<unknown>,
+    done: string | null,
+    after: (() => void) | null
+  ) => {
     try {
       await action();
       if (done) toast.success(done);
-      if (leave) onClose();
+      after?.();
     } catch (failure) {
       toast.error(t(resolveMailboxErrorKey(failure)));
     }
@@ -115,7 +130,7 @@ export function MessageActions({
     try {
       await action();
       toastWithUndo(done, t('actions.undo'), undo);
-      onClose();
+      leaveView();
     } catch (failure) {
       toast.error(t(resolveMailboxErrorKey(failure)));
     }
@@ -167,7 +182,7 @@ export function MessageActions({
           loading={update.isPending && update.variables?.read !== undefined}
           icon={<MailOpen className="size-4" />}
           onClick={() =>
-            void run(() => update.mutateAsync({ messageId: message.id, read: false }), null, true)
+            void run(() => update.mutateAsync({ messageId: message.id, read: false }), null, onClose)
           }
         >
           {t('actions.markUnread')}
@@ -186,7 +201,7 @@ export function MessageActions({
           void run(
             () => update.mutateAsync({ messageId: message.id, starred: !message.starred }),
             null,
-            false
+            null
           )
         }
       >
@@ -241,7 +256,7 @@ export function MessageActions({
             void run(
               () => update.mutateAsync({ messageId: message.id, placement: 'default' }),
               t('messages.restored'),
-              true
+              leaveView
             )
           }
         >
@@ -276,7 +291,7 @@ export function MessageActions({
               setConfirmDelete(false);
             },
             t('messages.deletedForever'),
-            true
+            leaveView
           )
         }
       />

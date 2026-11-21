@@ -496,9 +496,10 @@ func (h *Handler) ReceiveInbound(c *gin.Context) {
 		return
 	}
 	message, created, err := h.service.ReceiveInbound(c.Request.Context(), InboundDelivery{
-		Recipient: c.GetHeader(InboundRecipientHeader),
-		Signature: c.GetHeader(InboundSignatureHeader),
-		Raw:       raw,
+		ConnectionID: c.Param("connection_id"),
+		Recipient:    c.GetHeader(InboundRecipientHeader),
+		Signature:    c.GetHeader(InboundSignatureHeader),
+		Raw:          raw,
 	})
 	if err != nil {
 		response.HandleError(c, "Failed to accept inbound mail", err)

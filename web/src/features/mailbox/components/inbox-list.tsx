@@ -19,7 +19,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-reason';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
-import { rowUnread } from '@/features/mailbox/components/message-list';
+import { rowUnread } from '@/features/mailbox/components/message-rows';
 import { MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
 import type { InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
 import { useT } from '@/i18n';
@@ -27,6 +27,8 @@ import { cn } from '@/utils';
 
 /** How far below the visible rows the next page starts loading. */
 const loadAheadMargin = '240px';
+/** Display names of connector ids; an id without one is shown as it is. */
+const SOURCE_NAMES: Record<string, string | undefined> = { gmail: 'Gmail', outlook: 'Outlook' };
 
 /** `zone` when this browser knows it, else undefined (the browser's own zone). */
 function knownZone(zone: string): string | undefined {
@@ -414,13 +416,15 @@ export function InboxList({
                       {t('inbox.threadCount', { count })}
                     </span>
                   ) : null}
-                  {item.source === 'gmail' || item.source === 'outlook' ? (
+                  {item.source && item.source !== 'zmail' ? (
                     <span
                       data-source={item.source}
-                      title={t(`inbox.source.${item.source}Title`)}
+                      title={t('inbox.sourceTitle', {
+                        name: SOURCE_NAMES[item.source] ?? item.source,
+                      })}
                       className="shrink-0 rounded-full border border-border px-[6px] text-[11px] text-text-muted"
                     >
-                      {t(`inbox.source.${item.source}`)}
+                      {SOURCE_NAMES[item.source] ?? item.source}
                     </span>
                   ) : null}
                   {role ? (

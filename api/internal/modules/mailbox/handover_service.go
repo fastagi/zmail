@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -170,7 +171,37 @@ func (s *service) MemberRemoved(ctx context.Context, event domain.OrganizationMe
 	})
 	// Mail roles only display their owner, so clearing it is not part of the access change above.
 	s.clearMailRoleOwner(ctx, event.OrganizationID, event.UserID)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.revokeConnectionsOfLeaver(ctx, event.OrganizationID, event.UserID)
+}
+
+// revokeConnectionsOfLeaver stops syncing the outside accounts of a member who left. Those accounts
+// are the member's own, so unlike a personal mailbox nothing awaits a handover: each grant is handed
+// back to its provider, the token is erased, and the copies stay readable by nobody. Binding the
+// account again after rejoining restores the same mailbox.
+func (s *service) revokeConnectionsOfLeaver(ctx context.Context, organizationID, userID uint) error {
+	if s.externalMail == nil || s.encryptor == nil {
+		return nil
+	}
+	connections, err := s.externalMail.ListExternalMailConnections(ctx, organizationID, userID)
+	if err != nil {
+		return err
+	}
+	for _, connection := range connections {
+		if connection.Status == domain.ExternalMailStatusRevoked {
+			continue
+		}
+		s.handBackExternalGrant(ctx, connection)
+		if err := s.externalMail.RevokeExternalMailConnection(ctx, organizationID, connection.ID, s.now().UTC()); err != nil {
+			return err
+		}
+		slog.InfoContext(ctx, "external_mail.revoked",
+			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
+			slog.String("reason", reasonLeftOrganization))
+	}
+	return nil
 }
 
 // MemberJoined handles a user joining the organization: a returning owner's personal mailboxes

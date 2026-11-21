@@ -407,7 +407,11 @@ func (s *service) commitMailbox(ctx context.Context, viewer domain.OrganizationC
 	mailbox := plan.mailbox
 	// A send-only domain receives elsewhere, so Email Routing is never used for its addresses.
 	if plan.connected != nil && receives(plan.connected) {
-		ruleID, ruleErr := s.domainProvider.CreateRoutingRule(ctx, plan.connected.ZoneID, mailbox.Address, s.settings.EmailWorker)
+		provider, worker, err := s.domainClient(ctx, plan.connected)
+		if err != nil {
+			return nil, err
+		}
+		ruleID, ruleErr := provider.CreateRoutingRule(ctx, plan.connected.ZoneID, mailbox.Address, worker)
 		if ruleErr != nil {
 			return nil, providerError(ruleErr)
 		}

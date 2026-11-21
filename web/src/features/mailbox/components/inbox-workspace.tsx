@@ -323,11 +323,17 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     try {
       const saved = window.localStorage.getItem(sortKey);
       if (saved === 'address' || saved === 'unread') setSort(saved);
-    } catch { /* Storage may be unavailable in private browsing. */ }
+    } catch {
+      /* Storage may be unavailable in private browsing. */
+    }
   }, []);
   const changeSort = (value: string) => {
     setSort(value);
-    try { window.localStorage.setItem(sortKey, value); } catch { /* Keep the session preference. */ }
+    try {
+      window.localStorage.setItem(sortKey, value);
+    } catch {
+      /* Keep the session preference. */
+    }
   };
   const mailboxes = useMailboxes(organizationId, { live: true });
   const roles = useMailRoles(organizationId);
@@ -763,6 +769,20 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       action(...args);
     };
 
+  if (draft?.draft.mode === 'compose' && sendableIds.has(draft.mailbox.id)) {
+    return (
+      <Suspense fallback={null}>
+        <ComposeDialog
+          inline
+          mailbox={draft.mailbox}
+          fromOptions={sendable}
+          draft={draft.draft}
+          onClose={() => setDraft(null)}
+        />
+      </Suspense>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0 bg-bg-canvas text-[13px] leading-normal antialiased">
       <MailShortcuts bindings={shortcuts} />
@@ -865,7 +885,10 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           </Suspense>
         ) : (
           <div className="flex h-full min-h-48 flex-col items-center justify-center gap-5 px-6 text-center">
-            <span aria-hidden="true" className="h-28 w-40 bg-[url('/inbox-letters.svg')] bg-contain bg-center bg-no-repeat motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 dark:brightness-75" />
+            <span
+              aria-hidden="true"
+              className="h-28 w-40 bg-[url('/inbox-letters.svg')] bg-contain bg-center bg-no-repeat motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-300 dark:brightness-75"
+            />
             <p className="text-sm text-text-muted">{t('list.readerEmpty')}</p>
           </div>
         )}
