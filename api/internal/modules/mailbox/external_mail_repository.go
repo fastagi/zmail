@@ -137,6 +137,10 @@ func (r *repository) SaveExternalMailSync(ctx context.Context, result domain.Ext
 		if result.SyncedAt != nil {
 			updates["last_synced_at"] = *result.SyncedAt
 		}
+		if result.EncryptedRefreshToken != "" {
+			// A rotated grant is saved with the page it came with: losing it would lose the account.
+			updates["encrypted_refresh_token"] = result.EncryptedRefreshToken
+		}
 		// The status condition locks the row and drops the batch when a revoke or a lost grant
 		// landed while the fetch ran.
 		update := tx.Model(&ExternalMailConnectionPO{}).

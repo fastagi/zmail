@@ -63,13 +63,27 @@ func TestExternalMailFakeRefusedInProduction(t *testing.T) {
 // TestExternalMailConfigRejectsUnavailableProvidersAndMissingKey: real providers wait for their
 // OAuth applications, and refresh tokens are never stored without the encryption key.
 func TestExternalMailConfigRejectsUnavailableProvidersAndMissingKey(t *testing.T) {
-	for name, providers := range map[string][]string{
-		"gmail before its source exists":   {"gmail"},
-		"outlook before its source exists": {"outlook"},
-		"unknown provider":                 {"imap"},
+	client := map[string]ExternalMailOAuthClient{"gmail": {ClientID: "id", ClientSecret: "secret"}}
+	for name, cfg := range map[string]ExternalMailConfig{
+		"gmail without its client":     {Providers: []string{"gmail"}, RedirectURL: "https://zmail.example/cb"},
+		"gmail without a redirect URL": {Providers: []string{"gmail"}, OAuth: client},
+		"outlook with gmail's client":  {Providers: []string{"outlook"}, OAuth: client, RedirectURL: "https://zmail.example/cb"},
+		"unknown provider":             {Providers: []string{"pop3"}},
+		"fake next to a real provider": {Providers: []string{"fake", "imap"}},
 	} {
-		if err := validateExternalMailConfig(ExternalMailConfig{Providers: providers}, testExternalMailKey, false); err == nil {
+		if err := validateExternalMailConfig(cfg, testExternalMailKey, false); err == nil {
 			t.Errorf("%s: want an error", name)
+		}
+	}
+	for name, cfg := range map[string]ExternalMailConfig{
+		"gmail with its client": {Providers: []string{"gmail"}, OAuth: client, RedirectURL: "https://zmail.example/cb"},
+		"imap alone":            {Providers: []string{"imap"}},
+	} {
+		if err := validateExternalMailConfig(cfg, testExternalMailKey, true); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if cfg.Source() != ExternalMailSourceConnectors {
+			t.Errorf("%s: source = %q, want connectors", name, cfg.Source())
 		}
 	}
 	err := validateExternalMailConfig(ExternalMailConfig{Providers: []string{ExternalMailSourceFake}}, "short", false)

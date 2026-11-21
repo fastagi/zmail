@@ -199,7 +199,7 @@ func TestExternalMailSyncAuthFailureNeedsReconnect(t *testing.T) {
 // failingSource fails every fetch with a provider error that is not an authorization failure.
 type failingSource struct{ *FakeExternalMailSource }
 
-func (failingSource) Fetch(context.Context, ExternalMailToken, string) (ExternalMailFetch, error) {
+func (failingSource) Fetch(context.Context, ExternalMailFetchRequest) (ExternalMailFetch, error) {
 	return ExternalMailFetch{}, errors.New("provider unavailable")
 }
 
@@ -269,8 +269,8 @@ type revokingSource struct {
 	revoke func()
 }
 
-func (s revokingSource) Fetch(ctx context.Context, token ExternalMailToken, cursor string) (ExternalMailFetch, error) {
-	fetched, err := s.FakeExternalMailSource.Fetch(ctx, token, cursor)
+func (s revokingSource) Fetch(ctx context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	fetched, err := s.FakeExternalMailSource.Fetch(ctx, request)
 	s.revoke()
 	return fetched, err
 }

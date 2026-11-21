@@ -20,6 +20,10 @@ var (
 	// ErrExternalMailAuth means the provider refused the token (HTTP 401 or a revoked grant): the
 	// owner must bind the account again.
 	ErrExternalMailAuth = errors.New("external mail authorization failed")
+	// ErrExternalMailCursorExpired means the provider no longer honours the cursor (a Gmail
+	// historyId that is too old, a Graph delta token that expired): the sync starts over from an
+	// empty cursor, bounded by the connection's backfill window, and stored copies are not repeated.
+	ErrExternalMailCursorExpired = errors.New("external mail cursor expired")
 )
 
 // ExternalMailToken is the credential a source fetches with.
@@ -51,10 +55,31 @@ type ExternalMessage struct {
 	ReceivedAt time.Time
 }
 
+// ExternalMailFetchRequest is what a source needs to read one page of an account.
+type ExternalMailFetchRequest struct {
+	Token ExternalMailToken
+	// Cursor is the opaque position the source returned last; empty starts the backfill. A source
+	// encodes whatever its provider needs (one historyId, a delta link per folder, UIDs per
+	// folder) and nothing else reads it.
+	Cursor string
+	// AccountAddress is the bound account, for providers that address a mailbox by it.
+	AccountAddress string
+	// BackfillDays bounds how far back a fetch from an empty cursor reads.
+	BackfillDays int
+	// Now is the sync time, so the backfill window does not depend on the wall clock.
+	Now time.Time
+}
+
 // ExternalMailFetch is one page of new mail and the cursor after it.
 type ExternalMailFetch struct {
 	Messages []ExternalMessage
 	Cursor   string
+	// More means another page is ready: the connection is fetched again at once instead of after
+	// the sync interval, so a long backfill proceeds page by page and resumes after a restart.
+	More bool
+	// RefreshToken is set when the provider rotated the grant during this fetch; it is sealed and
+	// saved in the transaction that stores the page. Empty keeps the stored token.
+	RefreshToken string
 }
 
 // ExternalMailAuthRequest is what a sign-in page needs: the single-use state, the S256 PKCE
@@ -80,17 +105,37 @@ type ExternalMailSource interface {
 	// Exchange returns the grant and the account it reads; ErrExternalMailAuth when the provider
 	// refuses the code.
 	Exchange(ctx context.Context, exchange ExternalMailCodeExchange) (ExternalMailToken, ExternalMailAccount, error)
-	// Fetch returns the mail after cursor; an empty cursor starts the backfill. It returns
-	// ErrExternalMailAuth when the provider refuses the token.
-	Fetch(ctx context.Context, token ExternalMailToken, cursor string) (ExternalMailFetch, error)
+	// Fetch returns one page of mail after the request's cursor. It returns ErrExternalMailAuth
+	// when the provider refuses the token and ErrExternalMailCursorExpired when it no longer
+	// honours the cursor.
+	Fetch(ctx context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error)
 	Revoke(ctx context.Context, token ExternalMailToken) error
 }
 
 // ExternalMailAuthKind is how a member grants a connector access.
 type ExternalMailAuthKind string
 
-// ExternalMailAuthOAuth2 is the OAuth 2.0 authorization code flow with PKCE.
-const ExternalMailAuthOAuth2 ExternalMailAuthKind = "oauth2"
+const (
+	// ExternalMailAuthOAuth2 is the OAuth 2.0 authorization code flow with PKCE.
+	ExternalMailAuthOAuth2 ExternalMailAuthKind = "oauth2"
+	// ExternalMailAuthPassword is an app password the member types in, for providers without
+	// OAuth; it never goes through the sign-in redirect.
+	ExternalMailAuthPassword ExternalMailAuthKind = "password"
+)
+
+// ExternalMailConnectorBuilder builds one connector from the configuration, or reports false when
+// the configuration does not enable it.
+type ExternalMailConnectorBuilder func(cfg config.ExternalMailConfig) (ExternalMailConnector, bool)
+
+// externalMailConnectorBuilders are the real connectors compiled into the binary, in registration
+// order. Each adapter file adds its own builder with registerExternalMailConnector from an init
+// function, so adding a provider touches no shared file.
+var externalMailConnectorBuilders []ExternalMailConnectorBuilder
+
+// registerExternalMailConnector adds a connector builder; call it from an adapter's init.
+func registerExternalMailConnector(builder ExternalMailConnectorBuilder) {
+	externalMailConnectorBuilders = append(externalMailConnectorBuilders, builder)
+}
 
 // ExternalMailCapabilities says what a connector can do with a bound account.
 type ExternalMailCapabilities struct {
@@ -140,7 +185,17 @@ func newExternalMailRegistry(cfg config.ExternalMailConfig) *externalMailRegistr
 	if cfg.Source() == config.ExternalMailSourceFake {
 		return fakeExternalMailRegistry(NewFakeExternalMailSource())
 	}
-	return &externalMailRegistry{}
+	registry := &externalMailRegistry{}
+	for _, build := range externalMailConnectorBuilders {
+		connector, enabled := build(cfg)
+		if !enabled || !connector.ID.Valid() || connector.Source == nil {
+			continue
+		}
+		if _, duplicate := registry.lookup(connector.ID); !duplicate {
+			registry.connectors = append(registry.connectors, connector)
+		}
+	}
+	return registry
 }
 
 // fakeExternalMailRegistry registers one fake source under the Gmail and Outlook ids.
@@ -167,7 +222,7 @@ func (disabledExternalMailSource) Exchange(context.Context, ExternalMailCodeExch
 	return ExternalMailToken{}, ExternalMailAccount{}, ErrExternalMailUnavailable
 }
 
-func (disabledExternalMailSource) Fetch(context.Context, ExternalMailToken, string) (ExternalMailFetch, error) {
+func (disabledExternalMailSource) Fetch(context.Context, ExternalMailFetchRequest) (ExternalMailFetch, error) {
 	return ExternalMailFetch{}, ErrExternalMailUnavailable
 }
 
@@ -186,6 +241,18 @@ type FakeExternalMailSource struct {
 	revoked  map[string]bool
 	// challenges are the PKCE challenges of sign-in pages served; an exchange must prove one.
 	challenges map[string]bool
+	// PageSize caps the messages of one fetch; zero returns everything at once.
+	PageSize int
+	// rotations maps a token to the one the next fetch with it hands out; aliases maps a rotated
+	// token back to the account's first token.
+	rotations map[string]string
+	aliases   map[string]string
+	// spent marks tokens replaced by a rotation.
+	spent map[string]bool
+	// expired marks tokens whose next fetch with a cursor answers ErrExternalMailCursorExpired.
+	expired map[string]bool
+	// requests keeps the last fetch request per account, for assertions.
+	requests map[string]ExternalMailFetchRequest
 }
 
 var _ ExternalMailSource = (*FakeExternalMailSource)(nil)
@@ -195,6 +262,8 @@ func NewFakeExternalMailSource() *FakeExternalMailSource {
 	return &FakeExternalMailSource{
 		mail: map[string][]ExternalMessage{}, authFail: map[string]bool{},
 		fetches: map[string]int{}, revoked: map[string]bool{}, challenges: map[string]bool{},
+		rotations: map[string]string{}, aliases: map[string]string{}, expired: map[string]bool{}, spent: map[string]bool{},
+		requests: map[string]ExternalMailFetchRequest{},
 	}
 }
 
@@ -250,30 +319,81 @@ func (f *FakeExternalMailSource) Exchange(_ context.Context, exchange ExternalMa
 	return ExternalMailToken{RefreshToken: token}, ExternalMailAccount{Address: exchange.Code + "@external.invalid"}, nil
 }
 
-func (f *FakeExternalMailSource) Fetch(_ context.Context, token ExternalMailToken, cursor string) (ExternalMailFetch, error) {
+// RotateOnNextFetch makes the next fetch with token hand out next as the rotated grant; token
+// stops working afterwards, as a rotated refresh token does.
+func (f *FakeExternalMailSource) RotateOnNextFetch(token, next string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.fetches[token.RefreshToken]++
-	if f.authFail[token.RefreshToken] || f.revoked[token.RefreshToken] {
+	f.rotations[token] = next
+}
+
+// ExpireCursor makes the next fetch with token and a cursor answer ErrExternalMailCursorExpired.
+func (f *FakeExternalMailSource) ExpireCursor(token string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.expired[f.account(token)] = true
+}
+
+// LastRequest returns the last fetch request made for the account behind token.
+func (f *FakeExternalMailSource) LastRequest(token string) ExternalMailFetchRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.requests[f.account(token)]
+}
+
+// account resolves a possibly rotated token to the account's first token, which keys its mail.
+func (f *FakeExternalMailSource) account(token string) string {
+	if first, rotated := f.aliases[token]; rotated {
+		return first
+	}
+	return token
+}
+
+func (f *FakeExternalMailSource) Fetch(_ context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	token := request.Token.RefreshToken
+	account := f.account(token)
+	f.fetches[account]++
+	f.requests[account] = request
+	if f.spent[token] || f.authFail[token] || f.revoked[token] || f.authFail[account] || f.revoked[account] {
 		return ExternalMailFetch{}, ErrExternalMailAuth
 	}
+	if request.Cursor != "" && f.expired[account] {
+		delete(f.expired, account)
+		return ExternalMailFetch{}, ErrExternalMailCursorExpired
+	}
 	start := 0
-	if cursor != "" {
-		parsed, err := strconv.Atoi(cursor)
+	if request.Cursor != "" {
+		parsed, err := strconv.Atoi(request.Cursor)
 		if err != nil || parsed < 0 {
 			return ExternalMailFetch{}, errors.New("fake external mail: invalid cursor")
 		}
 		start = parsed
 	}
-	all := f.mail[token.RefreshToken]
+	all := f.mail[account]
 	start = min(start, len(all))
-	page := append([]ExternalMessage(nil), all[start:]...)
-	return ExternalMailFetch{Messages: page, Cursor: strconv.Itoa(len(all))}, nil
+	end := len(all)
+	if f.PageSize > 0 {
+		end = min(end, start+f.PageSize)
+	}
+	fetched := ExternalMailFetch{
+		Messages: append([]ExternalMessage(nil), all[start:end]...), Cursor: strconv.Itoa(end), More: end < len(all),
+	}
+	if next, rotate := f.rotations[token]; rotate {
+		delete(f.rotations, token)
+		f.aliases[next] = account
+		// The old token is spent once a new one is issued.
+		f.spent[token] = true
+		fetched.RefreshToken = next
+	}
+	return fetched, nil
 }
 
 func (f *FakeExternalMailSource) Revoke(_ context.Context, token ExternalMailToken) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.revoked[f.account(token.RefreshToken)] = true
 	f.revoked[token.RefreshToken] = true
 	return nil
 }

@@ -389,3 +389,69 @@ func TestLeavingTheOrganizationRevokesConnections(t *testing.T) {
 		t.Fatalf("external mailbox = %+v, err %v; want no handover state", mailbox, err)
 	}
 }
+
+// TestExternalMailBackfillProceedsPageByPage: a source that returns pages is fetched again at once
+// while more is ready, each page saved with its cursor, and then at the normal interval.
+func TestExternalMailBackfillProceedsPageByPage(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.source.PageSize = 2
+	for i := 1; i <= 5; i++ {
+		f.source.Deliver(externalTestToken, externalMessage(fmt.Sprintf("g-%d", i), fmt.Sprintf("Mail %d", i), time.Time{}))
+	}
+	for pass, want := range []int{2, 4, 5} {
+		if handled := f.sync(t); handled != 1 {
+			t.Fatalf("pass %d handled %d connections, want 1 without waiting for the interval", pass, handled)
+		}
+		if stored := len(f.storedExternal(t)); stored != want {
+			t.Fatalf("pass %d stored %d messages, want %d", pass, stored, want)
+		}
+	}
+	if handled := f.sync(t); handled != 0 {
+		t.Fatalf("a finished backfill was fetched again before the interval (%d)", handled)
+	}
+	request := f.source.LastRequest(externalTestToken)
+	if request.BackfillDays != domain.DefaultExternalMailBackfillDays || request.AccountAddress != f.mailbox.Address || request.Now.IsZero() {
+		t.Fatalf("fetch request = %+v, want the connection's backfill window, address, and sync time", request)
+	}
+}
+
+// TestExternalMailSavesRotatedToken: a grant the provider rotates during a fetch is saved with that
+// page, so the next fetch uses the new one and the account is not lost.
+func TestExternalMailSavesRotatedToken(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.source.Deliver(externalTestToken, externalMessage("g-1", "One", time.Time{}))
+	f.source.RotateOnNextFetch(externalTestToken, "refresh-b-2")
+	f.sync(t)
+
+	stored, err := f.service.encryptor.DecryptString(f.reload(t).EncryptedRefreshToken)
+	if err != nil || stored != "refresh-b-2" {
+		t.Fatalf("stored token = %q, err %v; want the rotated one", stored, err)
+	}
+	f.source.Deliver(externalTestToken, externalMessage("g-2", "Two", time.Time{}))
+	f.advance(externalMailSyncInterval)
+	f.sync(t)
+	if connection := f.reload(t); connection.Status != domain.ExternalMailStatusActive || len(f.storedExternal(t)) != 2 {
+		t.Fatalf("after rotation: status %q, %d messages; want active and 2", connection.Status, len(f.storedExternal(t)))
+	}
+}
+
+// TestExternalMailCursorExpiryResyncs: when the provider no longer honours the cursor, the sync
+// starts over at once from an empty cursor and stores no second copy.
+func TestExternalMailCursorExpiryResyncs(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.source.Deliver(externalTestToken, externalMessage("g-1", "One", time.Time{}))
+	f.sync(t)
+	f.source.ExpireCursor(externalTestToken)
+	f.source.Deliver(externalTestToken, externalMessage("g-2", "Two", time.Time{}))
+	f.advance(externalMailSyncInterval)
+	f.sync(t)
+	if connection := f.reload(t); connection.SyncCursor != "" || connection.Status != domain.ExternalMailStatusActive || connection.LastErrorCode != "" {
+		t.Fatalf("after expiry: %+v, want an empty cursor, active, no error", connection)
+	}
+	if handled := f.sync(t); handled != 1 {
+		t.Fatalf("the resync waited for the interval (%d handled)", handled)
+	}
+	if stored := len(f.storedExternal(t)); stored != 2 {
+		t.Fatalf("stored %d messages after the resync, want 2 without copies", stored)
+	}
+}
