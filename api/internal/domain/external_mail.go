@@ -181,6 +181,10 @@ type ExternalMailRepository interface {
 	// connection's runs beyond MaxExternalMailSyncRuns are pruned.
 	// The returned messages are the ones newly stored, with their ids.
 	SaveExternalMailSync(ctx context.Context, result ExternalMailSyncResult) (stored []*MailMessage, applied bool, err error)
+	// LockExternalMailBindings holds the owner's binding lock in the organization until the
+	// surrounding transaction ends, so two bindings of one member count their live connections in
+	// turn and never both pass the per-member limit.
+	LockExternalMailBindings(ctx context.Context, organizationID, ownerUserID uint) error
 	// CountLiveExternalMailConnections counts the owner's connections that are not revoked; the
 	// per-member limit bounds these.
 	CountLiveExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) (int, error)

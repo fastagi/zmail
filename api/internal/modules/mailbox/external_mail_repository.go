@@ -3,6 +3,7 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -446,6 +447,14 @@ func (r *repository) TakeExternalMailAuthorization(ctx context.Context, stateHas
 		SealedVerifier: po.SealedVerifier, ConnectionID: po.ConnectionID, BackfillDays: po.BackfillDays,
 		ExpiresAt: po.ExpiresAt, CreatedAt: po.CreatedAt,
 	}, nil
+}
+
+func (r *repository) LockExternalMailBindings(ctx context.Context, organizationID, ownerUserID uint) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	key := fmt.Sprintf("zmail.external_mail_binding:%d:%d", organizationID, ownerUserID)
+	return r.conn(ctx).Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`, key).Error
 }
 
 func (r *repository) CountLiveExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) (int, error) {
