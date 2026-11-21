@@ -284,7 +284,7 @@ Steps (stack A, fake connector, one member):
 5. `GET /v1/external-mail-connections`.
 
 Expected: the member never has more than 10 live connections (contract: "Revoked connections … do
-not count toward the limit of 10"; roadmap §4.2.3 "每人 10 个个人接入"), so step 4 is `409
+not count toward the limit of 10"; roadmap §4.2.3, ten personal connections per member), so step 4 is `409
 MAILBOX.EXTERNAL_CONNECTION_LIMIT`; and the list ("at most 10") shows every live connection.
 
 Actual: 11 live connections (`select count(*) … where status <> 'revoked'` → 11). The list returns
