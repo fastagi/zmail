@@ -118,7 +118,7 @@ func validateExternalMailConfig(c ExternalMailConfig, secretKey string, producti
 	}
 	if c.RedirectURL != "" {
 		parsed, err := url.Parse(c.RedirectURL)
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && !(parsed.Scheme == "http" && !production)) {
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && (parsed.Scheme != "http" || production)) {
 			return fmt.Errorf("EXTERNAL_MAIL_REDIRECT_URL must be an absolute https URL (http only outside production)")
 		}
 	}
