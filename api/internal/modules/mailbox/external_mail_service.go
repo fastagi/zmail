@@ -56,9 +56,11 @@ func (s *service) SyncExternalMail(ctx context.Context, limit int) (int, error) 
 			return len(connections), err
 		}
 	}
-	// Housekeeping is bounded and does not count as handled connections, so it never keeps the
-	// worker from waiting between passes.
-	return len(connections), s.maintainExternalMail(ctx, now)
+	// Pruning is bounded and does not count as handled connections, so it never keeps the worker
+	// from waiting between passes. The purge of revoked copies runs in the mail worker instead, so
+	// it does not depend on any provider being enabled.
+	s.pruneExternalMailSyncRuns(ctx, now)
+	return len(connections), nil
 }
 
 // syncExternalConnection fetches one claimed connection and records the outcome with a sync run.
@@ -74,6 +76,21 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	spacing := budget.Spacing()
 	timedOut, throttled := false, false
 	startedAt, started := s.now().UTC(), time.Now()
+	mailbox, err := s.repo.FindMailbox(ctx, connection.OrganizationID, connection.MailboxID)
+	if errors.Is(err, ErrMailboxNotFound) {
+		return s.dropConnectionWithoutMailbox(ctx, connection, result, startedAt)
+	}
+	if err != nil {
+		return err
+	}
+	// The claim lease covers the wait in this pass; before the fetch it is moved past the fetch
+	// deadline, so no other worker can claim the connection, and use its grant, while the fetch
+	// may still run. A connection another worker took meanwhile is skipped.
+	held, err := s.externalMail.RenewExternalMailLease(ctx, connection.ID, connection.NextSyncAt,
+		maxTime(connection.NextSyncAt, s.now().UTC().Add(budget.Timeout()+externalMailLeaseMargin)))
+	if err != nil || !held {
+		return err
+	}
 	connector, registered := s.externalConnectors.lookup(connection.Provider)
 	refreshToken, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
 	var fetched ExternalMailFetch
@@ -105,6 +122,10 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	}
 	latency := time.Since(started)
 	outcome := domain.ExternalMailSyncOK
+	if errors.Is(err, ErrExternalMailCursorExpired) && connection.SyncCursor == "" {
+		// An empty cursor cannot expire: a source that says so would restart forever.
+		err = errExternalMailCursorLoop
+	}
 	if fetched.RefreshToken != "" && fetched.RefreshToken != refreshToken {
 		// A provider that rotates grants has already spent the old one, so the new one is kept
 		// even when the rest of the fetch failed.
@@ -130,15 +151,10 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 			}
 		}
 	case errors.Is(err, ErrExternalMailCursorExpired):
-		// Start over from an empty cursor at once; copies already stored are not repeated. The
-		// restart counts toward the pages fetched in a row, so a source that keeps expiring its
-		// cursor is spaced like an endless backfill.
+		// Start over from an empty cursor at once, in the next pass; copies already stored are
+		// not repeated. The restart is a new backfill, so its pages in a row count from zero.
 		outcome = domain.ExternalMailSyncCursorExpired
-		result.Cursor, result.NextSyncAt, result.ConsecutiveFailures = "", now, 0
-		result.ConsecutiveMore = min(connection.ConsecutiveMore+1, maxConsecutiveFailures)
-		if result.ConsecutiveMore >= budget.ImmediatePages() {
-			result.NextSyncAt, throttled = now.Add(spacing), true
-		}
+		result.Cursor, result.NextSyncAt, result.ConsecutiveFailures, result.ConsecutiveMore = "", now, 0, 0
 		slog.InfoContext(ctx, "external_mail.cursor_expired",
 			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
 	case errors.Is(err, ErrExternalMailAuth):
@@ -158,16 +174,6 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		ConnectionID: connection.ID, StartedAt: startedAt, FinishedAt: s.now().UTC(), Outcome: outcome,
 		Fetched: len(fetched.Messages), More: err == nil && fetched.More, ErrorCode: result.LastErrorCode,
 		TimedOut: timedOut, Throttled: throttled,
-	}
-	mailbox, err := s.repo.FindMailbox(ctx, connection.OrganizationID, connection.MailboxID)
-	if errors.Is(err, ErrMailboxNotFound) {
-		// A deleted external mailbox takes no more mail; its lease keeps it out of the next passes.
-		slog.WarnContext(ctx, "external_mail.mailbox_missing",
-			slog.Uint64("connection_id", uint64(connection.ID)), slog.Uint64("mailbox_id", uint64(connection.MailboxID)))
-		return nil
-	}
-	if err != nil {
-		return err
 	}
 	var stored []*domain.MailMessage
 	applied := false

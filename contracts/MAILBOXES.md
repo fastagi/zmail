@@ -829,8 +829,11 @@ connection already fetched the most pages in a row allowed at once.
 
 Revoking a connection, by its member, an `owner` or `admin`, or because the member left the
 organization, starts a retention of `EXTERNAL_MAIL_REVOKED_RETENTION` (720 hours, 30 days, by
-default). Binding the same account again before it ends keeps the mailbox and its copies and cancels
-the deletion. When it ends, the worker deletes the copies for good in bounded batches, then deletes
+default; at least 24 hours, written as a duration such as `720h` or a day count such as `90d`; a
+value that does not parse stops startup). Binding the same account again before it ends keeps the
+mailbox and its copies and cancels the deletion. When it ends, the mail worker (`mail:broadcast:work`
+ticks, which run whenever the mailbox starter is on, with or without `EXTERNAL_MAIL_PROVIDERS`)
+deletes the copies for good in bounded batches, then deletes
 the external mailbox and the connection with its sync runs, and stores a `copies_purged` access
 event on the deleted mailbox with `{ "connection_id", "provider", "reason": "retention" }`, the
 member who bound the account as its subject. The event is an audit record: the access history route
@@ -845,9 +848,13 @@ revoked connection at once, the same way, with `reason` `owner` and the caller a
 | Every copy, the mailbox, and the connection are deleted | `200` `{ "deleted_messages": 120, "completed": true }` |
 | More copies than one request deletes | `202` `{ "deleted_messages": 5000, "completed": false }`: the rest is due at once and the worker deletes it in its next passes |
 | The connection is not revoked | `409 MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` |
-| Another member's connection, an `owner` or `admin` included, or external mail is off | `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` |
+| Another member's connection, an `owner` or `admin` included | `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` |
 
-A purge only ever touches the connection's own mailbox.
+The route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never
+strands copies. A purge only ever touches the connection's own mailbox, and only when that mailbox
+holds synced copies; a purge that fails is logged and retried an hour later without holding up the
+connections revoked after it. A claimed connection whose mailbox is gone is not fetched: its grant
+is handed back, it is revoked, and its run is recorded as `dropped`.
 
 ## Domains
 

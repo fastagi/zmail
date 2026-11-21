@@ -26,7 +26,8 @@ type addExternalMailSyncOps struct {
 //     consecutive_more bounds how many pages in a row one connection fetches at once.
 //   - external_mail_connections.revoked_at starts the retention of a revoked connection's copies.
 //     Existing revoked rows start it at the upgrade, so no copy is deleted earlier than a full
-//     retention after it.
+//     retention after it. purge_retry_at holds back a connection whose purge failed, so it does
+//     not block the ones revoked after it.
 //   - The due index gains the provider, so a pass takes each provider's oldest due connections
 //     without scanning the others, and a partial index finds revoked connections by age.
 //
@@ -37,7 +38,8 @@ func (m *addExternalMailSyncOps) Up(db *gorm.DB) error {
 		`ALTER TABLE external_mail_connections
 		  ADD COLUMN consecutive_failures smallint NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
 		  ADD COLUMN consecutive_more smallint NOT NULL DEFAULT 0 CHECK (consecutive_more >= 0),
-		  ADD COLUMN revoked_at timestamptz`,
+		  ADD COLUMN revoked_at timestamptz,
+		  ADD COLUMN purge_retry_at timestamptz`,
 		`UPDATE external_mail_connections SET revoked_at = now() WHERE status = 'revoked'`,
 		`DROP INDEX idx_external_mail_connections_due`,
 		`CREATE INDEX idx_external_mail_connections_due
@@ -69,6 +71,6 @@ func (m *addExternalMailSyncOps) Down(db *gorm.DB) error {
 		`DROP INDEX IF EXISTS idx_external_mail_connections_revoked`,
 		`DROP INDEX idx_external_mail_connections_due`,
 		`CREATE INDEX idx_external_mail_connections_due ON external_mail_connections (next_sync_at) WHERE status = 'active'`,
-		`ALTER TABLE external_mail_connections DROP COLUMN revoked_at, DROP COLUMN consecutive_more, DROP COLUMN consecutive_failures`,
+		`ALTER TABLE external_mail_connections DROP COLUMN purge_retry_at, DROP COLUMN revoked_at, DROP COLUMN consecutive_more, DROP COLUMN consecutive_failures`,
 	)
 }

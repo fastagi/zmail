@@ -54,6 +54,7 @@ type ExternalMailConnectionPO struct {
 	ConsecutiveFailures   int `gorm:"type:smallint;not null;default:0"`
 	ConsecutiveMore       int `gorm:"type:smallint;not null;default:0"`
 	RevokedAt             *time.Time
+	PurgeRetryAt          *time.Time
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }
@@ -331,7 +332,7 @@ func (r *repository) RebindExternalMailConnection(ctx context.Context, rebind do
 		"status": string(domain.ExternalMailStatusActive), "encrypted_refresh_token": rebind.EncryptedRefreshToken,
 		"last_error_code": nil, "next_sync_at": rebind.Now, "updated_at": rebind.Now,
 		// A rebind before the retention ends keeps the copies: the purge is canceled.
-		"consecutive_failures": 0, "consecutive_more": 0, "revoked_at": nil,
+		"consecutive_failures": 0, "consecutive_more": 0, "revoked_at": nil, "purge_retry_at": nil,
 	}
 	if rebind.ResetCursor {
 		updates["sync_cursor"] = ""
