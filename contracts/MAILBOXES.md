@@ -785,7 +785,10 @@ The `outlook` connector runs when `EXTERNAL_MAIL_PROVIDERS` lists it and its OAu
 platform with the delegated scopes `offline_access Mail.Read User.Read openid email` and binds the
 account's `mail` address, or its user principal name when it has none. It syncs the Inbox through
 Microsoft Graph message delta; Sent Items, Drafts, Deleted Items, and Junk Email are not synced, and
-neither are drafts. A message removed at Microsoft stays in the external mailbox. Unbinding erases
+neither are drafts. A message removed at Microsoft stays in the external mailbox. Graph returns at
+most about 5,000 messages in the first sync's look-back, so the first sync of a busier Inbox may
+stop short of it; later syncs read every new message. A body over 256 KiB is cut there, and a message whose
+body Graph cannot return within the connector's bound is kept with its headers only. Unbinding erases
 the stored grant; Microsoft has no per-grant revocation, so the member removes the app's consent in
 their Microsoft account to end it there as well.
 

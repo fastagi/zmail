@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,7 +19,12 @@ import (
 // The Outlook connector reads Outlook.com and Microsoft 365 mailboxes through Microsoft Graph with
 // the OAuth 2.0 authorization code flow and PKCE. It syncs each folder with Graph message delta:
 // a delta round pages through the folder with @odata.nextLink and ends in an @odata.deltaLink,
-// which the next round follows to read only what changed.
+// which the next round follows to read only what changed. A delta page carries headers only; each
+// message's body is read with its own bounded request, so one huge body never fails a whole page.
+//
+// Graph caps a delta round filtered on receivedDateTime at about 5,000 messages, so the first
+// round of a very busy Inbox may stop short of the backfill window; the connector logs
+// external_mail.backfill_truncated when that happens, and later rounds read every new message.
 
 const (
 	outlookLoginBaseURL = "https://login.microsoftonline.com"
@@ -26,18 +32,32 @@ const (
 	// outlookScopes are the delegated permissions the member grants: read mail, read the profile
 	// for the account address, and a refresh token (offline_access).
 	outlookScopes = "offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read openid email"
-	// outlookPageSize is the Graph page size a delta request prefers.
+	// outlookPageSize is the Graph page size a delta request prefers; an oversized page is asked
+	// again with half the size, down to one message.
 	outlookPageSize = 25
-	// outlookMessageFields are the message properties a delta page selects.
-	outlookMessageFields  = "id,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,isDraft,internetMessageHeaders"
+	// outlookMessageFields are the message properties a delta page selects. The body is read per
+	// message.
+	outlookMessageFields  = "id,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,isDraft,internetMessageHeaders"
 	outlookRequestTimeout = 30 * time.Second
-	// outlookMaxTokenResponse bounds token and profile responses; outlookMaxPageResponse bounds one
-	// delta page of 25 messages with their bodies.
+	// outlookMaxTokenResponse bounds token and profile responses, outlookMaxPageResponse one delta
+	// page of headers, and outlookMaxBodyResponse one message body: four times the stored limit,
+	// as JSON escaping inflates HTML.
 	outlookMaxTokenResponse = 64 << 10
-	outlookMaxPageResponse  = 32 << 20
+	outlookMaxPageResponse  = 8 << 20
+	outlookMaxBodyResponse  = 4 * domain.MaxMailBodyBytes
+	// outlookDeltaRoundLimit is how many messages Graph returns at most in a delta round filtered
+	// on receivedDateTime.
+	outlookDeltaRoundLimit = 5000
 	// outlookDefaultBackfillDays is the look-back of a first round when the request names none.
 	outlookDefaultBackfillDays = 14
 	outlookCursorVersion       = 1
+)
+
+var (
+	// errOutlookResponseTooLarge marks a response over its bound.
+	errOutlookResponseTooLarge = errors.New("outlook: response too large")
+	// errOutlookNotFound marks a Graph 404, such as a message deleted since its page was read.
+	errOutlookNotFound = errors.New("outlook: not found")
 )
 
 // outlookSyncedFolders are the folders the connector syncs, by Graph well-known name, in order.
@@ -73,7 +93,12 @@ type outlookMailSource struct {
 	loginBaseURL string
 	graphBaseURL string
 	folders      []string
-	client       *http.Client
+	// maxPageBytes and maxBodyBytes bound delta pages and message bodies; fields for tests.
+	maxPageBytes int64
+	maxBodyBytes int64
+	// deltaRoundLimit is Graph's cap on a filtered delta round; a field for tests.
+	deltaRoundLimit int
+	client          *http.Client
 }
 
 var _ ExternalMailSource = (*outlookMailSource)(nil)
@@ -85,8 +110,9 @@ func newOutlookMailSource(client config.ExternalMailOAuthClient) *outlookMailSou
 	}
 	return &outlookMailSource{
 		clientID: strings.TrimSpace(client.ClientID), clientSecret: client.ClientSecret, tenant: tenant,
-		loginBaseURL: outlookLoginBaseURL, graphBaseURL: outlookGraphBaseURL,
-		folders: outlookSyncedFolders, client: &http.Client{Timeout: outlookRequestTimeout},
+		loginBaseURL: outlookLoginBaseURL, graphBaseURL: outlookGraphBaseURL, folders: outlookSyncedFolders,
+		maxPageBytes: outlookMaxPageResponse, maxBodyBytes: outlookMaxBodyResponse, deltaRoundLimit: outlookDeltaRoundLimit,
+		client: &http.Client{Timeout: outlookRequestTimeout},
 	}
 }
 
@@ -107,6 +133,10 @@ func (s *outlookMailSource) AuthURL(request ExternalMailAuthRequest) string {
 
 func (s *outlookMailSource) oauthEndpoint(name string) string {
 	return strings.TrimRight(s.loginBaseURL, "/") + "/" + url.PathEscape(s.tenant) + "/oauth2/v2.0/" + name
+}
+
+func (s *outlookMailSource) graphURL(path string) string {
+	return strings.TrimRight(s.graphBaseURL, "/") + path
 }
 
 // Exchange redeems the code with its PKCE verifier and reads the account address from /me.
@@ -131,8 +161,7 @@ func (s *outlookMailSource) Exchange(ctx context.Context, exchange ExternalMailC
 		Mail              string `json:"mail"`
 		UserPrincipalName string `json:"userPrincipalName"`
 	}
-	profileURL := strings.TrimRight(s.graphBaseURL, "/") + "/me?$select=mail,userPrincipalName"
-	if err := s.graphGet(ctx, grant.AccessToken, profileURL, outlookMaxTokenResponse, &profile); err != nil {
+	if err = s.graphGet(ctx, grant.AccessToken, s.graphURL("/me?$select=mail,userPrincipalName"), 0, outlookMaxTokenResponse, &profile); err != nil {
 		return ExternalMailToken{}, ExternalMailAccount{}, err
 	}
 	address := strings.TrimSpace(profile.Mail)
@@ -142,7 +171,7 @@ func (s *outlookMailSource) Exchange(ctx context.Context, exchange ExternalMailC
 	if address == "" {
 		return ExternalMailToken{}, ExternalMailAccount{}, errors.New("outlook: the account has no mail address")
 	}
-	return ExternalMailToken{RefreshToken: grant.RefreshToken}, ExternalMailAccount{Address: address}, nil
+	return ExternalMailToken{RefreshToken: grant.RefreshToken}, ExternalMailAccount{Address: strings.ToLower(address)}, nil
 }
 
 // Revoke does nothing at Microsoft: the identity platform has no endpoint that revokes a single
@@ -154,7 +183,8 @@ func (s *outlookMailSource) Revoke(context.Context, ExternalMailToken) error {
 }
 
 // Fetch redeems the refresh token and follows one delta page of one folder. Microsoft rotates
-// refresh tokens on every redemption, so the token it issues is always handed back to be stored.
+// refresh tokens on every redemption, so the token it issues is always handed back to be stored,
+// next to the error when the rest of the fetch fails.
 func (s *outlookMailSource) Fetch(ctx context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error) {
 	cursor, err := s.parseCursor(request.Cursor)
 	if err != nil {
@@ -167,38 +197,96 @@ func (s *outlookMailSource) Fetch(ctx context.Context, request ExternalMailFetch
 	if err != nil {
 		return ExternalMailFetch{}, err
 	}
+	rotated := ExternalMailFetch{RefreshToken: grant.RefreshToken}
 
 	folder := cursor.next()
 	link := folder.Link
 	if link == "" {
 		link = s.initialDeltaURL(folder.Folder, request)
+		folder.Backfill, folder.Count = true, 0
 	}
-	var page outlookDeltaPage
-	if err = s.graphGet(ctx, grant.AccessToken, link, outlookMaxPageResponse, &page); err != nil {
-		return ExternalMailFetch{}, err
+	page, err := s.deltaPage(ctx, grant.AccessToken, link)
+	if err != nil {
+		return rotated, err
+	}
+	messages := make([]ExternalMessage, 0, len(page.Value))
+	for _, item := range page.Value {
+		message, ok := item.message()
+		if !ok {
+			continue
+		}
+		bodyErr := s.readBody(ctx, grant.AccessToken, item.ID, &message)
+		if errors.Is(bodyErr, errOutlookNotFound) {
+			// Deleted since the page was read.
+			continue
+		}
+		if bodyErr != nil {
+			return rotated, bodyErr
+		}
+		messages = append(messages, message)
+	}
+	if folder.Backfill {
+		folder.Count += len(page.Value)
 	}
 	switch {
 	case page.NextLink != "":
 		folder.Link, folder.Pending = page.NextLink, true
 	case page.DeltaLink != "":
 		folder.Link, folder.Pending = page.DeltaLink, false
+		if folder.Backfill && folder.Count >= s.deltaRoundLimit {
+			slog.WarnContext(ctx, "external_mail.backfill_truncated",
+				slog.String("provider", string(domain.ExternalMailProviderOutlook)), slog.String("folder", folder.Folder),
+				slog.Int("messages", folder.Count))
+		}
+		folder.Backfill, folder.Count = false, 0
 	default:
-		return ExternalMailFetch{}, errors.New("outlook: delta page carries neither a next nor a delta link")
+		return rotated, errors.New("outlook: delta page carries neither a next nor a delta link")
 	}
 	// Links come back from the provider and are checked again when the next fetch reads them.
 	encoded, err := json.Marshal(cursor)
 	if err != nil {
-		return ExternalMailFetch{}, fmt.Errorf("outlook: encode cursor: %w", err)
-	}
-	messages := make([]ExternalMessage, 0, len(page.Value))
-	for _, item := range page.Value {
-		if message, ok := item.message(); ok {
-			messages = append(messages, message)
-		}
+		return rotated, fmt.Errorf("outlook: encode cursor: %w", err)
 	}
 	return ExternalMailFetch{
 		Messages: messages, Cursor: string(encoded), More: cursor.pending(), RefreshToken: grant.RefreshToken,
 	}, nil
+}
+
+// deltaPage reads one delta page, asking again with half the page size while the page exceeds its
+// bound, so one page of unusually large headers does not fail every pass.
+func (s *outlookMailSource) deltaPage(ctx context.Context, accessToken, link string) (outlookDeltaPage, error) {
+	for size := outlookPageSize; ; size = max(1, size/2) {
+		var page outlookDeltaPage
+		err := s.graphGet(ctx, accessToken, link, size, s.maxPageBytes, &page)
+		if err == nil || !errors.Is(err, errOutlookResponseTooLarge) || size == 1 {
+			return page, err
+		}
+	}
+}
+
+// readBody reads a message's body into message. A body over its bound leaves the message with
+// its headers only, as an oversized inbound part is dropped.
+func (s *outlookMailSource) readBody(ctx context.Context, accessToken, id string, message *ExternalMessage) error {
+	var body struct {
+		Body struct {
+			ContentType string `json:"contentType"`
+			Content     string `json:"content"`
+		} `json:"body"`
+	}
+	err := s.graphGet(ctx, accessToken, s.graphURL("/me/messages/"+url.PathEscape(id)+"?$select=body"), 0, s.maxBodyBytes, &body)
+	if errors.Is(err, errOutlookResponseTooLarge) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	content := truncateText(cleanText(body.Body.Content), domain.MaxMailBodyBytes)
+	if strings.EqualFold(body.Body.ContentType, "html") {
+		message.HTMLBody = content
+	} else {
+		message.TextBody = content
+	}
+	return nil
 }
 
 // initialDeltaURL starts a folder's first delta round, bounded by the backfill window.
@@ -216,8 +304,7 @@ func (s *outlookMailSource) initialDeltaURL(folder string, request ExternalMailF
 		"$select": {outlookMessageFields},
 		"$filter": {"receivedDateTime ge " + since},
 	}
-	return strings.TrimRight(s.graphBaseURL, "/") + "/me/mailFolders/" + url.PathEscape(folder) +
-		"/messages/delta?" + query.Encode()
+	return s.graphURL("/me/mailFolders/" + url.PathEscape(folder) + "/messages/delta?" + query.Encode())
 }
 
 // outlookCursor is the opaque sync position: one Graph link per folder. A pending folder is in the
@@ -232,11 +319,16 @@ type outlookFolderState struct {
 	Folder  string `json:"folder"`
 	Link    string `json:"link,omitempty"`
 	Pending bool   `json:"pending,omitempty"`
+	// Backfill marks a first round, filtered on the backfill window; Count is how many entries it
+	// has returned so far, to report a round Graph cut at its limit.
+	Backfill bool `json:"backfill,omitempty"`
+	Count    int  `json:"count,omitempty"`
 }
 
 // parseCursor reads a stored cursor, keeping the configured folders in order: a folder the cursor
 // lacks starts its first round, and one no longer configured is dropped. Every stored link must
-// point at the configured Graph host, so a tampered cursor cannot send the access token elsewhere.
+// point at the configured Graph host, so a tampered cursor cannot send the access token elsewhere;
+// such a cursor is expired and the sync starts over.
 func (s *outlookMailSource) parseCursor(raw string) (*outlookCursor, error) {
 	stored := map[string]*outlookFolderState{}
 	if raw != "" {
@@ -257,7 +349,9 @@ func (s *outlookMailSource) parseCursor(raw string) (*outlookCursor, error) {
 	cursor := &outlookCursor{Version: outlookCursorVersion}
 	for _, name := range s.folders {
 		if folder, ok := stored[name]; ok {
-			cursor.Folders = append(cursor.Folders, &outlookFolderState{Folder: name, Link: folder.Link, Pending: folder.Pending})
+			state := *folder
+			state.Folder = name
+			cursor.Folders = append(cursor.Folders, &state)
 			continue
 		}
 		cursor.Folders = append(cursor.Folders, &outlookFolderState{Folder: name, Pending: true})
@@ -309,8 +403,18 @@ type outlookGrant struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-// redeem posts a grant to the token endpoint. A refused grant (invalid_grant, or any 400 or 401)
-// is ErrExternalMailAuth; throttling and server errors are plain errors the worker retries.
+// outlookMemberGrantErrors are the token endpoint errors only the member can clear by signing in
+// again. Every other refusal (invalid_client, unauthorized_client, an expired client secret) is the
+// operator's configuration and must not send every connection to needs_reconnect.
+var outlookMemberGrantErrors = map[string]bool{
+	"invalid_grant":        true,
+	"interaction_required": true,
+	"consent_required":     true,
+}
+
+// redeem posts a grant to the token endpoint. A grant the member must renew is
+// ErrExternalMailAuth; client errors, throttling, and server errors are plain errors the worker
+// retries.
 func (s *outlookMailSource) redeem(ctx context.Context, form url.Values) (outlookGrant, error) {
 	form.Set("client_id", s.clientID)
 	form.Set("client_secret", s.clientSecret)
@@ -338,21 +442,23 @@ func (s *outlookMailSource) redeem(ctx context.Context, form url.Values) (outloo
 			// A body that is not JSON carries no error code.
 			failure.Error = ""
 		}
-		if failure.Error == "invalid_grant" || resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized {
+		if outlookMemberGrantErrors[failure.Error] {
 			return outlookGrant{}, fmt.Errorf("%w: token endpoint answered %d %s", ErrExternalMailAuth, resp.StatusCode, outlookErrorCode(failure.Error))
 		}
-		return outlookGrant{}, fmt.Errorf("outlook: token endpoint answered %d", resp.StatusCode)
+		return outlookGrant{}, fmt.Errorf("outlook: token endpoint answered %d %s", resp.StatusCode, outlookErrorCode(failure.Error))
 	}
 	var grant outlookGrant
-	if err := json.Unmarshal(body, &grant); err != nil || grant.AccessToken == "" {
+	if err = json.Unmarshal(body, &grant); err != nil || grant.AccessToken == "" {
 		return outlookGrant{}, errors.New("outlook: token endpoint answered without an access token")
 	}
 	return grant, nil
 }
 
-// graphGet reads one Graph resource into out. 401 is ErrExternalMailAuth; 410 and the sync state
-// error codes are ErrExternalMailCursorExpired; 429 and 5xx are plain errors the worker retries.
-func (s *outlookMailSource) graphGet(ctx context.Context, accessToken, link string, limit int64, out any) error {
+// graphGet reads one Graph resource into out, preferring pageSize entries per page when it is
+// positive. 401 is ErrExternalMailAuth; 410 and the sync state error codes are
+// ErrExternalMailCursorExpired; 404 is errOutlookNotFound; a body over limit is
+// errOutlookResponseTooLarge; 429 and 5xx are plain errors the worker retries.
+func (s *outlookMailSource) graphGet(ctx context.Context, accessToken, link string, pageSize int, limit int64, out any) error {
 	if !s.graphLink(link) {
 		return errors.New("outlook: refusing a link outside the Graph host")
 	}
@@ -362,7 +468,9 @@ func (s *outlookMailSource) graphGet(ctx context.Context, accessToken, link stri
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Add("Prefer", fmt.Sprintf("odata.maxpagesize=%d", outlookPageSize))
+	if pageSize > 0 {
+		req.Header.Add("Prefer", fmt.Sprintf("odata.maxpagesize=%d", pageSize))
+	}
 	req.Header.Add("Prefer", `IdType="ImmutableId"`)
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -389,13 +497,15 @@ func (s *outlookMailSource) graphGet(ctx context.Context, accessToken, link stri
 			return fmt.Errorf("%w: graph answered %d %s", ErrExternalMailAuth, resp.StatusCode, outlookErrorCode(code))
 		case resp.StatusCode == http.StatusGone || outlookSyncStateCode(code):
 			return fmt.Errorf("%w: graph answered %d %s", ErrExternalMailCursorExpired, resp.StatusCode, outlookErrorCode(code))
+		case resp.StatusCode == http.StatusNotFound:
+			return fmt.Errorf("%w: graph answered 404 %s", errOutlookNotFound, outlookErrorCode(code))
 		case resp.StatusCode == http.StatusTooManyRequests:
-			return fmt.Errorf("outlook: graph throttled the request (429), retry later")
+			return errors.New("outlook: graph throttled the request (429), retry later")
 		default:
 			return fmt.Errorf("outlook: graph answered %d %s", resp.StatusCode, outlookErrorCode(code))
 		}
 	}
-	if err := json.Unmarshal(body, out); err != nil {
+	if err = json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("outlook: decode graph response: %w", err)
 	}
 	return nil
@@ -433,14 +543,15 @@ func outlookRedactURLError(err error) error {
 	return err
 }
 
-// outlookReadBounded reads at most limit bytes and fails on a longer body.
+// outlookReadBounded reads at most limit bytes and fails with errOutlookResponseTooLarge on a
+// longer body.
 func outlookReadBounded(r io.Reader, limit int64) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(body)) > limit {
-		return nil, fmt.Errorf("response exceeds %d bytes", limit)
+		return nil, fmt.Errorf("%w: over %d bytes", errOutlookResponseTooLarge, limit)
 	}
 	return body, nil
 }
@@ -460,48 +571,41 @@ type outlookRecipient struct {
 }
 
 type outlookMessage struct {
-	ID                string             `json:"id"`
-	Removed           json.RawMessage    `json:"@removed"`
-	InternetMessageID string             `json:"internetMessageId"`
-	Subject           string             `json:"subject"`
-	From              *outlookRecipient  `json:"from"`
-	ToRecipients      []outlookRecipient `json:"toRecipients"`
-	CcRecipients      []outlookRecipient `json:"ccRecipients"`
-	ReceivedDateTime  string             `json:"receivedDateTime"`
-	IsDraft           bool               `json:"isDraft"`
-	Body              struct {
-		ContentType string `json:"contentType"`
-		Content     string `json:"content"`
-	} `json:"body"`
+	ID                     string             `json:"id"`
+	Removed                json.RawMessage    `json:"@removed"`
+	InternetMessageID      string             `json:"internetMessageId"`
+	Subject                string             `json:"subject"`
+	From                   *outlookRecipient  `json:"from"`
+	ToRecipients           []outlookRecipient `json:"toRecipients"`
+	CcRecipients           []outlookRecipient `json:"ccRecipients"`
+	ReceivedDateTime       string             `json:"receivedDateTime"`
+	IsDraft                bool               `json:"isDraft"`
 	InternetMessageHeaders []struct {
 		Name  string `json:"name"`
 		Value string `json:"value"`
 	} `json:"internetMessageHeaders"`
 }
 
-// message maps a delta entry to an ExternalMessage; removed entries and drafts are skipped.
+// message maps a delta entry's headers to an ExternalMessage; removed entries and drafts are
+// skipped. The body is read separately.
 func (m outlookMessage) message() (ExternalMessage, bool) {
 	if len(m.Removed) > 0 || m.IsDraft || m.ID == "" {
 		return ExternalMessage{}, false
 	}
 	message := ExternalMessage{
-		ExternalID: m.ID, Subject: m.Subject,
-		To: outlookAddresses(m.ToRecipients), Cc: outlookAddresses(m.CcRecipients),
+		ExternalID: m.ID,
+		Subject:    strings.Join(strings.Fields(truncateText(cleanText(m.Subject), domain.MaxMailSubjectLength)), " "),
+		To:         outlookAddresses(m.ToRecipients), Cc: outlookAddresses(m.CcRecipients),
 	}
 	if m.From != nil {
-		message.FromAddress = strings.TrimSpace(m.From.EmailAddress.Address)
-		message.FromName = strings.TrimSpace(m.From.EmailAddress.Name)
+		message.FromAddress = strings.ToLower(strings.TrimSpace(cleanText(m.From.EmailAddress.Address)))
+		message.FromName = truncateText(strings.TrimSpace(cleanText(m.From.EmailAddress.Name)), 255)
 	}
 	if id, ok := normalizeMessageID(m.InternetMessageID); ok {
 		message.RFCMessageID = id
 	}
 	if received, err := time.Parse(time.RFC3339, m.ReceivedDateTime); err == nil {
 		message.ReceivedAt = received.UTC()
-	}
-	if strings.EqualFold(m.Body.ContentType, "html") {
-		message.HTMLBody = m.Body.Content
-	} else {
-		message.TextBody = m.Body.Content
 	}
 	for _, header := range m.InternetMessageHeaders {
 		switch strings.ToLower(header.Name) {
@@ -519,7 +623,7 @@ func (m outlookMessage) message() (ExternalMessage, bool) {
 func outlookAddresses(recipients []outlookRecipient) []string {
 	var addresses []string
 	for _, recipient := range recipients {
-		if address := strings.TrimSpace(recipient.EmailAddress.Address); address != "" {
+		if address := strings.TrimSpace(cleanText(recipient.EmailAddress.Address)); address != "" {
 			addresses = append(addresses, address)
 		}
 	}

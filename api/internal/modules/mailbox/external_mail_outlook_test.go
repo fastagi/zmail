@@ -1,10 +1,12 @@
 package mailbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -44,6 +46,13 @@ type fakeMicrosoft struct {
 	lastPrefer []string
 	lastQuery  url.Values
 	deltaCalls int
+	// pageSizes are the odata.maxpagesize values delta requests preferred, in order.
+	pageSizes []int
+	bodyCalls int
+	// bodyFail answers the next body request with an error; bodyGone lists ids deleted since
+	// their page was read.
+	bodyFail *fakeMicrosoftFailure
+	bodyGone map[string]bool
 }
 
 type fakeMicrosoftFailure struct {
@@ -114,6 +123,8 @@ func (f *fakeMicrosoft) serve(w http.ResponseWriter, r *http.Request) {
 		writeFakeJSON(w, http.StatusOK, f.profile)
 	case r.URL.Path == "/v1.0/me/mailFolders/inbox/messages/delta":
 		f.serveDelta(w, r)
+	case strings.HasPrefix(r.URL.Path, "/v1.0/me/messages/"):
+		f.serveBody(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -167,6 +178,17 @@ func (f *fakeMicrosoft) serveDelta(w http.ResponseWriter, r *http.Request) {
 	f.deltaCalls++
 	f.lastPrefer = r.Header.Values("Prefer")
 	f.lastQuery = r.URL.Query()
+	pageSize := f.pageSize
+	for _, prefer := range f.lastPrefer {
+		if raw, ok := strings.CutPrefix(prefer, "odata.maxpagesize="); ok {
+			preferred, err := strconv.Atoi(raw)
+			if err != nil {
+				f.t.Errorf("Prefer %q", prefer)
+			}
+			f.pageSizes = append(f.pageSizes, preferred)
+			pageSize = min(pageSize, preferred)
+		}
+	}
 	if !f.authorized(r) {
 		writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]any{"code": "InvalidAuthenticationToken"}})
 		return
@@ -209,13 +231,20 @@ func (f *fakeMicrosoft) serveDelta(w http.ResponseWriter, r *http.Request) {
 		}
 		f.removed = nil
 	}
-	stop := min(end, start+f.pageSize)
+	stop := min(end, start+pageSize)
 	for _, message := range f.inbox[start:stop] {
 		received, _ := time.Parse(time.RFC3339, message["receivedDateTime"].(string))
 		if !since.IsZero() && received.Before(since) {
 			continue
 		}
-		value = append(value, message)
+		// The page selects headers only; the body is read per message.
+		headers := map[string]any{}
+		for key, field := range message {
+			if key != "body" {
+				headers[key] = field
+			}
+		}
+		value = append(value, headers)
 	}
 	base := f.server.URL + "/v1.0/me/mailFolders/inbox/messages/delta"
 	page := map[string]any{"value": value}
@@ -229,6 +258,35 @@ func (f *fakeMicrosoft) serveDelta(w http.ResponseWriter, r *http.Request) {
 		page["@odata.deltaLink"] = base + "?" + url.Values{"$deltatoken": {strconv.Itoa(end)}}.Encode()
 	}
 	writeFakeJSON(w, http.StatusOK, page)
+}
+
+func (f *fakeMicrosoft) serveBody(w http.ResponseWriter, r *http.Request) {
+	f.bodyCalls++
+	if !f.authorized(r) {
+		writeFakeJSON(w, http.StatusUnauthorized, map[string]any{"error": map[string]any{"code": "InvalidAuthenticationToken"}})
+		return
+	}
+	if r.URL.Query().Get("$select") != "body" || !strings.Contains(strings.Join(r.Header.Values("Prefer"), ";"), "ImmutableId") {
+		writeFakeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"code": "BadRequest"}})
+		return
+	}
+	if failure := f.bodyFail; failure != nil {
+		f.bodyFail = nil
+		writeFakeJSON(w, failure.status, map[string]any{"error": map[string]any{"code": failure.code}})
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/v1.0/me/messages/")
+	if f.bodyGone[id] {
+		writeFakeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": "ErrorItemNotFound"}})
+		return
+	}
+	for _, message := range f.inbox {
+		if message["id"] == id {
+			writeFakeJSON(w, http.StatusOK, map[string]any{"body": message["body"]})
+			return
+		}
+	}
+	writeFakeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": "ErrorItemNotFound"}})
 }
 
 func writeFakeJSON(w http.ResponseWriter, status int, body any) {
@@ -279,6 +337,8 @@ func TestOutlookExchange(t *testing.T) {
 		tokenFail   *fakeMicrosoftFailure
 		wantAddress string
 		wantAuthErr bool
+		// wantPlainErr is a refusal that is the operator's configuration, not the member's grant.
+		wantPlainErr bool
 	}{
 		{name: "mail address", code: "code-1", verifier: "verifier-1", wantAddress: "dana@contoso.example",
 			profile: map[string]any{"mail": "dana@contoso.example", "userPrincipalName": "dana@contoso.onmicrosoft.example"}},
@@ -286,8 +346,16 @@ func TestOutlookExchange(t *testing.T) {
 			profile: map[string]any{"mail": nil, "userPrincipalName": "erin@outlook.example"}},
 		{name: "wrong verifier", code: "code-1", verifier: "other", wantAuthErr: true},
 		{name: "unknown code", code: "code-2", verifier: "verifier-1", wantAuthErr: true},
-		{name: "consent refused", code: "code-1", verifier: "verifier-1", wantAuthErr: true,
+		{name: "consent required", code: "code-1", verifier: "verifier-1", wantAuthErr: true,
+			tokenFail: &fakeMicrosoftFailure{status: http.StatusBadRequest, code: "consent_required"}},
+		{name: "interaction required", code: "code-1", verifier: "verifier-1", wantAuthErr: true,
+			tokenFail: &fakeMicrosoftFailure{status: http.StatusBadRequest, code: "interaction_required"}},
+		{name: "client secret expired", code: "code-1", verifier: "verifier-1", wantPlainErr: true,
 			tokenFail: &fakeMicrosoftFailure{status: http.StatusUnauthorized, code: "invalid_client"}},
+		{name: "client not authorized", code: "code-1", verifier: "verifier-1", wantPlainErr: true,
+			tokenFail: &fakeMicrosoftFailure{status: http.StatusBadRequest, code: "unauthorized_client"}},
+		{name: "mixed-case address is lowercased", code: "code-1", verifier: "verifier-1", wantAddress: "dana@contoso.example",
+			profile: map[string]any{"mail": " Dana@Contoso.Example "}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -303,6 +371,12 @@ func TestOutlookExchange(t *testing.T) {
 			if tt.wantAuthErr {
 				if !errors.Is(err, ErrExternalMailAuth) {
 					t.Fatalf("err = %v, want ErrExternalMailAuth", err)
+				}
+				return
+			}
+			if tt.wantPlainErr {
+				if err == nil || errors.Is(err, ErrExternalMailAuth) {
+					t.Fatalf("err = %v, want a plain error", err)
 				}
 				return
 			}
@@ -456,14 +530,19 @@ func TestOutlookFetchErrors(t *testing.T) {
 		token       *fakeMicrosoftFailure
 		wantExpired bool
 		wantAuth    bool
+		// wantRotated: the token was redeemed before the failure, so the new one comes back.
+		wantRotated bool
 	}{
-		{name: "gone", graph: &fakeMicrosoftFailure{http.StatusGone, "SyncStateNotFound"}, wantExpired: true},
-		{name: "sync state not found", graph: &fakeMicrosoftFailure{http.StatusBadRequest, "syncStateNotFound"}, wantExpired: true},
-		{name: "resync required", graph: &fakeMicrosoftFailure{http.StatusBadRequest, "resyncRequired"}, wantExpired: true},
-		{name: "graph unauthorized", graph: &fakeMicrosoftFailure{http.StatusUnauthorized, "InvalidAuthenticationToken"}, wantAuth: true},
+		{name: "gone", graph: &fakeMicrosoftFailure{http.StatusGone, "SyncStateNotFound"}, wantExpired: true, wantRotated: true},
+		{name: "sync state not found", graph: &fakeMicrosoftFailure{http.StatusBadRequest, "syncStateNotFound"}, wantExpired: true, wantRotated: true},
+		{name: "resync required", graph: &fakeMicrosoftFailure{http.StatusBadRequest, "resyncRequired"}, wantExpired: true, wantRotated: true},
+		{name: "graph unauthorized", graph: &fakeMicrosoftFailure{http.StatusUnauthorized, "InvalidAuthenticationToken"}, wantAuth: true, wantRotated: true},
+		{name: "throttled", graph: &fakeMicrosoftFailure{http.StatusTooManyRequests, "ApplicationThrottled"}, wantRotated: true},
+		{name: "server error", graph: &fakeMicrosoftFailure{http.StatusServiceUnavailable, "ServiceNotAvailable"}, wantRotated: true},
 		{name: "refresh refused", token: &fakeMicrosoftFailure{http.StatusBadRequest, "invalid_grant"}, wantAuth: true},
-		{name: "throttled", graph: &fakeMicrosoftFailure{http.StatusTooManyRequests, "ApplicationThrottled"}},
-		{name: "server error", graph: &fakeMicrosoftFailure{http.StatusServiceUnavailable, "ServiceNotAvailable"}},
+		{name: "consent revoked", token: &fakeMicrosoftFailure{http.StatusBadRequest, "consent_required"}, wantAuth: true},
+		{name: "client secret expired", token: &fakeMicrosoftFailure{http.StatusUnauthorized, "invalid_client"}},
+		{name: "client not authorized", token: &fakeMicrosoftFailure{http.StatusBadRequest, "unauthorized_client"}},
 		{name: "token endpoint down", token: &fakeMicrosoftFailure{http.StatusInternalServerError, "server_error"}},
 	}
 	for _, tt := range tests {
@@ -471,11 +550,14 @@ func TestOutlookFetchErrors(t *testing.T) {
 			ms := newFakeMicrosoft(t)
 			ms.grantRefreshToken("rt-0")
 			ms.graphFail, ms.tokenFail = tt.graph, tt.token
-			_, err := ms.source().Fetch(context.Background(), ExternalMailFetchRequest{
+			fetched, err := ms.source().Fetch(context.Background(), ExternalMailFetchRequest{
 				Token: ExternalMailToken{RefreshToken: "rt-0"}, BackfillDays: 14, Now: outlookTestNow,
 			})
 			if err == nil {
 				t.Fatal("Fetch succeeded, want an error")
+			}
+			if rotated := fetched.RefreshToken == "rt-1"; rotated != tt.wantRotated || (!tt.wantRotated && fetched.RefreshToken != "") {
+				t.Fatalf("refresh token next to the error = %q, want rotated %v", fetched.RefreshToken, tt.wantRotated)
 			}
 			if got := errors.Is(err, ErrExternalMailCursorExpired); got != tt.wantExpired {
 				t.Fatalf("cursor expired = %v, want %v (%v)", got, tt.wantExpired, err)
@@ -664,5 +746,133 @@ func TestOutlookSyncStoresOnceAndRotatesToken(t *testing.T) {
 			t.Fatalf("message %q stored twice", message.Subject)
 		}
 		seen[message.Subject] = true
+	}
+}
+
+// TestOutlookOversizedPageShrinks: a delta page over its bound is asked again with half the page
+// size, down to one message, instead of failing the same page on every pass.
+func TestOutlookOversizedPageShrinks(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	ms.grantRefreshToken("rt-0")
+	for i := 1; i <= 3; i++ {
+		message := outlookTestMessage(fmt.Sprintf("big-%d", i), strings.Repeat("s", 900), outlookTestNow)
+		ms.deliver(message)
+	}
+	source := ms.source()
+	// One message's headers fit; two do not.
+	source.maxPageBytes = 2500
+	fetched, err := source.Fetch(context.Background(), ExternalMailFetchRequest{
+		Token: ExternalMailToken{RefreshToken: "rt-0"}, BackfillDays: 14, Now: outlookTestNow,
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(fetched.Messages) != 1 || fetched.Messages[0].ExternalID != "big-1" || !fetched.More {
+		t.Fatalf("fetched %d messages, More %v", len(fetched.Messages), fetched.More)
+	}
+	if got := fmt.Sprint(ms.pageSizes); got != "[25 12 6 3 1]" {
+		t.Fatalf("page sizes = %s, want halving down to 1", got)
+	}
+
+	// Still too large at one message: a plain error that hands back the rotated token.
+	source.maxPageBytes = 100
+	fetched, err = source.Fetch(context.Background(), ExternalMailFetchRequest{
+		Token: ExternalMailToken{RefreshToken: "rt-1"}, Cursor: fetched.Cursor, Now: outlookTestNow,
+	})
+	if err == nil || errors.Is(err, ErrExternalMailAuth) || errors.Is(err, ErrExternalMailCursorExpired) || fetched.RefreshToken != "rt-2" {
+		t.Fatalf("err = %v, token %q", err, fetched.RefreshToken)
+	}
+}
+
+// TestOutlookBodies: bodies are cleaned and capped like inbound mail, an oversized body leaves the
+// message with headers only, a message deleted before its body is read is skipped, and a failed
+// body read hands back the rotated token.
+func TestOutlookBodies(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	ms.grantRefreshToken("rt-0")
+	long := outlookTestMessage("long", "Long", outlookTestNow)
+	long["body"] = map[string]any{"contentType": "text", "content": "a\x00b" + strings.Repeat("x", domain.MaxMailBodyBytes)}
+	long["from"] = map[string]any{"emailAddress": map[string]any{"name": "Carol\x00", "address": "Carol@Sender.Example"}}
+	huge := outlookTestMessage("huge", "Huge", outlookTestNow)
+	huge["body"] = map[string]any{"contentType": "html", "content": strings.Repeat("<p>y</p>", domain.MaxMailBodyBytes/2)}
+	gone := outlookTestMessage("gone", "Gone", outlookTestNow)
+	ms.deliver(long, huge, gone)
+	ms.bodyGone = map[string]bool{"gone": true}
+	source := ms.source()
+	source.maxBodyBytes = 2 * domain.MaxMailBodyBytes
+
+	fetched, err := source.Fetch(context.Background(), ExternalMailFetchRequest{
+		Token: ExternalMailToken{RefreshToken: "rt-0"}, BackfillDays: 14, Now: outlookTestNow,
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(fetched.Messages) != 2 {
+		t.Fatalf("fetched %d messages, want long and huge", len(fetched.Messages))
+	}
+	got := fetched.Messages[0]
+	if len(got.TextBody) != domain.MaxMailBodyBytes || strings.ContainsRune(got.TextBody, 0) || !strings.HasPrefix(got.TextBody, "abx") {
+		t.Fatalf("text body: %d bytes, prefix %q", len(got.TextBody), got.TextBody[:3])
+	}
+	if got.FromAddress != "carol@sender.example" || got.FromName != "Carol" {
+		t.Fatalf("sender %q %q", got.FromAddress, got.FromName)
+	}
+	if headersOnly := fetched.Messages[1]; headersOnly.ExternalID != "huge" || headersOnly.HTMLBody != "" || headersOnly.TextBody != "" || headersOnly.Subject != "Huge" {
+		t.Fatalf("oversized message = %+v, want headers only", headersOnly.ExternalID)
+	}
+
+	ms.deliver(outlookTestMessage("later", "Later", outlookTestNow))
+	ms.bodyFail = &fakeMicrosoftFailure{http.StatusServiceUnavailable, "ServiceNotAvailable"}
+	fetched, err = source.Fetch(context.Background(), ExternalMailFetchRequest{
+		Token: ExternalMailToken{RefreshToken: "rt-1"}, Cursor: fetched.Cursor, Now: outlookTestNow,
+	})
+	if err == nil || fetched.RefreshToken != "rt-2" || len(fetched.Messages) != 0 {
+		t.Fatalf("body failure: err %v, token %q, %d messages", err, fetched.RefreshToken, len(fetched.Messages))
+	}
+}
+
+// TestOutlookBackfillTruncatedLogged: a first round that ends at Graph's cap is logged once; an
+// incremental round is not.
+func TestOutlookBackfillTruncatedLogged(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	ms := newFakeMicrosoft(t)
+	ms.grantRefreshToken("rt-0")
+	for i := 1; i <= 5; i++ {
+		ms.deliver(outlookTestMessage(fmt.Sprintf("m-%d", i), "M", outlookTestNow))
+	}
+	source := ms.source()
+	source.deltaRoundLimit = 5
+	token, cursor := "rt-0", ""
+	for range 2 {
+		fetched, err := source.Fetch(context.Background(), ExternalMailFetchRequest{
+			Token: ExternalMailToken{RefreshToken: token}, Cursor: cursor, BackfillDays: 14, Now: outlookTestNow,
+		})
+		if err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		token, cursor = fetched.RefreshToken, fetched.Cursor
+	}
+	if strings.Count(logs.String(), "external_mail.backfill_truncated") != 1 || !strings.Contains(logs.String(), `"messages":5`) {
+		t.Fatalf("logs = %s", logs.String())
+	}
+	if strings.Contains(cursor, "backfill") {
+		t.Fatalf("a settled round still counts: %s", cursor)
+	}
+
+	ms.deliver(outlookTestMessage("m-6", "M", outlookTestNow))
+	if _, err := source.Fetch(context.Background(), ExternalMailFetchRequest{
+		Token: ExternalMailToken{RefreshToken: token}, Cursor: cursor, Now: outlookTestNow,
+	}); err != nil {
+		t.Fatalf("incremental Fetch: %v", err)
+	}
+	if strings.Count(logs.String(), "external_mail.backfill_truncated") != 1 {
+		t.Fatalf("an incremental round logged truncation: %s", logs.String())
+	}
+	if strings.Contains(logs.String(), "rt-") || strings.Contains(logs.String(), "at-") {
+		t.Fatalf("logs leak a token: %s", logs.String())
 	}
 }
