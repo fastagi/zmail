@@ -86,7 +86,6 @@ import {
 } from '@/features/mailbox/platform-account-schemas';
 import { EXTERNAL_MAIL_CONNECTOR_ID_PATTERN } from '@/features/mailbox/external-mail-schemas';
 import { decodeInboxCursor, encodeInboxCursor } from '@/features/mailbox/server/inbox-cursor';
-import { mockExternalMailStore } from '@/features/mailbox/server/mock-external-mail-store';
 import { mockTriageStore } from '@/features/mailbox/server/mock-triage-store';
 import {
   mockLedgerPage,
@@ -4666,6 +4665,11 @@ async function forwardCloudflareManagement(
  */
 
 const maxExternalMailBodyBytes = 4 * 1_024;
+
+/** The development mock of external mail loads only when a mock route first needs it. */
+async function externalMailMock() {
+  return (await import('@/features/mailbox/server/mock-external-mail-store')).mockExternalMailStore;
+}
 const maxExternalCallbackValueLength = 2_048;
 
 /** The instance's connectors; empty while external mail is off. */
@@ -4680,7 +4684,7 @@ export async function listExternalMailConnectorsRoute(request: Request): Promise
       organizationId: String(target.organizationId),
     });
   }
-  return success(mockExternalMailStore.connectors());
+  return success((await externalMailMock()).connectors());
 }
 
 /** The caller's own bound accounts in the organization. */
@@ -4695,7 +4699,7 @@ export async function listExternalMailConnectionsRoute(request: Request): Promis
       organizationId: String(target.organizationId),
     });
   }
-  return success(mockExternalMailStore.list(target.organizationId, target.context.user_id));
+  return success((await externalMailMock()).list(target.organizationId, target.context.user_id));
 }
 
 /** Starts a sign-in with `provider`, or reconnects the caller's `connection_id`. */
@@ -4754,7 +4758,7 @@ export async function startExternalMailAuthorizationRoute(
       },
     });
   }
-  const result = mockExternalMailStore.start(
+  const result = (await externalMailMock()).start(
     target.organizationId,
     target.context.user_id,
     new URL(request.url).origin,
@@ -4809,7 +4813,7 @@ export async function completeExternalMailAuthorizationRoute(
     });
   }
   const userId = target.context.user_id;
-  const result = mockExternalMailStore.complete(
+  const result = (await externalMailMock()).complete(
     target.organizationId,
     userId,
     mockOrganizationStore.memberEmails(target.organizationId).get(userId) ?? '',
@@ -4880,7 +4884,7 @@ export async function revokeExternalMailConnectionRoute(
       organizationId: String(target.organizationId),
     });
   }
-  const revoked = mockExternalMailStore.revoke(
+  const revoked = (await externalMailMock()).revoke(
     target.organizationId,
     { userId: target.context.user_id, manages: target.context.role !== 'member' },
     connectionId.value
