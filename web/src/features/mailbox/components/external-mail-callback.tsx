@@ -123,13 +123,33 @@ function PendingCallback({
   return <CallbackBody state={state} code={code} providerError={providerError} pending={pending} />;
 }
 
+/**
+ * The page's heading, which says what is happening: connecting, or that it could not connect. The
+ * failure heading takes focus when it appears, so assistive technology reads it out.
+ */
+function CallbackHeading({ failed }: { failed: boolean }) {
+  const t = useT('mailbox');
+  const ref = useRef<HTMLHeadingElement | null>(null);
+  useEffect(() => {
+    if (failed) ref.current?.focus();
+  }, [failed]);
+  return (
+    <h1 ref={ref} tabIndex={failed ? -1 : undefined} className="text-center text-xl font-semibold outline-none">
+      {t(failed ? 'external.callback.failedTitle' : 'external.callback.title')}
+    </h1>
+  );
+}
+
 function Working() {
   const t = useT('mailbox');
   return (
-    <div className="flex flex-col items-center gap-3 text-center" role="status">
-      <Loader2 className="size-6 animate-spin text-text-muted motion-reduce:animate-none" />
-      <p className="text-sm text-text-muted">{t('external.callback.working')}</p>
-    </div>
+    <>
+      <CallbackHeading failed={false} />
+      <div className="flex flex-col items-center gap-3 text-center" role="status">
+        <Loader2 className="size-6 animate-spin text-text-muted motion-reduce:animate-none" />
+        <p className="text-sm text-text-muted">{t('external.callback.working')}</p>
+      </div>
+    </>
   );
 }
 
@@ -199,43 +219,50 @@ function CallbackBody({
 
   const again = view.pending;
   return (
-    <div className="space-y-4">
-      <Alert variant="destructive">
-        <AlertCircle className="size-4" aria-hidden="true" />
-        <AlertDescription>{t(`external.callback.errors.${view.reason}`)}</AlertDescription>
-      </Alert>
-      {retry.error ? (
-        <p role="alert" className="text-xs text-error">
-          {t('external.connect.failed')}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        {again ? (
-          <Button
-            type="button"
-            loading={retry.isPending}
-            onClick={() =>
-              retry.begin(
-                again.connectionId !== null
-                  ? { kind: 'reconnect', provider: again.provider, connectionId: again.connectionId }
-                  : {
-                      kind: 'new',
-                      provider: again.provider,
-                      backfillDays: again.backfillDays ?? 14,
-                    }
-              )
-            }
-          >
-            {t('external.callback.tryAnother')}
-          </Button>
+    <>
+      <CallbackHeading failed />
+      <div className="space-y-4">
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" aria-hidden="true" />
+          <AlertDescription>{t(`external.callback.errors.${view.reason}`)}</AlertDescription>
+        </Alert>
+        {retry.error ? (
+          <p role="alert" className="text-xs text-error">
+            {t('external.connect.failed')}
+          </p>
         ) : null}
-        <Button asChild variant={again ? 'outline' : 'default'}>
-          <Link href={again ? inboxHref(again.organizationId) : ROUTES.CONSOLE.MAILBOXES}>
-            {t('external.callback.backToInbox')}
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {again ? (
+            <Button
+              type="button"
+              loading={retry.isPending}
+              onClick={() =>
+                retry.begin(
+                  again.connectionId !== null
+                    ? {
+                        kind: 'reconnect',
+                        provider: again.provider,
+                        connectionId: again.connectionId,
+                      }
+                    : {
+                        kind: 'new',
+                        provider: again.provider,
+                        backfillDays: again.backfillDays ?? 14,
+                      }
+                )
+              }
+            >
+              {t('external.callback.tryAnother')}
+            </Button>
+          ) : null}
+          <Button asChild variant={again ? 'outline' : 'default'}>
+            <Link href={again ? inboxHref(again.organizationId) : ROUTES.CONSOLE.MAILBOXES}>
+              {t('external.callback.backToInbox')}
+            </Link>
+          </Button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

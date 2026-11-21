@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useId, useState, type RefObject } from 'react';
 import { ArrowLeft, Eye, Lock, LogOut, Mail } from 'lucide-react';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -21,6 +21,7 @@ import {
   type ExternalMailBackfillDays,
   type ExternalMailConnector,
 } from '@/features/mailbox/external-mail-schemas';
+import { useDialogReturnFocus } from '@/features/mailbox/hooks/use-dialog-return-focus';
 import { useBeginExternalAuthorization } from '@/features/mailbox/hooks/use-external-mail-actions';
 import { providerName } from '@/features/mailbox/utils/external-mail';
 import { ApiErrorCode } from '@/http/codes';
@@ -44,13 +45,17 @@ export function ExternalConnectDialog({
   onOpenChange,
   organizationId,
   connectors,
+  returnFocusRef,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   organizationId: number;
   connectors: readonly ExternalMailConnector[];
+  /** Shared with the dialogs that open this one, so focus goes back to where the flow began. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const t = useT('mailbox');
+  const returnFocus = useDialogReturnFocus(open, returnFocusRef);
   const [chosen, setChosen] = useState<ExternalMailConnector | null>(null);
   const [days, setDays] = useState<ExternalMailBackfillDays>(EXTERNAL_MAIL_DEFAULT_BACKFILL_DAYS);
   const authorization = useBeginExternalAuthorization(organizationId);
@@ -74,7 +79,11 @@ export function ExternalConnectDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onCloseAutoFocus={returnFocus}
+        data-return-focus-chain=""
+      >
         {chosen === null ? (
           <>
             <DialogHeader>

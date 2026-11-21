@@ -405,6 +405,94 @@ describe('unified inbox', () => {
     expect(within(mine).queryByRole('button', { name: 'Add external mailbox' })).toBeNull();
   });
 
+  it('reads each connected mailbox right when the connections and the mailbox list differ', async () => {
+    // The connections list is capped at 10, live first, so it can miss a mailbox the list has,
+    // and it can hold a connection whose mailbox the list no longer has.
+    state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
+    state.mailboxes.data = [
+      mailbox(1, 'hello'),
+      externalMailbox(41, 'late@gmail.com'),
+      externalMailbox(42, 'gone@outlook.com'),
+      externalMailbox(43, 'unlisted@gmail.com'),
+    ];
+    state.connections.data = [
+      connection({
+        id: 1,
+        mailbox_id: 41,
+        account_address: 'late@gmail.com',
+        status: 'needs_reconnect',
+        last_error_code: 'external.auth_failed',
+      }),
+      connection({
+        id: 2,
+        mailbox_id: 42,
+        provider: 'outlook',
+        account_address: 'gone@outlook.com',
+        status: 'revoked',
+      }),
+      connection({ id: 3, mailbox_id: 99, account_address: 'purged@gmail.com' }),
+    ];
+    renderRoute();
+
+    const mine = (await screen.findAllByRole('navigation', { name: 'Connected by me' }))[0];
+    const rows = within(mine)
+      .getAllByRole('button')
+      .filter(button => button.hasAttribute('data-connected-mailbox'));
+    expect(rows.map(row => row.getAttribute('data-connected-mailbox'))).toEqual([
+      '41',
+      '42',
+      '43',
+    ]);
+    const late = within(mine).getByRole('button', {
+      name: 'late@gmail.com, Gmail, Needs reconnecting',
+    });
+    expect(late.querySelector('[data-status-dot="needs_reconnect"]')).toHaveClass('bg-warning');
+    const gone = within(mine).getByRole('button', {
+      name: 'gone@outlook.com, Outlook, Disconnected',
+    });
+    expect(gone.querySelector('[data-status-dot="revoked"]')).toHaveClass('bg-text-faint');
+    // Outside the capped list its status is unknown: no dot and no status in its name.
+    const unlisted = within(mine).getByRole('button', { name: 'unlisted@gmail.com' });
+    expect(unlisted.querySelector('[data-status-dot]')).toBeNull();
+    expect(unlisted).not.toHaveAttribute('data-connection-status');
+    // A connection whose mailbox is not listed adds no row.
+    expect(within(mine).queryByText('purged@gmail.com')).not.toBeInTheDocument();
+  });
+
+  it('returns focus to the sidebar control that opened the external mailbox dialogs', async () => {
+    state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
+    state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];
+    state.connections.data = [
+      connection({ id: 1, mailbox_id: 41, account_address: 'me@gmail.com' }),
+    ];
+    renderRoute();
+
+    const mine = (await screen.findAllByRole('navigation', { name: 'Connected by me' }))[0];
+    const add = within(mine).getByRole('button', { name: 'Add external mailbox' });
+    add.focus();
+    fireEvent.click(add);
+    const connect = await screen.findByRole('dialog', { name: 'Add an external mailbox' });
+    await waitFor(() => expect(connect).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.keyDown(connect, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(add).toHaveFocus());
+
+    // Manage, then Add inside it: closing the connect dialog goes back to the manage control.
+    const manage = within(mine).getByRole('button', { name: 'Manage connected mailboxes' });
+    manage.focus();
+    fireEvent.click(manage);
+    const list = await screen.findByRole('dialog', { name: 'Connected mailboxes' });
+    await waitFor(() => expect(list).toContainElement(document.activeElement as HTMLElement));
+    const addInside = within(list).getByRole('button', { name: 'Add external mailbox' });
+    addInside.focus();
+    fireEvent.click(addInside);
+    const again = await screen.findByRole('dialog', { name: 'Add an external mailbox' });
+    await waitFor(() => expect(again).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.keyDown(again, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(manage).toHaveFocus());
+  });
+
   it('shows a one-time reconnect notice for a connection that lost its grant', async () => {
     state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
     state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];
