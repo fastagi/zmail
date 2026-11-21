@@ -8747,6 +8747,79 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-credentials:
+    post:
+      operationId: bindExternalMailCredentials
+      summary: Bind or reconnect an outside account with an app password
+      description: For connectors whose `auth_kind` is `password` (the generic `imap` connector for iCloud,
+        Yahoo, Fastmail, QQ, 163, or a self-hosted server). The server signs in to `host` over implicit
+        TLS on port 993 with a verified certificate and opens INBOX once before anything is stored;
+        hosts that resolve to loopback, private, link-local, or unspecified addresses are refused. The
+        outcomes follow `completeExternalMailAuthorization`. A new account creates a private, read-only
+        `external` mailbox and its connection (`201`); the caller's own account in any state is restored
+        with the new password and the same mailbox (`200`). The password is sealed at rest, never
+        logged, never returned, and never written to audit metadata. Attempts are limited to 10 per
+        member per 15 minutes. Session only; never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BindExternalMailCredentialsRequest'
+      responses:
+        '200':
+          description: An existing connection of the caller was restored and is active.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailConnectionResponse'
+        '201':
+          description: A new external mailbox and connection were created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailConnectionResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization is not found (`ORGANIZATION.NOT_FOUND`), or the instance does not
+            run the connector, the connector does not bind with a password, or external mail is off
+            (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Another member bound the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), or the caller
+            bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: The server refused the username or password (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`);
+            the server could not be reached over TLS, its certificate did not verify, or the host is not
+            allowed (`MAILBOX.EXTERNAL_SERVER_UNREACHABLE`); a value carries a control character, the
+            account address is not an address, or the backfill is out of range
+            (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); or a malformed body (`COMMON.VALIDATION_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/external-mail-connections:
     get:
       operationId: listExternalMailConnections
@@ -9849,6 +9922,7 @@ components:
         - MAILBOX.EXTERNAL_ACCOUNT_TAKEN
         - MAILBOX.EXTERNAL_CONNECTION_LIMIT
         - MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE
+        - MAILBOX.EXTERNAL_SERVER_UNREACHABLE
     FieldErrors:
       type: object
       additionalProperties:
@@ -14469,6 +14543,48 @@ components:
           type: string
           minLength: 1
           maxLength: 4096
+    BindExternalMailCredentialsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - provider
+        - host
+        - username
+        - password
+      properties:
+        provider:
+          $ref: '#/components/schemas/ExternalMailConnectorID'
+        host:
+          type: string
+          description: The IMAP server, such as `imap.mail.me.com`.
+          minLength: 1
+          maxLength: 253
+        port:
+          type: integer
+          description: Implicit-TLS IMAP; only 993 is accepted.
+          minimum: 1
+          maximum: 65535
+          default: 993
+        username:
+          type: string
+          minLength: 1
+          maxLength: 320
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          description: An app password issued by the provider. Never returned.
+          minLength: 1
+          maxLength: 320
+        account_address:
+          type: string
+          description: The bound address; defaults to `username`, which must then be an address.
+          maxLength: 320
+        backfill_days:
+          type: integer
+          description: How far back the first sync reads INBOX; 14 when omitted.
+          minimum: 1
+          maximum: 90
     ExternalMailConnectionResponse:
       type: object
       additionalProperties: false

@@ -746,6 +746,36 @@ On a `409` the grant is handed back to the provider. A refused code is
 `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`; an unknown, expired, used, or another member's `state`
 is `404 MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`. Both routes are session only and never cached.
 
+### Binding With An App Password
+
+Connectors whose `auth_kind` is `password` never redirect: the generic `imap` connector (enabled by
+`imap` in `EXTERNAL_MAIL_PROVIDERS`) reads INBOX of any provider that offers IMAP over TLS and app
+passwords, such as iCloud, Yahoo, Fastmail, QQ, 163, or a self-hosted server.
+
+`POST /v1/external-mail-credentials` takes
+`{ "provider": "imap", "host", "port"?, "username", "password", "account_address"?, "backfill_days"? }`.
+Before anything is stored the server signs in once over implicit TLS on port 993 (the only port
+accepted) with a verified certificate, and opens INBOX read-only. A host that resolves to a loopback,
+private, shared, link-local, or unspecified address is refused. `account_address` defaults to
+`username`, which must then be an address. The outcomes are those of a completed sign-in: `201` for a
+new account, `200` for the caller's own connection restored with the new password,
+`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`, and `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT`. In addition:
+
+| Failure | Result |
+|---|---|
+| The server refused the username or password | `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED` |
+| The host does not resolve, is not allowed, does not answer over TLS, or its certificate does not verify | `422 MAILBOX.EXTERNAL_SERVER_UNREACHABLE` |
+| A value carries a control character, the account address is not an address, or `backfill_days` is out of range | `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID` |
+| More than 10 attempts by the member in 15 minutes | `429 COMMON.RATE_LIMITED` with `Retry-After` |
+| The connector is not enabled or binds with OAuth | `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE` |
+
+The password is sealed at rest with the connection's grant, never logged, never returned, and never
+written to audit metadata. The sync reads INBOX only and never changes the account: messages are
+fetched with `BODY.PEEK`, and a message larger than 5 MiB is skipped. Copies carry `source` `imap`. A
+password revoked at the provider moves the connection to `needs_reconnect`; posting the credentials
+again restores it. Unbinding erases the stored password; revoking the app password itself is done at
+the provider. The route is session only and never cached.
+
 ### Connections
 
 `GET /v1/external-mail-connections` lists the caller's own connections in the organization, live

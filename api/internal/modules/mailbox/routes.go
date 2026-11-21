@@ -71,6 +71,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("external_mail_authorizations.store")
 		auth.POST("/external-mail-authorizations/completions", h.CompleteExternalMailAuthorization).
 			Name("external_mail_authorizations.completions.store")
+		auth.POST("/external-mail-credentials", h.BindExternalMailCredentials).
+			Name("external_mail_credentials.store").Middleware(middleware.BodyLimit(maxExternalMailCredentialsBodyBytes))
 		auth.GET("/external-mail-connections", h.ListExternalMailConnections).Name("external_mail_connections.index")
 		auth.DELETE("/external-mail-connections/:connection_id", h.RevokeExternalMailConnection).
 			Name("external_mail_connections.destroy").WhereNumber("connection_id")
