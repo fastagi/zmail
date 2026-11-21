@@ -265,6 +265,8 @@ type Service interface {
 	ExternalMailService
 	// ExternalMailBindingService binds and reconnects outside accounts.
 	ExternalMailBindingService
+	// ExternalMailOpsService shows a connection's sync history and purges revoked copies.
+	ExternalMailOpsService
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
