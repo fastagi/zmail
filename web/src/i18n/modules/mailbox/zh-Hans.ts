@@ -1155,6 +1155,7 @@ const messages = {
     previewHint: '按上方填写的模板变量实时渲染；联系人专属字段使用示例值或默认值。',
     timezoneHint: '本地时间（{zone}）',
     schedulePast: '请选择未来的时间进行定时发送。',
+    scheduleTooFar: '定时发送最多只能设置在一年以内。',
     unsavedTitle: '放弃未保存的修改？',
     unsavedDescription: '你对当前群发草稿的修改尚未保存。',
     discard: '放弃修改',
