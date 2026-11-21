@@ -238,10 +238,27 @@ function EmailLogContent({
   };
 
   const lost = isOrganizationLost(mailboxes.error);
+  if (composition?.pickFrom && !lost) {
+    return (
+      <ComposeDialog
+        inline
+        mailbox={composition.mailbox}
+        fromOptions={senders}
+        draft={composition.draft}
+        onClose={() => setComposition(null)}
+        onStored={() => setView(current => ({ ...current, page: 1 }))}
+      />
+    );
+  }
 
   return (
     <>
       <MailPageHeader title={t('emails.title')} description={t('emails.description')} scope={scope}>
+        <Button asChild variant="outline">
+          <Link href={mailOrganizationHref(ROUTES.CONSOLE.MAIL_BROADCASTS, organizationId)}>
+            {t('broadcasts.title')}
+          </Link>
+        </Button>
         <Button
           type="button"
           icon={<Send className="size-4" />}

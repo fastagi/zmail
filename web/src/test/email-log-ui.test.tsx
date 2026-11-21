@@ -1141,12 +1141,12 @@ describe('emails console', () => {
     );
   });
 
-  it('opens the compose dialog with a From picker over every mailbox', async () => {
+  it('opens the full-page composer with a From picker over every mailbox', async () => {
     state.send.mutateAsync.mockResolvedValue(message({ direction: 'outbound', status: 'sent' }));
     renderLog({ page: 2 });
 
     fireEvent.click(screen.getByRole('button', { name: 'Send email' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
     expect(within(dialog).getByRole('heading', { name: 'New message' })).toBeInTheDocument();
     const from = within(dialog).getByLabelText('From') as HTMLSelectElement;
     expect(from.tagName).toBe('SELECT');
@@ -1172,7 +1172,7 @@ describe('emails console', () => {
       })
     );
     expect(toast.success).toHaveBeenCalledWith('Message sent');
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'New message' })).toBeNull());
     // The new message is at the top of the first page.
     expect(state.logCalls.at(-1)).toEqual({ filters: {}, page: 1 });
   });
@@ -1184,7 +1184,7 @@ describe('emails console', () => {
     renderLog({ mailboxId: 2, page: 1 });
 
     fireEvent.click(screen.getByRole('button', { name: 'Send email' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('region', { name: 'New message' });
     expect(within(dialog).getByLabelText('From')).toHaveValue('2');
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
     fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Hello' } });
@@ -1195,7 +1195,7 @@ describe('emails console', () => {
     expect(alert).toHaveTextContent(/NOT delivered/u);
     expect(screen.queryByText(/provider said no/u)).toBeNull();
     expect(toast.success).not.toHaveBeenCalled();
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'New message' })).toBeInTheDocument();
   });
 });
 

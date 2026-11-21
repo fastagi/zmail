@@ -353,15 +353,19 @@ func (s *service) DeleteMailDomain(ctx context.Context, organizationID, id uint)
 // records the zone lacks, and checks the result. It only ever adds: a record that conflicts stays
 // as it is and is reported.
 func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*domain.MailDomain, error) {
+	provider, _, clientErr := s.domainClient(ctx, mailDomain)
+	if clientErr != nil {
+		return nil, clientErr
+	}
 	var failures []error
 	if receives(mailDomain) {
-		if err := s.domainProvider.EnableRouting(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
+		if err := prepareReceiving(ctx, provider, mailDomain); err != nil {
 			failures = append(failures, err)
 		} else {
 			failures = append(failures, s.routeUnroutedMailboxes(ctx, mailDomain)...)
 		}
 	}
-	if tag, err := s.domainProvider.EnsureSending(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
+	if tag, err := provider.EnsureSending(ctx, mailDomain.ZoneID, mailDomain.Name); err != nil {
 		failures = append(failures, err)
 	} else {
 		mailDomain.SendingTag = tag
@@ -377,7 +381,7 @@ func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*do
 				// without content stands for sending that is not enabled yet.
 				continue
 			}
-			if _, err := s.domainProvider.CreateRecord(ctx, mailDomain.ZoneID, mailtransport.DNSRecord{
+			if _, err := provider.CreateRecord(ctx, mailDomain.ZoneID, mailtransport.DNSRecord{
 				Type: record.Type, Name: record.Name, Content: record.Content, Priority: record.Priority,
 			}); err != nil {
 				failures = append(failures, err)
@@ -391,13 +395,17 @@ func (s *service) setUp(ctx context.Context, mailDomain *domain.MailDomain) (*do
 // its rule, the way CreateMailbox does. Such mailboxes were created while the domain only sent.
 // Mailboxes that already have a rule are left alone, so a repeated setup adds nothing.
 func (s *service) routeUnroutedMailboxes(ctx context.Context, mailDomain *domain.MailDomain) []error {
+	provider, worker, err := s.domainClient(ctx, mailDomain)
+	if err != nil {
+		return []error{err}
+	}
 	mailboxes, err := s.domains.ListMailboxesWithoutRoutingRule(ctx, mailDomain.OrganizationID, mailDomain.Name)
 	if err != nil {
 		return []error{err}
 	}
 	var failures []error
 	for _, mailbox := range mailboxes {
-		ruleID, err := s.domainProvider.CreateRoutingRule(ctx, mailDomain.ZoneID, mailbox.Address, s.settings.EmailWorker)
+		ruleID, err := provider.CreateRoutingRule(ctx, mailDomain.ZoneID, mailbox.Address, worker)
 		if err != nil {
 			failures = append(failures, err)
 			continue
@@ -405,7 +413,7 @@ func (s *service) routeUnroutedMailboxes(ctx context.Context, mailDomain *domain
 		if err := s.domains.SetMailboxRoutingRule(ctx, mailbox.ID, ruleID); err != nil {
 			failures = append(failures, err)
 			// An unrecorded rule would never be removed with its mailbox.
-			if deleteErr := s.domainProvider.DeleteRoutingRule(ctx, mailDomain.ZoneID, ruleID); deleteErr != nil {
+			if deleteErr := provider.DeleteRoutingRule(ctx, mailDomain.ZoneID, ruleID); deleteErr != nil {
 				slog.WarnContext(ctx, "unrecorded routing rule was not removed",
 					slog.String("address", mailbox.Address), slog.String("error", deleteErr.Error()))
 			}
@@ -464,6 +472,10 @@ func receives(mailDomain *domain.MailDomain) bool {
 
 // evaluate lists the records the domain needs and what its zone has for each.
 func (s *service) evaluate(ctx context.Context, mailDomain *domain.MailDomain) ([]domain.MailDomainRecord, error) {
+	provider, _, err := s.domainClient(ctx, mailDomain)
+	if err != nil {
+		return nil, err
+	}
 	required := make([]domain.MailDomainRecord, 0, 8)
 	if receives(mailDomain) {
 		for _, host := range routingMXHosts {
@@ -476,7 +488,7 @@ func (s *service) evaluate(ctx context.Context, mailDomain *domain.MailDomain) (
 		})
 	}
 	if mailDomain.SendingTag != "" {
-		sending, err := s.domainProvider.SendingRecords(ctx, mailDomain.ZoneID, mailDomain.SendingTag)
+		sending, err := provider.SendingRecords(ctx, mailDomain.ZoneID, mailDomain.SendingTag)
 		if err != nil {
 			return nil, err
 		}
@@ -522,7 +534,7 @@ func (s *service) evaluate(ctx context.Context, mailDomain *domain.MailDomain) (
 	group, groupContext := errgroup.WithContext(ctx)
 	for i, name := range names {
 		group.Go(func() error {
-			records, err := s.domainProvider.ListRecords(groupContext, mailDomain.ZoneID, name)
+			records, err := provider.ListRecords(groupContext, mailDomain.ZoneID, name)
 			found[i] = records
 			return err
 		})
@@ -661,7 +673,11 @@ func (s *service) removeRoutingRule(ctx context.Context, mailbox *domain.Mailbox
 			// Email Routing is never used for a send-only domain.
 			return
 		}
-		err = s.domainProvider.DeleteRoutingRule(ctx, mailDomain.ZoneID, mailbox.RoutingRuleID)
+		provider, _, clientErr := s.domainClient(ctx, mailDomain)
+		err = clientErr
+		if err == nil {
+			err = provider.DeleteRoutingRule(ctx, mailDomain.ZoneID, mailbox.RoutingRuleID)
+		}
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "routing rule of a deleted mailbox was not removed",

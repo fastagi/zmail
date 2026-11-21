@@ -91,6 +91,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_11_28_090000_add_external_mail",
 			"2026_11_30_090000_add_mail_outbound_time_index",
 			"2026_12_01_090100_create_mail_content_access_audits",
+			"2026_12_02_090000_mail_cloudflare",
 		),
 	)
 }
