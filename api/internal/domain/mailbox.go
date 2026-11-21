@@ -683,6 +683,9 @@ type MailBroadcastDispatcher interface {
 	// PurgeExpiredTransactional deletes up to limit transactional messages, with their events,
 	// created TransactionalRetention before now.
 	PurgeExpiredTransactional(ctx context.Context, now time.Time, limit int) (int, error)
+	// PurgeRevokedExternalMail deletes the copies of external connections revoked longer than the
+	// retention, in at most limit bounded steps, whether or not any provider is enabled.
+	PurgeRevokedExternalMail(ctx context.Context, now time.Time, limit int) (int, error)
 }
 
 // MailZoneChecker checks pending managed zones outside request paths: it activates the zones the

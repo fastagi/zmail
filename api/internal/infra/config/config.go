@@ -748,6 +748,13 @@ func Load() (*Config, error) {
 					Tenant:       env.Get("EXTERNAL_MAIL_OUTLOOK_TENANT", DefaultExternalMailOutlookTenant),
 				},
 			},
+			Sync: parseExternalMailSyncConfig(ExternalMailSyncSettings{
+				ProviderFetchesPerPass: env.Get("EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS", ""),
+				MinFetchSpacing:        env.Get("EXTERNAL_MAIL_MIN_FETCH_SPACING", ""),
+				RevokedRetention:       env.Get("EXTERNAL_MAIL_REVOKED_RETENTION", ""),
+				FetchTimeout:           env.Get("EXTERNAL_MAIL_FETCH_TIMEOUT", ""),
+				MaxImmediatePages:      env.Get("EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES", ""),
+			}),
 		},
 		Mailbox: MailboxConfig{
 			Domain:              env.Get("MAILBOX_DOMAIN", ""),

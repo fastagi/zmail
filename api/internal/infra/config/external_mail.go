@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // External mail connectors an instance may enable. The OAuth connectors need the client of an OAuth
@@ -52,6 +54,173 @@ type ExternalMailConfig struct {
 	RedirectURL string
 	// OAuth holds the OAuth client of each enabled OAuth connector, keyed by provider.
 	OAuth map[string]ExternalMailOAuthClient
+	// Sync bounds how hard the sync worker reads providers and how long revoked copies stay.
+	Sync ExternalMailSyncConfig
+}
+
+// Defaults of the sync budget and the retention of revoked copies.
+const (
+	// DefaultExternalMailProviderFetchesPerPass matches the worker's default batch, so one provider
+	// alone keeps the full batch while several share it round-robin.
+	DefaultExternalMailProviderFetchesPerPass = 20
+	MaxExternalMailProviderFetchesPerPass     = 1000
+	// DefaultExternalMailMinFetchSpacing separates two fetches of one connection that has more
+	// pages ready, so a long backfill cannot occupy every pass.
+	DefaultExternalMailMinFetchSpacing = 5 * time.Second
+	MaxExternalMailMinFetchSpacing     = 10 * time.Minute
+	// DefaultExternalMailRevokedRetention is how long copies of a revoked connection stay before
+	// the worker deletes them: 30 days.
+	DefaultExternalMailRevokedRetention = 720 * time.Hour
+	MinExternalMailRevokedRetention     = 24 * time.Hour
+	MaxExternalMailRevokedRetention     = 8760 * time.Hour
+	// DefaultExternalMailFetchTimeout bounds one fetch, so a slow or hostile provider cannot stall
+	// the sequential pass.
+	DefaultExternalMailFetchTimeout = 60 * time.Second
+	MaxExternalMailFetchTimeout     = 10 * time.Minute
+	// DefaultExternalMailMaxImmediatePages is how many pages in a row one connection may fetch at
+	// once before each further page waits the spacing.
+	DefaultExternalMailMaxImmediatePages = 20
+	MaxExternalMailMaxImmediatePages     = 1000
+)
+
+// ExternalMailSyncConfig is the sync worker's budget. A zero field takes its default, so a
+// configuration built in code needs none of them.
+type ExternalMailSyncConfig struct {
+	// ProviderFetchesPerPass caps the fetches of one provider in one worker pass.
+	ProviderFetchesPerPass int
+	// MinFetchSpacing is the least time between two fetches of one connection.
+	MinFetchSpacing time.Duration
+	// RevokedRetention is how long the copies of a revoked connection are kept.
+	RevokedRetention time.Duration
+	// FetchTimeout bounds one fetch of one connection.
+	FetchTimeout time.Duration
+	// MaxImmediatePages is how many pages in a row are fetched again at once.
+	MaxImmediatePages int
+	// invalid names the keys that were set to a value that does not parse; startup refuses them,
+	// so a typo never silently falls back to a default (for the retention, an earlier deletion).
+	invalid []string
+}
+
+// ExternalMailSyncSettings are the raw values of the sync budget keys; empty means unset.
+type ExternalMailSyncSettings struct {
+	ProviderFetchesPerPass string
+	MinFetchSpacing        string
+	RevokedRetention       string
+	FetchTimeout           string
+	MaxImmediatePages      string
+}
+
+// parseExternalMailSyncConfig parses the sync budget. An unset key takes its default; a key set to
+// a value that does not parse is recorded and refused by validation.
+func parseExternalMailSyncConfig(raw ExternalMailSyncSettings) ExternalMailSyncConfig {
+	var c ExternalMailSyncConfig
+	integer := func(key, value string, into *int) {
+		if value = strings.TrimSpace(value); value == "" {
+			return
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 {
+			c.invalid = append(c.invalid, key)
+			return
+		}
+		*into = parsed
+	}
+	duration := func(key, value string, into *time.Duration) {
+		if value = strings.TrimSpace(value); value == "" {
+			return
+		}
+		parsed, err := parseExternalMailDuration(value)
+		if err != nil || parsed <= 0 {
+			c.invalid = append(c.invalid, key)
+			return
+		}
+		*into = parsed
+	}
+	integer("EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS", raw.ProviderFetchesPerPass, &c.ProviderFetchesPerPass)
+	duration("EXTERNAL_MAIL_MIN_FETCH_SPACING", raw.MinFetchSpacing, &c.MinFetchSpacing)
+	duration("EXTERNAL_MAIL_REVOKED_RETENTION", raw.RevokedRetention, &c.RevokedRetention)
+	duration("EXTERNAL_MAIL_FETCH_TIMEOUT", raw.FetchTimeout, &c.FetchTimeout)
+	integer("EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES", raw.MaxImmediatePages, &c.MaxImmediatePages)
+	return c
+}
+
+// parseExternalMailDuration accepts a Go duration ("720h", "90s") or a whole number of days
+// ("30d").
+func parseExternalMailDuration(value string) (time.Duration, error) {
+	if days, found := strings.CutSuffix(value, "d"); found {
+		count, err := strconv.Atoi(days)
+		if err != nil || count <= 0 || count > 3660 {
+			return 0, fmt.Errorf("invalid day count %q", value)
+		}
+		return time.Duration(count) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(value)
+}
+
+// Timeout returns the fetch deadline, or its default.
+func (c ExternalMailSyncConfig) Timeout() time.Duration {
+	if c.FetchTimeout <= 0 {
+		return DefaultExternalMailFetchTimeout
+	}
+	return c.FetchTimeout
+}
+
+// ImmediatePages returns the bound on immediate refetches, or its default.
+func (c ExternalMailSyncConfig) ImmediatePages() int {
+	if c.MaxImmediatePages <= 0 {
+		return DefaultExternalMailMaxImmediatePages
+	}
+	return c.MaxImmediatePages
+}
+
+// FetchesPerPass returns the per-provider cap, or its default.
+func (c ExternalMailSyncConfig) FetchesPerPass() int {
+	if c.ProviderFetchesPerPass <= 0 {
+		return DefaultExternalMailProviderFetchesPerPass
+	}
+	return c.ProviderFetchesPerPass
+}
+
+// Spacing returns the per-connection spacing, or its default.
+func (c ExternalMailSyncConfig) Spacing() time.Duration {
+	if c.MinFetchSpacing <= 0 {
+		return DefaultExternalMailMinFetchSpacing
+	}
+	return c.MinFetchSpacing
+}
+
+// Retention returns the retention of revoked copies, or its default.
+func (c ExternalMailSyncConfig) Retention() time.Duration {
+	if c.RevokedRetention <= 0 {
+		return DefaultExternalMailRevokedRetention
+	}
+	return c.RevokedRetention
+}
+
+// validateExternalMailSyncConfig refuses a budget outside its bounds; zero takes the default.
+func validateExternalMailSyncConfig(c ExternalMailSyncConfig) error {
+	if len(c.invalid) > 0 {
+		return fmt.Errorf("%s must be a positive number, or a duration such as 90s, 720h, or 30d", strings.Join(c.invalid, ", "))
+	}
+	if c.ProviderFetchesPerPass < 0 || c.ProviderFetchesPerPass > MaxExternalMailProviderFetchesPerPass {
+		return fmt.Errorf("EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS must be between 1 and %d", MaxExternalMailProviderFetchesPerPass)
+	}
+	if c.MinFetchSpacing != 0 && (c.MinFetchSpacing < time.Second || c.MinFetchSpacing > MaxExternalMailMinFetchSpacing) {
+		return fmt.Errorf("EXTERNAL_MAIL_MIN_FETCH_SPACING must be between 1s and %s", MaxExternalMailMinFetchSpacing)
+	}
+	if c.FetchTimeout != 0 && (c.FetchTimeout < time.Second || c.FetchTimeout > MaxExternalMailFetchTimeout) {
+		// The worker renews a connection's lease to the deadline before each fetch, so no other
+		// worker can claim it while the fetch may still run.
+		return fmt.Errorf("EXTERNAL_MAIL_FETCH_TIMEOUT must be between 1s and %s", MaxExternalMailFetchTimeout)
+	}
+	if c.MaxImmediatePages < 0 || c.MaxImmediatePages > MaxExternalMailMaxImmediatePages {
+		return fmt.Errorf("EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES must be between 1 and %d", MaxExternalMailMaxImmediatePages)
+	}
+	if c.RevokedRetention != 0 && (c.RevokedRetention < MinExternalMailRevokedRetention || c.RevokedRetention > MaxExternalMailRevokedRetention) {
+		return fmt.Errorf("EXTERNAL_MAIL_REVOKED_RETENTION must be between %s and %s",
+			MinExternalMailRevokedRetention, MaxExternalMailRevokedRetention)
+	}
+	return nil
 }
 
 // Provides reports whether the list enables the provider.
@@ -92,6 +261,9 @@ func parseExternalMailProviders(raw string) []string {
 // real connector, an OAuth connector without its client or the redirect URL, and an enabled
 // feature without the key that seals grants.
 func validateExternalMailConfig(c ExternalMailConfig, secretKey string, production bool) error {
+	if err := validateExternalMailSyncConfig(c.Sync); err != nil {
+		return err
+	}
 	for _, provider := range c.Providers {
 		switch provider {
 		case ExternalMailSourceFake:

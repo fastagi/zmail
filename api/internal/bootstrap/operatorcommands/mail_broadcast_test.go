@@ -17,6 +17,14 @@ type recordingMailDispatcher struct {
 	txPurged      int
 	// txPurgeLimit is the batch the last transactional purge was given.
 	txPurgeLimit int
+	// externalPurgeLimit is the batch the last purge of revoked external copies was given.
+	externalPurgeLimit int
+}
+
+func (d *recordingMailDispatcher) PurgeRevokedExternalMail(_ context.Context, _ time.Time, limit int) (int, error) {
+	d.calls = append(d.calls, "purge-external")
+	d.externalPurgeLimit = limit
+	return 0, nil
 }
 
 func (d *recordingMailDispatcher) DispatchTransactional(_ context.Context, limit int) (int, error) {
@@ -113,5 +121,17 @@ func TestMailWorkerDispatchesTransactionalFirst(t *testing.T) {
 	processed, err = mailBroadcastWorker{dispatcher: busy}.DispatchWebhooks(context.Background(), 25)
 	if err != nil || processed != 25 || len(busy.calls) != 1 {
 		t.Fatalf("calls = %v, processed %d, %v; want only transactional when it fills the batch", busy.calls, processed, err)
+	}
+}
+
+// TestMailWorkerPurgesRevokedExternalCopiesLast runs the retention of revoked external copies on
+// every tick, with what the batch has left, independent of the external mail worker.
+func TestMailWorkerPurgesRevokedExternalCopiesLast(t *testing.T) {
+	dispatcher := &recordingMailDispatcher{transactional: 2, queued: 3, sent: 4, purged: 5, txPurged: 1}
+	if _, err := (mailBroadcastWorker{dispatcher: dispatcher}).DispatchWebhooks(context.Background(), 25); err != nil {
+		t.Fatalf("DispatchWebhooks: %v", err)
+	}
+	if last := dispatcher.calls[len(dispatcher.calls)-1]; last != "purge-external" || dispatcher.externalPurgeLimit != 10 {
+		t.Fatalf("calls = %v, external purge limit %d; want purge-external last with 10", dispatcher.calls, dispatcher.externalPurgeLimit)
 	}
 }

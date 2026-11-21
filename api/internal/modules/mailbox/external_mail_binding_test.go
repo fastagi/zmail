@@ -399,6 +399,9 @@ func TestExternalMailBackfillProceedsPageByPage(t *testing.T) {
 		f.source.Deliver(externalTestToken, externalMessage(fmt.Sprintf("g-%d", i), fmt.Sprintf("Mail %d", i), time.Time{}))
 	}
 	for pass, want := range []int{2, 4, 5} {
+		if pass > 0 {
+			f.advance(config.DefaultExternalMailMinFetchSpacing)
+		}
 		if handled := f.sync(t); handled != 1 {
 			t.Fatalf("pass %d handled %d connections, want 1 without waiting for the interval", pass, handled)
 		}
