@@ -18,31 +18,68 @@ const (
 	// externalMailCredentialAttempts is how many bindings a member may try per window.
 	externalMailCredentialAttempts = 10
 	externalMailCredentialWindow   = 15 * time.Minute
+	// ruleExternalMailCredentialsOrganization bounds the attempts of all members of one
+	// organization, so the distinct refusals cannot drive a scan of outside hosts.
+	ruleExternalMailCredentialsOrganization = "mailbox_external_mail_credentials_org"
+	externalMailOrganizationAttempts        = 30
+	externalMailOrganizationWindow          = time.Hour
 )
 
 // ErrExternalMailCredentialsRateLimited means a member tried too many password bindings.
 var ErrExternalMailCredentialsRateLimited = errors.New("too many external mail credential attempts")
 
 // ExternalMailCredentialsInput binds an account of a password connector. The password is used to
-// sign in once, then sealed; it is never logged or returned.
+// sign in once, then sealed; it is never logged or returned. The account address is derived by
+// the connector from what the server accepted, never taken from the member.
 type ExternalMailCredentialsInput struct {
-	Provider       domain.ExternalMailProvider
-	Host           string
-	Port           int
-	Username       string
-	Password       string
-	AccountAddress string
+	Provider domain.ExternalMailProvider
+	Host     string
+	Port     int
+	Username string
+	Password string
 	// BackfillDays is how far back a new binding first reads; zero takes the default.
 	BackfillDays int
 }
 
-func newExternalMailCredentialLimit(stores *ratelimit.Stores) ratelimit.Store {
+// externalCredentialLimits bound password bindings per member and per organization.
+type externalCredentialLimits struct {
+	member       ratelimit.Store
+	organization ratelimit.Store
+}
+
+func newExternalMailCredentialLimits(stores *ratelimit.Stores) externalCredentialLimits {
 	if stores == nil {
 		stores = ratelimit.NewMemoryStores()
 	}
-	return stores.New(ratelimit.Rule{
-		Name: ruleExternalMailCredentials, Max: externalMailCredentialAttempts, Window: externalMailCredentialWindow,
-	})
+	return externalCredentialLimits{
+		member: stores.New(ratelimit.Rule{
+			Name: ruleExternalMailCredentials, Max: externalMailCredentialAttempts, Window: externalMailCredentialWindow,
+		}),
+		organization: stores.New(ratelimit.Rule{
+			Name: ruleExternalMailCredentialsOrganization, Max: externalMailOrganizationAttempts,
+			Window: externalMailOrganizationWindow,
+		}),
+	}
+}
+
+// take consumes one attempt of the member and then of the organization; a member already over
+// their own limit does not use up the organization's.
+func (l externalCredentialLimits) take(ctx context.Context, viewer domain.OrganizationContext) error {
+	for _, limit := range []struct {
+		store  ratelimit.Store
+		bucket string
+	}{
+		{l.member, "user:" + strconv.FormatUint(uint64(viewer.UserID), 10)},
+		{l.organization, "organization:" + strconv.FormatUint(uint64(viewer.OrganizationID), 10)},
+	} {
+		if limit.store == nil {
+			continue
+		}
+		if allowed, _, resetAt := limit.store.Take(ctx, limit.bucket); !allowed {
+			return &RetryAfterError{Err: ErrExternalMailCredentialsRateLimited, RetryAfter: time.Until(resetAt)}
+		}
+	}
+	return nil
 }
 
 // BindExternalMailCredentials verifies the credentials by signing in once, then binds the account
@@ -64,16 +101,12 @@ func (s *service) BindExternalMailCredentials(ctx context.Context, viewer domain
 	if backfill < 1 || backfill > domain.MaxExternalMailBackfillDays {
 		return nil, false, ErrExternalMailAuthorizationInvalid
 	}
-	if s.externalCredentialLimit != nil {
-		allowed, _, resetAt := s.externalCredentialLimit.Take(ctx, strconv.FormatUint(uint64(viewer.UserID), 10))
-		if !allowed {
-			return nil, false, &RetryAfterError{Err: ErrExternalMailCredentialsRateLimited, RetryAfter: time.Until(resetAt)}
-		}
+	if err := s.externalCredentialLimits.take(ctx, viewer); err != nil {
+		return nil, false, err
 	}
 
 	token, account, err := verifier.VerifyPassword(ctx, ExternalMailPasswordCredentials{
 		Host: input.Host, Port: input.Port, Username: input.Username, Password: input.Password,
-		AccountAddress: input.AccountAddress,
 	})
 	if err != nil {
 		outcome := "unreachable"

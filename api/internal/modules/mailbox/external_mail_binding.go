@@ -207,7 +207,8 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 		}
 		connection, findErr = s.externalMail.RebindExternalMailConnection(tx, domain.ExternalMailRebind{
 			ConnectionID: existing.ID, EncryptedRefreshToken: sealed,
-			ResetCursor: existing.Status == domain.ExternalMailStatusRevoked, Now: s.now().UTC(),
+			ResetCursor: existing.Status == domain.ExternalMailStatusRevoked || !s.sameExternalMailbox(connector, existing, token),
+			Now:         s.now().UTC(),
 		})
 		return findErr
 	})
@@ -233,6 +234,21 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 		slog.Uint64("organization_id", uint64(viewer.OrganizationID)), slog.Uint64("user_id", uint64(viewer.UserID)),
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
 	return connection, created, nil
+}
+
+// sameExternalMailbox reports whether a fresh grant reads the same mailbox as the connection's
+// stored one. Only connectors whose grant names a server can tell; a stored grant that cannot be
+// opened is treated as another mailbox, so the cursor starts over.
+func (s *service) sameExternalMailbox(connector ExternalMailConnector, existing *domain.ExternalMailConnection, token ExternalMailToken) bool {
+	comparer, compares := connector.Source.(ExternalMailGrantComparer)
+	if !compares {
+		return true
+	}
+	previous, err := s.encryptor.DecryptString(existing.EncryptedRefreshToken)
+	if err != nil {
+		return false
+	}
+	return comparer.SameMailbox(ExternalMailToken{RefreshToken: previous}, token)
 }
 
 // bindExternalAccount creates the private, read-only external mailbox of a new account and its

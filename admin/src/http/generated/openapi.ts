@@ -399,7 +399,7 @@ export interface paths {
         put?: never;
         /**
          * Bind or reconnect an outside account with an app password
-         * @description For connectors whose `auth_kind` is `password` (the generic `imap` connector for iCloud, Yahoo, Fastmail, QQ, 163, or a self-hosted server). The server signs in to `host` over implicit TLS on port 993 with a verified certificate and opens INBOX once before anything is stored; hosts that resolve to loopback, private, link-local, or unspecified addresses are refused. The outcomes follow `completeExternalMailAuthorization`. A new account creates a private, read-only `external` mailbox and its connection (`201`); the caller's own account in any state is restored with the new password and the same mailbox (`200`). The password is sealed at rest, never logged, never returned, and never written to audit metadata. Attempts are limited to 10 per member per 15 minutes. Session only; never cached.
+         * @description For connectors whose `auth_kind` is `password` (the generic `imap` connector for iCloud, Yahoo, Fastmail, QQ, 163, or a self-hosted server). The server signs in to `host` over implicit TLS on port 993 with a verified certificate and opens INBOX once before anything is stored; hosts that resolve to loopback, private, link-local, or unspecified addresses are refused. The outcomes follow `completeExternalMailAuthorization`. A new account creates a private, read-only `external` mailbox and its connection (`201`); the caller's own account in any state is restored with the new password and the same mailbox (`200`), and a restore that names another host starts the backfill over. The account is derived from the login, never named by the caller. The password is sealed at rest, never logged, never returned, and never written to audit metadata. Attempts are limited to 10 per member per 15 minutes and 30 per organization per hour. Session only; never cached.
          */
         post: operations["bindExternalMailCredentials"];
         delete?: never;
@@ -3606,8 +3606,6 @@ export interface components {
             message: string;
         };
         BindExternalMailCredentialsRequest: {
-            /** @description The bound address; defaults to `username`, which must then be an address. */
-            account_address?: string;
             /** @description How far back the first sync reads INBOX; 14 when omitted. */
             backfill_days?: number;
             /** @description The IMAP server, such as `imap.mail.me.com`. */
@@ -3623,6 +3621,7 @@ export interface components {
              */
             port: number;
             provider: components["schemas"]["ExternalMailConnectorID"];
+            /** @description The login. The bound account is derived from it, never named by the caller; the lowercased username when it contains `@`, otherwise `username@host`. */
             username: string;
         };
         CompleteExternalMailAuthorizationRequest: {
@@ -7849,7 +7848,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description The server refused the username or password (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`); the server could not be reached over TLS, its certificate did not verify, or the host is not allowed (`MAILBOX.EXTERNAL_SERVER_UNREACHABLE`); a value carries a control character, the account address is not an address, or the backfill is out of range (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); or a malformed body (`COMMON.VALIDATION_FAILED`). */
+            /** @description The server refused the username or password (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`); the server could not be reached over TLS, its certificate did not verify, or the host is not allowed, or refused the login for a transient reason (`MAILBOX.EXTERNAL_SERVER_UNREACHABLE`); a value carries a control character or the backfill is out of range (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); or a malformed body (`COMMON.VALIDATION_FAILED`). */
             422: {
                 headers: {
                     [name: string]: unknown;

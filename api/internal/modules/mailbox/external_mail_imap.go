@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +15,6 @@ import (
 	"log/slog"
 	"math"
 	"net"
-	"net/mail"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -33,16 +34,30 @@ const (
 	imapPort = 993
 	// imapPageSize is how many messages one fetch returns.
 	imapPageSize = 25
-	// imapBodyBatch is how many bodies one UID FETCH command reads, bounding the memory of a page.
+	// imapBodyBatch is how many bodies one UID FETCH command reads.
 	imapBodyBatch = 5
+	// imapBatchBytes bounds the announced sizes of the bodies one UID FETCH command reads; a
+	// single message up to the inbound limit always fits.
+	imapBatchBytes = 6 << 20
+	// imapPageBytes bounds the announced sizes of the bodies one fetch reads; a page above it is
+	// cut short and continues in the next fetch.
+	imapPageBytes = 40 << 20
+	// imapCommandBudget bounds every byte the server sends in answer to one command, lines and
+	// literals, kept or discarded.
+	imapCommandBudget = 8 << 20
+	// imapSessionBudget bounds every byte one connection receives.
+	imapSessionBudget = 48 << 20
 	// imapMaxMessageBytes skips messages larger than the inbound limit.
 	imapMaxMessageBytes = MaxInboundBytes
 	// imapMaxLineBytes bounds one response line, a long UID SEARCH result included.
 	imapMaxLineBytes = 4 << 20
 	// imapMaxSmallLiteral bounds a literal outside a message body.
 	imapMaxSmallLiteral = 64 << 10
-	imapDialTimeout     = 15 * time.Second
-	imapCommandTimeout  = 60 * time.Second
+	imapDialTimeout     = 10 * time.Second
+	imapCommandTimeout  = 15 * time.Second
+	// imapOverallTimeout bounds one fetch or one verification, dial and every command included,
+	// so a slow or hostile server cannot hold the sync worker.
+	imapOverallTimeout = 45 * time.Second
 	// imapMaxCredentialLength bounds each credential field.
 	imapMaxCredentialLength = 320
 )
@@ -52,6 +67,8 @@ var (
 	// host does not resolve, is refused as a private address, does not answer, or presents a
 	// certificate that does not verify.
 	ErrExternalMailServerUnreachable = errors.New("external mail server unreachable")
+	// errIMAPBudget means the server sent more than a command or a connection may receive.
+	errIMAPBudget = errors.New("imap: response exceeds its byte budget")
 )
 
 func init() {
@@ -72,14 +89,20 @@ type ExternalMailPasswordCredentials struct {
 	Port     int
 	Username string
 	Password string
-	// AccountAddress is the bound address; empty takes the username when it is an address.
-	AccountAddress string
 }
 
 // ExternalMailPasswordVerifier is implemented by sources bound with a password: it signs in once
-// and returns the grant to store and the account it reads.
+// and returns the grant to store and the account it reads. The account is derived from the
+// credentials by the source, never taken from the member.
 type ExternalMailPasswordVerifier interface {
 	VerifyPassword(ctx context.Context, credentials ExternalMailPasswordCredentials) (ExternalMailToken, ExternalMailAccount, error)
+}
+
+// ExternalMailGrantComparer is implemented by sources whose grant names the server it reads. A
+// rebind with a grant for another server starts the connection's backfill over, since the old
+// cursor means nothing there.
+type ExternalMailGrantComparer interface {
+	SameMailbox(previous, next ExternalMailToken) bool
 }
 
 // imapCredentials is the sealed secret of an IMAP connection.
@@ -112,25 +135,31 @@ type imapResolver interface {
 	LookupNetIP(ctx context.Context, network, host string) ([]netip.Addr, error)
 }
 
-// imapSource reads INBOX of an IMAP account over implicit TLS. It is read-only: messages are
-// fetched with BODY.PEEK so their \Seen flag stays as it was.
+// imapSource reads INBOX of an IMAP account over implicit TLS. It is read-only: INBOX is opened
+// with EXAMINE and messages are fetched with BODY.PEEK, so no flag changes.
 type imapSource struct {
 	policy         imapNetworkPolicy
 	resolver       imapResolver
 	dialTimeout    time.Duration
 	commandTimeout time.Duration
+	overallTimeout time.Duration
 	pageSize       int
+	// commandBudget and sessionBudget override the byte budgets in tests.
+	commandBudget int64
+	sessionBudget int64
 }
 
 var (
 	_ ExternalMailSource           = (*imapSource)(nil)
 	_ ExternalMailPasswordVerifier = (*imapSource)(nil)
+	_ ExternalMailGrantComparer    = (*imapSource)(nil)
 )
 
 func newIMAPSource() *imapSource {
 	return &imapSource{
 		resolver: net.DefaultResolver, dialTimeout: imapDialTimeout, commandTimeout: imapCommandTimeout,
-		pageSize: imapPageSize,
+		overallTimeout: imapOverallTimeout, pageSize: imapPageSize,
+		commandBudget: imapCommandBudget, sessionBudget: imapSessionBudget,
 	}
 }
 
@@ -145,7 +174,28 @@ func (*imapSource) Exchange(context.Context, ExternalMailCodeExchange) (External
 // Revoke has nothing to hand back: the member revokes the app password at the provider.
 func (*imapSource) Revoke(context.Context, ExternalMailToken) error { return nil }
 
-// VerifyPassword signs in and opens INBOX once, then returns the sealed-to-be credentials.
+// SameMailbox reports whether two grants read the same server. A grant that does not decode
+// never matches.
+func (*imapSource) SameMailbox(previous, next ExternalMailToken) bool {
+	var before, after imapCredentials
+	if json.Unmarshal([]byte(previous.RefreshToken), &before) != nil || json.Unmarshal([]byte(next.RefreshToken), &after) != nil {
+		return false
+	}
+	return before.Host != "" && strings.EqualFold(before.Host, after.Host)
+}
+
+// imapAccountIdentity is the account a binding claims, derived only from what the server
+// accepted: the username when it is an address, otherwise the username at the host.
+func imapAccountIdentity(credentials imapCredentials) string {
+	username := strings.ToLower(strings.TrimSpace(credentials.Username))
+	if strings.Contains(username, "@") {
+		return username
+	}
+	return username + "@" + credentials.Host
+}
+
+// VerifyPassword signs in and opens INBOX once, then returns the sealed-to-be credentials and
+// the account identity.
 func (s *imapSource) VerifyPassword(ctx context.Context, input ExternalMailPasswordCredentials) (ExternalMailToken, ExternalMailAccount, error) {
 	credentials := imapCredentials{
 		Host: strings.ToLower(strings.TrimSpace(input.Host)), Port: input.Port,
@@ -157,14 +207,12 @@ func (s *imapSource) VerifyPassword(ctx context.Context, input ExternalMailPassw
 	if err := credentials.validate(); err != nil {
 		return ExternalMailToken{}, ExternalMailAccount{}, err
 	}
-	address := strings.TrimSpace(input.AccountAddress)
-	if address == "" {
-		address = strings.TrimSpace(input.Username)
-	}
-	parsed, err := mail.ParseAddress(address)
-	if err != nil || parsed.Name != "" || parsed.Address != address {
+	identity := imapAccountIdentity(credentials)
+	if len(identity) > imapMaxCredentialLength {
 		return ExternalMailToken{}, ExternalMailAccount{}, ErrExternalMailAuthorizationInvalid
 	}
+	ctx, cancel := context.WithTimeout(ctx, s.overallTimeout)
+	defer cancel()
 	session, err := s.open(ctx, credentials)
 	if err != nil {
 		return ExternalMailToken{}, ExternalMailAccount{}, err
@@ -177,11 +225,11 @@ func (s *imapSource) VerifyPassword(ctx context.Context, input ExternalMailPassw
 	if err != nil {
 		return ExternalMailToken{}, ExternalMailAccount{}, err
 	}
-	return ExternalMailToken{RefreshToken: string(sealed)}, ExternalMailAccount{Address: strings.ToLower(address)}, nil
+	return ExternalMailToken{RefreshToken: string(sealed)}, ExternalMailAccount{Address: identity}, nil
 }
 
-// Fetch reads one page of INBOX after the cursor. An empty cursor starts the backfill at the
-// request's window; a changed UIDVALIDITY expires the cursor.
+// Fetch reads one page of INBOX after the cursor within one overall deadline. An empty cursor
+// starts the backfill at the request's window; a changed UIDVALIDITY expires the cursor.
 func (s *imapSource) Fetch(ctx context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error) {
 	var credentials imapCredentials
 	if err := json.Unmarshal([]byte(request.Token.RefreshToken), &credentials); err != nil || credentials.validate() != nil {
@@ -193,15 +241,14 @@ func (s *imapSource) Fetch(ctx context.Context, request ExternalMailFetchRequest
 			return ExternalMailFetch{}, ErrExternalMailCursorExpired
 		}
 	}
-	session, err := s.open(ctx, credentials)
+	ctx, cancel := context.WithTimeout(ctx, s.overallTimeout)
+	defer cancel()
+	reader := &imapPageReader{source: s, ctx: ctx, credentials: credentials}
+	inbox, err := reader.connect()
 	if err != nil {
 		return ExternalMailFetch{}, err
 	}
-	defer session.close()
-	inbox, err := session.selectInbox()
-	if err != nil {
-		return ExternalMailFetch{}, err
-	}
+	defer reader.close()
 	if request.Cursor != "" && cursor.UIDValidity != inbox.uidValidity {
 		return ExternalMailFetch{}, ErrExternalMailCursorExpired
 	}
@@ -217,9 +264,9 @@ func (s *imapSource) Fetch(ctx context.Context, request ExternalMailFetchRequest
 		if now.IsZero() {
 			now = time.Now()
 		}
-		uids, err = session.search("SINCE " + now.UTC().AddDate(0, 0, -days).Format("2-Jan-2006"))
+		uids, err = reader.session.search("SINCE " + now.UTC().AddDate(0, 0, -days).Format("2-Jan-2006"))
 	case inbox.uidNext == 0 || cursor.LastUID+1 < inbox.uidNext:
-		uids, err = session.search(fmt.Sprintf("UID %d:*", cursor.LastUID+1))
+		uids, err = reader.session.search(fmt.Sprintf("UID %d:*", cursor.LastUID+1))
 	}
 	if err != nil {
 		return ExternalMailFetch{}, err
@@ -234,27 +281,33 @@ func (s *imapSource) Fetch(ctx context.Context, request ExternalMailFetchRequest
 		pageSize = imapPageSize
 	}
 	page := uids[:min(len(uids), pageSize)]
-	next := imapCursor{UIDValidity: inbox.uidValidity, LastUID: cursor.LastUID}
-	if len(page) > 0 {
-		next.LastUID = page[len(page)-1]
+	messages, processed := reader.readPage(page)
+	if len(page) > 0 && processed == 0 {
+		// Not one message could be read before the deadline: try again at the next interval.
+		return ExternalMailFetch{}, fmt.Errorf("imap: no message of the page could be read: %w", ctx.Err())
 	}
-	more := len(page) < len(uids)
+	next := imapCursor{UIDValidity: inbox.uidValidity, LastUID: max(cursor.LastUID, processed)}
+	more := len(uids) > 0 && next.LastUID < uids[len(uids)-1]
 	if !more && inbox.uidNext > 0 && inbox.uidNext-1 > next.LastUID {
 		// Everything in the window was read: later fetches start at mail newer than this one.
 		next.LastUID = inbox.uidNext - 1
-	}
-	messages, err := session.fetchMessages(ctx, page)
-	if err != nil {
-		return ExternalMailFetch{}, err
 	}
 	encoded, err := json.Marshal(next)
 	if err != nil {
 		return ExternalMailFetch{}, err
 	}
-	for i := range messages {
-		messages[i].ExternalID = fmt.Sprintf("%d:%s", inbox.uidValidity, messages[i].ExternalID)
-	}
 	return ExternalMailFetch{Messages: messages, Cursor: string(encoded), More: more}, nil
+}
+
+// imapExternalID is stable across a UIDVALIDITY change: a message with a Message-ID is known by
+// its hash, so a resync after the change stores no second copy. Only a message without one falls
+// back to its UID.
+func imapExternalID(messageID string, uidValidity, uid uint32) string {
+	if messageID = strings.ToLower(strings.TrimSpace(messageID)); messageID != "" {
+		sum := sha256.Sum256([]byte(messageID))
+		return "m:" + hex.EncodeToString(sum[:])[:40]
+	}
+	return fmt.Sprintf("u:%d:%d", uidValidity, uid)
 }
 
 // validate refuses credentials that cannot be sent safely: control characters would let a value
@@ -279,16 +332,37 @@ func (c imapCredentials) validate() error {
 	return nil
 }
 
+// imapRefusedPrefixes are special-purpose ranges a public mail server never uses: shared and
+// benchmarking space, IETF protocol assignments, the reserved class E, and IPv6 forms that
+// embed or translate an IPv4 address the IPv4 checks would otherwise judge.
+var imapRefusedPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/96"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("2002::/16"),
+}
+
 // allowedAddress refuses addresses inside the instance's own network.
 func (p imapNetworkPolicy) allowedAddress(addr netip.Addr) bool {
 	addr = addr.Unmap()
 	if p.AllowPrivate {
 		return addr.IsValid()
 	}
-	sharedSpace := netip.MustParsePrefix("100.64.0.0/10")
-	thisNetwork := netip.MustParsePrefix("0.0.0.0/8")
-	return addr.IsValid() && addr.IsGlobalUnicast() && !addr.IsPrivate() && !addr.IsLoopback() &&
-		!addr.IsLinkLocalUnicast() && !addr.IsUnspecified() && !sharedSpace.Contains(addr) && !thisNetwork.Contains(addr)
+	if !addr.IsValid() || !addr.IsGlobalUnicast() || addr.IsPrivate() || addr.IsLoopback() || addr.IsMulticast() ||
+		addr.IsLinkLocalUnicast() || addr.IsUnspecified() {
+		return false
+	}
+	for _, prefix := range imapRefusedPrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+	return true
 }
 
 // dial resolves the host, refuses any private address it resolves to, and connects over TLS to
@@ -335,22 +409,241 @@ func (s *imapSource) dial(ctx context.Context, credentials imapCredentials) (*tl
 	return nil, fmt.Errorf("%w: %v", ErrExternalMailServerUnreachable, lastErr)
 }
 
-// imapSession is one signed-in connection.
-type imapSession struct {
-	conn    *tls.Conn
-	reader  *bufio.Reader
-	timeout time.Duration
-	tag     int
-	stop    func() bool
+// imapPageReader reads one page, reconnecting when a command fails so one bad message cannot
+// block the mailbox.
+type imapPageReader struct {
+	source      *imapSource
+	ctx         context.Context
+	credentials imapCredentials
+	session     *imapSession
+	uidValidity uint32
+	// broken means the session's state is unknown after a failed command.
+	broken bool
 }
 
-// open connects, reads the greeting, and signs in. A NO to LOGIN is ErrExternalMailAuth.
+// connect opens a session and INBOX. A reconnect that finds another UIDVALIDITY expires the
+// cursor.
+func (r *imapPageReader) connect() (imapInbox, error) {
+	r.close()
+	session, err := r.source.open(r.ctx, r.credentials)
+	if err != nil {
+		return imapInbox{}, err
+	}
+	inbox, err := session.selectInbox()
+	if err != nil {
+		session.close()
+		return imapInbox{}, err
+	}
+	if r.uidValidity != 0 && inbox.uidValidity != r.uidValidity {
+		session.close()
+		return imapInbox{}, ErrExternalMailCursorExpired
+	}
+	r.session, r.uidValidity, r.broken = session, inbox.uidValidity, false
+	return inbox, nil
+}
+
+func (r *imapPageReader) close() {
+	if r.session != nil {
+		r.session.close()
+		r.session = nil
+	}
+}
+
+// skipped logs a message that will not be stored; the cursor still moves past it.
+func (r *imapPageReader) skipped(uid uint32, reason string, attributes ...any) {
+	slog.InfoContext(r.ctx, "external_mail.imap_message_skipped",
+		append([]any{slog.Uint64("uid", uint64(uid)), slog.String("reason", reason)}, attributes...)...)
+}
+
+// readPage reads the UIDs in order and returns the messages and the last UID it is done with,
+// read or skipped. Sizes come first, so a message above the inbound limit is never downloaded;
+// bodies follow in batches bounded by count and announced size. A failed batch is retried one
+// UID at a time; a UID that still fails is skipped. The page stops early at the deadline or when
+// its bodies would exceed the page budget.
+func (r *imapPageReader) readPage(page []uint32) ([]ExternalMessage, uint32) {
+	if len(page) == 0 {
+		return nil, 0
+	}
+	sizes, err := r.session.fetch(page, "(UID RFC822.SIZE)")
+	if err != nil {
+		r.broken = true
+		messages, processed, _ := r.oneByOne(page, nil, 0)
+		return messages, processed
+	}
+	var messages []ExternalMessage
+	var processed uint32
+	var batch []uint32
+	var batchBytes, pageBytes int64
+	flush := func() bool {
+		if len(batch) == 0 {
+			return true
+		}
+		read, err := r.session.fetch(batch, "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[])")
+		if err != nil {
+			r.broken = true
+			var stopped bool
+			messages, processed, stopped = r.oneByOne(batch, messages, processed)
+			batch, batchBytes = nil, 0
+			return !stopped
+		}
+		for _, uid := range batch {
+			messages = r.collect(messages, uid, read)
+			processed = uid
+		}
+		batch, batchBytes = nil, 0
+		return true
+	}
+	for _, uid := range page {
+		fetched, answered := sizes[uid]
+		switch {
+		case !answered:
+			if !flush() {
+				return messages, processed
+			}
+			r.skipped(uid, "no_response")
+			processed = uid
+			continue
+		case fetched.size > imapMaxMessageBytes:
+			if !flush() {
+				return messages, processed
+			}
+			r.skipped(uid, "oversized", slog.Int64("size", fetched.size))
+			processed = uid
+			continue
+		case pageBytes+fetched.size > imapPageBytes && (processed != 0 || len(batch) > 0):
+			// The rest of the page continues in the next fetch.
+			flush()
+			return messages, processed
+		}
+		if len(batch) == imapBodyBatch || batchBytes+fetched.size > imapBatchBytes {
+			if !flush() {
+				return messages, processed
+			}
+		}
+		batch = append(batch, uid)
+		batchBytes += fetched.size
+		pageBytes += fetched.size
+	}
+	flush()
+	return messages, processed
+}
+
+// oneByOne reads each UID with its own commands, reconnecting after any failure. A UID that
+// fails is skipped; the deadline ends the loop, skipping the UID it interrupted, and stopped
+// reports that the UIDs were not all done.
+func (r *imapPageReader) oneByOne(uids []uint32, messages []ExternalMessage, processed uint32) ([]ExternalMessage, uint32, bool) {
+	for _, uid := range uids {
+		if r.ctx.Err() != nil {
+			return messages, processed, true
+		}
+		if r.broken {
+			if _, err := r.connect(); err != nil {
+				if r.ctx.Err() != nil || errors.Is(err, ErrExternalMailCursorExpired) {
+					return messages, processed, true
+				}
+				r.broken = true
+				r.skipped(uid, "reconnect_failed")
+				processed = uid
+				continue
+			}
+		}
+		read, err := r.session.fetch([]uint32{uid}, "(UID RFC822.SIZE)")
+		if err == nil {
+			if fetched, answered := read[uid]; answered && fetched.size <= imapMaxMessageBytes {
+				read, err = r.session.fetch([]uint32{uid}, "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[])")
+			}
+		}
+		if err != nil {
+			r.broken = true
+			reason := "fetch_failed"
+			if r.ctx.Err() != nil {
+				reason = "deadline"
+			}
+			r.skipped(uid, reason)
+			processed = uid
+			continue
+		}
+		messages = r.collect(messages, uid, read)
+		processed = uid
+	}
+	return messages, processed, false
+}
+
+// collect parses the body of one requested UID, or logs why it is skipped.
+func (r *imapPageReader) collect(messages []ExternalMessage, uid uint32, read map[uint32]imapFetched) []ExternalMessage {
+	fetched, answered := read[uid]
+	switch {
+	case !answered:
+		r.skipped(uid, "no_response")
+		return messages
+	case fetched.oversized || fetched.size > imapMaxMessageBytes:
+		r.skipped(uid, "oversized", slog.Int64("size", fetched.size))
+		return messages
+	case fetched.body == nil:
+		r.skipped(uid, "no_body")
+		return messages
+	}
+	parsed, err := parseMail(fetched.body)
+	if err != nil {
+		r.skipped(uid, "unparseable")
+		return messages
+	}
+	return append(messages, ExternalMessage{
+		ExternalID:  imapExternalID(parsed.MessageID, r.uidValidity, uid),
+		FromAddress: parsed.FromAddress, FromName: parsed.FromName,
+		To: parsed.To, Cc: parsed.Cc, Subject: parsed.Subject, TextBody: parsed.TextBody, HTMLBody: parsed.HTMLBody,
+		RFCMessageID: parsed.MessageID, InReplyTo: parsed.InReplyTo, References: parsed.References,
+		ReceivedAt: fetched.internalDate,
+	})
+}
+
+// imapBudgetReader counts every byte read from the connection against the budget of the current
+// command and of the whole connection.
+type imapBudgetReader struct {
+	conn    net.Conn
+	command int64
+	session int64
+}
+
+func (b *imapBudgetReader) Read(p []byte) (int, error) {
+	limit := min(b.command, b.session)
+	if limit <= 0 {
+		return 0, errIMAPBudget
+	}
+	if int64(len(p)) > limit {
+		p = p[:limit]
+	}
+	n, err := b.conn.Read(p)
+	b.command -= int64(n)
+	b.session -= int64(n)
+	return n, err
+}
+
+// imapSession is one signed-in connection.
+type imapSession struct {
+	conn          net.Conn
+	reader        *bufio.Reader
+	budget        *imapBudgetReader
+	commandBudget int64
+	timeout       time.Duration
+	// deadline is the overall deadline no command may outlive.
+	deadline time.Time
+	tag      int
+	stop     func() bool
+}
+
+// open connects, reads the greeting, and signs in.
 func (s *imapSource) open(ctx context.Context, credentials imapCredentials) (*imapSession, error) {
 	conn, err := s.dial(ctx, credentials)
 	if err != nil {
 		return nil, err
 	}
-	session := &imapSession{conn: conn, reader: bufio.NewReaderSize(conn, 32<<10), timeout: s.commandTimeout}
+	budget := &imapBudgetReader{conn: conn, command: s.commandBudget, session: s.sessionBudget}
+	session := &imapSession{
+		conn: conn, reader: bufio.NewReaderSize(budget, 32<<10), budget: budget,
+		commandBudget: s.commandBudget, timeout: s.commandTimeout,
+	}
+	session.deadline, _ = ctx.Deadline()
 	// A canceled context closes the connection, which ends any read in progress.
 	session.stop = context.AfterFunc(ctx, func() { closeQuietly(conn) })
 	greeting, err := session.readGreeting()
@@ -369,9 +662,19 @@ func (s *imapSource) open(ctx context.Context, credentials imapCredentials) (*im
 	return session, nil
 }
 
+// arm starts a command: a fresh byte budget and a deadline that never outlives the overall one.
+func (s *imapSession) arm() error {
+	s.budget.command = s.commandBudget
+	deadline := time.Now().Add(s.timeout)
+	if !s.deadline.IsZero() && s.deadline.Before(deadline) {
+		deadline = s.deadline
+	}
+	return s.conn.SetDeadline(deadline)
+}
+
 // readGreeting reads the server's first line within one command timeout.
 func (s *imapSession) readGreeting() (string, error) {
-	if err := s.conn.SetDeadline(time.Now().Add(s.timeout)); err != nil {
+	if err := s.arm(); err != nil {
 		return "", err
 	}
 	return s.readLine()
@@ -401,7 +704,7 @@ func closeQuietly(closer io.Closer) {
 // send writes a command under the next tag, which finish then waits for.
 func (s *imapSession) send(command string) error {
 	s.tag++
-	if err := s.conn.SetDeadline(time.Now().Add(s.timeout)); err != nil {
+	if err := s.arm(); err != nil {
 		return err
 	}
 	_, err := io.WriteString(s.conn, "Z"+strconv.Itoa(s.tag)+" "+command+"\r\n")
@@ -417,14 +720,31 @@ func (s *imapSession) skip(n int) error {
 // imapStatus is the tagged completion of a command.
 type imapStatus struct {
 	ok   bool
+	bad  bool
 	text string
 }
 
-// imapHandlers receive the untagged responses of a command: FETCH responses parsed, any other
-// response as its line after "* ".
+// code is the response code that opens the completion text, such as "AUTHENTICATIONFAILED".
+func (s imapStatus) code() string {
+	text, ok := strings.CutPrefix(s.text, "[")
+	if !ok {
+		return ""
+	}
+	end := strings.IndexAny(text, " ]")
+	if end < 0 {
+		return ""
+	}
+	return strings.ToUpper(text[:end])
+}
+
+// imapHandlers receive the untagged responses of a command: FETCH responses of the requested
+// UIDs parsed, any other response as its line after "* " when line is set. Everything else is
+// read and dropped without being kept.
 type imapHandlers struct {
 	line  func(line string) error
 	fetch func(fetched imapFetched)
+	// want reports whether a UID was requested; nil wants none.
+	want func(uid uint32) bool
 }
 
 // finish reads responses until the tagged completion of the last command.
@@ -448,19 +768,28 @@ func (s *imapSession) finish(handlers imapHandlers) (imapStatus, error) {
 		if err != nil {
 			return imapStatus{}, err
 		}
-		rest, tagged := strings.CutPrefix(line, tag+" ")
-		if !tagged {
-			continue
+		if status, tagged, err := parseCompletion(line, tag); tagged {
+			return status, err
 		}
-		status, text, _ := strings.Cut(rest, " ")
-		switch strings.ToUpper(status) {
-		case "OK":
-			return imapStatus{ok: true, text: text}, nil
-		case "NO", "BAD":
-			return imapStatus{text: text}, nil
-		}
-		return imapStatus{}, fmt.Errorf("imap: unexpected completion %q", status)
 	}
+}
+
+// parseCompletion reads a tagged completion line; tagged is false for any other line.
+func parseCompletion(line, tag string) (imapStatus, bool, error) {
+	rest, tagged := strings.CutPrefix(line, tag+" ")
+	if !tagged {
+		return imapStatus{}, false, nil
+	}
+	status, text, _ := strings.Cut(rest, " ")
+	switch strings.ToUpper(status) {
+	case "OK":
+		return imapStatus{ok: true, text: text}, true, nil
+	case "NO":
+		return imapStatus{text: text}, true, nil
+	case "BAD":
+		return imapStatus{bad: true, text: text}, true, nil
+	}
+	return imapStatus{}, true, fmt.Errorf("imap: unexpected completion %q", status)
 }
 
 // readUntagged reads one untagged response after its "* ".
@@ -479,23 +808,27 @@ func (s *imapSession) readUntagged(handlers imapHandlers) error {
 		}
 	}
 	if _, numeric := parseUID(first); numeric && strings.EqualFold(second, "FETCH") {
-		fetched, fetchErr := s.readFetch()
+		want := handlers.want
+		if want == nil {
+			want = func(uint32) bool { return false }
+		}
+		fetched, fetchErr := s.readFetch(want, handlers.want != nil)
 		if fetchErr != nil {
 			return fetchErr
 		}
-		if handlers.fetch != nil {
+		if handlers.fetch != nil && fetched.uid != 0 && want(fetched.uid) {
 			handlers.fetch(fetched)
 		}
 		return nil
+	}
+	if handlers.line == nil {
+		return s.discardLine()
 	}
 	rest, err := s.readLine()
 	if err != nil {
 		return err
 	}
-	if handlers.line != nil {
-		return handlers.line(strings.TrimSpace(first + " " + second + rest))
-	}
-	return nil
+	return handlers.line(strings.TrimSpace(first + " " + second + rest))
 }
 
 // readWord reads up to the next space or line end, without consuming it.
@@ -550,6 +883,31 @@ func (s *imapSession) readLine() (string, error) {
 	}
 }
 
+// discardLine drops the rest of a response line and any literal it announces, keeping nothing
+// but the end of the last chunk read.
+func (s *imapSession) discardLine() error {
+	for {
+		var tail []byte
+		for {
+			chunk, err := s.reader.ReadSlice('\n')
+			tail = append(tail[:0], chunk[max(0, len(chunk)-24):]...)
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, bufio.ErrBufferFull) {
+				return err
+			}
+		}
+		size, ok := trailingLiteral(bytes.TrimRight(tail, "\r\n"))
+		if !ok {
+			return nil
+		}
+		if _, err := io.CopyN(io.Discard, s.reader, size); err != nil {
+			return err
+		}
+	}
+}
+
 // readRawLine reads up to CRLF, refusing lines longer than limit.
 func (s *imapSession) readRawLine(limit int) ([]byte, error) {
 	var line []byte
@@ -585,12 +943,31 @@ func trailingLiteral(line []byte) (int64, bool) {
 	return size, true
 }
 
+// imapTransientCodes are LOGIN refusals that say nothing about the password.
+var imapTransientCodes = map[string]bool{
+	"UNAVAILABLE": true, "LIMIT": true, "INUSE": true, "SERVERBUG": true, "CONTACTADMIN": true,
+}
+
+// loginRefusal turns a LOGIN completion into an error: a NO is a refused password unless its
+// response code says the refusal is transient; a BAD is a protocol fault, retryable like one.
+func loginRefusal(status imapStatus) error {
+	switch {
+	case status.ok:
+		return nil
+	case status.bad:
+		return fmt.Errorf("imap: LOGIN rejected as malformed: %s", status.code())
+	case imapTransientCodes[status.code()]:
+		return fmt.Errorf("imap: LOGIN refused for now [%s]", status.code())
+	}
+	return ErrExternalMailAuth
+}
+
 // login signs in. Printable ASCII values go as quoted strings; any other value goes as a literal
 // the server must invite. Control characters were refused before.
 func (s *imapSession) login(username, password string) error {
 	s.tag++
 	tag := "Z" + strconv.Itoa(s.tag)
-	if err := s.conn.SetDeadline(time.Now().Add(s.timeout)); err != nil {
+	if err := s.arm(); err != nil {
 		return fmt.Errorf("%w: %v", ErrExternalMailServerUnreachable, err)
 	}
 	parts := []string{tag + " LOGIN "}
@@ -608,13 +985,17 @@ func (s *imapSession) login(username, password string) error {
 	parts[len(parts)-1] += "\r\n"
 	for i, part := range parts {
 		if i > 0 {
-			// The server invites each literal with a continuation, or refuses the command.
+			// The server invites each literal with a continuation, or completes the command.
 			line, err := s.readLine()
 			if err != nil {
 				return fmt.Errorf("%w: %v", ErrExternalMailServerUnreachable, err)
 			}
 			if !strings.HasPrefix(line, "+") {
-				return ErrExternalMailAuth
+				status, tagged, err := parseCompletion(line, tag)
+				if err != nil || !tagged {
+					return fmt.Errorf("imap: unexpected answer to a LOGIN literal")
+				}
+				return loginRefusal(status)
 			}
 		}
 		if _, err := io.WriteString(s.conn, part); err != nil {
@@ -625,10 +1006,7 @@ func (s *imapSession) login(username, password string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrExternalMailServerUnreachable, err)
 	}
-	if !status.ok {
-		return ErrExternalMailAuth
-	}
-	return nil
+	return loginRefusal(status)
 }
 
 // quotable reports whether a value fits a quoted string: printable ASCII only.
@@ -645,14 +1023,15 @@ func quoteIMAP(value string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value) + `"`
 }
 
-// imapInbox is what SELECT reports about INBOX.
+// imapInbox is what EXAMINE reports about INBOX.
 type imapInbox struct {
 	uidValidity uint32
 	uidNext     uint32
 }
 
 // selectInbox opens INBOX with EXAMINE, the read-only form of SELECT, so syncing never changes
-// the account: no \Recent flag is consumed, and messages are read with BODY.PEEK.
+// the account: no \Recent flag is consumed, and messages are read with BODY.PEEK. A refusal is a
+// retryable error, not a lost authorization.
 func (s *imapSession) selectInbox() (imapInbox, error) {
 	if err := s.send("EXAMINE INBOX"); err != nil {
 		return imapInbox{}, err
@@ -671,7 +1050,7 @@ func (s *imapSession) selectInbox() (imapInbox, error) {
 		return imapInbox{}, err
 	}
 	if !status.ok {
-		return imapInbox{}, fmt.Errorf("%w: INBOX cannot be opened", ErrExternalMailAuth)
+		return imapInbox{}, fmt.Errorf("imap: INBOX cannot be opened [%s]", status.code())
 	}
 	if inbox.uidValidity == 0 {
 		return imapInbox{}, errors.New("imap: INBOX reports no UIDVALIDITY")
@@ -733,70 +1112,23 @@ type imapFetched struct {
 	oversized bool
 }
 
-// fetchMessages reads the messages of the UIDs in small batches. Sizes come first, so a message
-// above the inbound limit is never downloaded; it is skipped like any message that does not
-// parse.
-func (s *imapSession) fetchMessages(ctx context.Context, uids []uint32) ([]ExternalMessage, error) {
-	if len(uids) == 0 {
-		return nil, nil
-	}
-	sizes, err := s.fetch(uids, "(UID RFC822.SIZE)")
-	if err != nil {
-		return nil, err
-	}
-	var wanted []uint32
-	for _, uid := range uids {
-		if fetched, ok := sizes[uid]; ok && fetched.size <= imapMaxMessageBytes {
-			wanted = append(wanted, uid)
-		} else if ok {
-			slog.InfoContext(ctx, "external_mail.imap_message_skipped", slog.Uint64("uid", uint64(uid)),
-				slog.Int64("size", fetched.size), slog.String("reason", "oversized"))
-		}
-	}
-	messages := make([]ExternalMessage, 0, len(wanted))
-	for start := 0; start < len(wanted); start += imapBodyBatch {
-		batch := wanted[start:min(len(wanted), start+imapBodyBatch)]
-		bodies, err := s.fetch(batch, "(UID RFC822.SIZE INTERNALDATE BODY.PEEK[])")
-		if err != nil {
-			return nil, err
-		}
-		for _, uid := range batch {
-			fetched, ok := bodies[uid]
-			if !ok || fetched.oversized || fetched.body == nil {
-				continue
-			}
-			parsed, err := parseMail(fetched.body)
-			if err != nil {
-				slog.InfoContext(ctx, "external_mail.imap_message_skipped", slog.Uint64("uid", uint64(uid)),
-					slog.String("reason", "unparseable"))
-				continue
-			}
-			messages = append(messages, ExternalMessage{
-				ExternalID: strconv.FormatUint(uint64(uid), 10), FromAddress: parsed.FromAddress, FromName: parsed.FromName,
-				To: parsed.To, Cc: parsed.Cc, Subject: parsed.Subject, TextBody: parsed.TextBody, HTMLBody: parsed.HTMLBody,
-				RFCMessageID: parsed.MessageID, InReplyTo: parsed.InReplyTo, References: parsed.References,
-				ReceivedAt: fetched.internalDate,
-			})
-		}
-	}
-	return messages, nil
-}
-
-// fetch runs UID FETCH for the UIDs and returns the responses by UID.
+// fetch runs UID FETCH for the UIDs and returns the responses of those UIDs; responses about
+// any other message are read and dropped.
 func (s *imapSession) fetch(uids []uint32, items string) (map[uint32]imapFetched, error) {
 	set := make([]string, len(uids))
+	requested := make(map[uint32]bool, len(uids))
 	for i, uid := range uids {
 		set[i] = strconv.FormatUint(uint64(uid), 10)
+		requested[uid] = true
 	}
 	if err := s.send("UID FETCH " + strings.Join(set, ",") + " " + items); err != nil {
 		return nil, err
 	}
 	results := map[uint32]imapFetched{}
-	status, err := s.finish(imapHandlers{fetch: func(fetched imapFetched) {
-		if fetched.uid != 0 {
-			results[fetched.uid] = fetched
-		}
-	}})
+	status, err := s.finish(imapHandlers{
+		want:  func(uid uint32) bool { return requested[uid] },
+		fetch: func(fetched imapFetched) { results[fetched.uid] = fetched },
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -806,18 +1138,56 @@ func (s *imapSession) fetch(uids []uint32, items string) (map[uint32]imapFetched
 	return results, nil
 }
 
-// readFetch reads the "(...)" of a FETCH response and the line end after it.
-func (s *imapSession) readFetch() (imapFetched, error) {
-	value, err := s.readValue(0)
+// readFetch reads the "(...)" of a FETCH response and the line end after it. A body is kept only
+// while the command fetches bodies, only up to the message limit, and not for a UID announced
+// before it that was not requested; any other body is discarded as it arrives. A body announced
+// before its UID is kept within the command's byte budget and dropped afterwards when unwanted.
+func (s *imapSession) readFetch(want func(uint32) bool, fetching bool) (imapFetched, error) {
+	if err := s.skipSpaces(); err != nil {
+		return imapFetched{}, err
+	}
+	open, err := s.reader.ReadByte()
 	if err != nil {
 		return imapFetched{}, err
 	}
-	if _, err := s.readRawLine(imapMaxLineBytes); err != nil {
-		return imapFetched{}, err
+	if open != '(' {
+		return imapFetched{}, errors.New("imap: malformed FETCH response")
 	}
 	var fetched imapFetched
-	for i := 0; i+1 < len(value.list); i += 2 {
-		name, item := strings.ToUpper(value.list[i].atom), value.list[i+1]
+	for items := 0; ; items++ {
+		if items > 64 {
+			return imapFetched{}, errors.New("imap: FETCH response too long")
+		}
+		if err = s.skipSpaces(); err != nil {
+			return imapFetched{}, err
+		}
+		next, err := s.reader.Peek(1)
+		if err != nil {
+			return imapFetched{}, err
+		}
+		if next[0] == ')' {
+			if err = s.skip(1); err != nil {
+				return imapFetched{}, err
+			}
+			break
+		}
+		key, err := s.readValue(0, imapMaxSmallLiteral)
+		if err != nil {
+			return imapFetched{}, err
+		}
+		name := strings.ToUpper(key.atom)
+		keep := int64(imapMaxSmallLiteral)
+		isBody := strings.HasPrefix(name, "BODY[") || name == "RFC822"
+		if isBody {
+			keep = 0
+			if fetching && (fetched.uid == 0 || want(fetched.uid)) {
+				keep = imapMaxMessageBytes
+			}
+		}
+		item, err := s.readValue(0, keep)
+		if err != nil {
+			return imapFetched{}, err
+		}
 		switch {
 		case name == "UID":
 			fetched.uid, _ = parseUID(item.atom)
@@ -833,9 +1203,12 @@ func (s *imapSession) readFetch() (imapFetched, error) {
 			if date, err := time.Parse("2-Jan-2006 15:04:05 -0700", strings.TrimSpace(string(item.text))); err == nil {
 				fetched.internalDate = date
 			}
-		case strings.HasPrefix(name, "BODY[") || name == "RFC822":
+		case isBody:
 			fetched.body, fetched.oversized = item.text, item.oversized
 		}
+	}
+	if _, err := s.readRawLine(imapMaxLineBytes); err != nil {
+		return imapFetched{}, err
 	}
 	return fetched, nil
 }
@@ -848,9 +1221,10 @@ type imapValue struct {
 	oversized bool
 }
 
-// readValue reads one value from the stream. String literals above the message limit are
-// discarded and marked oversized.
-func (s *imapSession) readValue(depth int) (imapValue, error) {
+// readValue reads one value from the stream. A literal larger than keep is discarded as it
+// arrives and marked oversized; no literal is allocated beyond what the command may still
+// receive.
+func (s *imapSession) readValue(depth int, keep int64) (imapValue, error) {
 	if depth > 8 {
 		return imapValue{}, errors.New("imap: response nests too deeply")
 	}
@@ -884,7 +1258,7 @@ func (s *imapSession) readValue(depth int) (imapValue, error) {
 			if len(value.list) > 64 {
 				return imapValue{}, errors.New("imap: response list too long")
 			}
-			item, err := s.readValue(depth + 1)
+			item, err := s.readValue(depth+1, imapMaxSmallLiteral)
 			if err != nil {
 				return imapValue{}, err
 			}
@@ -924,11 +1298,14 @@ func (s *imapSession) readValue(depth int) (imapValue, error) {
 		if crlf, err := s.readRawLine(2); err != nil || len(crlf) != 0 {
 			return imapValue{}, errors.New("imap: malformed literal")
 		}
-		if size > imapMaxMessageBytes {
+		if size > keep {
 			if _, err := io.CopyN(io.Discard, s.reader, size); err != nil {
 				return imapValue{}, err
 			}
 			return imapValue{oversized: true}, nil
+		}
+		if size > s.budget.command+int64(s.reader.Buffered()) {
+			return imapValue{}, errIMAPBudget
 		}
 		text := make([]byte, size)
 		if _, err := io.ReadFull(s.reader, text); err != nil {

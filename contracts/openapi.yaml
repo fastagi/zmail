@@ -8757,9 +8757,11 @@ paths:
         hosts that resolve to loopback, private, link-local, or unspecified addresses are refused. The
         outcomes follow `completeExternalMailAuthorization`. A new account creates a private, read-only
         `external` mailbox and its connection (`201`); the caller's own account in any state is restored
-        with the new password and the same mailbox (`200`). The password is sealed at rest, never
-        logged, never returned, and never written to audit metadata. Attempts are limited to 10 per
-        member per 15 minutes. Session only; never cached.
+        with the new password and the same mailbox (`200`), and a restore that names another host
+        starts the backfill over. The account is derived from the login, never named by the caller. The
+        password is sealed at rest, never logged, never returned, and never written to audit metadata.
+        Attempts are limited to 10 per member per 15 minutes and 30 per organization per hour. Session
+        only; never cached.
       tags:
         - Mailboxes
       security:
@@ -8809,8 +8811,8 @@ paths:
         '422':
           description: The server refused the username or password (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`);
             the server could not be reached over TLS, its certificate did not verify, or the host is not
-            allowed (`MAILBOX.EXTERNAL_SERVER_UNREACHABLE`); a value carries a control character, the
-            account address is not an address, or the backfill is out of range
+            allowed, or refused the login for a transient reason (`MAILBOX.EXTERNAL_SERVER_UNREACHABLE`); a
+            value carries a control character or the backfill is out of range
             (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); or a malformed body (`COMMON.VALIDATION_FAILED`).
           content:
             application/json:
@@ -14567,6 +14569,8 @@ components:
           default: 993
         username:
           type: string
+          description: The login. The bound account is derived from it, never named by the caller; the
+            lowercased username when it contains `@`, otherwise `username@host`.
           minLength: 1
           maxLength: 320
         password:
@@ -14575,10 +14579,6 @@ components:
           writeOnly: true
           description: An app password issued by the provider. Never returned.
           minLength: 1
-          maxLength: 320
-        account_address:
-          type: string
-          description: The bound address; defaults to `username`, which must then be an address.
           maxLength: 320
         backfill_days:
           type: integer

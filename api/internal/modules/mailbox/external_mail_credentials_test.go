@@ -60,26 +60,26 @@ func TestIMAPCredentialBindingOutcomes(t *testing.T) {
 	if err != nil || created || again.ID != connection.ID {
 		t.Fatalf("rebind = %+v, created %v, err %v; want the same connection", again, created, err)
 	}
-	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.d, imapInput(server, "carol@imap.test")); !errors.Is(err, ErrExternalMailAccountTaken) {
+	if _, _, err = f.service.BindExternalMailCredentials(ctx, f.d, imapInput(server, "carol@imap.test")); !errors.Is(err, ErrExternalMailAccountTaken) {
 		t.Fatalf("another member binding = %v, want taken", err)
 	}
 	wrong := imapInput(server, "dave@imap.test")
 	wrong.Password = "wrong"
-	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.d, wrong); !errors.Is(err, ErrExternalMailAuthorizationFailed) {
+	if _, _, err = f.service.BindExternalMailCredentials(ctx, f.d, wrong); !errors.Is(err, ErrExternalMailAuthorizationFailed) {
 		t.Fatalf("wrong password = %v, want authorization failed", err)
 	}
 	unreachable := imapInput(server, "dave@imap.test")
 	unreachable.Port = closedPort(t)
-	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.d, unreachable); !errors.Is(err, ErrExternalMailServerUnreachable) {
+	if _, _, err = f.service.BindExternalMailCredentials(ctx, f.d, unreachable); !errors.Is(err, ErrExternalMailServerUnreachable) {
 		t.Fatalf("closed port = %v, want unreachable", err)
 	}
-	invalid := imapInput(server, "not-an-address")
-	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.d, invalid); !errors.Is(err, ErrExternalMailAuthorizationInvalid) {
-		t.Fatalf("username without an address = %v, want invalid", err)
+	bare, created, err := f.service.BindExternalMailCredentials(ctx, f.d, imapInput(server, "Dave"))
+	if err != nil || !created || bare.AccountAddress != "dave@127.0.0.1" {
+		t.Fatalf("bare username = %+v, created %v, err %v; want dave@127.0.0.1", bare, created, err)
 	}
-	invalid.AccountAddress = "dave@imap.test"
-	if _, created, err := f.service.BindExternalMailCredentials(ctx, f.d, invalid); err != nil || !created {
-		t.Fatalf("explicit account address = created %v, err %v", created, err)
+	injected := imapInput(server, "dave@imap.test\r\nZ9 LOGOUT")
+	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.d, injected); !errors.Is(err, ErrExternalMailAuthorizationInvalid) {
+		t.Fatalf("username with CRLF = %v, want invalid", err)
 	}
 	gmail := imapInput(server, "dave@imap.test")
 	gmail.Provider = domain.ExternalMailProviderGmail
@@ -103,7 +103,7 @@ func TestIMAPCredentialBindingOutcomes(t *testing.T) {
 func TestIMAPCredentialBindingLimits(t *testing.T) {
 	f, server := newIMAPFixture(t)
 	ctx := context.Background()
-	f.service.externalCredentialLimit = nil
+	f.service.externalCredentialLimits = externalCredentialLimits{}
 	for i := range domain.MaxExternalMailConnectionsPerUser {
 		if _, _, err := f.service.BindExternalMailCredentials(ctx, f.d, imapInput(server, fmt.Sprintf("d%d@imap.test", i))); err != nil {
 			t.Fatalf("bind %d: %v", i, err)
@@ -113,7 +113,7 @@ func TestIMAPCredentialBindingLimits(t *testing.T) {
 		t.Fatalf("past the limit = %v, want limit", err)
 	}
 
-	f.service.externalCredentialLimit = newExternalMailCredentialLimit(ratelimit.NewMemoryStores())
+	f.service.externalCredentialLimits = newExternalMailCredentialLimits(ratelimit.NewMemoryStores())
 	wrong := imapInput(server, "carol@imap.test")
 	wrong.Password = "guess"
 	for range externalMailCredentialAttempts {
@@ -132,6 +132,74 @@ func TestIMAPCredentialBindingLimits(t *testing.T) {
 	}
 	if _, created, err := f.service.BindExternalMailCredentials(ctx, f.b, imapInput(server, "b@imap.test")); err != nil || !created {
 		t.Fatalf("another member is not limited: created %v, err %v", created, err)
+	}
+
+	// The organization's bound covers all members together: 10 + 10 + 10 attempts spend it.
+	f.service.externalCredentialLimits = newExternalMailCredentialLimits(ratelimit.NewMemoryStores())
+	for _, member := range []domain.OrganizationContext{f.b, f.c, f.d} {
+		for range externalMailCredentialAttempts {
+			if _, _, err := f.service.BindExternalMailCredentials(ctx, member, wrong); !errors.Is(err, ErrExternalMailAuthorizationFailed) {
+				t.Fatalf("member %d guess = %v", member.UserID, err)
+			}
+		}
+	}
+	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.admin, wrong); !errors.Is(err, ErrExternalMailCredentialsRateLimited) {
+		t.Fatalf("a fresh member past the organization bound = %v, want rate limited", err)
+	}
+}
+
+// TestIMAPRebindToAnotherHostRestartsBackfill: binding the same account again with a grant for
+// another server starts the cursor over; the same server keeps it.
+func TestIMAPRebindToAnotherHostRestartsBackfill(t *testing.T) {
+	f, server := newIMAPFixture(t)
+	ctx := context.Background()
+	server.deliver("One", f.service.now())
+	input := imapInput(server, "carol@imap.test")
+	input.Host = "imap.test"
+	connection, _, err := f.service.BindExternalMailCredentials(ctx, f.c, input)
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	f.sync(t)
+	synced, _ := f.service.externalMail.FindExternalMailConnection(ctx, accessOrg, connection.ID)
+	if synced.SyncCursor == "" {
+		t.Fatal("no cursor after the first sync")
+	}
+	if again, _, rebindErr := f.service.BindExternalMailCredentials(ctx, f.c, input); rebindErr != nil || again.SyncCursor != synced.SyncCursor {
+		t.Fatalf("rebind to the same host = cursor %q, err %v; want it kept", again.SyncCursor, rebindErr)
+	}
+	input.Host = "other.imap.test"
+	moved, created, err := f.service.BindExternalMailCredentials(ctx, f.c, input)
+	if err != nil || created || moved.ID != connection.ID || moved.SyncCursor != "" {
+		t.Fatalf("rebind to another host = %+v, created %v, err %v; want the cursor reset", moved, created, err)
+	}
+}
+
+// TestIMAPUIDValidityChangeStoresNoSecondCopy: a mailbox rebuilt under a new UIDVALIDITY is read
+// again from the backfill window, and messages already stored are recognized by their
+// Message-ID.
+func TestIMAPUIDValidityChangeStoresNoSecondCopy(t *testing.T) {
+	f, server := newIMAPFixture(t)
+	ctx := context.Background()
+	server.deliver("First", f.service.now().Add(-time.Hour))
+	server.deliver("Second", f.service.now().Add(-time.Minute))
+	connection, _, err := f.service.BindExternalMailCredentials(ctx, f.c, imapInput(server, "carol@imap.test"))
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	f.sync(t)
+	server.renumber()
+	for range 3 {
+		f.advance(externalMailSyncInterval)
+		f.sync(t)
+	}
+	messages, _, err := f.service.ListMessages(ctx, f.c, connection.MailboxID, domain.MailMessageFilter{Page: 1, PerPage: 20})
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("stored %d messages after the UIDVALIDITY change, err %v; want 2", len(messages), err)
+	}
+	reloaded, _ := f.service.externalMail.FindExternalMailConnection(ctx, accessOrg, connection.ID)
+	if !strings.Contains(reloaded.SyncCursor, `"uidvalidity":7002`) {
+		t.Fatalf("cursor = %q; want the new UIDVALIDITY", reloaded.SyncCursor)
 	}
 }
 
@@ -172,7 +240,7 @@ func TestIMAPSyncStoresMessagesOnce(t *testing.T) {
 	}
 	subjects := map[string]bool{}
 	for _, message := range messages {
-		if message.Source != domain.MailSource("imap") || !strings.HasPrefix(message.ExternalID, "7001:") ||
+		if message.Source != domain.MailSource("imap") || !strings.HasPrefix(message.ExternalID, "m:") ||
 			message.Direction != domain.MailDirectionInbound {
 			t.Fatalf("message = source %q, external id %q", message.Source, message.ExternalID)
 		}
@@ -223,6 +291,14 @@ func TestIMAPCredentialsHTTP(t *testing.T) {
 	}
 	if status, raw, _ = call(f.c, payload("carol@imap.test", fakeIMAPPassword, server.port)); status != http.StatusOK {
 		t.Fatalf("rebind = %d %s", status, raw)
+	}
+	// A member cannot name the account: a claimed address is ignored.
+	spoof := fmt.Sprintf(`{"provider":"imap","host":"127.0.0.1","port":%d,"username":"eve","password":%q,"account_address":"carol@corp.test"}`,
+		server.port, fakeIMAPPassword)
+	status, raw, body = call(f.d, spoof)
+	data, _ = body["data"].(map[string]any)
+	if status != http.StatusCreated || data["account_address"] != "eve@127.0.0.1" {
+		t.Fatalf("claimed address = %d %s; want the derived eve@127.0.0.1", status, raw)
 	}
 	for name, want := range map[string]struct {
 		viewer domain.OrganizationContext

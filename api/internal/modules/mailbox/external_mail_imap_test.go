@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/netip"
@@ -52,6 +53,18 @@ type fakeIMAPServer struct {
 	// bodies are the UIDs whose body was served.
 	bodies      []uint32
 	connections int
+	// loginReply replaces the OK to a correct LOGIN, such as "NO [UNAVAILABLE] later".
+	loginReply string
+	// stallLogin never answers LOGIN, as a tarpit does.
+	stallLogin bool
+	// examineReply replaces the OK to EXAMINE.
+	examineReply string
+	// failBody answers NO to any body FETCH that includes the UID; stallBody never answers it;
+	// silent leaves the UID out of every FETCH answer.
+	failBody, stallBody, silent map[uint32]bool
+	// unsolicited is sent before the answer to every body FETCH: a response about a UID nobody
+	// asked for.
+	unsolicited string
 }
 
 func newFakeIMAPServer(t *testing.T) *fakeIMAPServer {
@@ -65,7 +78,7 @@ func newFakeIMAPServer(t *testing.T) *fakeIMAPServer {
 		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, IsCA: true, BasicConstraintsValid: true,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:    []string{"imap.test"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:    []string{"imap.test", "other.imap.test"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
@@ -86,6 +99,7 @@ func newFakeIMAPServer(t *testing.T) *fakeIMAPServer {
 	server := &fakeIMAPServer{
 		t: t, listener: listener, roots: roots, port: listener.Addr().(*net.TCPAddr).Port,
 		uidValidity: 7001, nextUID: 1,
+		failBody: map[uint32]bool{}, stallBody: map[uint32]bool{}, silent: map[uint32]bool{},
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 	go server.serve()
@@ -96,12 +110,21 @@ func newFakeIMAPServer(t *testing.T) *fakeIMAPServer {
 func (f *fakeIMAPServer) source() *imapSource {
 	source := newIMAPSource()
 	source.policy = imapNetworkPolicy{AllowPrivate: true, AllowAnyPort: true, RootCAs: f.roots}
-	source.dialTimeout, source.commandTimeout = 5*time.Second, 5*time.Second
+	source.dialTimeout, source.commandTimeout, source.overallTimeout = 5*time.Second, 5*time.Second, 20*time.Second
+	loopback := []netip.Addr{netip.MustParseAddr("127.0.0.1")}
+	source.resolver = fixedResolver{"imap.test": loopback, "other.imap.test": loopback}
 	return source
 }
 
 func (f *fakeIMAPServer) credentials(username string) ExternalMailPasswordCredentials {
 	return ExternalMailPasswordCredentials{Host: "127.0.0.1", Port: f.port, Username: username, Password: fakeIMAPPassword}
+}
+
+// configure changes the server's behavior under its lock.
+func (f *fakeIMAPServer) configure(change func(f *fakeIMAPServer)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	change(f)
 }
 
 // deliver appends a message received at date.
@@ -174,8 +197,19 @@ func (f *fakeIMAPServer) session(conn net.Conn) {
 		tag, command := args[0], strings.ToUpper(args[1])
 		switch {
 		case command == "LOGIN" && len(args) == 4:
+			f.mu.Lock()
+			stall, reply := f.stallLogin, f.loginReply
+			f.mu.Unlock()
+			if stall {
+				_, _ = io.Copy(io.Discard, reader)
+				return
+			}
 			if args[3] != fakeIMAPPassword {
 				write("%s NO [AUTHENTICATIONFAILED] Invalid credentials", tag)
+				continue
+			}
+			if reply != "" {
+				write("%s %s", tag, reply)
 				continue
 			}
 			authenticated = true
@@ -192,14 +226,25 @@ func (f *fakeIMAPServer) session(conn net.Conn) {
 			write("* FLAGS (\\Answered \\Flagged \\Deleted \\Seen \\Draft)")
 			write("* OK [UIDVALIDITY %d] UIDs valid", f.uidValidity)
 			write("* OK [UIDNEXT %d] Predicted next UID", f.nextUID)
+			reply := f.examineReply
 			f.mu.Unlock()
-			write("%s OK [READ-ONLY] EXAMINE completed", tag)
+			if reply == "" {
+				reply = "OK [READ-ONLY] EXAMINE completed"
+			}
+			write("%s %s", tag, reply)
 		case command == "UID" && len(args) >= 4 && strings.EqualFold(args[2], "SEARCH"):
 			write("* SEARCH%s", f.search(args[3:]))
 			write("%s OK SEARCH completed", tag)
 		case command == "UID" && len(args) >= 5 && strings.EqualFold(args[2], "FETCH"):
-			f.fetch(conn, args[3], strings.Join(args[4:], " "))
-			write("%s OK FETCH completed", tag)
+			switch f.fetch(conn, args[3], strings.Join(args[4:], " ")) {
+			case fetchStall:
+				_, _ = io.Copy(io.Discard, reader)
+				return
+			case fetchFail:
+				write("%s NO [SERVERBUG] cannot fetch", tag)
+			default:
+				write("%s OK FETCH completed", tag)
+			}
 		default:
 			write("%s BAD unknown command", tag)
 		}
@@ -240,14 +285,36 @@ func (f *fakeIMAPServer) search(criteria []string) string {
 	return strings.Join(found, "")
 }
 
-func (f *fakeIMAPServer) fetch(conn net.Conn, set, items string) {
+type fetchOutcome int
+
+const (
+	fetchOK fetchOutcome = iota
+	fetchFail
+	fetchStall
+)
+
+func (f *fakeIMAPServer) fetch(conn net.Conn, set, items string) fetchOutcome {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	wantBody := strings.Contains(strings.ToUpper(items), "BODY.PEEK[]")
+	if wantBody {
+		for _, part := range strings.Split(set, ",") {
+			uid, _ := strconv.Atoi(part)
+			if f.stallBody[uint32(uid)] {
+				return fetchStall
+			}
+			if f.failBody[uint32(uid)] {
+				return fetchFail
+			}
+		}
+		if f.unsolicited != "" {
+			_, _ = io.WriteString(conn, f.unsolicited)
+		}
+	}
 	for _, part := range strings.Split(set, ",") {
 		uid, _ := strconv.Atoi(part)
 		for sequence, message := range f.messages {
-			if int(message.uid) != uid {
+			if int(message.uid) != uid || f.silent[message.uid] {
 				continue
 			}
 			response := fmt.Sprintf("* %d FETCH (UID %d RFC822.SIZE %d", sequence+1, message.uid, len(message.raw))
@@ -263,6 +330,7 @@ func (f *fakeIMAPServer) fetch(conn net.Conn, set, items string) {
 			_, _ = io.WriteString(conn, response+")\r\n")
 		}
 	}
+	return fetchOK
 }
 
 // readFakeCommand reads one command, inviting each synchronizing literal, and splits it into
@@ -392,7 +460,7 @@ func TestIMAPBackfillPagesAndIncrementalFetch(t *testing.T) {
 		t.Fatalf("first page = %d messages, more %v; want 25 and more", len(first.Messages), first.More)
 	}
 	message := first.Messages[0]
-	if message.ExternalID != "7001:2" || message.Subject != "Recent 00" || message.FromAddress != "carol@sender.test" ||
+	if message.ExternalID != imapExternalID("Recent-00@sender.test", 7001, 2) || message.Subject != "Recent 00" || message.FromAddress != "carol@sender.test" ||
 		message.FromName != "Carol" || message.RFCMessageID != "Recent-00@sender.test" ||
 		!strings.Contains(message.TextBody, "Body of Recent 00") || !message.ReceivedAt.Equal(now.AddDate(0, 0, -20)) {
 		t.Fatalf("first message = %+v", message)
@@ -407,7 +475,7 @@ func TestIMAPBackfillPagesAndIncrementalFetch(t *testing.T) {
 
 	server.deliver("Fresh", now)
 	fresh := fetchIMAP(t, source, token, second.Cursor, now)
-	if len(fresh.Messages) != 1 || fresh.Messages[0].Subject != "Fresh" || fresh.Messages[0].ExternalID != "7001:32" {
+	if len(fresh.Messages) != 1 || fresh.Messages[0].Subject != "Fresh" || fresh.Messages[0].ExternalID != imapExternalID("Fresh@sender.test", 0, 0) {
 		t.Fatalf("incremental fetch = %+v", fresh.Messages)
 	}
 	var cursor imapCursor
@@ -464,7 +532,8 @@ func TestIMAPUIDValidityChangeExpiresCursor(t *testing.T) {
 		t.Fatalf("fetch with an unreadable cursor = %v, want cursor expired", err)
 	}
 	restarted := fetchIMAP(t, source, token, "", now)
-	if len(restarted.Messages) != 1 || restarted.Messages[0].ExternalID != "7002:2" {
+	// The message keeps its id across the change, so the resync stores no second copy.
+	if len(restarted.Messages) != 1 || restarted.Messages[0].ExternalID != first.Messages[0].ExternalID {
 		t.Fatalf("restarted backfill = %+v", restarted.Messages)
 	}
 }
@@ -498,7 +567,7 @@ func TestIMAPSkipsOversizedMessage(t *testing.T) {
 func TestIMAPLiteralBodyAboveLimitIsDiscarded(t *testing.T) {
 	session := &imapSession{reader: bufio.NewReaderSize(strings.NewReader(
 		fmt.Sprintf("{%d}\r\n%s", MaxInboundBytes+1, strings.Repeat("y", MaxInboundBytes+1))), 1024)}
-	value, err := session.readValue(0)
+	value, err := session.readValue(0, imapMaxMessageBytes)
 	if err != nil || !value.oversized || value.text != nil {
 		t.Fatalf("oversized literal = oversized %v, %d bytes, err %v", value.oversized, len(value.text), err)
 	}
@@ -509,14 +578,13 @@ func TestIMAPLiteralBodyAboveLimitIsDiscarded(t *testing.T) {
 func TestIMAPCredentialsAreQuotedOrSentAsLiterals(t *testing.T) {
 	server := newFakeIMAPServer(t)
 	source := server.source()
-	quoted := server.credentials(`we"ird\user@imap.test`)
-	quoted.AccountAddress = "weird@imap.test"
-	if _, account, err := source.VerifyPassword(context.Background(), quoted); err != nil || account.Address != "weird@imap.test" {
+	quoted := server.credentials(`We"ird\user@imap.test`)
+	if _, account, err := source.VerifyPassword(context.Background(), quoted); err != nil || account.Address != `we"ird\user@imap.test` {
 		t.Fatalf("quoted login = %q, %v", account.Address, err)
 	}
 	verifyIMAP(t, source, server.credentials("dävid@imap.test"))
 	commands, _, _ := server.served()
-	if !slices.ContainsFunc(commands, func(c string) bool { return strings.Contains(c, `"we\"ird\\user@imap.test"`) }) {
+	if !slices.ContainsFunc(commands, func(c string) bool { return strings.Contains(c, `"We\"ird\\user@imap.test"`) }) {
 		t.Fatalf("no escaped quoted LOGIN in %q", commands)
 	}
 	if !slices.ContainsFunc(commands, func(c string) bool { return strings.Contains(c, "LOGIN {16}\r\ndävid@imap.test") }) {
@@ -603,7 +671,10 @@ func TestIMAPNetworkPolicyAddresses(t *testing.T) {
 		"203.0.113.9": true, "2001:4860:4860::8888": true, "8.8.8.8": true,
 		"127.0.0.1": false, "10.0.0.1": false, "172.16.0.1": false, "192.168.0.1": false, "100.64.0.1": false,
 		"169.254.169.254": false, "0.0.0.0": false, "::": false, "::1": false, "fe80::1": false, "fd00::1": false,
-		"224.0.0.1": false, "::ffff:10.0.0.1": false,
+		"224.0.0.1": false, "::ffff:10.0.0.1": false, "ff02::1": false,
+		"64:ff9b::a00:1": false, "64:ff9b:1::1": false, "2002:a00:1::1": false, "::10.0.0.1": false,
+		"240.0.0.1": false, "255.255.255.255": false, "198.18.0.1": false, "198.19.255.1": false,
+		"192.0.0.8": false, "100.127.0.1": false, "100.128.0.1": true,
 	} {
 		if got := production.allowedAddress(netip.MustParseAddr(address)); got != want {
 			t.Errorf("allowedAddress(%s) = %v, want %v", address, got, want)
@@ -637,4 +708,218 @@ func closedPort(t *testing.T) int {
 	port := listener.Addr().(*net.TCPAddr).Port
 	_ = listener.Close()
 	return port
+}
+
+// TestIMAPIdentityIsDerivedFromTheLogin: the account is the username when it is an address,
+// otherwise the username at the host; the member never names it.
+func TestIMAPIdentityIsDerivedFromTheLogin(t *testing.T) {
+	server := newFakeIMAPServer(t)
+	source := server.source()
+	if _, account, err := source.VerifyPassword(context.Background(), server.credentials("Dave")); err != nil ||
+		account.Address != "dave@127.0.0.1" {
+		t.Fatalf("bare username = %q, %v; want dave@127.0.0.1", account.Address, err)
+	}
+	named := server.credentials("Dave")
+	named.Host = "IMAP.test"
+	token, account, err := source.VerifyPassword(context.Background(), named)
+	if err != nil || account.Address != "dave@imap.test" {
+		t.Fatalf("bare username at a named host = %q, %v", account.Address, err)
+	}
+	var sealed imapCredentials
+	if err = json.Unmarshal([]byte(token.RefreshToken), &sealed); err != nil || sealed.Host != "imap.test" {
+		t.Fatalf("sealed host = %q, %v; want the lowercased host", sealed.Host, err)
+	}
+	other := named
+	other.Host = "other.imap.test"
+	otherToken, _, err := source.VerifyPassword(context.Background(), other)
+	if err != nil {
+		t.Fatalf("other host: %v", err)
+	}
+	if !source.SameMailbox(token, token) || source.SameMailbox(token, otherToken) ||
+		source.SameMailbox(ExternalMailToken{RefreshToken: "garbage"}, token) {
+		t.Fatal("SameMailbox does not compare the sealed hosts")
+	}
+}
+
+// TestIMAPTransientRefusalsAreNotLostAuthorization: only a plain NO, or one naming the
+// credentials, means the password is wrong; everything else is retried.
+func TestIMAPTransientRefusalsAreNotLostAuthorization(t *testing.T) {
+	for reply, auth := range map[string]bool{
+		"NO [AUTHENTICATIONFAILED] bad": true, "NO [AUTHORIZATIONFAILED] no": true, "NO [EXPIRED] old": true,
+		"NO wrong password": true, "NO [UNAVAILABLE] later": false, "NO [LIMIT] too many": false,
+		"NO [INUSE] busy": false, "NO [SERVERBUG] oops": false, "NO [CONTACTADMIN] call": false,
+		"BAD [AUTHENTICATIONFAILED] syntax": false,
+	} {
+		server := newFakeIMAPServer(t)
+		server.configure(func(f *fakeIMAPServer) { f.loginReply = reply })
+		_, _, err := server.source().VerifyPassword(context.Background(), server.credentials("dave@imap.test"))
+		if err == nil || errors.Is(err, ErrExternalMailAuth) != auth {
+			t.Fatalf("LOGIN answered %q = %v; want auth failure %v", reply, err, auth)
+		}
+	}
+	server := newFakeIMAPServer(t)
+	token := verifyIMAP(t, server.source(), server.credentials("dave@imap.test"))
+	server.configure(func(f *fakeIMAPServer) { f.examineReply = "NO [UNAVAILABLE] INBOX is being rebuilt" })
+	if _, err := server.source().Fetch(context.Background(), ExternalMailFetchRequest{Token: token, Now: time.Now()}); err == nil ||
+		errors.Is(err, ErrExternalMailAuth) {
+		t.Fatalf("EXAMINE refused = %v; want a retryable error", err)
+	}
+}
+
+// TestIMAPOverallDeadline: a server that never answers holds a verification or a fetch no longer
+// than the overall deadline, even when each command could wait longer.
+func TestIMAPOverallDeadline(t *testing.T) {
+	server := newFakeIMAPServer(t)
+	token := verifyIMAP(t, server.source(), server.credentials("dave@imap.test"))
+	server.configure(func(f *fakeIMAPServer) { f.stallLogin = true })
+	source := server.source()
+	source.commandTimeout, source.overallTimeout = 30*time.Second, 300*time.Millisecond
+	started := time.Now()
+	if _, _, err := source.VerifyPassword(context.Background(), server.credentials("dave@imap.test")); err == nil {
+		t.Fatal("a tarpit verified")
+	}
+	if _, err := source.Fetch(context.Background(), ExternalMailFetchRequest{Token: token, Now: time.Now()}); err == nil {
+		t.Fatal("a tarpit fetched")
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("two calls to a tarpit took %v", elapsed)
+	}
+}
+
+// captureLogs records the default logger's output for the test.
+func captureLogs(t *testing.T) *strings.Builder {
+	t.Helper()
+	var output strings.Builder
+	var mu sync.Mutex
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(lockedWriter{&mu, &output}, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &output
+}
+
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
+
+// TestIMAPFailingMessageDoesNotBlockTheMailbox: a batch that fails or stalls is retried one UID
+// at a time; the UID that still fails is skipped with a log line and the cursor moves past it, as
+// it does past a UID the server never answers for.
+func TestIMAPFailingMessageDoesNotBlockTheMailbox(t *testing.T) {
+	logs := captureLogs(t)
+	server := newFakeIMAPServer(t)
+	now := time.Now()
+	for i := range 8 {
+		server.deliver(fmt.Sprintf("Message %d", i), now)
+	}
+	server.configure(func(f *fakeIMAPServer) {
+		f.failBody[2], f.stallBody[4], f.silent[6] = true, true, true
+	})
+	source := server.source()
+	source.commandTimeout = 500 * time.Millisecond
+	token := verifyIMAP(t, source, server.credentials("dave@imap.test"))
+
+	fetched := fetchIMAP(t, source, token, "", now)
+	var subjects []string
+	for _, message := range fetched.Messages {
+		subjects = append(subjects, message.Subject)
+	}
+	want := []string{"Message 0", "Message 2", "Message 4", "Message 6", "Message 7"}
+	if !slices.Equal(subjects, want) {
+		t.Fatalf("subjects = %v; want %v", subjects, want)
+	}
+	var cursor imapCursor
+	if err := json.Unmarshal([]byte(fetched.Cursor), &cursor); err != nil || cursor.LastUID != 8 || fetched.More {
+		t.Fatalf("cursor = %s, more %v; want past every UID", fetched.Cursor, fetched.More)
+	}
+	text := logs.String()
+	for _, line := range []string{"uid=2 reason=fetch_failed", "uid=4 reason=fetch_failed", "uid=6 reason=no_response"} {
+		if !strings.Contains(text, "external_mail.imap_message_skipped") || !strings.Contains(text, line) {
+			t.Fatalf("logs lack %q:\n%s", line, text)
+		}
+	}
+	if strings.Contains(text, "Message 1") || strings.Contains(text, "carol@sender.test") {
+		t.Fatalf("skip logs carry message content:\n%s", text)
+	}
+}
+
+// TestIMAPUnsolicitedFetchIsDropped: a FETCH response about a UID nobody asked for is not
+// returned, and its body is not kept.
+func TestIMAPUnsolicitedFetchIsDropped(t *testing.T) {
+	server := newFakeIMAPServer(t)
+	now := time.Now()
+	server.deliver("Asked", now)
+	planted := "From: x@evil.test\r\nSubject: Planted\r\n\r\nplanted\r\n"
+	server.configure(func(f *fakeIMAPServer) {
+		f.unsolicited = fmt.Sprintf("* 99 FETCH (UID 999 RFC822.SIZE %d BODY[] {%d}\r\n%s)\r\n", len(planted), len(planted), planted)
+	})
+	source := server.source()
+	token := verifyIMAP(t, source, server.credentials("dave@imap.test"))
+	fetched := fetchIMAP(t, source, token, "", now)
+	if len(fetched.Messages) != 1 || fetched.Messages[0].Subject != "Asked" {
+		t.Fatalf("fetched = %+v; want only the requested message", fetched.Messages)
+	}
+}
+
+// scriptedSession is a session over an in-memory pipe whose server side writes script.
+func scriptedSession(t *testing.T, script string) *imapSession {
+	const commandBudget = 64 << 10
+	t.Helper()
+	client, server := net.Pipe()
+	t.Cleanup(func() { _ = client.Close(); _ = server.Close() })
+	go func() {
+		reader := bufio.NewReader(server)
+		if _, err := reader.ReadString('\n'); err != nil {
+			return
+		}
+		_, _ = io.WriteString(server, script)
+		_, _ = io.Copy(io.Discard, reader)
+	}()
+	budget := &imapBudgetReader{conn: client, command: commandBudget, session: 4 * commandBudget}
+	return &imapSession{
+		conn: client, reader: bufio.NewReaderSize(budget, 32<<10), budget: budget,
+		commandBudget: commandBudget, timeout: 5 * time.Second,
+	}
+}
+
+// TestIMAPByteBudgets: a command whose answer exceeds its budget (64 KiB here) fails, discarded
+// bytes included, and a literal larger than the remaining budget is refused before it is allocated.
+func TestIMAPByteBudgets(t *testing.T) {
+	const budget = 64 << 10
+	flood := scriptedSession(t, fmt.Sprintf("* 9 FETCH (UID 99 BODY[] {%d}\r\n%s)\r\nZ1 OK done\r\n",
+		budget*4, strings.Repeat("x", budget*4)))
+	if _, err := flood.fetch([]uint32{1}, "(UID BODY.PEEK[])"); !errors.Is(err, errIMAPBudget) {
+		t.Fatalf("an unsolicited flood = %v; want the budget refusal", err)
+	}
+	announced := scriptedSession(t, "* 1 FETCH (UID 1 BODY[] {4000000}\r\n")
+	if _, err := announced.fetch([]uint32{1}, "(UID BODY.PEEK[])"); !errors.Is(err, errIMAPBudget) {
+		t.Fatalf("a literal above the budget = %v; want the budget refusal", err)
+	}
+	lines := scriptedSession(t, strings.Repeat("* OK "+strings.Repeat("y", 1000)+"\r\n", 200)+"Z1 OK done\r\n")
+	if _, err := lines.search("ALL"); !errors.Is(err, errIMAPBudget) {
+		t.Fatalf("a flood of lines = %v; want the budget refusal", err)
+	}
+	fits := scriptedSession(t, "* 1 FETCH (UID 1 RFC822.SIZE 5 BODY[] {5}\r\nhello)\r\nZ1 OK done\r\n")
+	read, err := fits.fetch([]uint32{1}, "(UID RFC822.SIZE BODY.PEEK[])")
+	if err != nil || string(read[1].body) != "hello" {
+		t.Fatalf("a small answer = %+v, %v", read, err)
+	}
+}
+
+func TestIMAPExternalIDIsStable(t *testing.T) {
+	if imapExternalID("<A@B>", 1, 2) == imapExternalID("", 1, 2) || imapExternalID("Id@Host", 1, 2) != imapExternalID("id@host", 9, 9) {
+		t.Fatal("the Message-ID id depends on the UID or ignores case")
+	}
+	if id := imapExternalID("x@y", 1, 2); !strings.HasPrefix(id, "m:") || len(id) != 42 {
+		t.Fatalf("id = %q", id)
+	}
+	if id := imapExternalID("", 7, 9); id != "u:7:9" {
+		t.Fatalf("fallback id = %q", id)
+	}
 }

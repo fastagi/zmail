@@ -753,27 +753,36 @@ Connectors whose `auth_kind` is `password` never redirect: the generic `imap` co
 passwords, such as iCloud, Yahoo, Fastmail, QQ, 163, or a self-hosted server.
 
 `POST /v1/external-mail-credentials` takes
-`{ "provider": "imap", "host", "port"?, "username", "password", "account_address"?, "backfill_days"? }`.
+`{ "provider": "imap", "host", "port"?, "username", "password", "backfill_days"? }`.
 Before anything is stored the server signs in once over implicit TLS on port 993 (the only port
-accepted) with a verified certificate, and opens INBOX read-only. A host that resolves to a loopback,
-private, shared, link-local, or unspecified address is refused. `account_address` defaults to
-`username`, which must then be an address. The outcomes are those of a completed sign-in: `201` for a
-new account, `200` for the caller's own connection restored with the new password,
-`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`, and `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT`. In addition:
+accepted) with a verified certificate, and opens INBOX read-only, within 45 seconds in all. A host
+that resolves to a loopback, private, shared, benchmarking, reserved, link-local, multicast, or
+unspecified address, or to an IPv6 form embedding an IPv4 address (NAT64, 6to4, IPv4-compatible), is
+refused.
+
+The bound account is never named by the caller: it is the lowercased `username` when it contains
+`@`, otherwise `username@host`. The sealed grant keeps the lowercased host, and restoring a
+connection with credentials for another host starts its backfill over. The outcomes are those of a
+completed sign-in: `201` for a new account, `200` for the caller's own connection restored with the
+new password, `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`, and `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT`. In
+addition:
 
 | Failure | Result |
 |---|---|
 | The server refused the username or password | `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED` |
-| The host does not resolve, is not allowed, does not answer over TLS, or its certificate does not verify | `422 MAILBOX.EXTERNAL_SERVER_UNREACHABLE` |
-| A value carries a control character, the account address is not an address, or `backfill_days` is out of range | `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID` |
-| More than 10 attempts by the member in 15 minutes | `429 COMMON.RATE_LIMITED` with `Retry-After` |
+| The host does not resolve, is not allowed, does not answer over TLS in time, its certificate does not verify, or the server refused the login for a transient reason (`UNAVAILABLE`, `LIMIT`, `INUSE`, `SERVERBUG`, `CONTACTADMIN`, or a `BAD`) | `422 MAILBOX.EXTERNAL_SERVER_UNREACHABLE` |
+| A value carries a control character, or `backfill_days` is out of range | `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID` |
+| More than 10 attempts by the member in 15 minutes, or 30 by the organization's members in an hour | `429 COMMON.RATE_LIMITED` with `Retry-After` |
 | The connector is not enabled or binds with OAuth | `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE` |
 
 The password is sealed at rest with the connection's grant, never logged, never returned, and never
 written to audit metadata. The sync reads INBOX only and never changes the account: messages are
-fetched with `BODY.PEEK`, and a message larger than 5 MiB is skipped. Copies carry `source` `imap`. A
-password revoked at the provider moves the connection to `needs_reconnect`; posting the credentials
-again restores it. Unbinding erases the stored password; revoking the app password itself is done at
+fetched with `BODY.PEEK`, and a message larger than 5 MiB is skipped. One sync of a connection takes
+at most 45 seconds and bounds the bytes it accepts; a message the server fails to deliver is retried
+on its own once and then skipped, so it never blocks the mailbox. Copies carry `source` `imap` and
+are known by their Message-ID, so a mailbox the provider rebuilds (a new UIDVALIDITY) is read again
+from the backfill window without second copies. Only a refused login without a transient reason
+moves the connection to `needs_reconnect`; posting the credentials again restores it. Unbinding erases the stored password; revoking the app password itself is done at
 the provider. The route is session only and never cached.
 
 ### Connections
