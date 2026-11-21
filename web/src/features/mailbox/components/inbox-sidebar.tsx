@@ -206,6 +206,7 @@ export function InboxSidebar({
       {onCompose ? (
         <button
           type="button"
+          data-compose-trigger=""
           aria-label={rail ? t('actions.compose') : undefined}
           title={rail ? t('actions.compose') : undefined}
           className={cn(
