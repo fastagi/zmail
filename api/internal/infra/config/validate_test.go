@@ -939,3 +939,40 @@ func TestMailboxConfigLaneLimitsInheritTheSendLimit(t *testing.T) {
 		t.Fatalf("resolved lanes = %d, %d; want the explicit 7 and 9", resolved.DailyBroadcastLimit, resolved.DailyTransactionalLimit)
 	}
 }
+
+func TestValidate_LogEmailProviderIsDevelopmentOnly(t *testing.T) {
+	logConfig := EmailConfig{
+		Provider: EmailProviderLog, From: "Zmail <noreply@mail.localhost>", RequestTimeout: 10 * time.Second,
+	}
+	tests := []struct {
+		name    string
+		env     string
+		config  EmailConfig
+		wantErr string
+	}{
+		{name: "development", env: "development", config: logConfig},
+		{name: "development without a sender is off", env: "development", config: EmailConfig{Provider: EmailProviderLog}},
+		{name: "production", env: "production", config: logConfig, wantErr: "MAIL_PROVIDER log"},
+		{name: "staging", env: "staging", config: logConfig, wantErr: "MAIL_PROVIDER log"},
+		{name: "test", env: "test", config: logConfig, wantErr: "MAIL_PROVIDER log"},
+		{
+			name:    "invalid sender",
+			env:     "development",
+			config:  EmailConfig{Provider: EmailProviderLog, From: "not-an-email", RequestTimeout: 10 * time.Second},
+			wantErr: "MAIL_FROM",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := baseValidConfig(tt.env)
+			cfg.Email = tt.config
+			err := validate(cfg)
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("validate() error = %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("validate() error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -123,4 +124,31 @@ func newWebhookHandlerContext(
 	context.Request = request.WithContext(requestContext)
 	context.Set("userID", actorID)
 	return recorder, context
+}
+
+func TestHandlerRejectsTestDeliveryForDisabledEndpointWithDocumentedCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, organizationID, actorID, _ := newWebhookServiceTest(t)
+	handler := NewHandler(service)
+	handler.RegisterErrorMappings(response.DefaultErrorMapper)
+	created, err := service.CreateEndpoint(t.Context(), organizationID, actorID, endpointInput{
+		Name:       "Receiver",
+		URL:        "http://127.0.0.1:8080/hook",
+		EventTypes: []string{"webhook.test"},
+	})
+	require.NoError(t, err)
+	_, err = service.ReplaceEndpointStatus(t.Context(), organizationID, created.Endpoint.ID, actorID, 1, false)
+	require.NoError(t, err)
+
+	id := strconv.FormatUint(uint64(created.Endpoint.ID), 10)
+	recorder, context := newWebhookHandlerContext(
+		http.MethodPost, "/v1/webhook-endpoints/"+id+"/tests", "", organizationID, actorID, domain.OrganizationRoleOwner,
+	)
+	context.Params = gin.Params{{Key: "id", Value: id}}
+	context.Request.Header.Set("Idempotency-Key", "disabled-endpoint-test")
+
+	handler.TestEndpoint(context)
+	// WEBHOOKS.md and openapi.yaml (WebhookTestConflict) define this endpoint-state rejection.
+	assert.Equal(t, http.StatusConflict, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"error_code":"`+domain.CodeWebhookReplayNotAllowed+`"`)
 }

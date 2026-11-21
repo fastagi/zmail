@@ -243,7 +243,9 @@ typed snapshot. `MAIL_PROVIDER` is `resend` (the default) or `cloudflare`. With 
 key are an all-or-none pair; partial configuration fails startup instead of silently skipping
 delivery. With Cloudflare, `MAIL_FROM` is required and must be on a domain enabled for Cloudflare
 Email Sending, such as `Zmail <noreply@mail.example.com>`; the account ID and token default to the
-`MAILBOX_CLOUDFLARE_*` values. When configured, the sender must be a valid mailbox
+`MAILBOX_CLOUDFLARE_*` values. `log` sends nothing: it writes each message, including one-time
+codes and reset tokens, to the API log as `email.log_delivery`, so startup rejects it unless
+`APP_ENV` is `development`; `make dev` uses it. When configured, the sender must be a valid mailbox
 and the timeout must be positive. The default provider request timeout is 10 seconds.
 
 The timeout is a duration value such as `3s` or `500ms`, not a bare millisecond count. It bounds each

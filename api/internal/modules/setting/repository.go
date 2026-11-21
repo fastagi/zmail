@@ -83,6 +83,9 @@ func (r *repository) Set(
 				return domain.ErrSettingVersionConflict
 			}
 			po = newSettingPO(target, key, valueJSON, true, 1)
+			now := r.now().UTC()
+			po.CreatedAt = now
+			po.UpdatedAt = now
 			create := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(po)
 			if create.Error != nil {
 				return fmt.Errorf("create setting override: %w", create.Error)
