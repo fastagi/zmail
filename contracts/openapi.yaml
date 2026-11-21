@@ -6272,6 +6272,189 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/agent-grants:
+    get:
+      operationId: listMailboxAgentGrants
+      summary: List a mailbox's agent grants, newest first
+      description: Only the owner of a personal or connected mailbox, or a `manage` member of a shared one. An
+        organization role alone never qualifies. See MAILBOXES.md, Agent Grants.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated agent grants.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAgentGrantPageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: issueMailboxAgentGrant
+      summary: Let an API key receive the mailbox's new mail
+      description: Same issuers as the listing. The key must be a live, active key with `mail:agent` whose owner
+        is a current member with `view` on the mailbox (`send` for `draft`); a key of anyone but the issuer gets
+        one undifferentiated refusal. Sender filters compare the forgeable `From` header and are not
+        authentication. Writes an `agent_granted` access event. See MAILBOXES.md, Agent Grants.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMailAgentGrantRequest'
+      responses:
+        '201':
+          description: The grant is issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAgentGrantResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The key already holds a live grant of the mailbox (`MAILBOX.AGENT_GRANT_EXISTS`), or the
+            mailbox has 10 live grants (`MAILBOX.AGENT_GRANT_LIMIT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The key, capabilities, filters, or expiry cannot be applied (`MAILBOX.AGENT_GRANT_INVALID`),
+            or a malformed body (`VALIDATION.FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/agent-grants/{grant_id}:
+    delete:
+      operationId: revokeMailboxAgentGrant
+      summary: Revoke an agent grant at once
+      description: Same issuers as the listing. Revoking an ended grant changes nothing and also answers `204`.
+        Writes an `agent_revoked` access event.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/AgentGrantID'
+      responses:
+        '204':
+          description: The grant is revoked.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The mailbox is not visible (`MAILBOX.NOT_FOUND`), or the id is not a grant of it
+            (`MAILBOX.AGENT_GRANT_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/agent-grants/{grant_id}/activity:
+    get:
+      operationId: listMailboxAgentGrantActivity
+      summary: List a grant's newest agent reads and drafts
+      description: Same issuers as the listing. At most the newest 100 audit rows, newest first; ids and the
+        action only, never content.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/AgentGrantID'
+      responses:
+        '200':
+          description: The grant's newest audit rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAgentActivityResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The mailbox is not visible (`MAILBOX.NOT_FOUND`), or the id is not a grant of it
+            (`MAILBOX.AGENT_GRANT_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/agent-drafts:
+    get:
+      operationId: listMailboxAgentDrafts
+      summary: List the reply drafts agents stored for the mailbox, newest first
+      description: Needs `send` on the mailbox. Drafts are never sent by Zmail; a person replies through the
+        send route.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PerPage'
+      responses:
+        '200':
+          description: Paginated agent drafts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAgentDraftPageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/triage-setting:
     put:
       operationId: setMailboxTriageSetting
@@ -7477,6 +7660,161 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/agent-mail-events:
+    get:
+      operationId: listAgentMailEvents
+      summary: Read the agent mail feed after a cursor
+      description: The key must hold the `mail:agent` scope; test keys are refused. Returns the `message.received`
+        events of the key's working grants in the organization, ascending by id. Delivery is at least once and
+        the same cursor returns the same events while the grants stay as they are. A key without a working
+        grant gets an empty feed. See MAILBOXES.md, The Agent Feed.
+      tags:
+        - Mailboxes
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: after
+          in: query
+          required: false
+          description: A `next_cursor` from an earlier page; omitted starts at the oldest event kept.
+          schema:
+            type: string
+            pattern: '^[0-9]{1,19}$'
+        - name: limit
+          in: query
+          required: false
+          description: Events per page.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: One page of the feed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentMailFeedResponse'
+        '400':
+          description: A malformed `Organization-Id`, `after`, or `limit` (`COMMON.INVALID_INPUT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          description: The key made more agent requests this minute than allowed (`COMMON.RATE_LIMITED`); see
+            `Retry-After`.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/agent-mail-messages/{message_id}:
+    get:
+      operationId: getAgentMailMessage
+      summary: Read a message the key's grants received
+      description: The key must hold the `mail:agent` scope. Codes and sign-in links are masked unless the grant
+        has `reveal_secrets`. Every read is audited (`read` or `read_revealed`) and changes nobody's read state.
+        Any other message is `404 MAILBOX.MESSAGE_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailMessageID'
+      responses:
+        '200':
+          description: The message detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailMessageResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          description: The key made more agent requests this minute than allowed (`COMMON.RATE_LIMITED`); see
+            `Retry-After`.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/agent-mail-drafts:
+    post:
+      operationId: createAgentMailDraft
+      summary: Store a reply draft for a person to review
+      description: The key must hold the `mail:agent` scope and a working grant that received the message, holds
+        `draft`, and whose key owner can send from the mailbox. One pending draft per grant and message; a later
+        draft replaces its body. Nothing is sent.
+      tags:
+        - Mailboxes
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentMailDraftRequest'
+      responses:
+        '200':
+          description: The grant's pending draft of the message was replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAgentDraftResponse'
+        '201':
+          description: The draft is stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailAgentDraftResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: Empty or oversized `text` or `html` (`MAILBOX.MESSAGE_INVALID`), or a malformed body
+            (`VALIDATION.FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/transactional-messages:
@@ -9559,6 +9897,13 @@ components:
       description: Positive mail label identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
+    AgentGrantID:
+      name: grant_id
+      in: path
+      required: true
+      description: Positive agent grant identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     InboxCursor:
       name: cursor
       in: query
@@ -10106,6 +10451,10 @@ components:
         - MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE
         - MAILBOX.EXTERNAL_SERVER_UNREACHABLE
         - MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED
+        - MAILBOX.AGENT_GRANT_NOT_FOUND
+        - MAILBOX.AGENT_GRANT_INVALID
+        - MAILBOX.AGENT_GRANT_LIMIT
+        - MAILBOX.AGENT_GRANT_EXISTS
     FieldErrors:
       type: object
       additionalProperties:
@@ -13468,6 +13817,8 @@ components:
         - connection_revoked
         - connection_force_disconnected
         - connection_revoked_on_leave
+        - agent_granted
+        - agent_revoked
     MailboxAccessEvent:
       type: object
       additionalProperties: false
@@ -13523,6 +13874,368 @@ components:
           $ref: '#/components/schemas/PaginationMeta'
         links:
           $ref: '#/components/schemas/PaginationLinks'
+    CreateMailAgentGrantRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - api_key_id
+        - capabilities
+        - expires_at
+      properties:
+        api_key_id:
+          $ref: '#/components/schemas/PositiveID'
+        capabilities:
+          type: array
+          minItems: 1
+          maxItems: 2
+          description: Must include `read`; `draft` is optional.
+          items:
+            type: string
+            enum:
+              - read
+              - draft
+        reveal_secrets:
+          type: boolean
+          default: false
+        filters:
+          $ref: '#/components/schemas/MailAgentGrantFilters'
+        expires_at:
+          type: string
+          format: date-time
+          description: In the future and at most 90 days ahead.
+    MailAgentGrantFilters:
+      type: object
+      additionalProperties: false
+      description: Empty lists match every message.
+      properties:
+        senders:
+          type: array
+          maxItems: 20
+          description: Addresses (exact) or domains (with subdomains), case-insensitive.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 320
+        label_ids:
+          type: array
+          maxItems: 20
+          description: Labels of the mailbox the message carries when its event is written.
+          items:
+            $ref: '#/components/schemas/PositiveID'
+    MailAgentGrant:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mailbox_id
+        - api_key_id
+        - api_key_name
+        - api_key_prefix
+        - key_user_id
+        - granted_by
+        - capabilities
+        - reveal_secrets
+        - filters
+        - status
+        - expires_at
+        - revoked_at
+        - revoke_reason
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        api_key_id:
+          $ref: '#/components/schemas/PositiveID'
+        api_key_name:
+          type: string
+        api_key_prefix:
+          type: string
+        key_user_id:
+          $ref: '#/components/schemas/PositiveID'
+        granted_by:
+          $ref: '#/components/schemas/PositiveID'
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum:
+              - read
+              - draft
+        reveal_secrets:
+          type: boolean
+        filters:
+          type: object
+          additionalProperties: false
+          required:
+            - senders
+            - label_ids
+          properties:
+            senders:
+              type: array
+              items:
+                type: string
+            label_ids:
+              type: array
+              items:
+                $ref: '#/components/schemas/PositiveID'
+        status:
+          type: string
+          enum:
+            - active
+            - expired
+            - revoked
+        expires_at:
+          type: string
+          format: date-time
+        revoked_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        revoke_reason:
+          oneOf:
+            - type: string
+              enum:
+                - revoked
+                - left_organization
+                - handed_over
+                - member_removed
+                - connection_revoked
+            - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+    MailAgentGrantResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailAgentGrant'
+    MailAgentGrantPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailAgentGrant'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    MailAgentAuditEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - grant_id
+        - api_key_id
+        - message_id
+        - action
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        grant_id:
+          $ref: '#/components/schemas/PositiveID'
+        api_key_id:
+          $ref: '#/components/schemas/PositiveID'
+        message_id:
+          $ref: '#/components/schemas/PositiveID'
+        action:
+          type: string
+          enum:
+            - read
+            - read_revealed
+            - draft
+        created_at:
+          type: string
+          format: date-time
+    MailAgentActivityResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailAgentAuditEntry'
+    MailAgentDraft:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mailbox_id
+        - grant_id
+        - message_id
+        - api_key_id
+        - text
+        - html
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        grant_id:
+          $ref: '#/components/schemas/PositiveID'
+        message_id:
+          $ref: '#/components/schemas/PositiveID'
+        api_key_id:
+          $ref: '#/components/schemas/PositiveID'
+        text:
+          type: string
+        html:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MailAgentDraftResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailAgentDraft'
+    MailAgentDraftPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+        - links
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailAgentDraft'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+        links:
+          $ref: '#/components/schemas/PaginationLinks'
+    CreateAgentMailDraftRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - message_id
+        - text
+      properties:
+        message_id:
+          $ref: '#/components/schemas/PositiveID'
+        text:
+          type: string
+          minLength: 1
+          maxLength: 102400
+        html:
+          type: string
+          maxLength: 102400
+    AgentMailEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - grant_id
+        - mailbox_id
+        - message_id
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        type:
+          type: string
+          enum:
+            - message.received
+        grant_id:
+          $ref: '#/components/schemas/PositiveID'
+        mailbox_id:
+          $ref: '#/components/schemas/PositiveID'
+        message_id:
+          $ref: '#/components/schemas/PositiveID'
+        created_at:
+          type: string
+          format: date-time
+    AgentMailFeedResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - events
+            - next_cursor
+            - has_more
+          properties:
+            events:
+              type: array
+              maxItems: 100
+              items:
+                $ref: '#/components/schemas/AgentMailEvent'
+            next_cursor:
+              type: string
+              pattern: '^[0-9]{1,19}$'
+              description: Pass as `after` to read the next page; equals `after` when the page is empty.
+            has_more:
+              type: boolean
     HandOverMailboxRequest:
       type: object
       additionalProperties: false

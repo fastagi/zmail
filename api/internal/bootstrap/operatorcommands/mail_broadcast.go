@@ -32,7 +32,7 @@ func NewMailBroadcastWorkCommand() *MailBroadcastWorkCommand {
 
 func (c *MailBroadcastWorkCommand) Name() string { return "mail:broadcast:work" }
 func (c *MailBroadcastWorkCommand) Description() string {
-	return "Send transactional and queued mail and the recipients of scheduled and running mail broadcasts, and purge expired trash and transactional mail"
+	return "Send transactional and queued mail and the recipients of scheduled and running mail broadcasts, and purge expired trash, transactional mail, and agent mail events and audit"
 }
 func (c *MailBroadcastWorkCommand) Usage() string {
 	return "mail:broadcast:work [--batch=25] [--poll=2s] [--once]"
@@ -41,12 +41,14 @@ func (c *MailBroadcastWorkCommand) Usage() string {
 // mailBroadcastWorker adapts the dispatcher to the shared worker loop.
 type mailBroadcastWorker struct {
 	dispatcher domain.MailBroadcastDispatcher
+	// agents prunes agent feed events and audit rows past retention; nil skips the step.
+	agents domain.MailAgentEventPruner
 }
 
 // DispatchWebhooks runs one tick, each step with what the batch has left: transactional mail
 // first, then messages that waited for the send limit, broadcast recipients, the trash expired 30
-// days ago, transactional messages past their retention, and last the copies of external mail
-// connections revoked longer than their retention.
+// days ago, transactional messages past their retention, the copies of external mail connections
+// revoked longer than their retention, and last agent feed events and audit rows past theirs.
 func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (int, error) {
 	steps := []func(context.Context, int) (int, error){
 		w.dispatcher.DispatchTransactional,
@@ -60,6 +62,12 @@ func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (i
 		},
 		func(ctx context.Context, limit int) (int, error) {
 			return w.dispatcher.PurgeRevokedExternalMail(ctx, time.Now().UTC(), limit)
+		},
+		func(ctx context.Context, limit int) (int, error) {
+			if w.agents == nil {
+				return 0, nil
+			}
+			return w.agents.PruneExpiredAgentMail(ctx, time.Now().UTC(), limit)
 		},
 	}
 	processed := 0
@@ -94,7 +102,7 @@ func (c *MailBroadcastWorkCommand) Run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	slog.Info("mail_broadcast.worker_started", "batch", workerConfig.Batch, "poll", workerConfig.Poll.String())
-	processed, err := runWebhookWorker(ctx, mailBroadcastWorker{dispatcher: application.MailBroadcasts}, workerConfig)
+	processed, err := runWebhookWorker(ctx, mailBroadcastWorker{dispatcher: application.MailBroadcasts, agents: application.MailAgentEvents}, workerConfig)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}

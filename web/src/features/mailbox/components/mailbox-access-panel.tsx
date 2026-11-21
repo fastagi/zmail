@@ -712,6 +712,12 @@ function useEventText(nameOf: (userId: number | null) => string) {
         return t('access.history.connectionForceDisconnected', { actor });
       case 'connection_revoked_on_leave':
         return t('access.history.connectionRevokedOnLeave', { subject });
+      case 'agent_granted':
+        return t('access.history.agentGranted', { actor, subject });
+      case 'agent_revoked':
+        return event.actor_user_id === null
+          ? t('access.history.agentEnded', { subject })
+          : t('access.history.agentRevoked', { actor, subject });
     }
   };
 }

@@ -25,6 +25,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(domain.MailboxOperatorConsole), new(*service)),
 	wire.Bind(new(domain.MailTriageWorker), new(*service)),
 	wire.Bind(new(domain.ExternalMailSyncWorker), new(*service)),
+	wire.Bind(new(domain.MailAgentEventPruner), new(*service)),
 	// Owners and members are validated against the organization starter's memberships.
 	NewMembershipDirectory,
 	// Console test sends go to the caller's account address, read through the user starter.
@@ -94,6 +95,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_02_090000_mail_cloudflare",
 			"2026_12_03_090000_open_mail_connectors",
 			"2026_12_04_090000_add_mailbox_origin",
+			"2026_12_05_090000_add_mail_agent_grants",
 			"2026_12_06_090000_add_external_mail_sync_ops",
 		),
 	)
