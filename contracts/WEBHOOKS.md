@@ -185,7 +185,9 @@ update, status, delete, and rotation require `If-Match: "webhook-endpoint-v<vers
 
 Test delivery requires one canonical `Idempotency-Key` header. It can publish only the fixed
 `webhook.test` schema and only to the selected endpoint; it is not a generic browser publication
-surface.
+surface. A test delivery for an endpoint that is disabled or not subscribed to `webhook.test` returns
+`409 WEBHOOK.REPLAY_NOT_ALLOWED`: like an operator replay, it needs an active endpoint, so clients
+should ask the user to enable the endpoint first rather than retry.
 
 ## Browser Adapter
 
@@ -206,7 +208,7 @@ not make outbound network calls or pretend to prove production delivery.
 | 404 | `WEBHOOK.DELIVERY_NOT_FOUND` | Delivery is absent or outside the active organization |
 | 409 | `WEBHOOK.IDEMPOTENCY_CONFLICT` | Trusted publisher reused an event identity with different content |
 | 409 | `WEBHOOK.ENDPOINT_VERSION_CONFLICT` | Endpoint state changed since the caller read it |
-| 409 | `WEBHOOK.REPLAY_NOT_ALLOWED` | Delivery is not terminal or required retained state is unavailable |
+| 409 | `WEBHOOK.REPLAY_NOT_ALLOWED` | Delivery is not terminal, required retained state is unavailable, or the endpoint is not active (or, for a test delivery, not subscribed to `webhook.test`) |
 | 422 | `WEBHOOK.INVALID_EVENT_TYPE` | Event type is missing from the finite catalog |
 | 422 | `WEBHOOK.INVALID_TARGET` | Endpoint target violates URL or network policy |
 | 428 | `WEBHOOK.PRECONDITION_REQUIRED` | A versioned endpoint mutation omitted `If-Match` |

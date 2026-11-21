@@ -106,6 +106,12 @@ are exact, except that `*` matches every required scope. A route that needs scop
 `401 AUTH.UNAUTHORIZED`; insufficient scope, or a test key on a route without test support,
 returns `403 PERMISSION.DENIED`.
 
+Zmail's mail routes use these scopes (see [`MAILBOXES.md`](MAILBOXES.md#programmatic-sending)):
+`mail:send`, `mail:read`, `mail:transactional`, and `mail:agent`. `mail:agent` lets a key use the
+agent mail feed, agent message reads, and agent drafts, and nothing else; by itself it reaches no
+mailbox: each mailbox needs a live agent grant issued to the key
+([`MAILBOXES.md`](MAILBOXES.md#agent-grants)), and the key still never exceeds its owner's access.
+
 `last_used_at` is operational metadata, not an authorization decision. Its write is best-effort,
 atomic, and throttled to at most once per minute per active key.
 

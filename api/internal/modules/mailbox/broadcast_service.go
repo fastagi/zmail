@@ -30,6 +30,7 @@ const (
 	stopReasonBounceRate      = "bounce_rate_high"
 	stopReasonComplaintRate   = "complaint_rate_high"
 	stopReasonOwner           = "paused_by_owner"
+	stopReasonAllFailed       = "all_recipients_failed"
 	maxTestPercent            = 50
 	defaultTestWaitMinutes    = 30
 	minTestWaitMinutes        = 5
@@ -242,7 +243,11 @@ func (s *service) SendBroadcast(ctx context.Context, viewer domain.OrganizationC
 	if err = requireStandardTemplate(template); err != nil {
 		return nil, err
 	}
-	if _, err := parseStoredTemplate(template); err != nil {
+	parsed, err := parseStoredTemplate(template)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.checkBroadcastVariables(ctx, broadcast, parsed); err != nil {
 		return nil, err
 	}
 	now := s.now().UTC()
@@ -260,6 +265,28 @@ func (s *service) SendBroadcast(ctx context.Context, viewer domain.OrganizationC
 		return nil, err
 	}
 	return s.broadcasts.FindBroadcast(ctx, organizationID, id)
+}
+
+// checkBroadcastVariables refuses a template variable without a fallback that no recipient can
+// fill: it is not a shared value, a contact field, or a property of any subscribed contact of
+// the list, so it would fail every recipient. A variable some contacts lack still fails only them.
+func (s *service) checkBroadcastVariables(ctx context.Context, broadcast *domain.MailBroadcast, parsed *parsedTemplate) error {
+	properties, err := s.broadcasts.ListPropertyNames(ctx, broadcast.OrganizationID, broadcast.ListID)
+	if err != nil {
+		return err
+	}
+	// Any non-empty value stands for a value some recipient will have.
+	values := make(map[string]string, len(broadcast.Variables)+len(properties)+len(broadcastContactVariables))
+	for name, value := range broadcast.Variables {
+		values[name] = value
+	}
+	for _, name := range append(properties, broadcastContactVariables...) {
+		values[name] = name
+	}
+	if missing := parsed.render(values).Missing; len(missing) > 0 {
+		return &MissingVariablesError{Names: missing}
+	}
+	return nil
 }
 
 // CancelBroadcast stops a broadcast for good. Stopping mail needs no access to the sender
@@ -426,7 +453,7 @@ func (s *service) DispatchBroadcasts(ctx context.Context, limit int) (int, error
 	if err := s.broadcasts.CompleteTestWaves(ctx, s.now().UTC()); err != nil {
 		return processed, err
 	}
-	if _, err := s.broadcasts.FinishBroadcasts(ctx, s.now().UTC()); err != nil {
+	if _, err := s.broadcasts.FinishBroadcasts(ctx, s.now().UTC(), stopReasonAllFailed); err != nil {
 		return processed, err
 	}
 	return processed, nil

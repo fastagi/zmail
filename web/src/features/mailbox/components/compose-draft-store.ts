@@ -51,3 +51,20 @@ export function writeComposeDraft(key: string, value: StoredComposeDraft | null)
     // Private windows and full storage keep no draft; closing still works.
   }
 }
+
+/**
+ * What of `written` is worth keeping as the draft of `draft`: null when nothing is written or only
+ * the starting text is.
+ */
+export function draftToKeep(
+  written: StoredComposeDraft,
+  draft: ComposeDraft
+): StoredComposeDraft | null {
+  const empty = Object.values(written).every(value => value.trim() === '');
+  const untouched =
+    written.to === draft.to &&
+    written.cc === (draft.cc ?? '') &&
+    written.subject === draft.subject &&
+    written.body === (draft.body ?? '');
+  return empty || untouched ? null : written;
+}

@@ -38,7 +38,7 @@ function readAbsoluteUrl(
 }
 
 /** An optional absolute http(s) URL; empty or unset means not configured. */
-function readOptionalHttpOrigin(name: string, value: string | undefined): string | undefined {
+function readOptionalHttpUrl(name: string, value: string | undefined): string | undefined {
   if (value === undefined || value === '') {
     return undefined;
   }
@@ -111,9 +111,18 @@ export const env: PublicEnv = {
   NEXT_PUBLIC_OPTIONAL_FEATURES:
     process.env.NEXT_PUBLIC_OPTIONAL_FEATURES ?? '',
   // The public API origin the developer console prints in code snippets; optional.
-  NEXT_PUBLIC_DEVELOPER_API_ORIGIN: readOptionalHttpOrigin(
+  NEXT_PUBLIC_DEVELOPER_API_ORIGIN: readOptionalHttpUrl(
     'NEXT_PUBLIC_DEVELOPER_API_ORIGIN',
     process.env.NEXT_PUBLIC_DEVELOPER_API_ORIGIN
+  ),
+  // Legal documents the registration consent links to; optional absolute http(s) URLs.
+  NEXT_PUBLIC_TERMS_URL: readOptionalHttpUrl(
+    'NEXT_PUBLIC_TERMS_URL',
+    process.env.NEXT_PUBLIC_TERMS_URL
+  ),
+  NEXT_PUBLIC_PRIVACY_URL: readOptionalHttpUrl(
+    'NEXT_PUBLIC_PRIVACY_URL',
+    process.env.NEXT_PUBLIC_PRIVACY_URL
   ),
   // Devtools routes are on outside production and off in production builds
   // unless a deployment explicitly opts in.

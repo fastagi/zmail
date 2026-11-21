@@ -64,6 +64,7 @@ def main() -> int:
             "OPTIONAL_STARTERS=organization,setting",
             "NEXT_PUBLIC_OPTIONAL_FEATURES=organization,setting",
             "`branding.display_name`",
+            "shipped Web and Admin shells do not render it",
             "`localization.locale`",
             "`localization.timezone`",
             "catalog is capped at 64 definitions",

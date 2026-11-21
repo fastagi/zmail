@@ -133,6 +133,24 @@ describe('webhook management workflow', () => {
     });
   });
 
+  it('keeps the endpoint form a bounded flex column so a long event list scrolls inside the dialog', () => {
+    state.eventTypes.data = Array.from({ length: 40 }, (_, index) => `mail.event.${index}`);
+    renderWithMessages(<WebhookManagement organizationId={7} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create endpoint' }));
+    const dialog = screen.getByRole('dialog');
+    const form = dialog.querySelector('form');
+    expect(form).not.toBeNull();
+    // DialogContent caps its height as a flex column; the form between it and DialogBody must
+    // shrink (min-h-0) and pass the bound on (flex-col), or the body never scrolls (#84).
+    expect(form).toHaveClass('flex', 'min-h-0', 'flex-1', 'flex-col');
+    const body = screen.getByLabelText('mail.event.39').closest('.overflow-y-auto');
+    expect(body?.parentElement).toBe(form);
+    const submit = screen.getAllByRole('button', { name: 'Create endpoint' }).at(-1)!;
+    expect(body?.contains(submit)).toBe(false);
+    expect(form?.contains(submit)).toBe(true);
+  });
+
   it('keeps the existing subscriptions of an edited endpoint and can add one', async () => {
     state.eventTypes.data = ['mail.message.bounced', 'mail.message.sent', 'webhook.test'];
     state.update.mutateAsync.mockResolvedValue(endpoint);

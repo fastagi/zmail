@@ -34,6 +34,41 @@ and `deploy/self-host` passes the `EXTERNAL_MAIL_*` settings and `MAILBOX_SECRET
 adds the `external-mail-worker` service in the `external-mail` Compose profile. A deployment of your
 own adds the worker as `api/docs/DEPLOYMENT.md` describes.
 
+## Unreleased — Mail agent grants and the agent mail feed
+
+A person can let an API key (an agent) receive one mailbox's new mail through a replayable feed,
+read those messages (masked unless the grant says otherwise), and store reply drafts for review.
+Contract: `contracts/MAILBOXES.md`, Agent Grants; `contracts/API_KEYS.md`. Plan:
+`docs/plans/mail-agent-grants.plan.md`.
+
+### Medium — New `mail:agent` scope, agent routes, and access event types
+
+Three API-key routes need the new `mail:agent` scope: `GET /v1/agent-mail-events`,
+`GET /v1/agent-mail-messages/{message_id}`, and `POST /v1/agent-mail-drafts`. A key with `*` holds
+it too, but still reaches no mailbox without a grant. Five session routes manage grants and drafts
+under `/v1/mailboxes/{mailbox_id}/agent-grants` and `/v1/mailboxes/{mailbox_id}/agent-drafts`, with
+four new error codes (`MAILBOX.AGENT_GRANT_NOT_FOUND`, `MAILBOX.AGENT_GRANT_INVALID`,
+`MAILBOX.AGENT_GRANT_LIMIT`, `MAILBOX.AGENT_GRANT_EXISTS`). The mailbox access history gains the
+types `agent_granted` and `agent_revoked`; a client with a strict enum must accept them. Removing a
+shared mailbox member, handing over a personal mailbox, a member leaving the organization, and
+disconnecting a connected mailbox's account now also revoke the agent grants they affect (and delete
+the mailbox's drafts where its mail becomes unreadable), in the same transaction. Deleting a mailbox,
+including the end of a revoked connection's purge, deletes its agent grants, events, drafts, and
+audit rows. A connected mailbox accepts read-only grants: `draft` is refused.
+
+### Low — Migration `2026_12_05_090000_add_mail_agent_grants` and a prune command
+
+The migration only creates `mail_agent_grants`, `mail_agent_events`, `mail_agent_audit`, and
+`mail_agent_drafts`; it locks no existing table. Every newly stored inbound message reads the
+mailbox's live grants (a partial index keeps this one cheap lookup) and, only when one matches,
+writes its events under a per-organization transaction lock. Every
+`mail:broadcast:work` pass deletes feed events older than `MAIL_AGENT_EVENT_RETENTION` (default
+`720h`) and agent audit rows older than `MAIL_AGENT_AUDIT_RETENTION` (default `2160h`) in small
+batches; `mail:agent-events:prune [--before=<RFC3339>]` deletes old events at once.
+`MAIL_AGENT_READS_PER_MINUTE` (default 600) limits each key's agent requests. The mailbox
+repository reads `api_keys` (never writes it) to check a key when a grant is issued and when it
+decides which grants still receive mail.
+
 ## Unreleased — Mailbox origin: connected mailboxes and manager connection controls
 
 A mailbox now has an `origin` (`zmail` or `connected`) beside its `type` (`personal` or `shared`).
@@ -122,7 +157,6 @@ the connection's member through `GET /v1/external-mail-connections/:connection_i
 `external_mail.synced` and `external_mail.sync_failed` log events gain `outcome`, `latency_ms`,
 `page_size`, and `more`, and Prometheus gains `zmail_external_mail_syncs_total{provider,outcome}`,
 `zmail_external_mail_sync_seconds{provider}`, and `zmail_external_mail_copies_purged_total`.
-
 ## Unreleased — Mail connectors: binding, reconnecting, and open provider ids
 
 External mailboxes can now be bound and reconnected through a provider-neutral connector registry,

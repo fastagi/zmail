@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
@@ -317,6 +317,41 @@ describe('callback page', () => {
     expect(service.start).toHaveBeenCalledWith(7, { provider: 'gmail', backfill_days: 30 });
   });
 
+  it('the heading follows the state and is announced when the sign-in fails', async () => {
+    arrive('state=abc&code=xyz', newBinding);
+    let refuse: (error: unknown) => void = () => {};
+    service.complete.mockReturnValue(
+      new Promise((_, reject) => {
+        refuse = reject;
+      })
+    );
+    renderWith(<ExternalMailCallback />);
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Connecting your mailbox' })
+    ).toBeInTheDocument();
+    await waitFor(() => expect(service.complete).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      refuse(new ApiError('refused', ApiErrorCode.MAILBOX_EXTERNAL_AUTHORIZATION_FAILED, 422));
+    });
+
+    const heading = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Could not connect your mailbox',
+    });
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.queryByText('Connecting your mailbox')).not.toBeInTheDocument();
+    // Focus moves to the new heading, so a screen reader reads it out.
+    expect(heading).toHaveFocus();
+  });
+
+  it('an error known on arrival shows the failure heading at once', () => {
+    arrive('error=access_denied&state=abc', newBinding);
+    renderWith(<ExternalMailCallback />, 'zh-Hans');
+
+    expect(screen.getByRole('heading', { level: 1, name: '无法接入邮箱' })).toHaveFocus();
+  });
+
   it('a reconnect tries again with the same connection', async () => {
     arrive('state=abc&code=xyz', reconnecting);
     service.complete.mockRejectedValue(
@@ -398,9 +433,11 @@ describe('connected mailboxes dialog', () => {
     fireEvent.click(within(first).getByRole('button', { name: 'Disconnect' }));
     const confirm = within(first).getByRole('group', { name: 'Disconnect me@gmail.com?' });
     expect(confirm).toHaveFocus();
+    // The Web does not know the instance's retention, so the copy names no number.
     expect(confirm).toHaveTextContent(
-      'Syncing stops now. Mail already synced is kept for 30 days.'
+      'Syncing stops now. Mail already synced is kept for a limited time and then deleted.'
     );
+    expect(confirm).not.toHaveTextContent(/\d+ days/u);
     fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }));
     expect(within(first).queryByRole('group')).not.toBeInTheDocument();
     expect(service.disconnect).not.toHaveBeenCalled();
@@ -448,6 +485,106 @@ describe('connected mailboxes dialog', () => {
   });
 });
 
+describe('focus after closing', () => {
+  /** The page's button that opens the dialog, as the sidebar and the manage icon do. */
+  function Opener({
+    label,
+    dialog,
+  }: {
+    label: string;
+    dialog: (open: boolean, setOpen: (open: boolean) => void) => React.ReactNode;
+  }) {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          {label}
+        </button>
+        {dialog(open, setOpen)}
+      </>
+    );
+  }
+
+  async function openFrom(label: string, dialogName: string) {
+    const trigger = screen.getByRole('button', { name: label });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog', { name: dialogName });
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+    return { trigger, dialog };
+  }
+
+  it('returns focus to the trigger when the connect dialog closes, on every path', async () => {
+    renderWith(
+      <Opener
+        label="Add external mailbox"
+        dialog={(open, setOpen) => (
+          <ExternalConnectDialog
+            open={open}
+            onOpenChange={setOpen}
+            organizationId={7}
+            connectors={[gmail]}
+          />
+        )}
+      />
+    );
+
+    // Escape.
+    let { trigger, dialog } = await openFrom('Add external mailbox', 'Add an external mailbox');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    // The close button, from the consent step.
+    ({ trigger, dialog } = await openFrom('Add external mailbox', 'Add an external mailbox'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Gmail' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    // The backdrop.
+    ({ trigger } = await openFrom('Add external mailbox', 'Add an external mailbox'));
+    const overlay = document.querySelector('[data-state="open"][class*="fixed inset-0"]');
+    if (!(overlay instanceof HTMLElement)) throw new Error('no overlay');
+    // Radix listens for outside presses from the tick after the dialog opens.
+    await act(() => new Promise(resolve => setTimeout(resolve, 0)));
+    // A press on the backdrop dismisses on the click that follows it.
+    fireEvent.pointerDown(overlay, { button: 0, pointerType: 'mouse' });
+    fireEvent.pointerUp(overlay, { button: 0, pointerType: 'mouse' });
+    fireEvent.click(overlay);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('returns focus to the trigger when the connected mailboxes dialog closes', async () => {
+    renderWith(
+      <Opener
+        label="Manage connected mailboxes"
+        dialog={(open, setOpen) => (
+          <ConnectedMailboxesDialog
+            open={open}
+            onOpenChange={setOpen}
+            organizationId={7}
+            connections={[connectionOf({ id: 1 })]}
+            error={false}
+            onAdd={null}
+          />
+        )}
+      />
+    );
+
+    let { trigger, dialog } = await openFrom('Manage connected mailboxes', 'Connected mailboxes');
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    ({ trigger, dialog } = await openFrom('Manage connected mailboxes', 'Connected mailboxes'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+});
+
 describe('external mail copy', () => {
   it('has every English key in Simplified Chinese, translated', () => {
     const english = flatten(enMailbox.external);
@@ -460,6 +597,15 @@ describe('external mail copy', () => {
         expect(value, key).toMatch(/\p{Script=Han}/u);
       }
     }
+  });
+
+  it('names no retention period in the disconnect confirmation, in either locale', () => {
+    // The instance sets the retention (EXTERNAL_MAIL_REVOKED_RETENTION); the Web does not know it.
+    expect(enMailbox.external.manage.confirm).not.toMatch(/\d/u);
+    expect(zhMailbox.external.manage.confirm).not.toMatch(/\d/u);
+    expect(zhMailbox.external.manage.confirm).toBe(
+      '同步会立即停止。已同步的邮件会保留一段时间，之后被删除。'
+    );
   });
 
   it('renders the consent step in Simplified Chinese', () => {

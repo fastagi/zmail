@@ -430,7 +430,7 @@ case ",${OPTIONAL_STARTERS:-}," in
 import json, sys
 values = json.load(open(sys.argv[1]))["data"]
 expected = [
-    ("app", "branding.display_name", "FastBuild", 0, "default"),
+    ("app", "branding.display_name", "Zmail", 0, "default"),
     ("app", "localization.locale", "en-US", 0, "default"),
 ]
 actual = [(item["scope"], item["key"], item["value"], item["version"], item["source"]) for item in values]

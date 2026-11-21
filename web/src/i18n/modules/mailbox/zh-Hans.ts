@@ -128,6 +128,8 @@ const messages = {
     reader: {
       to: '收件邮箱 {address}',
       toRole: '收件邮箱 {address} · {role}',
+      from: '发件邮箱 {address}',
+      fromRole: '发件邮箱 {address} · {role}',
     },
     groups: {
       label: '角色与邮箱',
@@ -276,6 +278,8 @@ const messages = {
     label: '会话',
     expand: '展开 {sender} 的邮件',
     sent: '已发送',
+    recipientsTo: '收件人：{addresses}',
+    recipientsCc: '抄送：{addresses}',
   },
   deleteForever: {
     title: '永久删除',
@@ -798,6 +802,9 @@ const messages = {
       connectionRevoked: '{actor} 断开了此账号',
       connectionForceDisconnected: '{actor} 代表组织断开了此账号',
       connectionRevokedOnLeave: '{subject} 离开组织，此账号已断开',
+      agentGranted: '{actor} 授权 {subject} 的 Agent 密钥接收这个邮箱的新信',
+      agentRevoked: '{actor} 撤销了 {subject} 的 Agent 密钥授权',
+      agentEnded: '{subject} 的 Agent 密钥授权已失效',
     },
     conflict: '这个邮箱刚刚发生了变化。请刷新查看当前权限。',
     refresh: '刷新',
@@ -1148,6 +1155,7 @@ const messages = {
     previewHint: '按上方填写的模板变量实时渲染；联系人专属字段使用示例值或默认值。',
     timezoneHint: '本地时间（{zone}）',
     schedulePast: '请选择未来的时间进行定时发送。',
+    scheduleTooFar: '定时发送最多只能设置在一年以内。',
     unsavedTitle: '放弃未保存的修改？',
     unsavedDescription: '你对当前群发草稿的修改尚未保存。',
     discard: '放弃修改',
@@ -1539,6 +1547,7 @@ const messages = {
     },
     callback: {
       title: '正在接入邮箱',
+      failedTitle: '无法接入邮箱',
       working: '正在完成接入…',
       connected: '已接入，正在同步最近 {days} 天的邮件。',
       connectedRecent: '已接入，正在同步最近的邮件。',
@@ -1574,7 +1583,7 @@ const messages = {
       reconnect: '重新连接',
       disconnect: '断开',
       confirmTitle: '断开 {address}？',
-      confirm: '同步会立即停止。已同步的邮件保留 30 天。',
+      confirm: '同步会立即停止。已同步的邮件会保留一段时间，之后被删除。',
       confirmAction: '断开',
       cancel: '取消',
       disconnected: '已断开 {address}',

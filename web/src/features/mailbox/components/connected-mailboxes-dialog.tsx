@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -17,6 +17,7 @@ import {
 import { ProviderMark } from '@/features/mailbox/components/external-connect-dialog';
 import { useDateTimeFormat } from '@/features/mailbox/components/mail-shared';
 import type { ExternalMailConnection } from '@/features/mailbox/external-mail-schemas';
+import { useDialogReturnFocus } from '@/features/mailbox/hooks/use-dialog-return-focus';
 import {
   useBeginExternalAuthorization,
   useDisconnectExternalMail,
@@ -37,6 +38,7 @@ export function ConnectedMailboxesDialog({
   connections,
   error,
   onAdd,
+  returnFocusRef,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -45,9 +47,12 @@ export function ConnectedMailboxesDialog({
   error: boolean;
   /** Opens the connect dialog; null when the instance offers no connector. */
   onAdd: (() => void) | null;
+  /** Shared with the connect dialog, so focus goes back to where the flow began. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const t = useT('mailbox');
   const [confirming, setConfirming] = useState<number | null>(null);
+  const returnFocus = useDialogReturnFocus(open, returnFocusRef);
 
   return (
     <Dialog
@@ -57,7 +62,11 @@ export function ConnectedMailboxesDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        className="sm:max-w-lg"
+        onCloseAutoFocus={returnFocus}
+        data-return-focus-chain=""
+      >
         <DialogHeader>
           <DialogTitle>{t('external.manage.title')}</DialogTitle>
           <DialogDescription>{t('external.manage.description')}</DialogDescription>

@@ -107,6 +107,24 @@ describe('external mail browser routes', () => {
     expect(external).toMatchObject({ type: 'personal', origin: 'connected', owner_user_id: 3 });
     expect(external.access).toMatchObject({ view: true, send: false, organize: false });
 
+    // Synced copies carry the connector as `source` in every listing, so the source badge shows;
+    // Zmail's own mail says `zmail`.
+    const copies = await route.listMailMessagesRoute(
+      request(`/api/mailboxes/${connection.mailbox_id}/messages`),
+      String(connection.mailbox_id)
+    );
+    const copyItems: { source?: string }[] = (await copies.json()).data;
+    expect(copyItems.length).toBeGreaterThan(0);
+    expect(copyItems.map(item => item.source)).toEqual(copyItems.map(() => 'gmail'));
+    const unified = await route.listInboxMessagesRoute(request('/api/inbox-messages?view=all'));
+    const unifiedItems: { mailbox_id: number; source?: string }[] = (await unified.json()).data;
+    const synced = unifiedItems.filter(item => item.mailbox_id === connection.mailbox_id);
+    expect(synced.length).toBeGreaterThan(0);
+    for (const item of synced) expect(item.source).toBe('gmail');
+    for (const item of unifiedItems.filter(row => row.mailbox_id !== connection.mailbox_id)) {
+      expect(item.source).toBe('zmail');
+    }
+
     // Reconnecting a connection that needs it restores the same one (200).
     store.mockExternalMailStore.markNeedsReconnect(connection.id);
     const listed = await route.listExternalMailConnectionsRoute(

@@ -24,10 +24,17 @@ import { isInactiveStarter, settingErrorKey } from '@/features/app-settings/sett
 import type { AppSetting, AppSettingValue } from '@/features/app-settings/types';
 import { cn } from '@/lib/cn';
 
+// Help for shipped definitions whose effect is not obvious from the key. Downstream definitions
+// have none, so the page stays product-neutral.
+const settingHelpKeys: Readonly<Record<string, string>> = {
+  'branding.display_name': 'settings.help.brandingDisplayName',
+};
+
 function SettingEditor({ setting }: { setting: AppSetting }) {
   const { t } = useTranslation();
   const change = useChangeAppSetting();
   const [draft, setDraft] = useState<AppSettingValue>(setting.value);
+  const helpKey = settingHelpKeys[setting.key];
   const dirty = draft !== setting.value;
   const display = (value: AppSettingValue) =>
     typeof value === 'boolean' ? (value ? t('settings.on') : t('settings.off')) : String(value);
@@ -89,6 +96,7 @@ function SettingEditor({ setting }: { setting: AppSetting }) {
     >
       <div className="min-w-0 md:w-1/3">
         <code className="text-sm font-medium">{setting.key}</code>
+        {helpKey ? <p className="text-muted-foreground mt-1 text-xs">{t(helpKey)}</p> : null}
         <div className="mt-1 flex flex-wrap gap-1">
           <StatusBadge tone={setting.source === 'override' ? 'brand' : 'neutral'}>
             {t(`settings.source.${setting.source}`)}

@@ -669,8 +669,11 @@ type MailBroadcastRepository interface {
 	// ListActiveBroadcasts lists sending broadcasts and paused ones waiting after their test wave,
 	// with counts, for the health check.
 	ListActiveBroadcasts(ctx context.Context, limit int) ([]*MailBroadcast, error)
-	// FinishBroadcasts marks sending broadcasts without pending recipients as sent.
-	FinishBroadcasts(ctx context.Context, now time.Time) (int, error)
+	// FinishBroadcasts ends sending broadcasts without pending recipients: sent, or canceled with
+	// stop reason allFailedReason when recipients failed and none was sent.
+	FinishBroadcasts(ctx context.Context, now time.Time, allFailedReason string) (int, error)
+	// ListPropertyNames lists the property names held by any subscribed contact of the list.
+	ListPropertyNames(ctx context.Context, organizationID, listID uint) ([]string, error)
 
 	// FindContactForBroadcast loads a contact by id within an organization, without its lists.
 	FindContactForBroadcast(ctx context.Context, organizationID, id uint) (*MailContact, error)

@@ -56,4 +56,7 @@ type Application struct {
 	MailTriage domain.MailTriageWorker
 	// ExternalMail syncs bound external mailboxes; nil when the mailbox starter is not selected.
 	ExternalMail domain.ExternalMailSyncWorker
+	// MailAgentEvents prunes agent feed events past retention; nil when the mailbox starter is not
+	// selected.
+	MailAgentEvents domain.MailAgentEventPruner
 }

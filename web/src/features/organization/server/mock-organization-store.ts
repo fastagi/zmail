@@ -98,8 +98,8 @@ export class MockOrganizationStore {
     this.organizations = [
       {
         id: 1,
-        name: 'FastBuild Demo',
-        slug: 'fastbuild-demo',
+        name: 'Zmail Demo',
+        slug: 'zmail-demo',
         createdAt: timestamp,
         updatedAt: timestamp,
       },

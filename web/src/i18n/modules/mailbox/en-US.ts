@@ -133,6 +133,8 @@ const messages = {
     reader: {
       to: 'To {address}',
       toRole: 'To {address} · {role}',
+      from: 'From {address}',
+      fromRole: 'From {address} · {role}',
     },
     groups: {
       label: 'Roles & mailboxes',
@@ -282,6 +284,8 @@ const messages = {
     label: 'Conversation',
     expand: 'Show the message from {sender}',
     sent: 'Sent',
+    recipientsTo: 'To: {addresses}',
+    recipientsCc: 'Cc: {addresses}',
   },
   deleteForever: {
     title: 'Delete forever',
@@ -825,6 +829,9 @@ const messages = {
       connectionRevoked: '{actor} disconnected this account',
       connectionForceDisconnected: '{actor} disconnected this account for the organization',
       connectionRevokedOnLeave: 'Disconnected because {subject} left the organization',
+      agentGranted: "{actor} let an agent key of {subject} receive this mailbox's mail",
+      agentRevoked: "{actor} revoked an agent key of {subject}",
+      agentEnded: "An agent key of {subject} lost access",
     },
     conflict: 'This mailbox changed in the meantime. Refresh to see its current access.',
     refresh: 'Refresh',
@@ -1192,6 +1199,7 @@ const messages = {
       'Rendered with the shared template values above; contact fields use sample or fallback text.',
     timezoneHint: 'Local time ({zone})',
     schedulePast: 'Choose a future time to schedule this broadcast.',
+    scheduleTooFar: 'Schedule this broadcast at most one year ahead.',
     unsavedTitle: 'Discard unsaved changes?',
     unsavedDescription: 'Your edits to this broadcast draft have not been saved yet.',
     discard: 'Discard changes',
@@ -1612,6 +1620,7 @@ const messages = {
     },
     callback: {
       title: 'Connecting your mailbox',
+      failedTitle: 'Could not connect your mailbox',
       working: 'Finishing the connection…',
       connected: 'Connected. Syncing the last {days} days of mail.',
       connectedRecent: 'Connected. Syncing your recent mail.',
@@ -1648,7 +1657,8 @@ const messages = {
       reconnect: 'Reconnect',
       disconnect: 'Disconnect',
       confirmTitle: 'Disconnect {address}?',
-      confirm: 'Syncing stops now. Mail already synced is kept for 30 days.',
+      confirm:
+        'Syncing stops now. Mail already synced is kept for a limited time and then deleted.',
       confirmAction: 'Disconnect',
       cancel: 'Cancel',
       disconnected: 'Disconnected {address}',

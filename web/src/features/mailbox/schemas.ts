@@ -664,6 +664,8 @@ export const mailboxAccessEventTypeSchema = union([
   literal('connection_revoked'),
   literal('connection_force_disconnected'),
   literal('connection_revoked_on_leave'),
+  literal('agent_granted'),
+  literal('agent_revoked'),
 ]);
 
 export const mailboxAccessEventSchema = strictObject({

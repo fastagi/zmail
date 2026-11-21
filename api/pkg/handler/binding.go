@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -53,6 +55,22 @@ func WriteBodyError(c *gin.Context, err error) {
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
 		response.ErrorWithCode(c, http.StatusRequestEntityTooLarge, response.ErrorCodeRequestTooLarge, "Request body too large")
+		return
+	}
+	var numeric *strconv.NumError
+	if errors.As(err, &numeric) {
+		// Query binding shares this writer; parser text such as strconv.ParseUint stays private.
+		response.BadRequest(c, "Invalid query parameters", errors.New("query parameter is not a valid number"))
+		return
+	}
+	var wrongType *json.UnmarshalTypeError
+	if errors.As(err, &wrongType) {
+		// The decoder's message names Go types; answer with the wire field only.
+		field := wrongType.Field
+		if field == "" {
+			field = "value"
+		}
+		response.BadRequest(c, "Invalid request body", errors.New(field+" has an invalid value"))
 		return
 	}
 	response.BadRequest(c, "Invalid request body", err)

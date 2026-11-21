@@ -19,6 +19,12 @@ MAIL_REQUEST_TIMEOUT=10s
 or a non-positive timeout fails typed startup validation. With neither value set, the capability is
 disabled and `Service.IsConfigured()` returns false. `MAIL_REQUEST_TIMEOUT` defaults to 10 seconds.
 
+For local development only, `MAIL_PROVIDER=log` with a `MAIL_FROM` sender makes the capability
+configured without any provider: each message is written to the API log as an `email.log_delivery`
+line with sender, recipients, subject, and the message as plain text, and no network call is made.
+Because that text carries registration codes and reset tokens, startup validation rejects the log
+provider unless `APP_ENV` is `development`. `make dev` enables it.
+
 Configuration follows the startup snapshot and restart lifecycle in
 [`CONFIGURATION.md`](CONFIGURATION.md). Provider credentials must come from the deployment secret
 store and must not be committed to an environment file.
@@ -40,8 +46,9 @@ Every send:
   `ErrInvalidProviderResponse`, or a status-only `ProviderError` as appropriate;
 - never returns the provider response body, which may contain recipient PII or provider diagnostics.
 
-Password-reset and welcome templates HTML-escape dynamic values. The capability does not log
-recipients, subject lines, message bodies, API keys, or provider response bodies. Feature-owned outer
+Password-reset and welcome templates HTML-escape dynamic values. Apart from the development-only
+log provider, the capability does not log recipients, subject lines, message bodies, API keys, or
+provider response bodies. Feature-owned outer
 layers may log stable operation names, internal IDs, outcomes, and the sanitized error.
 
 ## Current Semantics

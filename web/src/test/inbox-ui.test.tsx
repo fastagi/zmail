@@ -405,6 +405,94 @@ describe('unified inbox', () => {
     expect(within(mine).queryByRole('button', { name: 'Add external mailbox' })).toBeNull();
   });
 
+  it('reads each connected mailbox right when the connections and the mailbox list differ', async () => {
+    // The connections list is capped at 10, live first, so it can miss a mailbox the list has,
+    // and it can hold a connection whose mailbox the list no longer has.
+    state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
+    state.mailboxes.data = [
+      mailbox(1, 'hello'),
+      externalMailbox(41, 'late@gmail.com'),
+      externalMailbox(42, 'gone@outlook.com'),
+      externalMailbox(43, 'unlisted@gmail.com'),
+    ];
+    state.connections.data = [
+      connection({
+        id: 1,
+        mailbox_id: 41,
+        account_address: 'late@gmail.com',
+        status: 'needs_reconnect',
+        last_error_code: 'external.auth_failed',
+      }),
+      connection({
+        id: 2,
+        mailbox_id: 42,
+        provider: 'outlook',
+        account_address: 'gone@outlook.com',
+        status: 'revoked',
+      }),
+      connection({ id: 3, mailbox_id: 99, account_address: 'purged@gmail.com' }),
+    ];
+    renderRoute();
+
+    const mine = (await screen.findAllByRole('navigation', { name: 'Connected by me' }))[0];
+    const rows = within(mine)
+      .getAllByRole('button')
+      .filter(button => button.hasAttribute('data-connected-mailbox'));
+    expect(rows.map(row => row.getAttribute('data-connected-mailbox'))).toEqual([
+      '41',
+      '42',
+      '43',
+    ]);
+    const late = within(mine).getByRole('button', {
+      name: 'late@gmail.com, Gmail, Needs reconnecting',
+    });
+    expect(late.querySelector('[data-status-dot="needs_reconnect"]')).toHaveClass('bg-warning');
+    const gone = within(mine).getByRole('button', {
+      name: 'gone@outlook.com, Outlook, Disconnected',
+    });
+    expect(gone.querySelector('[data-status-dot="revoked"]')).toHaveClass('bg-text-faint');
+    // Outside the capped list its status is unknown: no dot and no status in its name.
+    const unlisted = within(mine).getByRole('button', { name: 'unlisted@gmail.com' });
+    expect(unlisted.querySelector('[data-status-dot]')).toBeNull();
+    expect(unlisted).not.toHaveAttribute('data-connection-status');
+    // A connection whose mailbox is not listed adds no row.
+    expect(within(mine).queryByText('purged@gmail.com')).not.toBeInTheDocument();
+  });
+
+  it('returns focus to the sidebar control that opened the external mailbox dialogs', async () => {
+    state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
+    state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];
+    state.connections.data = [
+      connection({ id: 1, mailbox_id: 41, account_address: 'me@gmail.com' }),
+    ];
+    renderRoute();
+
+    const mine = (await screen.findAllByRole('navigation', { name: 'Connected by me' }))[0];
+    const add = within(mine).getByRole('button', { name: 'Add external mailbox' });
+    add.focus();
+    fireEvent.click(add);
+    const connect = await screen.findByRole('dialog', { name: 'Add an external mailbox' });
+    await waitFor(() => expect(connect).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.keyDown(connect, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(add).toHaveFocus());
+
+    // Manage, then Add inside it: closing the connect dialog goes back to the manage control.
+    const manage = within(mine).getByRole('button', { name: 'Manage connected mailboxes' });
+    manage.focus();
+    fireEvent.click(manage);
+    const list = await screen.findByRole('dialog', { name: 'Connected mailboxes' });
+    await waitFor(() => expect(list).toContainElement(document.activeElement as HTMLElement));
+    const addInside = within(list).getByRole('button', { name: 'Add external mailbox' });
+    addInside.focus();
+    fireEvent.click(addInside);
+    const again = await screen.findByRole('dialog', { name: 'Add an external mailbox' });
+    await waitFor(() => expect(again).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.keyDown(again, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(manage).toHaveFocus());
+  });
+
   it('shows a one-time reconnect notice for a connection that lost its grant', async () => {
     state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
     state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];
@@ -1431,6 +1519,55 @@ describe('unified inbox', () => {
     expect(screen.getByRole('listbox').closest('section')).not.toHaveClass('max-lg:hidden');
     expect(screen.queryByRole('button', { name: 'Back to list' })).not.toBeInTheDocument();
   });
+
+  // Issue #74: a sent message is from the mailbox, to the people it was sent to.
+  it('reading a sent message names the mailbox as sender and shows its real recipients', async () => {
+    const sent = {
+      direction: 'outbound',
+      status: 'delivered',
+      from: { address: 'hello@mail.example.com', name: '' },
+      to: ['bob@example.com'],
+      cc: ['carol@example.com'],
+    };
+    state.inbox.data = listing([[{ ...singleRow(), ...sent }]]);
+    state.detail.data = message({ id: 12, mailbox_id: 1, ...sent });
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    await readingPaneLoaded();
+
+    const article = screen.getByRole('region', { name: 'Reading pane' });
+    expect(within(article).getByText('From hello@mail.example.com')).toBeInTheDocument();
+    expect(within(article).queryByText('To hello@mail.example.com')).toBeNull();
+    expect(within(article).getByText('To: bob@example.com')).toBeInTheDocument();
+    expect(within(article).getByText('Cc: carol@example.com')).toBeInTheDocument();
+  });
+
+  // Issue #81: the row and the reader of one message show one time, in the inbox's zone.
+  it('the list row and the reader show a message in the same time zone', async () => {
+    state.settingsEnabled = true;
+    state.userSettings.mockResolvedValue(timezoneSetting('Asia/Shanghai'));
+    // A minute ago, so the row shows the time of day rather than the date.
+    const createdAt = new Date(Date.now() - 60_000).toISOString();
+    const inShanghai = (options: Intl.DateTimeFormatOptions) =>
+      new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'Asia/Shanghai' }).format(
+        new Date(createdAt)
+      );
+    state.inbox.data = listing([[{ ...singleRow(), created_at: createdAt }]]);
+    state.detail.data = message({ id: 12, mailbox_id: 1, created_at: createdAt });
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    await readingPaneLoaded();
+
+    // Both read in Shanghai, whatever zone the machine runs in.
+    await waitFor(() =>
+      expect(rowButton('Invoice').querySelector('time')?.textContent).toBe(
+        inShanghai({ hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      )
+    );
+    const article = screen.getByRole('region', { name: 'Reading pane' });
+    const readerTime = article.querySelector(`time[datetime="${createdAt}"]`);
+    expect(readerTime?.textContent).toBe(inShanghai({ dateStyle: 'medium', timeStyle: 'short' }));
+  });
 });
 
 describe('inbox keyboard shortcuts', () => {
@@ -1439,6 +1576,7 @@ describe('inbox keyboard shortcuts', () => {
     toast.success.mockReset();
     toast.error.mockReset();
     window.localStorage.clear();
+    state.settingsEnabled = false;
     window.history.replaceState(null, '', '/console/mailboxes');
     state.organizations.data = page([organization('owner')]);
     state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales')];
@@ -1710,6 +1848,39 @@ describe('inbox keyboard shortcuts', () => {
     expect(toast.success).not.toHaveBeenCalled();
     press('c');
     expect(await screen.findByLabelText('Subject')).toHaveValue('');
+  });
+
+  // Issue #86: leaving the page with the composer open keeps what was written.
+  it('navigating away with the composer open keeps the draft for the next compose', async () => {
+    const first = renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('Subject'), {
+      target: { value: 'Quarterly numbers' },
+    });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Line one\nLine two' } });
+    // The global sidebar leaves the mail route: the workspace and its composer unmount.
+    first.unmount();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    renderRoute();
+    press('c');
+    expect(await screen.findByLabelText('Subject')).toHaveValue('Quarterly numbers');
+    expect(screen.getByLabelText('Message')).toHaveValue('Line one\nLine two');
+  });
+
+  it('never offers a connected mailbox as a sender, even with send access', async () => {
+    state.mailboxes.data = [
+      { ...externalMailbox(3, 'me@gmail.com'), access: { ...noAccess(), view: true, send: true } },
+      mailbox(1, 'hello'),
+    ];
+    window.history.replaceState(null, '', '/console/mailboxes?box=3');
+    renderRoute();
+
+    press('c');
+    const from = await screen.findByLabelText('From');
+    expect(from).toHaveValue('1');
+    expect(within(from).queryByRole('option', { name: 'me@gmail.com' })).toBeNull();
   });
 
   it('c defaults the sender to the narrowed mailbox', async () => {

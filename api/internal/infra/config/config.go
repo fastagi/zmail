@@ -105,6 +105,7 @@ type Config struct {
 	Mailbox        MailboxConfig
 	AITriage       AITriageConfig
 	ExternalMail   ExternalMailConfig
+	MailAgent      MailAgentConfig
 	Audit          AuditConfig
 	Operator       OperatorConfig
 	R2             R2Config
@@ -405,7 +406,9 @@ type CORSConfig struct {
 
 type EmailConfig struct {
 	// Provider delivers system mail: "resend" (the default) or "cloudflare", which sends through
-	// Cloudflare Email Sending from a domain the account has enabled for sending.
+	// Cloudflare Email Sending from a domain the account has enabled for sending. "log" records each
+	// message, including one-time codes, in the API log instead of delivering it; it is accepted only
+	// when APP_ENV is development.
 	Provider       string
 	From           string
 	ResendAPIKey   string
@@ -419,6 +422,8 @@ type EmailConfig struct {
 const (
 	EmailProviderResend     = "resend"
 	EmailProviderCloudflare = "cloudflare"
+	// EmailProviderLog writes system mail to the API log. It is a development-only transport.
+	EmailProviderLog = "log"
 )
 
 // ResolvedProvider is the provider name, "resend" when none is set.
@@ -647,7 +652,7 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		App: AppConfig{
-			Name:  env.Get("APP_NAME", "FastBuild"),
+			Name:  env.Get("APP_NAME", "Zmail"),
 			Env:   appEnv,
 			Debug: appDebug,
 			URL:   env.Get("APP_URL", "http://localhost:8025"),
@@ -734,6 +739,11 @@ func Load() (*Config, error) {
 			PendingTTL:         env.GetDuration("ASSET_PENDING_TTL", DefaultAssetPendingTTL),
 		},
 		AITriage: loadAITriageConfig(),
+		MailAgent: MailAgentConfig{
+			EventRetention: env.GetDuration("MAIL_AGENT_EVENT_RETENTION", DefaultMailAgentEventRetention),
+			AuditRetention: env.GetDuration("MAIL_AGENT_AUDIT_RETENTION", DefaultMailAgentAuditRetention),
+			ReadsPerMinute: env.GetInt("MAIL_AGENT_READS_PER_MINUTE", DefaultMailAgentReadsPerMinute),
+		},
 		ExternalMail: ExternalMailConfig{
 			Providers:   parseExternalMailProviders(env.Get("EXTERNAL_MAIL_PROVIDERS", "")),
 			RedirectURL: strings.TrimSpace(env.Get("EXTERNAL_MAIL_REDIRECT_URL", "")),
@@ -1088,7 +1098,7 @@ func validate(cfg *Config) error {
 		return err
 	}
 
-	if err := validateEmailConfig(cfg.Email); err != nil {
+	if err := validateEmailConfig(cfg.Email, cfg.App.Env); err != nil {
 		return err
 	}
 	if cfg.Organization.InvitationTTL < 0 ||
@@ -1120,6 +1130,9 @@ func validate(cfg *Config) error {
 		return err
 	}
 	if err := validateExternalMailConfig(cfg.ExternalMail, cfg.Mailbox.SecretEncryptionKey, isProd); err != nil {
+		return err
+	}
+	if err := validateMailAgentConfig(cfg.MailAgent); err != nil {
 		return err
 	}
 
@@ -1559,7 +1572,7 @@ func validCookieName(name string) bool {
 	return true
 }
 
-func validateEmailConfig(emailConfig EmailConfig) error {
+func validateEmailConfig(emailConfig EmailConfig, appEnv string) error {
 	fromConfigured := strings.TrimSpace(emailConfig.From) != ""
 	switch emailConfig.ResolvedProvider() {
 	case EmailProviderResend:
@@ -1574,8 +1587,14 @@ func validateEmailConfig(emailConfig EmailConfig) error {
 			return fmt.Errorf("MAIL_PROVIDER cloudflare with MAIL_FROM needs Cloudflare credentials " +
 				"(MAIL_CLOUDFLARE_ACCOUNT_ID and MAIL_CLOUDFLARE_API_TOKEN, or the MAILBOX_CLOUDFLARE_* values)")
 		}
+	case EmailProviderLog:
+		// The log transport prints one-time codes and reset tokens, so only development may use it.
+		if !strings.EqualFold(strings.TrimSpace(appEnv), "development") {
+			return fmt.Errorf("MAIL_PROVIDER log is accepted only when APP_ENV is development: it writes codes to the log")
+		}
 	default:
-		return fmt.Errorf("MAIL_PROVIDER must be %q or %q", EmailProviderResend, EmailProviderCloudflare)
+		return fmt.Errorf("MAIL_PROVIDER must be %q, %q, or %q (development only)",
+			EmailProviderResend, EmailProviderCloudflare, EmailProviderLog)
 	}
 	if emailConfig.RequestTimeout < 0 {
 		return fmt.Errorf("MAIL_REQUEST_TIMEOUT must not be negative")

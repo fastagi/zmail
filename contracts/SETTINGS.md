@@ -36,11 +36,17 @@ The shipped catalog is intentionally small:
 
 | Scope | Key | Kind | Visibility | Default |
 |---|---|---|---|---|
-| app | `branding.display_name` | string | public | `FastBuild` |
+| app | `branding.display_name` | string | public | `Zmail` |
 | app | `localization.locale` | enum | public | `en-US` |
 | organization | `localization.locale` | enum | private | `en-US` |
 | user | `localization.locale` | enum | private | `en-US` |
 | user | `localization.timezone` | timezone | private | `UTC` |
+
+`branding.display_name` is published data for API clients through `GET /v1/settings/public`. The
+shipped Web and Admin shells do not render it: their brand name is build-time configuration (Web's
+brand copy, Admin's `VITE_APP_NAME`), so an override has no visible effect in either shell. A
+downstream app that wants a runtime brand reads this public setting in its own shell, with its
+built-in name as the fallback.
 
 Locale values are `en-US` or `zh-Hans`. Time zones must be valid IANA names. Downstream apps may
 compose more string, boolean, integer, enum, or timezone definitions at assembly time. Keys use
@@ -75,7 +81,9 @@ An effective setting has this shape:
 Enum definitions also expose their fixed `options`. A definition with no durable history has
 version `0`, source `default`, and `updated_at: null`. Setting an override increments the version.
 Resetting retains a tombstone, increments the version, and exposes the code default with source
-`default`; this prevents an old writer from becoming current again after reset. A no-op write does
+`default`, the tombstone's version, and the reset time as `updated_at`; this prevents an old writer
+from becoming current again after reset. `updated_at` is always an RFC 3339 UTC timestamp (`Z`),
+independent of the server's time zone. A no-op write does
 not increment the version.
 
 Every mutation requires exactly one strong item precondition:

@@ -77,6 +77,8 @@ type Settings struct {
 	Triage config.AITriageConfig
 	// ExternalMail enables read-only external mailboxes; the zero value is off.
 	ExternalMail config.ExternalMailConfig
+	// MailAgent bounds agent feed retention and agent reads; the zero value takes the defaults.
+	MailAgent config.MailAgentConfig
 }
 
 // InboundDelivery is one signed delivery from the mail edge.
@@ -269,6 +271,8 @@ type Service interface {
 	ExternalMailOpsService
 	// ExternalMailDirectoryService lists and force-disconnects members' connections for managers.
 	ExternalMailDirectoryService
+	// AgentGrantService issues agent grants and serves the agent mail feed.
+	AgentGrantService
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -370,6 +374,10 @@ type service struct {
 	externalConnectors *externalMailRegistry
 	// externalCredentialLimits bound password bindings per member and per organization.
 	externalCredentialLimits externalCredentialLimits
+	// agents stores agent grants, their feed, audit, and drafts; nil when repo does not implement it.
+	agents domain.MailAgentRepository
+	// agentReads limits the agent route requests of each API key per minute.
+	agentReads ratelimit.Store
 }
 
 var _ Service = (*service)(nil)
@@ -416,6 +424,10 @@ func NewService(
 	if seam, ok := repo.(domain.ExternalMailRepository); ok {
 		externalMail = seam
 	}
+	var agents domain.MailAgentRepository
+	if seam, ok := repo.(domain.MailAgentRepository); ok {
+		agents = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -434,6 +446,7 @@ func NewService(
 		triage:      triage, triageModel: newTriageModel(settings.Triage),
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
 		externalCredentialLimits: newExternalMailCredentialLimits(limits),
+		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),
 	}
 }
 
@@ -505,6 +518,7 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	settings.TransactionalKeyPerSecond = resolved.TransactionalKeyPerSecond
 	settings.Triage = cfg.AITriage
 	settings.ExternalMail = cfg.ExternalMail
+	settings.MailAgent = cfg.MailAgent
 	return settings
 }
 
@@ -1357,9 +1371,12 @@ func sendFingerprint(to, cc []string, subject, text, html, inReplyTo, attachment
 // afterInboundStored is the one post-store step of every newly stored inbound message, whatever
 // its source: Zmail delivery or a synced outside account. It runs in the storing transaction, so
 // a message is queued for triage and announced exactly when it is stored. Consumers of new mail
-// (triage, webhooks, and later agent grants) attach here and nowhere else.
+// (triage, webhooks, and agent grants) attach here and nowhere else.
 func (s *service) afterInboundStored(tx context.Context, mailbox *domain.Mailbox, message *domain.MailMessage) ([]MailNotification, error) {
 	if err := s.enqueueTriage(tx, message); err != nil {
+		return nil, err
+	}
+	if err := s.appendAgentEvents(tx, mailbox, message); err != nil {
 		return nil, err
 	}
 	notification := mailNotificationFor(mailbox, message)
