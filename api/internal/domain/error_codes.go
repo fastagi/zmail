@@ -173,6 +173,8 @@ const (
 	CodeExternalMailAccountTaken          = "MAILBOX.EXTERNAL_ACCOUNT_TAKEN"
 	CodeExternalMailConnectionLimit       = "MAILBOX.EXTERNAL_CONNECTION_LIMIT"
 	CodeExternalMailProviderUnavailable   = "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE"
+	CodeExternalMailServerUnreachable     = "MAILBOX.EXTERNAL_SERVER_UNREACHABLE"
+	CodeExternalMailConnectionNotRevoked  = "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED"
 	CodeMailZoneNotFound                  = "MAILBOX.ZONE_NOT_FOUND"
 	CodeMailZonePending                   = "MAILBOX.ZONE_PENDING"
 	CodeMailZoneInUse                     = "MAILBOX.ZONE_IN_USE"

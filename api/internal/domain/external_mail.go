@@ -136,8 +136,14 @@ type ExternalMailConnection struct {
 	BackfillDays int
 	// NextSyncAt is when the connection is next due; a claim pushes it ahead as a lease.
 	NextSyncAt time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// ConsecutiveFailures counts failed fetches in a row; it sets the backoff.
+	ConsecutiveFailures int
+	// ConsecutiveMore counts pages in a row that reported more; it bounds immediate refetches.
+	ConsecutiveMore int
+	// RevokedAt is when the connection was revoked; its copies are deleted a retention later.
+	RevokedAt *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // ExternalMailSyncResult is the outcome of one fetch of one connection.
@@ -156,18 +162,28 @@ type ExternalMailSyncResult struct {
 	SyncedAt   *time.Time
 	NextSyncAt time.Time
 	Now        time.Time
+	// ConsecutiveFailures is the connection's failed fetches in a row after this one.
+	ConsecutiveFailures int
+	// ConsecutiveMore is the connection's pages in a row that reported more after this one.
+	ConsecutiveMore int
+	// Run is recorded with the result; its Stored count and a dropped outcome are filled in by
+	// the save.
+	Run *ExternalMailSyncRun
 }
 
 // ExternalMailRepository stores external mail connections and the mail synced through them.
 type ExternalMailRepository interface {
 	// CreateExternalMailConnection stores a new active connection and fills its id.
 	CreateExternalMailConnection(ctx context.Context, connection *ExternalMailConnection) error
-	// ClaimExternalMailConnections returns up to limit active connections due at now, oldest
-	// first, and pushes each one's next sync to leaseUntil, skipping rows another worker holds.
-	ClaimExternalMailConnections(ctx context.Context, now, leaseUntil time.Time, limit int) ([]*ExternalMailConnection, error)
+	// ClaimExternalMailConnections returns up to claim.Limit active connections due at claim.Now,
+	// at most claim.PerProvider of each provider, taken round-robin across providers and oldest
+	// first within one, in that order. It pushes each one's next sync to claim.LeaseUntil and
+	// skips rows another worker holds.
+	ClaimExternalMailConnections(ctx context.Context, claim ExternalMailClaim) ([]*ExternalMailConnection, error)
 	// SaveExternalMailSync records a fetch while the connection is still active and stores its new
 	// messages once per (mailbox, external id). applied is false, and nothing is stored, when the
-	// connection stopped being active meanwhile.
+	// connection stopped being active meanwhile. The result's run is recorded either way, and the
+	// connection's runs beyond MaxExternalMailSyncRuns are pruned.
 	// The returned messages are the ones newly stored, with their ids.
 	SaveExternalMailSync(ctx context.Context, result ExternalMailSyncResult) (stored []*MailMessage, applied bool, err error)
 	// CountLiveExternalMailConnections counts the owner's connections that are not revoked; the
@@ -178,19 +194,21 @@ type ExternalMailRepository interface {
 	ListExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) ([]*ExternalMailConnection, error)
 	// FindExternalMailConnection returns one connection of the organization.
 	FindExternalMailConnection(ctx context.Context, organizationID, id uint) (*ExternalMailConnection, error)
-	// RevokeExternalMailConnection marks the connection revoked and clears its token and cursor.
+	// RevokeExternalMailConnection marks the connection revoked, clears its token and cursor, and
+	// sets revoked_at unless it is already set.
 	RevokeExternalMailConnection(ctx context.Context, organizationID, id uint, now time.Time) error
 	// FindExternalMailConnectionByAccount returns the organization's connection of the provider
 	// and outside address, ignoring case, in any state.
 	FindExternalMailConnectionByAccount(ctx context.Context, organizationID uint, provider ExternalMailProvider, address string) (*ExternalMailConnection, error)
 	// RebindExternalMailConnection stores a fresh grant, makes the connection active and due now,
-	// and clears its error.
+	// and clears its error, failures, and revoked_at, which cancels a pending purge.
 	RebindExternalMailConnection(ctx context.Context, rebind ExternalMailRebind) (*ExternalMailConnection, error)
 	// CreateExternalMailAuthorization stores a pending sign-in and removes expired ones.
 	CreateExternalMailAuthorization(ctx context.Context, authorization *ExternalMailAuthorization) error
 	// TakeExternalMailAuthorization deletes and returns the unexpired sign-in with the state hash,
 	// so it is used at most once.
 	TakeExternalMailAuthorization(ctx context.Context, stateHash string, now time.Time) (*ExternalMailAuthorization, error)
+	ExternalMailOpsRepository
 }
 
 // ExternalMailSyncWorker syncs external mail outside request paths.

@@ -28,6 +28,9 @@ type ExternalMailBindingService interface {
 	// created is true when a new external mailbox and connection were made, false when an existing
 	// connection was restored.
 	CompleteExternalMailAuthorization(ctx context.Context, viewer domain.OrganizationContext, state, code string) (connection *domain.ExternalMailConnection, created bool, err error)
+	// BindExternalMailCredentials binds an account of a password connector after signing in to it
+	// once; created as for CompleteExternalMailAuthorization.
+	BindExternalMailCredentials(ctx context.Context, viewer domain.OrganizationContext, input ExternalMailCredentialsInput) (connection *domain.ExternalMailConnection, created bool, err error)
 }
 
 // ExternalMailAuthorizationInput starts a sign-in.
@@ -151,10 +154,31 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 		}
 		return nil, false, err
 	}
-	address := strings.ToLower(strings.TrimSpace(account.Address))
+	return s.saveExternalBinding(ctx, viewer, connector, token, externalBinding{
+		provider: authorization.Provider, address: account.Address, backfillDays: authorization.BackfillDays,
+		connectionID: authorization.ConnectionID,
+	})
+}
+
+// externalBinding is a grant a provider just issued, to be stored for the viewer.
+type externalBinding struct {
+	provider     domain.ExternalMailProvider
+	address      string
+	backfillDays int
+	// connectionID restricts the binding to restoring that connection of the viewer.
+	connectionID *uint
+}
+
+// saveExternalBinding stores a fresh grant: a new account gets a private read-only external
+// mailbox and an active connection; the viewer's own connection to the account is restored with
+// the grant; an account another member bound is refused. A grant that is not kept is handed back
+// to the provider.
+func (s *service) saveExternalBinding(ctx context.Context, viewer domain.OrganizationContext, connector ExternalMailConnector, token ExternalMailToken, binding externalBinding) (*domain.ExternalMailConnection, bool, error) {
+	address := strings.ToLower(strings.TrimSpace(binding.address))
 	if address == "" || len(address) > 320 || token.RefreshToken == "" {
 		return nil, false, ErrExternalMailAuthorizationFailed
 	}
+	binding.address = address
 	sealed, err := s.sealRefreshToken(token.RefreshToken)
 	if err != nil {
 		return nil, false, err
@@ -163,13 +187,13 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 	var connection *domain.ExternalMailConnection
 	created := false
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
-		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, authorization.Provider, address)
+		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, binding.provider, address)
 		switch {
 		case errors.Is(findErr, ErrExternalMailConnectionNotFound):
-			if authorization.ConnectionID != nil {
+			if binding.connectionID != nil {
 				return ErrExternalMailAccountMismatch
 			}
-			connection, findErr = s.bindExternalAccount(tx, viewer, authorization, address, sealed)
+			connection, findErr = s.bindExternalAccount(tx, viewer, binding, sealed)
 			created = findErr == nil
 			return findErr
 		case findErr != nil:
@@ -178,12 +202,13 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 		if existing.OwnerUserID == nil || *existing.OwnerUserID != viewer.UserID {
 			return ErrExternalMailAccountTaken
 		}
-		if authorization.ConnectionID != nil && *authorization.ConnectionID != existing.ID {
+		if binding.connectionID != nil && *binding.connectionID != existing.ID {
 			return ErrExternalMailAccountMismatch
 		}
 		connection, findErr = s.externalMail.RebindExternalMailConnection(tx, domain.ExternalMailRebind{
 			ConnectionID: existing.ID, EncryptedRefreshToken: sealed,
-			ResetCursor: existing.Status == domain.ExternalMailStatusRevoked, Now: s.now().UTC(),
+			ResetCursor: existing.Status == domain.ExternalMailStatusRevoked || !s.sameExternalMailbox(connector, existing, token),
+			Now:         s.now().UTC(),
 		})
 		return findErr
 	})
@@ -196,7 +221,7 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 			errors.Is(err, ErrExternalMailConnectionLimit) {
 			// The grant is not kept, so it is handed back to the provider.
 			if revokeErr := connector.Source.Revoke(ctx, token); revokeErr != nil {
-				slog.WarnContext(ctx, "external_mail.provider_revoke_failed", slog.String("provider", string(authorization.Provider)))
+				slog.WarnContext(ctx, "external_mail.provider_revoke_failed", slog.String("provider", string(binding.provider)))
 			}
 		}
 		return nil, false, err
@@ -211,9 +236,24 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 	return connection, created, nil
 }
 
+// sameExternalMailbox reports whether a fresh grant reads the same mailbox as the connection's
+// stored one. Only connectors whose grant names a server can tell; a stored grant that cannot be
+// opened is treated as another mailbox, so the cursor starts over.
+func (s *service) sameExternalMailbox(connector ExternalMailConnector, existing *domain.ExternalMailConnection, token ExternalMailToken) bool {
+	comparer, compares := connector.Source.(ExternalMailGrantComparer)
+	if !compares {
+		return true
+	}
+	previous, err := s.encryptor.DecryptString(existing.EncryptedRefreshToken)
+	if err != nil {
+		return false
+	}
+	return comparer.SameMailbox(ExternalMailToken{RefreshToken: previous}, token)
+}
+
 // bindExternalAccount creates the private, read-only external mailbox of a new account and its
 // connection, due for its first sync at once.
-func (s *service) bindExternalAccount(tx context.Context, viewer domain.OrganizationContext, authorization *domain.ExternalMailAuthorization, address, sealed string) (*domain.ExternalMailConnection, error) {
+func (s *service) bindExternalAccount(tx context.Context, viewer domain.OrganizationContext, binding externalBinding, sealed string) (*domain.ExternalMailConnection, error) {
 	// Revoked connections are kept for a later rebind and do not count.
 	live, err := s.externalMail.CountLiveExternalMailConnections(tx, viewer.OrganizationID, viewer.UserID)
 	if err != nil {
@@ -224,7 +264,7 @@ func (s *service) bindExternalAccount(tx context.Context, viewer domain.Organiza
 	}
 	owner := viewer.UserID
 	mailbox := &domain.Mailbox{
-		OrganizationID: viewer.OrganizationID, CreatedBy: viewer.UserID, Address: address, DisplayName: address,
+		OrganizationID: viewer.OrganizationID, CreatedBy: viewer.UserID, Address: binding.address, DisplayName: binding.address,
 		Type: domain.MailboxTypeExternal, OwnerUserID: &owner,
 	}
 	// External mailboxes are a member's own accounts; the per-user limit bounds them, not the
@@ -233,9 +273,9 @@ func (s *service) bindExternalAccount(tx context.Context, viewer domain.Organiza
 		return nil, err
 	}
 	connection := &domain.ExternalMailConnection{
-		OrganizationID: viewer.OrganizationID, MailboxID: mailbox.ID, Provider: authorization.Provider,
-		AccountAddress: address, OwnerUserID: &owner, EncryptedRefreshToken: sealed,
-		BackfillDays: authorization.BackfillDays, NextSyncAt: s.now().UTC(),
+		OrganizationID: viewer.OrganizationID, MailboxID: mailbox.ID, Provider: binding.provider,
+		AccountAddress: binding.address, OwnerUserID: &owner, EncryptedRefreshToken: sealed,
+		BackfillDays: binding.backfillDays, NextSyncAt: s.now().UTC(),
 	}
 	if err := s.externalMail.CreateExternalMailConnection(tx, connection); err != nil {
 		return nil, err

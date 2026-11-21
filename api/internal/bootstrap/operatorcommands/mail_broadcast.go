@@ -45,7 +45,8 @@ type mailBroadcastWorker struct {
 
 // DispatchWebhooks runs one tick, each step with what the batch has left: transactional mail
 // first, then messages that waited for the send limit, broadcast recipients, the trash expired 30
-// days ago, and last transactional messages past their retention.
+// days ago, transactional messages past their retention, and last the copies of external mail
+// connections revoked longer than their retention.
 func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (int, error) {
 	steps := []func(context.Context, int) (int, error){
 		w.dispatcher.DispatchTransactional,
@@ -56,6 +57,9 @@ func (w mailBroadcastWorker) DispatchWebhooks(ctx context.Context, limit int) (i
 		},
 		func(ctx context.Context, limit int) (int, error) {
 			return w.dispatcher.PurgeExpiredTransactional(ctx, time.Now().UTC(), limit)
+		},
+		func(ctx context.Context, limit int) (int, error) {
+			return w.dispatcher.PurgeRevokedExternalMail(ctx, time.Now().UTC(), limit)
 		},
 	}
 	processed := 0
