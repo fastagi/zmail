@@ -102,6 +102,56 @@ TABLE external_mail_connections
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
 
+TABLE mail_agent_audit
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_agent_audit_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN grant_id bigint NOT NULL
+  COLUMN api_key_id bigint NOT NULL
+  COLUMN message_id bigint NOT NULL
+  COLUMN action character varying(16) NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+
+TABLE mail_agent_drafts
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_agent_drafts_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN grant_id bigint NOT NULL
+  COLUMN message_id bigint NOT NULL
+  COLUMN api_key_id bigint NOT NULL
+  COLUMN text_body text NOT NULL
+  COLUMN html_body text NOT NULL DEFAULT ''::text
+  COLUMN status character varying(16) NOT NULL DEFAULT 'pending'::character varying
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
+TABLE mail_agent_events
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_agent_events_id_seq'::regclass)
+  COLUMN grant_id bigint NOT NULL
+  COLUMN organization_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN message_id bigint NOT NULL
+  COLUMN type character varying(32) NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+
+TABLE mail_agent_grants
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_agent_grants_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN api_key_id bigint NOT NULL
+  COLUMN key_user_id bigint NOT NULL
+  COLUMN granted_by bigint NOT NULL
+  COLUMN can_draft boolean NOT NULL DEFAULT false
+  COLUMN reveal_secrets boolean NOT NULL DEFAULT false
+  COLUMN sender_filters jsonb NOT NULL DEFAULT '[]'::jsonb
+  COLUMN label_ids jsonb NOT NULL DEFAULT '[]'::jsonb
+  COLUMN expires_at timestamp with time zone NOT NULL
+  COLUMN revoked_at timestamp with time zone
+  COLUMN revoked_by bigint
+  COLUMN revoke_reason character varying(32) NOT NULL DEFAULT ''::character varying
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_attachments
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_attachments_id_seq'::regclass)
   COLUMN message_id bigint NOT NULL
@@ -782,6 +832,26 @@ CONSTRAINT external_mail_connections.external_mail_connections_organization_id_f
 CONSTRAINT external_mail_connections.external_mail_connections_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT external_mail_connections.external_mail_connections_pkey PRIMARY KEY (id)
 CONSTRAINT external_mail_connections.external_mail_connections_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'needs_reconnect'::character varying, 'revoked'::character varying])::text[])))
+CONSTRAINT mail_agent_audit.mail_agent_audit_action_check CHECK (((action)::text = ANY ((ARRAY['read'::character varying, 'read_revealed'::character varying, 'draft'::character varying])::text[])))
+CONSTRAINT mail_agent_audit.mail_agent_audit_pkey PRIMARY KEY (id)
+CONSTRAINT mail_agent_drafts.mail_agent_drafts_grant_id_fkey FOREIGN KEY (grant_id) REFERENCES mail_agent_grants(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_drafts.mail_agent_drafts_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_drafts.mail_agent_drafts_message_id_fkey FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_drafts.mail_agent_drafts_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_drafts.mail_agent_drafts_pkey PRIMARY KEY (id)
+CONSTRAINT mail_agent_drafts.mail_agent_drafts_status_check CHECK (((status)::text = 'pending'::text))
+CONSTRAINT mail_agent_events.mail_agent_events_grant_id_fkey FOREIGN KEY (grant_id) REFERENCES mail_agent_grants(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_events.mail_agent_events_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_events.mail_agent_events_message_id_fkey FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_events.mail_agent_events_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_events.mail_agent_events_pkey PRIMARY KEY (id)
+CONSTRAINT mail_agent_events.mail_agent_events_type_check CHECK (((type)::text = 'message.received'::text))
+CONSTRAINT mail_agent_grants.chk_mail_agent_grants_revoked CHECK (((revoked_at IS NULL) = ((revoke_reason)::text = ''::text)))
+CONSTRAINT mail_agent_grants.mail_agent_grants_api_key_id_fkey FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_grants.mail_agent_grants_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_grants.mail_agent_grants_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_agent_grants.mail_agent_grants_pkey PRIMARY KEY (id)
+CONSTRAINT mail_agent_grants.mail_agent_grants_revoke_reason_check CHECK (((revoke_reason)::text = ANY ((ARRAY[''::character varying, 'revoked'::character varying, 'left_organization'::character varying, 'handed_over'::character varying, 'member_removed'::character varying])::text[])))
 CONSTRAINT mail_attachments.chk_mail_attachments_size CHECK (((size >= 0) AND (size = octet_length(content))))
 CONSTRAINT mail_attachments.fk_mail_attachments_message FOREIGN KEY (message_id) REFERENCES mail_messages(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_attachments.mail_attachments_pkey PRIMARY KEY (id)
@@ -1048,6 +1118,22 @@ INDEX CREATE UNIQUE INDEX external_mail_connections_pkey ON external_mail_connec
 INDEX CREATE UNIQUE INDEX idx_external_mail_connections_account ON external_mail_connections USING btree (organization_id, provider, lower((account_address)::text))
 INDEX CREATE INDEX idx_external_mail_connections_due ON external_mail_connections USING btree (next_sync_at) WHERE ((status)::text = 'active'::text)
 INDEX CREATE INDEX idx_external_mail_connections_owner ON external_mail_connections USING btree (organization_id, owner_user_id)
+INDEX CREATE INDEX idx_mail_agent_audit_grant ON mail_agent_audit USING btree (grant_id, id DESC)
+INDEX CREATE UNIQUE INDEX mail_agent_audit_pkey ON mail_agent_audit USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_mail_agent_drafts_grant_message ON mail_agent_drafts USING btree (grant_id, message_id)
+INDEX CREATE INDEX idx_mail_agent_drafts_mailbox ON mail_agent_drafts USING btree (mailbox_id, id DESC)
+INDEX CREATE INDEX idx_mail_agent_drafts_message ON mail_agent_drafts USING btree (message_id)
+INDEX CREATE UNIQUE INDEX mail_agent_drafts_pkey ON mail_agent_drafts USING btree (id)
+INDEX CREATE INDEX idx_mail_agent_events_created ON mail_agent_events USING btree (created_at)
+INDEX CREATE INDEX idx_mail_agent_events_grant ON mail_agent_events USING btree (grant_id, id)
+INDEX CREATE UNIQUE INDEX idx_mail_agent_events_grant_message ON mail_agent_events USING btree (grant_id, message_id)
+INDEX CREATE INDEX idx_mail_agent_events_message ON mail_agent_events USING btree (message_id)
+INDEX CREATE UNIQUE INDEX mail_agent_events_pkey ON mail_agent_events USING btree (id)
+INDEX CREATE INDEX idx_mail_agent_grants_live_key ON mail_agent_grants USING btree (api_key_id) WHERE (revoked_at IS NULL)
+INDEX CREATE INDEX idx_mail_agent_grants_live_mailbox ON mail_agent_grants USING btree (mailbox_id) WHERE (revoked_at IS NULL)
+INDEX CREATE INDEX idx_mail_agent_grants_live_user ON mail_agent_grants USING btree (organization_id, key_user_id) WHERE (revoked_at IS NULL)
+INDEX CREATE INDEX idx_mail_agent_grants_mailbox ON mail_agent_grants USING btree (mailbox_id, id DESC)
+INDEX CREATE UNIQUE INDEX mail_agent_grants_pkey ON mail_agent_grants USING btree (id)
 INDEX CREATE INDEX idx_mail_attachments_message ON mail_attachments USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_attachments_pkey ON mail_attachments USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_broadcast_recipients_contact ON mail_broadcast_recipients USING btree (broadcast_id, contact_id)

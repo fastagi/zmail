@@ -149,6 +149,16 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.role_assignment.update").WhereNumber("mailbox_id")
 		auth.PUT("/mailboxes/:mailbox_id/triage-setting", h.SetMailboxTriageSetting).
 			Name("mailboxes.triage_setting.update").WhereNumber("mailbox_id")
+		auth.GET("/mailboxes/:mailbox_id/agent-grants", h.ListAgentGrants).
+			Name("mailboxes.agent_grants.index").WhereNumber("mailbox_id")
+		auth.POST("/mailboxes/:mailbox_id/agent-grants", h.IssueAgentGrant).
+			Name("mailboxes.agent_grants.store").WhereNumber("mailbox_id")
+		auth.DELETE("/mailboxes/:mailbox_id/agent-grants/:grant_id", h.RevokeAgentGrant).
+			Name("mailboxes.agent_grants.destroy").WhereNumber("mailbox_id").WhereNumber("grant_id")
+		auth.GET("/mailboxes/:mailbox_id/agent-grants/:grant_id/activity", h.AgentGrantActivity).
+			Name("mailboxes.agent_grants.activity.index").WhereNumber("mailbox_id").WhereNumber("grant_id")
+		auth.GET("/mailboxes/:mailbox_id/agent-drafts", h.ListAgentDrafts).
+			Name("mailboxes.agent_drafts.index").WhereNumber("mailbox_id")
 
 		auth.GET("/mail-triage-setting", h.GetTriageSetting).Name("mail_triage_setting.show")
 		auth.PUT("/mail-triage-setting", h.UpdateTriageSetting).Name("mail_triage_setting.update")
@@ -210,6 +220,17 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		key.GET("/outbound-mail-messages/:message_id", h.GetOutbound).
 			Name("outbound_mail_messages.show").WhereNumber("message_id").
 			Middleware(apikey.RequireScopes(ScopeMailRead))
+
+		// Agents: a key with mail:agent receives the mail of the mailboxes it holds a live grant
+		// for, as its owner may read it, and may store reply drafts. It never sends.
+		key.GET("/agent-mail-events", h.ListAgentMailEvents).
+			Name("agent_mail_events.index").Middleware(apikey.RequireScopes(ScopeMailAgent))
+		key.GET("/agent-mail-messages/:message_id", h.GetAgentMailMessage).
+			Name("agent_mail_messages.show").WhereNumber("message_id").
+			Middleware(apikey.RequireScopes(ScopeMailAgent))
+		key.POST("/agent-mail-drafts", h.CreateAgentDraft).
+			Name("agent_mail_drafts.store").
+			Middleware(middleware.BodyLimit(maxAgentDraftBodyBytes), apikey.RequireScopes(ScopeMailAgent))
 
 		// Transactional mail accepts test keys: a test key's messages are simulated and never
 		// reach the provider.

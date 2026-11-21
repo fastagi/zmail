@@ -655,6 +655,8 @@ export const mailboxAccessEventTypeSchema = union([
   literal('sealed_deleted'),
   literal('webhooks_changed'),
   literal('renamed'),
+  literal('agent_granted'),
+  literal('agent_revoked'),
 ]);
 
 export const mailboxAccessEventSchema = strictObject({

@@ -265,6 +265,8 @@ type Service interface {
 	ExternalMailService
 	// ExternalMailBindingService binds and reconnects outside accounts.
 	ExternalMailBindingService
+	// AgentGrantService issues agent grants and serves the agent mail feed.
+	AgentGrantService
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -364,6 +366,8 @@ type service struct {
 	// externalConnectors are the providers outside mailboxes can be bound with; settings.ExternalMail
 	// selects them.
 	externalConnectors *externalMailRegistry
+	// agents stores agent grants, their feed, audit, and drafts; nil when repo does not implement it.
+	agents domain.MailAgentRepository
 }
 
 var _ Service = (*service)(nil)
@@ -410,6 +414,10 @@ func NewService(
 	if seam, ok := repo.(domain.ExternalMailRepository); ok {
 		externalMail = seam
 	}
+	var agents domain.MailAgentRepository
+	if seam, ok := repo.(domain.MailAgentRepository); ok {
+		agents = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -427,6 +435,7 @@ func NewService(
 		recordAudit: auditstarter.RecordChange,
 		triage:      triage, triageModel: newTriageModel(settings.Triage),
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
+		agents: agents,
 	}
 }
 
@@ -1345,9 +1354,12 @@ func sendFingerprint(to, cc []string, subject, text, html, inReplyTo, attachment
 // afterInboundStored is the one post-store step of every newly stored inbound message, whatever
 // its source: Zmail delivery or a synced outside account. It runs in the storing transaction, so
 // a message is queued for triage and announced exactly when it is stored. Consumers of new mail
-// (triage, webhooks, and later agent grants) attach here and nowhere else.
+// (triage, webhooks, and agent grants) attach here and nowhere else.
 func (s *service) afterInboundStored(tx context.Context, mailbox *domain.Mailbox, message *domain.MailMessage) ([]MailNotification, error) {
 	if err := s.enqueueTriage(tx, message); err != nil {
+		return nil, err
+	}
+	if err := s.appendAgentEvents(tx, mailbox, message); err != nil {
 		return nil, err
 	}
 	notification := mailNotificationFor(mailbox, message)

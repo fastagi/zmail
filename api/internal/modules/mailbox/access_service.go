@@ -547,6 +547,13 @@ func (s *service) RemoveMailboxMember(ctx context.Context, viewer domain.Organiz
 		if err := s.repo.DeleteMailboxReads(tx, mailbox.ID, removed.MembershipID); err != nil {
 			return err
 		}
+		// The removed member's agent grants of this mailbox end with their access.
+		if err := s.revokeAgentGrants(tx, domain.MailAgentGrantRevocation{
+			OrganizationID: mailbox.OrganizationID, MailboxID: mailbox.ID, KeyUserID: removed.UserID,
+			Reason: domain.MailAgentRevokedMemberRemoved, RevokedBy: viewer.UserID,
+		}); err != nil {
+			return err
+		}
 		return s.recordAccess(tx, mailbox, domain.MailboxAccessMemberRemoved, viewer.UserID, removed.UserID, map[string]any{
 			"membership_id": removed.MembershipID,
 			"permission":    string(removed.Permission),

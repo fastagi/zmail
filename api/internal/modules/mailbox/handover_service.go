@@ -68,6 +68,13 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 		if _, upsertErr := s.repo.UpsertMailboxMember(tx, member, domain.MaxMailboxMembers); upsertErr != nil {
 			return upsertErr
 		}
+		// Agent grants of the personal mailbox end with it; the successor issues their own.
+		if revokeErr := s.revokeAgentGrants(tx, domain.MailAgentGrantRevocation{
+			OrganizationID: mailbox.OrganizationID, MailboxID: mailbox.ID,
+			Reason: domain.MailAgentRevokedHandedOver, RevokedBy: viewer.UserID,
+		}); revokeErr != nil {
+			return revokeErr
+		}
 		detail := map[string]any{
 			"sealed_before": boundary.Format(time.RFC3339Nano),
 			// membership_id and permission let a later departure of the successor be traced.
@@ -167,7 +174,11 @@ func (s *service) MemberRemoved(ctx context.Context, event domain.OrganizationMe
 				return recordErr
 			}
 		}
-		return nil
+		// Every grant issued to the leaver's keys ends now, whichever mailbox it reads.
+		return s.revokeAgentGrants(tx, domain.MailAgentGrantRevocation{
+			OrganizationID: event.OrganizationID, KeyUserID: event.UserID,
+			Reason: domain.MailAgentRevokedOwnerLeft, At: at,
+		})
 	})
 	// Mail roles only display their owner, so clearing it is not part of the access change above.
 	s.clearMailRoleOwner(ctx, event.OrganizationID, event.UserID)

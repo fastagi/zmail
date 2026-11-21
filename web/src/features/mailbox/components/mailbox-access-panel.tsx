@@ -702,6 +702,12 @@ function useEventText(nameOf: (userId: number | null) => string) {
         return typeof detail.to === 'string' && detail.to !== ''
           ? t('access.history.renamed', { actor, name: detail.to })
           : t('access.history.renamedCleared', { actor });
+      case 'agent_granted':
+        return t('access.history.agentGranted', { actor, subject });
+      case 'agent_revoked':
+        return event.actor_user_id === null
+          ? t('access.history.agentEnded', { subject })
+          : t('access.history.agentRevoked', { actor, subject });
     }
   };
 }
