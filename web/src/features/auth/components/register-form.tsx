@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,8 @@ import {
   resolveAuthErrorKey,
 } from '@/features/auth/utils/auth-error';
 import { getAuthErrorCode } from '@/features/auth/utils/auth-failure';
+import { withReturnUrl } from '@/features/auth/utils/return-url';
+import { authConfig } from '@/config/auth';
 import { ApiErrorCode } from '@/http/codes';
 import { useT } from '@/i18n';
 
@@ -37,6 +40,7 @@ const resendCooldownSeconds = 60;
 export function RegisterForm() {
   const t = useT();
   const { mutate: register, isPending, error, reset } = useRegister();
+  const returnUrl = useSearchParams()?.get('returnUrl') ?? null;
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -278,7 +282,7 @@ export function RegisterForm() {
       <CardFooter className="px-0 flex flex-wrap items-center justify-center gap-1.5 text-sm text-muted-foreground mt-2">
         {t.auth('hasAccount')}
         <Link
-          href="/login"
+          href={withReturnUrl(authConfig.routes.login, returnUrl)}
           className="font-medium text-primary hover:underline hover:text-primary-deep transition-colors"
         >
           {t.auth('signIn')}

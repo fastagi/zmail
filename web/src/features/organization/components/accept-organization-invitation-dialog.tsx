@@ -20,25 +20,36 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { getOrganizationRoute } from '@/constants/routes';
+import { ROUTES } from '@/constants/routes';
 import { useAcceptOrganizationInvitation } from '@/features/organization/hooks/use-organizations';
 import { acceptOrganizationInvitationSchema } from '@/features/organization/schemas';
 import {
   hasOrganizationFieldError,
   resolveOrganizationErrorKey,
 } from '@/features/organization/utils/organization-error';
+import { clearPendingInvitation } from '@/features/organization/utils/pending-invitation';
 import { useT } from '@/i18n';
 
-export function AcceptOrganizationInvitationDialog() {
+/**
+ * Joins an organization with the one-time token from an invitation mail. `initialToken`, left in
+ * this tab by an invitation link, opens the dialog with the token filled in. Once joined, the
+ * invitee starts in the organization's mail.
+ */
+export function AcceptOrganizationInvitationDialog({
+  initialToken = null,
+}: {
+  initialToken?: string | null;
+}) {
   const t = useT('organization');
   const common = useT('common');
   const router = useRouter();
   const mutation = useAcceptOrganizationInvitation();
-  const [open, setOpen] = useState(false);
-  const [token, setToken] = useState('');
+  const [open, setOpen] = useState(initialToken !== null);
+  const [token, setToken] = useState(initialToken ?? '');
   const [clientError, setClientError] = useState<string>();
 
   const reset = () => {
+    clearPendingInvitation();
     setToken('');
     setClientError(undefined);
     mutation.reset();
@@ -57,7 +68,7 @@ export function AcceptOrganizationInvitationDialog() {
         toast.success(t('acceptInvitationSuccess'));
         setOpen(false);
         reset();
-        router.push(getOrganizationRoute(organization.id));
+        router.push(`${ROUTES.CONSOLE.MAILBOXES}?org=${organization.id}`);
       },
     });
   };

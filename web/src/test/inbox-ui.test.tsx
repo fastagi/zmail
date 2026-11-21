@@ -119,6 +119,7 @@ vi.mock('next/navigation', async () => {
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => state.organizations,
   useOrganizationMembers: () => state.members,
+  useCreateOrganization: () => ({ mutate: vi.fn(), reset: vi.fn(), isPending: false, error: null }),
 }));
 vi.mock('@/config/features', async importOriginal => {
   const original = await importOriginal<typeof import('@/config/features')>();
@@ -626,6 +627,24 @@ describe('unified inbox', () => {
     renderRoute();
     expect(screen.getByText('No mailbox to read yet')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Manage mailboxes' })).not.toBeInTheDocument();
+  });
+
+  it('opens mailbox creation at once for a team just created', async () => {
+    state.mailboxes.data = [];
+    window.history.replaceState(null, '', '/console/mailboxes?new=mailbox');
+    renderRoute();
+
+    expect(await screen.findByRole('dialog', { name: 'Manage mailboxes' })).toBeInTheDocument();
+    // The request is spent: a reload does not open it again.
+    expect(new URLSearchParams(window.location.search).has('new')).toBe(false);
+  });
+
+  it('offers to name a team when the user has none', async () => {
+    state.organizations.data = page([]);
+    renderRoute();
+
+    expect(await screen.findByLabelText('Team name')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create team' })).toBeInTheDocument();
   });
 
   it('keeps the three-pane shape while the organization and the mailboxes load', () => {

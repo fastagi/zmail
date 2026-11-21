@@ -1,12 +1,14 @@
 'use client';
 
-import { useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ROUTES } from '@/constants/routes';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import {
@@ -80,6 +82,20 @@ export function CreateMailboxForm({
     { key: 1, userId: '', permission: 'send' },
   ]);
   const [error, setError] = useState<string | null>(null);
+  // A team of one has nobody else to choose: its only member is filled in until changed.
+  const soleMember =
+    people.status === 'ready' && people.items.length === 1 ? String(people.items[0].user_id) : '';
+  const [filledSole, setFilledSole] = useState(false);
+  useEffect(() => {
+    if (soleMember === '' || filledSole) return;
+    setFilledSole(true);
+    setOwner(current => (current === '' ? soleMember : current));
+    setMembers(current =>
+      current.length === 1 && current[0].userId === ''
+        ? [{ ...current[0], userId: soleMember }]
+        : current
+    );
+  }, [soleMember, filledSole]);
   const limitReached = mailboxCount !== undefined && mailboxCount >= domain.max_mailboxes;
   // A domain removed or unverified since the form opened falls back to the shared one.
   const chosen = domains.find(item => item.domain === addressDomain) ?? domain;
@@ -143,8 +159,8 @@ export function CreateMailboxForm({
       });
       setLocalPart('');
       setDisplayName('');
-      setOwner('');
-      setMembers([{ key: nextKey, userId: '', permission: 'send' }]);
+      setOwner(soleMember);
+      setMembers([{ key: nextKey, userId: soleMember, permission: 'send' }]);
       setNextKey(key => key + 1);
       toast.success(t('messages.mailboxCreated'));
       onCreated(mailbox);
@@ -217,6 +233,17 @@ export function CreateMailboxForm({
             <p id="mailbox-local-part-hint" className="text-xs text-muted-foreground">
               {t('create.localPartHint')}
             </p>
+            {chosen.kind !== 'organization' ? (
+              <p className="text-xs text-muted-foreground">
+                {t('create.sharedDomainRules', { domain: chosen.domain })}{' '}
+                <Link
+                  href={ROUTES.CONSOLE.MAIL_DOMAIN}
+                  className="font-medium text-primary hover:underline"
+                >
+                  {t('create.ownDomainLink')}
+                </Link>
+              </p>
+            ) : null}
           </div>
           <div className="space-y-2">
             <Label htmlFor="mailbox-display-name">{t('create.displayName')}</Label>
