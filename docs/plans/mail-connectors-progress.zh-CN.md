@@ -86,3 +86,13 @@
 
 - fastagi/zmail#65（连接器底座）已合并到 `main`，合并提交 `f7f7b9d`。
 - fastagi/zmail#66 的基准分支改为 `main`，等 CI 通过后合并。
+
+## 2026-11-21 开始合并到主分支
+
+- 已合并到 `main`：fastagi/zmail#65（底座）、fastagi/zmail#66（适配器接口）、fastagi/zmail#68（Gmail）。
+- fastagi/zmail#67（Outlook）：与 Gmail 的文档冲突已解决，等 CI 重跑后合并。
+- fastagi/zmail#69（IMAP）：8 处审查问题已在代码里确认修复；三个适配器合在一起的全量 mailbox 测试、CI 同版本代码检查、契约校验都通过，等 Outlook 合并和 CI 后合并。
+- 三项独立审查已返回并退回修复：Agent 授权 5 处（最严重：交接后草稿泄露封存历史）、同步运维 7 处（最需注意：保留期配置写错会被悄悄当成 30 天）、Web 接入 5 处（最严重：授权码会进入分析上报和浏览历史）。
+- 来源维度：会话已推送 `integ/origin-model`，独立审查进行中。
+
+合并顺序：#67 → #69 → #72（同步运维）→ #70（来源维度）→ #71（Agent）→ #73（Web）。
