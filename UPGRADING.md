@@ -11,6 +11,40 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mailbox origin: connected mailboxes and manager connection controls
+
+A mailbox now has an `origin` (`zmail` or `connected`) beside its `type` (`personal` or `shared`).
+The `external` type is gone: every external mailbox becomes `personal` + `connected`. Contract:
+`contracts/MAILBOXES.md`, Access and Connection Directory. Plan: `docs/plans/mailbox-origin.plan.md`.
+
+### High — `type` loses `external`; `Mailbox.origin` is required
+
+`domain.MailboxTypeExternal` is removed; check `Mailbox.Connected()` (or `Origin ==
+domain.MailboxOriginConnected`) instead. The HTTP `Mailbox` gains a required `origin`, and
+`MailboxType` no longer lists `external`. A client that branched on `type === 'external'` must test
+`origin === 'connected'`. The mailbox access history has five new event types (`connection_bound`,
+`connection_reconnected`, `connection_revoked`, `connection_force_disconnected`,
+`connection_revoked_on_leave`); a client with a strict enum must accept them.
+
+### Medium — Managers no longer see members' connected accounts
+
+The owner and admin roles grant nothing on a connected personal mailbox: it disappears from their
+mailbox lists, the mailbox directory and its `mailbox_count`, the export, and the unified inbox, and
+its routes answer them `404` (previously they saw it locked with `administer`). The organization's
+mailbox limit counts `origin = 'zmail'` only. Managers use the new
+`GET /v1/external-mail-connection-directory` (masked addresses) and
+`DELETE /v1/external-mail-connection-directory/{connection_id}` (forced disconnect). A connected
+mailbox never sends, never gets `organize`, never awaits a handover, and the handover routes refuse
+it. `domain.ExternalMailRepository` gains `ListExternalMailConnectionDirectory`.
+
+### Low — Migration `2026_12_04_090000_add_mailbox_origin`
+
+Adds `mailboxes.origin varchar(16) NOT NULL DEFAULT 'zmail'` (catalog only, no rewrite) with
+`chk_mailboxes_origin`, converts `external` rows (soft-deleted ones included), restores
+`chk_mailboxes_type` to `personal` and `shared`, and rebuilds `idx_mailboxes_address` as
+`WHERE origin = 'zmail'`. mailboxes is bounded per organization, so the scans are short. Rolling back
+turns connected personal mailboxes back into external ones and fails while a connected shared
+mailbox exists.
 ## Unreleased — Mail connectors: sync runs, backoff, provider budget, and retention
 
 The connector sync is now operable. Contract: `contracts/MAILBOXES.md`, External Mailboxes (Sync

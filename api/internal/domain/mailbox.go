@@ -264,6 +264,8 @@ type Mailbox struct {
 	Address     string
 	DisplayName string
 	Type        MailboxType
+	// Origin says where the mail comes from; empty reads as zmail.
+	Origin MailboxOrigin
 	// OwnerUserID is the owner of a personal mailbox; nil for a shared one, or when the owner's
 	// account was deleted.
 	OwnerUserID *uint
@@ -290,6 +292,17 @@ type Mailbox struct {
 	AITriageEnabled bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// Connected reports whether the mailbox holds read-only copies of an outside account.
+func (m *Mailbox) Connected() bool {
+	return m != nil && m.Origin == MailboxOriginConnected
+}
+
+// AwaitingHandover reports whether the mailbox is a Zmail personal mailbox whose owner left. A
+// connected personal mailbox is the owner's own account and never awaits a handover.
+func (m *Mailbox) AwaitingHandover() bool {
+	return m != nil && m.Type == MailboxTypePersonal && !m.Connected() && m.OwnerLeftAt != nil
 }
 
 // MailMessage is one stored inbound or outbound message.
@@ -881,7 +894,7 @@ type MailboxRepository interface {
 	// with includeAwaitingHandover also every personal mailbox whose owner left.
 	ListUsableMailboxes(ctx context.Context, organizationID, membershipID, userID uint, includeAwaitingHandover bool) ([]*Mailbox, error)
 	FindMailbox(ctx context.Context, organizationID, id uint) (*Mailbox, error)
-	// FindMailboxByAddress returns the mailbox that takes delivery for address; external mailboxes,
+	// FindMailboxByAddress returns the mailbox that takes delivery for address; connected mailboxes,
 	// which carry an outside account's address, are never returned.
 	FindMailboxByAddress(ctx context.Context, address string) (*Mailbox, error)
 	DeleteMailbox(ctx context.Context, organizationID, id uint) error

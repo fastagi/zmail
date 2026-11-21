@@ -284,8 +284,10 @@ export const mailDnsRecordPatchSchema = strictObject({
 
 /** The types a mailbox can be created, filtered, or exported as. */
 export const mailboxTypeSchema = union([literal('personal'), literal('shared')]);
-/** Every type the API reports; `external` holds read-only copies of a member's bound account. */
-export const mailboxKindSchema = union([literal('personal'), literal('shared'), literal('external')]);
+/** Every type the API reports: who may use the mailbox, independent of its origin. */
+export const mailboxKindSchema = mailboxTypeSchema;
+/** Where a mailbox's mail comes from; `connected` holds read-only copies of a bound outside account. */
+export const mailboxOriginSchema = union([literal('zmail'), literal('connected')]);
 
 /** AI triage categories; `review` means the model could not decide (`contracts/MAILBOXES.md`). */
 export const MAIL_TRIAGE_CATEGORIES = ['reply', 'deadline', 'fyi', 'review'] as const;
@@ -324,6 +326,8 @@ export const mailboxSchema = strictObject({
   address: string(),
   display_name: string(),
   type: mailboxKindSchema,
+  // `connected` mailboxes are read-only copies of an outside account. Optional until every API emits it.
+  origin: optional(mailboxOriginSchema),
   // Null for a shared mailbox or after the owner account is deleted; kept while a personal mailbox awaits handover.
   owner_user_id: nullable(safeIdSchema),
   awaiting_handover: boolean(),
@@ -655,6 +659,11 @@ export const mailboxAccessEventTypeSchema = union([
   literal('sealed_deleted'),
   literal('webhooks_changed'),
   literal('renamed'),
+  literal('connection_bound'),
+  literal('connection_reconnected'),
+  literal('connection_revoked'),
+  literal('connection_force_disconnected'),
+  literal('connection_revoked_on_leave'),
 ]);
 
 export const mailboxAccessEventSchema = strictObject({

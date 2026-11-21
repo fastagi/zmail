@@ -148,9 +148,10 @@ func seedV2Scene(dsn string) error {
 		  SELECT n, ((n - 1) %% %d) + 1, n, CASE WHEN n BETWEEN %d AND %d THEN 'owner' ELSE 'member' END, now(), now()
 		  FROM generate_series(1, %d) AS n`, v2Organizations, v2Organizations+1, 2*v2Organizations, v2Users),
 		fmt.Sprintf(`SELECT setval(pg_get_serial_sequence('organization_memberships', 'id'), %d)`, v2Users),
-		fmt.Sprintf(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, ai_triage_enabled, created_at, updated_at)
+		fmt.Sprintf(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, origin, owner_user_id, ai_triage_enabled, created_at, updated_at)
 		  SELECT n, 1, 1, 'box' || n || '@mail.example',
-		    CASE WHEN n >= %[1]d THEN 'external' ELSE 'shared' END, CASE WHEN n >= %[1]d THEN 1 END,
+		    CASE WHEN n >= %[1]d THEN 'personal' ELSE 'shared' END, CASE WHEN n >= %[1]d THEN 'connected' ELSE 'zmail' END,
+		    CASE WHEN n >= %[1]d THEN 1 END,
 		    n <= %[2]d, now(), now()
 		  FROM generate_series(1, %[3]d) AS n`, v2ExternalFrom, v2TriageMailboxes, v2InboxMailboxes),
 		fmt.Sprintf(`INSERT INTO mailboxes (id, organization_id, created_by, address, created_at, updated_at)

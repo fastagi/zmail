@@ -428,9 +428,11 @@ type MailboxResponse struct {
 	DisplayName string `json:"display_name"`
 	// Type is "personal" or "shared".
 	Type string `json:"type"`
+	// Origin is "zmail", or "connected" for read-only copies of an outside account.
+	Origin string `json:"origin"`
 	// OwnerUserID is the owner of a personal mailbox; null for a shared one.
 	OwnerUserID *uint `json:"owner_user_id"`
-	// AwaitingHandover is true when the owner of a personal mailbox left the organization.
+	// AwaitingHandover is true when the owner of a Zmail personal mailbox left the organization.
 	AwaitingHandover bool `json:"awaiting_handover"`
 	// SealedBefore hides every message created before it; null when never sealed.
 	SealedBefore    *time.Time `json:"sealed_before"`
@@ -640,8 +642,9 @@ func toMailboxResponse(mailbox *domain.Mailbox) *MailboxResponse {
 		Address:          mailbox.Address,
 		DisplayName:      mailbox.DisplayName,
 		Type:             string(mailbox.Type),
+		Origin:           string(mailboxOriginOf(string(mailbox.Origin))),
 		OwnerUserID:      mailbox.OwnerUserID,
-		AwaitingHandover: mailbox.Type == domain.MailboxTypePersonal && mailbox.OwnerLeftAt != nil,
+		AwaitingHandover: mailbox.AwaitingHandover(),
 		SealedBefore:     mailbox.SealedBefore,
 		WebhooksEnabled:  mailbox.WebhooksEnabled,
 		Access:           MailboxAccessResponse(mailbox.Access),
@@ -1056,7 +1059,7 @@ func toMailboxDirectoryEntryResponse(entry *domain.MailboxDirectoryEntry) Mailbo
 		DisplayName:      mailbox.DisplayName,
 		Type:             string(mailbox.Type),
 		OwnerUserID:      mailbox.OwnerUserID,
-		AwaitingHandover: mailbox.Type == domain.MailboxTypePersonal && mailbox.OwnerLeftAt != nil,
+		AwaitingHandover: mailbox.AwaitingHandover(),
 		CreatedAt:        mailbox.CreatedAt,
 		MemberCount:      entry.MemberCount,
 		SentLast24h:      entry.SentLast24h,

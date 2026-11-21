@@ -7,7 +7,8 @@ func TestMailboxAccessFor(t *testing.T) {
 	personal := &Mailbox{ID: 1, OrganizationID: 7, Type: MailboxTypePersonal, OwnerUserID: &owner}
 	orphan := &Mailbox{ID: 2, OrganizationID: 7, Type: MailboxTypePersonal}
 	shared := &Mailbox{ID: 3, OrganizationID: 7, Type: MailboxTypeShared}
-	external := &Mailbox{ID: 4, OrganizationID: 7, Type: MailboxTypeExternal, OwnerUserID: &owner}
+	external := &Mailbox{ID: 4, OrganizationID: 7, Type: MailboxTypePersonal, Origin: MailboxOriginConnected, OwnerUserID: &owner}
+	connectedShared := &Mailbox{ID: 3, OrganizationID: 7, Type: MailboxTypeShared, Origin: MailboxOriginConnected}
 	viewer := func(userID, membershipID uint, role OrganizationRole) OrganizationContext {
 		return OrganizationContext{OrganizationID: 7, OrganizationName: "Acme", OrganizationSlug: "acme",
 			MembershipID: membershipID, UserID: userID, Role: role}
@@ -58,12 +59,22 @@ func TestMailboxAccessFor(t *testing.T) {
 			MailboxAccess{View: true, Send: true, Administer: true, SeeHistory: true, ManageMembers: true, Organize: true}},
 		{"other organization", shared, OrganizationContext{OrganizationID: 8, MembershipID: 110, UserID: 11,
 			Role: OrganizationRoleOwner}, member(110, MailboxPermissionManage), none},
-		// An external mailbox is the binder's alone, and read-only even for them.
-		{"external binder", external, viewer(10, 100, OrganizationRoleMember), nil, MailboxAccess{View: true, SeeHistory: true}},
-		{"external colleague", external, viewer(11, 110, OrganizationRoleMember), nil, none},
-		{"external colleague with member row", external, viewer(11, 110, OrganizationRoleMember),
+		// A connected personal mailbox is the binder's alone, and read-only even for them; the
+		// organization role grants nothing on a member's own outside account.
+		{"connected personal binder", external, viewer(10, 100, OrganizationRoleMember), nil, MailboxAccess{View: true, SeeHistory: true}},
+		{"connected personal binder who is admin", external, viewer(10, 100, OrganizationRoleAdmin), nil,
+			MailboxAccess{View: true, SeeHistory: true}},
+		{"connected personal colleague", external, viewer(11, 110, OrganizationRoleMember), nil, none},
+		{"connected personal colleague with member row", external, viewer(11, 110, OrganizationRoleMember),
 			&MailboxMember{MailboxID: 4, MembershipID: 110, Permission: MailboxPermissionManage}, none},
-		{"external admin", external, viewer(12, 120, OrganizationRoleAdmin), nil, administer},
+		{"connected personal admin", external, viewer(12, 120, OrganizationRoleAdmin), nil, none},
+		{"connected personal organization owner", external, viewer(12, 120, OrganizationRoleOwner), nil, none},
+		// A connected shared mailbox keeps the member model, minus sending and organizing.
+		{"connected shared manage member", connectedShared, viewer(11, 110, OrganizationRoleMember),
+			member(110, MailboxPermissionManage), MailboxAccess{View: true, ManageMembers: true, SeeHistory: true}},
+		{"connected shared send member", connectedShared, viewer(11, 110, OrganizationRoleMember),
+			member(110, MailboxPermissionSend), MailboxAccess{View: true}},
+		{"connected shared admin", connectedShared, viewer(12, 120, OrganizationRoleAdmin), nil, administerShared},
 		{"nil mailbox", nil, viewer(10, 100, OrganizationRoleOwner), nil, none},
 	}
 	for _, tt := range tests {

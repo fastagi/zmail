@@ -136,9 +136,9 @@ func (s *service) SaveTriageSetting(ctx context.Context, viewer domain.Organizat
 
 // canSwitchTriage is the owner of a personal mailbox, or ManageMembers on a shared one.
 func canSwitchTriage(mailbox *domain.Mailbox, viewer domain.OrganizationContext) bool {
-	// A personal or external mailbox holds one member's own mail: only that member consents to a
-	// model reading it, never an organization manager.
-	if mailbox.Type == domain.MailboxTypePersonal || mailbox.Type == domain.MailboxTypeExternal {
+	// A personal mailbox, connected or not, holds one member's own mail: only that member consents
+	// to a model reading it, never an organization manager.
+	if mailbox.Type == domain.MailboxTypePersonal {
 		return mailbox.OwnerUserID != nil && *mailbox.OwnerUserID == viewer.UserID && mailbox.OwnerLeftAt == nil
 	}
 	return mailbox.Access.ManageMembers
