@@ -17,7 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { isDevtoolsEnabled } from '@/config/devtools';
 import { ROUTES } from '@/constants/routes';
 import { getSessionUser } from '@/features/auth/server/session';
-import { OnboardingChecklist } from '@/features/mailbox/components/onboarding-checklist';
+import { LazyOnboardingChecklist } from '@/features/mailbox/components/onboarding-checklist-lazy';
 import { getT } from '@/i18n/server';
 
 import { GreetingClock } from './_components/greeting-clock';
@@ -130,7 +130,7 @@ export default async function ConsoleHomePage() {
         ))}
       </section>
 
-      <OnboardingChecklist />
+      <LazyOnboardingChecklist />
 
       {isDevtoolsEnabled() ? (
         <section className="mt-10 rounded-xl border bg-bg-surface p-6">

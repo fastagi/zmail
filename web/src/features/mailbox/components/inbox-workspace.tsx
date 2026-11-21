@@ -80,7 +80,6 @@ import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
-import { TeamSetupCard } from '@/features/organization/components/team-setup-card';
 
 // Administration dialogs load when opened, not with the mail page.
 const ManageRolesDialog = lazy(async () => {
@@ -136,6 +135,12 @@ const TAB_PARAM = 'tab';
 const TRIAGE_PARAM = 'triage';
 /** `new=mailbox`: the team was just created, so mailbox creation opens at once. */
 const NEW_PARAM = 'new';
+
+// Only someone without a team sees it, so it loads on demand.
+const TeamSetupCard = lazy(async () => {
+  const feature = await import('@/features/organization/components/team-setup-card');
+  return { default: feature.TeamSetupCard };
+});
 const UNREAD_TAB = 'unread';
 const NO_ROLE = 'none';
 const filterParams = [
@@ -279,7 +284,9 @@ export function InboxWorkspace() {
         />
         {/* Without a team the first step is to name one, right here. */}
         {scope.status === 'empty' ? (
-          <TeamSetupCard className="mx-auto max-w-xl" />
+          <Suspense fallback={null}>
+            <TeamSetupCard className="mx-auto max-w-xl" />
+          </Suspense>
         ) : (
           <MailOrganizationBoundary scope={scope}>{() => null}</MailOrganizationBoundary>
         )}

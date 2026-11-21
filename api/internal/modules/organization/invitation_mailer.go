@@ -68,7 +68,7 @@ func (m *invitationMailer) SendInvitation(
 	if !m.IsConfigured() {
 		return email.ErrNotConfigured
 	}
-	button := ""
+	button := `<p>Sign in with this email address and enter the one-time token below:</p>`
 	if link := m.acceptURL(token); link != "" {
 		button = fmt.Sprintf(
 			`<p><a href="%s">Join %s on Zmail</a></p>
@@ -77,8 +77,6 @@ func (m *invitationMailer) SendInvitation(
 			html.EscapeString(link),
 			html.EscapeString(organizationName),
 		)
-	} else {
-		button = `<p>Sign in with this email address and enter the one-time token below:</p>`
 	}
 	htmlContent := fmt.Sprintf(`
 		<h2>Organization invitation</h2>
