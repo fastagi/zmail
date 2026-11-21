@@ -360,7 +360,7 @@ export interface paths {
         post?: never;
         /**
          * Force-disconnect a member's connected account
-         * @description Needs the `owner` or `admin` organization role. Has the effect of the owner's unbind on any connection of the organization; the grant is revoked at the provider on a best-effort basis, the token is erased, mail already synced stays in the owner's connected mailbox, and a `connection_force_disconnected` access event is written. A revoked connection answers `204` again and writes nothing. Another organization's id, and any id while external mail is off, answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+         * @description Needs the `owner` or `admin` organization role. Has the effect of the owner's unbind on any connection of the organization; the grant is revoked at the provider on a best-effort basis, the token is erased, mail already synced stays in the owner's connected mailbox, and a `connection_force_disconnected` access event and an organization audit entry (connection id, provider, owner; never the address) are written. The owner may bind the account again afterwards. A revoked connection answers `204` again and writes nothing. Another organization's id, and any id while external mail is off, answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
          */
         delete: operations["forceDisconnectExternalMailConnection"];
         options?: never;
@@ -7826,7 +7826,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), another member bound the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), or the caller bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to the provider. */
+            /** @description A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), another member holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked one is purged and the account bound fresh instead), or the caller bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to the provider. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8162,7 +8162,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Another member bound the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), or the caller bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). */
+            /** @description Another member holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked one is purged and the account bound fresh instead), or the caller bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). */
             409: {
                 headers: {
                     [name: string]: unknown;
