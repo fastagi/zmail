@@ -647,7 +647,7 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		App: AppConfig{
-			Name:  env.Get("APP_NAME", "FastBuild"),
+			Name:  env.Get("APP_NAME", "Zmail"),
 			Env:   appEnv,
 			Debug: appDebug,
 			URL:   env.Get("APP_URL", "http://localhost:8025"),

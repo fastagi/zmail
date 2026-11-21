@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
@@ -81,6 +82,19 @@ export function useMailBroadcastRecipients(
   page: number,
   live: boolean
 ) {
+  const queryClient = useQueryClient();
+  const wasLive = useRef(live);
+  // Polling stops once the broadcast settles, so the last poll may predate the final recipient
+  // states: refresh every cached recipient view of the broadcast when it stops being live.
+  useEffect(() => {
+    if (wasLive.current && !live && validId(organizationId) && validId(broadcastId)) {
+      void queryClient.invalidateQueries({
+        queryKey: [...mailBroadcastKeys.detail(organizationId, broadcastId), 'recipients'],
+      });
+    }
+    wasLive.current = live;
+  }, [broadcastId, live, organizationId, queryClient]);
+
   return useQuery({
     queryKey: mailBroadcastKeys.recipients(organizationId, broadcastId, status, page),
     queryFn: () =>

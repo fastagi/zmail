@@ -27,6 +27,7 @@ import {
 import { getAuthErrorCode } from '@/features/auth/utils/auth-failure';
 import { withReturnUrl } from '@/features/auth/utils/return-url';
 import { authConfig } from '@/config/auth';
+import { env } from '@/config/env';
 import { ApiErrorCode } from '@/http/codes';
 import { useT } from '@/i18n';
 
@@ -39,6 +40,11 @@ const resendCooldownSeconds = 60;
  */
 export function RegisterForm() {
   const t = useT();
+  // Consent is asked only for the legal documents the deployment links to (#83): asking users to
+  // accept documents they cannot open is not meaningful consent.
+  const termsUrl = env.NEXT_PUBLIC_TERMS_URL;
+  const privacyUrl = env.NEXT_PUBLIC_PRIVACY_URL;
+  const consentRequired = Boolean(termsUrl || privacyUrl);
   const { mutate: register, isPending, error, reset } = useRegister();
   const returnUrl = useSearchParams()?.get('returnUrl') ?? null;
   const [name, setName] = useState('');
@@ -111,7 +117,7 @@ export function RegisterForm() {
       void sendCode();
       return;
     }
-    if (!acceptedTerms) {
+    if (consentRequired && !acceptedTerms) {
       return;
     }
 
@@ -244,33 +250,41 @@ export function RegisterForm() {
                 />
               </div>
 
-              <div className="flex items-start space-x-2 pt-2">
-                <Checkbox
-                  id="terms"
-                  name="terms"
-                  checked={acceptedTerms}
-                  disabled={isPending}
-                  onCheckedChange={checked => {
-                    setAcceptedTerms(Boolean(checked));
-                    clearMutationError();
-                  }}
-                  required
-                />
-                <div className="grid gap-1.5 leading-none">
-                  <label
-                    htmlFor="terms"
-                    className="text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                  >
-                    {t.auth('agreeToTerms')} {t.auth('termsOfService')} {t.auth('and')}{' '}
-                    {t.auth('privacyPolicy')}
-                  </label>
+              {consentRequired ? (
+                <div className="flex items-start space-x-2 pt-2">
+                  <Checkbox
+                    id="terms"
+                    name="terms"
+                    checked={acceptedTerms}
+                    disabled={isPending}
+                    onCheckedChange={checked => {
+                      setAcceptedTerms(Boolean(checked));
+                      clearMutationError();
+                    }}
+                    required
+                  />
+                  <div className="grid gap-1.5 leading-none">
+                    <label
+                      htmlFor="terms"
+                      className="text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      {t.auth('agreeToTerms')}{' '}
+                      {termsUrl ? (
+                        <LegalLink href={termsUrl}>{t.auth('termsOfService')}</LegalLink>
+                      ) : null}
+                      {termsUrl && privacyUrl ? ` ${t.auth('and')} ` : null}
+                      {privacyUrl ? (
+                        <LegalLink href={privacyUrl}>{t.auth('privacyPolicy')}</LegalLink>
+                      ) : null}
+                    </label>
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
               <Button
                 type="submit"
                 className="w-full font-semibold"
-                disabled={!acceptedTerms}
+                disabled={consentRequired && !acceptedTerms}
                 loading={isPending}
               >
                 {t.auth('signUp')}
@@ -289,5 +303,19 @@ export function RegisterForm() {
         </Link>
       </CardFooter>
     </Card>
+  );
+}
+
+/** A legal document opened in a new tab so the half-filled registration form is kept. */
+function LegalLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-semibold text-foreground underline underline-offset-2 hover:text-primary"
+    >
+      {children}
+    </a>
   );
 }

@@ -23,6 +23,14 @@ const mutations = vi.hoisted(() => ({
   },
 }));
 
+// The registration consent checkbox appears only when a legal document is configured.
+vi.mock('@/config/env', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/config/env')>();
+  return {
+    ...actual,
+    env: { ...actual.env, NEXT_PUBLIC_TERMS_URL: 'https://legal.example.com/terms' },
+  };
+});
 vi.mock('@/features/auth/hooks/use-auth', () => ({
   useLogin: () => mutations.login,
   useRegister: () => mutations.register,

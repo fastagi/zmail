@@ -378,3 +378,32 @@ func TestServiceRegistrationCodeEmailCarriesTheCode(t *testing.T) {
 		t.Fatalf("recipient = %v", payload.To)
 	}
 }
+
+// The welcome email names the product, not the scaffold underneath (#75).
+func TestServiceSendWelcomeEmailNamesTheProduct(t *testing.T) {
+	payloads := make(chan resendSendRequest, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload resendSendRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		payloads <- payload
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"email_123"}`)
+	}))
+	t.Cleanup(server.Close)
+
+	service := configuredEmailService(server.Client(), server.URL+"/emails", time.Second)
+	if err := service.SendWelcomeEmail(context.Background(), "alice@example.com", "Alice"); err != nil {
+		t.Fatalf("SendWelcomeEmail() error = %v", err)
+	}
+
+	payload := <-payloads
+	if payload.Subject != "Welcome to Zmail" {
+		t.Fatalf("Subject = %q", payload.Subject)
+	}
+	if !strings.Contains(payload.HTML, "Welcome to Zmail") || strings.Contains(payload.HTML, "FastBuild") {
+		t.Fatalf("HTML = %q", payload.HTML)
+	}
+}
