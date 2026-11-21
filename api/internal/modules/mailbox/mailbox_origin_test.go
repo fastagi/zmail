@@ -464,10 +464,10 @@ func TestConnectedTriageStopsWhenTheConnectionDoes(t *testing.T) {
 	if err != nil || len(claims) != 1 || claims[0].MailboxOn {
 		t.Fatalf("claims = %+v, %v; want the pending row with its mailbox off", claims, err)
 	}
-	if err := repo.db.Exec(`UPDATE external_mail_connections SET status = 'active' WHERE id = ?`, f.connection.ID).Error; err != nil {
+	if err = repo.db.Exec(`UPDATE external_mail_connections SET status = 'active' WHERE id = ?`, f.connection.ID).Error; err != nil {
 		t.Fatalf("mark active: %v", err)
 	}
-	if err := repo.db.Exec(`UPDATE mail_triage SET status = 'pending' WHERE mailbox_id = ?`, f.mailbox.ID).Error; err != nil {
+	if err = repo.db.Exec(`UPDATE mail_triage SET status = 'pending' WHERE mailbox_id = ?`, f.mailbox.ID).Error; err != nil {
 		t.Fatalf("reset pending: %v", err)
 	}
 
