@@ -59,11 +59,14 @@ type fakeGoogle struct {
 type gmailTestHistory struct {
 	id        uint64
 	messageID string
+	// labelsAdded makes the record a labelAdded one with these labels; nil is messageAdded.
+	labelsAdded []string
 }
 
 type gmailTestFailure struct {
 	status int
 	reason string
+	domain string
 	// times bounds how often the failure is served; zero serves it always.
 	times int
 }
@@ -112,6 +115,17 @@ func (g *fakeGoogle) arrive(messages ...gmailMessage) {
 		g.historyID++
 		g.added = append(g.added, gmailTestHistory{id: g.historyID, messageID: message.ID})
 	}
+}
+
+// relabel replaces a stored message's labels and records the labels added as history.
+func (g *fakeGoogle) relabel(id string, labels, added []string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	message := g.messages[id]
+	message.LabelIDs = labels
+	g.messages[id] = message
+	g.historyID++
+	g.added = append(g.added, gmailTestHistory{id: g.historyID, messageID: id, labelsAdded: added})
 }
 
 func (g *fakeGoogle) failing(operation string, failure gmailTestFailure) {
@@ -187,7 +201,7 @@ func (g *fakeGoogle) serve(w http.ResponseWriter, r *http.Request) {
 			g.writeJSON(w, failure.status, map[string]any{"error": failure.reason})
 		} else {
 			g.writeJSON(w, failure.status, map[string]any{"error": map[string]any{
-				"code": failure.status, "errors": []map[string]any{{"reason": failure.reason}},
+				"code": failure.status, "errors": []map[string]any{{"reason": failure.reason, "domain": failure.domain}},
 			}})
 		}
 		return
@@ -270,6 +284,12 @@ func (g *fakeGoogle) serveList(w http.ResponseWriter, query url.Values) {
 	if !strings.HasPrefix(query.Get("q"), "after:") {
 		g.t.Errorf("list without an after: query: %q", query.Get("q"))
 	}
+	if query.Get("pageToken") == "stale" {
+		g.writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{
+			"code": 400, "errors": []map[string]any{{"reason": "invalidArgument", "domain": "global"}},
+		}})
+		return
+	}
 	start, end, next := gmailTestPageOf(query, len(g.order))
 	listed := []map[string]string{}
 	for _, id := range g.order[start:end] {
@@ -288,8 +308,8 @@ func (g *fakeGoogle) serveHistory(w http.ResponseWriter, query url.Values) {
 		g.writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": 404, "status": "NOT_FOUND"}})
 		return
 	}
-	if query.Get("historyTypes") != "messageAdded" {
-		g.t.Errorf("historyTypes = %q", query.Get("historyTypes"))
+	if types := query["historyTypes"]; fmt.Sprint(types) != "[messageAdded labelAdded]" {
+		g.t.Errorf("historyTypes = %v", types)
 	}
 	var after []gmailTestHistory
 	for _, record := range g.added {
@@ -300,10 +320,15 @@ func (g *fakeGoogle) serveHistory(w http.ResponseWriter, query url.Values) {
 	start, end, next := gmailTestPageOf(query, len(after))
 	records := []map[string]any{}
 	for _, record := range after[start:end] {
-		records = append(records, map[string]any{
-			"id":            strconv.FormatUint(record.id, 10),
-			"messagesAdded": []map[string]any{{"message": map[string]any{"id": record.messageID}}},
-		})
+		entry := map[string]any{"id": strconv.FormatUint(record.id, 10)}
+		if record.labelsAdded != nil {
+			entry["labelsAdded"] = []map[string]any{{
+				"message": map[string]any{"id": record.messageID}, "labelIds": record.labelsAdded,
+			}}
+		} else {
+			entry["messagesAdded"] = []map[string]any{{"message": map[string]any{"id": record.messageID}}}
+		}
+		records = append(records, entry)
 	}
 	answer := map[string]any{"history": records, "historyId": strconv.FormatUint(g.historyID, 10)}
 	if next != "" {
@@ -398,7 +423,8 @@ func TestGmailExchange(t *testing.T) {
 		{name: "success", code: "code-1", verifier: "verifier-1"},
 		{name: "unknown code is invalid_grant", code: "code-unknown", verifier: "verifier-1", wantAuth: true},
 		{name: "missing verifier", code: "code-1", verifier: "", wantAuth: true},
-		{name: "token 401", code: "code-1", verifier: "verifier-1", fail: map[string]gmailTestFailure{"token": {status: 401, reason: "invalid_client"}}, wantAuth: true},
+		{name: "invalid client is configuration", code: "code-1", verifier: "verifier-1", fail: map[string]gmailTestFailure{"token": {status: 401, reason: "invalid_client"}}},
+		{name: "unauthorized client is configuration", code: "code-1", verifier: "verifier-1", fail: map[string]gmailTestFailure{"token": {status: 400, reason: "unauthorized_client"}}},
 		{name: "token 503 retries", code: "code-1", verifier: "verifier-1", fail: map[string]gmailTestFailure{"token": {status: 503}}},
 		{name: "profile 401", code: "code-1", verifier: "verifier-1", fail: map[string]gmailTestFailure{"profile": {status: 401}}, wantAuth: true},
 	}
@@ -558,15 +584,23 @@ func TestGmailFetchErrors(t *testing.T) {
 	}{
 		{name: "history 404 expires the cursor", cursor: gmailCursor{HistoryID: "5"}.encode(), want: ErrExternalMailCursorExpired},
 		{name: "unreadable cursor expires", cursor: "17", want: ErrExternalMailCursorExpired},
-		{name: "backfill page token refused", cursor: gmailCursor{HistoryID: "1000", PageToken: "stale", Backfill: true}.encode(),
-			fail: map[string]gmailTestFailure{"list": {status: 400, reason: "invalidArgument"}}, want: ErrExternalMailCursorExpired},
+		{name: "backfill refused twice is plain", cursor: gmailCursor{HistoryID: "1000", PageToken: "stale", Backfill: true}.encode(),
+			fail: map[string]gmailTestFailure{"list": {status: 400, reason: "invalidArgument"}}, wantAny: true},
 		{name: "revoked refresh token", cursor: historyCursor, token: "refresh-revoked", want: ErrExternalMailAuth},
-		{name: "token 401", cursor: historyCursor, fail: map[string]gmailTestFailure{"token": {status: 401, reason: "invalid_client"}}, want: ErrExternalMailAuth},
+		{name: "token invalid_grant", cursor: historyCursor, fail: map[string]gmailTestFailure{"token": {status: 400, reason: "invalid_grant"}}, want: ErrExternalMailAuth},
+		{name: "token invalid_client retries", cursor: historyCursor, fail: map[string]gmailTestFailure{"token": {status: 401, reason: "invalid_client"}}, wantAny: true},
+		{name: "token unauthorized_client retries", cursor: historyCursor, fail: map[string]gmailTestFailure{"token": {status: 400, reason: "unauthorized_client"}}, wantAny: true},
+		{name: "token other 400 retries", cursor: historyCursor, fail: map[string]gmailTestFailure{"token": {status: 400, reason: "invalid_request"}}, wantAny: true},
 		{name: "api 401", cursor: historyCursor, fail: map[string]gmailTestFailure{"history": {status: 401}}, want: ErrExternalMailAuth},
 		{name: "scope withdrawn 403", cursor: "", fail: map[string]gmailTestFailure{"profile": {status: 403, reason: "insufficientPermissions"}}, want: ErrExternalMailAuth},
 		{name: "token 429", cursor: historyCursor, fail: map[string]gmailTestFailure{"token": {status: 429}}, wantAny: true},
 		{name: "history 429", cursor: historyCursor, fail: map[string]gmailTestFailure{"history": {status: 429, reason: "rateLimitExceeded"}}, wantAny: true},
-		{name: "rate limit 403", cursor: "", fail: map[string]gmailTestFailure{"list": {status: 403, reason: "userRateLimitExceeded"}}, wantAny: true},
+		{name: "rate limit 403", cursor: "", fail: map[string]gmailTestFailure{"list": {status: 403, reason: "userRateLimitExceeded", domain: "usageLimits"}}, wantAny: true},
+		{name: "daily limit 403", cursor: historyCursor, fail: map[string]gmailTestFailure{"history": {status: 403, reason: "dailyLimitExceeded", domain: "usageLimits"}}, wantAny: true},
+		{name: "quota 403", cursor: historyCursor, fail: map[string]gmailTestFailure{"history": {status: 403, reason: "quotaExceeded", domain: "usageLimits"}}, wantAny: true},
+		{name: "unknown 403", cursor: historyCursor, fail: map[string]gmailTestFailure{"history": {status: 403, reason: "somethingNew"}}, wantAny: true},
+		{name: "forbidden in usage limits", cursor: historyCursor, fail: map[string]gmailTestFailure{"history": {status: 403, reason: "forbidden", domain: "usageLimits"}}, wantAny: true},
+		{name: "forbidden access", cursor: historyCursor, fail: map[string]gmailTestFailure{"history": {status: 403, reason: "forbidden", domain: "global"}}, want: ErrExternalMailAuth},
 		{name: "message 500", cursor: historyCursor, fail: map[string]gmailTestFailure{"message": {status: 500, reason: "backendError"}}, wantAny: true},
 		{name: "list 503", cursor: "", fail: map[string]gmailTestFailure{"list": {status: 503}}, wantAny: true},
 	}
@@ -602,6 +636,90 @@ func TestGmailFetchErrors(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestGmailBackfillQueryIsStable: the after: bound is fixed when the backfill starts, so a page
+// fetched later sends the identical query with its page token.
+func TestGmailBackfillQueryIsStable(t *testing.T) {
+	google := newFakeGoogle(t)
+	start := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	for i := 4; i >= 1; i-- {
+		google.store(gmailTestMessage(fmt.Sprintf("b%d", i), start.Add(-time.Duration(i)*time.Hour)))
+	}
+	source := google.source(2)
+	request := ExternalMailFetchRequest{Token: ExternalMailToken{RefreshToken: gmailTestRefresh}, BackfillDays: 3, Now: start}
+	first, err := source.Fetch(context.Background(), request)
+	if err != nil || !first.More {
+		t.Fatalf("first page: more %v, %v", first.More, err)
+	}
+	firstQuery := google.query("list").Get("q")
+	request.Cursor, request.Now, request.BackfillDays = first.Cursor, start.Add(6*time.Hour), 30
+	second, err := source.Fetch(context.Background(), request)
+	if err != nil || second.More || fmt.Sprint(gmailIDs(second.Messages)) != "[b2 b1]" {
+		t.Fatalf("second page = %v more %v, %v", gmailIDs(second.Messages), second.More, err)
+	}
+	query := google.query("list")
+	if query.Get("q") != firstQuery || firstQuery != "after:"+strconv.FormatInt(start.AddDate(0, 0, -3).Unix(), 10) || query.Get("pageToken") != "page-2" {
+		t.Fatalf("second query %v, first q %q", query, firstQuery)
+	}
+}
+
+// TestGmailBackfillRestartsOnRefusedPageToken: a page token Google refuses restarts the backfill
+// within the same fetch, from a fresh historyId, without reporting an expired cursor.
+func TestGmailBackfillRestartsOnRefusedPageToken(t *testing.T) {
+	google := newFakeGoogle(t)
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	google.store(gmailTestMessage("b2", now.Add(-time.Hour)), gmailTestMessage("b1", now.Add(-2*time.Hour)))
+	fetched, err := google.source(25).Fetch(context.Background(), ExternalMailFetchRequest{
+		Token:  ExternalMailToken{RefreshToken: gmailTestRefresh},
+		Cursor: gmailCursor{HistoryID: "900", PageToken: "stale", Backfill: true, After: now.Add(-48 * time.Hour).Unix()}.encode(), Now: now,
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if fmt.Sprint(gmailIDs(fetched.Messages)) != "[b2 b1]" || fetched.More || google.count("list") != 2 || google.count("profile") != 1 {
+		t.Fatalf("restart = %v more %v, list %d profile %d", gmailIDs(fetched.Messages), fetched.More, google.count("list"), google.count("profile"))
+	}
+	if cursor, _ := decodeGmailCursor(fetched.Cursor); cursor.HistoryID != gmailTestStartHistory || cursor.Backfill {
+		t.Fatalf("cursor = %+v", cursor)
+	}
+}
+
+// TestGmailHistoryMailLeavingSpam: mail that arrived in spam is skipped, and copied once it gains
+// the INBOX label; other labels added are ignored.
+func TestGmailHistoryMailLeavingSpam(t *testing.T) {
+	google := newFakeGoogle(t)
+	now := time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
+	google.arrive(gmailTestMessage("s1", now, "SPAM"), gmailTestMessage("n1", now))
+	source := google.source(25)
+	request := ExternalMailFetchRequest{Token: ExternalMailToken{RefreshToken: gmailTestRefresh}, Cursor: gmailCursor{HistoryID: gmailTestStartHistory}.encode()}
+	fetched, err := source.Fetch(context.Background(), request)
+	if err != nil || fmt.Sprint(gmailIDs(fetched.Messages)) != "[n1]" {
+		t.Fatalf("before = %v, %v", gmailIDs(fetched.Messages), err)
+	}
+	google.relabel("s1", []string{"INBOX", "UNREAD"}, []string{"INBOX"})
+	google.relabel("n1", []string{"INBOX", "STARRED"}, []string{"STARRED"})
+	request.Cursor = fetched.Cursor
+	if fetched, err = source.Fetch(context.Background(), request); err != nil || fmt.Sprint(gmailIDs(fetched.Messages)) != "[s1]" {
+		t.Fatalf("after not spam = %v, %v", gmailIDs(fetched.Messages), err)
+	}
+}
+
+// TestGmailRotatedTokenSurvivesFailure: a grant Google rotated before the page failed comes back
+// next to the error, so the worker keeps it.
+func TestGmailRotatedTokenSurvivesFailure(t *testing.T) {
+	google := newFakeGoogle(t)
+	google.rotateTo = "refresh-gmail-2"
+	google.failing("history", gmailTestFailure{status: 503})
+	fetched, err := google.source(25).Fetch(context.Background(), ExternalMailFetchRequest{
+		Token: ExternalMailToken{RefreshToken: gmailTestRefresh}, Cursor: gmailCursor{HistoryID: gmailTestStartHistory}.encode(),
+	})
+	if err == nil || errors.Is(err, ErrExternalMailAuth) {
+		t.Fatalf("err = %v, want a retryable error", err)
+	}
+	if fetched.RefreshToken != "refresh-gmail-2" || len(fetched.Messages) != 0 || fetched.Cursor != "" {
+		t.Fatalf("fetched = %+v, want only the rotated token", fetched)
 	}
 }
 

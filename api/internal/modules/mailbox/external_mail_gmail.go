@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -47,8 +48,25 @@ const (
 	gmailCursorVersion = 1
 )
 
-// errGmailTooLarge means a response exceeded its size bound.
-var errGmailTooLarge = errors.New("gmail: response too large")
+var (
+	// errGmailTooLarge means a response exceeded its size bound.
+	errGmailTooLarge = errors.New("gmail: response too large")
+	// errGmailPageTokenRefused means Google refused a backfill page token.
+	errGmailPageTokenRefused = errors.New("gmail: page token refused")
+)
+
+// gmailGrantReasons are the API 403 reasons that mean the grant no longer reads the mailbox, so
+// the member must reconnect. Quota, rate limit, and unknown reasons are retried instead.
+var gmailGrantReasons = map[string]bool{
+	"insufficientPermissions": true, "ACCESS_TOKEN_SCOPE_INSUFFICIENT": true, "authError": true,
+	"domainPolicy": true,
+}
+
+// gmailGrantRefused reports whether an API 403 means the grant lacks access. A generic forbidden
+// counts only outside the usage-limit domain, where Google reports quotas.
+func gmailGrantRefused(reason, domain string) bool {
+	return gmailGrantReasons[reason] || (reason == "forbidden" && domain != "usageLimits")
+}
 
 func init() {
 	registerExternalMailConnector(func(cfg config.ExternalMailConfig) (ExternalMailConnector, bool) {
@@ -149,12 +167,14 @@ func (g *gmailMailSource) Exchange(ctx context.Context, exchange ExternalMailCod
 }
 
 // gmailCursor is the opaque sync position: the historyId the incremental phase starts from, and
-// the page token of the listing in progress. Backfill marks the messages.list phase.
+// the page token of the listing in progress. Backfill marks the messages.list phase; After is the
+// backfill's lower bound in Unix seconds, fixed when it starts so every page sends the same query.
 type gmailCursor struct {
 	Version   int    `json:"v"`
 	HistoryID string `json:"h"`
 	PageToken string `json:"p,omitempty"`
 	Backfill  bool   `json:"b,omitempty"`
+	After     int64  `json:"a,omitempty"`
 }
 
 func (c gmailCursor) encode() string {
@@ -182,7 +202,8 @@ func validHistoryID(id string) bool {
 }
 
 // Fetch refreshes the access token and reads one page: a backfill page from an empty or backfill
-// cursor, otherwise a page of history.
+// cursor, otherwise a page of history. A refresh token Google rotated is returned even when the
+// rest of the fetch fails, since the old one may already be spent.
 func (g *gmailMailSource) Fetch(ctx context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error) {
 	if request.Token.RefreshToken == "" {
 		return ExternalMailFetch{}, ErrExternalMailAuth
@@ -193,27 +214,35 @@ func (g *gmailMailSource) Fetch(ctx context.Context, request ExternalMailFetchRe
 	if err != nil {
 		return ExternalMailFetch{}, err
 	}
-	var fetched ExternalMailFetch
-	if request.Cursor == "" {
-		fetched, err = g.startBackfill(ctx, tokens.AccessToken, request)
-	} else {
-		cursor, decodeErr := decodeGmailCursor(request.Cursor)
-		switch {
-		case decodeErr != nil:
-			err = decodeErr
-		case cursor.Backfill:
-			fetched, err = g.backfillPage(ctx, tokens.AccessToken, request, cursor)
-		default:
-			fetched, err = g.historyPage(ctx, tokens.AccessToken, cursor)
-		}
-	}
+	fetched, err := g.fetchPage(ctx, tokens.AccessToken, request)
 	if err != nil {
-		return ExternalMailFetch{}, err
+		fetched = ExternalMailFetch{}
 	}
 	if tokens.RefreshToken != "" && tokens.RefreshToken != request.Token.RefreshToken {
 		fetched.RefreshToken = tokens.RefreshToken
 	}
-	return fetched, nil
+	return fetched, err
+}
+
+// fetchPage reads the page the cursor points at.
+func (g *gmailMailSource) fetchPage(ctx context.Context, accessToken string, request ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	if request.Cursor == "" {
+		return g.startBackfill(ctx, accessToken, request)
+	}
+	cursor, err := decodeGmailCursor(request.Cursor)
+	if err != nil {
+		return ExternalMailFetch{}, err
+	}
+	if !cursor.Backfill {
+		return g.historyPage(ctx, accessToken, cursor)
+	}
+	fetched, err := g.backfillPage(ctx, accessToken, request, cursor)
+	if errors.Is(err, errGmailPageTokenRefused) {
+		// Google no longer honors the page token: start the backfill over, once in this fetch. The
+		// restarted listing has no page token, so a second refusal is a plain error.
+		return g.startBackfill(ctx, accessToken, request)
+	}
+	return fetched, err
 }
 
 // startBackfill records the account's current historyId before listing, so mail that arrives
@@ -226,11 +255,13 @@ func (g *gmailMailSource) startBackfill(ctx context.Context, accessToken string,
 	if !validHistoryID(profile.HistoryID) {
 		return ExternalMailFetch{}, errors.New("gmail: profile carries no historyId")
 	}
-	return g.backfillPage(ctx, accessToken, request, gmailCursor{HistoryID: profile.HistoryID, Backfill: true})
+	return g.backfillPage(ctx, accessToken, request, gmailCursor{
+		HistoryID: profile.HistoryID, Backfill: true, After: gmailBackfillAfter(request),
+	})
 }
 
-// backfillPage lists one page of the backfill window, newest first.
-func (g *gmailMailSource) backfillPage(ctx context.Context, accessToken string, request ExternalMailFetchRequest, cursor gmailCursor) (ExternalMailFetch, error) {
+// gmailBackfillAfter is the lower bound of a backfill that starts now, in Unix seconds.
+func gmailBackfillAfter(request ExternalMailFetchRequest) int64 {
 	now := request.Now
 	if now.IsZero() {
 		now = time.Now()
@@ -240,8 +271,16 @@ func (g *gmailMailSource) backfillPage(ctx context.Context, accessToken string, 
 		days = domain.DefaultExternalMailBackfillDays
 	}
 	days = min(days, domain.MaxExternalMailBackfillDays)
+	return now.AddDate(0, 0, -days).Unix()
+}
+
+// backfillPage lists one page of the backfill window, newest first.
+func (g *gmailMailSource) backfillPage(ctx context.Context, accessToken string, request ExternalMailFetchRequest, cursor gmailCursor) (ExternalMailFetch, error) {
+	if cursor.After <= 0 {
+		cursor.After = gmailBackfillAfter(request)
+	}
 	query := url.Values{
-		"q":          {"after:" + strconv.FormatInt(now.AddDate(0, 0, -days).Unix(), 10)},
+		"q":          {"after:" + strconv.FormatInt(cursor.After, 10)},
 		"maxResults": {strconv.Itoa(g.pageSize)},
 	}
 	if cursor.PageToken != "" {
@@ -256,8 +295,7 @@ func (g *gmailMailSource) backfillPage(ctx context.Context, accessToken string, 
 	if err := g.getJSON(ctx, accessToken, "list", "/users/me/messages", query, gmailMaxListBytes, &listed); err != nil {
 		var status *gmailStatusError
 		if cursor.PageToken != "" && errors.As(err, &status) && status.Status == http.StatusBadRequest {
-			// Google no longer honors the page token: start the backfill over.
-			return ExternalMailFetch{}, fmt.Errorf("%w: gmail page token refused", ErrExternalMailCursorExpired)
+			return ExternalMailFetch{}, errGmailPageTokenRefused
 		}
 		return ExternalMailFetch{}, err
 	}
@@ -271,17 +309,18 @@ func (g *gmailMailSource) backfillPage(ctx context.Context, accessToken string, 
 	}
 	next := gmailCursor{HistoryID: cursor.HistoryID}
 	if listed.NextPageToken != "" {
-		next.PageToken, next.Backfill = listed.NextPageToken, true
+		next.PageToken, next.Backfill, next.After = listed.NextPageToken, true, cursor.After
 	}
 	return ExternalMailFetch{Messages: messages, Cursor: next.encode(), More: listed.NextPageToken != ""}, nil
 }
 
-// historyPage reads one page of messages added after the cursor's historyId. Google answers 404
-// once the historyId is too old to replay.
+// historyPage reads one page of the messages added after the cursor's historyId, and of those that
+// gained the INBOX label, such as mail marked as not spam. Google answers 404 once the historyId is
+// too old to replay.
 func (g *gmailMailSource) historyPage(ctx context.Context, accessToken string, cursor gmailCursor) (ExternalMailFetch, error) {
 	query := url.Values{
 		"startHistoryId": {cursor.HistoryID},
-		"historyTypes":   {"messageAdded"},
+		"historyTypes":   {"messageAdded", "labelAdded"},
 		"maxResults":     {strconv.Itoa(g.pageSize)},
 	}
 	if cursor.PageToken != "" {
@@ -294,6 +333,12 @@ func (g *gmailMailSource) historyPage(ctx context.Context, accessToken string, c
 					ID string `json:"id"`
 				} `json:"message"`
 			} `json:"messagesAdded"`
+			LabelsAdded []struct {
+				Message struct {
+					ID string `json:"id"`
+				} `json:"message"`
+				LabelIDs []string `json:"labelIds"`
+			} `json:"labelsAdded"`
 		} `json:"history"`
 		NextPageToken string `json:"nextPageToken"`
 		HistoryID     string `json:"historyId"`
@@ -307,11 +352,20 @@ func (g *gmailMailSource) historyPage(ctx context.Context, accessToken string, c
 	}
 	var ids []string
 	seen := map[string]bool{}
+	keep := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
 	for _, record := range history.History {
 		for _, added := range record.MessagesAdded {
-			if id := added.Message.ID; id != "" && !seen[id] {
-				seen[id] = true
-				ids = append(ids, id)
+			keep(added.Message.ID)
+		}
+		for _, labeled := range record.LabelsAdded {
+			if slices.Contains(labeled.LabelIDs, "INBOX") {
+				// A copy already stored is not repeated.
+				keep(labeled.Message.ID)
 			}
 		}
 	}
@@ -569,8 +623,10 @@ func (e *gmailStatusError) Error() string {
 	return fmt.Sprintf("gmail %s: HTTP %d", e.Operation, e.Status)
 }
 
-// token calls the token endpoint with the client credentials. A refused grant (invalid_grant, or
-// any 400 or 401) is ErrExternalMailAuth; 429 and 5xx stay plain errors the worker retries.
+// token calls the token endpoint with the client credentials. Only a refused grant (invalid_grant)
+// is ErrExternalMailAuth. Any other refusal, such as invalid_client after the client secret
+// expired, is the operator's configuration and stays a plain error the worker retries, so it does
+// not send every member to reconnect; so do 429 and 5xx.
 func (g *gmailMailSource) token(ctx context.Context, operation string, form url.Values) (gmailTokenResponse, error) {
 	form.Set("client_id", g.clientID)
 	form.Set("client_secret", g.clientSecret)
@@ -592,7 +648,7 @@ func (g *gmailMailSource) token(ctx context.Context, operation string, form url.
 	}
 	if response.StatusCode != http.StatusOK {
 		statusErr := &gmailStatusError{Operation: operation, Status: response.StatusCode, Reason: shortReason(tokens.Error)}
-		if tokens.Error == "invalid_grant" || response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnauthorized {
+		if tokens.Error == "invalid_grant" {
 			return gmailTokenResponse{}, fmt.Errorf("%w: %w", ErrExternalMailAuth, statusErr)
 		}
 		return gmailTokenResponse{}, statusErr
@@ -606,8 +662,8 @@ func (g *gmailMailSource) token(ctx context.Context, operation string, form url.
 	return tokens, nil
 }
 
-// getJSON calls the Gmail API and decodes a bounded answer. 401, and 403 for anything but a rate
-// limit, mean the grant no longer reads the mailbox: ErrExternalMailAuth.
+// getJSON calls the Gmail API and decodes a bounded answer. 401, and 403 with a reason in
+// gmailGrantReasons, mean the grant no longer reads the mailbox: ErrExternalMailAuth.
 func (g *gmailMailSource) getJSON(ctx context.Context, accessToken, operation, path string, query url.Values, limit int64, target any) error {
 	address := g.apiBase + path
 	if len(query) > 0 {
@@ -625,12 +681,12 @@ func (g *gmailMailSource) getJSON(ctx context.Context, accessToken, operation, p
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		reason := gmailErrorReason(response.Body)
+		reason, errorDomain := gmailErrorReason(response.Body)
 		statusErr := &gmailStatusError{Operation: operation, Status: response.StatusCode, Reason: reason}
 		switch {
 		case response.StatusCode == http.StatusUnauthorized:
 			return fmt.Errorf("%w: %w", ErrExternalMailAuth, statusErr)
-		case response.StatusCode == http.StatusForbidden && reason != "rateLimitExceeded" && reason != "userRateLimitExceeded":
+		case response.StatusCode == http.StatusForbidden && gmailGrantRefused(reason, errorDomain):
 			return fmt.Errorf("%w: %w", ErrExternalMailAuth, statusErr)
 		}
 		return statusErr
@@ -645,27 +701,34 @@ func (g *gmailMailSource) getJSON(ctx context.Context, accessToken, operation, p
 	return nil
 }
 
-// gmailErrorReason reads the first error reason of a Google API error body.
-func gmailErrorReason(body io.Reader) string {
+// gmailErrorReason reads the first error reason, and its domain, of a Google API error body.
+func gmailErrorReason(body io.Reader) (reason, errorDomain string) {
 	raw, err := io.ReadAll(io.LimitReader(body, gmailMaxErrorBytes))
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	var decoded struct {
 		Error struct {
 			Errors []struct {
 				Reason string `json:"reason"`
+				Domain string `json:"domain"`
 			} `json:"errors"`
+			Details []struct {
+				Reason string `json:"reason"`
+			} `json:"details"`
 			Status string `json:"status"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(raw, &decoded) != nil {
-		return ""
+		return "", ""
 	}
-	if len(decoded.Error.Errors) > 0 {
-		return shortReason(decoded.Error.Errors[0].Reason)
+	switch {
+	case len(decoded.Error.Errors) > 0:
+		return shortReason(decoded.Error.Errors[0].Reason), shortReason(decoded.Error.Errors[0].Domain)
+	case len(decoded.Error.Details) > 0 && decoded.Error.Details[0].Reason != "":
+		return shortReason(decoded.Error.Details[0].Reason), ""
 	}
-	return shortReason(decoded.Error.Status)
+	return shortReason(decoded.Error.Status), ""
 }
 
 // shortReason keeps a machine-readable reason only, so an error string never carries content.
