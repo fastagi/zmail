@@ -897,14 +897,14 @@ func (s *imapSession) readValue(depth int) (imapValue, error) {
 			if err != nil {
 				return imapValue{}, err
 			}
-			switch {
-			case b == '"':
+			switch b {
+			case '"':
 				return imapValue{text: text}, nil
-			case b == '\\':
+			case '\\':
 				if b, err = s.reader.ReadByte(); err != nil {
 					return imapValue{}, err
 				}
-			case b == '\r' || b == '\n':
+			case '\r', '\n':
 				return imapValue{}, errors.New("imap: line break in a quoted string")
 			}
 			if len(text) >= imapMaxSmallLiteral {

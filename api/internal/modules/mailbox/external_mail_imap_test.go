@@ -104,12 +104,12 @@ func (f *fakeIMAPServer) credentials(username string) ExternalMailPasswordCreden
 	return ExternalMailPasswordCredentials{Host: "127.0.0.1", Port: f.port, Username: username, Password: fakeIMAPPassword}
 }
 
-// deliver appends a message received at date and returns its UID.
-func (f *fakeIMAPServer) deliver(subject string, date time.Time) uint32 {
+// deliver appends a message received at date.
+func (f *fakeIMAPServer) deliver(subject string, date time.Time) {
 	raw := fmt.Sprintf("From: Carol <carol@sender.test>\r\nTo: dave@imap.test\r\nSubject: %s\r\n"+
 		"Message-ID: <%s@sender.test>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBody of %s\r\n",
 		subject, strings.ReplaceAll(subject, " ", "-"), subject)
-	return f.deliverRaw([]byte(raw), date)
+	f.deliverRaw([]byte(raw), date)
 }
 
 func (f *fakeIMAPServer) deliverRaw(raw []byte, date time.Time) uint32 {
