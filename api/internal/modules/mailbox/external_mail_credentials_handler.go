@@ -18,12 +18,14 @@ const maxExternalMailCredentialsBodyBytes = 4096
 // bindExternalMailCredentialsRequest binds an account of a password connector. It is never
 // logged or echoed back.
 type bindExternalMailCredentialsRequest struct {
-	Provider     string `json:"provider" binding:"required,max=16"`
-	Host         string `json:"host" binding:"required,max=253"`
-	Port         int    `json:"port" binding:"omitempty,min=1,max=65535"`
-	Username     string `json:"username" binding:"required,max=320"`
-	Password     string `json:"password" binding:"required,max=320"`
-	BackfillDays int    `json:"backfill_days" binding:"omitempty,min=1,max=90"`
+	Provider string `json:"provider" binding:"required,max=16"`
+	Host     string `json:"host" binding:"required,max=253"`
+	Port     int    `json:"port" binding:"omitempty,min=1,max=65535"`
+	Username string `json:"username" binding:"required,max=320"`
+	Password string `json:"password" binding:"required,max=320"`
+	// BackfillDays is checked by the service, which answers MAILBOX.EXTERNAL_AUTHORIZATION_INVALID
+	// out of range, as the OAuth start route does.
+	BackfillDays int `json:"backfill_days"`
 }
 
 // BindExternalMailCredentials binds an outside account with an app password: 201 with a new

@@ -35,6 +35,8 @@ Environment:
   FASTBUILD_DEV_STARTERS        API OPTIONAL_STARTERS (default every optional starter)
   FASTBUILD_DEV_WEB_FEATURES    Web NEXT_PUBLIC_OPTIONAL_FEATURES
   FASTBUILD_DEV_ADMIN_FEATURES  Admin VITE_OPTIONAL_FEATURES
+  EXTERNAL_MAIL_PROVIDERS       Mail connectors; when set (with the mailbox starter) the
+                                mail:external:sync worker runs too
 
 Seeded accounts (password "secret"): admin@example.com is a platform operator, user@example.com is
 a regular user.
@@ -196,6 +198,12 @@ up() {
     # Broadcast recipients are sent by their own worker, like webhook deliveries.
     if [[ ",${STARTERS}," == *",mailbox,"* ]]; then
       run_prefixed broadcast bash -c "cd '${ROOT_DIR}/api' && exec '${STATE_DIR}/bin/fastbuild' mail:broadcast:work --poll=2s"
+      # Connected accounts are synced by their own worker. It exits at once while no connector is
+      # enabled, which would stop the stack, so it runs only when EXTERNAL_MAIL_PROVIDERS is set.
+      # With `fake` the worker has its own empty in-memory source, so it records runs but no mail.
+      if [[ -n "${EXTERNAL_MAIL_PROVIDERS:-}" ]]; then
+        run_prefixed external-mail bash -c "cd '${ROOT_DIR}/api' && exec '${STATE_DIR}/bin/fastbuild' mail:external:sync --poll=30s"
+      fi
     fi
   fi
   if wants web; then

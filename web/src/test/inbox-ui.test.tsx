@@ -1884,6 +1884,50 @@ describe('inbox keyboard shortcuts', () => {
     expect(await screen.findByLabelText('Subject')).toHaveValue('');
   });
 
+  // Issue #91: opening the composer moves focus into it; closing returns it to the trigger.
+  it('opening compose focuses To, and closing returns the focus to the Compose button', async () => {
+    renderRoute();
+
+    press('c');
+    const to = await screen.findByLabelText('To');
+    await waitFor(() => expect(to).toHaveFocus());
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+
+    const trigger = screen.getAllByRole('button', { name: /Compose/u })[0];
+    act(() => trigger.focus());
+    fireEvent.click(trigger);
+    await waitFor(() => expect(screen.getByLabelText('To')).toHaveFocus());
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getAllByRole('button', { name: /Compose/u })[0])
+    );
+  });
+
+  // Issue #92: a bad recipient is named on the To field itself, not in one generic form error.
+  it('an invalid recipient is reported inline on To and focuses it', async () => {
+    renderRoute();
+
+    press('c');
+    const to = await screen.findByLabelText('To');
+    fireEvent.change(to, { target: { value: 'ann@example.com, not-an-address' } });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Hello' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(to).toHaveAttribute('aria-invalid', 'true'));
+    expect(to).toHaveFocus();
+    expect(to).toHaveAccessibleDescription(/not-an-address/u);
+    expect(to).not.toHaveAccessibleDescription(/ann@example\.com/u);
+    expect(screen.queryByText(/Enter 1 to 50 plain email addresses/u)).toBeNull();
+    expect(state.send.mutateAsync).not.toHaveBeenCalled();
+
+    // Fixing the field clears its error.
+    fireEvent.change(to, { target: { value: 'ann@example.com' } });
+    expect(to).not.toHaveAttribute('aria-invalid', 'true');
+  });
+
   // Issue #86: leaving the page with the composer open keeps what was written.
   it('navigating away with the composer open keeps the draft for the next compose', async () => {
     const first = renderRoute();

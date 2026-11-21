@@ -1,7 +1,8 @@
 # Self-Hosting Zmail
 
 Runs Zmail on one Linux server with Docker Compose: PostgreSQL, the API, the webhook, broadcast,
-and mail zone workers, and the Web console. A reverse proxy on the host terminates TLS.
+and mail zone workers (plus the mail connector worker once connectors are on), and the Web console.
+A reverse proxy on the host terminates TLS.
 
 ## Install
 
@@ -73,6 +74,28 @@ account, so keep zones organizations must not use in another Cloudflare account.
 and Managed Zones sections of [`contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md), and
 [`docs/runbooks/self-serve-domain-acceptance.md`](../../docs/runbooks/self-serve-domain-acceptance.md)
 for a real end-to-end check, including the steps for installs that predate managed zones.
+
+## Mail Connectors
+
+Members can bind their own Gmail, Outlook, or IMAP accounts read-only (External Mailboxes in
+[`contracts/MAILBOXES.md`](../../contracts/MAILBOXES.md)). It is off by default. To turn it on, set
+in `.env`:
+
+- `EXTERNAL_MAIL_PROVIDERS`, a comma list of `gmail`, `outlook`, and `imap`.
+- `MAILBOX_SECRET_ENCRYPTION_KEY`, at least 32 characters (for example `openssl rand -hex 32`). It
+  seals the stored grants and passwords: back it up with `.env` and never change it while
+  connections exist.
+- For `gmail` or `outlook`: `EXTERNAL_MAIL_REDIRECT_URL` set to
+  `https://<host>/console/mailboxes/connected/callback`, and the provider's OAuth client
+  (`EXTERNAL_MAIL_GMAIL_CLIENT_ID` and `EXTERNAL_MAIL_GMAIL_CLIENT_SECRET`, or
+  `EXTERNAL_MAIL_OUTLOOK_CLIENT_ID`, `EXTERNAL_MAIL_OUTLOOK_CLIENT_SECRET`, and optionally
+  `EXTERNAL_MAIL_OUTLOOK_TENANT`).
+- `COMPOSE_PROFILES=external-mail`, which starts the `external-mail-worker` service
+  (`mail:external:sync --batch=20 --poll=30s`). Without it accounts bind but are never synced.
+
+Then run `docker compose up -d --wait` again. Copies of a disconnected account are deleted by
+`broadcast-worker` once `EXTERNAL_MAIL_REVOKED_RETENTION` (default `720h`) has passed, whether or
+not connectors are on.
 
 ## Backups
 

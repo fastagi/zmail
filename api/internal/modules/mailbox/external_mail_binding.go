@@ -171,8 +171,9 @@ type externalBinding struct {
 
 // saveExternalBinding stores a fresh grant: a new account gets a private read-only connected
 // mailbox and an active connection; the viewer's own connection to the account is restored with
-// the grant; an account another member bound is refused. A grant that is not kept is handed back
-// to the provider.
+// the grant; an account another member bound is refused. A new account and a restored revoked
+// connection each take one of the viewer's live places, so both are refused at the limit. A grant
+// that is not kept is handed back to the provider.
 func (s *service) saveExternalBinding(ctx context.Context, viewer domain.OrganizationContext, connector ExternalMailConnector, token ExternalMailToken, binding externalBinding) (*domain.ExternalMailConnection, bool, error) {
 	address := strings.ToLower(strings.TrimSpace(binding.address))
 	if address == "" || len(address) > 320 || token.RefreshToken == "" {
@@ -187,6 +188,10 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 	var connection *domain.ExternalMailConnection
 	created := false
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+		// The viewer's bindings run one at a time, so the limit is counted against committed rows.
+		if lockErr := s.externalMail.LockExternalMailBindings(tx, viewer.OrganizationID, viewer.UserID); lockErr != nil {
+			return lockErr
+		}
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, binding.provider, address)
 		switch {
 		case errors.Is(findErr, ErrExternalMailConnectionNotFound):
@@ -216,6 +221,12 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 		}
 		if binding.connectionID != nil && *binding.connectionID != existing.ID {
 			return ErrExternalMailAccountMismatch
+		}
+		if existing.Status == domain.ExternalMailStatusRevoked {
+			// A revoked connection does not count; restoring it makes it live again.
+			if limitErr := s.checkExternalMailConnectionLimit(tx, viewer); limitErr != nil {
+				return limitErr
+			}
 		}
 		connection, findErr = s.externalMail.RebindExternalMailConnection(tx, domain.ExternalMailRebind{
 			ConnectionID: existing.ID, EncryptedRefreshToken: sealed,
@@ -289,13 +300,8 @@ func (s *service) sameExternalMailbox(connector ExternalMailConnector, existing 
 // bindExternalAccount creates the private, read-only connected personal mailbox of a new account
 // and its connection, due for its first sync at once.
 func (s *service) bindExternalAccount(tx context.Context, viewer domain.OrganizationContext, binding externalBinding, sealed string) (*domain.ExternalMailConnection, error) {
-	// Revoked connections are kept for a later rebind and do not count.
-	live, err := s.externalMail.CountLiveExternalMailConnections(tx, viewer.OrganizationID, viewer.UserID)
-	if err != nil {
+	if err := s.checkExternalMailConnectionLimit(tx, viewer); err != nil {
 		return nil, err
-	}
-	if live >= domain.MaxExternalMailConnectionsPerUser {
-		return nil, ErrExternalMailConnectionLimit
 	}
 	owner := viewer.UserID
 	mailbox := &domain.Mailbox{
@@ -319,6 +325,20 @@ func (s *service) bindExternalAccount(tx context.Context, viewer domain.Organiza
 		return nil, err
 	}
 	return connection, nil
+}
+
+// checkExternalMailConnectionLimit refuses one more live connection for the viewer once they hold
+// MaxExternalMailConnectionsPerUser. Revoked connections are kept for a later rebind and do not
+// count. It runs under the viewer's binding lock.
+func (s *service) checkExternalMailConnectionLimit(tx context.Context, viewer domain.OrganizationContext) error {
+	live, err := s.externalMail.CountLiveExternalMailConnections(tx, viewer.OrganizationID, viewer.UserID)
+	if err != nil {
+		return err
+	}
+	if live >= domain.MaxExternalMailConnectionsPerUser {
+		return ErrExternalMailConnectionLimit
+	}
+	return nil
 }
 
 // randomToken is 32 random bytes, base64url without padding: a state or a PKCE verifier.

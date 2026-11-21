@@ -8185,7 +8185,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Neither `provider` nor `connection_id`, a `provider` other than the connection's (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`), or a malformed body (`VALIDATION.FAILED`). */
+            /** @description Neither `provider` nor `connection_id`, a `provider` other than the connection's, or a `backfill_days` outside 1 to 90 (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`), or a malformed body (`COMMON.VALIDATION_FAILED`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8242,7 +8242,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), another member holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked one is purged and the account bound fresh instead), or the caller bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to the provider. */
+            /** @description A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), another member holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked one is purged and the account bound fresh instead), or the caller already holds the most live connections allowed, 10, and the account is new or the caller's revoked connection (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to the provider. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8578,7 +8578,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Another member holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked one is purged and the account bound fresh instead), or the caller bound the most accounts allowed, 10 (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). */
+            /** @description Another member holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked one is purged and the account bound fresh instead), or the caller already holds the most live connections allowed, 10, and the account is new or the caller's revoked connection (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). */
             409: {
                 headers: {
                     [name: string]: unknown;

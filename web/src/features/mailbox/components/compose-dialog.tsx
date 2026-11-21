@@ -36,6 +36,7 @@ import {
   MAIL_MAX_ATTACHMENTS,
   MAIL_SUBJECT_MAX_LENGTH,
   normalizeMailMessage,
+  normalizeRecipient,
   normalizeRecipientLists,
   splitRecipients,
 } from '@/features/mailbox/schemas';
@@ -114,6 +115,32 @@ export function ComposeDialog({
   );
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const toInput = useRef<HTMLTextAreaElement>(null);
+  const ccInput = useRef<HTMLTextAreaElement>(null);
+  // Addresses a recipient field holds that are not plain email addresses, shown on that field.
+  const [badTo, setBadTo] = useState<string[]>([]);
+  const [badCc, setBadCc] = useState<string[]>([]);
+  // The page's composer takes the focus as it opens, so the next Tab stays in the form; the
+  // dialog does the same through its own open focus.
+  useEffect(() => {
+    if (inline) toInput.current?.focus();
+  }, [inline]);
+
+  /**
+   * Names every address of To and Cc that is not a plain email address on its own field and
+   * focuses the first such field; false when there is one.
+   */
+  const checkRecipients = (): boolean => {
+    const invalid = (value: string) =>
+      splitRecipients(value).filter(address => normalizeRecipient(address) === null);
+    const toInvalid = invalid(to);
+    const ccInvalid = invalid(cc);
+    setBadTo(toInvalid);
+    setBadCc(ccInvalid);
+    if (toInvalid.length > 0) toInput.current?.focus();
+    else if (ccInvalid.length > 0) ccInput.current?.focus();
+    return toInvalid.length === 0 && ccInvalid.length === 0;
+  };
   const attachHintId = useId();
   const filesTooMany = files.length + carried.length > MAIL_MAX_ATTACHMENTS;
   const filesTooLarge =
@@ -160,6 +187,7 @@ export function ComposeDialog({
 
   const submitTemplate = async () => {
     if (!template) return;
+    if (!checkRecipients()) return;
     const recipients = normalizeRecipientLists(splitRecipients(to), splitRecipients(cc));
     if (!recipients) {
       setErrorKey('errors.messageInvalid');
@@ -202,6 +230,7 @@ export function ComposeDialog({
       await submitTemplate();
       return;
     }
+    if (!checkRecipients()) return;
     const normalized = normalizeMailMessage({
       to: splitRecipients(to),
       cc: splitRecipients(cc),
@@ -291,7 +320,17 @@ export function ComposeDialog({
             disabled={send.isPending}
             placeholder={t('compose.toPlaceholder')}
             aria-describedby="mail-compose-recipients-hint"
-            onChange={event => setTo(event.target.value)}
+            root
+            ref={toInput}
+            errorText={
+              badTo.length > 0
+                ? t('compose.invalidRecipients', { addresses: badTo.join(', ') })
+                : undefined
+            }
+            onChange={event => {
+              setBadTo([]);
+              setTo(event.target.value);
+            }}
           />
           <p id="mail-compose-recipients-hint" className="text-xs text-muted-foreground">
             {t('compose.recipientsHint')}
@@ -306,7 +345,17 @@ export function ComposeDialog({
             rows={1}
             spellCheck={false}
             disabled={send.isPending}
-            onChange={event => setCc(event.target.value)}
+            root
+            ref={ccInput}
+            errorText={
+              badCc.length > 0
+                ? t('compose.invalidRecipients', { addresses: badCc.join(', ') })
+                : undefined
+            }
+            onChange={event => {
+              setBadCc([]);
+              setCc(event.target.value);
+            }}
           />
         </div>
         {!isReplyOrForward && templates.data && templates.data.length > 0 ? (
@@ -504,7 +553,12 @@ export function ComposeDialog({
     );
   return (
     <Dialog open onOpenChange={open => !open && dismiss()}>
-      <DialogContent>
+      <DialogContent
+        onOpenAutoFocus={event => {
+          event.preventDefault();
+          toInput.current?.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t(titleKey)}</DialogTitle>
           <DialogDescription>

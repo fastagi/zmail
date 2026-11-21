@@ -11,6 +11,29 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Mail connector acceptance fixes
+
+### Medium — Restoring a revoked connection counts toward the limit of 10
+
+Binding an account again whose connection the member revoked makes that connection live, so it now
+answers `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT` (and hands the grant back) while the member already
+holds 10 live connections, on both `POST /v1/external-mail-authorizations/completions` and
+`POST /v1/external-mail-credentials`. Reconnecting a live connection is unchanged. Bindings of one
+member now run one at a time, so two at once never both pass the limit.
+
+### Low — An out-of-range `backfill_days` is `MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`
+
+`POST /v1/external-mail-authorizations` and `POST /v1/external-mail-credentials` answer a
+`backfill_days` outside 1 to 90 with `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`, as the contract
+states, instead of `422 COMMON.VALIDATION_FAILED`.
+
+### Medium — Run `mail:external:sync` where connectors are on
+
+Nothing ran the sync worker before. `make dev` now starts it when `EXTERNAL_MAIL_PROVIDERS` is set,
+and `deploy/self-host` passes the `EXTERNAL_MAIL_*` settings and `MAILBOX_SECRET_ENCRYPTION_KEY` and
+adds the `external-mail-worker` service in the `external-mail` Compose profile. A deployment of your
+own adds the worker as `api/docs/DEPLOYMENT.md` describes.
+
 ## Unreleased — Mail agent grants and the agent mail feed
 
 A person can let an API key (an agent) receive one mailbox's new mail through a replayable feed,
@@ -102,10 +125,10 @@ Budget, Sync Runs, Retention Of Revoked Copies). Migration `2026_12_06_090000_ad
 ### High — Revoked external copies are deleted after 30 days
 
 Revoking a connection (by its member, a manager, or a member leaving) now sets `revoked_at`, and the
-`mail:external:sync` worker deletes the copies, the external mailbox, and the connection once
+mail worker (`mail:broadcast:work`) deletes the copies, the external mailbox, and the connection once
 `EXTERNAL_MAIL_REVOKED_RETENTION` (default `720h`, at least `24h`, `90d` accepted; a value that does not
-parse stops startup) has passed. The deletion runs in the mail worker (`mail:broadcast:work`),
-whether or not `EXTERNAL_MAIL_PROVIDERS` is set; `MailBroadcastDispatcher` gains
+parse stops startup) has passed. The deletion runs there, not in `mail:external:sync`, whether or not
+`EXTERNAL_MAIL_PROVIDERS` is set; `MailBroadcastDispatcher` gains
 `PurgeRevokedExternalMail`. Connections revoked before the upgrade
 start their retention at the migration, so their copies are deleted one retention after the upgrade;
 raise the retention to keep them longer. Binding the
