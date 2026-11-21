@@ -14,11 +14,16 @@ import { useT } from '@/i18n';
 
 /**
  * Whether the caller may switch the mailbox's AI triage: a personal mailbox's owner alone (the
- * only caller with `organize` there, never an organization owner or admin by role), a shared
- * mailbox's `manage_members`. The API remains the authority.
+ * only caller with `organize` on a Zmail one, and the only one who sees a connected one at all,
+ * never an organization owner or admin by role), a shared mailbox's `manage_members`. A connected
+ * mailbox never grants `organize`, so its owner is recognized by `view`. The API remains the
+ * authority.
  */
 export function mayToggleMailboxTriage(mailbox: Mailbox): boolean {
   if (mailbox.type === 'personal') {
+    if (mailbox.origin === 'connected') {
+      return mailbox.access.view;
+    }
     return mailbox.access.organize && !mailbox.awaiting_handover;
   }
   return mailbox.access.manage_members;

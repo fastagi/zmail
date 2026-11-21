@@ -50,7 +50,7 @@ func (f *externalFixture) addConnection(t *testing.T, provider domain.ExternalMa
 	owner := uint(accessB)
 	mailbox := &domain.Mailbox{
 		OrganizationID: accessOrg, CreatedBy: accessB, Address: token + "@" + string(provider) + ".example",
-		Type: domain.MailboxTypeExternal, OwnerUserID: &owner,
+		Type: domain.MailboxTypePersonal, Origin: domain.MailboxOriginConnected, OwnerUserID: &owner,
 	}
 	if err := f.repo.CreateMailbox(ctx, mailbox, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("create external mailbox: %v", err)

@@ -93,6 +93,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_01_090100_create_mail_content_access_audits",
 			"2026_12_02_090000_mail_cloudflare",
 			"2026_12_03_090000_open_mail_connectors",
+			"2026_12_04_090000_add_mailbox_origin",
 			"2026_12_06_090000_add_external_mail_sync_ops",
 		),
 	)

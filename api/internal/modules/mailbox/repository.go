@@ -45,22 +45,27 @@ func (r *repository) InTransaction(ctx context.Context, fn func(ctx context.Cont
 	})
 }
 
-// CreateMailbox inserts a mailbox while holding a per-organization advisory lock, so two concurrent
-// requests cannot both pass the ownership limit.
+// CreateMailbox inserts a mailbox. A Zmail mailbox is inserted while holding a per-organization
+// advisory lock, so two concurrent requests cannot both pass the organization's limit. A connected
+// mailbox ignores limit: it is a member's own outside account, bounded per member by the binding
+// (MaxExternalMailConnectionsPerUser), never by the organization's mailbox limit.
 func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox, limit int) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('mailbox_owner'), ?)`, int32(mailbox.OrganizationID)).Error; err != nil { //nolint:gosec // lock key only needs to be stable per user
-			return err
-		}
-		var owned int64
-		if err := tx.Model(&MailboxPO{}).Where("organization_id = ?", mailbox.OrganizationID).Count(&owned).Error; err != nil {
-			return err
-		}
-		if owned >= int64(limit) {
-			return ErrMailboxLimitReached
+		if !mailbox.Connected() {
+			if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('mailbox_owner'), ?)`, int32(mailbox.OrganizationID)).Error; err != nil { //nolint:gosec // lock key only needs to be stable per user
+				return err
+			}
+			var owned int64
+			if err := tx.Model(&MailboxPO{}).Where("organization_id = ? AND origin = ?", mailbox.OrganizationID,
+				string(domain.MailboxOriginZmail)).Count(&owned).Error; err != nil {
+				return err
+			}
+			if owned >= int64(limit) {
+				return ErrMailboxLimitReached
+			}
 		}
 		organizationID := mailbox.OrganizationID
 		po := &MailboxPO{
@@ -70,6 +75,7 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 			DisplayName:    mailbox.DisplayName,
 			RoutingRuleID:  mailbox.RoutingRuleID,
 			Type:           string(mailbox.Type),
+			Origin:         string(mailboxOriginOf(string(mailbox.Origin))),
 			OwnerUserID:    mailbox.OwnerUserID,
 		}
 		if po.Type == "" {
@@ -88,13 +94,14 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 	})
 }
 
-func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMembershipID uint) ([]*domain.Mailbox, error) {
+func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMembershipID, viewerUserID uint) ([]*domain.Mailbox, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
 	var rows []MailboxPO
 	err := r.conn(ctx).
 		Where("organization_id = ?", organizationID).
+		Where(visibleToViewer, viewerUserID).
 		Order("id asc").
 		Limit(domain.MailboxesPerOrganizationCeiling).
 		Find(&rows).Error
@@ -104,15 +111,20 @@ func (r *repository) ListMailboxes(ctx context.Context, organizationID, readerMe
 	return r.withUnreadCounts(ctx, rows, readerMembershipID)
 }
 
+// visibleToViewer drops other members' connected personal mailboxes in SQL: they are outside the
+// organization's mailbox limit, so a listing must never load them only to filter them out. The
+// viewer's own connected mailboxes, at most MaxExternalMailConnectionsPerUser, stay.
+const visibleToViewer = "(NOT (origin = 'connected' AND type = 'personal') OR owner_user_id = ?)"
+
 // ListUsableMailboxes is bounded like ListMailboxes; it reads the caller's personal mailboxes,
 // their member rows, and, for managers, personal mailboxes awaiting handover.
 func (r *repository) ListUsableMailboxes(ctx context.Context, organizationID, membershipID, userID uint, includeAwaitingHandover bool) ([]*domain.Mailbox, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	condition := "(type IN ('personal','external') AND owner_user_id = ?) OR id IN (SELECT mailbox_id FROM mailbox_members WHERE membership_id = ?)"
+	condition := "(type = 'personal' AND owner_user_id = ?) OR id IN (SELECT mailbox_id FROM mailbox_members WHERE membership_id = ?)"
 	if includeAwaitingHandover {
-		condition += " OR (type = 'personal' AND owner_left_at IS NOT NULL)"
+		condition += " OR (type = 'personal' AND origin = 'zmail' AND owner_left_at IS NOT NULL)"
 	}
 	var rows []MailboxPO
 	err := r.conn(ctx).
@@ -201,8 +213,8 @@ func (r *repository) FindMailboxByAddress(ctx context.Context, address string) (
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailboxPO
-	// External mailboxes carry an outside account's address and never take delivery.
-	if err := r.conn(ctx).Where("address = ? AND type <> ?", strings.ToLower(address), string(domain.MailboxTypeExternal)).First(&po).Error; err != nil {
+	// Connected mailboxes carry an outside account's address and never take delivery.
+	if err := r.conn(ctx).Where("address = ? AND origin = ?", strings.ToLower(address), string(domain.MailboxOriginZmail)).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailboxNotFound
 		}

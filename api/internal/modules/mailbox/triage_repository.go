@@ -119,8 +119,29 @@ func (r *repository) SetMailboxTriage(ctx context.Context, mailboxID uint, enabl
 		Updates(map[string]any{"ai_triage_enabled": enabled, "updated_at": time.Now().UTC()}).Error
 }
 
+// StopMailboxTriage turns the switch off and deletes the mailbox's pending rows.
+func (r *repository) StopMailboxTriage(ctx context.Context, mailboxID uint) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&MailboxPO{}).Where("id = ?", mailboxID).
+			Updates(map[string]any{"ai_triage_enabled": false, "updated_at": time.Now().UTC()}).Error; err != nil {
+			return err
+		}
+		return tx.Where("mailbox_id = ? AND status = ?", mailboxID, string(domain.MailTriagePending)).
+			Delete(&MailTriagePO{}).Error
+	})
+}
+
+// triageableOrigin keeps a Zmail mailbox, or a connected one whose connection is still active: a
+// revoked or lost connection's copies are never sent to the model.
+const triageableOrigin = `(box.origin = 'zmail' OR EXISTS (SELECT 1 FROM external_mail_connections conn
+	WHERE conn.mailbox_id = box.id AND conn.status = 'active'))`
+
 // EnqueueTriage inserts a pending row when the mailbox is live with its switch on, the
-// organization's switch is on, and a personal mailbox's owner is still a member. It reads both
+// organization's switch is on, a personal mailbox's owner is still a member, and a connected
+// mailbox's connection is active. It reads both
 // switches in the same statement, so the cost on the inbound path is one insert.
 func (r *repository) EnqueueTriage(ctx context.Context, messageID, mailboxID uint, now time.Time) (bool, error) {
 	if r.db == nil {
@@ -132,7 +153,7 @@ func (r *repository) EnqueueTriage(ctx context.Context, messageID, mailboxID uin
 		FROM mailboxes AS box
 		JOIN mail_triage_settings AS settings ON settings.organization_id = box.organization_id
 		WHERE box.id = @mailbox AND box.deleted_at IS NULL AND box.ai_triage_enabled AND settings.enabled
-		  AND (box.type = 'shared' OR box.owner_left_at IS NULL)
+		  AND (box.type = 'shared' OR box.owner_left_at IS NULL) AND `+triageableOrigin+`
 		ON CONFLICT (message_id) DO NOTHING`, map[string]any{"message": messageID, "mailbox": mailboxID, "now": now})
 	return result.RowsAffected == 1, result.Error
 }
@@ -166,7 +187,7 @@ func (r *repository) ClaimTriage(ctx context.Context, now time.Time, limit int) 
 		if err := db.Raw(`SELECT mail_triage.*, box.organization_id,
 			  COALESCE(settings.enabled, false) AS organization_on,
 			  COALESCE(settings.daily_message_cap, 0) AS organization_cap,
-			  (box.ai_triage_enabled AND box.deleted_at IS NULL) AS mailbox_on,
+			  (box.ai_triage_enabled AND box.deleted_at IS NULL AND `+triageableOrigin+`) AS mailbox_on,
 			  box.type = 'personal' AS mailbox_personal,
 			  box.owner_left_at IS NOT NULL AS mailbox_owner_left,
 			  COALESCE(role.name, '') AS mailbox_role_name

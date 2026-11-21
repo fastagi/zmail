@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/metrics"
+	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
 const (
@@ -254,9 +256,9 @@ func (s *service) ListExternalMailConnections(ctx context.Context, viewer domain
 }
 
 // RevokeExternalMailConnection unbinds an account: its owner may, and so may owners and admins for
-// offboarding. The provider grant is revoked on a best-effort basis, then the connection stops for
-// good and its token is erased. Mail already synced stays in the external mailbox until the
-// retention ends or the owner purges it.
+// offboarding, which is recorded as a forced disconnect. The provider grant is revoked on a
+// best-effort basis, then the connection stops for good and its token is erased. Mail already
+// synced stays in the connected mailbox until the retention ends or the owner purges it.
 func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domain.OrganizationContext, id uint) error {
 	if !s.externalMailAvailable() {
 		return ErrExternalMailConnectionNotFound
@@ -269,23 +271,102 @@ func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domai
 	if !owner && !viewer.Role.CanManageOrganization() {
 		return ErrExternalMailConnectionNotFound
 	}
+	if !owner {
+		return s.forceDisconnect(ctx, viewer, connection)
+	}
+	return s.revokeConnection(ctx, connection, viewer.UserID, domain.MailboxAccessConnectionRevoked)
+}
+
+// forceDisconnect revokes another member's connection for an owner or admin, records it in the
+// mailbox's access history, and, when it changed anything, in the organization audit log so other
+// managers see who disconnected which connection. Neither carries the outside address.
+func (s *service) forceDisconnect(ctx context.Context, viewer domain.OrganizationContext, connection *domain.ExternalMailConnection) error {
+	live := connection.Status != domain.ExternalMailStatusRevoked
+	if err := s.revokeConnection(ctx, connection, viewer.UserID, domain.MailboxAccessConnectionForceRevoked); err != nil {
+		return err
+	}
+	if live {
+		metadata := map[string]any{"provider": string(connection.Provider), "reason": "forced_disconnect"}
+		if connection.OwnerUserID != nil {
+			metadata["owner_user_id"] = *connection.OwnerUserID
+		}
+		s.auditChange(ctx, auditstarter.Change{
+			Action: "delete", Resource: "external_mail_connections", TargetType: "external_mail_connection",
+			TargetID: strconv.FormatUint(uint64(connection.ID), 10), Result: domain.AuditResultSuccess,
+			Metadata: metadata,
+		})
+	}
+	return nil
+}
+
+// revokeConnection hands a live connection's grant back to its provider, then marks it revoked and
+// records the event on its mailbox in one transaction. A connection already revoked changes nothing
+// and records nothing.
+func (s *service) revokeConnection(ctx context.Context, connection *domain.ExternalMailConnection, actorUserID uint, event domain.MailboxAccessEventType) error {
 	if connection.Status == domain.ExternalMailStatusRevoked {
 		return nil
 	}
 	s.handBackExternalGrant(ctx, connection)
-	if err := s.externalMail.RevokeExternalMailConnection(ctx, viewer.OrganizationID, id, s.now().UTC()); err != nil {
+	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if err := s.externalMail.RevokeExternalMailConnection(tx, connection.OrganizationID, connection.ID, s.now().UTC()); err != nil {
+			return err
+		}
+		// A revoked account's copies never reach the model again, whoever revoked it.
+		if s.triage != nil {
+			if err := s.triage.StopMailboxTriage(tx, connection.MailboxID); err != nil {
+				return err
+			}
+		}
+		return s.recordConnectionEvent(tx, connection, event, actorUserID)
+	})
+	if err != nil {
 		return err
 	}
 	slog.InfoContext(ctx, "external_mail.revoked",
-		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
+		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
+		slog.String("event", string(event)))
 	return nil
+}
+
+// deleteConnectedMailbox revokes the mailbox's connection, then soft-deletes the mailbox, in one
+// transaction. A mailbox without a connection is deleted as it is.
+func (s *service) deleteConnectedMailbox(ctx context.Context, viewer domain.OrganizationContext, mailbox *domain.Mailbox) error {
+	return s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if s.externalMail != nil {
+			connection, err := s.externalMail.FindExternalMailConnectionByMailbox(tx, mailbox.OrganizationID, mailbox.ID)
+			switch {
+			case errors.Is(err, ErrExternalMailConnectionNotFound):
+			case err != nil:
+				return err
+			default:
+				if err := s.revokeConnection(tx, connection, viewer.UserID, domain.MailboxAccessConnectionRevoked); err != nil {
+					return err
+				}
+			}
+		}
+		return s.repo.DeleteMailbox(tx, mailbox.OrganizationID, mailbox.ID)
+	})
+}
+
+// recordConnectionEvent writes a connection event to its mailbox's access history. The detail names
+// the connection and its provider only, never the outside account's address.
+func (s *service) recordConnectionEvent(ctx context.Context, connection *domain.ExternalMailConnection, event domain.MailboxAccessEventType, actorUserID uint) error {
+	var subject uint
+	if connection.OwnerUserID != nil {
+		subject = *connection.OwnerUserID
+	}
+	mailbox := &domain.Mailbox{ID: connection.MailboxID, OrganizationID: connection.OrganizationID}
+	return s.recordAccess(ctx, mailbox, event, actorUserID, subject, map[string]any{
+		"connection_id": connection.ID,
+		"provider":      string(connection.Provider),
+	})
 }
 
 // handBackExternalGrant revokes a connection's grant at its provider on a best-effort basis: a
 // provider that is down or no longer enabled leaves the grant to expire there, and the token is
 // erased here either way.
 func (s *service) handBackExternalGrant(ctx context.Context, connection *domain.ExternalMailConnection) {
-	if connection.EncryptedRefreshToken == "" {
+	if connection.EncryptedRefreshToken == "" || s.encryptor == nil {
 		return
 	}
 	token, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)

@@ -169,7 +169,7 @@ type externalBinding struct {
 	connectionID *uint
 }
 
-// saveExternalBinding stores a fresh grant: a new account gets a private read-only external
+// saveExternalBinding stores a fresh grant: a new account gets a private read-only connected
 // mailbox and an active connection; the viewer's own connection to the account is restored with
 // the grant; an account another member bound is refused. A grant that is not kept is handed back
 // to the provider.
@@ -200,7 +200,19 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 			return findErr
 		}
 		if existing.OwnerUserID == nil || *existing.OwnerUserID != viewer.UserID {
-			return ErrExternalMailAccountTaken
+			if existing.Status != domain.ExternalMailStatusRevoked || binding.connectionID != nil {
+				// A live account belongs to the member who bound it.
+				return ErrExternalMailAccountTaken
+			}
+			// The previous member's connection is revoked (they left, unbound it, or were
+			// disconnected) and the binder just proved control of the account: the old copies and
+			// mailbox are purged at once and the account is bound fresh, in this transaction.
+			if purgeErr := s.purgeForRebind(tx, viewer, existing); purgeErr != nil {
+				return purgeErr
+			}
+			connection, findErr = s.bindExternalAccount(tx, viewer, binding, sealed)
+			created = findErr == nil
+			return findErr
 		}
 		if binding.connectionID != nil && *binding.connectionID != existing.ID {
 			return ErrExternalMailAccountMismatch
@@ -210,7 +222,10 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 			ResetCursor: existing.Status == domain.ExternalMailStatusRevoked || !s.sameExternalMailbox(connector, existing, token),
 			Now:         s.now().UTC(),
 		})
-		return findErr
+		if findErr != nil {
+			return findErr
+		}
+		return s.recordConnectionEvent(tx, connection, domain.MailboxAccessConnectionReconnected, viewer.UserID)
 	})
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
 		// Another sign-in bound the same account in the meantime.
@@ -236,6 +251,26 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 	return connection, created, nil
 }
 
+// purgeForRebind deletes a revoked connection of another member with its copies and mailbox, to
+// completion, recording copies_purged with reason rebound and the new binder as the actor. A
+// connection the worker holds right now is still in use: the binder retries.
+func (s *service) purgeForRebind(tx context.Context, viewer domain.OrganizationContext, existing *domain.ExternalMailConnection) error {
+	for {
+		purge, err := s.purgeExternalMailStep(tx, domain.ExternalMailPurgeStep{
+			ConnectionID: existing.ID, Now: s.now().UTC(), Messages: externalMailPurgeBatch,
+		}, viewer.UserID, externalMailPurgeRebound)
+		if err != nil {
+			return err
+		}
+		if purge == nil {
+			return ErrExternalMailAccountTaken
+		}
+		if purge.Completed {
+			return nil
+		}
+	}
+}
+
 // sameExternalMailbox reports whether a fresh grant reads the same mailbox as the connection's
 // stored one. Only connectors whose grant names a server can tell; a stored grant that cannot be
 // opened is treated as another mailbox, so the cursor starts over.
@@ -251,8 +286,8 @@ func (s *service) sameExternalMailbox(connector ExternalMailConnector, existing 
 	return comparer.SameMailbox(ExternalMailToken{RefreshToken: previous}, token)
 }
 
-// bindExternalAccount creates the private, read-only external mailbox of a new account and its
-// connection, due for its first sync at once.
+// bindExternalAccount creates the private, read-only connected personal mailbox of a new account
+// and its connection, due for its first sync at once.
 func (s *service) bindExternalAccount(tx context.Context, viewer domain.OrganizationContext, binding externalBinding, sealed string) (*domain.ExternalMailConnection, error) {
 	// Revoked connections are kept for a later rebind and do not count.
 	live, err := s.externalMail.CountLiveExternalMailConnections(tx, viewer.OrganizationID, viewer.UserID)
@@ -265,11 +300,11 @@ func (s *service) bindExternalAccount(tx context.Context, viewer domain.Organiza
 	owner := viewer.UserID
 	mailbox := &domain.Mailbox{
 		OrganizationID: viewer.OrganizationID, CreatedBy: viewer.UserID, Address: binding.address, DisplayName: binding.address,
-		Type: domain.MailboxTypeExternal, OwnerUserID: &owner,
+		Type: domain.MailboxTypePersonal, Origin: domain.MailboxOriginConnected, OwnerUserID: &owner,
 	}
-	// External mailboxes are a member's own accounts; the per-user limit bounds them, not the
-	// organization's mailbox limit.
-	if err := s.repo.CreateMailbox(tx, mailbox, domain.MailboxesPerOrganizationCeiling); err != nil {
+	// Connected mailboxes are a member's own accounts; the per-user limit above bounds them, and
+	// the organization's mailbox limit does not apply (CreateMailbox ignores it for them).
+	if err := s.repo.CreateMailbox(tx, mailbox, 0); err != nil {
 		return nil, err
 	}
 	connection := &domain.ExternalMailConnection{
@@ -278,6 +313,9 @@ func (s *service) bindExternalAccount(tx context.Context, viewer domain.Organiza
 		BackfillDays: binding.backfillDays, NextSyncAt: s.now().UTC(),
 	}
 	if err := s.externalMail.CreateExternalMailConnection(tx, connection); err != nil {
+		return nil, err
+	}
+	if err := s.recordConnectionEvent(tx, connection, domain.MailboxAccessConnectionBound, viewer.UserID); err != nil {
 		return nil, err
 	}
 	return connection, nil

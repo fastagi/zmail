@@ -33,7 +33,7 @@ type externalFixture struct {
 func newExternalFixture(t *testing.T, providers ...string) *externalFixture {
 	t.Helper()
 	repo, db := openRepository(t)
-	if err := db.AutoMigrate(&ExternalMailConnectionPO{}, &ExternalMailAuthorizationPO{}, &ExternalMailSyncRunPO{}); err != nil {
+	if err := db.AutoMigrate(&ExternalMailConnectionPO{}, &ExternalMailAuthorizationPO{}, &ExternalMailSyncRunPO{}, &MailTriagePO{}, &MailTriageSettingsPO{}); err != nil {
 		t.Fatalf("migrate external mail connections: %v", err)
 	}
 	createOwner(t, db, accessOrg)
@@ -53,7 +53,7 @@ func newExternalFixture(t *testing.T, providers ...string) *externalFixture {
 	owner := uint(accessB)
 	f.mailbox = &domain.Mailbox{
 		OrganizationID: accessOrg, CreatedBy: accessB, Address: "b.personal@gmail.example",
-		Type: domain.MailboxTypeExternal, OwnerUserID: &owner,
+		Type: domain.MailboxTypePersonal, Origin: domain.MailboxOriginConnected, OwnerUserID: &owner,
 	}
 	if err := repo.CreateMailbox(ctx, f.mailbox, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("create external mailbox: %v", err)
@@ -325,8 +325,9 @@ func TestExternalMailboxIsPrivateAndReadOnly(t *testing.T) {
 	if _, _, err := f.service.ListMessages(ctx, f.c, f.mailbox.ID, domain.MailMessageFilter{Page: 1, PerPage: 50}); !errors.Is(err, ErrMailboxNotFound) {
 		t.Fatalf("colleague listing the external mailbox: err = %v, want not found", err)
 	}
-	if _, err := f.service.GetMessage(ctx, f.admin, f.mailbox.ID, synced.ID); !errors.Is(err, domain.ErrPermissionDenied) {
-		t.Fatalf("admin reading external mail: err = %v, want permission denied", err)
+	// An admin cannot even tell the member's own account exists.
+	if _, err := f.service.GetMessage(ctx, f.admin, f.mailbox.ID, synced.ID); !errors.Is(err, ErrMailboxNotFound) {
+		t.Fatalf("admin reading connected mail: err = %v, want not found", err)
 	}
 	if _, _, err := f.service.SendMessage(ctx, f.b, f.mailbox.ID, SendInput{To: []string{"x@example.com"}, Subject: "Hi", Text: "Hi"}); !errors.Is(err, domain.ErrPermissionDenied) {
 		t.Fatalf("binder sending from the external mailbox: err = %v, want permission denied", err)
@@ -375,6 +376,8 @@ func (f *externalFixture) callWith(t *testing.T, viewer domain.OrganizationConte
 	handler := NewHandler(f.service)
 	router.GET("/external-mail-connections", handler.ListExternalMailConnections)
 	router.DELETE("/external-mail-connections/:connection_id", handler.RevokeExternalMailConnection)
+	router.GET("/external-mail-connection-directory", handler.ListExternalMailConnectionDirectory)
+	router.DELETE("/external-mail-connection-directory/:connection_id", handler.ForceDisconnectExternalMailConnection)
 	router.GET("/external-mail-connectors", handler.ListExternalMailConnectors)
 	router.POST("/external-mail-authorizations", handler.StartExternalMailAuthorization)
 	router.POST("/external-mail-authorizations/completions", handler.CompleteExternalMailAuthorization)

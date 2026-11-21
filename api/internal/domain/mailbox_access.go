@@ -20,6 +20,24 @@ func (t MailboxType) Valid() bool {
 	return t == MailboxTypePersonal || t == MailboxTypeShared
 }
 
+// MailboxOrigin says where a mailbox's mail comes from. It is independent of the type, which says
+// who may use the mailbox.
+type MailboxOrigin string
+
+const (
+	// MailboxOriginZmail mailboxes receive and send mail at a Zmail address; the default.
+	MailboxOriginZmail MailboxOrigin = "zmail"
+	// MailboxOriginConnected mailboxes hold read-only copies of an outside account, synced through an
+	// external mail connection. Their address is the outside account's, never Zmail's to deliver to
+	// or send from, and they are never created through the mailbox API.
+	MailboxOriginConnected MailboxOrigin = "connected"
+)
+
+// Valid reports whether the origin is a known value.
+func (o MailboxOrigin) Valid() bool {
+	return o == MailboxOriginZmail || o == MailboxOriginConnected
+}
+
 // MailboxPermission is what a member may do in a shared mailbox. Each level includes the
 // previous one: view < send < manage.
 type MailboxPermission string
@@ -98,12 +116,18 @@ func (a MailboxAccess) Any() bool {
 // rules: the organization role administers, the personal owner uses their own mailbox, and a
 // shared member gets what the member row grants. A mailbox of another organization grants
 // nothing.
+//
+// A connected mailbox holds read-only copies of an outside account: whatever the type and the
+// permission, it never grants send or organize. A connected personal mailbox is the owner's own
+// outside account, so the organization role grants nothing on it at all: owners and admins
+// neither see nor administer it, and disconnect it through the connection directory instead.
 func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMember) MailboxAccess {
 	var access MailboxAccess
 	if m == nil || m.OrganizationID == 0 || m.OrganizationID != viewer.OrganizationID {
 		return access
 	}
-	if viewer.Role.CanManageOrganization() {
+	connectedPersonal := m.Connected() && m.Type == MailboxTypePersonal
+	if viewer.Role.CanManageOrganization() && !connectedPersonal {
 		access.Administer = true
 		access.SeeHistory = true
 		if m.Type == MailboxTypeShared {
@@ -118,13 +142,6 @@ func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMem
 			access.SeeHistory = true
 			access.Organize = true
 		}
-	case MailboxTypeExternal:
-		// A synced copy of an outside account: only the member who bound it reads it, and nobody
-		// sends from it or deletes its mail for good.
-		if m.OwnerUserID != nil && viewer.UserID != 0 && *m.OwnerUserID == viewer.UserID {
-			access.View = true
-			access.SeeHistory = true
-		}
 	case MailboxTypeShared:
 		if member != nil && member.MailboxID == m.ID && viewer.MembershipID != 0 && member.MembershipID == viewer.MembershipID {
 			access.View = access.View || member.Permission.Includes(MailboxPermissionView)
@@ -135,6 +152,10 @@ func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMem
 				access.Organize = true
 			}
 		}
+	}
+	if m.Connected() {
+		access.Send = false
+		access.Organize = false
 	}
 	return access
 }
@@ -153,6 +174,13 @@ const (
 	MailboxAccessWebhooksChanged MailboxAccessEventType = "webhooks_changed"
 	// MailboxAccessRenamed records a display-name change with detail from and to.
 	MailboxAccessRenamed MailboxAccessEventType = "renamed"
+	// Connection events of a connected mailbox carry detail connection_id and provider, never the
+	// outside account's address.
+	MailboxAccessConnectionBound        MailboxAccessEventType = "connection_bound"
+	MailboxAccessConnectionReconnected  MailboxAccessEventType = "connection_reconnected"
+	MailboxAccessConnectionRevoked      MailboxAccessEventType = "connection_revoked"
+	MailboxAccessConnectionForceRevoked MailboxAccessEventType = "connection_force_disconnected"
+	MailboxAccessConnectionRevokedLeave MailboxAccessEventType = "connection_revoked_on_leave"
 )
 
 // MailboxAccessEvent is one entry of a mailbox's access history. It stores user ids, ids, and

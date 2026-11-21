@@ -48,7 +48,7 @@ func TestIMAPCredentialBindingOutcomes(t *testing.T) {
 		t.Fatalf("bind = %+v, created %v, err %v", connection, created, err)
 	}
 	mailbox, err := f.repo.FindMailbox(ctx, accessOrg, connection.MailboxID)
-	if err != nil || mailbox.Type != domain.MailboxTypeExternal || mailbox.OwnerUserID == nil || *mailbox.OwnerUserID != accessC {
+	if err != nil || mailbox.Type != domain.MailboxTypePersonal || !mailbox.Connected() || mailbox.OwnerUserID == nil || *mailbox.OwnerUserID != accessC {
 		t.Fatalf("mailbox = %+v, err %v", mailbox, err)
 	}
 	stored, _ := f.service.externalMail.FindExternalMailConnection(ctx, accessOrg, connection.ID)

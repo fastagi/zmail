@@ -79,7 +79,7 @@ type InboxViewCounts struct {
 type MailInboxRepository interface {
 	// ListMailboxAccessRows returns the organization's live mailboxes, id ascending, with the
 	// membership's member rows and no unread counts.
-	ListMailboxAccessRows(ctx context.Context, organizationID, membershipID uint) ([]MailboxAccessRow, error)
+	ListMailboxAccessRows(ctx context.Context, organizationID, membershipID, viewerUserID uint) ([]MailboxAccessRow, error)
 	// CountUnreadByMailboxIDs returns the reader's unread Inbox count of each given mailbox of the
 	// organization.
 	CountUnreadByMailboxIDs(ctx context.Context, organizationID, readerMembershipID uint, mailboxIDs []uint) (map[uint]int, error)

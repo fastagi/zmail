@@ -206,11 +206,19 @@ func TestOperatorMetricsExcludeDeletedMailboxesAndSyncedCopies(t *testing.T) {
 	require.NoError(t, f.repo.CreateMailbox(ctx, gone, domain.MailboxesPerOrganizationCeiling))
 	storePlatformMessage(t, f.repo, gone.ID, "outbound", "sent", "Gone", metricsDay.Add(12*time.Hour))
 	require.NoError(t, f.repo.DeleteMailbox(ctx, 2, gone.ID))
+	// A member's connected account is not one of the organization's mailboxes.
+	owner := uint(1)
+	connected := &domain.Mailbox{OrganizationID: 2, Address: "member@gmail.example", Type: domain.MailboxTypePersonal,
+		Origin: domain.MailboxOriginConnected, OwnerUserID: &owner}
+	require.NoError(t, f.repo.CreateMailbox(ctx, connected, domain.MailboxesPerOrganizationCeiling))
 
 	overview, err := f.handler.overview(ctx, metricsDay, 1)
 	require.NoError(t, err)
 	assert.Equal(t, 2, overview.Day.Sent)
 	assert.Equal(t, int64(2), overview.Mailboxes)
+	counts, err := f.repo.platformMailboxCounts(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), counts[2], "the connected mailbox is not counted")
 }
 
 func TestOperatorMetricsHTTP(t *testing.T) {

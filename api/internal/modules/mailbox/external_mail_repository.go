@@ -273,6 +273,40 @@ func (r *repository) ListExternalMailConnections(ctx context.Context, organizati
 	return connections, nil
 }
 
+func (r *repository) ListExternalMailConnectionDirectory(ctx context.Context, organizationID, beforeID uint, limit int) ([]*domain.ExternalMailConnection, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	query := r.conn(ctx).Where("organization_id = ?", organizationID)
+	if beforeID != 0 {
+		query = query.Where("id < ?", beforeID)
+	}
+	var rows []ExternalMailConnectionPO
+	if err := query.Order("id DESC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	connections := make([]*domain.ExternalMailConnection, 0, len(rows))
+	for i := range rows {
+		connections = append(connections, rows[i].toDomain())
+	}
+	return connections, nil
+}
+
+func (r *repository) FindExternalMailConnectionByMailbox(ctx context.Context, organizationID, mailboxID uint) (*domain.ExternalMailConnection, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	var po ExternalMailConnectionPO
+	err := r.conn(ctx).Where("organization_id = ? AND mailbox_id = ?", organizationID, mailboxID).First(&po).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrExternalMailConnectionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return po.toDomain(), nil
+}
+
 func (r *repository) FindExternalMailConnection(ctx context.Context, organizationID, id uint) (*domain.ExternalMailConnection, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
