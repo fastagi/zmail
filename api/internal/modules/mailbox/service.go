@@ -261,10 +261,12 @@ type Service interface {
 	PlatformAccountService
 	// TriageService serves the AI triage switches, overrides, and reply drafts.
 	TriageService
-	// ExternalMailService lists and revokes bound external mailboxes.
+	// ExternalMailService lists and revokes the caller's connected mailboxes.
 	ExternalMailService
 	// ExternalMailBindingService binds and reconnects outside accounts.
 	ExternalMailBindingService
+	// ExternalMailDirectoryService lists and force-disconnects members' connections for managers.
+	ExternalMailDirectoryService
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -815,8 +817,8 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 // when the window has room. A broadcast recipient (not queueAtLimit) counts in the broadcast lane
 // and gets ErrMailSendLimitReached there, which pauses the broadcast.
 func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput, queueAtLimit bool) (*domain.MailMessage, bool, error) {
-	// An external mailbox holds read-only copies of an outside account; no path sends from it.
-	if mailbox.Type == domain.MailboxTypeExternal {
+	// A connected mailbox holds read-only copies of an outside account; no path sends from it.
+	if mailbox.Connected() {
 		return nil, false, domain.ErrPermissionDenied
 	}
 	var templateID uint

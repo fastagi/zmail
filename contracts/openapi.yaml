@@ -8689,7 +8689,7 @@ paths:
       summary: Finish binding or reconnecting an outside account
       description: Takes the `state` and `code` the provider returned to the callback page. The pending
         sign-in is used up whether or not the exchange succeeds. A new account creates a private,
-        read-only `external` mailbox and its connection (`201`); the caller's own account in any state
+        read-only connected personal mailbox and its connection (`201`); the caller's own account in any state
         is restored with the same mailbox, so synced mail is never copied twice (`200`). Session only;
         never cached.
       tags:
@@ -8712,7 +8712,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExternalMailConnectionResponse'
         '201':
-          description: A new external mailbox and connection were created.
+          description: A new connected mailbox and connection were created.
           content:
             application/json:
               schema:
@@ -8750,7 +8750,7 @@ paths:
   /v1/external-mail-connections:
     get:
       operationId: listExternalMailConnections
-      summary: List the caller's bound external mailboxes
+      summary: List the caller's connected accounts
       description: Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in
         this organization, at most 10. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty)
         the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached
@@ -8784,10 +8784,11 @@ paths:
   /v1/external-mail-connections/{connection_id}:
     delete:
       operationId: revokeExternalMailConnection
-      summary: Unbind an external mailbox
-      description: The member who bound the account, or an `owner` or `admin`, may unbind it. The grant is
+      summary: Unbind a connected account
+      description: The member who bound the account, or an `owner` or `admin` (recorded as a forced
+        disconnect), may unbind it. The grant is
         revoked at the provider on a best-effort basis, the stored token is erased, and the connection is
-        never synced again; mail already synced stays in the external mailbox. Unbinding a revoked
+        never synced again; mail already synced stays in the connected mailbox. Unbinding a revoked
         connection succeeds again. Another member's connection, another organization's id, and any id
         while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
       tags:
@@ -8804,6 +8805,93 @@ paths:
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the connection
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-connection-directory:
+    get:
+      operationId: listExternalMailConnectionDirectory
+      summary: List the organization's connected accounts for administration
+      description: Needs the `owner` or `admin` organization role. Keyset pages of every connection in the
+        organization, in any status, newest first, with the account address masked (`st***@gmail.com`)
+        and the owner's display name while they are a member. Never a token, the full address, the
+        mailbox, mail, or counts. Empty while external mail is off. Pass `meta.next_cursor` as `cursor`
+        for the next, older page. Never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - name: cursor
+          in: query
+          description: Opaque keyset position from `meta.next_cursor`; absent or empty requests the newest page.
+          schema:
+            type: string
+            maxLength: 128
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 15
+      responses:
+        '200':
+          description: One page of the connection directory.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailConnectionDirectoryPageResponse'
+        '400':
+          description: The cursor is malformed or `page` was sent (`COMMON.INVALID_INPUT`); or the organization
+            header is missing or malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-connection-directory/{connection_id}:
+    delete:
+      operationId: forceDisconnectExternalMailConnection
+      summary: Force-disconnect a member's connected account
+      description: Needs the `owner` or `admin` organization role. Has the effect of the owner's unbind on
+        any connection of the organization; the grant is revoked at the provider on a best-effort basis,
+        the token is erased, mail already synced stays in the owner's connected mailbox, and a
+        `connection_force_disconnected` access event is written. A revoked connection answers `204` again
+        and writes nothing. Another organization's id, and any id while external mail is off, answer
+        `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/ExternalMailConnectionID'
+      responses:
+        '204':
+          description: The connection is revoked.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: The organization (`ORGANIZATION.NOT_FOUND`) or the connection
             (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
@@ -12981,6 +13069,7 @@ components:
         - address
         - display_name
         - type
+        - origin
         - owner_user_id
         - awaiting_handover
         - sealed_before
@@ -13002,6 +13091,8 @@ components:
           maxLength: 120
         type:
           $ref: '#/components/schemas/MailboxType'
+        origin:
+          $ref: '#/components/schemas/MailboxOrigin'
         owner_user_id:
           description: The owner of a personal mailbox; null for a shared one or a personal one whose owner left.
           oneOf:
@@ -13009,8 +13100,8 @@ components:
             - type: 'null'
         awaiting_handover:
           type: boolean
-          description: True while a personal mailbox's owner has left the organization and nobody has taken
-            it over.
+          description: True while a Zmail personal mailbox's owner has left the organization and nobody has
+            taken it over. Always false for a connected mailbox.
         sealed_before:
           description: Messages and broadcasts created before this instant are sealed and invisible on every
             surface; set once at handover, null when nothing is sealed.
@@ -13074,13 +13165,21 @@ components:
             $ref: '#/components/schemas/MailboxMemberRequest'
     MailboxType:
       type: string
-      description: '`external` mailboxes hold read-only copies of a bound outside account; only the member
-        who bound it reads them and nobody sends from them. They are never created, filtered, or exported
-        by type through these routes, which accept `personal` and `shared` only.'
+      description: Who may use the mailbox; independent of its `origin`.
       enum:
         - personal
         - shared
-        - external
+    MailboxOrigin:
+      type: string
+      description: Where the mailbox's mail comes from. `zmail` mailboxes receive and send at a Zmail
+        address. `connected` mailboxes hold read-only copies of an outside account synced through an
+        external mail connection; nobody sends from them or deletes their mail for good, their address
+        never takes delivery, and they are never created through `POST /v1/mailboxes`. A connected
+        `personal` mailbox is its owner's own account, invisible to every other member, owners and admins
+        included.
+      enum:
+        - zmail
+        - connected
     MailboxPermission:
       type: string
       description: Each level includes the previous one.
@@ -13195,6 +13294,11 @@ components:
         - sealed_deleted
         - webhooks_changed
         - renamed
+        - connection_bound
+        - connection_reconnected
+        - connection_revoked
+        - connection_force_disconnected
+        - connection_revoked_on_leave
     MailboxAccessEvent:
       type: object
       additionalProperties: false
@@ -14362,7 +14466,7 @@ components:
       type: string
       description: Where the message came from. `zmail` is mail Zmail itself received or sent; any other
         value is the id of the connector that synced a read-only copy from a bound outside account into
-        an `external` mailbox, such as `gmail` or `outlook`. New connectors add values without a
+        a connected mailbox, such as `gmail` or `outlook`. New connectors add values without a
         contract change, so clients render an unknown value generically.
       pattern: ^[a-z][a-z0-9_]{1,15}$
     ExternalMailConnectorID:
@@ -14393,7 +14497,7 @@ components:
           properties:
             read:
               type: boolean
-              description: The connector syncs the account's mail into its external mailbox.
+              description: The connector syncs the account's mail into its connected mailbox.
     ExternalMailConnectorListResponse:
       type: object
       additionalProperties: false
@@ -14504,7 +14608,7 @@ components:
           type: string
           maxLength: 320
         mailbox_id:
-          description: The `external` mailbox synced mail is stored in.
+          description: The connected mailbox synced mail is stored in.
           allOf:
             - $ref: '#/components/schemas/PositiveID'
         status:
@@ -14549,6 +14653,76 @@ components:
           maxItems: 10
           items:
             $ref: '#/components/schemas/ExternalMailConnection'
+    ExternalMailConnectionDirectoryEntry:
+      type: object
+      additionalProperties: false
+      description: One connection as an owner or admin sees it; never the token, the full address, the
+        mailbox, or mail.
+      required:
+        - id
+        - provider
+        - status
+        - masked_account_address
+        - owner_user_id
+        - owner_display_name
+        - last_synced_at
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        provider:
+          $ref: '#/components/schemas/ExternalMailConnectorID'
+        status:
+          type: string
+          enum:
+            - active
+            - needs_reconnect
+            - revoked
+        masked_account_address:
+          type: string
+          description: The first two characters of the local part (one when it is that short), `***`, and the
+            domain, such as `st***@gmail.com`.
+          maxLength: 324
+        owner_user_id:
+          description: The member who bound the account; null once that account was deleted.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        owner_display_name:
+          description: The owner's nickname, or username without one, while they are a member; null otherwise.
+          oneOf:
+            - type: string
+              maxLength: 255
+            - type: 'null'
+        last_synced_at:
+          description: When a sync last succeeded; null before the first.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+    ExternalMailConnectionDirectoryPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ExternalMailConnectionDirectoryEntry'
+        meta:
+          $ref: '#/components/schemas/CursorPageMeta'
     MailTriageCategory:
       type: string
       description: '`reply` needs the reader''s answer, `deadline` carries a date, `fyi` is for

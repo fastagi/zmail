@@ -74,6 +74,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.GET("/external-mail-connections", h.ListExternalMailConnections).Name("external_mail_connections.index")
 		auth.DELETE("/external-mail-connections/:connection_id", h.RevokeExternalMailConnection).
 			Name("external_mail_connections.destroy").WhereNumber("connection_id")
+		auth.GET("/external-mail-connection-directory", h.ListExternalMailConnectionDirectory).
+			Name("external_mail_connection_directory.index")
+		auth.DELETE("/external-mail-connection-directory/:connection_id", h.ForceDisconnectExternalMailConnection).
+			Name("external_mail_connection_directory.destroy").WhereNumber("connection_id")
 
 		auth.GET("/transactional-mail-log", h.ListTransactionalLog).Name("transactional_mail_log.index")
 		auth.GET("/transactional-mail-log/:message_id", h.GetTransactionalLogEntry).

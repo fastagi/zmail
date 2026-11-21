@@ -185,7 +185,10 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 			ConnectionID: existing.ID, EncryptedRefreshToken: sealed,
 			ResetCursor: existing.Status == domain.ExternalMailStatusRevoked, Now: s.now().UTC(),
 		})
-		return findErr
+		if findErr != nil {
+			return findErr
+		}
+		return s.recordConnectionEvent(tx, connection, domain.MailboxAccessConnectionReconnected, viewer.UserID)
 	})
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
 		// Another sign-in bound the same account in the meantime.
@@ -211,8 +214,8 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 	return connection, created, nil
 }
 
-// bindExternalAccount creates the private, read-only external mailbox of a new account and its
-// connection, due for its first sync at once.
+// bindExternalAccount creates the private, read-only connected personal mailbox of a new account
+// and its connection, due for its first sync at once.
 func (s *service) bindExternalAccount(tx context.Context, viewer domain.OrganizationContext, authorization *domain.ExternalMailAuthorization, address, sealed string) (*domain.ExternalMailConnection, error) {
 	// Revoked connections are kept for a later rebind and do not count.
 	live, err := s.externalMail.CountLiveExternalMailConnections(tx, viewer.OrganizationID, viewer.UserID)
@@ -225,10 +228,10 @@ func (s *service) bindExternalAccount(tx context.Context, viewer domain.Organiza
 	owner := viewer.UserID
 	mailbox := &domain.Mailbox{
 		OrganizationID: viewer.OrganizationID, CreatedBy: viewer.UserID, Address: address, DisplayName: address,
-		Type: domain.MailboxTypeExternal, OwnerUserID: &owner,
+		Type: domain.MailboxTypePersonal, Origin: domain.MailboxOriginConnected, OwnerUserID: &owner,
 	}
-	// External mailboxes are a member's own accounts; the per-user limit bounds them, not the
-	// organization's mailbox limit.
+	// Connected mailboxes are a member's own accounts; the per-user limit bounds them, not the
+	// organization's mailbox limit, which counts Zmail mailboxes only.
 	if err := s.repo.CreateMailbox(tx, mailbox, domain.MailboxesPerOrganizationCeiling); err != nil {
 		return nil, err
 	}
@@ -238,6 +241,9 @@ func (s *service) bindExternalAccount(tx context.Context, viewer domain.Organiza
 		BackfillDays: authorization.BackfillDays, NextSyncAt: s.now().UTC(),
 	}
 	if err := s.externalMail.CreateExternalMailConnection(tx, connection); err != nil {
+		return nil, err
+	}
+	if err := s.recordConnectionEvent(tx, connection, domain.MailboxAccessConnectionBound, viewer.UserID); err != nil {
 		return nil, err
 	}
 	return connection, nil

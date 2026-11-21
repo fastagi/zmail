@@ -102,7 +102,7 @@ func (f *fakeMemberships) ListMembershipsByUserIDs(ctx context.Context, organiza
 		if err != nil {
 			continue
 		}
-		membership.User = &domain.User{ID: userID, Email: fmt.Sprintf("u%d@people.test", userID)}
+		membership.User = &domain.User{ID: userID, Username: fmt.Sprintf("user%d", userID), Email: fmt.Sprintf("u%d@people.test", userID)}
 		found = append(found, membership)
 	}
 	return found, nil

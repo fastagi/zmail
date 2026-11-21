@@ -319,10 +319,50 @@ export interface paths {
         put?: never;
         /**
          * Finish binding or reconnecting an outside account
-         * @description Takes the `state` and `code` the provider returned to the callback page. The pending sign-in is used up whether or not the exchange succeeds. A new account creates a private, read-only `external` mailbox and its connection (`201`); the caller's own account in any state is restored with the same mailbox, so synced mail is never copied twice (`200`). Session only; never cached.
+         * @description Takes the `state` and `code` the provider returned to the callback page. The pending sign-in is used up whether or not the exchange succeeds. A new account creates a private, read-only connected personal mailbox and its connection (`201`); the caller's own account in any state is restored with the same mailbox, so synced mail is never copied twice (`200`). Session only; never cached.
          */
         post: operations["completeExternalMailAuthorization"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-connection-directory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the organization's connected accounts for administration
+         * @description Needs the `owner` or `admin` organization role. Keyset pages of every connection in the organization, in any status, newest first, with the account address masked (`st***@gmail.com`) and the owner's display name while they are a member. Never a token, the full address, the mailbox, mail, or counts. Empty while external mail is off. Pass `meta.next_cursor` as `cursor` for the next, older page. Never cached.
+         */
+        get: operations["listExternalMailConnectionDirectory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-connection-directory/{connection_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Force-disconnect a member's connected account
+         * @description Needs the `owner` or `admin` organization role. Has the effect of the owner's unbind on any connection of the organization; the grant is revoked at the provider on a best-effort basis, the token is erased, mail already synced stays in the owner's connected mailbox, and a `connection_force_disconnected` access event is written. A revoked connection answers `204` again and writes nothing. Another organization's id, and any id while external mail is off, answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+         */
+        delete: operations["forceDisconnectExternalMailConnection"];
         options?: never;
         head?: never;
         patch?: never;
@@ -336,7 +376,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the caller's bound external mailboxes
+         * List the caller's connected accounts
          * @description Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in this organization, at most 10. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty) the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached and never carries a token.
          */
         get: operations["listExternalMailConnections"];
@@ -359,8 +399,8 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Unbind an external mailbox
-         * @description The member who bound the account, or an `owner` or `admin`, may unbind it. The grant is revoked at the provider on a best-effort basis, the stored token is erased, and the connection is never synced again; mail already synced stays in the external mailbox. Unbinding a revoked connection succeeds again. Another member's connection, another organization's id, and any id while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+         * Unbind a connected account
+         * @description The member who bound the account, or an `owner` or `admin` (recorded as a forced disconnect), may unbind it. The grant is revoked at the provider on a best-effort basis, the stored token is erased, and the connection is never synced again; mail already synced stays in the connected mailbox. Unbinding a revoked connection succeeds again. Another member's connection, another organization's id, and any id while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
          */
         delete: operations["revokeExternalMailConnection"];
         options?: never;
@@ -3682,7 +3722,7 @@ export interface components {
             last_error_code: string | null;
             /** @description When a sync last succeeded; null before the first. */
             last_synced_at: string | null;
-            /** @description The `external` mailbox synced mail is stored in. */
+            /** @description The connected mailbox synced mail is stored in. */
             mailbox_id: components["schemas"]["PositiveID"];
             provider: components["schemas"]["ExternalMailConnectorID"];
             /**
@@ -3690,6 +3730,30 @@ export interface components {
              * @enum {string}
              */
             status: "active" | "needs_reconnect" | "revoked";
+        };
+        /** @description One connection as an owner or admin sees it; never the token, the full address, the mailbox, or mail. */
+        ExternalMailConnectionDirectoryEntry: {
+            /** Format: date-time */
+            created_at: string;
+            id: components["schemas"]["PositiveID"];
+            /** @description When a sync last succeeded; null before the first. */
+            last_synced_at: string | null;
+            /** @description The first two characters of the local part (one when it is that short), `***`, and the domain, such as `st***@gmail.com`. */
+            masked_account_address: string;
+            /** @description The owner's nickname, or username without one, while they are a member; null otherwise. */
+            owner_display_name: string | null;
+            /** @description The member who bound the account; null once that account was deleted. */
+            owner_user_id: components["schemas"]["PositiveID"] | null;
+            provider: components["schemas"]["ExternalMailConnectorID"];
+            /** @enum {string} */
+            status: "active" | "needs_reconnect" | "revoked";
+        };
+        ExternalMailConnectionDirectoryPageResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["ExternalMailConnectionDirectoryEntry"][];
+            message: string;
+            meta: components["schemas"]["CursorPageMeta"];
         };
         ExternalMailConnectionListResponse: {
             /** @constant */
@@ -3710,7 +3774,7 @@ export interface components {
              */
             auth_kind: "oauth2";
             capabilities: {
-                /** @description The connector syncs the account's mail into its external mailbox. */
+                /** @description The connector syncs the account's mail into its connected mailbox. */
                 read: boolean;
             };
             id: components["schemas"]["ExternalMailConnectorID"];
@@ -3910,12 +3974,13 @@ export interface components {
             address: string;
             /** @description Whether new inbound mail of this mailbox is queued for AI triage. Triage also needs the organization switch; handover turns it off. */
             ai_triage_enabled: boolean;
-            /** @description True while a personal mailbox's owner has left the organization and nobody has taken it over. */
+            /** @description True while a Zmail personal mailbox's owner has left the organization and nobody has taken it over. Always false for a connected mailbox. */
             awaiting_handover: boolean;
             /** Format: date-time */
             created_at: string;
             display_name: string;
             id: components["schemas"]["PositiveID"];
+            origin: components["schemas"]["MailboxOrigin"];
             /** @description The owner of a personal mailbox; null for a shared one or a personal one whose owner left. */
             owner_user_id: components["schemas"]["PositiveID"] | null;
             /** @description The mail role the mailbox belongs to; null when it has none. A mail role groups mailboxes for navigation and grants nothing. */
@@ -3960,7 +4025,7 @@ export interface components {
             meta: components["schemas"]["PaginationMeta"];
         };
         /** @enum {string} */
-        MailboxAccessEventType: "created" | "member_set" | "member_removed" | "owner_left" | "owner_returned" | "handed_over" | "sealed_deleted" | "webhooks_changed" | "renamed";
+        MailboxAccessEventType: "created" | "member_set" | "member_removed" | "owner_left" | "owner_returned" | "handed_over" | "sealed_deleted" | "webhooks_changed" | "renamed" | "connection_bound" | "connection_reconnected" | "connection_revoked" | "connection_force_disconnected" | "connection_revoked_on_leave";
         MailboxDirectoryEntry: {
             address: string;
             awaiting_handover: boolean;
@@ -4107,6 +4172,11 @@ export interface components {
             message: string;
         };
         /**
+         * @description Where the mailbox's mail comes from. `zmail` mailboxes receive and send at a Zmail address. `connected` mailboxes hold read-only copies of an outside account synced through an external mail connection; nobody sends from them or deletes their mail for good, their address never takes delivery, and they are never created through `POST /v1/mailboxes`. A connected `personal` mailbox is its owner's own account, invisible to every other member, owners and admins included.
+         * @enum {string}
+         */
+        MailboxOrigin: "zmail" | "connected";
+        /**
          * @description Each level includes the previous one.
          * @enum {string}
          */
@@ -4132,10 +4202,10 @@ export interface components {
             message: string;
         };
         /**
-         * @description `external` mailboxes hold read-only copies of a bound outside account; only the member who bound it reads them and nobody sends from them. They are never created, filtered, or exported by type through these routes, which accept `personal` and `shared` only.
+         * @description Who may use the mailbox; independent of its `origin`.
          * @enum {string}
          */
-        MailboxType: "personal" | "shared" | "external";
+        MailboxType: "personal" | "shared";
         MailBroadcast: {
             counts: components["schemas"]["MailBroadcastCounts"];
             /** Format: date-time */
@@ -4893,7 +4963,7 @@ export interface components {
             data: components["schemas"]["MailSendLaneUsageList"];
             message: string;
         };
-        /** @description Where the message came from. `zmail` is mail Zmail itself received or sent; any other value is the id of the connector that synced a read-only copy from a bound outside account into an `external` mailbox, such as `gmail` or `outlook`. New connectors add values without a contract change, so clients render an unknown value generically. */
+        /** @description Where the message came from. `zmail` is mail Zmail itself received or sent; any other value is the id of the connector that synced a read-only copy from a bound outside account into a connected mailbox, such as `gmail` or `outlook`. New connectors add values without a contract change, so clients render an unknown value generically. */
         MailSource: string;
         /**
          * @description `received` for inbound messages. Outbound messages are `queued` while the provider call is in flight, then `sent` or `failed`.
@@ -7615,7 +7685,7 @@ export interface operations {
                     "application/json": components["schemas"]["ExternalMailConnectionResponse"];
                 };
             };
-            /** @description A new external mailbox and connection were created. */
+            /** @description A new connected mailbox and connection were created. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -7646,6 +7716,84 @@ export interface operations {
             };
             /** @description The provider refused the code (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`), or a malformed body (`VALIDATION.FAILED`). */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listExternalMailConnectionDirectory: {
+        parameters: {
+            query?: {
+                /** @description Opaque keyset position from `meta.next_cursor`; absent or empty requests the newest page. */
+                cursor?: string;
+                per_page?: number;
+            };
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the connection directory. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalMailConnectionDirectoryPageResponse"];
+                };
+            };
+            /** @description The cursor is malformed or `page` was sent (`COMMON.INVALID_INPUT`); or the organization header is missing or malformed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    forceDisconnectExternalMailConnection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive external mail connection identifier. */
+                connection_id: components["parameters"]["ExternalMailConnectionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The connection is revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the connection (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

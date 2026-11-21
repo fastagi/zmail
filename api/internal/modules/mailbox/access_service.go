@@ -145,7 +145,7 @@ func (s *service) usableMailboxes(ctx context.Context, viewer domain.Organizatio
 	usable := make([]*domain.Mailbox, 0, len(mailboxes))
 	for _, mailbox := range mailboxes {
 		mailbox.Access = domain.MailboxAccessFor(mailbox, viewer, members[mailbox.ID])
-		awaiting := manager && mailbox.Type == domain.MailboxTypePersonal && mailbox.OwnerLeftAt != nil
+		awaiting := manager && mailbox.AwaitingHandover()
 		if mailbox.Access.View || mailbox.Access.Send || (awaiting && mailbox.Access.Any()) {
 			usable = append(usable, mailbox)
 		}

@@ -45,6 +45,7 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 		VALUES (1, 'inbound', 'received', 'bob@sender.test', 'gmail', 'g-1', now(), now())`)
 
 	// Later migrations that build on these tables roll back first.
+	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	require.NoError(t, (&openMailConnectors{}).Down(db))
 	require.NoError(t, (&addMailOutboundTimeIndex{}).Down(db))
 	require.NoError(t, (&addExternalMail{}).Down(db))
@@ -55,6 +56,7 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 	require.NoError(t, (&addExternalMail{}).Up(db))
 	require.NoError(t, (&addMailOutboundTimeIndex{}).Up(db))
 	require.NoError(t, (&openMailConnectors{}).Up(db))
+	require.NoError(t, (&addMailboxOrigin{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 
@@ -62,6 +64,7 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 // the older schema does not know.
 func TestExternalMailDownRefusesExternalMailboxes(t *testing.T) {
 	db, exec := externalMailFixture(t)
+	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
 		VALUES (2, 10, 901, 'owner@gmail.example', 'external', 901, now(), now())`)
 	assert.Error(t, db.Transaction(func(tx *gorm.DB) error { return (&addExternalMail{}).Down(tx) }))
@@ -71,8 +74,8 @@ func TestExternalMailDownRefusesExternalMailboxes(t *testing.T) {
 // the service still cannot break them.
 func TestExternalMailConstraints(t *testing.T) {
 	db, exec := externalMailFixture(t)
-	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
-		VALUES (2, 10, 901, 'owner@gmail.example', 'external', 901, now(), now())`)
+	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, origin, owner_user_id, created_at, updated_at)
+		VALUES (2, 10, 901, 'owner@gmail.example', 'personal', 'connected', 901, now(), now())`)
 	exec(`INSERT INTO external_mail_connections (id, organization_id, mailbox_id, provider, account_address, owner_user_id, next_sync_at, created_at, updated_at)
 		VALUES (1, 10, 2, 'gmail', 'Owner@Gmail.example', 901, now(), now(), now())`)
 	exec(`INSERT INTO mail_messages (mailbox_id, direction, status, from_address, source, external_id, created_at, updated_at)

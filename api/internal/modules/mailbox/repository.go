@@ -55,8 +55,11 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 		if err := tx.Exec(`SELECT pg_advisory_xact_lock(hashtext('mailbox_owner'), ?)`, int32(mailbox.OrganizationID)).Error; err != nil { //nolint:gosec // lock key only needs to be stable per user
 			return err
 		}
+		// The limit bounds the organization's own mailboxes; connected copies of members' outside
+		// accounts are bounded per member instead.
 		var owned int64
-		if err := tx.Model(&MailboxPO{}).Where("organization_id = ?", mailbox.OrganizationID).Count(&owned).Error; err != nil {
+		if err := tx.Model(&MailboxPO{}).Where("organization_id = ? AND origin = ?", mailbox.OrganizationID,
+			string(domain.MailboxOriginZmail)).Count(&owned).Error; err != nil {
 			return err
 		}
 		if owned >= int64(limit) {
@@ -70,6 +73,7 @@ func (r *repository) CreateMailbox(ctx context.Context, mailbox *domain.Mailbox,
 			DisplayName:    mailbox.DisplayName,
 			RoutingRuleID:  mailbox.RoutingRuleID,
 			Type:           string(mailbox.Type),
+			Origin:         string(mailboxOriginOf(string(mailbox.Origin))),
 			OwnerUserID:    mailbox.OwnerUserID,
 		}
 		if po.Type == "" {
@@ -110,9 +114,9 @@ func (r *repository) ListUsableMailboxes(ctx context.Context, organizationID, me
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	condition := "(type IN ('personal','external') AND owner_user_id = ?) OR id IN (SELECT mailbox_id FROM mailbox_members WHERE membership_id = ?)"
+	condition := "(type = 'personal' AND owner_user_id = ?) OR id IN (SELECT mailbox_id FROM mailbox_members WHERE membership_id = ?)"
 	if includeAwaitingHandover {
-		condition += " OR (type = 'personal' AND owner_left_at IS NOT NULL)"
+		condition += " OR (type = 'personal' AND origin = 'zmail' AND owner_left_at IS NOT NULL)"
 	}
 	var rows []MailboxPO
 	err := r.conn(ctx).
@@ -201,8 +205,8 @@ func (r *repository) FindMailboxByAddress(ctx context.Context, address string) (
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailboxPO
-	// External mailboxes carry an outside account's address and never take delivery.
-	if err := r.conn(ctx).Where("address = ? AND type <> ?", strings.ToLower(address), string(domain.MailboxTypeExternal)).First(&po).Error; err != nil {
+	// Connected mailboxes carry an outside account's address and never take delivery.
+	if err := r.conn(ctx).Where("address = ? AND origin = ?", strings.ToLower(address), string(domain.MailboxOriginZmail)).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailboxNotFound
 		}

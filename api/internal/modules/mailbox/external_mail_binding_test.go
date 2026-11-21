@@ -54,7 +54,7 @@ func TestExternalMailBindCreatesPrivateConnection(t *testing.T) {
 		t.Fatalf("connection = %+v", connection)
 	}
 	mailbox, err := f.repo.FindMailbox(context.Background(), accessOrg, connection.MailboxID)
-	if err != nil || mailbox.Type != domain.MailboxTypeExternal || mailbox.OwnerUserID == nil || *mailbox.OwnerUserID != accessC {
+	if err != nil || mailbox.Type != domain.MailboxTypePersonal || !mailbox.Connected() || mailbox.OwnerUserID == nil || *mailbox.OwnerUserID != accessC {
 		t.Fatalf("mailbox = %+v, err %v; want carol's external mailbox", mailbox, err)
 	}
 	if _, _, err := f.service.ListMessages(context.Background(), f.b, connection.MailboxID, domain.MailMessageFilter{Page: 1, PerPage: 10}); err == nil {
@@ -263,7 +263,7 @@ func TestInboundDeliveryNeverReachesExternalMailbox(t *testing.T) {
 	}
 	owner := uint(accessC)
 	twin := &domain.Mailbox{OrganizationID: accessOrg, CreatedBy: accessC, Address: f.mailbox.Address,
-		Type: domain.MailboxTypeExternal, OwnerUserID: &owner}
+		Type: domain.MailboxTypePersonal, Origin: domain.MailboxOriginConnected, OwnerUserID: &owner}
 	if err := f.repo.CreateMailbox(context.Background(), twin, domain.MailboxesPerOrganizationCeiling); err != nil {
 		t.Fatalf("a second external mailbox with the same outside address: %v", err)
 	}

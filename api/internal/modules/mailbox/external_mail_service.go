@@ -187,8 +187,9 @@ func (s *service) ListExternalMailConnections(ctx context.Context, viewer domain
 }
 
 // RevokeExternalMailConnection unbinds an account: its owner may, and so may owners and admins for
-// offboarding. The provider grant is revoked on a best-effort basis, then the connection stops for
-// good and its token is erased. Mail already synced stays in the external mailbox.
+// offboarding, which is recorded as a forced disconnect. The provider grant is revoked on a
+// best-effort basis, then the connection stops for good and its token is erased. Mail already
+// synced stays in the connected mailbox.
 func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domain.OrganizationContext, id uint) error {
 	if !s.externalMailAvailable() {
 		return ErrExternalMailConnectionNotFound
@@ -201,23 +202,55 @@ func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domai
 	if !owner && !viewer.Role.CanManageOrganization() {
 		return ErrExternalMailConnectionNotFound
 	}
+	event := domain.MailboxAccessConnectionRevoked
+	if !owner {
+		event = domain.MailboxAccessConnectionForceRevoked
+	}
+	return s.revokeConnection(ctx, connection, viewer.UserID, event)
+}
+
+// revokeConnection hands a live connection's grant back to its provider, then marks it revoked and
+// records the event on its mailbox in one transaction. A connection already revoked changes nothing
+// and records nothing.
+func (s *service) revokeConnection(ctx context.Context, connection *domain.ExternalMailConnection, actorUserID uint, event domain.MailboxAccessEventType) error {
 	if connection.Status == domain.ExternalMailStatusRevoked {
 		return nil
 	}
 	s.handBackExternalGrant(ctx, connection)
-	if err := s.externalMail.RevokeExternalMailConnection(ctx, viewer.OrganizationID, id, s.now().UTC()); err != nil {
+	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if err := s.externalMail.RevokeExternalMailConnection(tx, connection.OrganizationID, connection.ID, s.now().UTC()); err != nil {
+			return err
+		}
+		return s.recordConnectionEvent(tx, connection, event, actorUserID)
+	})
+	if err != nil {
 		return err
 	}
 	slog.InfoContext(ctx, "external_mail.revoked",
-		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
+		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
+		slog.String("event", string(event)))
 	return nil
+}
+
+// recordConnectionEvent writes a connection event to its mailbox's access history. The detail names
+// the connection and its provider only, never the outside account's address.
+func (s *service) recordConnectionEvent(ctx context.Context, connection *domain.ExternalMailConnection, event domain.MailboxAccessEventType, actorUserID uint) error {
+	var subject uint
+	if connection.OwnerUserID != nil {
+		subject = *connection.OwnerUserID
+	}
+	mailbox := &domain.Mailbox{ID: connection.MailboxID, OrganizationID: connection.OrganizationID}
+	return s.recordAccess(ctx, mailbox, event, actorUserID, subject, map[string]any{
+		"connection_id": connection.ID,
+		"provider":      string(connection.Provider),
+	})
 }
 
 // handBackExternalGrant revokes a connection's grant at its provider on a best-effort basis: a
 // provider that is down or no longer enabled leaves the grant to expire there, and the token is
 // erased here either way.
 func (s *service) handBackExternalGrant(ctx context.Context, connection *domain.ExternalMailConnection) {
-	if connection.EncryptedRefreshToken == "" {
+	if connection.EncryptedRefreshToken == "" || s.encryptor == nil {
 		return
 	}
 	token, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)

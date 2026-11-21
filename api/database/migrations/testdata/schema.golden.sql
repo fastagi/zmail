@@ -401,6 +401,7 @@ TABLE mailboxes
   COLUMN webhooks_enabled boolean NOT NULL DEFAULT false
   COLUMN role_id bigint
   COLUMN ai_triage_enabled boolean NOT NULL DEFAULT false
+  COLUMN origin character varying(16) NOT NULL DEFAULT 'zmail'::character varying
 
 TABLE migrations
   COLUMN id integer NOT NULL DEFAULT nextval('migrations_id_seq'::regclass)
@@ -874,8 +875,9 @@ CONSTRAINT mailbox_members.mailbox_members_mailbox_id_fkey FOREIGN KEY (mailbox_
 CONSTRAINT mailbox_members.mailbox_members_membership_id_fkey FOREIGN KEY (membership_id) REFERENCES organization_memberships(id) ON DELETE CASCADE
 CONSTRAINT mailbox_members.mailbox_members_permission_check CHECK (((permission)::text = ANY ((ARRAY['view'::character varying, 'send'::character varying, 'manage'::character varying])::text[])))
 CONSTRAINT mailbox_members.mailbox_members_pkey PRIMARY KEY (mailbox_id, membership_id)
+CONSTRAINT mailboxes.chk_mailboxes_origin CHECK (((origin)::text = ANY ((ARRAY['zmail'::character varying, 'connected'::character varying])::text[])))
 CONSTRAINT mailboxes.chk_mailboxes_personal_webhooks CHECK ((((type)::text = 'shared'::text) OR (NOT webhooks_enabled)))
-CONSTRAINT mailboxes.chk_mailboxes_type CHECK (((type)::text = ANY ((ARRAY['personal'::character varying, 'shared'::character varying, 'external'::character varying])::text[])))
+CONSTRAINT mailboxes.chk_mailboxes_type CHECK (((type)::text = ANY ((ARRAY['personal'::character varying, 'shared'::character varying])::text[])))
 CONSTRAINT mailboxes.fk_mailboxes_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
@@ -1130,7 +1132,7 @@ INDEX CREATE INDEX idx_mailbox_access_events_mailbox ON mailbox_access_events US
 INDEX CREATE UNIQUE INDEX mailbox_access_events_pkey ON mailbox_access_events USING btree (id)
 INDEX CREATE INDEX idx_mailbox_members_membership ON mailbox_members USING btree (membership_id, mailbox_id)
 INDEX CREATE UNIQUE INDEX mailbox_members_pkey ON mailbox_members USING btree (mailbox_id, membership_id)
-INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address) WHERE ((type)::text <> 'external'::text)
+INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address) WHERE ((origin)::text = 'zmail'::text)
 INDEX CREATE INDEX idx_mailboxes_organization ON mailboxes USING btree (organization_id, id) WHERE (deleted_at IS NULL)
 INDEX CREATE INDEX idx_mailboxes_owner ON mailboxes USING btree (organization_id, owner_user_id) WHERE ((deleted_at IS NULL) AND ((type)::text = 'personal'::text))
 INDEX CREATE INDEX idx_mailboxes_role ON mailboxes USING btree (role_id) WHERE (role_id IS NOT NULL)
