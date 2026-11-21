@@ -328,10 +328,8 @@ describe('unified inbox', () => {
       mailbox(1, 'hello'),
       mailbox(2, 'sales'),
       externalMailbox(41, 'me@gmail.com'),
-      // An API with the origin field marks a connected mailbox `personal` + `connected`.
-      { ...externalMailbox(42, 'old@outlook.com'), type: 'personal', origin: 'connected' },
-      // Another member's external mailbox, which an admin sees with `administer` only.
-      { ...externalMailbox(43, 'them@gmail.com'), access: { ...noAccess(), administer: true } },
+      externalMailbox(42, 'old@outlook.com'),
+      // Another member's connected mailbox is never listed to anyone else, admins included.
     ];
     state.connections.data = [
       connection({ id: 1, mailbox_id: 41, account_address: 'me@gmail.com' }),
@@ -2168,12 +2166,13 @@ function noAccess() {
   };
 }
 
-/** The viewer's own external mailbox: they read it; nobody sends from it or organizes it. */
+/** The viewer's own connected mailbox: they read it; nobody sends from it or organizes it. */
 function externalMailbox(id: number, address: string) {
   return {
-    ...mailbox(id, 'external'),
+    ...mailbox(id, 'connected'),
     address,
-    type: 'external',
+    type: 'personal',
+    origin: 'connected',
     owner_user_id: 1,
     access: { ...noAccess(), view: true, see_history: true },
   };

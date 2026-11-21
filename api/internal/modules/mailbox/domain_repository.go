@@ -233,8 +233,11 @@ func (r *repository) DeleteDomain(ctx context.Context, organizationID, id uint) 
 			}
 			return err
 		}
+		// Only Zmail's own mailboxes hold the domain: a member's connected copy of an outside account
+		// on it neither blocks the deletion nor may be revealed by it.
 		var used int64
-		if err := tx.Model(&MailboxPO{}).Where("address LIKE ?", "%@"+escapeLike(po.Name)).Count(&used).Error; err != nil {
+		if err := tx.Model(&MailboxPO{}).Where("address LIKE ? AND origin = ?", "%@"+escapeLike(po.Name),
+			string(domain.MailboxOriginZmail)).Count(&used).Error; err != nil {
 			return err
 		}
 		if used > 0 {
@@ -275,8 +278,9 @@ func (r *repository) SetDomainCapability(ctx context.Context, organizationID, id
 	return nil
 }
 
-// ListMailboxesWithoutRoutingRule returns live mailboxes only; a deleted mailbox keeps its address
-// but receives nothing.
+// ListMailboxesWithoutRoutingRule returns live Zmail mailboxes only; a deleted mailbox keeps its
+// address but receives nothing, and a connected mailbox's address is an outside account's, never
+// routed through Zmail.
 // fastbuild:bounded-list max=5000 reason=an organization owns at most domain.MailboxesPerOrganizationCeiling mailboxes
 func (r *repository) ListMailboxesWithoutRoutingRule(ctx context.Context, organizationID uint, domainName string) ([]*domain.Mailbox, error) {
 	if r.db == nil {
@@ -284,7 +288,8 @@ func (r *repository) ListMailboxesWithoutRoutingRule(ctx context.Context, organi
 	}
 	var rows []MailboxPO
 	if err := r.conn(ctx).
-		Where("organization_id = ? AND routing_rule_id = '' AND address LIKE ?", organizationID, "%@"+escapeLike(strings.ToLower(domainName))).
+		Where("organization_id = ? AND routing_rule_id = '' AND origin = ? AND address LIKE ?", organizationID,
+			string(domain.MailboxOriginZmail), "%@"+escapeLike(strings.ToLower(domainName))).
 		Order("id asc").Limit(domain.MailboxesPerOrganizationCeiling).Find(&rows).Error; err != nil {
 		return nil, err
 	}

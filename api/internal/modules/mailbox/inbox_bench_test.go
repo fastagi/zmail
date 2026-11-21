@@ -184,7 +184,7 @@ func inboxBenchDay() (time.Time, time.Time) {
 // inboxBenchList does what the service does for one page: read the access rows, list the page,
 // then load its snippets.
 func inboxBenchList(ctx context.Context, repo *repository, query domain.InboxQuery) ([]*domain.MailMessage, error) {
-	if _, err := repo.ListMailboxAccessRows(ctx, 10, inboxBenchMembership); err != nil {
+	if _, err := repo.ListMailboxAccessRows(ctx, 10, inboxBenchMembership, 0); err != nil {
 		return nil, err
 	}
 	query.MailboxIDs, query.MembershipID, query.Limit = inboxBenchMailboxes, inboxBenchMembership, inboxBenchPageSize+1
@@ -206,7 +206,7 @@ func inboxBenchList(ctx context.Context, repo *repository, query domain.InboxQue
 // inboxBenchCounts does what the service does for the counts: access rows, unread per readable
 // mailbox, then the view counts.
 func inboxBenchCounts(ctx context.Context, repo *repository) (domain.InboxViewCounts, error) {
-	if _, err := repo.ListMailboxAccessRows(ctx, 10, inboxBenchMembership); err != nil {
+	if _, err := repo.ListMailboxAccessRows(ctx, 10, inboxBenchMembership, 0); err != nil {
 		return domain.InboxViewCounts{}, err
 	}
 	if _, err := repo.CountUnreadByMailboxIDs(ctx, 10, inboxBenchMembership, inboxBenchMailboxes); err != nil {

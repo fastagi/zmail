@@ -131,7 +131,8 @@ func (r *repository) platformOrganizationCounts(ctx context.Context, from, to ti
 	return counts, nil
 }
 
-// platformMailboxCounts counts existing mailboxes per organization.
+// platformMailboxCounts counts each organization's live Zmail mailboxes, the figure its mailbox
+// limit bounds; members' connected accounts are neither counted nor revealed.
 func (r *repository) platformMailboxCounts(ctx context.Context) (map[uint]int64, error) {
 	if r == nil || r.db == nil {
 		return nil, domain.ErrServiceUnavailable
@@ -142,7 +143,7 @@ func (r *repository) platformMailboxCounts(ctx context.Context) (map[uint]int64,
 	}
 	if err := r.conn(ctx).Model(&MailboxPO{}).
 		Select("organization_id, COUNT(*) AS mailboxes").
-		Where("organization_id IS NOT NULL").
+		Where("organization_id IS NOT NULL AND origin = ?", string(domain.MailboxOriginZmail)).
 		Group("organization_id").
 		Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("count platform mailboxes: %w", err)

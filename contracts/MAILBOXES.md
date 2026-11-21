@@ -109,10 +109,12 @@ recorded but has no special rights to it. A removed member loses access on their
 | List the connectors accounts can be bound with | none yet | `GET /v1/external-mail-connectors` | `200` envelope, at most 32 items |
 | Start binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations` | `201` |
 | Finish binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations/completions` | `201` new, `200` restored |
-| List the caller's external mailboxes | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 10 items |
-| Unbind an external mailbox | none yet | `DELETE /v1/external-mail-connections/:connection_id` | `204` |
+| List the caller's connected accounts | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 10 items |
+| Unbind a connected account | none yet | `DELETE /v1/external-mail-connections/:connection_id` | `204` |
 | List a connection's latest sync runs | none yet | `GET /v1/external-mail-connections/:connection_id/sync-runs` | `200` envelope, at most 50 items |
 | Delete a revoked connection's copies at once | none yet | `POST /v1/external-mail-connections/:connection_id/purges` | `200` done, `202` finishing in the background |
+| List the organization's connected accounts (owners and admins) | none yet | `GET /v1/external-mail-connection-directory` | Cursor page, at most 100 items |
+| Force-disconnect a member's connected account (owners and admins) | none yet | `DELETE /v1/external-mail-connection-directory/:connection_id` | `204` |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
 | Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
 | Send a transactional message | none | `POST /v1/transactional-messages` | `202`, or `200` for a repeat |
@@ -186,6 +188,7 @@ has no browser route: only the mail edge calls it.
     "address": "hello@mail.example.com",
     "display_name": "Hello Team",
     "type": "shared",
+    "origin": "zmail",
     "owner_user_id": null,
     "awaiting_handover": false,
     "sealed_before": null,
@@ -203,8 +206,9 @@ has no browser route: only the mail edge calls it.
 boundary that the caller has not read (see [Read State](#read-state)); sent messages and messages that
 are archived, in a folder, or in the trash never count. It is `0` for a caller who may not
 read the mailbox. `access` is what the caller may do with the mailbox; clients show or hide
-controls from it. `awaiting_handover` is `true` while a personal mailbox's owner has left the
-organization and nobody has taken it over (see [Departure And Handover](#departure-and-handover)).
+controls from it. `origin` is `zmail` or `connected` (see [Access](#access)). `awaiting_handover` is
+`true` while a Zmail personal mailbox's owner has left the organization and nobody has taken it over
+(see [Departure And Handover](#departure-and-handover)); it is never `true` for a connected mailbox.
 `sealed_before` is the seal boundary set at handover, `null` when nothing is sealed.
 `webhooks_enabled` is the [webhook switch](#webhook-switch); it is always `false` on a personal
 mailbox. `ai_triage_enabled` is the mailbox's [AI triage](#ai-triage) switch. `role_id` is the
@@ -337,15 +341,31 @@ surface that carries member email addresses.
 
 ## Access
 
-Every mailbox is one of three types:
+A mailbox has two independent dimensions. Its `type` says who may use it, and its `origin` says
+where its mail comes from:
+
+- `origin` `zmail` mailboxes receive and send at a Zmail address; every mailbox created through
+  `POST /v1/mailboxes` is one.
+- `origin` `connected` mailboxes hold read-only copies of an outside account (see
+  [External Mailboxes](#external-mailboxes)). Whatever the type and permission, nobody sends from
+  them or gets `organize`; their address never takes delivery, never blocks a Zmail address, and
+  does not count toward the organization's mailbox limit. They are never created through
+  `POST /v1/mailboxes`. A connected `personal` mailbox is its owner's own account: only the owner
+  sees it, with `view` and `see_history`, and the owner and admin roles get nothing on it, so it is
+  absent from their mailbox lists, the directory and its `mailbox_count`, the export, the unified
+  inbox and its counts, and every route of it answers them `404`. Owners and admins see connected
+  accounts only in the [connection directory](#connection-directory), with the address masked.
+  Domain receiving and domain deletion ignore connected mailboxes too: an address on an
+  organization domain gets no routing rule because of one, and never keeps the domain from being
+  deleted. Operator mailbox counts count Zmail mailboxes only.
+- Deleting a connected mailbox (only a connected shared one has `administer`) revokes its connection
+  in the same operation: the grant is handed back and the token erased, so no stored grant outlives
+  its mailbox.
+
+Every mailbox is one of two types:
 
 - **Personal** mailboxes belong to one member, the owner (`owner_user_id`). The owner reads,
   sends, replies, and deletes; nobody else reads or sends, and a personal mailbox has no members.
-- **External** mailboxes hold read-only copies of an outside account a member bound (see
-  [External Mailboxes](#external-mailboxes)). Only that member, the owner, reads them, with `view`
-  and `see_history`; nobody sends from them, moves or deletes their mail for good, or becomes a
-  member. Owners and admins get `administer` only. They are never created through
-  `POST /v1/mailboxes`, and the directory and export accept `personal` and `shared` only.
 - **Shared** mailboxes are worked by named members, 1 to 100, each with one permission. Each level
   includes the previous one:
 
@@ -369,7 +389,7 @@ member row grant. It is returned as `access`:
 A caller with no access at all to a mailbox gets `404 MAILBOX.NOT_FOUND` on every route of it,
 exactly like a mailbox that does not exist, and does not see it in `GET /v1/mailboxes`. A caller
 with some access but not the one a route needs gets `403 PERMISSION.DENIED`. So an admin who is not
-a member sees a mailbox listed but gets `403` when opening its mail.
+a member sees a mailbox listed but gets `403` when opening its mail; a member's connected personal mailbox is the exception and is never listed for them.
 
 `organize` changes what everyone sees and cannot be undone: it deletes mail for good and changes the
 mailbox's folders and labels. An owner or admin who is not a member cannot read the mail, so they do
@@ -437,10 +457,15 @@ per page:
 | `sealed_deleted` | An admin deletes the sealed history | `null` | `{ "deleted_messages", "deleted_broadcasts" }` |
 | `webhooks_changed` | The webhook switch changes | `null` | `{ "enabled" }` |
 | `renamed` | An admin changes the display name | `null` | `{ "from", "to" }` |
+| `connection_bound` | A member binds an outside account into a new connected mailbox | The owner | `{ "connection_id", "provider" }` |
+| `connection_reconnected` | The owner signs in to the account again | The owner | `{ "connection_id", "provider" }` |
+| `connection_revoked` | The owner unbinds the account | The owner | `{ "connection_id", "provider" }` |
+| `connection_force_disconnected` | An owner or admin disconnects another member's account | The owner | `{ "connection_id", "provider" }` |
+| `connection_revoked_on_leave` | The owner leaves the organization | The owner | `{ "connection_id", "provider" }` |
 
 `actor_user_id` is `null` for a change Zmail made itself, such as `owner_left`, `owner_returned`,
 and `member_removed` for a departure. `detail` holds ids, permissions, timestamps, counts, and display
-names only, never message content. Creating a shared mailbox writes `created` and one `member_set` per first
+names only, never message content. Connection events never carry the outside account's address. Creating a shared mailbox writes `created` and one `member_set` per first
 member. Clients ignore `detail` keys they do not know.
 
 ### Departure And Handover
@@ -701,21 +726,25 @@ no platform account.
 ## External Mailboxes
 
 A member can bind an outside account read-only through a **connector**: Gmail, Outlook, or any
-provider the instance adds later. Its mail is copied into an `external` mailbox the member owns
-alone (see [Access](#access)); every copy is inbound, `received`, carries the connector id as
+provider the instance adds later. Its mail is copied into a `personal` mailbox with `origin`
+`connected` that the member owns alone (see [Access](#access)); every copy is inbound, `received`, carries the connector id as
 `source` (`gmail`, `outlook`, ...), and the provider's receive time as `created_at`. A copy is stored
 once per mailbox and provider message id, so a reconnect or a repeated fetch never adds a second
 one. The first sync looks back 14 days unless the binding asked for 1 to 90.
 
 Connector ids match `^[a-z][a-z0-9_]{1,15}$`; a new connector adds ids without a contract change, so
-clients render an id they do not know generically. An external mailbox carries the outside account's
+clients render an id they do not know generically. A connected mailbox carries the outside account's
 address, but that address is never Zmail's to deliver to: inbound delivery, sending, and the address
-directory ignore external mailboxes, and two members may each bind their own copy of an address.
+check ignore connected mailboxes. Within one organization and connector an outside account belongs
+to one member at a time; the same address may still exist under another connector or as a Zmail
+mailbox, which is all the relaxed address index allows.
 
 Every newly stored message, delivered by Zmail or synced, goes through the same post-store step in
 the transaction that stores it: it is queued for [AI triage](#ai-triage) when the switches allow,
-and announced as `mail.message.received` (webhooks still publish for shared mailboxes only). Only an
-external mailbox's owner may switch triage on for it.
+and announced as `mail.message.received` (webhooks still publish for shared mailboxes only). Only a
+connected personal mailbox's owner may switch triage on for it. A connected mailbox whose connection
+is not `active` queues nothing for triage and hands no queued message to the model, and any revoke,
+including the one when the owner leaves, turns its switch off and drops its queued messages.
 
 While the instance enables no connector (`EXTERNAL_MAIL_PROVIDERS` empty, the default) the connector
 list is empty, starting a sign-in answers `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`, the connection
@@ -738,10 +767,11 @@ sign-in up, whatever the outcome, then exchanges the code with the PKCE verifier
 
 | Account signed in to | Result |
 |---|---|
-| New in the organization for this connector | `201`: a private, read-only `external` mailbox and an active connection, synced at once |
-| The caller's own connection, in any state | `200`: the same connection, active, error cleared, synced at once; mailbox and history kept (a `revoked` one backfills again, without copies) |
+| New in the organization for this connector | `201`: a private, read-only connected personal mailbox and an active connection, synced at once (`connection_bound`) |
+| The caller's own connection, in any state | `200`: the same connection, active, error cleared, synced at once; mailbox and history kept (a `revoked` one backfills again, without copies) (`connection_reconnected`) |
 | A reconnect that signed in to another account | `409 MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`; nothing changes |
-| Bound by another member | `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` |
+| Bound by another member, connection not `revoked` | `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` |
+| Bound by another member whose connection is `revoked` (they left, unbound it, or were disconnected) | `201`: the old connection's copies, mailbox, and connection are deleted for good at once (`copies_purged` with `reason` `rebound` and the caller as actor), then the account is bound into a new mailbox; `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` only while the sync worker holds the old connection |
 | A new account past the caller's 10 | `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT` |
 
 On a `409` the grant is handed back to the provider. A refused code is
@@ -812,12 +842,13 @@ of random jitter. A successful fetch resets the backoff to the two-minute interv
 connector the instance no longer runs stays `active` with its grant and records
 `external.provider_unavailable` until the connector is enabled again.
 
-`DELETE /v1/external-mail-connections/:connection_id` unbinds: the member who bound the account, or
-an `owner` or `admin`, may. The grant is revoked at the provider on a best-effort basis, the stored
+`DELETE /v1/external-mail-connections/:connection_id` unbinds: the member who bound the account
+(`connection_revoked`), or an `owner` or `admin` (`connection_force_disconnected`), may. The grant is revoked at the provider on a best-effort basis, the stored
 token is erased, and syncing stops for good, including a fetch already running. Mail already synced
-stays in the external mailbox until the retention below ends or the member purges it. Unbinding a
-revoked connection answers `204` again. A member who leaves the organization has every connection there revoked the same way at once:
-the accounts are their own, so nothing awaits a handover, and the copies stay readable by nobody.
+stays in the connected mailbox until the retention below ends or the member purges it. Unbinding a revoked connection answers `204` again and records
+nothing. A member who leaves the organization has every connection there revoked the same way at
+once (`connection_revoked_on_leave`): the accounts are their own, so the connected mailbox never
+awaits a handover, the handover routes refuse it, and the copies stay readable by nobody.
 Binding the account again after rejoining restores the same mailbox without copies. Another member's
 connection and another organization's id are `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
 
@@ -829,7 +860,7 @@ The `outlook` connector runs when `EXTERNAL_MAIL_PROVIDERS` lists it and its OAu
 platform with the delegated scopes `offline_access Mail.Read User.Read openid email` and binds the
 account's `mail` address, or its user principal name when it has none. It syncs the Inbox through
 Microsoft Graph message delta; Sent Items, Drafts, Deleted Items, and Junk Email are not synced, and
-neither are drafts. A message removed at Microsoft stays in the external mailbox. Graph returns at
+neither are drafts. A message removed at Microsoft stays in the connected mailbox. Graph returns at
 most about 5,000 messages in the first sync's look-back, so the first sync of a busier Inbox may
 stop short of it; later syncs read every new message. A body over 256 KiB is cut there, and a message whose
 body Graph cannot return within the connector's bound is kept with its headers only. Unbinding erases
@@ -899,7 +930,7 @@ value that does not parse stops startup). Binding the same account again before 
 mailbox and its copies and cancels the deletion. When it ends, the mail worker (`mail:broadcast:work`
 ticks, which run whenever the mailbox starter is on, with or without `EXTERNAL_MAIL_PROVIDERS`)
 deletes the copies for good in bounded batches, then deletes
-the external mailbox and the connection with its sync runs, and stores a `copies_purged` access
+the connected mailbox and the connection with its sync runs, and stores a `copies_purged` access
 event on the deleted mailbox with `{ "connection_id", "provider", "reason": "retention" }`, the
 member who bound the account as its subject. The event is an audit record: the access history route
 of a deleted mailbox answers `404`, so it is never listed. Binding the account afterwards starts a
@@ -920,6 +951,36 @@ strands copies. A purge only ever touches the connection's own mailbox, and only
 holds synced copies; a purge that fails is logged and retried an hour later without holding up the
 connections revoked after it. A claimed connection whose mailbox is gone is not fetched: its grant
 is handed back, it is revoked, and its run is recorded as `dropped`.
+
+### Connection Directory
+
+Owners and admins learn that members connected outside accounts, and can disconnect them, without
+ever seeing the account's mail or full address. Members get `403 PERMISSION.DENIED` on both routes.
+
+`GET /v1/external-mail-connection-directory` returns keyset pages of every connection of the
+organization in any status, newest first (`cursor`, `per_page` 1 to 100, default 15; `page` is
+`400 COMMON.INVALID_INPUT`). It is empty while external mail is off, and never cached:
+
+```json
+{ "id": 3, "provider": "gmail", "status": "active", "masked_account_address": "st***@gmail.com",
+  "owner_user_id": 5, "owner_display_name": "stark", "last_synced_at": "2026-11-20T08:00:00Z",
+  "created_at": "2026-11-19T08:00:00Z" }
+```
+
+The mask keeps the first two characters of the local part (one when it is that short) and the
+domain. `owner_display_name` is the owner's nickname, or username without one, while they are a
+member, otherwise `null`. No token, mailbox id, message, or count is ever returned.
+
+`DELETE /v1/external-mail-connection-directory/:connection_id` force-disconnects any connection of
+the organization with the effect of the owner's unbind and writes `connection_force_disconnected`
+to the connected mailbox's history. A revoked connection answers `204` again and writes nothing;
+another organization's id, and any id while external mail is off, is
+`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. A forced disconnect that changed anything is also
+written to the organization audit log (resource `external_mail_connections`, the connection id,
+`provider`, and `owner_user_id`; never the address), so every owner and admin can see who
+disconnected which account. The owner may bind the account again afterwards, which restores the
+same mailbox like any rebind of their own; until then another member who proves control of the
+account may bind it instead (see [Binding](#binding)).
 
 ## Domains
 
@@ -1140,7 +1201,7 @@ they existed. See [Listing And Search](#listing-and-search) for the filters.
 | `failure_code` | Stable provider or transport reason when `status` is `failed`, otherwise empty |
 | `last_event` | Summary of the delivery events of an outbound message; see [Delivery Events](#delivery-events). Empty when none are recorded. |
 | `attachment_count` | How many files the message has |
-| `source` | `zmail` for mail Zmail received or sent; `gmail` or `outlook` for a read-only copy synced into an external mailbox. Also on log entries and unified inbox rows. |
+| `source` | `zmail` for mail Zmail received or sent; `gmail` or `outlook` for a read-only copy synced into a connected mailbox. Also on log entries and unified inbox rows. |
 | `template_id` | The template the message was rendered from; `null` when none was used |
 | `placement` | `default`, `archive`, `folder`, or `trash`; see [Placements](#placements). Shared by everyone. |
 | `folder_id` | The folder that holds the message when `placement` is `folder`, otherwise `null` |

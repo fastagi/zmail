@@ -20,8 +20,9 @@ const unsealedMessage = `NOT EXISTS (SELECT 1 FROM mailboxes AS seal WHERE seal.
 const unsealedBroadcast = `NOT EXISTS (SELECT 1 FROM mailboxes AS seal WHERE seal.id = mail_broadcasts.mailbox_id
 	AND seal.sealed_before IS NOT NULL AND mail_broadcasts.created_at < seal.sealed_before)`
 
-// MarkOwnerLeft sets owner_left_at on the user's live personal mailboxes in the organization and
-// returns them. A repeated departure records the later time, so the boundary is the latest one.
+// MarkOwnerLeft sets owner_left_at on the user's live Zmail personal mailboxes in the organization
+// and returns them; a connected personal mailbox is the user's own account and never awaits a
+// handover. A repeated departure records the later time, so the boundary is the latest one.
 func (r *repository) MarkOwnerLeft(ctx context.Context, organizationID, userID uint, at time.Time) ([]*domain.Mailbox, error) {
 	return r.updateOwnedMailboxes(ctx, organizationID, userID, "TRUE", at)
 }
@@ -38,7 +39,8 @@ func (r *repository) updateOwnedMailboxes(ctx context.Context, organizationID, u
 	}
 	var rows []MailboxPO
 	err := r.conn(ctx).Raw(`UPDATE mailboxes SET owner_left_at = ?, updated_at = now()
-		WHERE organization_id = ? AND owner_user_id = ? AND type = 'personal' AND deleted_at IS NULL AND `+condition+`
+		WHERE organization_id = ? AND owner_user_id = ? AND type = 'personal' AND origin = 'zmail'
+		  AND deleted_at IS NULL AND `+condition+`
 		RETURNING *`, leftAt, organizationID, userID).Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -84,7 +86,7 @@ func (r *repository) HandOverMailbox(ctx context.Context, mailboxID uint, sealed
 	converted := false
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&MailboxPO{}).
-			Where("id = ? AND type = ?", mailboxID, string(domain.MailboxTypePersonal)).
+			Where("id = ? AND type = ? AND origin = ?", mailboxID, string(domain.MailboxTypePersonal), string(domain.MailboxOriginZmail)).
 			Updates(map[string]any{
 				"type":          string(domain.MailboxTypeShared),
 				"owner_user_id": nil,

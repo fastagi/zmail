@@ -13,8 +13,8 @@ import (
 func TestExternalMailSyncOpsUpDown(t *testing.T) {
 	db, exec := externalMailFixture(t)
 	migrated := dumpSchema(t, db)
-	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
-		VALUES (2, 10, 901, 'owner@gmail.example', 'external', 901, now(), now())`)
+	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, origin, owner_user_id, created_at, updated_at)
+		VALUES (2, 10, 901, 'owner@gmail.example', 'personal', 'connected', 901, now(), now())`)
 	exec(`INSERT INTO external_mail_connections (id, organization_id, mailbox_id, provider, account_address, owner_user_id, status, next_sync_at, created_at, updated_at)
 		VALUES (1, 10, 2, 'gmail', 'owner@gmail.example', 901, 'revoked', now(), now(), '2026-01-01T00:00:00Z')`)
 	exec(`INSERT INTO external_mail_sync_runs (connection_id, started_at, finished_at, outcome, fetched_count, stored_count)

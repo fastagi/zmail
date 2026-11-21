@@ -25,7 +25,9 @@ func (mailboxOwnerPO) TableName() string { return "organizations" }
 func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	t.Helper()
 	db := testplatform.OpenPostgres(
-		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{})
+		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{},
+		// Triage reads a connected mailbox's connection status.
+		&ExternalMailConnectionPO{})
 	return NewRepository(db), db
 }
 
@@ -100,7 +102,7 @@ func TestRepositoryEnforcesTheMailboxLimitPerOrganization(t *testing.T) {
 		t.Fatalf("another organization is limited by the first one's mailboxes: %v", err)
 	}
 
-	owned, err := repo.ListMailboxes(ctx, 1, 0)
+	owned, err := repo.ListMailboxes(ctx, 1, 0, 0)
 	if err != nil || len(owned) != 2 || owned[0].Address != "a@mail.example" {
 		t.Fatalf("ListMailboxes = %v, %v", owned, err)
 	}
@@ -385,7 +387,7 @@ func TestRepositoryCountsUnreadInboundMessagesPerMailbox(t *testing.T) {
 	// An outbound message is never unread mail, even without a read time.
 	add(busy.ID, domain.MailDirectionOutbound, false)
 
-	owned, err := repo.ListMailboxes(ctx, 1, reader)
+	owned, err := repo.ListMailboxes(ctx, 1, reader, 0)
 	if err != nil || len(owned) != 2 {
 		t.Fatalf("ListMailboxes = %v, %v", owned, err)
 	}
@@ -393,7 +395,7 @@ func TestRepositoryCountsUnreadInboundMessagesPerMailbox(t *testing.T) {
 		t.Fatalf("busy mailbox unread = %d; want 2", owned[0].UnreadCount)
 	}
 	// Read state is the reader's own: someone who read nothing has everything unread.
-	if others, _ := repo.ListMailboxes(ctx, 1, other); others[0].UnreadCount != 3 {
+	if others, _ := repo.ListMailboxes(ctx, 1, other, 0); others[0].UnreadCount != 3 {
 		t.Fatalf("busy mailbox unread for another reader = %d; want 3", others[0].UnreadCount)
 	}
 	if owned[1].ID != quiet.ID || owned[1].UnreadCount != 0 {
@@ -619,7 +621,7 @@ func TestRepositoryStoresDeliveryEventsOnceAndSummarizesThem(t *testing.T) {
 
 func TestRepositoryReportsADisabledDatabase(t *testing.T) {
 	repo := NewRepository(nil)
-	if _, err := repo.ListMailboxes(context.Background(), 1, 0); !errors.Is(err, domain.ErrServiceUnavailable) {
+	if _, err := repo.ListMailboxes(context.Background(), 1, 0, 0); !errors.Is(err, domain.ErrServiceUnavailable) {
 		t.Fatalf("error = %v; want ErrServiceUnavailable", err)
 	}
 }

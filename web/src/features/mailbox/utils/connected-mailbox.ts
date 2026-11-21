@@ -1,9 +1,14 @@
 import type { Mailbox } from '@/features/mailbox/types';
 
+/** A mailbox holding read-only copies of a bound outside account (`origin: connected`). */
+export function isConnectedMailbox(mailbox: Pick<Mailbox, 'origin'>): boolean {
+  return mailbox.origin === 'connected';
+}
+
 /**
- * A mailbox holding read-only copies of a member's bound outside account: `origin: connected`, or
- * `type: external` from an API that predates the origin field.
+ * The viewer's own connected account: a connected personal mailbox, which the API lists for its
+ * owner alone, so `view` on it means the viewer owns it.
  */
-export function isConnectedMailbox(mailbox: Pick<Mailbox, 'type' | 'origin'>): boolean {
-  return mailbox.origin === 'connected' || mailbox.type === 'external';
+export function isOwnConnectedMailbox(mailbox: Pick<Mailbox, 'type' | 'origin' | 'access'>): boolean {
+  return isConnectedMailbox(mailbox) && mailbox.type === 'personal' && mailbox.access.view;
 }

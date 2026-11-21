@@ -6,11 +6,6 @@ import (
 	"time"
 )
 
-// MailboxTypeExternal mailboxes hold read-only copies of an outside account's mail, synced through
-// an external mail connection. Only the member who bound the account, the owner, reads them, and
-// nobody sends from them. They are never created through the mailbox API.
-const MailboxTypeExternal MailboxType = "external"
-
 // connectorIDPattern is the shape of a connector id. The schema checks the same pattern, so adding
 // a connector needs code only.
 var connectorIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{1,15}$`)
@@ -114,11 +109,11 @@ const DefaultExternalMailBackfillDays = 14
 // MaxExternalMailConnectionsPerUser bounds the connections one member may bind in an organization.
 const MaxExternalMailConnectionsPerUser = 10
 
-// ExternalMailConnection binds one outside account to one external mailbox.
+// ExternalMailConnection binds one outside account to one connected mailbox.
 type ExternalMailConnection struct {
 	ID             uint
 	OrganizationID uint
-	// MailboxID is the external mailbox synced mail is stored in.
+	// MailboxID is the connected mailbox synced mail is stored in.
 	MailboxID      uint
 	Provider       ExternalMailProvider
 	AccountAddress string
@@ -192,6 +187,11 @@ type ExternalMailRepository interface {
 	// ListExternalMailConnections returns the owner's connections in the organization, live ones
 	// first, then id ascending, at most MaxExternalMailConnectionsPerUser.
 	ListExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) ([]*ExternalMailConnection, error)
+	// ListExternalMailConnectionDirectory returns up to limit connections of the organization in any
+	// state, id descending, below beforeID when it is not zero.
+	ListExternalMailConnectionDirectory(ctx context.Context, organizationID, beforeID uint, limit int) ([]*ExternalMailConnection, error)
+	// FindExternalMailConnectionByMailbox returns the connection of a connected mailbox, in any state.
+	FindExternalMailConnectionByMailbox(ctx context.Context, organizationID, mailboxID uint) (*ExternalMailConnection, error)
 	// FindExternalMailConnection returns one connection of the organization.
 	FindExternalMailConnection(ctx context.Context, organizationID, id uint) (*ExternalMailConnection, error)
 	// RevokeExternalMailConnection marks the connection revoked, clears its token and cursor, and

@@ -702,6 +702,16 @@ function useEventText(nameOf: (userId: number | null) => string) {
         return typeof detail.to === 'string' && detail.to !== ''
           ? t('access.history.renamed', { actor, name: detail.to })
           : t('access.history.renamedCleared', { actor });
+      case 'connection_bound':
+        return t('access.history.connectionBound', { actor });
+      case 'connection_reconnected':
+        return t('access.history.connectionReconnected', { actor });
+      case 'connection_revoked':
+        return t('access.history.connectionRevoked', { actor });
+      case 'connection_force_disconnected':
+        return t('access.history.connectionForceDisconnected', { actor });
+      case 'connection_revoked_on_leave':
+        return t('access.history.connectionRevokedOnLeave', { subject });
     }
   };
 }
