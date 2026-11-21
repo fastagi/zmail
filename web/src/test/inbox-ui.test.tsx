@@ -1894,6 +1894,25 @@ describe('inbox keyboard shortcuts', () => {
     expect(to).not.toHaveAttribute('aria-invalid', 'true');
   });
 
+  // Issue #117: a send refused because the session ended says so and offers sign-in.
+  it('a send after the session ended keeps the draft and links to sign in', async () => {
+    state.send.mutateAsync.mockRejectedValueOnce(
+      new ApiError('unauthorized', ApiErrorCode.AUTH_UNAUTHORIZED, 401)
+    );
+    renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('To'), { target: { value: 'ann@example.com' } });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Hello' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText(/Your session has ended, so nothing was sent/u)).toBeVisible();
+    const signIn = screen.getByRole('link', { name: 'Sign in again' });
+    expect(signIn.getAttribute('href')).toMatch(/^\/login(\?returnUrl=|$)/u);
+    expect(screen.getByLabelText('Subject')).toHaveValue('Hello');
+  });
+
   // Issue #86: leaving the page with the composer open keeps what was written.
   it('navigating away with the composer open keeps the draft for the next compose', async () => {
     const first = renderRoute();

@@ -422,6 +422,7 @@ const messages = {
     templateNone: 'None, write the message',
     templateHint: 'An empty variable uses the fallback written in the template.',
     draftSaved: 'Saved as a draft',
+    signInAgain: 'Sign in again',
     invalidRecipients: 'Not a plain email address: {addresses}',
   },
   emails: {
@@ -1484,6 +1485,8 @@ const messages = {
       'This organization has reached the 24-hour sending limit. Nothing was sent. Try again later.',
     senderNotConfigured:
       'The message was NOT delivered: sending mail is not set up on this server. It is kept in Sent as failed.',
+    sessionExpired:
+      'Your session has ended, so nothing was sent. What you wrote is kept as a draft in this browser.',
     tooLarge: 'The message is too large to send.',
     triageUnavailable: 'AI triage is not available for this organization.',
     unavailable: 'The mailbox service is temporarily unavailable.',

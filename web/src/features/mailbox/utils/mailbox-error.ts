@@ -50,6 +50,7 @@ export type MailboxErrorKey =
   | 'errors.platformAccountTaken'
   | 'errors.sendLimitReached'
   | 'errors.senderNotConfigured'
+  | 'errors.sessionExpired'
   | 'errors.templateInvalid'
   | 'errors.templateKeyTaken'
   | 'errors.templateKindImmutable'
@@ -86,6 +87,7 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.COMMON_VALIDATION_FAILED]: 'errors.invalidInput',
   [ApiErrorCode.COMMON_INVALID_INPUT]: 'errors.invalidInput',
   [ApiErrorCode.COMMON_REQUEST_TOO_LARGE]: 'errors.tooLarge',
+  [ApiErrorCode.AUTH_UNAUTHORIZED]: 'errors.sessionExpired',
   [ApiErrorCode.PERMISSION_DENIED]: 'errors.permissionDenied',
   [ApiErrorCode.ORGANIZATION_NOT_FOUND]: 'errors.organizationNotFound',
   [ApiErrorCode.MAILBOX_NOT_FOUND]: 'errors.mailboxNotFound',

@@ -28,6 +28,8 @@ export function createQueryClient(): QueryClient {
       mutations: {
         // Write retries require endpoint-specific idempotency evidence.
         retry: false,
+        // Offline, a write fails now instead of pausing and running unseen on reconnect.
+        networkMode: 'always',
       },
     },
   });

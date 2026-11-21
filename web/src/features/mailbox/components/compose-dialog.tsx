@@ -2,10 +2,13 @@
 
 import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { AlertCircle, Paperclip, Send, X } from 'lucide-react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { authConfig } from '@/config/auth';
+import { withReturnUrl } from '@/features/auth/utils/return-url';
 import {
   Dialog,
   DialogBody,
@@ -470,7 +473,20 @@ export function ComposeDialog({
         {errorKey ? (
           <Alert variant="destructive">
             <AlertCircle className="size-4" aria-hidden="true" />
-            <AlertDescription>{t(errorKey)}</AlertDescription>
+            <AlertDescription>
+              {t(errorKey)}{' '}
+              {errorKey === 'errors.sessionExpired' ? (
+                <Link
+                  className="font-medium underline underline-offset-4"
+                  href={withReturnUrl(
+                    authConfig.routes.login,
+                    `${window.location.pathname}${window.location.search}`
+                  )}
+                >
+                  {t('compose.signInAgain')}
+                </Link>
+              ) : null}
+            </AlertDescription>
           </Alert>
         ) : null}
       </DialogBody>

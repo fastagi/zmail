@@ -410,6 +410,7 @@ const messages = {
     templateNone: '不使用，自己写',
     templateHint: '变量留空时，使用模板中写好的默认值。',
     draftSaved: '已存为草稿',
+    signInAgain: '重新登录',
     invalidRecipients: '不是有效的邮箱地址：{addresses}',
   },
   emails: {
@@ -1422,6 +1423,7 @@ const messages = {
     sendLimitReached: '该组织已达到 24 小时发信上限，邮件没有发出。请稍后再试。',
     senderNotConfigured:
       '邮件没有送达：此服务器尚未配置发信功能。它已保存在“已发送”中并标记为发送失败。',
+    sessionExpired: '登录已失效，邮件没有发出。已写的内容已作为草稿保存在此浏览器中。',
     tooLarge: '邮件太大，无法发送。',
     triageUnavailable: '本组织无法使用 AI 分流。',
     unavailable: '邮箱服务暂时不可用。',
