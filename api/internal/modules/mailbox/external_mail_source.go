@@ -79,6 +79,8 @@ type ExternalMailFetch struct {
 	More bool
 	// RefreshToken is set when the provider rotated the grant during this fetch; it is sealed and
 	// saved in the transaction that stores the page. Empty keeps the stored token.
+	// A source that rotated the grant and then failed returns it next to its error, and it is
+	// saved all the same.
 	RefreshToken string
 }
 

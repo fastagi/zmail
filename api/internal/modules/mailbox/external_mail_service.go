@@ -78,6 +78,15 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		// A token this instance cannot open is as unusable as one the provider refuses.
 		err = fmt.Errorf("%w: sealed token unreadable", ErrExternalMailAuth)
 	}
+	if fetched.RefreshToken != "" && fetched.RefreshToken != refreshToken {
+		// A provider that rotates grants has already spent the old one, so the new one is kept
+		// even when the rest of the fetch failed.
+		sealed, sealErr := s.sealRefreshToken(fetched.RefreshToken)
+		if sealErr != nil {
+			return sealErr
+		}
+		result.EncryptedRefreshToken = sealed
+	}
 	switch {
 	case err == nil:
 		result.Cursor, result.SyncedAt = fetched.Cursor, &now
@@ -85,13 +94,6 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		if fetched.More {
 			// Another page is ready: fetch it in the next pass instead of after the interval.
 			result.NextSyncAt = now
-		}
-		if fetched.RefreshToken != "" && fetched.RefreshToken != refreshToken {
-			sealed, sealErr := s.sealRefreshToken(fetched.RefreshToken)
-			if sealErr != nil {
-				return sealErr
-			}
-			result.EncryptedRefreshToken = sealed
 		}
 	case errors.Is(err, ErrExternalMailCursorExpired):
 		// Start over from an empty cursor at once; copies already stored are not repeated.
