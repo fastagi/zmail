@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { authConfig } from '@/config/auth';
 import { useLogin } from '@/features/auth/hooks/use-auth';
 import { hasAuthFieldError, resolveAuthErrorKey } from '@/features/auth/utils/auth-error';
+import { withReturnUrl } from '@/features/auth/utils/return-url';
 import { useT } from '@/i18n';
 
 interface LoginFormProps {
@@ -33,6 +35,7 @@ interface LoginFormProps {
 export function LoginForm({ demoCredentials, registrationEnabled = true }: LoginFormProps) {
   const t = useT();
   const { mutate: login, isPending, error, reset } = useLogin();
+  const returnUrl = useSearchParams()?.get('returnUrl') ?? null;
   const [email, setEmail] = useState(demoCredentials?.email ?? '');
   const [password, setPassword] = useState(demoCredentials?.password ?? '');
   const emailError = hasAuthFieldError(error, 'email') ? t.auth('emailInvalid') : undefined;
@@ -134,7 +137,7 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
           <>
             {t.auth('noAccount')}
             <Link
-              href={authConfig.routes.register}
+              href={withReturnUrl(authConfig.routes.register, returnUrl)}
               className="font-medium text-primary hover:underline hover:text-primary-deep transition-colors"
             >
               {t.auth('signUp')}

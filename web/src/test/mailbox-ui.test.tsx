@@ -101,13 +101,15 @@ vi.mock('next/navigation', async () => {
       new URLSearchParams(useSyncExternalStore(subscribe, () => window.location.search)),
   };
 });
+const twoPeople = [
+  { id: 101, user_id: 1, username: 'admin', nickname: 'Admin User', role: 'owner' },
+  { id: 105, user_id: 5, username: 'riley', nickname: 'Riley Chen', role: 'member' },
+];
+const peopleState = vi.hoisted(() => ({ items: null as unknown[] | null }));
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => state.organizations,
   useOrganizationMembers: () => ({
-    data: page([
-      { id: 101, user_id: 1, username: 'admin', nickname: 'Admin User', role: 'owner' },
-      { id: 105, user_id: 5, username: 'riley', nickname: 'Riley Chen', role: 'member' },
-    ]),
+    data: page(peopleState.items ?? twoPeople),
     isPending: false,
     error: null,
     refetch: vi.fn(),
@@ -178,6 +180,7 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
 
 describe('mailbox workspace', () => {
   beforeEach(() => {
+    peopleState.items = null;
     toast.success.mockReset();
     toast.error.mockReset();
     templateState.data = [];
@@ -513,6 +516,26 @@ describe('mailbox workspace', () => {
     expect(screen.getByLabelText('Address')).toHaveValue('');
     // The new mailbox becomes the open one.
     expect(new URLSearchParams(window.location.search).get('mailbox')).toBe('3');
+  });
+
+  it('puts the only member of a new team in the mailbox and explains the shared domain', async () => {
+    peopleState.items = [twoPeople[0]];
+    state.createMailbox.mutateAsync.mockResolvedValue(mailbox(3, 'hello', ''));
+    renderWorkspace();
+    openManage();
+
+    expect(screen.getByLabelText('Member 1')).toHaveValue('1');
+    expect(screen.getByText(/unique across Zmail/u)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Address'), { target: { value: 'hello' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create mailbox' }));
+
+    await waitFor(() =>
+      expect(state.createMailbox.mutateAsync).toHaveBeenCalledWith({
+        local_part: 'hello',
+        type: 'shared',
+        members: [{ user_id: 1, permission: 'send' }],
+      })
+    );
   });
 
   it('explains address errors without sending and maps the API codes', async () => {

@@ -2,6 +2,7 @@
 
 import { lazy, Suspense, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
   ArrowLeft,
@@ -104,6 +105,10 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
   const settingEnabled = isWebFeatureEnabled('setting');
   const usageEnabled = isWebFeatureEnabled('usage');
   const webhookEnabled = isWebFeatureEnabled('webhook');
+  // `?tab=invitations`, from the getting-started checklist, opens straight on inviting.
+  const requestedTab = useSearchParams()?.get('tab');
+  const initialTab =
+    requestedTab === 'invitations' && canManageOrganization ? 'invitations' : 'profile';
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -157,7 +162,7 @@ function OrganizationSettings({ context }: { context: OrganizationContext }) {
         </div>
       </div>
 
-      <Tabs defaultValue="profile" className="pt-5">
+      <Tabs defaultValue={initialTab} className="pt-5">
         <TabsList className="max-w-full overflow-x-auto">
           <TabsTrigger value="profile">
             <Settings2 aria-hidden="true" />

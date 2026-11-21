@@ -153,6 +153,14 @@ const ROLE_PARAM = 'role';
 const SEARCH_PARAM = 'q';
 const TAB_PARAM = 'tab';
 const TRIAGE_PARAM = 'triage';
+/** `new=mailbox`: the team was just created, so mailbox creation opens at once. */
+const NEW_PARAM = 'new';
+
+// Only someone without a team sees it, so it loads on demand.
+const TeamSetupCard = lazy(async () => {
+  const feature = await import('@/features/organization/components/team-setup-card');
+  return { default: feature.TeamSetupCard };
+});
 const UNREAD_TAB = 'unread';
 const NO_ROLE = 'none';
 const filterParams = [
@@ -294,7 +302,14 @@ export function InboxWorkspace() {
           description={t('inbox.description')}
           scope={scope}
         />
-        <MailOrganizationBoundary scope={scope}>{() => null}</MailOrganizationBoundary>
+        {/* Without a team the first step is to name one, right here. */}
+        {scope.status === 'empty' ? (
+          <Suspense fallback={null}>
+            <TeamSetupCard className="mx-auto max-w-xl" />
+          </Suspense>
+        ) : (
+          <MailOrganizationBoundary scope={scope}>{() => null}</MailOrganizationBoundary>
+        )}
       </div>
     );
   }
@@ -411,6 +426,10 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     },
     [pathname, router]
+  );
+  const dropNewParam = useCallback(
+    () => replaceParams(next => next.delete(NEW_PARAM)),
+    [replaceParams]
   );
   const setListing = (changes: Partial<Record<(typeof filterParams)[number], string | null>>) => {
     setAdvanceAfter(null);
@@ -552,6 +571,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
                   <ManageMailboxesAction
                     mailboxes={mailboxes.data}
                     onRefresh={() => void mailboxes.refetch()}
+                    autoOpen={searchParams.get(NEW_PARAM) === 'mailbox'}
+                    onAutoOpened={dropNewParam}
                   />
                 ) : null}
                 {externalOn ? (
@@ -1068,14 +1089,25 @@ function MailShortcuts({ bindings }: { bindings: Partial<Record<MailShortcut, ()
 function ManageMailboxesAction({
   mailboxes,
   onRefresh,
+  autoOpen = false,
+  onAutoOpened,
 }: {
   mailboxes: Mailbox[];
   onRefresh: () => void;
+  /** Opens the dialog as soon as the domains are known: the team was just created. */
+  autoOpen?: boolean;
+  onAutoOpened?: () => void;
 }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
   const domains = useMailboxDomains(organizationId);
   const [open, setOpen] = useState(false);
+  const domainsReady = domains.data !== undefined;
+  useEffect(() => {
+    if (!autoOpen || !domainsReady) return;
+    setOpen(true);
+    onAutoOpened?.();
+  }, [autoOpen, domainsReady, onAutoOpened]);
 
   return (
     <>

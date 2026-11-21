@@ -26,6 +26,9 @@ const messages = {
     title: 'New mailbox',
     localPart: 'Address',
     localPartPlaceholder: 'hello',
+    sharedDomainRules:
+      'Addresses @{domain} are unique across Zmail and go to whoever takes them first; a deleted address can never be used again.',
+    ownDomainLink: 'Use your own domain',
     localPartHint:
       'Lowercase letters and digits, with single dots, underscores, or hyphens inside.',
     displayName: 'Display name (optional)',
