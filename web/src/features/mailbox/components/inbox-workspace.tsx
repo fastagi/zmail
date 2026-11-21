@@ -46,8 +46,8 @@ import {
   EmptyState,
   ErrorAlert,
   ReaderArticleSkeleton,
-  useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import { useMailDateTimeFormat } from '@/features/mailbox/components/mail-time';
 import type { PaletteCommand } from '@/features/mailbox/components/command-palette';
 import {
   useInboxCounts,
@@ -405,7 +405,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     /** The mailboxes a new message may be sent from; replies keep their own. */
     fromOptions?: readonly Mailbox[];
   } | null>(null);
-  const formatter = useDateTimeFormat();
+  const formatter = useMailDateTimeFormat();
   // Mounted from the first open on, so the dialog can animate closed.
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpMounted, setHelpMounted] = useState(false);

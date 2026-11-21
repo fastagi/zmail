@@ -41,9 +41,9 @@ import {
   mailStatusKey,
   nativeSelectClassName,
   relativeTime,
-  useDateTimeFormat,
   useRelativeTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import { useMailDateTimeFormat } from '@/features/mailbox/components/mail-time';
 import {
   MAIL_STATS_DAYS,
   useMailLog,
@@ -132,7 +132,7 @@ function EmailLogContent({
   initialView: EmailLogView;
 }) {
   const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
+  const formatter = useMailDateTimeFormat();
   const organizationId = useMailOrganizationId();
   const mailboxes = useMailboxes(organizationId);
   const markRead = useMarkMailMessageRead(organizationId);
@@ -495,7 +495,7 @@ function EmailTable({
   onOpen: (entry: MailLogEntry) => void;
 }) {
   const t = useT('mailbox');
-  const absolute = useDateTimeFormat();
+  const absolute = useMailDateTimeFormat();
   const relative = useRelativeTimeFormat();
   const [now] = useState(() => Date.now());
   const organizationId = useMailOrganizationId();

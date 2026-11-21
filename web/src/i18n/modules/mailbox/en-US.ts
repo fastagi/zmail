@@ -133,6 +133,8 @@ const messages = {
     reader: {
       to: 'To {address}',
       toRole: 'To {address} · {role}',
+      from: 'From {address}',
+      fromRole: 'From {address} · {role}',
     },
     groups: {
       label: 'Roles & mailboxes',
@@ -282,6 +284,8 @@ const messages = {
     label: 'Conversation',
     expand: 'Show the message from {sender}',
     sent: 'Sent',
+    recipientsTo: 'To: {addresses}',
+    recipientsCc: 'Cc: {addresses}',
   },
   deleteForever: {
     title: 'Delete forever',

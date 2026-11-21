@@ -259,9 +259,14 @@ export function InboxReadingPane({
       actionsRef.current = null;
     };
   });
+  // Mail the mailbox sent is from it; each message names its own recipients.
+  const sent = item.direction === 'outbound';
   const kicker = roleName
-    ? t('inbox.reader.toRole', { address: item.mailbox_address, role: roleName })
-    : t('inbox.reader.to', { address: item.mailbox_address });
+    ? t(sent ? 'inbox.reader.fromRole' : 'inbox.reader.toRole', {
+        address: item.mailbox_address,
+        role: roleName,
+      })
+    : t(sent ? 'inbox.reader.from' : 'inbox.reader.to', { address: item.mailbox_address });
 
   let body: ReactNode;
   if (unavailable) {

@@ -145,11 +145,28 @@ export function EmptyState({
   );
 }
 
-export function useDateTimeFormat(): Intl.DateTimeFormat {
+/** `zone` when this browser knows it, else undefined (the browser's own zone). */
+export function knownTimeZone(zone: string | undefined): string | undefined {
+  if (!zone) return undefined;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return zone;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Date and time in `timeZone` when given and known, else in the browser's zone. */
+export function useDateTimeFormat(timeZone?: string): Intl.DateTimeFormat {
   const locale = useLocale();
   return useMemo(
-    () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }),
-    [locale]
+    () =>
+      new Intl.DateTimeFormat(locale, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: knownTimeZone(timeZone),
+      }),
+    [locale, timeZone]
   );
 }
 

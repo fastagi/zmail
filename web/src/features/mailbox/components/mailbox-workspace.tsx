@@ -42,8 +42,8 @@ import {
 import {
   EmptyState,
   ErrorAlert,
-  useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import { useMailDateTimeFormat } from '@/features/mailbox/components/mail-time';
 import {
   ListSkeleton,
   MessageListPane,
@@ -363,7 +363,7 @@ function MailboxView({
     }
   };
 
-  const formatter = useDateTimeFormat();
+  const formatter = useMailDateTimeFormat();
   const replyCopy = {
     prefixSubject: (subject: string) => t('compose.replySubject', { subject }),
     quotedHeader: (params: { date: string; sender: string }) => t('compose.quotedHeader', params),

@@ -34,8 +34,8 @@ import {
   MailStatusBadge,
   mailBadgeKey,
   StaleNotice,
-  useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import { useMailDateTimeFormat } from '@/features/mailbox/components/mail-time';
 import { LabelDot, type MailView } from '@/features/mailbox/components/mailbox-sidebar';
 import {
   originOf,
@@ -654,7 +654,7 @@ function MessageRows({
   onLeave: (rowIds: number[]) => void;
 }) {
   const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
+  const formatter = useMailDateTimeFormat();
   const organizationId = useMailOrganizationId();
   const update = useUpdateMailMessage(organizationId, mailbox.id);
   const updateMany = useUpdateMailMessages(organizationId, mailbox.id);

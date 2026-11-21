@@ -128,6 +128,8 @@ const messages = {
     reader: {
       to: '收件邮箱 {address}',
       toRole: '收件邮箱 {address} · {role}',
+      from: '发件邮箱 {address}',
+      fromRole: '发件邮箱 {address} · {role}',
     },
     groups: {
       label: '角色与邮箱',
@@ -276,6 +278,8 @@ const messages = {
     label: '会话',
     expand: '展开 {sender} 的邮件',
     sent: '已发送',
+    recipientsTo: '收件人：{addresses}',
+    recipientsCc: '抄送：{addresses}',
   },
   deleteForever: {
     title: '永久删除',
