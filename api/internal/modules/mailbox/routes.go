@@ -88,6 +88,9 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 	r.Group("", func(key *router.Router) {
 		key.WithMiddleware("api_key", "organization_context")
 
+		key.POST("/agent-mail-templates", h.CreateTemplate).
+			Name("agent_mail_templates.store").Middleware(apikey.RequireScopes("templates:create"))
+
 		key.POST("/outbound-mail-messages", h.SendOutbound).
 			Name("outbound_mail_messages.store").Middleware(apikey.RequireScopes(ScopeMailSend))
 		key.GET("/outbound-mail-messages/:message_id", h.GetOutbound).

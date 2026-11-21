@@ -1,0 +1,40 @@
+{
+  "message_id": 4,
+  "from": {
+    "address": "hello@notify.zmail.im",
+    "name": "Zmail 团队"
+  },
+  "to": [
+    "authorized Gmail test recipient"
+  ],
+  "subject": "Zmail 正式发件身份测试",
+  "events": [
+    {
+      "type": "accepted",
+      "recipient": "",
+      "detail": "",
+      "occurred_at": "2026-11-17T19:33:40.25859Z"
+    },
+    {
+      "type": "delivered",
+      "recipient": "authorized Gmail test recipient",
+      "detail": "",
+      "occurred_at": "2026-11-17T19:33:43.288Z"
+    }
+  ],
+  "status": "sent",
+  "last_event": "delivered",
+  "scope": "Provider delivery and Gmail inbox placement/authentication verified for this message only; no guarantee for future messages.",
+  "receiver_verification": {
+    "source": "Gmail browser: Inbox label and Show original",
+    "verified_on": "2026-11-17",
+    "inbox_label": true,
+    "delivery_delay_seconds": 3,
+    "spf": "PASS",
+    "spf_ip": "104.30.16.88",
+    "dkim": "PASS",
+    "dkim_domain": "notify.zmail.im",
+    "dmarc": "PASS",
+    "header_from_domain": "notify.zmail.im"
+  }
+}

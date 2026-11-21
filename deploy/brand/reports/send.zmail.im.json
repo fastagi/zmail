@@ -1,0 +1,70 @@
+{
+  "checked_at": "2026-11-17T19:35:20.835231+00:00",
+  "domain": "send.zmail.im",
+  "checks": [
+    {
+      "name": "cf-bounce.send.zmail.im",
+      "type": "MX",
+      "matches_provider": true,
+      "expected": "19 route1.mx.cloudflare.net",
+      "observed": [
+        "7 route2.mx.cloudflare.net",
+        "22 route3.mx.cloudflare.net",
+        "19 route1.mx.cloudflare.net"
+      ]
+    },
+    {
+      "name": "cf-bounce.send.zmail.im",
+      "type": "MX",
+      "matches_provider": true,
+      "expected": "7 route2.mx.cloudflare.net",
+      "observed": [
+        "22 route3.mx.cloudflare.net",
+        "7 route2.mx.cloudflare.net",
+        "19 route1.mx.cloudflare.net"
+      ]
+    },
+    {
+      "name": "cf-bounce.send.zmail.im",
+      "type": "MX",
+      "matches_provider": true,
+      "expected": "22 route3.mx.cloudflare.net",
+      "observed": [
+        "7 route2.mx.cloudflare.net",
+        "22 route3.mx.cloudflare.net",
+        "19 route1.mx.cloudflare.net"
+      ]
+    },
+    {
+      "name": "cf-bounce.send.zmail.im",
+      "type": "TXT",
+      "matches_provider": true,
+      "expected": "v=spf1 include:_spf.mx.cloudflare.net ~all",
+      "observed": [
+        "v=spf1 include:_spf.mx.cloudflare.net ~all"
+      ]
+    },
+    {
+      "name": "cf-bounce._domainkey.send.zmail.im",
+      "type": "TXT",
+      "matches_provider": true,
+      "expected": "v=DKIM1; h=sha256; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiweykoi+o48IOGuP7GR3X0MOExCUDY/BCRHoWBnh3rChl7WhdyCxW3jgq1daEjPPqoi7sJvdg5hEQVsgVRQP4DcnQDVjGMbASQtrY4WmB1VebF+RPJB2ECPsEDTpeiI5ZyUAwJaVX7r6bznU67g7LvFq35yIo4sdlmtZGV+i0H4cpYH9+3JJ78km4KXwaf9xUJCWF6nxeD+qG6Fyruw1Qlbds2r85U9dkNDVAS3gioCvELryh1TxKGiVTkg4wqHTyHfWsp7KD3WQHYJn0RyfJJu6YEmL77zonn7p2SRMvTMP3ZEXibnC9gz3nnhR6wcYL8Q7zXypKTMD58bTixDSJwIDAQAB",
+      "observed": [
+        "v=DKIM1; h=sha256; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiweykoi+o48IOGuP7GR3X0MOExCUDY/BCRHoWBnh3rChl7WhdyCxW3jgq1daEjPPqoi7sJvdg5hEQVsgVRQP4DcnQDVjGMbASQtrY4WmB1VebF+RPJB2ECPsEDTpeiI5ZyUAwJaVX7r6bznU67g7LvFq35yIo4sdlmtZGV+i0H4cpYH9+3JJ78km4KXwaf9xUJCWF6nxeD+qG6Fyruw1Qlbds2r85U9dkNDVAS3gioCvELryh1TxKGiVTkg4wqHTyHfWsp7KD3WQHYJn0RyfJJu6YEmL77zonn7p2SRMvTMP3ZEXibnC9gz3nnhR6wcYL8Q7zXypKTMD58bTixDSJwIDAQAB"
+      ]
+    },
+    {
+      "name": "_dmarc.send.zmail.im",
+      "type": "TXT",
+      "matches_provider": true,
+      "expected": "v=DMARC1; p=reject;",
+      "observed": [
+        "v=DMARC1; p=reject;"
+      ]
+    }
+  ],
+  "dmarc_enforced": true,
+  "dns_ready": true,
+  "receiver_authentication": "Not verified by DNS inspection; inspect received Authentication-Results.",
+  "inbox_placement": "Not established by DNS inspection or provider delivered events."
+}

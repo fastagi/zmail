@@ -1,0 +1,135 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "zmail-api-queue",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-stark--claude-spares-spare-6rSOf8/2ef74ec4-9413-4ac8-86d4-19256fda82e3/scratchpad/run-api.sh"
+      ],
+      "port": 18095
+    },
+    {
+      "name": "zmail-web-queue",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/send-quota-queue/web && API_ADAPTER_ENABLED=true API_UPSTREAM_URL=http://127.0.0.1:18095/v1 NEXT_PUBLIC_APP_URL=http://localhost:3105 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox,webhook MOCK_BFF_ENABLED=false AUTH_REGISTRATION_ENABLED=true NEXT_PUBLIC_DEFAULT_LOCALE=zh-Hans exec corepack pnpm exec next dev -p 3105"
+      ],
+      "port": 3105
+    },
+    {
+      "name": "zmail-selfhosted-mailserver",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-stark-item-zmail/2ef74ec4-9413-4ac8-86d4-19256fda82e3/scratchpad/run-mailserver.sh"
+      ],
+      "port": 8125
+    },
+    {
+      "name": "zmail-selfhosted-api",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-stark-item-zmail/2ef74ec4-9413-4ac8-86d4-19256fda82e3/scratchpad/run-api-selfhosted.sh"
+      ],
+      "port": 18096
+    },
+    {
+      "name": "zmail-selfhosted-web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/self-hosted-mail/web && API_ADAPTER_ENABLED=true API_UPSTREAM_URL=http://127.0.0.1:18096/v1 NEXT_PUBLIC_APP_URL=http://localhost:3106 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox,webhook MOCK_BFF_ENABLED=false AUTH_REGISTRATION_ENABLED=true NEXT_PUBLIC_DEFAULT_LOCALE=zh-Hans exec corepack pnpm exec next dev -p 3106"
+      ],
+      "port": 3106
+    },
+    {
+      "name": "zmail-web-domains-mock",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/self-serve-domains/web && NEXT_PUBLIC_APP_URL=http://localhost:3110 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox corepack pnpm exec next dev --turbopack -p 3110"
+      ],
+      "port": 3110
+    },
+    {
+      "name": "zmail-api-feishu",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-stark-item-zmail/2ef74ec4-9413-4ac8-86d4-19256fda82e3/scratchpad/run-api-feishu.sh"
+      ],
+      "port": 18097
+    },
+    {
+      "name": "zmail-web-feishu",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/self-serve-domains/web && API_ADAPTER_ENABLED=true API_UPSTREAM_URL=http://127.0.0.1:18097/v1 NEXT_PUBLIC_APP_URL=http://localhost:3111 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox,webhook MOCK_BFF_ENABLED=false AUTH_REGISTRATION_ENABLED=true NEXT_PUBLIC_DEFAULT_LOCALE=zh-Hans exec corepack pnpm exec next dev -p 3111"
+      ],
+      "port": 3111
+    },
+    {
+      "name": "zmail-web-organize-mock",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/mailbox-organize/web && NEXT_PUBLIC_APP_URL=http://localhost:3112 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox NEXT_PUBLIC_DEFAULT_LOCALE=zh-Hans exec corepack pnpm exec next dev -p 3112"
+      ],
+      "port": 3112
+    },
+    {
+      "name": "zmail-web-inbox-v2-mock",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/unified-inbox/web && NEXT_PUBLIC_APP_URL=http://localhost:3121 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox exec corepack pnpm exec next dev --turbopack -p 3121"
+      ],
+      "port": 3121
+    },
+    {
+      "name": "zmail-api-inbox-demo",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-stark-item-zmail/2ef74ec4-9413-4ac8-86d4-19256fda82e3/scratchpad/run-api-demo.sh"
+      ],
+      "port": 28741
+    },
+    {
+      "name": "zmail-web-inbox-demo",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/unified-inbox/web && API_ADAPTER_ENABLED=true API_UPSTREAM_URL=http://127.0.0.1:28741/v1 NEXT_PUBLIC_APP_URL=http://localhost:3131 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox MOCK_BFF_ENABLED=false AUTH_REGISTRATION_ENABLED=true NEXT_PUBLIC_DEFAULT_LOCALE=zh-Hans exec corepack pnpm exec next dev -p 3131"
+      ],
+      "port": 3131
+    },
+    {
+      "name": "zmail-web-v2-check",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/trusting-allen-92d998/web && API_ADAPTER_ENABLED=true API_UPSTREAM_URL=http://127.0.0.1:28741/v1 NEXT_PUBLIC_APP_URL=http://localhost:3132 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox MOCK_BFF_ENABLED=false AUTH_REGISTRATION_ENABLED=true NEXT_PUBLIC_DEFAULT_LOCALE=zh-Hans exec corepack pnpm exec next dev -p 3132"
+      ],
+      "port": 3132
+    },
+    {
+      "name": "zmail-web-triage",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/triage-settings/web && MOCK_BFF_ENABLED=true NEXT_PUBLIC_APP_URL=http://localhost:3120 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox,webhook AUTH_REGISTRATION_ENABLED=true NEXT_PUBLIC_DEFAULT_LOCALE=zh-Hans exec corepack pnpm exec next dev -p 3120"
+      ],
+      "port": 3120
+    },
+    {
+      "name": "zmail-web-interaction-mock",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/stark/item/zmail/.claude/worktrees/interaction-decisions/web && MOCK_BFF_ENABLED=true NEXT_PUBLIC_APP_URL=http://localhost:3140 NEXT_PUBLIC_OPTIONAL_FEATURES=organization,mailbox AUTH_REGISTRATION_ENABLED=true NEXT_PUBLIC_DEFAULT_LOCALE=zh-Hans exec corepack pnpm exec next dev -p 3140"
+      ],
+      "port": 3140
+    }
+  ]
+}

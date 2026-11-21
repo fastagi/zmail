@@ -435,7 +435,7 @@ const (
 	DefaultMailboxDomain = "mail.localhost"
 	// DefaultMailboxRequestTimeout caps one outbound provider call.
 	DefaultMailboxRequestTimeout = 15 * time.Second
-	// DefaultMailboxDailySendLimit bounds outbound messages per user per 24 hours.
+	// DefaultMailboxDailySendLimit bounds outbound send attempts per organization per rolling 24 hours.
 	DefaultMailboxDailySendLimit = 200
 	// DefaultMailboxInboundTolerance is the accepted clock skew for a signed inbound delivery.
 	DefaultMailboxInboundTolerance = 5 * time.Minute

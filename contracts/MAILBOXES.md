@@ -86,6 +86,13 @@ has no browser route: only the mail edge calls it.
   settings: `max_mailboxes` (per organization, across all domains), the outbound `provider`
   (`cloudflare` delivers; `log` only records and is for development), `inbound_enabled`,
   `daily_send_limit` (per organization), `broadcasts_enabled`, and `custom_domains_enabled`.
+- When custom-domain management is enabled and the operator promotes an already connected
+  domain to `MAILBOX_DOMAIN`, that domain appears only once, as shared. Its verified domain
+  configuration supplies literal routing rules for new shared-domain mailboxes, including
+  those of other organizations. This permits replies on shared subdomains, which cannot use
+  an apex catch-all. The connected domain's management ownership does not change. A pending
+  domain blocks creation with `422 MAILBOX.DOMAIN_NOT_VERIFIED`; routing failure creates no
+  mailbox. An unregistered shared domain keeps the existing operator-managed routing behavior.
 - An address that is or ever was a mailbox is
   `409 MAILBOX.ADDRESS_TAKEN`: deleting a mailbox keeps its address reserved, so a later owner
   never receives mail meant for the previous one.
@@ -322,6 +329,20 @@ stores the rendered content and `template_id`; editing or deleting the template 
 it. The idempotency fingerprint covers the rendered content.
 
 A template of another organization is `404 MAILBOX.TEMPLATE_NOT_FOUND`.
+
+### Create a template from an AI tool
+
+Configure the tool runner with a user-owned API key scoped to `templates:create` and the organization ID. Keep the key in the runner's secret store. The model supplies the JSON body. The organization membership and template validation rules above apply.
+
+```sh
+curl --fail-with-body -X POST https://zmail.im/v1/agent-mail-templates \
+  -H "X-API-Key: $ZMAIL_API_KEY" \
+  -H "Organization-Id: $ZMAIL_ORG_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Welcome follow-up","subject":"Welcome, {{name}}","text":"Hello {{name}}, how can we help?","sample_variables":{"name":"Alex"}}'
+```
+
+A successful request returns HTTP 201 and the saved template in `data`. Members can review it on the organization's Templates page. Creation sends no email. A duplicate name returns 409. The create scope grants no sending, editing, or deletion rights.
 
 ### Contacts
 
