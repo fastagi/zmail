@@ -364,6 +364,8 @@ type service struct {
 	// externalConnectors are the providers outside mailboxes can be bound with; settings.ExternalMail
 	// selects them.
 	externalConnectors *externalMailRegistry
+	// externalCredentialLimits bound password bindings per member and per organization.
+	externalCredentialLimits externalCredentialLimits
 }
 
 var _ Service = (*service)(nil)
@@ -427,6 +429,7 @@ func NewService(
 		recordAudit: auditstarter.RecordChange,
 		triage:      triage, triageModel: newTriageModel(settings.Triage),
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
+		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 	}
 }
 

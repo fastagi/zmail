@@ -96,6 +96,8 @@ var mailboxErrorCodes = []struct {
 	{ErrExternalMailAccountTaken, http.StatusConflict, domain.CodeExternalMailAccountTaken},
 	{ErrExternalMailConnectionLimit, http.StatusConflict, domain.CodeExternalMailConnectionLimit},
 	{ErrExternalMailProviderUnavailable, http.StatusNotFound, domain.CodeExternalMailProviderUnavailable},
+	{ErrExternalMailServerUnreachable, http.StatusUnprocessableEntity, domain.CodeExternalMailServerUnreachable},
+	{ErrExternalMailCredentialsRateLimited, http.StatusTooManyRequests, domain.CodeRateLimited},
 	{ErrMailRoleLimitReached, http.StatusUnprocessableEntity, domain.CodeMailRoleLimitReached},
 	{ErrTransactionalMessageNotFound, http.StatusNotFound, domain.CodeMailTransactionalMessageNotFound},
 	{ErrTransactionalDisabled, http.StatusServiceUnavailable, domain.CodeMailTransactionalDisabled},
