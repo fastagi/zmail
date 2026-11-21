@@ -120,4 +120,18 @@ describe('AppSettingsPage', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('explains that the brand setting is published data the shipped shells do not render', async () => {
+    const brand = { ...setting, key: 'branding.display_name', value: 'Zmail QA' };
+    renderPage(
+      vi.fn().mockResolvedValue(json({ code: 0, message: 'success', data: [brand, setting] })),
+    );
+
+    expect(
+      await screen.findByText(
+        'Published to API clients. The Web and Admin apps show their built-in name, so changing this has no visible effect there.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/Published to API clients/)).toHaveLength(1);
+  });
 });

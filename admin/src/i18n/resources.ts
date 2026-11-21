@@ -196,6 +196,10 @@ const enUS = {
       concurrencyNote:
         'Each change applies only if nobody changed the setting since you loaded it.',
       source: { default: 'Default', override: 'Override' },
+      help: {
+        brandingDisplayName:
+          'Published to API clients. The Web and Admin apps show their built-in name, so changing this has no visible effect there.',
+      },
       version: 'Version {{version}}',
       on: 'On',
       off: 'Off',
@@ -725,6 +729,9 @@ const zhHans = {
       listTitle: '设置项',
       concurrencyNote: '只有在你加载之后无人修改过该设置时，修改才会生效。',
       source: { default: '默认值', override: '已覆盖' },
+      help: {
+        brandingDisplayName: '提供给 API 客户端。Web 和管理后台显示内置名称，因此修改此项不会改变它们的显示。',
+      },
       version: '版本 {{version}}',
       on: '开',
       off: '关',

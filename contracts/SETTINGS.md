@@ -42,6 +42,12 @@ The shipped catalog is intentionally small:
 | user | `localization.locale` | enum | private | `en-US` |
 | user | `localization.timezone` | timezone | private | `UTC` |
 
+`branding.display_name` is published data for API clients through `GET /v1/settings/public`. The
+shipped Web and Admin shells do not render it: their brand name is build-time configuration (Web's
+brand copy, Admin's `VITE_APP_NAME`), so an override has no visible effect in either shell. A
+downstream app that wants a runtime brand reads this public setting in its own shell, with its
+built-in name as the fallback.
+
 Locale values are `en-US` or `zh-Hans`. Time zones must be valid IANA names. Downstream apps may
 compose more string, boolean, integer, enum, or timezone definitions at assembly time. Keys use
 lowercase namespaced dot-separated semantic names (`domain.reason`, with letter-led snake_case
