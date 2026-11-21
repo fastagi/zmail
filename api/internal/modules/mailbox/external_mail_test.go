@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ type externalFixture struct {
 func newExternalFixture(t *testing.T, providers ...string) *externalFixture {
 	t.Helper()
 	repo, db := openRepository(t)
-	if err := db.AutoMigrate(&ExternalMailConnectionPO{}); err != nil {
+	if err := db.AutoMigrate(&ExternalMailConnectionPO{}, &ExternalMailAuthorizationPO{}); err != nil {
 		t.Fatalf("migrate external mail connections: %v", err)
 	}
 	createOwner(t, db, accessOrg)
@@ -44,7 +45,7 @@ func newExternalFixture(t *testing.T, providers ...string) *externalFixture {
 	svc := NewService(repo, memberships, repo, repo, repo, repo,
 		nil, nil, nil, transport, &fakeNotifier{}, settings, nil, nil, nil)
 	source := NewFakeExternalMailSource()
-	svc.externalSource = source
+	svc.externalConnectors = fakeExternalMailRegistry(source)
 	f := &externalFixture{accessFixture: seedAccessFixture(t, svc, repo, transport, memberships), source: source}
 	f.advance = f.fixClock()
 
@@ -208,7 +209,7 @@ func TestExternalMailSyncFetchFailureRetries(t *testing.T) {
 	f := newExternalFixture(t, config.ExternalMailSourceFake)
 	f.source.Deliver(externalTestToken, externalMessage("g-1", "One", time.Time{}))
 	f.sync(t)
-	f.service.externalSource = failingSource{f.source}
+	f.service.externalConnectors = fakeExternalMailRegistry(failingSource{f.source})
 	f.advance(externalMailSyncInterval)
 	f.sync(t)
 
@@ -216,7 +217,7 @@ func TestExternalMailSyncFetchFailureRetries(t *testing.T) {
 	if connection.Status != domain.ExternalMailStatusActive || connection.LastErrorCode != domain.ExternalMailErrorFetchFailed || connection.SyncCursor != "1" {
 		t.Fatalf("status %q error %q cursor %q, want active, fetch_failed, 1", connection.Status, connection.LastErrorCode, connection.SyncCursor)
 	}
-	f.service.externalSource = f.source
+	f.service.externalConnectors = fakeExternalMailRegistry(f.source)
 	f.advance(externalMailSyncInterval)
 	f.sync(t)
 	if connection = f.reload(t); connection.LastErrorCode != "" {
@@ -279,11 +280,11 @@ func (s revokingSource) Fetch(ctx context.Context, token ExternalMailToken, curs
 func TestExternalMailRevokeDuringFetchDropsTheBatch(t *testing.T) {
 	f := newExternalFixture(t, config.ExternalMailSourceFake)
 	f.source.Deliver(externalTestToken, externalMessage("g-1", "One", time.Time{}))
-	f.service.externalSource = revokingSource{FakeExternalMailSource: f.source, revoke: func() {
+	f.service.externalConnectors = fakeExternalMailRegistry(revokingSource{FakeExternalMailSource: f.source, revoke: func() {
 		if err := f.service.RevokeExternalMailConnection(context.Background(), f.admin, f.connection.ID); err != nil {
 			t.Errorf("revoke during fetch: %v", err)
 		}
-	}}
+	}})
 	f.sync(t)
 
 	if stored := f.storedExternal(t); len(stored) != 0 {
@@ -365,12 +366,24 @@ func TestExternalMailOffWithoutProviders(t *testing.T) {
 
 func (f *externalFixture) call(t *testing.T, viewer domain.OrganizationContext, method, path string) (int, map[string]any) {
 	t.Helper()
+	return f.callWith(t, viewer, method, path, "")
+}
+
+func (f *externalFixture) callWith(t *testing.T, viewer domain.OrganizationContext, method, path, body string) (int, map[string]any) {
+	t.Helper()
 	router := accessRouter(f.service, viewer)
 	handler := NewHandler(f.service)
 	router.GET("/external-mail-connections", handler.ListExternalMailConnections)
 	router.DELETE("/external-mail-connections/:connection_id", handler.RevokeExternalMailConnection)
+	router.GET("/external-mail-connectors", handler.ListExternalMailConnectors)
+	router.POST("/external-mail-authorizations", handler.StartExternalMailAuthorization)
+	router.POST("/external-mail-authorizations/completions", handler.CompleteExternalMailAuthorization)
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(method, path, nil))
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	router.ServeHTTP(recorder, request)
 	decoded := map[string]any{}
 	_ = json.Unmarshal(recorder.Body.Bytes(), &decoded)
 	return recorder.Code, decoded

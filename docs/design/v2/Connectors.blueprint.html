@@ -1,0 +1,510 @@
+<title>Zmail 连接器蓝图</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500;6..72,600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column (max 1040px); the prototype is a framed app window with screen tabs;
+   tables and diagrams scroll inside their own containers. Tokens follow web/src/themes (paper, ink, night, indigo, rust). */
+:root{
+  --bg:#FBFAF7; --surface:#FFFFFF; --sunken:#F3F1EC; --line:#E6E2DA; --line-soft:#EFEDE7;
+  --fg:#16150F; --fg-2:#3A3833; --muted:#77736A; --faint:#8E8A81;
+  --accent:#2F4BD8; --accent-soft:#EEF1FD; --accent-fg:#FFFFFF;
+  --warn:#B4541F; --warn-soft:#FBEEE5; --ok:#2E7D4F; --ok-soft:#E8F3EC; --off:#B9B4AA;
+  --display:"Newsreader","Songti SC","Noto Serif SC",Georgia,serif;
+  --body:"Inter","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"JetBrains Mono","SF Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#12110E; --surface:#1A1915; --sunken:#211F1B; --line:#2A2823; --line-soft:#25231F;
+  --fg:#EDEBE5; --fg-2:#C9C6BE; --muted:#9A968C; --faint:#6F6B62;
+  --accent:#7D90F2; --accent-soft:#1E2443; --accent-fg:#12110E;
+  --warn:#E08A57; --warn-soft:#3A2618; --ok:#6FBF8E; --ok-soft:#18281E; --off:#4A4740; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#12110E; --surface:#1A1915; --sunken:#211F1B; --line:#2A2823; --line-soft:#25231F;
+  --fg:#EDEBE5; --fg-2:#C9C6BE; --muted:#9A968C; --faint:#6F6B62;
+  --accent:#7D90F2; --accent-soft:#1E2443; --accent-fg:#12110E;
+  --warn:#E08A57; --warn-soft:#3A2618; --ok:#6FBF8E; --ok-soft:#18281E; --off:#4A4740; color-scheme:dark }
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.65;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:40px 80px}
+.page{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:56px}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(30px,5vw,44px);line-height:1.15;margin:0;text-wrap:balance}
+h2{font-family:var(--display);font-weight:600;font-size:26px;line-height:1.25;margin:0;text-wrap:balance}
+h3{font-size:15px;font-weight:600;margin:0}
+p{margin:0;max-width:68ch}
+.lede{font-size:17px;color:var(--fg-2)}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500}
+section{display:flex;flex-direction:column;gap:18px}
+.stack{display:flex;flex-direction:column;gap:10px}
+.muted{color:var(--muted)} .small{font-size:13px}
+code{font-family:var(--mono);font-size:.88em;background:var(--sunken);padding:1px 5px;border-radius:4px}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px}
+nav.toc a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line)}
+nav.toc a:hover{color:var(--fg)}
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:560px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:12px;letter-spacing:.03em;white-space:nowrap}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+.cell{border:1px solid var(--line);border-radius:10px;padding:16px;background:var(--surface);min-width:0;display:flex;flex-direction:column;gap:8px}
+.cell.flat{background:transparent}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.tag.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.tag.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.tag.acc{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--off);flex:none}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)}
+ol.path{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;font-size:13.5px;color:var(--fg-2)}
+.matrix{display:grid;grid-template-columns:auto 1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.matrix>div{background:var(--surface);padding:14px;min-width:0}
+.matrix .h{background:var(--sunken);font-size:12px;font-weight:600;color:var(--muted)}
+/* prototype */
+.proto-tabs{display:flex;flex-wrap:wrap;gap:6px}
+.proto-tabs button{font:inherit;font-size:13px;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg-2);cursor:pointer}
+.proto-tabs button[aria-selected="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.window{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+.window .bar{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--muted);background:var(--sunken)}
+.window .bar b{color:var(--fg);font-weight:600}
+.app{display:grid;grid-template-columns:210px 1fr;min-width:760px;min-height:430px}
+.side{border-right:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:3px;font-size:13px;background:var(--bg)}
+.side .grp{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:12px 6px 4px}
+.side .it{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;color:var(--fg-2);min-width:0}
+.side .it span.n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.side .it.on{background:var(--accent-soft);color:var(--fg)}
+.side .it em{font-style:normal;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.btn{font:inherit;font-size:12.5px;padding:6px 11px;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer;white-space:nowrap}
+.btn.pri{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.dash{border-style:dashed;color:var(--muted);text-align:left;background:transparent}
+.btn.danger{color:var(--warn)}
+.main{padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.main h4{font-family:var(--display);font-size:22px;margin:0;font-weight:600}
+.banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:13px}
+.banner.ok{background:var(--ok-soft);color:var(--ok)}
+.row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 4px;border-bottom:1px solid var(--line-soft);font-size:13.5px}
+.row .who{display:flex;align-items:center;gap:8px;font-weight:600;min-width:0}
+.row .t{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.row .sub{grid-column:1/-1;color:var(--fg-2)} .row .box{grid-column:1/-1;color:var(--muted);font-size:12px}
+.steps{display:flex;gap:6px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.steps span{padding:3px 9px;border-radius:999px;border:1px solid var(--line)}
+.steps span.on{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.dialog{max-width:440px;border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:12px;background:var(--surface);margin:18px auto}
+.dialog ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--fg-2);display:flex;flex-direction:column;gap:4px}
+.prov{display:flex;flex-direction:column;gap:8px}
+.prov button{display:flex;align-items:center;justify-content:space-between;gap:10px;font:inherit;font-size:14px;padding:11px 14px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
+.field{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+select,input[type=text]{font:inherit;font-size:13.5px;padding:7px 9px;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--fg)}
+.chk{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;color:var(--fg-2)}
+.log{font-family:var(--mono);font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px}
+pre.mermaid{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:640px}
+.note{border-left:2px solid var(--accent);padding:2px 0 2px 14px;color:var(--fg-2)}
+@media (prefers-reduced-motion: no-preference){ .proto-tabs button,.btn{transition:background .15s,color .15s} }
+</style>
+
+<div class="page">
+
+<header class="stack">
+  <span class="eyebrow">Zmail · 产品蓝图 · 2026-11-21</span>
+  <h1>所有邮箱，一条收件流，人和 Agent 都从这里开始工作</h1>
+  <p class="lede">这页把第三方邮箱接入这件事讲完整：产品思路、可点击的原型、用户故事与路径、和现有企业版怎么结合、竞品怎么做、底层架构、执行计划与后台长任务。</p>
+  <nav class="toc" aria-label="目录">
+    <a href="#idea">思路</a><a href="#proto">原型</a><a href="#stories">用户故事</a><a href="#enterprise">企业版结合</a>
+    <a href="#rivals">竞品</a><a href="#arch">架构</a><a href="#jobs">长任务</a><a href="#plan">执行计划</a><a href="#decide">待决定</a>
+  </nav>
+</header>
+
+<section id="idea">
+  <span class="eyebrow">思路</span>
+  <h2>入库之前各走各的路，入库之后完全一样</h2>
+  <p>企业今天在 Zmail 里做三件事：老板创建组织，管理员分配邮箱，员工使用分到的邮箱。接入第三方邮箱不改变这三件事，只增加一个事实：邮箱可以不在 Zmail 的域名上。</p>
+  <p>所以模型只加一个维度。<b>谁能用</b>（私人或共享）沿用现有权限，<b>从哪来</b>（自建或接入）是新的。权限、交接、审计、AI 和 Agent 授权只看前者。</p>
+  <div class="scroll"><div class="matrix" style="min-width:560px">
+    <div class="h"></div><div class="h">自建 · Zmail 域名</div><div class="h">接入 · Gmail / Outlook / IMAP</div>
+    <div class="h">私人</div>
+    <div><b>员工的工作邮箱</b><br><span class="small muted">管理员分配，主人读和发。已有。</span></div>
+    <div><b>员工自己的外部账号</b><br><span class="small muted">员工自助接入，只有本人读。离职即断开。</span></div>
+    <div class="h">共享</div>
+    <div><b>团队邮箱</b><br><span class="small muted">成员按查看、回复、管理成员使用。已有。</span></div>
+    <div><b>团队在外部服务上的账号</b><br><span class="small muted">管理员接入并分配成员，规则与团队邮箱相同。</span></div>
+  </div></div>
+  <div class="grid3">
+    <div class="cell"><h3>个人接入</h3><p class="small">任何成员为自己接入。产生「私人 + 接入」邮箱。</p></div>
+    <div class="cell"><h3>共享接入</h3><p class="small">管理员用团队账号授权，再分配成员。产生「共享 + 接入」邮箱。</p></div>
+    <div class="cell"><h3>租户接入</h3><p class="small">所有者一次授权整个 Google Workspace 或 Microsoft 365，再从目录批量分配。最贴合现在的企业流程。</p></div>
+  </div>
+</section>
+
+<section id="proto">
+  <span class="eyebrow">原型</span>
+  <h2>五个界面，可以点</h2>
+  <p class="muted small">示例数据。按钮会切换状态，用来说明交互，不会真的发出请求。</p>
+  <div class="proto-tabs" role="tablist" aria-label="原型界面">
+    <button role="tab" id="tab-inbox" aria-selected="true" data-screen="inbox">① 员工收件箱</button>
+    <button role="tab" id="tab-connect" aria-selected="false" data-screen="connect">② 接入流程</button>
+    <button role="tab" id="tab-admin" aria-selected="false" data-screen="admin">③ 管理员 · 外部连接</button>
+    <button role="tab" id="tab-tenant" aria-selected="false" data-screen="tenant">④ 租户接入</button>
+    <button role="tab" id="tab-agent" aria-selected="false" data-screen="agent">⑤ Agent 授权</button>
+  </div>
+
+  <div class="window">
+    <div class="bar"><b>Zmail</b><span>Acme Studio</span><span id="proto-who" style="margin-left:auto">以员工「小王」的身份</span></div>
+    <div class="scroll">
+
+    <!-- 1 inbox -->
+    <div class="app" data-panel="inbox">
+      <div class="side">
+        <div class="it on"><span class="n">全部邮件</span><em>7</em></div>
+        <div class="it"><span class="n">今日新到</span><em>5</em></div>
+        <div class="it"><span class="n">待处理</span><em>2</em></div>
+        <div class="grp">团队邮箱</div>
+        <div class="it"><span class="n">hello@acme.com</span><em>2</em></div>
+        <div class="it"><span class="n">support@acme.com</span><span class="tag">Google</span></div>
+        <div class="grp">我接入的</div>
+        <div class="it"><span class="dot ok"></span><span class="n">wang.design@gmail.com</span><em>3</em></div>
+        <div class="it"><span class="dot warn" id="ol-dot"></span><span class="n">wang@outlook.com</span></div>
+        <button class="btn dash" type="button" data-goto="connect" style="margin-top:6px">＋ 接入外部邮箱</button>
+      </div>
+      <div class="main">
+        <h4>收件箱</h4>
+        <div class="banner" id="reconnect-banner"><span>你的 Outlook 授权已失效，最近一次同步在 3 小时前。</span><button class="btn" type="button" id="reconnect-btn">重新连接</button></div>
+        <div class="steps" aria-label="来源筛选"><span class="on">全部来源</span><span>Zmail</span><span>Gmail</span><span>Outlook</span></div>
+        <div>
+          <div class="row"><div class="who"><span class="dot ok"></span>Behance<span class="tag">Gmail</span><span class="tag acc">待回复</span></div><div class="t">10:42</div><div class="sub">合作邀约：设计周特别企划</div><div class="box">wang.design@gmail.com · 设计编辑部</div></div>
+          <div class="row"><div class="who">Ana Pereira</div><div class="t">10:15</div><div class="sub">第一季度联合活动提案</div><div class="box">hello@acme.com</div></div>
+          <div class="row"><div class="who">Medium<span class="tag">Gmail</span></div><div class="t">09:58</div><div class="sub">你的验证码是 ••••••</div><div class="box">wang.design@gmail.com · 只读，<u>在 Gmail 中打开</u></div></div>
+          <div class="row"><div class="who">客户 · 李女士<span class="tag">Google</span></div><div class="t">09:31</div><div class="sub">订单 1043 的发票抬头需要修改</div><div class="box">support@acme.com · 共享，你有「回复」权限</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 connect -->
+    <div class="main" data-panel="connect" hidden style="min-width:560px;min-height:430px">
+      <div class="steps" id="connect-steps"><span class="on">选择服务商</span><span>授权前说明</span><span>在服务商登录</span><span>完成</span></div>
+      <div class="dialog" id="connect-step-0">
+        <h3>接入外部邮箱</h3>
+        <p class="small muted">按钮来自服务商列表接口，以后新增服务商会自动出现。</p>
+        <div class="prov">
+          <button type="button" data-prov="Gmail">Gmail / Google Workspace<span class="tag">OAuth</span></button>
+          <button type="button" data-prov="Outlook">Outlook / Microsoft 365<span class="tag">OAuth</span></button>
+          <button type="button" data-prov="IMAP">其他邮箱（IMAP）<span class="tag">应用专用密码 · 后续</span></button>
+        </div>
+      </div>
+      <div class="dialog" id="connect-step-1" hidden>
+        <h3>接入 <span id="prov-name">Gmail</span> 之前</h3>
+        <ul>
+          <li>Zmail 只读取邮件，不会代你发信、删信。</li>
+          <li>只有你能看到这些邮件。管理员看不到正文，也看不到数量。</li>
+          <li>你离开这个组织时，连接会自动断开。</li>
+        </ul>
+        <label class="field" for="backfill">首次同步范围
+          <select id="backfill"><option>最近 14 天</option><option>最近 30 天</option><option>最近 90 天</option></select>
+        </label>
+        <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" data-step="0">返回</button><button class="btn pri" type="button" data-step="2">继续，去授权</button></div>
+      </div>
+      <div class="dialog" id="connect-step-2" hidden>
+        <h3>服务商的登录页</h3>
+        <p class="small muted">浏览器跳到服务商。地址里带一次性的 state 和 PKCE 校验串，10 分钟内有效。用户在那里选择账号并同意只读权限。</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn" type="button" data-step="3" data-outcome="taken">模拟：账号已被同事接入</button><button class="btn pri" type="button" data-step="3" data-outcome="ok">模拟：授权成功</button></div>
+      </div>
+      <div class="dialog" id="connect-step-3" hidden>
+        <div class="banner ok" id="connect-ok">已接入，正在同步最近 14 天的邮件。</div>
+        <div class="banner" id="connect-taken" hidden>这个账号已经由你的一位同事接入。请换一个账号，或请管理员把它设为共享邮箱。</div>
+        <div class="log" id="connect-log"><span>回填 · 已同步 126 / 约 480 封</span><span>增量 · 每 2 分钟一次（上线推送后为近实时）</span></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" data-step="0">再接入一个</button><button class="btn pri" type="button" data-goto="inbox">回到收件箱</button></div>
+      </div>
+    </div>
+
+    <!-- 3 admin -->
+    <div class="main" data-panel="admin" hidden style="min-width:760px;min-height:430px">
+      <h4>外部连接</h4>
+      <p class="small muted">管理员在这里管理连接。这里没有任何信件内容和数量；个人接入的地址只显示一部分。</p>
+      <table>
+        <thead><tr><th>邮箱</th><th>类型</th><th>负责人或成员</th><th>服务商</th><th>状态</th><th>最近同步</th><th></th></tr></thead>
+        <tbody>
+          <tr><td>support@acme.com</td><td>共享</td><td>客服组 4 人</td><td>Google</td><td><span class="tag ok">正常</span></td><td class="num">1 分钟前</td><td><button class="btn" type="button">成员</button></td></tr>
+          <tr><td>wa***@gmail.com</td><td>个人</td><td>小王</td><td>Gmail</td><td><span class="tag ok">正常</span></td><td class="num">2 分钟前</td><td><button class="btn danger" type="button" data-disconnect>强制断开</button></td></tr>
+          <tr><td>wa***@outlook.com</td><td>个人</td><td>小王</td><td>Outlook</td><td><span class="tag warn">需重新连接</span></td><td class="num">3 小时前</td><td><button class="btn danger" type="button" data-disconnect>强制断开</button></td></tr>
+          <tr><td>li***@gmail.com</td><td>个人</td><td>小李（已离职）</td><td>Gmail</td><td><span class="tag">已断开 · 离职</span></td><td class="num">昨天</td><td><span class="small muted">副本 29 天后删除</span></td></tr>
+        </tbody>
+      </table>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn pri" type="button">＋ 接入团队账号（共享）</button><button class="btn" type="button" data-goto="tenant">接入企业租户…</button></div>
+    </div>
+
+    <!-- 4 tenant -->
+    <div class="main" data-panel="tenant" hidden style="min-width:760px;min-height:430px">
+      <h4>接入企业租户 · Google Workspace</h4>
+      <div class="steps"><span>管理员同意</span><span class="on">从目录分配</span><span>确认与结果</span></div>
+      <p class="small muted">只有组织所有者能授权租户。授权后也不会自动读任何邮箱：只同步下面被分配的地址。</p>
+      <table>
+        <thead><tr><th>目录中的地址</th><th>分配为</th><th>给谁</th><th>结果</th></tr></thead>
+        <tbody>
+          <tr><td>wang@acme.com</td><td><select id="t1" aria-label="wang 的分配"><option>私人</option><option>共享</option><option>不接入</option></select></td><td>小王</td><td><span class="tag ok">已开通</span></td></tr>
+          <tr><td>editor@acme.com</td><td><select id="t2" aria-label="editor 的分配"><option>共享</option><option>私人</option><option>不接入</option></select></td><td>编辑部 3 人</td><td><span class="tag ok">已开通</span></td></tr>
+          <tr><td>zhao@acme.com</td><td><select id="t3" aria-label="zhao 的分配"><option>私人</option><option>共享</option><option>不接入</option></select></td><td>小赵（尚未加入组织）</td><td><span class="tag warn">待邀请 · 可重试</span></td></tr>
+          <tr><td>ceo@acme.com</td><td><select id="t4" aria-label="ceo 的分配"><option>不接入</option><option>私人</option><option>共享</option></select></td><td>—</td><td><span class="tag">跳过</span></td></tr>
+        </tbody>
+      </table>
+      <p class="small muted">离职处理与自建私人邮箱相同：待交接，历史封存，由管理员指定接手人。</p>
+    </div>
+
+    <!-- 5 agent -->
+    <div class="main" data-panel="agent" hidden style="min-width:760px;min-height:430px">
+      <h4>wang.design@gmail.com · Agent</h4>
+      <div class="grid2">
+        <div class="cell flat">
+          <h3>授权一个 Agent</h3>
+          <label class="field" for="ag-who">哪个 Agent<select id="ag-who"><option>平台运营助手（小王的 API key）</option><option>周报整理助手</option></select></label>
+          <label class="field" for="ag-scope">范围<select id="ag-scope"><option>仅发件人 @behance.net、@medium.com</option><option>整个邮箱</option><option>仅标签「合作」</option></select></label>
+          <label class="chk"><input type="checkbox" id="ag-read" checked disabled> 读取新信</label>
+          <label class="chk"><input type="checkbox" id="ag-draft"> 起草回复（发送仍需你确认）</label>
+          <label class="chk"><input type="checkbox" id="ag-code"> 允许读取验证码（单独记录）</label>
+          <label class="field" for="ag-ttl">有效期<select id="ag-ttl"><option>30 天</option><option>7 天</option><option>90 天</option></select></label>
+          <button class="btn pri" type="button" id="ag-grant">授权</button>
+        </div>
+        <div class="cell flat">
+          <h3>当前授权</h3>
+          <div id="ag-current" class="stack">
+            <div><span class="tag ok" id="ag-state">生效中</span> <b>平台运营助手</b><br><span class="small muted">读取新信 · 仅 2 个发件域 · 12 月 21 日到期</span></div>
+            <button class="btn danger" type="button" id="ag-revoke" style="align-self:flex-start">撤销</button>
+          </div>
+          <h3 style="margin-top:8px">最近活动</h3>
+          <div class="log"><span>10:42 读取 「合作邀约：设计周特别企划」</span><span>10:43 生成待办 → 小王，周五前回复</span><span>09:58 跳过 「你的验证码是 ••••••」（未授权读取验证码）</span></div>
+        </div>
+      </div>
+    </div>
+
+    </div>
+  </div>
+</section>
+
+<section id="stories">
+  <span class="eyebrow">用户故事与路径</span>
+  <h2>四个人，四条路</h2>
+  <div class="grid2">
+    <div class="cell"><h3>运营小王：一页看完所有账号的新信</h3>
+      <p class="small muted">我用几个 Gmail 注册了不同平台的账号。我想每天早上在一个地方看到所有新信，知道哪封要回。</p>
+      <ol class="path"><li>收件箱侧栏点「＋ 接入外部邮箱」，选 Gmail</li><li>看完三条说明，选回溯范围，去 Google 授权</li><li>回到 Zmail，新邮箱出现在「我接入的」，开始回填</li><li>统一收件箱里按来源筛选；平台来信自动关联到「设计编辑部」角色</li><li>授权失效时看到提示，点一次「重新连接」恢复，历史不重复</li></ol></div>
+    <div class="cell"><h3>老板老陈：给客服接入团队邮箱</h3>
+      <p class="small muted">support@ 一直在 Google Workspace 上。我想让客服组在 Zmail 里一起处理，但不想搬域名。</p>
+      <ol class="path"><li>管理后台「外部连接」→「接入团队账号」</li><li>用 support@ 登录授权</li><li>在和新建共享邮箱一样的对话框里分配 4 名客服及权限</li><li>客服在各自的收件箱里看到它，各自已读</li><li>老陈自己要读信时，先把自己加为成员，留下记录</li></ol></div>
+    <div class="cell"><h3>IT 小周：100 名员工一次开通</h3>
+      <p class="small muted">公司用 Microsoft 365。我不想让每个人自己点授权，也要在员工离职时立刻收回。</p>
+      <ol class="path"><li>所有者完成一次管理员同意</li><li>从目录多选地址，逐行分配为私人或共享</li><li>逐行看结果，失败的行可重试</li><li>员工登录即看到自己的邮箱，无需任何操作</li><li>员工离职：邮箱进入待交接，历史封存，指定接手人</li></ol></div>
+    <div class="cell"><h3>Agent：读获准的新信，做下一步</h3>
+      <p class="small muted">我是小王授权的运营助手。我只该看到平台来信，把需要处理的事变成待办和回复草稿。</p>
+      <ol class="path"><li>小王在邮箱的「Agent」页签授权：范围、能力、有效期</li><li>Agent 用游标拉取新信，或接收签名推送</li><li>分流：归档、待办、需要人工复核</li><li>起草回复，进入「待确认」</li><li>小王确认后才发出；每一步都能追到授权和原信</li></ol></div>
+  </div>
+</section>
+
+<section id="enterprise">
+  <span class="eyebrow">和现在的企业版怎么结合</span>
+  <h2>角色不变，多管一样东西：连接</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>角色</th><th>今天能做的</th><th>接入后多出来的</th><th>仍然不能做的</th></tr></thead>
+    <tbody>
+      <tr><td><b>所有者</b></td><td>创建组织、管理成员、分配邮箱</td><td>授权和撤销企业租户；接入团队账号；强制断开任何连接</td><td>不因角色读任何信；看不到员工个人账号的完整地址</td></tr>
+      <tr><td><b>管理员</b></td><td>新建和分配邮箱、交接</td><td>接入团队账号并分配成员；从已授权的租户目录里分配；强制断开</td><td>不能授权或撤销租户；不能替员工开启 AI 或 Agent</td></tr>
+      <tr><td><b>成员</b></td><td>使用分到的邮箱</td><td>接入自己的账号（最多 10 个）；为自己的邮箱授权 Agent</td><td>看不到别人的个人接入</td></tr>
+      <tr><td><b>共享邮箱「管理成员」</b></td><td>增删成员、开关 webhook</td><td>重新连接团队账号；为该邮箱授权 Agent</td><td>不能删除邮箱或发起交接</td></tr>
+    </tbody>
+  </table></div>
+  <h3>员工离开时</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>邮箱</th><th>发生什么</th><th>理由</th></tr></thead>
+    <tbody>
+      <tr><td>自建私人</td><td>待交接，历史封存，管理员指定接手人</td><td>地址是组织的，业务要继续</td></tr>
+      <tr><td>个人接入</td><td>立即断开：退还授权、清除令牌、停止同步。不交接。副本到期删除</td><td>账号是员工本人的。<span class="tag ok">已实现</span></td></tr>
+      <tr><td>共享接入</td><td>只失去成员资格</td><td>连接属于组织</td></tr>
+      <tr><td>租户分配的私人邮箱</td><td>与自建私人相同</td><td>地址是组织的</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">名额分开算：接入邮箱不占组织的自建邮箱名额，只读期间不消耗发送额度。邮件角色（品牌身份）可以同时包含自建和接入邮箱，平台账号台账的「注册邮箱」可以指向接入邮箱。</p>
+</section>
+
+<section id="rivals">
+  <span class="eyebrow">竞品怎么做</span>
+  <h2>三类产品，三种取舍</h2>
+  <p>调研时间 2026-11-21，依据各家公开文档。价格只取计费单位，具体数字各来源不一致，不作依据。</p>
+  <div class="scroll"><table>
+    <thead><tr><th>产品</th><th>怎么接账号</th><th>存不存信</th><th>新信怎么到</th><th>授权失效怎么办</th><th>计费单位</th></tr></thead>
+    <tbody>
+      <tr><td><b><a href="https://developer.nylas.com/docs/dev-guide/best-practices/grant-lifecycle.md">Nylas v3</a></b><br><span class="small muted">统一邮件 API</span></td><td>每个邮箱一个 grant；托管 OAuth 或批量授权</td><td>Gmail、Microsoft 不存，直通；IMAP 缓存 90 天</td><td>webhook；Gmail 实时要自建 Pub/Sub</td><td>grant 变 invalid；重新授权保留原 ID；失效超过 72 小时的信不补推</td><td>每个已接入账号</td></tr>
+      <tr><td><b><a href="https://www.unipile.com/communication-api/email-api/">Unipile</a></b></td><td>托管授权，或自带 OAuth 应用；IMAP 自动探测</td><td>存在它的服务器上</td><td>webhook</td><td>—</td><td>每个已接入账号</td></tr>
+      <tr><td><b><a href="https://learn.emailengine.app/docs/accounts/gmail/gmail-api">EmailEngine</a></b><br><span class="small muted">自托管</span></td><td>必须自带 OAuth 应用</td><td>只存元数据，正文按需去服务器取</td><td>Pub/Sub 或 IMAP IDLE；没有推送时约 10 分钟轮询</td><td>发 authenticationError 事件</td><td>固定年费，不限邮箱</td></tr>
+      <tr><td><b><a href="https://docs.aurinko.io/llms-full.txt">Aurinko</a></b></td><td>个人、服务账号（组织级）、用户会话三种流程</td><td>不存正文，只缓存 ID 和会话关系</td><td>带签名的 webhook；增量令牌</td><td>生命周期事件 error / active</td><td>每个活跃账号</td></tr>
+      <tr><td><b><a href="https://agentmail.to/docs/permissions">AgentMail</a></b><br><span class="small muted">给 Agent 的邮箱</span></td><td>不接已有邮箱，只开新邮箱</td><td>存</td><td>webhook 和 WebSocket</td><td>—</td><td>每个邮箱加用量</td></tr>
+      <tr><td><b><a href="https://docs.composio.dev/docs/subscribing-to-connection-expiry-events.md">Composio</a></b><br><span class="small muted">Agent 工具集</span></td><td>每个用户一个 connected account，托管 OAuth</td><td>不存</td><td>轮询触发器，转成 webhook</td><td>账号变 EXPIRED，触发器自动停用，重新授权后恢复</td><td>每次工具调用</td></tr>
+      <tr><td><b><a href="https://help.front.com/en/articles/205312">Front</a></b><br><span class="small muted">团队收件箱</span></td><td>每个邮箱 OAuth，分共享和个人</td><td>存；可导入最近 5 万封，最长 72 小时</td><td>持续同步</td><td>重新授权后补导入漏掉的信</td><td>每个用户</td></tr>
+    </tbody>
+  </table></div>
+  <h3>从证据得出的八条设计结论</h3>
+  <div class="grid2">
+    <div class="cell"><h3>1. 我们必须存信</h3><p class="small">直通（Nylas、Aurinko）适合做 API 转售。统一收件箱、搜索、AI 分流和 Agent 都要本地有信，所以走 Front 和 Unipile 的路：存，但回填有上限，从新到旧。</p></div>
+    <div class="cell"><h3>2. 连接是一等对象，重新授权原地恢复</h3><p class="small">各家都这样做，删掉重建会丢游标和 ID。<span class="tag ok">我们已这样实现</span></p></div>
+    <div class="cell"><h3>3. 推送只当提示，轮询兜底</h3><p class="small">Gmail 和 Graph 的通知都可能丢，订阅都在 7 天内过期。需要续期任务和按游标的补拉。</p></div>
+    <div class="cell"><h3>4. 游标按服务商的形状存</h3><p class="small">Gmail 是每账号一个 historyId；Graph 的增量是<b>每个文件夹</b>一个；IMAP 是每文件夹的 UID。游标过期时走「有上限的重新对齐」。<span class="tag warn">需调整</span> 现在只有一个文本游标。</p></div>
+    <div class="cell"><h3>5. 远端状态只同步必要的</h3><p class="small">Front 只同步新信、已发和垃圾状态，不同步已读、归档、标签。我们照此起步：已读是每人各自的，本来就不该被远端覆盖。</p></div>
+    <div class="cell"><h3>6. 事件至少投递一次，可重放</h3><p class="small">只靠 webhook 会丢（Nylas 超过 72 小时不补）。Agent 收件流用「稳定事件 ID + 可回放的游标」，推送只是加速。</p></div>
+    <div class="cell"><h3>7. Google 审核是最大的外部成本</h3><p class="small">gmail.readonly 是受限权限：需要验证加<b>每年一次</b>安全评估，评估费 500 到 4,500 美元，几周时间。测试模式下最多 100 人，而且授权<b>7 天就过期</b>，试点用户每周都得重连。</p></div>
+    <div class="cell"><h3>8. 企业客户可以绕开审核</h3><p class="small">Google 对「内部使用」和全域安装的应用免审核；Microsoft 可以用「应用的 RBAC」把应用权限限制到指定邮箱。所以企业走「自带应用」或租户接入，比等我们的公共应用过审更快。</p></div>
+  </div>
+  <p class="note">对计划的影响：把「组织自带 OAuth 应用」提前到 C2，让企业试点不被 Google 审核卡住；Agent 权限照 AgentMail 的做法，按邮箱限定的密钥加能力白名单，发信一律先起草再由人确认。</p>
+</section>
+
+<section id="arch">
+  <span class="eyebrow">底层架构</span>
+  <h2>三层，服务商差异只留在最外一层</h2>
+  <div class="scroll"><pre class="mermaid">
+flowchart LR
+  subgraph P[服务商]
+    G[Gmail API]:::ext
+    M[Microsoft Graph]:::ext
+    I[IMAP]:::ext
+    CF[Cloudflare 收信]:::ext
+  end
+  subgraph C[连接器层 · 每家一个适配器]
+    A1[授权 / 换令牌]
+    A2[回填 分页]
+    A3[增量 游标]
+    A4[推送订阅 续期]
+    A5[撤权]
+  end
+  subgraph N[入库层 · 与服务商无关]
+    D[每邮箱每封只存一次]
+    T[归入会话]
+    S[验证码遮罩]
+  end
+  subgraph H[下游 · 一个入口]
+    TR[AI 分流]
+    WH[组织 webhook · 仅共享邮箱]
+    AG[Agent 收件流 · 按授权]
+    UI[统一收件箱]
+  end
+  G --> C
+  M --> C
+  I --> C
+  C --> N
+  CF --> N
+  N -->|afterInboundStored| H
+  classDef ext fill:transparent,stroke-dasharray:4 3
+  </pre></div>
+  <div class="grid2">
+    <div class="cell"><h3>已经建好的（分支 feat/mail-connectors）</h3>
+      <ul class="path" style="list-style:disc"><li>连接器注册表，服务商标识是数据不是表结构</li><li>授权：一次性 state（只存哈希）、PKCE、10 分钟过期</li><li>绑定、重连、解绑后重绑走同一条规则，不产生重复邮件</li><li>外部邮箱不接收 Zmail 投递</li><li>所有来源共用一个入库后处理步骤</li><li>离职断开；AI 分流只有主人能开</li></ul></div>
+    <div class="cell"><h3>复查发现、真实适配器之前要补的</h3>
+      <ul class="path" style="list-style:disc"><li><b>令牌轮换</b>：拉信接口要能返回新的刷新令牌并原子保存，否则 Microsoft 账号会在一次同步后失效</li><li><b>回填与增量分开</b>：回填是可续跑的分页任务，带进度；增量是轻量游标。现在两者是同一次调用</li><li><b>游标的形状</b>：Graph 的增量是每个文件夹一个，游标要能存一组；服务商说游标太旧时，进入有上限的「重新对齐」而不是报错</li><li><b>远端变更</b>：已读、删除、移动要不要镜像，按邮箱一个策略</li><li><b>附件</b>：只存元数据，打开时再取</li><li><b>限流</b>：按服务商和按连接各一个预算，带退避和抖动</li><li><b>运行记录</b>：每次同步一条记录，供状态页和排障用</li></ul></div>
+  </div>
+  <h3>绑定时序</h3>
+  <div class="scroll"><pre class="mermaid">
+sequenceDiagram
+  participant U as 浏览器
+  participant Z as Zmail API
+  participant P as 服务商
+  U->>Z: 发起授权（服务商，回溯天数）
+  Z-->>U: 授权地址（state + PKCE 挑战）
+  U->>P: 登录并同意只读
+  P-->>U: 跳回回调页（state, code）
+  U->>Z: 完成授权（state, code）
+  Z->>Z: 取出并删除待完成记录（一次性）
+  Z->>P: 用 code + PKCE 校验串换令牌
+  Z->>Z: 新账号：建私人只读邮箱 + 连接；已有：恢复原连接
+  Z-->>U: 201 新建 / 200 恢复 / 409 拒绝并退还授权
+  </pre></div>
+</section>
+
+<section id="jobs">
+  <span class="eyebrow">后台长任务</span>
+  <h2>七个任务，都跑在现有的 PostgreSQL 任务队列上</h2>
+  <p>不引入新的基础设施。每个任务都有租约、幂等键和明确的失败去向，多副本可以同时跑。</p>
+  <div class="scroll"><table>
+    <thead><tr><th>任务</th><th>触发</th><th>幂等靠什么</th><th>失败怎么办</th><th>状态</th></tr></thead>
+    <tbody>
+      <tr><td><b>回填</b></td><td>绑定成功；游标过期</td><td>每邮箱每个服务商消息 ID 唯一；分页游标落库，可续跑</td><td>退避重试；进度保留；界面显示「已同步 N 封」</td><td><span class="tag">待做</span></td></tr>
+      <tr><td><b>增量同步</b></td><td>每连接 2 分钟；或收到推送</td><td>同上；连接行上的租约防止两个 worker 同时拉</td><td>授权失败 → 需重新连接；其他错误 → 下个周期重试</td><td><span class="tag ok">已有（轮询）</span></td></tr>
+      <tr><td><b>推送订阅续期</b></td><td>到期前定时</td><td>按连接一条订阅记录</td><td>续期失败退回轮询，不丢信</td><td><span class="tag">待做</span></td></tr>
+      <tr><td><b>令牌刷新</b></td><td>拉信前按需</td><td>新令牌与同步结果同一事务保存</td><td>拒绝 → 需重新连接并通知主人</td><td><span class="tag">待做</span></td></tr>
+      <tr><td><b>副本清理</b></td><td>解绑或离职后到保留期</td><td>按邮箱分批删除，可重入</td><td>下次继续</td><td><span class="tag">待做</span></td></tr>
+      <tr><td><b>Agent 收件投递</b></td><td>新信入库（同一事务写入待投递）</td><td>每个授权一个单调游标；推送带事件 ID</td><td>重试后进入死信；拉取端不受影响</td><td><span class="tag">待做</span></td></tr>
+      <tr><td><b>租户目录同步</b></td><td>每天；管理员手动</td><td>按目录对象 ID 对账</td><td>只标记差异，不自动开通或回收</td><td><span class="tag">待做</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="plan">
+  <span class="eyebrow">执行计划</span>
+  <h2>九个迭代，每个都能单独上线</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>迭代</th><th>内容</th><th>验收</th><th>依赖</th><th>估时</th></tr></thead>
+    <tbody>
+      <tr><td><b>C0</b> <span class="tag ok">完成</span></td><td>连接器底座、绑定和重连、统一入库、离职断开</td><td>自动化测试；本地 16 步实测</td><td>无</td><td class="num">—</td></tr>
+      <tr><td><b>C1</b> 模型与可见性</td><td>「来源」维度迁移；他人的个人接入对管理员隐藏；管理后台「外部连接」；变更历史</td><td>任何入口都看不到他人个人接入的内容和完整地址</td><td>决定 1、2</td><td class="num">1 周</td></tr>
+      <tr><td><b>C2</b> Gmail 与 Outlook</td><td>两个真实适配器；回填与增量拆开；令牌轮换；按文件夹的游标；支持组织自带 OAuth 应用；Web 接入流程、状态、重连</td><td>一页看到自建、Gmail、Outlook 各一封真实新信；重连不重复</td><td>OAuth 应用</td><td class="num">2–3 周</td></tr>
+      <tr><td><b>C3</b> 共享接入</td><td>团队账号授权；分配成员；webhook 开关沿用</td><td>两名客服共同处理外部托管的 support@，各自已读</td><td>C1、C2</td><td class="num">1 周</td></tr>
+      <tr><td><b>D1</b> Agent 授权与收件流</td><td>授权模型、游标拉取、签名推送、逐次审计、Agent 页签</td><td>授权范围外的信读不到；撤销立即生效</td><td>决定 4、5</td><td class="num">2 周</td></tr>
+      <tr><td><b>D2</b> Agent 任务</td><td>分流 → 待办 → 起草 → 人工确认 → 发送</td><td>同一封邀请只生成一条待办；用真实一周来信校准</td><td>D1、AI 服务商</td><td class="num">2 周</td></tr>
+      <tr><td><b>C4</b> 租户接入</td><td>Workspace、M365 一次授权；目录分配；逐行结果</td><td>100 个地址可对账、可重试；撤销后全部停止</td><td>C1、C3</td><td class="num">3 周</td></tr>
+      <tr><td><b>C5</b> IMAP</td><td>通用 IMAP，应用专用密码</td><td>三个不同服务商各收一封</td><td>决定 6</td><td class="num">1–2 周</td></tr>
+      <tr><td><b>C6 / C7</b></td><td>以原地址回复；推送替代轮询、规模压测</td><td>代发全部审计；新信 P95 延迟 30 秒内</td><td>C2</td><td class="num">各 2 周</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="decide">
+  <span class="eyebrow">待你决定</span>
+  <h2>七件事，我的建议写在后面</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>#</th><th>决定</th><th>建议</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>管理员能否在邮箱列表里看到员工个人接入的地址</td><td>不能。只在「外部连接」页看遮罩地址和状态</td></tr>
+      <tr><td class="num">2</td><td>是否在 C1 做「来源」维度迁移</td><td>做。产品未正式上线，现在成本最低</td></tr>
+      <tr><td class="num">3</td><td>解绑或离职后副本保留多久</td><td>30 天后自动删除，本人可立即删除</td></tr>
+      <tr><td class="num">4</td><td>Agent 能否看到明文验证码</td><td>默认遮罩；授权时可单独勾选并单独记录</td></tr>
+      <tr><td class="num">5</td><td>Agent 的身份</td><td>先用「某个人的 API key + Agent 标记」，上限不超过这个人</td></tr>
+      <tr><td class="num">6</td><td>是否引入 IMAP 依赖库</td><td>同意，按依赖安全流程评审</td></tr>
+      <tr><td class="num">7</td><td>首批试点的账户类型</td><td>个人 Gmail、Google Workspace、Microsoft 365</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  var tabs=[].slice.call(document.querySelectorAll('.proto-tabs button'));
+  var panels=[].slice.call(document.querySelectorAll('[data-panel]'));
+  var who={inbox:'以员工「小王」的身份',connect:'以员工「小王」的身份',admin:'以管理员「老陈」的身份',tenant:'以所有者「老陈」的身份',agent:'以员工「小王」的身份'};
+  function show(name){
+    tabs.forEach(function(t){t.setAttribute('aria-selected',String(t.dataset.screen===name))});
+    panels.forEach(function(p){p.hidden=p.dataset.panel!==name});
+    document.getElementById('proto-who').textContent=who[name];
+  }
+  tabs.forEach(function(t){t.addEventListener('click',function(){show(t.dataset.screen)})});
+  document.querySelectorAll('[data-goto]').forEach(function(b){b.addEventListener('click',function(){show(b.dataset.goto)})});
+
+  var steps=[].slice.call(document.querySelectorAll('#connect-steps span'));
+  function step(n,outcome){
+    for(var i=0;i<4;i++){document.getElementById('connect-step-'+i).hidden=i!==n;steps[i].className=i===n?'on':''}
+    if(n===3){var ok=outcome!=='taken';
+      document.getElementById('connect-ok').hidden=!ok;document.getElementById('connect-taken').hidden=ok;document.getElementById('connect-log').hidden=!ok;}
+  }
+  document.querySelectorAll('[data-prov]').forEach(function(b){b.addEventListener('click',function(){document.getElementById('prov-name').textContent=b.dataset.prov;step(1)})});
+  document.querySelectorAll('[data-step]').forEach(function(b){b.addEventListener('click',function(){step(Number(b.dataset.step),b.dataset.outcome)})});
+
+  document.getElementById('reconnect-btn').addEventListener('click',function(){
+    var banner=document.getElementById('reconnect-banner');banner.className='banner ok';
+    banner.textContent='已重新连接 Outlook，正在补上这 3 小时的邮件。历史不会重复。';
+    document.getElementById('ol-dot').className='dot ok';
+  });
+  document.querySelectorAll('[data-disconnect]').forEach(function(b){b.addEventListener('click',function(){
+    var row=b.closest('tr');row.children[4].innerHTML='<span class="tag">已断开 · 管理员</span>';
+    b.replaceWith(Object.assign(document.createElement('span'),{className:'small muted',textContent:'已写入变更历史'}));
+  })});
+  var revoked=false;
+  document.getElementById('ag-revoke').addEventListener('click',function(){
+    revoked=true;var s=document.getElementById('ag-state');s.className='tag';s.textContent='已撤销';this.hidden=true;
+  });
+  document.getElementById('ag-grant').addEventListener('click',function(){
+    var s=document.getElementById('ag-state');s.className='tag ok';s.textContent='生效中';document.getElementById('ag-revoke').hidden=false;revoked=false;
+  });
+})();
+</script>

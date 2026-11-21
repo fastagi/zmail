@@ -106,6 +106,9 @@ recorded but has no special rights to it. A removed member loses access on their
 | Delete a platform account | `DELETE /api/platform-accounts/:accountId` | `DELETE /v1/platform-accounts/:account_id` | `204` |
 | Platform account history | `GET /api/platform-accounts/:accountId/events` | `GET /v1/platform-accounts/:account_id/events` | Paginated envelope |
 | Hand over platform accounts | `POST /api/platform-account-handovers` | `POST /v1/platform-account-handovers` | `201` envelope |
+| List the connectors accounts can be bound with | none yet | `GET /v1/external-mail-connectors` | `200` envelope, at most 32 items |
+| Start binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations` | `201` |
+| Finish binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations/completions` | `201` new, `200` restored |
 | List the caller's external mailboxes | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 10 items |
 | Unbind an external mailbox | none yet | `DELETE /v1/external-mail-connections/:connection_id` | `204` |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
@@ -695,18 +698,59 @@ no platform account.
 
 ## External Mailboxes
 
-A member can bind an outside Gmail or Outlook account read-only. Its mail is copied into an
-`external` mailbox the member owns alone (see [Access](#access)); every copy is inbound, `received`,
-and carries `source` `gmail` or `outlook`, and the provider's receive time as `created_at`. A copy is
-stored once per mailbox and provider message id, so a reconnect or a repeated fetch never adds a
-second one. The first sync looks back 14 days.
+A member can bind an outside account read-only through a **connector**: Gmail, Outlook, or any
+provider the instance adds later. Its mail is copied into an `external` mailbox the member owns
+alone (see [Access](#access)); every copy is inbound, `received`, carries the connector id as
+`source` (`gmail`, `outlook`, ...), and the provider's receive time as `created_at`. A copy is stored
+once per mailbox and provider message id, so a reconnect or a repeated fetch never adds a second
+one. The first sync looks back 14 days unless the binding asked for 1 to 90.
 
-Binding itself (the OAuth flow) is not available yet. While the instance enables no source
-(`EXTERNAL_MAIL_PROVIDERS` empty, the default) both routes below answer
-`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` and no account is synced.
+Connector ids match `^[a-z][a-z0-9_]{1,15}$`; a new connector adds ids without a contract change, so
+clients render an id they do not know generically. An external mailbox carries the outside account's
+address, but that address is never Zmail's to deliver to: inbound delivery, sending, and the address
+directory ignore external mailboxes, and two members may each bind their own copy of an address.
 
-`GET /v1/external-mail-connections` lists the caller's own connections in the organization, id
-ascending, at most 10; it never carries a token:
+Every newly stored message, delivered by Zmail or synced, goes through the same post-store step in
+the transaction that stores it: it is queued for [AI triage](#ai-triage) when the switches allow,
+and announced as `mail.message.received` (webhooks still publish for shared mailboxes only). Only an
+external mailbox's owner may switch triage on for it.
+
+While the instance enables no connector (`EXTERNAL_MAIL_PROVIDERS` empty, the default) the connector
+list is empty, starting a sign-in answers `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`, the connection
+routes answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, and no account is synced.
+
+### Binding
+
+`GET /v1/external-mail-connectors` lists the instance's connectors in a stable order:
+`{ "id": "gmail", "auth_kind": "oauth2", "capabilities": { "read": true } }`.
+
+`POST /v1/external-mail-authorizations` with `{ "provider": "gmail" }` (optionally
+`"backfill_days"`) starts a sign-in; with `{ "connection_id": 3 }` it reconnects that connection,
+which must be the caller's own. It stores a pending sign-in, single use and valid for 10 minutes,
+holding only the SHA-256 of a random `state` and the sealed PKCE verifier, and answers `201`
+`{ "authorization_url", "expires_at" }`. The browser goes to `authorization_url`; the provider sends
+it back to `EXTERNAL_MAIL_REDIRECT_URL` with `state` and `code`.
+
+`POST /v1/external-mail-authorizations/completions` with `{ "state", "code" }` uses the pending
+sign-in up, whatever the outcome, then exchanges the code with the PKCE verifier:
+
+| Account signed in to | Result |
+|---|---|
+| New in the organization for this connector | `201`: a private, read-only `external` mailbox and an active connection, synced at once |
+| The caller's own connection, in any state | `200`: the same connection, active, error cleared, synced at once; mailbox and history kept (a `revoked` one backfills again, without copies) |
+| A reconnect that signed in to another account | `409 MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`; nothing changes |
+| Bound by another member | `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` |
+| A new account past the caller's 10 | `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT` |
+
+On a `409` the grant is handed back to the provider. A refused code is
+`422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`; an unknown, expired, used, or another member's `state`
+is `404 MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`. Both routes are session only and never cached.
+
+### Connections
+
+`GET /v1/external-mail-connections` lists the caller's own connections in the organization, live
+ones first and then id ascending, at most 10; it never carries a token. Revoked connections are kept
+so a rebind restores the same mailbox, and do not count toward the limit of 10:
 
 ```json
 { "id": 3, "provider": "gmail", "account_address": "me@gmail.com", "mailbox_id": 41,
@@ -717,16 +761,20 @@ ascending, at most 10; it never carries a token:
 | `status` | Meaning |
 |---|---|
 | `active` | Synced every two minutes |
-| `needs_reconnect` | The provider refused the grant (`last_error_code` `external.auth_failed`); syncing stops until the member binds the account again |
+| `needs_reconnect` | The provider refused the grant (`last_error_code` `external.auth_failed`); syncing stops until the member reconnects |
 | `revoked` | Unbound; never synced again |
 
 A provider failure that is not about the grant keeps the connection `active` with
-`last_error_code` `external.fetch_failed` and retries at the next interval.
+`last_error_code` `external.fetch_failed` and retries at the next interval. A connection whose
+connector the instance no longer runs stays `active` with its grant and records
+`external.provider_unavailable` until the connector is enabled again.
 
 `DELETE /v1/external-mail-connections/:connection_id` unbinds: the member who bound the account, or
 an `owner` or `admin`, may. The grant is revoked at the provider on a best-effort basis, the stored
 token is erased, and syncing stops for good, including a fetch already running. Mail already synced
-stays in the external mailbox. Unbinding a revoked connection answers `204` again. Another member's
+stays in the external mailbox. Unbinding a revoked connection answers `204` again. A member who leaves the organization has every connection there revoked the same way at once:
+the accounts are their own, so nothing awaits a handover, and the copies stay readable by nobody.
+Binding the account again after rejoining restores the same mailbox without copies. Another member's
 connection and another organization's id are `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
 
 ## Domains

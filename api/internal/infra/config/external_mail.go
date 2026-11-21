@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -21,6 +22,9 @@ const (
 type ExternalMailConfig struct {
 	// Providers lists the enabled sources; empty turns the feature off.
 	Providers []string
+	// RedirectURL is where a provider sends the browser back after sign-in: the Web console's
+	// callback page. Each provider's OAuth application must list it.
+	RedirectURL string
 }
 
 // Enabled reports whether any source is enabled, so binding endpoints and the worker exist.
@@ -61,6 +65,12 @@ func validateExternalMailConfig(c ExternalMailConfig, secretKey string, producti
 		default:
 			return fmt.Errorf("EXTERNAL_MAIL_PROVIDERS accepts only %q until the Gmail and Outlook sources exist; got %q",
 				ExternalMailSourceFake, provider)
+		}
+	}
+	if c.RedirectURL != "" {
+		parsed, err := url.Parse(c.RedirectURL)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && (parsed.Scheme != "http" || production)) {
+			return fmt.Errorf("EXTERNAL_MAIL_REDIRECT_URL must be an absolute https URL (http only outside production)")
 		}
 	}
 	if c.Enabled() && len(strings.TrimSpace(secretKey)) < MinMailboxSecretEncryptionKeyLength {

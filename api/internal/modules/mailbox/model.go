@@ -15,7 +15,7 @@ type MailboxPO struct {
 	ID             uint   `gorm:"primaryKey"`
 	OrganizationID *uint  `gorm:"index:idx_mailboxes_organization"`
 	CreatedBy      uint   `gorm:"not null"`
-	Address        string `gorm:"size:320;not null;uniqueIndex:idx_mailboxes_address"`
+	Address        string `gorm:"size:320;not null;uniqueIndex:idx_mailboxes_address,where:type <> 'external'"`
 	DisplayName    string `gorm:"size:120;not null;default:''"`
 	RoutingRuleID  string `gorm:"size:64;not null;default:''"`
 	// Type is "personal" or "shared".

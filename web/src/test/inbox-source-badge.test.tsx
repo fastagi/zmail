@@ -8,7 +8,7 @@ import type { InboxItem, MailRole } from '@/features/mailbox/types';
 import { messages } from '@/i18n/modules';
 import zhHansMailbox from '@/i18n/modules/mailbox/zh-Hans';
 
-function row(id: number, subject: string, source?: 'zmail' | 'gmail' | 'outlook'): InboxItem {
+function row(id: number, subject: string, source?: string): InboxItem {
   return inboxItemSchema.parse({
     id,
     mailbox_id: 1,
@@ -108,7 +108,14 @@ describe('inbox source badge', () => {
     );
   });
 
-  it('refuses an unknown source', () => {
-    expect(() => row(1, 'Unknown', 'imap' as 'gmail')).toThrow();
+  it('marks a connector it has no name for with its id', () => {
+    renderList([row(1, 'From IMAP', 'imap')]);
+    const badge = within(option('From IMAP')).getByText('imap');
+    expect(badge).toHaveAttribute('data-source', 'imap');
+    expect(badge).toHaveAttribute('title', 'Synced from a bound imap account (read-only)');
+  });
+
+  it('refuses a malformed source', () => {
+    expect(() => row(1, 'Malformed', 'IMAP Mail')).toThrow();
   });
 });

@@ -151,12 +151,7 @@ const messages = {
     clearMailbox: 'Show all mailboxes',
     threadCount: '({count})',
     loadingMore: 'Loading more…',
-    source: {
-      gmail: 'Gmail',
-      gmailTitle: 'Synced from a bound Gmail account (read-only)',
-      outlook: 'Outlook',
-      outlookTitle: 'Synced from a bound Outlook account (read-only)',
-    },
+    sourceTitle: 'Synced from a bound {name} account (read-only)',
     views: {
       label: 'Inbox views',
       all: 'All mail',

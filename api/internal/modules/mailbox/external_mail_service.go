@@ -63,11 +63,15 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		ConnectionID: connection.ID, MailboxID: connection.MailboxID, Cursor: connection.SyncCursor,
 		Status: domain.ExternalMailStatusActive, NextSyncAt: now.Add(externalMailSyncInterval), Now: now,
 	}
+	connector, registered := s.externalConnectors.lookup(connection.Provider)
 	refreshToken, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
 	var fetched ExternalMailFetch
-	if err == nil {
-		fetched, err = s.externalSource.Fetch(ctx, ExternalMailToken{RefreshToken: refreshToken}, connection.SyncCursor)
-	} else {
+	switch {
+	case !registered:
+		err = ErrExternalMailProviderUnavailable
+	case err == nil:
+		fetched, err = connector.Source.Fetch(ctx, ExternalMailToken{RefreshToken: refreshToken}, connection.SyncCursor)
+	default:
 		// A token this instance cannot open is as unusable as one the provider refuses.
 		err = fmt.Errorf("%w: sealed token unreadable", ErrExternalMailAuth)
 	}
@@ -77,17 +81,48 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		result.Messages = s.externalCopies(connection, fetched.Messages, now)
 	case errors.Is(err, ErrExternalMailAuth):
 		result.Status, result.LastErrorCode = domain.ExternalMailStatusNeedsReconnect, domain.ExternalMailErrorAuthFailed
+	case errors.Is(err, ErrExternalMailProviderUnavailable):
+		// The connection keeps its grant and cursor and resumes when the connector is enabled again.
+		result.LastErrorCode = domain.ExternalMailErrorProviderUnavailable
 	default:
 		result.LastErrorCode = domain.ExternalMailErrorFetchFailed
 	}
-	stored, applied, saveErr := s.externalMail.SaveExternalMailSync(ctx, result)
+	mailbox, err := s.repo.FindMailbox(ctx, connection.OrganizationID, connection.MailboxID)
+	if errors.Is(err, ErrMailboxNotFound) {
+		// A deleted external mailbox takes no more mail; its lease keeps it out of the next passes.
+		slog.WarnContext(ctx, "external_mail.mailbox_missing",
+			slog.Uint64("connection_id", uint64(connection.ID)), slog.Uint64("mailbox_id", uint64(connection.MailboxID)))
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var stored []*domain.MailMessage
+	applied := false
+	// New copies go through the same post-store step as Zmail's own inbound mail, in the
+	// transaction that stores them.
+	saveErr := s.apply(ctx, func(tx context.Context) ([]MailNotification, error) {
+		var notifications []MailNotification
+		var err error
+		if stored, applied, err = s.externalMail.SaveExternalMailSync(tx, result); err != nil {
+			return nil, err
+		}
+		for _, message := range stored {
+			announced, err := s.afterInboundStored(tx, mailbox, message)
+			if err != nil {
+				return nil, err
+			}
+			notifications = append(notifications, announced...)
+		}
+		return notifications, nil
+	})
 	if saveErr != nil {
 		return saveErr
 	}
 	attributes := []any{
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.Uint64("mailbox_id", uint64(connection.MailboxID)),
 		slog.String("provider", string(connection.Provider)), slog.String("status", string(result.Status)),
-		slog.Int("fetched", len(result.Messages)), slog.Int("stored", stored), slog.Bool("applied", applied),
+		slog.Int("fetched", len(result.Messages)), slog.Int("stored", len(stored)), slog.Bool("applied", applied),
 	}
 	if result.LastErrorCode != "" {
 		slog.WarnContext(ctx, "external_mail.sync_failed", append(attributes, slog.String("error_code", result.LastErrorCode))...)
@@ -150,18 +185,34 @@ func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domai
 	if connection.Status == domain.ExternalMailStatusRevoked {
 		return nil
 	}
-	if connection.EncryptedRefreshToken != "" {
-		if token, openErr := s.encryptor.DecryptString(connection.EncryptedRefreshToken); openErr == nil {
-			if revokeErr := s.externalSource.Revoke(ctx, ExternalMailToken{RefreshToken: token}); revokeErr != nil {
-				slog.WarnContext(ctx, "external_mail.provider_revoke_failed",
-					slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
-			}
-		}
-	}
+	s.handBackExternalGrant(ctx, connection)
 	if err := s.externalMail.RevokeExternalMailConnection(ctx, viewer.OrganizationID, id, s.now().UTC()); err != nil {
 		return err
 	}
 	slog.InfoContext(ctx, "external_mail.revoked",
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
 	return nil
+}
+
+// handBackExternalGrant revokes a connection's grant at its provider on a best-effort basis: a
+// provider that is down or no longer enabled leaves the grant to expire there, and the token is
+// erased here either way.
+func (s *service) handBackExternalGrant(ctx context.Context, connection *domain.ExternalMailConnection) {
+	if connection.EncryptedRefreshToken == "" {
+		return
+	}
+	token, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
+	if err != nil {
+		return
+	}
+	connector, registered := s.externalConnectors.lookup(connection.Provider)
+	if !registered {
+		slog.WarnContext(ctx, "external_mail.provider_revoke_skipped",
+			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
+		return
+	}
+	if err := connector.Source.Revoke(ctx, ExternalMailToken{RefreshToken: token}); err != nil {
+		slog.WarnContext(ctx, "external_mail.provider_revoke_failed",
+			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
+	}
 }

@@ -77,3 +77,29 @@ func TestExternalMailConfigRejectsUnavailableProvidersAndMissingKey(t *testing.T
 		t.Fatalf("short key: err = %v, want a MAILBOX_SECRET_ENCRYPTION_KEY refusal", err)
 	}
 }
+
+// TestExternalMailRedirectURL: the sign-in callback must be an absolute https URL; http is only for
+// local development.
+func TestExternalMailRedirectURL(t *testing.T) {
+	enabled := func(redirect string) ExternalMailConfig {
+		return ExternalMailConfig{Providers: []string{ExternalMailSourceFake}, RedirectURL: redirect}
+	}
+	for redirect, production := range map[string]bool{
+		"":                            true,
+		"https://zmail.example/api/x": true,
+		"http://localhost:3000/api/x": false,
+	} {
+		if err := validateExternalMailConfig(ExternalMailConfig{RedirectURL: redirect}, testExternalMailKey, production); err != nil {
+			t.Errorf("%q (production %v): %v", redirect, production, err)
+		}
+	}
+	for redirect, production := range map[string]bool{
+		"http://zmail.example/api/x": true,
+		"/api/external-mail":         false,
+		"ftp://zmail.example/x":      false,
+	} {
+		if err := validateExternalMailConfig(enabled(redirect), testExternalMailKey, production); err == nil {
+			t.Errorf("%q (production %v) was accepted", redirect, production)
+		}
+	}
+}

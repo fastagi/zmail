@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"regexp"
 	"time"
 )
 
@@ -10,7 +11,12 @@ import (
 // nobody sends from them. They are never created through the mailbox API.
 const MailboxTypeExternal MailboxType = "external"
 
-// MailSource says where a stored message came from.
+// connectorIDPattern is the shape of a connector id. The schema checks the same pattern, so adding
+// a connector needs code only.
+var connectorIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{1,15}$`)
+
+// MailSource says where a stored message came from: zmail, or the id of the connector that synced
+// the copy.
 type MailSource string
 
 const (
@@ -22,12 +28,13 @@ const (
 	MailSourceOutlook MailSource = "outlook"
 )
 
-// Valid reports whether the source is a known value.
+// Valid reports whether the source is zmail or has the shape of a connector id.
 func (s MailSource) Valid() bool {
-	return s == MailSourceZmail || s == MailSourceGmail || s == MailSourceOutlook
+	return s == MailSourceZmail || connectorIDPattern.MatchString(string(s))
 }
 
-// ExternalMailProvider is the outside service of a connection.
+// ExternalMailProvider is the id of the connector that reads a connection's outside account. The
+// known ids are constants; any id of the connector shape is valid, so the set grows with code.
 type ExternalMailProvider string
 
 const (
@@ -35,9 +42,10 @@ const (
 	ExternalMailProviderOutlook ExternalMailProvider = "outlook"
 )
 
-// Valid reports whether the provider is a known value.
+// Valid reports whether the provider has the shape of a connector id. "zmail" is reserved for
+// mail Zmail itself handles.
 func (p ExternalMailProvider) Valid() bool {
-	return p == ExternalMailProviderGmail || p == ExternalMailProviderOutlook
+	return p != ExternalMailProvider(MailSourceZmail) && connectorIDPattern.MatchString(string(p))
 }
 
 // Source is the message source of mail synced from the provider.
@@ -62,7 +70,43 @@ const (
 const (
 	ExternalMailErrorAuthFailed  = "external.auth_failed"
 	ExternalMailErrorFetchFailed = "external.fetch_failed"
+	// ExternalMailErrorProviderUnavailable means the instance no longer runs the connection's
+	// connector; the connection keeps its state until it is enabled again.
+	ExternalMailErrorProviderUnavailable = "external.provider_unavailable"
 )
+
+// ExternalMailAuthorizationTTL is how long a started sign-in may be completed.
+const ExternalMailAuthorizationTTL = 10 * time.Minute
+
+// MaxExternalMailBackfillDays bounds how far back the first sync of a connection may read.
+const MaxExternalMailBackfillDays = 90
+
+// ExternalMailAuthorization is one pending sign-in to an outside account. It is completed once,
+// by the member who started it, before it expires.
+type ExternalMailAuthorization struct {
+	ID             uint
+	OrganizationID uint
+	UserID         uint
+	Provider       ExternalMailProvider
+	// StateHash is the hex SHA-256 of the single-use state; the state itself is never stored.
+	StateHash string
+	// SealedVerifier is the encrypted PKCE code verifier.
+	SealedVerifier string
+	// ConnectionID is the connection a reconnect restores; nil for a new binding.
+	ConnectionID *uint
+	BackfillDays int
+	ExpiresAt    time.Time
+	CreatedAt    time.Time
+}
+
+// ExternalMailRebind restores a connection with a fresh grant.
+type ExternalMailRebind struct {
+	ConnectionID          uint
+	EncryptedRefreshToken string
+	// ResetCursor starts a fresh backfill, used when the connection had been revoked.
+	ResetCursor bool
+	Now         time.Time
+}
 
 // DefaultExternalMailBackfillDays is how far back the first sync of a connection reads.
 const DefaultExternalMailBackfillDays = 14
@@ -121,14 +165,29 @@ type ExternalMailRepository interface {
 	// SaveExternalMailSync records a fetch while the connection is still active and stores its new
 	// messages once per (mailbox, external id). applied is false, and nothing is stored, when the
 	// connection stopped being active meanwhile.
-	SaveExternalMailSync(ctx context.Context, result ExternalMailSyncResult) (stored int, applied bool, err error)
-	// ListExternalMailConnections returns the owner's connections in the organization, id ascending,
-	// at most MaxExternalMailConnectionsPerUser.
+	// The returned messages are the ones newly stored, with their ids.
+	SaveExternalMailSync(ctx context.Context, result ExternalMailSyncResult) (stored []*MailMessage, applied bool, err error)
+	// CountLiveExternalMailConnections counts the owner's connections that are not revoked; the
+	// per-member limit bounds these.
+	CountLiveExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) (int, error)
+	// ListExternalMailConnections returns the owner's connections in the organization, live ones
+	// first, then id ascending, at most MaxExternalMailConnectionsPerUser.
 	ListExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) ([]*ExternalMailConnection, error)
 	// FindExternalMailConnection returns one connection of the organization.
 	FindExternalMailConnection(ctx context.Context, organizationID, id uint) (*ExternalMailConnection, error)
 	// RevokeExternalMailConnection marks the connection revoked and clears its token and cursor.
 	RevokeExternalMailConnection(ctx context.Context, organizationID, id uint, now time.Time) error
+	// FindExternalMailConnectionByAccount returns the organization's connection of the provider
+	// and outside address, ignoring case, in any state.
+	FindExternalMailConnectionByAccount(ctx context.Context, organizationID uint, provider ExternalMailProvider, address string) (*ExternalMailConnection, error)
+	// RebindExternalMailConnection stores a fresh grant, makes the connection active and due now,
+	// and clears its error.
+	RebindExternalMailConnection(ctx context.Context, rebind ExternalMailRebind) (*ExternalMailConnection, error)
+	// CreateExternalMailAuthorization stores a pending sign-in and removes expired ones.
+	CreateExternalMailAuthorization(ctx context.Context, authorization *ExternalMailAuthorization) error
+	// TakeExternalMailAuthorization deletes and returns the unexpired sign-in with the state hash,
+	// so it is used at most once.
+	TakeExternalMailAuthorization(ctx context.Context, stateHash string, now time.Time) (*ExternalMailAuthorization, error)
 }
 
 // ExternalMailSyncWorker syncs external mail outside request paths.
