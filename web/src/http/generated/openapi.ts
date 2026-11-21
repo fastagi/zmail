@@ -419,7 +419,7 @@ export interface paths {
         put?: never;
         /**
          * Delete a revoked connection's copies at once
-         * @description Deletes for good the synced copies of the caller's own revoked connection instead of waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then deletes the connected mailbox and the connection with its sync runs, storing a `copies_purged` audit event with reason `owner` on the deleted mailbox. When more copies are left than one request deletes, the rest is due at once and the worker deletes it in its next passes. Only the member who bound the account may purge; anyone else, an `owner` or `admin` included, gets `404`.
+         * @description Deletes for good the synced copies of the caller's own revoked connection instead of waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then deletes the connected mailbox and the connection with its sync runs, storing a `copies_purged` audit event with reason `owner` on the deleted mailbox. When more copies are left than one request deletes, the rest is due at once and the worker deletes it in its next passes. Only the member who bound the account may purge; anyone else, an `owner` or `admin` included, gets `404`. The route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never strands copies.
          */
         post: operations["purgeExternalMailCopies"];
         delete?: never;

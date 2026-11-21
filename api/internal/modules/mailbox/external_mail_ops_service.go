@@ -18,6 +18,10 @@ var ErrExternalMailConnectionNotRevoked = errors.New("external mail connection i
 // errExternalMailFetchTimeout is a fetch that ran past its deadline; it counts as fetch_failed.
 var errExternalMailFetchTimeout = errors.New("external mail fetch timed out")
 
+// errExternalMailCursorLoop is a source that reports an empty cursor expired; it counts as
+// fetch_failed, so the connection backs off instead of restarting forever.
+var errExternalMailCursorLoop = errors.New("external mail source expired an empty cursor")
+
 const (
 	// externalMailMaxBackoff caps the wait after repeated fetch failures.
 	externalMailMaxBackoff = time.Hour
@@ -28,7 +32,21 @@ const (
 	// externalMailImmediatePurgeSteps bounds the purge steps one owner request runs before it
 	// leaves the rest to the worker.
 	externalMailImmediatePurgeSteps = 5
+	// externalMailLeaseMargin is added to the fetch deadline when a lease is renewed.
+	externalMailLeaseMargin = 30 * time.Second
+	// externalMailPurgeRetry is how long a connection whose purge failed waits before the next
+	// attempt.
+	externalMailPurgeRetry = time.Hour
+	// externalMailMissingMailbox is the revoke reason of a connection whose mailbox is gone.
+	externalMailMissingMailbox = "mailbox_missing"
 )
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
+}
 
 // externalMailPurgeBatch bounds the copies one purge step deletes; tests lower it.
 var externalMailPurgeBatch = 1000
@@ -76,9 +94,10 @@ type ExternalMailPurgeResult struct {
 }
 
 // ownExternalMailConnection returns a connection of the viewer's own. Anyone else, managers
-// included, is answered not found.
-func (s *service) ownExternalMailConnection(ctx context.Context, viewer domain.OrganizationContext, id uint) (*domain.ExternalMailConnection, error) {
-	if !s.externalMailAvailable() {
+// included, is answered not found. withSync also requires the feature to be on; deleting one's
+// own revoked copies does not, so turning the providers off never strands them.
+func (s *service) ownExternalMailConnection(ctx context.Context, viewer domain.OrganizationContext, id uint, withSync bool) (*domain.ExternalMailConnection, error) {
+	if s.externalMail == nil || (withSync && !s.externalMailAvailable()) {
 		return nil, ErrExternalMailConnectionNotFound
 	}
 	connection, err := s.externalMail.FindExternalMailConnection(ctx, viewer.OrganizationID, id)
@@ -92,7 +111,7 @@ func (s *service) ownExternalMailConnection(ctx context.Context, viewer domain.O
 }
 
 func (s *service) ListExternalMailSyncRuns(ctx context.Context, viewer domain.OrganizationContext, id uint) ([]*domain.ExternalMailSyncRun, error) {
-	connection, err := s.ownExternalMailConnection(ctx, viewer, id)
+	connection, err := s.ownExternalMailConnection(ctx, viewer, id, true)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +119,7 @@ func (s *service) ListExternalMailSyncRuns(ctx context.Context, viewer domain.Or
 }
 
 func (s *service) PurgeExternalMailCopies(ctx context.Context, viewer domain.OrganizationContext, id uint) (ExternalMailPurgeResult, error) {
-	connection, err := s.ownExternalMailConnection(ctx, viewer, id)
+	connection, err := s.ownExternalMailConnection(ctx, viewer, id, false)
 	if err != nil {
 		return ExternalMailPurgeResult{}, err
 	}
@@ -110,7 +129,7 @@ func (s *service) PurgeExternalMailCopies(ctx context.Context, viewer domain.Org
 	var result ExternalMailPurgeResult
 	for range externalMailImmediatePurgeSteps {
 		purge, stepErr := s.purgeExternalMailStep(ctx, domain.ExternalMailPurgeStep{
-			ConnectionID: connection.ID, Messages: externalMailPurgeBatch,
+			ConnectionID: connection.ID, Now: s.now().UTC(), Messages: externalMailPurgeBatch,
 		}, viewer.UserID, externalMailPurgeOwner)
 		if stepErr != nil {
 			return result, stepErr
@@ -142,24 +161,79 @@ func (s *service) PurgeExternalMailCopies(ctx context.Context, viewer domain.Org
 	return result, nil
 }
 
-// maintainExternalMail runs the bounded housekeeping of a sync pass: it prunes sync runs past
-// their retention and deletes copies of connections revoked longer than the retention.
-func (s *service) maintainExternalMail(ctx context.Context, now time.Time) error {
-	if _, err := s.externalMail.PruneExternalMailSyncRuns(ctx, now.Add(-domain.ExternalMailSyncRunRetention), externalMailRunPruneBatch); err != nil {
-		return err
+// pruneExternalMailSyncRuns deletes a bounded batch of sync runs past their retention. A failure
+// is logged: the next pass tries again, and it never holds up syncing.
+func (s *service) pruneExternalMailSyncRuns(ctx context.Context, now time.Time) {
+	if _, err := s.externalMail.PruneExternalMailSyncRuns(ctx, now.Add(-domain.ExternalMailSyncRunRetention), externalMailRunPruneBatch); err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "external_mail.sync_runs_prune_failed", slog.String("error", err.Error()))
 	}
+}
+
+// PurgeRevokedExternalMail deletes copies of connections revoked longer than the retention: at
+// most min(limit, externalMailPurgeStepsPerPass) bounded steps. The mail worker runs it on every
+// tick whenever the mailbox starter is on, whether or not any provider is enabled. A step that
+// fails is logged and its connection held back for an hour, so it never blocks the connections
+// revoked after it and never fails the tick.
+func (s *service) PurgeRevokedExternalMail(ctx context.Context, now time.Time, limit int) (int, error) {
+	if s.externalMail == nil || limit <= 0 {
+		return 0, nil
+	}
+	now = now.UTC()
 	step := domain.ExternalMailPurgeStep{
-		RevokedBefore: now.Add(-s.settings.ExternalMail.Sync.Retention()), Messages: externalMailPurgeBatch,
+		RevokedBefore: now.Add(-s.settings.ExternalMail.Sync.Retention()), Now: now, Messages: externalMailPurgeBatch,
 	}
-	for range externalMailPurgeStepsPerPass {
+	done := 0
+	for range min(limit, externalMailPurgeStepsPerPass) {
 		if err := ctx.Err(); err != nil {
-			return err
+			return done, err
 		}
 		purge, err := s.purgeExternalMailStep(ctx, step, 0, externalMailPurgeRetention)
-		if err != nil || purge == nil {
-			return err
+		if err != nil {
+			if purge == nil || purge.Connection == nil {
+				// The connection is not known, so nothing can be held back: try next tick.
+				slog.WarnContext(ctx, "external_mail.copies_purge_failed", slog.String("error", err.Error()))
+				return done, nil
+			}
+			slog.WarnContext(ctx, "external_mail.copies_purge_failed",
+				slog.Uint64("connection_id", uint64(purge.Connection.ID)), slog.String("error", err.Error()))
+			if deferErr := s.externalMail.DeferExternalMailPurge(ctx, purge.Connection.ID, now.Add(externalMailPurgeRetry)); deferErr != nil {
+				slog.WarnContext(ctx, "external_mail.copies_purge_defer_failed",
+					slog.Uint64("connection_id", uint64(purge.Connection.ID)), slog.String("error", deferErr.Error()))
+				return done, nil
+			}
+			done++
+			continue
 		}
+		if purge == nil {
+			return done, nil
+		}
+		done++
 	}
+	return done, nil
+}
+
+// dropConnectionWithoutMailbox handles a claimed connection whose mailbox is gone: nothing can be
+// stored, so the grant is handed back and the connection revoked, which stops its polling and
+// starts the retention that deletes it. The run is recorded as dropped.
+func (s *service) dropConnectionWithoutMailbox(ctx context.Context, connection *domain.ExternalMailConnection, result domain.ExternalMailSyncResult, startedAt time.Time) error {
+	if s.encryptor != nil {
+		s.handBackExternalGrant(ctx, connection)
+	}
+	now := s.now().UTC()
+	if err := s.externalMail.RevokeExternalMailConnection(ctx, connection.OrganizationID, connection.ID, now); err != nil {
+		return err
+	}
+	result.Run = &domain.ExternalMailSyncRun{
+		ConnectionID: connection.ID, StartedAt: startedAt, FinishedAt: now, Outcome: domain.ExternalMailSyncDropped,
+	}
+	// The connection is revoked now, so the save stores nothing and records the run only.
+	if _, _, err := s.externalMail.SaveExternalMailSync(ctx, result); err != nil {
+		return err
+	}
+	metrics.RecordExternalMailSync(string(connection.Provider), string(domain.ExternalMailSyncDropped), 0)
+	slog.WarnContext(ctx, "external_mail.revoked",
+		slog.Uint64("connection_id", uint64(connection.ID)), slog.Uint64("mailbox_id", uint64(connection.MailboxID)),
+		slog.String("provider", string(connection.Provider)), slog.String("reason", externalMailMissingMailbox))
 	return nil
 }
 
@@ -192,7 +266,8 @@ func (s *service) purgeExternalMailStep(ctx context.Context, step domain.Externa
 		return s.externalMail.DeleteExternalMailConnection(tx, connection.ID)
 	})
 	if err != nil || purge == nil {
-		return nil, err
+		// On an error the purge, when known, names the connection, so the caller can hold it back.
+		return purge, err
 	}
 	metrics.RecordExternalMailCopiesPurged(purge.DeletedMessages)
 	attributes := []any{

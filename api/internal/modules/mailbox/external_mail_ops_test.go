@@ -24,6 +24,16 @@ func (f *externalFixture) runs(t *testing.T) []*domain.ExternalMailSyncRun {
 	return runs
 }
 
+// purge runs the mail worker's retention step for revoked copies at the fixture's time.
+func (f *externalFixture) purge(t *testing.T) int {
+	t.Helper()
+	done, err := f.service.PurgeRevokedExternalMail(context.Background(), f.service.now(), 20)
+	if err != nil {
+		t.Fatalf("PurgeRevokedExternalMail: %v", err)
+	}
+	return done
+}
+
 func (f *externalFixture) count(t *testing.T, query string, args ...any) int64 {
 	t.Helper()
 	var count int64
@@ -271,13 +281,13 @@ func TestExternalMailRetentionPurgesRevokedCopies(t *testing.T) {
 	}
 
 	f.advance(retention - time.Hour - time.Minute)
-	f.sync(t)
+	f.purge(t)
 	if stored := len(f.storedExternal(t)); stored != 2 {
 		t.Fatalf("before the deadline the mailbox holds %d copies, want 2", stored)
 	}
 
 	f.advance(2 * time.Minute)
-	f.sync(t)
+	f.purge(t)
 	if left := f.count(t, `SELECT count(*) FROM mail_messages WHERE mailbox_id = ?`, f.mailbox.ID); left != 0 {
 		t.Fatalf("%d copies left after the deadline", left)
 	}
@@ -344,6 +354,7 @@ func TestExternalMailRebindCancelsThePurge(t *testing.T) {
 	}
 	f.advance(config.DefaultExternalMailRevokedRetention + time.Hour)
 	f.sync(t)
+	f.purge(t)
 	if stored := len(f.storedExternal(t)); stored != 1 {
 		t.Fatalf("after the old deadline the rebound mailbox holds %d copies, want 1", stored)
 	}
@@ -431,7 +442,7 @@ func TestExternalMailImmediatePurgeHandsTheRestToTheWorker(t *testing.T) {
 	if status != http.StatusAccepted || data["deleted_messages"] != float64(externalMailImmediatePurgeSteps) || data["completed"] != false {
 		t.Fatalf("owner purging a large mailbox = %d %v", status, body)
 	}
-	f.sync(t)
+	f.purge(t)
 	if left := f.count(t, `SELECT count(*) FROM mail_messages WHERE mailbox_id = ?`, f.mailbox.ID); left != 0 {
 		t.Fatalf("the worker left %d copies", left)
 	}
@@ -568,5 +579,174 @@ func TestExternalMailImmediateRefetchesAreBounded(t *testing.T) {
 	f.sync(t)
 	if connection := f.reload(t); connection.ConsecutiveMore != 0 {
 		t.Fatalf("pages in a row after a last page = %d, want 0", connection.ConsecutiveMore)
+	}
+}
+
+// expiringSource answers every fetch with an expired cursor.
+type expiringSource struct{ *FakeExternalMailSource }
+
+func (expiringSource) Fetch(context.Context, ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	return ExternalMailFetch{}, ErrExternalMailCursorExpired
+}
+
+// TestExternalMailCursorExpiryRestartsAtOnce: an expired cursor restarts from an empty cursor in
+// the next pass even after the connection used up its immediate pages, and a source that claims
+// an empty cursor expired backs off instead of restarting forever.
+func TestExternalMailCursorExpiryRestartsAtOnce(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.service.settings.ExternalMail.Sync.MaxImmediatePages = 2
+	if err := f.repo.(*repository).db.Exec(`UPDATE external_mail_connections SET sync_cursor = '7', consecutive_more = 5 WHERE id = ?`,
+		f.connection.ID).Error; err != nil {
+		t.Fatalf("set cursor: %v", err)
+	}
+	f.service.externalConnectors = fakeExternalMailRegistry(expiringSource{f.source})
+	f.sync(t)
+	connection := f.reload(t)
+	if connection.SyncCursor != "" || connection.ConsecutiveMore != 0 || !connection.NextSyncAt.Equal(f.service.now().UTC()) {
+		t.Fatalf("after expiry: cursor %q, pages in a row %d, next %v; want a restart due now with the count reset",
+			connection.SyncCursor, connection.ConsecutiveMore, connection.NextSyncAt)
+	}
+	if handled := f.sync(t); handled != 1 {
+		t.Fatalf("the restart waited (%d handled)", handled)
+	}
+	runs := f.runs(t)
+	if len(runs) != 2 || runs[1].Outcome != domain.ExternalMailSyncCursorExpired || runs[1].Throttled ||
+		runs[0].Outcome != domain.ExternalMailSyncFetchFailed {
+		t.Fatalf("runs = %+v, want cursor_expired, then fetch_failed for an expired empty cursor", runs)
+	}
+	if connection = f.reload(t); connection.ConsecutiveFailures != 1 || !connection.NextSyncAt.After(f.service.now().UTC()) {
+		t.Fatalf("after an expired empty cursor: %+v, want one failure and a backoff", connection)
+	}
+}
+
+// TestExternalMailRetentionRunsWithProvidersOff: turning every provider off neither strands revoked
+// copies past their retention nor stops the owner from deleting them.
+func TestExternalMailRetentionRunsWithProvidersOff(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.source.Deliver(externalTestToken, externalMessage("g-1", "One", time.Time{}))
+	other := f.addConnection(t, domain.ExternalMailProviderGmail, "other-account")
+	f.source.Deliver("other-account", externalMessage("o-1", "Other", time.Time{}))
+	f.sync(t)
+	ctx := context.Background()
+	for _, id := range []uint{f.connection.ID, other.ID} {
+		if err := f.service.RevokeExternalMailConnection(ctx, f.b, id); err != nil {
+			t.Fatalf("revoke %d: %v", id, err)
+		}
+	}
+	f.service.settings.ExternalMail.Providers = nil
+
+	result, err := f.service.PurgeExternalMailCopies(ctx, f.b, other.ID)
+	if err != nil || !result.Completed || result.DeletedMessages != 1 {
+		t.Fatalf("owner purge with the providers off = %+v, %v; want it done", result, err)
+	}
+	f.advance(config.DefaultExternalMailRevokedRetention + time.Minute)
+	if done := f.purge(t); done != 1 {
+		t.Fatalf("the retention step purged %d connections with the providers off, want 1", done)
+	}
+	if left := f.count(t, `SELECT count(*) FROM mail_messages WHERE mailbox_id = ?`, f.mailbox.ID); left != 0 {
+		t.Fatalf("%d copies left with the providers off", left)
+	}
+}
+
+// TestExternalMailFailedPurgeDoesNotBlockTheQueue: a revoked connection that points at a mailbox
+// without synced copies is refused, leaves that mailbox's mail alone, is held back, and the purge
+// goes on with the connections revoked after it.
+func TestExternalMailFailedPurgeDoesNotBlockTheQueue(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.source.Deliver(externalTestToken, externalMessage("g-1", "One", time.Time{}))
+	later := f.addConnection(t, domain.ExternalMailProviderGmail, "later-account")
+	f.source.Deliver("later-account", externalMessage("l-1", "Later", time.Time{}))
+	f.sync(t)
+	ctx := context.Background()
+	if err := f.service.RevokeExternalMailConnection(ctx, f.b, f.connection.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	f.advance(time.Minute)
+	if err := f.service.RevokeExternalMailConnection(ctx, f.b, later.ID); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	// A corrupt row: the oldest revoked connection points at the team mailbox.
+	db := f.repo.(*repository).db
+	if err := db.Exec(`UPDATE external_mail_connections SET mailbox_id = ? WHERE id = ?`, f.team.ID, f.connection.ID).Error; err != nil {
+		t.Fatalf("corrupt connection: %v", err)
+	}
+	teamMail := f.count(t, `SELECT count(*) FROM mail_messages WHERE mailbox_id = ?`, f.team.ID)
+
+	f.advance(config.DefaultExternalMailRevokedRetention)
+	f.purge(t)
+	if got := f.count(t, `SELECT count(*) FROM mail_messages WHERE mailbox_id = ?`, f.team.ID); got != teamMail || teamMail == 0 {
+		t.Fatalf("the team mailbox holds %d messages, want its %d untouched", got, teamMail)
+	}
+	if _, err := f.service.externalMail.FindExternalMailConnection(ctx, accessOrg, later.ID); !errors.Is(err, ErrExternalMailConnectionNotFound) {
+		t.Fatalf("the connection revoked later was not purged: %v", err)
+	}
+	var held int64
+	db.Raw(`SELECT count(*) FROM external_mail_connections WHERE id = ? AND purge_retry_at > ?`, f.connection.ID, f.service.now()).Scan(&held)
+	if held != 1 {
+		t.Fatal("the refused connection is not held back")
+	}
+	if _, err := f.service.SyncExternalMail(ctx, 20); err != nil {
+		t.Fatalf("a refused purge fails the sync pass: %v", err)
+	}
+}
+
+// TestExternalMailMissingMailboxRevokesTheConnection: a connection whose mailbox was deleted is not
+// fetched, records a dropped run, has its grant handed back, and is never polled again.
+func TestExternalMailMissingMailboxRevokesTheConnection(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	if err := f.repo.DeleteMailbox(context.Background(), accessOrg, f.mailbox.ID); err != nil {
+		t.Fatalf("delete mailbox: %v", err)
+	}
+	f.sync(t)
+	connection := f.reload(t)
+	if connection.Status != domain.ExternalMailStatusRevoked || connection.RevokedAt == nil || connection.EncryptedRefreshToken != "" {
+		t.Fatalf("after the mailbox vanished: %+v, want revoked with the token erased", connection)
+	}
+	if f.source.Fetches(externalTestToken) != 0 || !f.source.Revoked(externalTestToken) {
+		t.Fatal("the account was fetched, or its grant not handed back")
+	}
+	if runs := f.runs(t); len(runs) != 1 || runs[0].Outcome != domain.ExternalMailSyncDropped {
+		t.Fatalf("runs = %+v, want one dropped run", runs)
+	}
+	f.advance(10 * externalMailSyncInterval)
+	if handled := f.sync(t); handled != 0 {
+		t.Fatal("a connection without a mailbox is still polled")
+	}
+}
+
+// leaseTakingSource lets another worker take a second connection's lease during the first fetch,
+// and reports the lease the fetched connection held while it ran.
+type leaseTakingSource struct {
+	*FakeExternalMailSource
+	during func(token string)
+}
+
+func (s leaseTakingSource) Fetch(ctx context.Context, request ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	s.during(request.Token.RefreshToken)
+	return s.FakeExternalMailSource.Fetch(ctx, request)
+}
+
+// TestExternalMailLeaseCoversTheFetch: before a fetch the lease is moved past the fetch deadline,
+// and a claimed connection another worker took meanwhile is not fetched.
+func TestExternalMailLeaseCoversTheFetch(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.service.settings.ExternalMail.Sync.FetchTimeout = 5 * time.Minute
+	second := f.addConnection(t, domain.ExternalMailProviderGmail, "second-account")
+	db := f.repo.(*repository).db
+	var leaseDuringFetch time.Time
+	f.service.externalConnectors = fakeExternalMailRegistry(leaseTakingSource{FakeExternalMailSource: f.source, during: func(token string) {
+		if token != externalTestToken {
+			return
+		}
+		db.Raw(`SELECT next_sync_at FROM external_mail_connections WHERE id = ?`, f.connection.ID).Scan(&leaseDuringFetch)
+		// Another worker claims the second connection with a lease of its own.
+		db.Exec(`UPDATE external_mail_connections SET next_sync_at = next_sync_at + interval '1 second' WHERE id = ?`, second.ID)
+	}})
+	f.sync(t)
+	if want := f.service.now().UTC().Add(5*time.Minute + externalMailLeaseMargin); leaseDuringFetch.Before(want) {
+		t.Fatalf("lease during the fetch = %v, want at least %v", leaseDuringFetch, want)
+	}
+	if f.source.Fetches("second-account") != 0 {
+		t.Fatal("a connection another worker took was fetched")
 	}
 }

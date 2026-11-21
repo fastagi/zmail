@@ -105,6 +105,14 @@ func (r *repository) PruneExternalMailSyncRuns(ctx context.Context, before time.
 	return int(result.RowsAffected), result.Error
 }
 
+// connectedMailboxKind is the SQL condition, on a mailboxes row aliased b, that marks a mailbox
+// holding synced copies of an outside account. A purge only ever deletes mail of such a mailbox.
+const connectedMailboxKind = "b.origin = 'connected'"
+
+// ErrExternalMailPurgeRefused means a revoked connection points at a mailbox that does not hold
+// synced copies; nothing is deleted.
+var ErrExternalMailPurgeRefused = errors.New("external mail purge refused: the mailbox does not hold synced copies")
+
 func (r *repository) PurgeRevokedExternalMail(ctx context.Context, step domain.ExternalMailPurgeStep) (*domain.ExternalMailPurge, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
@@ -115,31 +123,63 @@ func (r *repository) PurgeRevokedExternalMail(ctx context.Context, step domain.E
 	if step.ConnectionID != 0 {
 		query = query.Where("id = ?", step.ConnectionID)
 	} else {
-		query = query.Where("revoked_at <= ?", step.RevokedBefore).Order("revoked_at, id")
+		// A connection whose purge failed waits for its retry time, so it never blocks the
+		// connections revoked after it.
+		query = query.Where("revoked_at <= ? AND (purge_retry_at IS NULL OR purge_retry_at <= ?)", step.RevokedBefore, step.Now).
+			Order("revoked_at, id")
 	}
-	var po ExternalMailConnectionPO
-	err := query.Limit(1).Take(&po).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
+	// Find, not Take: no due connection is the usual case and must not be logged as an error.
+	var rows []ExternalMailConnectionPO
+	if err := query.Limit(1).Find(&rows).Error; err != nil || len(rows) == 0 {
 		return nil, err
 	}
-	// Only the connection's own mailbox is ever touched: its id is unique to the connection.
+	purge := &domain.ExternalMailPurge{Connection: rows[0].toDomain()}
+	mailboxID := purge.Connection.MailboxID
+	// The mailbox id is set by binding and unique to the connection; the kind is checked as well,
+	// so a corrupt row can never point a purge at mail Zmail itself received or sent.
+	var foreign []uint
+	if err := tx.Raw(`SELECT b.id FROM mailboxes b WHERE b.id = ? AND NOT (`+connectedMailboxKind+`)`, mailboxID).
+		Scan(&foreign).Error; err != nil {
+		return purge, err
+	}
+	if len(foreign) > 0 {
+		return purge, ErrExternalMailPurgeRefused
+	}
 	var found []uint
-	if lockErr := tx.Raw(`SELECT id FROM mail_messages WHERE mailbox_id = ? ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED`,
-		po.MailboxID, max(step.Messages, 1)).Scan(&found).Error; lockErr != nil {
-		return nil, lockErr
+	if err := tx.Raw(`SELECT m.id FROM mail_messages m JOIN mailboxes b ON b.id = m.mailbox_id AND `+connectedMailboxKind+`
+		WHERE m.mailbox_id = ? ORDER BY m.id LIMIT ? FOR UPDATE OF m SKIP LOCKED`,
+		mailboxID, max(step.Messages, 1)).Scan(&found).Error; err != nil {
+		return purge, err
 	}
 	deleted, err := deleteMessages(tx, found)
 	if err != nil {
-		return nil, err
+		return purge, err
 	}
 	var left []uint
-	if err := tx.Raw(`SELECT id FROM mail_messages WHERE mailbox_id = ? LIMIT 1`, po.MailboxID).Scan(&left).Error; err != nil {
-		return nil, err
+	if err := tx.Raw(`SELECT id FROM mail_messages WHERE mailbox_id = ? LIMIT 1`, mailboxID).Scan(&left).Error; err != nil {
+		return purge, err
 	}
-	return &domain.ExternalMailPurge{Connection: po.toDomain(), DeletedMessages: deleted, Completed: len(left) == 0}, nil
+	purge.DeletedMessages, purge.Completed = deleted, len(left) == 0
+	return purge, nil
+}
+
+func (r *repository) DeferExternalMailPurge(ctx context.Context, id uint, retryAt time.Time) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Model(&ExternalMailConnectionPO{}).
+		Where("id = ? AND status = ?", id, string(domain.ExternalMailStatusRevoked)).
+		Update("purge_retry_at", retryAt).Error
+}
+
+func (r *repository) RenewExternalMailLease(ctx context.Context, id uint, heldUntil, until time.Time) (bool, error) {
+	if r.db == nil {
+		return false, domain.ErrServiceUnavailable
+	}
+	result := r.conn(ctx).Model(&ExternalMailConnectionPO{}).
+		Where("id = ? AND status = ? AND next_sync_at = ?", id, string(domain.ExternalMailStatusActive), heldUntil).
+		Update("next_sync_at", until)
+	return result.RowsAffected == 1, result.Error
 }
 
 func (r *repository) DeleteExternalMailConnection(ctx context.Context, id uint) error {

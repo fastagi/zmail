@@ -104,6 +104,7 @@ TABLE external_mail_connections
   COLUMN consecutive_failures smallint NOT NULL DEFAULT 0
   COLUMN consecutive_more smallint NOT NULL DEFAULT 0
   COLUMN revoked_at timestamp with time zone
+  COLUMN purge_retry_at timestamp with time zone
 
 TABLE external_mail_sync_runs
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_sync_runs_id_seq'::regclass)

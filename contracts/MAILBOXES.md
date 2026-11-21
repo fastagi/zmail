@@ -841,17 +841,6 @@ awaits a handover, the handover routes refuse it, and the copies stay readable b
 Binding the account again after rejoining restores the same mailbox without copies. Another member's
 connection and another organization's id are `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
 
-### Gmail
-
-The `gmail` connector signs in on Google's consent page with the read-only Gmail scope and offline
-access. The first sync copies the backfill window newest first, a page at a time, and then follows
-the account's history from where the backfill began, so mail that arrives during the backfill is
-not missed. Only inbound mail is copied: drafts, spam, trash, and sent mail that is not also in the
-inbox are skipped; mail moved out of spam into the inbox is copied then. When Google no longer
-replays the history, the sync starts the backfill over without copies. Only a grant Google refuses
-or one that lost access to the mailbox moves the connection to `needs_reconnect`; rate limits,
-quotas, outages, and a misconfigured OAuth client are retried at the next interval.
-
 ### Outlook
 
 The `outlook` connector runs when `EXTERNAL_MAIL_PROVIDERS` lists it and its OAuth client is set
@@ -867,6 +856,17 @@ body Graph cannot return within the connector's bound is kept with its headers o
 the stored grant; Microsoft has no per-grant revocation, so the member removes the app's consent in
 their Microsoft account to end it there as well.
 
+### Gmail
+
+The `gmail` connector signs in on Google's consent page with the read-only Gmail scope and offline
+access. The first sync copies the backfill window newest first, a page at a time, and then follows
+the account's history from where the backfill began, so mail that arrives during the backfill is
+not missed. Only inbound mail is copied: drafts, spam, trash, and sent mail that is not also in the
+inbox are skipped; mail moved out of spam into the inbox is copied then. When Google no longer
+replays the history, the sync starts the backfill over without copies. Only a grant Google refuses
+or one that lost access to the mailbox moves the connection to `needs_reconnect`; rate limits,
+quotas, outages, and a misconfigured OAuth client are retried at the next interval.
+
 ### Sync Budget
 
 Each pass of the `mail:external:sync` worker takes due connections round-robin across providers:
@@ -878,7 +878,7 @@ off, and the pass moves on to the next connection. A connection whose provider h
 ready is fetched again at once, for at most `EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES` (20 by default)
 pages in a row; after that each further page waits `EXTERNAL_MAIL_MIN_FETCH_SPACING` (5 seconds by
 default), so one backfill cannot monopolize the worker. A connection whose cursor the provider no
-longer honors starts over after the same spacing.
+longer honors starts over from an empty cursor at once; the restart counts toward the same bound.
 
 ### Sync Runs
 
@@ -914,8 +914,11 @@ connection already fetched the most pages in a row allowed at once.
 
 Revoking a connection, by its member, an `owner` or `admin`, or because the member left the
 organization, starts a retention of `EXTERNAL_MAIL_REVOKED_RETENTION` (720 hours, 30 days, by
-default). Binding the same account again before it ends keeps the mailbox and its copies and cancels
-the deletion. When it ends, the worker deletes the copies for good in bounded batches, then deletes
+default; at least 24 hours, written as a duration such as `720h` or a day count such as `90d`; a
+value that does not parse stops startup). Binding the same account again before it ends keeps the
+mailbox and its copies and cancels the deletion. When it ends, the mail worker (`mail:broadcast:work`
+ticks, which run whenever the mailbox starter is on, with or without `EXTERNAL_MAIL_PROVIDERS`)
+deletes the copies for good in bounded batches, then deletes
 the connected mailbox and the connection with its sync runs, and stores a `copies_purged` access
 event on the deleted mailbox with `{ "connection_id", "provider", "reason": "retention" }`, the
 member who bound the account as its subject. The event is an audit record: the access history route
@@ -930,34 +933,13 @@ revoked connection at once, the same way, with `reason` `owner` and the caller a
 | Every copy, the mailbox, and the connection are deleted | `200` `{ "deleted_messages": 120, "completed": true }` |
 | More copies than one request deletes | `202` `{ "deleted_messages": 5000, "completed": false }`: the rest is due at once and the worker deletes it in its next passes |
 | The connection is not revoked | `409 MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` |
-| Another member's connection, an `owner` or `admin` included, or external mail is off | `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` |
+| Another member's connection, an `owner` or `admin` included | `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` |
 
-A purge only ever touches the connection's own mailbox.
-
-### Connection Directory
-
-Owners and admins learn that members connected outside accounts, and can disconnect them, without
-ever seeing the account's mail or full address. Members get `403 PERMISSION.DENIED` on both routes.
-
-`GET /v1/external-mail-connection-directory` returns keyset pages of every connection of the
-organization in any status, newest first (`cursor`, `per_page` 1 to 100, default 15; `page` is
-`400 COMMON.INVALID_INPUT`). It is empty while external mail is off, and never cached:
-
-```json
-{ "id": 3, "provider": "gmail", "status": "active", "masked_account_address": "st***@gmail.com",
-  "owner_user_id": 5, "owner_display_name": "stark", "last_synced_at": "2026-11-20T08:00:00Z",
-  "created_at": "2026-11-19T08:00:00Z" }
-```
-
-The mask keeps the first two characters of the local part (one when it is that short) and the
-domain. `owner_display_name` is the owner's nickname, or username without one, while they are a
-member, otherwise `null`. No token, mailbox id, message, or count is ever returned.
-
-`DELETE /v1/external-mail-connection-directory/:connection_id` force-disconnects any connection of
-the organization with the effect of the owner's unbind and writes `connection_force_disconnected`
-to the connected mailbox's history. A revoked connection answers `204` again and writes nothing;
-another organization's id, and any id while external mail is off, is
-`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+The route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never
+strands copies. A purge only ever touches the connection's own mailbox, and only when that mailbox
+holds synced copies; a purge that fails is logged and retried an hour later without holding up the
+connections revoked after it. A claimed connection whose mailbox is gone is not fetched: its grant
+is handed back, it is revoked, and its run is recorded as `dropped`.
 
 ## Domains
 

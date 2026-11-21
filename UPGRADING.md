@@ -54,7 +54,10 @@ Budget, Sync Runs, Retention Of Revoked Copies). Migration `2026_12_06_090000_ad
 
 Revoking a connection (by its member, a manager, or a member leaving) now sets `revoked_at`, and the
 `mail:external:sync` worker deletes the copies, the external mailbox, and the connection once
-`EXTERNAL_MAIL_REVOKED_RETENTION` (default `720h`) has passed. Connections revoked before the upgrade
+`EXTERNAL_MAIL_REVOKED_RETENTION` (default `720h`, at least `24h`, `90d` accepted; a value that does not
+parse stops startup) has passed. The deletion runs in the mail worker (`mail:broadcast:work`),
+whether or not `EXTERNAL_MAIL_PROVIDERS` is set; `MailBroadcastDispatcher` gains
+`PurgeRevokedExternalMail`. Connections revoked before the upgrade
 start their retention at the migration, so their copies are deleted one retention after the upgrade;
 raise the retention to keep them longer. Binding the
 account again before the deadline cancels the deletion. `POST

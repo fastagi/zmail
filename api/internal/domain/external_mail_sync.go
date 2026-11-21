@@ -70,6 +70,8 @@ type ExternalMailPurgeStep struct {
 	// ConnectionID names one.
 	RevokedBefore time.Time
 	ConnectionID  uint
+	// Now holds back connections whose purge failed until their retry time.
+	Now time.Time
 	// Messages bounds the copies deleted in this step.
 	Messages int
 }
@@ -91,13 +93,20 @@ type ExternalMailOpsRepository interface {
 	PruneExternalMailSyncRuns(ctx context.Context, before time.Time, limit int) (int, error)
 	// PurgeRevokedExternalMail locks one revoked connection whose copies are due, skipping one
 	// another worker holds, and deletes a batch of its copies. It returns nil when none is due.
-	// Call it inside a transaction: the lock holds until it ends.
+	// On an error after the connection was found, the purge still names it. Call it inside a
+	// transaction: the lock holds until it ends.
 	PurgeRevokedExternalMail(ctx context.Context, step ExternalMailPurgeStep) (*ExternalMailPurge, error)
 	// DeleteExternalMailConnection deletes a connection with its runs and pending sign-ins.
 	DeleteExternalMailConnection(ctx context.Context, id uint) error
 	// ExpediteExternalMailPurge makes a revoked connection's copies due at the time. It answers
 	// false when the connection is not revoked.
 	ExpediteExternalMailPurge(ctx context.Context, id uint, revokedAt time.Time) (bool, error)
+	// DeferExternalMailPurge holds back a revoked connection whose purge failed until retryAt.
+	DeferExternalMailPurge(ctx context.Context, id uint, retryAt time.Time) error
+	// RenewExternalMailLease moves a claimed connection's lease from heldUntil to until. It
+	// answers false when the connection is no longer held with that lease: another worker took
+	// it, or it stopped being active.
+	RenewExternalMailLease(ctx context.Context, id uint, heldUntil, until time.Time) (bool, error)
 }
 
 // MailboxAccessCopiesPurged records that the copies of a revoked connection were deleted, at the

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -70,7 +71,7 @@ const (
 	// DefaultExternalMailRevokedRetention is how long copies of a revoked connection stay before
 	// the worker deletes them: 30 days.
 	DefaultExternalMailRevokedRetention = 720 * time.Hour
-	MinExternalMailRevokedRetention     = time.Hour
+	MinExternalMailRevokedRetention     = 24 * time.Hour
 	MaxExternalMailRevokedRetention     = 8760 * time.Hour
 	// DefaultExternalMailFetchTimeout bounds one fetch, so a slow or hostile provider cannot stall
 	// the sequential pass.
@@ -95,6 +96,65 @@ type ExternalMailSyncConfig struct {
 	FetchTimeout time.Duration
 	// MaxImmediatePages is how many pages in a row are fetched again at once.
 	MaxImmediatePages int
+	// invalid names the keys that were set to a value that does not parse; startup refuses them,
+	// so a typo never silently falls back to a default (for the retention, an earlier deletion).
+	invalid []string
+}
+
+// ExternalMailSyncSettings are the raw values of the sync budget keys; empty means unset.
+type ExternalMailSyncSettings struct {
+	ProviderFetchesPerPass string
+	MinFetchSpacing        string
+	RevokedRetention       string
+	FetchTimeout           string
+	MaxImmediatePages      string
+}
+
+// parseExternalMailSyncConfig parses the sync budget. An unset key takes its default; a key set to
+// a value that does not parse is recorded and refused by validation.
+func parseExternalMailSyncConfig(raw ExternalMailSyncSettings) ExternalMailSyncConfig {
+	var c ExternalMailSyncConfig
+	integer := func(key, value string, into *int) {
+		if value = strings.TrimSpace(value); value == "" {
+			return
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 {
+			c.invalid = append(c.invalid, key)
+			return
+		}
+		*into = parsed
+	}
+	duration := func(key, value string, into *time.Duration) {
+		if value = strings.TrimSpace(value); value == "" {
+			return
+		}
+		parsed, err := parseExternalMailDuration(value)
+		if err != nil || parsed <= 0 {
+			c.invalid = append(c.invalid, key)
+			return
+		}
+		*into = parsed
+	}
+	integer("EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS", raw.ProviderFetchesPerPass, &c.ProviderFetchesPerPass)
+	duration("EXTERNAL_MAIL_MIN_FETCH_SPACING", raw.MinFetchSpacing, &c.MinFetchSpacing)
+	duration("EXTERNAL_MAIL_REVOKED_RETENTION", raw.RevokedRetention, &c.RevokedRetention)
+	duration("EXTERNAL_MAIL_FETCH_TIMEOUT", raw.FetchTimeout, &c.FetchTimeout)
+	integer("EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES", raw.MaxImmediatePages, &c.MaxImmediatePages)
+	return c
+}
+
+// parseExternalMailDuration accepts a Go duration ("720h", "90s") or a whole number of days
+// ("30d").
+func parseExternalMailDuration(value string) (time.Duration, error) {
+	if days, found := strings.CutSuffix(value, "d"); found {
+		count, err := strconv.Atoi(days)
+		if err != nil || count <= 0 || count > 3660 {
+			return 0, fmt.Errorf("invalid day count %q", value)
+		}
+		return time.Duration(count) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(value)
 }
 
 // Timeout returns the fetch deadline, or its default.
@@ -139,6 +199,9 @@ func (c ExternalMailSyncConfig) Retention() time.Duration {
 
 // validateExternalMailSyncConfig refuses a budget outside its bounds; zero takes the default.
 func validateExternalMailSyncConfig(c ExternalMailSyncConfig) error {
+	if len(c.invalid) > 0 {
+		return fmt.Errorf("%s must be a positive number, or a duration such as 90s, 720h, or 30d", strings.Join(c.invalid, ", "))
+	}
 	if c.ProviderFetchesPerPass < 0 || c.ProviderFetchesPerPass > MaxExternalMailProviderFetchesPerPass {
 		return fmt.Errorf("EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS must be between 1 and %d", MaxExternalMailProviderFetchesPerPass)
 	}
@@ -146,6 +209,8 @@ func validateExternalMailSyncConfig(c ExternalMailSyncConfig) error {
 		return fmt.Errorf("EXTERNAL_MAIL_MIN_FETCH_SPACING must be between 1s and %s", MaxExternalMailMinFetchSpacing)
 	}
 	if c.FetchTimeout != 0 && (c.FetchTimeout < time.Second || c.FetchTimeout > MaxExternalMailFetchTimeout) {
+		// The worker renews a connection's lease to the deadline before each fetch, so no other
+		// worker can claim it while the fetch may still run.
 		return fmt.Errorf("EXTERNAL_MAIL_FETCH_TIMEOUT must be between 1s and %s", MaxExternalMailFetchTimeout)
 	}
 	if c.MaxImmediatePages < 0 || c.MaxImmediatePages > MaxExternalMailMaxImmediatePages {
