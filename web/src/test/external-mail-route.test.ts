@@ -104,7 +104,7 @@ describe('external mail browser routes', () => {
     const external = (await mailboxes.json()).data.find(
       (item: { id: number }) => item.id === connection.mailbox_id
     );
-    expect(external).toMatchObject({ type: 'external', owner_user_id: 3 });
+    expect(external).toMatchObject({ type: 'personal', origin: 'connected', owner_user_id: 3 });
     expect(external.access).toMatchObject({ view: true, send: false, organize: false });
 
     // Reconnecting a connection that needs it restores the same one (200).

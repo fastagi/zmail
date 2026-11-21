@@ -105,7 +105,7 @@ func TestInboxAccessRowsListMemberRowsWithoutCounts(t *testing.T) {
 		{"D, member of nothing", f.d, map[uint]domain.MailboxPermission{}},
 	}
 	for _, tc := range cases {
-		rows, err := repo.ListMailboxAccessRows(ctx, accessOrg, tc.viewer.MembershipID)
+		rows, err := repo.ListMailboxAccessRows(ctx, accessOrg, tc.viewer.MembershipID, tc.viewer.UserID)
 		if err != nil {
 			t.Fatalf("%s: ListMailboxAccessRows: %v", tc.name, err)
 		}
@@ -143,7 +143,7 @@ func TestInboxAccessRowsCarryRoleID(t *testing.T) {
 		t.Fatalf("AssignMailboxRole: %v", err)
 	}
 
-	rows, err := repo.ListMailboxAccessRows(ctx, accessOrg, f.c.MembershipID)
+	rows, err := repo.ListMailboxAccessRows(ctx, accessOrg, f.c.MembershipID, f.c.UserID)
 	if err != nil {
 		t.Fatalf("ListMailboxAccessRows: %v", err)
 	}
@@ -646,7 +646,7 @@ func TestInboxCountUnreadMatchesListMailboxes(t *testing.T) {
 	f.seal(t, f.team, inboxBase)
 
 	for _, viewer := range []domain.OrganizationContext{f.b, f.c} {
-		listed, err := repo.ListMailboxes(ctx, accessOrg, viewer.MembershipID)
+		listed, err := repo.ListMailboxes(ctx, accessOrg, viewer.MembershipID, viewer.UserID)
 		if err != nil {
 			t.Fatalf("ListMailboxes: %v", err)
 		}

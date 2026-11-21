@@ -107,8 +107,7 @@ func (r *repository) PruneExternalMailSyncRuns(ctx context.Context, before time.
 
 // connectedMailboxKind is the SQL condition, on a mailboxes row aliased b, that marks a mailbox
 // holding synced copies of an outside account. A purge only ever deletes mail of such a mailbox.
-// The origin-model change replaces it with "b.origin = 'connected'".
-const connectedMailboxKind = "b.type = 'external'"
+const connectedMailboxKind = "b.origin = 'connected'"
 
 // ErrExternalMailPurgeRefused means a revoked connection points at a mailbox that does not hold
 // synced copies; nothing is deleted.

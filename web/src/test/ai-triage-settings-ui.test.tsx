@@ -259,6 +259,22 @@ describe('mailbox AI triage switch', () => {
         mailbox({ type: 'personal', owner_user_id: null, awaiting_handover: true, access: owner })
       )
     ).toBe(false);
+    // A connected personal mailbox never grants organize; only its owner sees it, with view.
+    expect(
+      mayToggleMailboxTriage(
+        mailbox({
+          type: 'personal',
+          origin: 'connected',
+          owner_user_id: 3,
+          access: { ...noAccess, view: true, see_history: true },
+        })
+      )
+    ).toBe(true);
+    expect(
+      mayToggleMailboxTriage(
+        mailbox({ type: 'personal', origin: 'connected', owner_user_id: 3, access: noAccess })
+      )
+    ).toBe(false);
     expect(mayToggleMailboxTriage(mailbox())).toBe(true);
     expect(
       mayToggleMailboxTriage(mailbox({ access: { ...noAccess, view: true, send: true } }))

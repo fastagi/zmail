@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -31,6 +30,10 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 	}
 	if mailbox.Type != domain.MailboxTypePersonal {
 		return nil, fmt.Errorf("%w: only a personal mailbox is handed over", ErrMailboxAccessConflict)
+	}
+	if mailbox.Connected() {
+		// The outside account is the member's own; it is disconnected, never handed over.
+		return nil, fmt.Errorf("%w: a connected mailbox is never handed over", ErrMailboxAccessConflict)
 	}
 	successor, err := s.currentMembership(ctx, viewer.OrganizationID, successorUserID)
 	if err != nil {
@@ -190,16 +193,9 @@ func (s *service) revokeConnectionsOfLeaver(ctx context.Context, organizationID,
 		return err
 	}
 	for _, connection := range connections {
-		if connection.Status == domain.ExternalMailStatusRevoked {
-			continue
-		}
-		s.handBackExternalGrant(ctx, connection)
-		if err := s.externalMail.RevokeExternalMailConnection(ctx, organizationID, connection.ID, s.now().UTC()); err != nil {
+		if err := s.revokeConnection(ctx, connection, 0, domain.MailboxAccessConnectionRevokedLeave); err != nil {
 			return err
 		}
-		slog.InfoContext(ctx, "external_mail.revoked",
-			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
-			slog.String("reason", reasonLeftOrganization))
 	}
 	return nil
 }

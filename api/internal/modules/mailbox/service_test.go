@@ -102,7 +102,7 @@ func (f *fakeMemberships) ListMembershipsByUserIDs(ctx context.Context, organiza
 		if err != nil {
 			continue
 		}
-		membership.User = &domain.User{ID: userID, Email: fmt.Sprintf("u%d@people.test", userID)}
+		membership.User = &domain.User{ID: userID, Username: fmt.Sprintf("user%d", userID), Email: fmt.Sprintf("u%d@people.test", userID)}
 		found = append(found, membership)
 	}
 	return found, nil
@@ -281,7 +281,7 @@ func (r *fakeRepository) CreateMailbox(_ context.Context, mailbox *domain.Mailbo
 	return nil
 }
 
-func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID, readerMembershipID uint) ([]*domain.Mailbox, error) {
+func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID, readerMembershipID, _ uint) ([]*domain.Mailbox, error) {
 	var owned []*domain.Mailbox
 	for _, mailbox := range r.mailboxes {
 		if mailbox.OrganizationID == organizationID {
@@ -302,7 +302,7 @@ func (r *fakeRepository) ListMailboxes(_ context.Context, organizationID, reader
 }
 
 func (r *fakeRepository) ListUsableMailboxes(ctx context.Context, organizationID, membershipID, userID uint, includeAwaitingHandover bool) ([]*domain.Mailbox, error) {
-	all, err := r.ListMailboxes(ctx, organizationID, membershipID)
+	all, err := r.ListMailboxes(ctx, organizationID, membershipID, 0)
 	if err != nil {
 		return nil, err
 	}

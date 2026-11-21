@@ -44,7 +44,7 @@ func newInboxRecorder() *inboxRecorder {
 	return &inboxRecorder{fakeRepository: newFakeRepository()}
 }
 
-func (r *inboxRecorder) ListMailboxAccessRows(_ context.Context, organizationID, membershipID uint) ([]domain.MailboxAccessRow, error) {
+func (r *inboxRecorder) ListMailboxAccessRows(_ context.Context, organizationID, membershipID, _ uint) ([]domain.MailboxAccessRow, error) {
 	rows := []domain.MailboxAccessRow{}
 	for _, mailbox := range r.mailboxes {
 		if mailbox.OrganizationID != organizationID {

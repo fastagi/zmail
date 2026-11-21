@@ -138,6 +138,9 @@ type MailTriageRepository interface {
 	SaveTriageSettings(ctx context.Context, settings MailTriageSettings, now time.Time) (MailTriageSettings, error)
 	// SetMailboxTriage changes a mailbox's switch.
 	SetMailboxTriage(ctx context.Context, mailboxID uint, enabled bool) error
+	// StopMailboxTriage turns a mailbox's switch off and deletes its pending rows, so nothing of it
+	// reaches the model any more; decided rows stay.
+	StopMailboxTriage(ctx context.Context, mailboxID uint) error
 	// EnqueueTriage adds a pending row for an inbound message when its organization's and its
 	// mailbox's switches are on, in the caller's transaction. It reports whether it added one.
 	EnqueueTriage(ctx context.Context, messageID, mailboxID uint, now time.Time) (bool, error)

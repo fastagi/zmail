@@ -13,6 +13,7 @@ import (
 func TestOpenMailConnectorsUpDown(t *testing.T) {
 	db, exec := externalMailFixture(t)
 	migrated := dumpSchema(t, db)
+	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
 		VALUES (2, 10, 901, 'owner@gmail.example', 'external', 901, now(), now())`)
 	exec(`INSERT INTO external_mail_connections (id, organization_id, mailbox_id, provider, account_address, owner_user_id, next_sync_at, created_at, updated_at)
@@ -22,6 +23,7 @@ func TestOpenMailConnectorsUpDown(t *testing.T) {
 	rolledBack := dumpSchema(t, db)
 	assert.NotContains(t, rolledBack, "TABLE external_mail_authorizations")
 	require.NoError(t, (&openMailConnectors{}).Up(db))
+	require.NoError(t, (&addMailboxOrigin{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 
@@ -29,6 +31,7 @@ func TestOpenMailConnectorsUpDown(t *testing.T) {
 // ids are still refused.
 func TestOpenMailConnectorsAcceptsAnyConnectorID(t *testing.T) {
 	db, exec := externalMailFixture(t)
+	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
 		VALUES (2, 10, 901, 'owner@icloud.example', 'external', 901, now(), now())`)
 	exec(`INSERT INTO external_mail_connections (id, organization_id, mailbox_id, provider, account_address, owner_user_id, next_sync_at, created_at, updated_at)
@@ -53,6 +56,7 @@ func TestOpenMailConnectorsAcceptsAnyConnectorID(t *testing.T) {
 // another external mailbox or a Zmail mailbox, while Zmail addresses stay unique.
 func TestOpenMailConnectorsSeparatesExternalAddresses(t *testing.T) {
 	db, exec := externalMailFixture(t)
+	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	exec(`INSERT INTO users (id, username, email, password, created_at, updated_at) VALUES (902, 'colleague', 'colleague@example.com', 'x', now(), now())`)
 	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
 		VALUES (2, 10, 901, 'team@mail.example', 'external', 901, now(), now())`)
@@ -66,6 +70,7 @@ func TestOpenMailConnectorsSeparatesExternalAddresses(t *testing.T) {
 // is used once, and deleting the connection or the member deletes the sign-in.
 func TestOpenMailConnectorsAuthorizations(t *testing.T) {
 	db, exec := externalMailFixture(t)
+	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
 		VALUES (2, 10, 901, 'owner@gmail.example', 'external', 901, now(), now())`)
 	exec(`INSERT INTO external_mail_connections (id, organization_id, mailbox_id, provider, account_address, owner_user_id, next_sync_at, created_at, updated_at)
