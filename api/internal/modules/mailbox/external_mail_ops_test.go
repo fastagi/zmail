@@ -570,3 +570,30 @@ func TestExternalMailImmediateRefetchesAreBounded(t *testing.T) {
 		t.Fatalf("pages in a row after a last page = %d, want 0", connection.ConsecutiveMore)
 	}
 }
+
+// expiringSource answers every fetch with an expired cursor.
+type expiringSource struct{ *FakeExternalMailSource }
+
+func (expiringSource) Fetch(context.Context, ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	return ExternalMailFetch{}, ErrExternalMailCursorExpired
+}
+
+// TestExternalMailCursorExpiryRestartsAtOnceWithinTheBound: an expired cursor restarts in the next
+// pass, and a source that keeps expiring it is throttled like an endless backfill.
+func TestExternalMailCursorExpiryRestartsAtOnceWithinTheBound(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.service.settings.ExternalMail.Sync.MaxImmediatePages = 2
+	f.service.externalConnectors = fakeExternalMailRegistry(expiringSource{f.source})
+	for pass := range 2 {
+		if handled := f.sync(t); handled != 1 {
+			t.Fatalf("pass %d handled %d connections, want an immediate restart", pass, handled)
+		}
+	}
+	if handled := f.sync(t); handled != 0 {
+		t.Fatal("a cursor that keeps expiring was restarted at once past the bound")
+	}
+	runs := f.runs(t)
+	if len(runs) != 2 || runs[0].Outcome != domain.ExternalMailSyncCursorExpired || !runs[0].Throttled || runs[1].Throttled {
+		t.Fatalf("runs = %+v, want two cursor_expired runs, the newest throttled", runs)
+	}
+}

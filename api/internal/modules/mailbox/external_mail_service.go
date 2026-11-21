@@ -130,9 +130,15 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 			}
 		}
 	case errors.Is(err, ErrExternalMailCursorExpired):
-		// Start over from an empty cursor after the spacing; copies already stored are not repeated.
+		// Start over from an empty cursor at once; copies already stored are not repeated. The
+		// restart counts toward the pages fetched in a row, so a source that keeps expiring its
+		// cursor is spaced like an endless backfill.
 		outcome = domain.ExternalMailSyncCursorExpired
-		result.Cursor, result.NextSyncAt, result.ConsecutiveFailures = "", now.Add(spacing), 0
+		result.Cursor, result.NextSyncAt, result.ConsecutiveFailures = "", now, 0
+		result.ConsecutiveMore = min(connection.ConsecutiveMore+1, maxConsecutiveFailures)
+		if result.ConsecutiveMore >= budget.ImmediatePages() {
+			result.NextSyncAt, throttled = now.Add(spacing), true
+		}
 		slog.InfoContext(ctx, "external_mail.cursor_expired",
 			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
 	case errors.Is(err, ErrExternalMailAuth):

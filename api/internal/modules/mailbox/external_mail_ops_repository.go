@@ -2,7 +2,6 @@ package mailbox
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -117,14 +116,12 @@ func (r *repository) PurgeRevokedExternalMail(ctx context.Context, step domain.E
 	} else {
 		query = query.Where("revoked_at <= ?", step.RevokedBefore).Order("revoked_at, id")
 	}
-	var po ExternalMailConnectionPO
-	err := query.Limit(1).Take(&po).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
+	// Find, not Take: no due connection is the usual case and must not be logged as an error.
+	var rows []ExternalMailConnectionPO
+	if err := query.Limit(1).Find(&rows).Error; err != nil || len(rows) == 0 {
 		return nil, err
 	}
+	po := rows[0]
 	// Only the connection's own mailbox is ever touched: its id is unique to the connection.
 	var found []uint
 	if lockErr := tx.Raw(`SELECT id FROM mail_messages WHERE mailbox_id = ? ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED`,

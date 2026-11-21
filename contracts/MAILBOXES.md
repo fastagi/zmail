@@ -793,7 +793,7 @@ off, and the pass moves on to the next connection. A connection whose provider h
 ready is fetched again at once, for at most `EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES` (20 by default)
 pages in a row; after that each further page waits `EXTERNAL_MAIL_MIN_FETCH_SPACING` (5 seconds by
 default), so one backfill cannot monopolize the worker. A connection whose cursor the provider no
-longer honors starts over after the same spacing.
+longer honors starts over from an empty cursor at once; the restart counts toward the same bound.
 
 ### Sync Runs
 
