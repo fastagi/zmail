@@ -4351,7 +4351,7 @@ export interface components {
             /** Format: date-time */
             started_at: string | null;
             status: components["schemas"]["MailBroadcastStatus"];
-            /** @description Why the broadcast is held. `send_limit_reached` while the organization's 24-hour send limit holds a sending broadcast; for a paused one `test_wave_complete` (waiting until `resume_at`), `bounce_rate_high` or `complaint_rate_high` (the health check stopped it), or `paused_by_owner`. Empty otherwise. */
+            /** @description Why the broadcast is held. `send_limit_reached` while the organization's 24-hour send limit holds a sending broadcast; for a paused one `test_wave_complete` (waiting until `resume_at`), `bounce_rate_high` or `complaint_rate_high` (the health check stopped it), or `paused_by_owner`; for a `canceled` one, `all_recipients_failed` when it ended with failed recipients and none sent. Empty otherwise. */
             stop_reason: string;
             template_id: components["schemas"]["PositiveID"];
             test_percent: number;
@@ -8839,7 +8839,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A field failed validation, `scheduled_at` is more than a year ahead (`MAILBOX.BROADCAST_INVALID`), the list has no subscribed contact (`MAILBOX.BROADCAST_NO_RECIPIENTS`), or the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`). */
+            /** @description A field failed validation, `scheduled_at` is more than a year ahead (`MAILBOX.BROADCAST_INVALID`), the list has no subscribed contact (`MAILBOX.BROADCAST_NO_RECIPIENTS`), the template is transactional (`MAILBOX.TEMPLATE_KIND_MISMATCH`), or a template variable without a fallback is one no recipient could fill (`MAILBOX.TEMPLATE_VARIABLES_MISSING`, one field error per variable named `variables.<name>`). */
             422: {
                 headers: {
                     [name: string]: unknown;
