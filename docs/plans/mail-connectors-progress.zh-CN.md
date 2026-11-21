@@ -96,3 +96,14 @@
 - 来源维度：会话已推送 `integ/origin-model`，独立审查进行中。
 
 合并顺序：#67 → #69 → #72（同步运维）→ #70（来源维度）→ #71（Agent）→ #73（Web）。
+
+## 2026-11-21 改用本地检查；适配器与同步运维已合并
+
+- 负责人指示：以本地检查为准，不使用远程 CI。合并条件改为"本地 `make check` 通过"，规则写入循环说明的 Local Gate 一节。
+- 本机默认的 Node 25 在 22:26 损坏：有会话执行了 `brew install node@24`，连带升级了共享库。改用 Node 24（项目正式支持的版本）跑检查。此后禁止在本项目执行 `brew install` 或 `brew upgrade`。修复默认 Node 需要负责人决定。
+- 在集成分支（`main` + Outlook + IMAP + 同步运维）上跑完整 `make check`，全部通过：治理、契约、Go 构建、代码检查、Go 测试、路由目录、Web 与 Admin 的类型检查、lint、测试和构建。
+- 已合并到 `main`：fastagi/zmail#67（Outlook）、fastagi/zmail#69（IMAP）、fastagi/zmail#72（同步运维）。合并后 `main` 的内容与通过检查的集成分支完全一致。
+
+至此 `main` 上已有：连接器底座、适配器接口、Gmail、Outlook、IMAP 三个适配器、同步运维。全部默认关闭，需在配置中启用。
+
+剩余顺序：#70（来源维度，8 处审查问题修复中）→ #71（Agent 授权）→ #73（Web 接入）→ 第二波。
