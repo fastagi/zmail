@@ -81,9 +81,10 @@ type Settings struct {
 
 // InboundDelivery is one signed delivery from the mail edge.
 type InboundDelivery struct {
-	Recipient string
-	Signature string
-	Raw       []byte
+	ConnectionID string
+	Recipient    string
+	Signature    string
+	Raw          []byte
 }
 
 // DeliveryEvent is one signed provider event forwarded by the mail edge.
@@ -114,6 +115,7 @@ type SendInput struct {
 
 // Service defines the business interface of the mailbox starter.
 type Service interface {
+	CloudflareConnectionService
 	Domain() string
 	// CreateMailbox creates a personal or shared mailbox on the input's domain, the shared domain
 	// when it is empty. Only owners and admins may.
@@ -909,7 +911,7 @@ func (s *service) deliver(
 	headers map[string]string,
 ) (*domain.MailMessage, bool, error) {
 	metrics.RecordSendLaneAttempt(string(message.SendLane))
-	outcome, sendErr := s.transport.Send(ctx, mailtransport.Message{
+	outcome, sendErr := s.sendWithConnection(ctx, mailbox.OrganizationID, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,
 		To:          message.To,
@@ -1196,7 +1198,20 @@ func replyReferences(parent *domain.MailMessage) []string {
 // ReceiveInbound verifies and stores one delivery from the mail edge. A repeated delivery of
 // the same message to the same mailbox returns the stored message with created=false.
 func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) (*domain.MailMessage, bool, error) {
-	if s.settings.InboundSecret == "" {
+	secret := s.settings.InboundSecret
+	var conn *CloudflareConnection
+	if delivery.ConnectionID != "" {
+		var err error
+		conn, err = s.connection(ctx, 0, delivery.ConnectionID)
+		if err != nil || conn == nil {
+			return nil, false, ErrMailInboundSignature
+		}
+		secret, err = s.encryptor.DecryptString(conn.SigningCipher)
+		if err != nil {
+			return nil, false, ErrMailInboundSignature
+		}
+	}
+	if secret == "" {
 		return nil, false, ErrMailInboundDisabled
 	}
 	if len(delivery.Raw) == 0 {
@@ -1207,7 +1222,7 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 	}
 	recipient := strings.ToLower(strings.TrimSpace(delivery.Recipient))
 	// Verify before any lookup, so an unsigned caller cannot probe which addresses exist.
-	if !verifyInbound(s.settings.InboundSecret, delivery.Signature, recipient, delivery.Raw, s.now(), s.settings.InboundTolerance) {
+	if !verifyInbound(secret, delivery.Signature, recipient, delivery.Raw, s.now(), s.settings.InboundTolerance) {
 		return nil, false, ErrMailInboundSignature
 	}
 
@@ -1217,6 +1232,21 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 			return nil, false, ErrMailRecipientNotFound
 		}
 		return nil, false, err
+	}
+	if s.domains != nil {
+		_, name, _ := strings.Cut(recipient, "@")
+		d, lookupErr := s.domains.FindDomainByName(ctx, name)
+		if lookupErr != nil && !errors.Is(lookupErr, ErrMailDomainNotFound) {
+			return nil, false, lookupErr
+		}
+		if conn != nil && (d == nil || d.CloudflareConnectionID == nil || *d.CloudflareConnectionID != conn.ID || !receives(d) || mailbox.OrganizationID != conn.OrganizationID || d.OrganizationID != conn.OrganizationID) {
+			return nil, false, ErrMailInboundSignature
+		}
+		if conn == nil && d != nil && d.CloudflareConnectionID != nil {
+			return nil, false, ErrMailInboundSignature
+		}
+	} else if conn != nil {
+		return nil, false, ErrMailInboundSignature
 	}
 	parsed, err := parseMail(delivery.Raw)
 	if err != nil {

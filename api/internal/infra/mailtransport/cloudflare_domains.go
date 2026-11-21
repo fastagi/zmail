@@ -254,6 +254,40 @@ func truncate(value string, limit int) string {
 	return value[:limit]
 }
 
+// AccessibleZone contains only fields used by the organization domain picker.
+type AccessibleZone struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	AccountID   string `json:"account_id"`
+	AccountName string `json:"account_name"`
+}
+
+func (c *CloudflareDomains) AccessibleZones(ctx context.Context) ([]AccessibleZone, error) {
+	zones := make([]AccessibleZone, 0)
+	for page := 1; page <= maxRecordPages; page++ {
+		var rows []struct {
+			ID      string
+			Name    string
+			Account struct {
+				ID   string
+				Name string
+			}
+		}
+		q := url.Values{"status": {"active"}, "per_page": {"50"}, "page": {strconv.Itoa(page)}}
+		info, err := c.callPaged(ctx, "list accessible zones", http.MethodGet, "/zones", q, nil, &rows)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			zones = append(zones, AccessibleZone{ID: row.ID, Name: row.Name, AccountID: row.Account.ID, AccountName: row.Account.Name})
+		}
+		if page >= info.TotalPages || len(rows) == 0 {
+			return zones, nil
+		}
+	}
+	return nil, &DomainError{Operation: "list accessible zones", Message: "restrict the token to the zones to connect"}
+}
+
 func (c *CloudflareDomains) FindZone(ctx context.Context, name string) (Zone, error) {
 	labels := strings.Split(strings.Trim(strings.ToLower(name), "."), ".")
 	// Try the name itself, then each parent down to a two-label name.
@@ -630,4 +664,21 @@ func (unconfiguredDomains) UpdateRecord(context.Context, string, DNSRecord) erro
 }
 func (unconfiguredDomains) DeleteRecord(context.Context, string, string) error {
 	return ErrNotConfigured
+}
+
+// CloudflareAccessChecks reports the result of independent read-only requests. A successful
+// read does not establish permission to write DNS, install rules or send an actual message.
+type CloudflareAccessChecks struct {
+	DNS       bool `json:"dns"`
+	Receiving bool `json:"receiving"`
+	Sending   bool `json:"sending"`
+}
+
+func (c *CloudflareDomains) CheckZoneAccess(ctx context.Context, zoneID string) CloudflareAccessChecks {
+	zone := "/zones/" + url.PathEscape(zoneID)
+	one := url.Values{"per_page": {"1"}}
+	readable := func(path string, q url.Values) bool {
+		return c.call(ctx, "check access", http.MethodGet, zone+path, q, nil, nil) == nil
+	}
+	return CloudflareAccessChecks{DNS: readable("/dns_records", one), Receiving: readable("/email/routing/rules", one), Sending: readable("/email/sending/subdomains", nil)}
 }

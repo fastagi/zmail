@@ -410,6 +410,17 @@ function MailboxView({
     }
   }
 
+  if (draft?.mode === 'compose' && mailbox.access.send) {
+    return (
+      <ComposeDialog
+        inline
+        mailbox={mailbox}
+        draft={draft}
+        onClose={() => setDraft(null)}
+        onStored={() => showView({ kind: 'sent' })}
+      />
+    );
+  }
   return (
     <div className="grid gap-4 lg:h-[calc(100dvh-12rem)] lg:min-h-[36rem] lg:grid-cols-[16rem_minmax(0,1fr)]">
       <aside className="flex min-h-0 flex-col gap-3 lg:overflow-y-auto lg:border-r lg:pr-4">

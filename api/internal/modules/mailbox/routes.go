@@ -26,6 +26,12 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mail_domains.checks.store").WhereNumber("domain_id")
 		auth.POST("/mail-domains/:domain_id/receiving", h.EnableMailDomainReceiving).
 			Name("mail_domains.receiving.store").WhereNumber("domain_id")
+		auth.GET("/mail-cloudflare-connection", h.GetCloudflare).Name("mail_cloudflare_connection.show")
+		auth.POST("/mail-cloudflare-connection", h.BindCloudflare).Name("mail_cloudflare_connection.store").Middleware(middleware.BodyLimit(2048))
+		auth.DELETE("/mail-cloudflare-connection/:connection_id", h.UnbindCloudflare).Name("mail_cloudflare_connection.destroy")
+		auth.POST("/mail-cloudflare-connection/:connection_id/checks", h.CheckCloudflareAccess).Name("mail_cloudflare_connection.checks.store")
+		auth.POST("/mail-cloudflare-connection/:connection_id/domains", h.ConnectCloudflareDomain).Name("mail_cloudflare_connection.domains.store")
+		auth.POST("/mail-cloudflare-previews", h.PreviewCloudflare).Name("mail_cloudflare_previews.store").Middleware(middleware.BodyLimit(2048))
 		auth.POST("/mail-domain-previews", h.PreviewMailDomain).Name("mail_domain_previews.store")
 
 		auth.GET("/mail-zones", h.ListMailZones).Name("mail_zones.index")
@@ -210,6 +216,7 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Middleware(apikey.RequireScopesAllowingTest(ScopeMailTransactional))
 	})
 
+	r.POST("/cloudflare-connections/:connection_id/inbound-mail-messages", h.ReceiveInbound).Name("cloudflare_connections.inbound.store")
 	r.POST("/inbound-mail-messages", h.ReceiveInbound).Name("inbound_mail_messages.store")
 	r.POST("/mail-delivery-events", h.ReceiveDeliveryEvent).Name("mail_delivery_events.store")
 	// A signed token authenticates an unsubscribe; recipients and mail clients have no session.

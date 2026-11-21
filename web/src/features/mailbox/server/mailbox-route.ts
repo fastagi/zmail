@@ -769,7 +769,11 @@ export async function listMailboxDirectoryRoute(request: Request): Promise<NextR
     });
   }
   if (query.value.mock.beforeId === 0) return invalidInput('Invalid directory cursor');
-  const page = mockMailboxStore.directory(target.organizationId, viewerOf(target), query.value.mock);
+  const page = mockMailboxStore.directory(
+    target.organizationId,
+    viewerOf(target),
+    query.value.mock
+  );
   if (!page.ok) return forbidden();
   const { items, nextBeforeId, mailboxCount, sentLast24h } = page.value;
   return NextResponse.json(
@@ -3966,7 +3970,10 @@ function mailboxImportBody(
 ): Parsed<{ dry_run: boolean; rows: MailboxImportRowInput[] }> {
   const { dry_run: dryRun, rows } = value;
   if (typeof dryRun !== 'boolean') {
-    return { ok: false, response: validationFailed({ dry_run: ['The dry_run field is required'] }) };
+    return {
+      ok: false,
+      response: validationFailed({ dry_run: ['The dry_run field is required'] }),
+    };
   }
   if (!Array.isArray(rows) || rows.length === 0 || rows.length > MAILBOX_IMPORT_MAX_ROWS) {
     return { ok: false, response: validationFailed({ rows: ['The rows field is invalid'] }) };
@@ -4592,4 +4599,60 @@ function triageFailure(error: 'unavailable' | 'forbidden'): NextResponse {
   return error === 'forbidden'
     ? accessForbidden()
     : failure(409, ApiErrorCode.MAILBOX_TRIAGE_UNAVAILABLE, 'AI triage is off');
+}
+
+/** Fixed routes only. Organization and upstream credentials come from the signed-in session. */
+export async function getCloudflareConnectionRoute(request: Request) {
+  const target = await resolveMailboxReadRoute(request);
+  return forwardCloudflareManagement(request, target, 'status');
+}
+
+export async function changeCloudflareConnectionRoute(
+  request: Request,
+  action: 'preview' | 'bind' | 'disconnect' | 'check' | 'domain',
+  id?: string
+) {
+  const target = await resolveMailboxMutationRoute(request);
+  return forwardCloudflareManagement(request, target, action, id);
+}
+
+async function forwardCloudflareManagement(
+  request: Request,
+  target: MailboxTarget,
+  action: 'status' | 'preview' | 'bind' | 'disconnect' | 'check' | 'domain',
+  id?: string
+) {
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  if (target.backend !== 'go-api')
+    return failure(
+      503,
+      ApiErrorCode.COMMON_SERVICE_UNAVAILABLE,
+      'Cloudflare connections require the API backend.'
+    );
+  if (
+    (action === 'disconnect' || action === 'check' || action === 'domain') &&
+    !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id ?? '')
+  )
+    return validationFailed({ id: ['Invalid connection'] });
+  const path =
+    action === 'preview'
+      ? 'mail-cloudflare-previews'
+      : 'mail-cloudflare-connection' +
+        (id ? '/' + id : '') +
+        (action === 'domain' ? '/domains' : action === 'check' ? '/checks' : '');
+  const method = action === 'status' ? 'GET' : action === 'disconnect' ? 'DELETE' : 'POST';
+  let body;
+  if (method === 'POST') {
+    const parsed = await jsonObject(request, 2048);
+    if (!parsed.ok) return parsed.response;
+    body = parsed.value;
+  }
+  return forwardAuthenticatedGoApi(request, {
+    method,
+    path,
+    body,
+    accessToken: target.accessToken,
+    organizationId: String(target.organizationId),
+  });
 }

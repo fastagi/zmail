@@ -186,3 +186,100 @@ func (h *Handler) DeleteMailDomain(c *gin.Context) {
 	}
 	response.NoContent(c)
 }
+
+// PreviewCloudflare enumerates zones with the presented token without persisting credentials.
+func (h *Handler) PreviewCloudflare(c *gin.Context) {
+	if _, ok := managerScope(c); !ok {
+		return
+	}
+	privateResponse(c)
+	var req struct {
+		Token string `json:"api_token" binding:"required,min=8,max=512"`
+	}
+	if !handler.BindJSON(c, &req) {
+		return
+	}
+	zones, err := h.service.CloudflareZones(c.Request.Context(), req.Token)
+	if err != nil {
+		response.Error(c, 422, "Could not list Cloudflare zones. Check Zone Read permission, the token and its IP restrictions.")
+		return
+	}
+	response.Success(c, zones)
+}
+
+func (h *Handler) GetCloudflare(c *gin.Context) {
+	org, ok := managerScope(c)
+	if !ok {
+		return
+	}
+	privateResponse(c)
+	row, err := h.service.GetCloudflareConnection(c.Request.Context(), org.OrganizationID)
+	if err != nil {
+		response.HandleError(c, "Failed to load Cloudflare connection", err)
+		return
+	}
+	response.Success(c, gin.H{"connection": row})
+}
+func (h *Handler) BindCloudflare(c *gin.Context) {
+	org, ok := managerScope(c)
+	if !ok {
+		return
+	}
+	privateResponse(c)
+	var req struct {
+		Token  string `json:"api_token" binding:"required,min=8,max=512"`
+		ZoneID string `json:"zone_id" binding:"required,alphanum,max=64"`
+	}
+	if !handler.BindJSON(c, &req) {
+		return
+	}
+	row, key, err := h.service.BindCloudflare(c.Request.Context(), org.OrganizationID, req.Token, req.ZoneID)
+	if err != nil {
+		response.HandleError(c, "Failed to bind Cloudflare", err)
+		return
+	}
+	response.Created(c, gin.H{"connection": row, "signing_secret": key, "callback_path": "/v1/cloudflare-connections/" + row.ID + "/inbound-mail-messages"})
+}
+func (h *Handler) UnbindCloudflare(c *gin.Context) {
+	org, ok := managerScope(c)
+	if !ok {
+		return
+	}
+	privateResponse(c)
+	if err := h.service.UnbindCloudflare(c.Request.Context(), org.OrganizationID, c.Param("connection_id")); err != nil {
+		response.HandleError(c, "Failed to disconnect Cloudflare", err)
+		return
+	}
+	response.NoContent(c)
+}
+func (h *Handler) ConnectCloudflareDomain(c *gin.Context) {
+	org, ok := managerScope(c)
+	if !ok {
+		return
+	}
+	privateResponse(c)
+	var req MailDomainRequest
+	if !handler.BindJSON(c, &req) {
+		return
+	}
+	row, err := h.service.ConnectCloudflareDomain(c.Request.Context(), org.OrganizationID, org.UserID, c.Param("connection_id"), req.Name, domain.MailDomainCapability(req.Capability))
+	if err != nil {
+		response.HandleError(c, "Failed to connect domain", err)
+		return
+	}
+	response.Created(c, toMailDomainResponse(row))
+}
+
+func (h *Handler) CheckCloudflareAccess(c *gin.Context) {
+	org, ok := managerScope(c)
+	if !ok {
+		return
+	}
+	privateResponse(c)
+	checks, err := h.service.CheckCloudflareAccess(c.Request.Context(), org.OrganizationID, c.Param("connection_id"))
+	if err != nil {
+		response.HandleError(c, "Failed to check Cloudflare access", err)
+		return
+	}
+	response.Success(c, checks)
+}

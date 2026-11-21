@@ -60,11 +60,12 @@ type MailDomainRecord struct {
 // MailDomain is a domain an organization connected, on which it may create mailboxes once
 // every required record is in place.
 type MailDomain struct {
-	ID             uint
-	OrganizationID uint
-	Name           string
-	ZoneID         string
-	ZoneName       string
+	CloudflareConnectionID *string
+	ID                     uint
+	OrganizationID         uint
+	Name                   string
+	ZoneID                 string
+	ZoneName               string
 	// MailZoneID is the managed zone the domain lives in; nil for a zone the operator manages.
 	MailZoneID *uint
 	Capability MailDomainCapability

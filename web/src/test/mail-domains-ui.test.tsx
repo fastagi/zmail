@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -5,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MailDnsRecordsPage } from '@/features/mailbox/components/mail-dns-records';
 import { MailDomainStatus } from '@/features/mailbox/components/mail-domain-status';
 import { ApiErrorCode } from '@/http/codes';
-import { ApiError } from '@/http/request';
+import request, { ApiError } from '@/http/request';
 import { messages } from '@/i18n/modules';
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), message: vi.fn() }));
@@ -74,6 +75,7 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
 
 describe('organization mail domains', () => {
   beforeEach(() => {
+    vi.spyOn(request, 'get').mockResolvedValue({ connection: null });
     for (const fn of [toast.success, toast.error, toast.message]) fn.mockReset();
     state.organizations.data = page([organization('owner')]);
     state.domains.data = [sharedDomain(true)];
@@ -663,9 +665,13 @@ describe('organization mail domains', () => {
 
 function renderPage() {
   return render(
-    <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
-      <MailDomainStatus />
-    </NextIntlClientProvider>
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
+        <MailDomainStatus />
+      </NextIntlClientProvider>
+    </QueryClientProvider>
   );
 }
 

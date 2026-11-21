@@ -2402,3 +2402,11 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.TRIAGE_UNAVAILABLE` | 409 |
 | `MAILBOX.TRIAGE_MODEL_FAILED` | 502 |
 | `MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` | 404 |
+
+### Organization Cloudflare discovery
+
+`POST /v1/mail-cloudflare-previews` accepts an organization manager's candidate `api_token` and returns the active zones visible to that token, with each zone's `id`, `name`, `account_id`, and `account_name`. The operation is read-only and the credential is never stored or returned. An empty list is valid. A successful response verifies visibility only; email routing, DNS writes and sending require their own checks.
+
+Organization owners and administrators can read the masked state with `GET /v1/mail-cloudflare-connection` and bind one zone with `POST /v1/mail-cloudflare-connection` (`api_token`, `zone_id`). The response returns the signing secret once, a generated Worker name and a callback path. The operator's public HTTPS API origin completes the URL. Enable Email Routing on the exact receiving domain and deploy the Worker in its own account. The daily token needs the selected zone's DNS Edit, Zone Read and Email Routing Rules Edit plus the corresponding account's Email Sending Edit.
+
+`POST /v1/mail-cloudflare-connection/{connection_id}/domains` accepts a name and capability. A domain with foreign MX is refused for receiving. DNS setup and checks, exact-address rules and sending use the connection of that domain. The Worker posts signed mail to `/v1/cloudflare-connections/{connection_id}/inbound-mail-messages`. Its organization and the recipient's domain must match the stored mailbox. `DELETE /v1/mail-cloudflare-connection/{connection_id}` clears the credentials and stops later sends and callbacks through this connection. The organization's existing messages and its Cloudflare resources are retained.

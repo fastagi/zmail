@@ -3965,6 +3965,284 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-previews:
+    post:
+      operationId: previewCloudflareZones
+      summary: List active zones available to the submitted token
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - api_token
+              properties:
+                api_token:
+                  type: string
+      responses:
+        '200':
+          description: List active zones available to the submitted token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailCloudflareZonesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-connection:
+    get:
+      operationId: getCloudflareConnection
+      summary: Get the current organization connection
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: Get the current organization connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailCloudflareConnectionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: bindCloudflareConnection
+      summary: Bind a verified zone and return one-time installation credentials
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - api_token
+              - zone_id
+              properties:
+                api_token:
+                  type: string
+                zone_id:
+                  type: string
+      responses:
+        '201':
+          description: Bind a verified zone and return one-time installation credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailCloudflareInstallationResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-connection/{connection_id}:
+    delete:
+      operationId: unbindCloudflareConnection
+      summary: Revoke this connection and erase its secrets
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '204':
+          description: Revoke this connection and erase its secrets
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-connection/{connection_id}/checks:
+    post:
+      operationId: checkCloudflareAccess
+      summary: Check read access to DNS records, sending domains and receiving rules
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Check read access to DNS records, sending domains and receiving rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailCloudflareChecksResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-cloudflare-connection/{connection_id}/domains:
+    post:
+      operationId: connectTenantMailDomain
+      summary: Set up an exact domain within the selected zone
+      tags:
+      - Mailboxes
+      security:
+      - bearerSession: []
+      parameters:
+      - $ref: '#/components/parameters/OrganizationContext'
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MailDomainRequest'
+      responses:
+        '201':
+          description: Set up an exact domain within the selected zone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDomainResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/cloudflare-connections/{connection_id}/inbound-mail-messages:
+    post:
+      operationId: receiveOrganizationInboundMessage
+      summary: Accept a signed message from an organization Worker
+      description: The callback authenticates the connection-specific signature and accepts mail only for
+        this organization and connection.
+      tags:
+      - Mailboxes
+      security: []
+      parameters:
+      - name: connection_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: X-Mailbox-Signature
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: X-Mailbox-Recipient
+        in: header
+        required: true
+        description: The envelope recipient the edge accepted the message for.
+        schema:
+          type: string
+          minLength: 3
+          maxLength: 320
+      requestBody:
+        required: true
+        content:
+          message/rfc822:
+            schema:
+              type: string
+              format: binary
+              maxLength: 5242880
+      responses:
+        '200':
+          description: The message was already stored by an earlier delivery.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundMailMessageResponse'
+        '201':
+          description: The message is stored in the recipient's mailbox.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboundMailMessageResponse'
+        '401':
+          description: The signature is missing, stale, or wrong (`MAILBOX.INBOUND_SIGNATURE_INVALID`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: No mailbox has the recipient address (`MAILBOX.RECIPIENT_NOT_FOUND`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: The raw message exceeds 5 MiB (`MAILBOX.INBOUND_TOO_LARGE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The body is not a parseable message with a sender (`MAILBOX.INBOUND_UNPARSEABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Inbound mail has no shared secret configured (`MAILBOX.INBOUND_DISABLED`), or the
+            database is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/mail-domain-previews:
     post:
       operationId: previewMailDomain
@@ -15452,6 +15730,120 @@ components:
             maxLength: 253
         suggested_capability:
           $ref: '#/components/schemas/MailDomainCapability'
+    MailCloudflareChecksResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: {const: 0}
+        message: {type: string}
+        data:
+          type: object
+          required: [dns, sending, receiving]
+          properties:
+            dns: {type: boolean}
+            sending: {type: boolean}
+            receiving: {type: boolean}
+    MailCloudflareZone:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - name
+      - account_id
+      - account_name
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        account_id:
+          type: string
+        account_name:
+          type: string
+    MailCloudflareConnection:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - account_id
+      - zone_id
+      - zone_name
+      - worker
+      properties:
+        id:
+          type: string
+        account_id:
+          type: string
+        zone_id:
+          type: string
+        zone_name:
+          type: string
+        worker:
+          type: string
+    MailCloudflareZonesResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - message
+      - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MailCloudflareZone'
+    MailCloudflareConnectionResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - message
+      - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+          - connection
+          properties:
+            connection:
+              oneOf:
+              - $ref: '#/components/schemas/MailCloudflareConnection'
+              - type: 'null'
+    MailCloudflareInstallationResponse:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - message
+      - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+          - connection
+          - signing_secret
+          - callback_path
+          properties:
+            connection:
+              $ref: '#/components/schemas/MailCloudflareConnection'
+            signing_secret:
+              type: string
+            callback_path:
+              type: string
     MailDomainPreviewResponse:
       type: object
       additionalProperties: false
