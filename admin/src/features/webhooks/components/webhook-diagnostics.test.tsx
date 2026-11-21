@@ -139,6 +139,22 @@ describe('WebhookDiagnostics', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
+  it('returns focus to the row Replay button when the dialog closes with Escape', async () => {
+    stubApi(() => json({}));
+    render(withQueryClient(<WebhookDiagnostics organizationId={7} />));
+
+    const opener = await screen.findByRole('button', { name: 'Replay' });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(opener);
+  });
+
   it('explains a rejected replay inside the dialog', async () => {
     stubApi(() =>
       json({ code: 409, error_code: 'WEBHOOK.REPLAY_NOT_ALLOWED', message: 'no' }, 409),

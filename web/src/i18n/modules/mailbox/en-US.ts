@@ -1192,6 +1192,7 @@ const messages = {
       'Rendered with the shared template values above; contact fields use sample or fallback text.',
     timezoneHint: 'Local time ({zone})',
     schedulePast: 'Choose a future time to schedule this broadcast.',
+    scheduleTooFar: 'Schedule this broadcast at most one year ahead.',
     unsavedTitle: 'Discard unsaved changes?',
     unsavedDescription: 'Your edits to this broadcast draft have not been saved yet.',
     discard: 'Discard changes',
