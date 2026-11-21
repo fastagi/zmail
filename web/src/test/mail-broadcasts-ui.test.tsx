@@ -241,17 +241,49 @@ describe('mail broadcasts console', () => {
 
   it('schedules a draft at the chosen local time', async () => {
     state.send.mutateAsync.mockResolvedValue(broadcast({ id: 8, status: 'scheduled' }));
+    const at = localDateTime(30);
     renderBroadcasts();
     fireEvent.click(screen.getByRole('button', { name: 'Open Draft idea' }));
-    fireEvent.change(screen.getByLabelText('Send at'), { target: { value: '2030-01-02T09:30' } });
+    fireEvent.change(screen.getByLabelText('Send at'), { target: { value: at } });
     fireEvent.click(screen.getByRole('button', { name: 'Schedule' }));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Schedule' }));
     await waitFor(() =>
       expect(state.send.mutateAsync).toHaveBeenCalledWith({
         broadcastId: 8,
-        input: { scheduled_at: new Date('2030-01-02T09:30').toISOString() },
+        input: { scheduled_at: new Date(at).toISOString() },
       })
     );
+  });
+
+  it('caps scheduling at one year ahead and names the date when it is exceeded (#96)', () => {
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Draft idea' }));
+    const sendAt = screen.getByLabelText('Send at');
+    const max = new Date(sendAt.getAttribute('max') ?? '').getTime();
+    expect(Math.abs(max - new Date(localDateTime(365)).getTime())).toBeLessThanOrEqual(60_000);
+
+    fireEvent.change(sendAt, { target: { value: localDateTime(367) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(state.send.mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByText('Schedule this broadcast at most one year ahead.')).toBeInTheDocument();
+    expect(screen.queryByText(/Check the broadcast/u)).toBeNull();
+  });
+
+  it('names the date when the API rejects a scheduled send as invalid (#96)', async () => {
+    state.send.mutateAsync.mockRejectedValue(
+      new ApiError('invalid', ApiErrorCode.MAILBOX_BROADCAST_INVALID, 422)
+    );
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Draft idea' }));
+    fireEvent.change(screen.getByLabelText('Send at'), { target: { value: localDateTime(300) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Schedule' }));
+
+    expect(
+      await screen.findByText('Schedule this broadcast at most one year ahead.')
+    ).toBeInTheDocument();
   });
 
   it('explains a list with nobody to send to', async () => {
@@ -541,4 +573,11 @@ function renderWithMessages(children: React.ReactNode) {
 
 function renderBroadcasts() {
   return renderWithMessages(<MailBroadcasts />);
+}
+
+/** A `datetime-local` value the given number of days from now, in the local time zone. */
+function localDateTime(days: number): string {
+  const at = new Date(Date.now() + days * 24 * 60 * 60 * 1_000);
+  at.setSeconds(0, 0);
+  return new Date(at.getTime() - at.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }

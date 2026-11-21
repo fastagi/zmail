@@ -451,12 +451,29 @@ function BackButton({ onBack }: { onBack: () => void }) {
   );
 }
 
-/** A `datetime-local` value for a time an hour from now, in the viewer's time zone. */
-function defaultScheduleValue(): string {
-  const at = new Date(Date.now() + 60 * 60 * 1_000);
+/** The API schedules a broadcast at most a year (365 days) ahead (contracts/MAILBOXES.md). */
+const maxScheduleAheadMs = 365 * 24 * 60 * 60 * 1_000;
+
+/** A `datetime-local` value for an instant, to the minute, in the viewer's time zone. */
+function localDateTimeValue(timestamp: number): string {
+  const at = new Date(timestamp);
   at.setSeconds(0, 0);
   const local = new Date(at.getTime() - at.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
+}
+
+/** A `datetime-local` value for a time an hour from now, in the viewer's time zone. */
+function defaultScheduleValue(): string {
+  return localDateTimeValue(Date.now() + 60 * 60 * 1_000);
+}
+
+/** Why a `datetime-local` value cannot be scheduled, or null when it can. */
+function scheduleProblem(value: string): ScheduleErrorKey | null {
+  const timestamp = new Date(value).getTime();
+  const now = Date.now();
+  if (Number.isNaN(timestamp) || timestamp <= now) return 'broadcasts.schedulePast';
+  if (timestamp - now > maxScheduleAheadMs) return 'broadcasts.scheduleTooFar';
+  return null;
 }
 
 /** Viewer time zone name for scheduling copy, falling back safely to UTC. */
@@ -468,7 +485,8 @@ function viewerTimeZone(): string {
   }
 }
 
-type EditorErrorKey = MailboxErrorKey | 'broadcasts.schedulePast';
+type ScheduleErrorKey = 'broadcasts.schedulePast' | 'broadcasts.scheduleTooFar';
+type EditorErrorKey = MailboxErrorKey | ScheduleErrorKey;
 
 function BroadcastEditor({
   broadcast,
@@ -627,9 +645,9 @@ function BroadcastEditor({
       setErrorKey('errors.broadcastInvalid');
       return;
     }
-    const timestamp = new Date(scheduleAt).getTime();
-    if (Number.isNaN(timestamp) || timestamp <= Date.now()) {
-      setErrorKey('broadcasts.schedulePast');
+    const problem = scheduleProblem(scheduleAt);
+    if (problem) {
+      setErrorKey(problem);
       return;
     }
     setConfirm('schedule');
@@ -637,13 +655,14 @@ function BroadcastEditor({
 
   const start = async (scheduled: boolean) => {
     if (scheduled) {
-      const timestamp = new Date(scheduleAt).getTime();
-      if (Number.isNaN(timestamp) || timestamp <= Date.now()) {
+      const problem = scheduleProblem(scheduleAt);
+      if (problem) {
         setConfirm(null);
-        setErrorKey('broadcasts.schedulePast');
+        setErrorKey(problem);
         return;
       }
     }
+    let sending = false;
     try {
       let targetId = savedId;
       if (targetId === null || dirty) {
@@ -674,6 +693,7 @@ function BroadcastEditor({
         setSavedId(stored.id);
         setDirty(false);
       }
+      sending = true;
       await send.mutateAsync({
         broadcastId: targetId,
         input: scheduled ? { scheduled_at: new Date(scheduleAt).toISOString() } : {},
@@ -683,7 +703,14 @@ function BroadcastEditor({
       onSaved(targetId);
     } catch (failure) {
       setConfirm(null);
-      setErrorKey(resolveMailboxErrorKey(failure));
+      const key = resolveMailboxErrorKey(failure);
+      // A scheduled send's only own field is scheduled_at, so BROADCAST_INVALID there names the
+      // date (for example when the viewer's clock is behind), not the draft.
+      setErrorKey(
+        scheduled && sending && key === 'errors.broadcastInvalid'
+          ? 'broadcasts.scheduleTooFar'
+          : key
+      );
     }
   };
 
@@ -943,6 +970,7 @@ function BroadcastEditor({
                       id={ids.at}
                       type="datetime-local"
                       value={scheduleAt}
+                      max={localDateTimeValue(Date.now() + maxScheduleAheadMs)}
                       aria-describedby={ids.atHint}
                       disabled={pending}
                       onChange={event => {
