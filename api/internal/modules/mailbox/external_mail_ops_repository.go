@@ -124,9 +124,9 @@ func (r *repository) PurgeRevokedExternalMail(ctx context.Context, step domain.E
 	}
 	// Only the connection's own mailbox is ever touched: its id is unique to the connection.
 	var found []uint
-	if err := tx.Raw(`SELECT id FROM mail_messages WHERE mailbox_id = ? ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED`,
-		po.MailboxID, max(step.Messages, 1)).Scan(&found).Error; err != nil {
-		return nil, err
+	if lockErr := tx.Raw(`SELECT id FROM mail_messages WHERE mailbox_id = ? ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED`,
+		po.MailboxID, max(step.Messages, 1)).Scan(&found).Error; lockErr != nil {
+		return nil, lockErr
 	}
 	deleted, err := deleteMessages(tx, found)
 	if err != nil {

@@ -106,11 +106,11 @@ func (s *service) PurgeExternalMailCopies(ctx context.Context, viewer domain.Org
 	}
 	var result ExternalMailPurgeResult
 	for range externalMailImmediatePurgeSteps {
-		purge, err := s.purgeExternalMailStep(ctx, domain.ExternalMailPurgeStep{
+		purge, stepErr := s.purgeExternalMailStep(ctx, domain.ExternalMailPurgeStep{
 			ConnectionID: connection.ID, Messages: externalMailPurgeBatch,
 		}, viewer.UserID, externalMailPurgeOwner)
-		if err != nil {
-			return result, err
+		if stepErr != nil {
+			return result, stepErr
 		}
 		if purge == nil {
 			// The worker holds the connection right now; it finishes the purge.

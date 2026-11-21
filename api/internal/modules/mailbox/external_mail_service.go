@@ -89,6 +89,15 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	}
 	latency := time.Since(started)
 	outcome := domain.ExternalMailSyncOK
+	if fetched.RefreshToken != "" && fetched.RefreshToken != refreshToken {
+		// A provider that rotates grants has already spent the old one, so the new one is kept
+		// even when the rest of the fetch failed.
+		sealed, sealErr := s.sealRefreshToken(fetched.RefreshToken)
+		if sealErr != nil {
+			return sealErr
+		}
+		result.EncryptedRefreshToken = sealed
+	}
 	switch {
 	case err == nil:
 		result.Cursor, result.SyncedAt, result.ConsecutiveFailures = fetched.Cursor, &now, 0
@@ -96,13 +105,6 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		if fetched.More {
 			// Another page is ready: fetch it after the spacing instead of after the interval.
 			result.NextSyncAt = now.Add(spacing)
-		}
-		if fetched.RefreshToken != "" && fetched.RefreshToken != refreshToken {
-			sealed, sealErr := s.sealRefreshToken(fetched.RefreshToken)
-			if sealErr != nil {
-				return sealErr
-			}
-			result.EncryptedRefreshToken = sealed
 		}
 	case errors.Is(err, ErrExternalMailCursorExpired):
 		// Start over from an empty cursor after the spacing; copies already stored are not repeated.

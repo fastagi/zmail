@@ -383,9 +383,9 @@ func TestExternalMailImmediatePurge(t *testing.T) {
 		t.Fatalf("revoke: %v", err)
 	}
 	for name, viewer := range map[string]domain.OrganizationContext{"colleague": f.c, "admin": f.admin} {
-		status, body := f.opsCall(t, viewer, http.MethodPost, path)
-		if status != http.StatusNotFound || body["error_code"] != domain.CodeExternalMailConnectionNotFound {
-			t.Fatalf("%s purging = %d %v", name, status, body)
+		refused, refusal := f.opsCall(t, viewer, http.MethodPost, path)
+		if refused != http.StatusNotFound || refusal["error_code"] != domain.CodeExternalMailConnectionNotFound {
+			t.Fatalf("%s purging = %d %v", name, refused, refusal)
 		}
 	}
 	if left := f.count(t, `SELECT count(*) FROM mail_messages WHERE mailbox_id = ?`, f.mailbox.ID); left != 3 {

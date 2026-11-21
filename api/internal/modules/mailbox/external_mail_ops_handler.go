@@ -63,7 +63,7 @@ func (h *Handler) PurgeExternalMailCopies(c *gin.Context) {
 		return
 	}
 	privateResponse(c)
-	body := ExternalMailPurgeResponse{DeletedMessages: result.DeletedMessages, Completed: result.Completed}
+	body := ExternalMailPurgeResponse(result)
 	if result.Completed {
 		response.Success(c, body)
 		return

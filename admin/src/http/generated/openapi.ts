@@ -379,7 +379,7 @@ export interface paths {
         put?: never;
         /**
          * Delete a revoked connection's copies at once
-         * @description Deletes for good the synced copies of the caller's own revoked connection instead of waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then deletes the external mailbox and the connection with its sync runs and writes `copies_purged` with reason `owner` to the mailbox's access history. When more copies are left than one request deletes, the rest is due at once and the worker deletes it in its next passes. Only the member who bound the account may purge; anyone else, an `owner` or `admin` included, gets `404`.
+         * @description Deletes for good the synced copies of the caller's own revoked connection instead of waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then deletes the external mailbox and the connection with its sync runs, storing a `copies_purged` audit event with reason `owner` on the deleted mailbox. When more copies are left than one request deletes, the rest is due at once and the worker deletes it in its next passes. Only the member who bound the account may purge; anyone else, an `owner` or `admin` included, gets `404`.
          */
         post: operations["purgeExternalMailCopies"];
         delete?: never;
@@ -4038,7 +4038,7 @@ export interface components {
             meta: components["schemas"]["PaginationMeta"];
         };
         /** @enum {string} */
-        MailboxAccessEventType: "created" | "member_set" | "member_removed" | "owner_left" | "owner_returned" | "handed_over" | "sealed_deleted" | "webhooks_changed" | "renamed" | "copies_purged";
+        MailboxAccessEventType: "created" | "member_set" | "member_removed" | "owner_left" | "owner_returned" | "handed_over" | "sealed_deleted" | "webhooks_changed" | "renamed";
         MailboxDirectoryEntry: {
             address: string;
             awaiting_handover: boolean;

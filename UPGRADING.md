@@ -25,8 +25,8 @@ start their retention at the migration, so their copies are deleted one retentio
 raise the retention to keep them longer. Binding the
 account again before the deadline cancels the deletion. `POST
 /v1/external-mail-connections/:connection_id/purges` lets the member delete them at once
-(`409 MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` while the connection is bound), and the access history
-gains the `copies_purged` event type.
+(`409 MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` while the connection is bound). Each purge stores a
+`copies_purged` access event on the deleted mailbox as an audit record; it is never listed.
 
 ### Medium — Failed fetches back off; passes are budgeted per provider
 

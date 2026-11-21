@@ -437,7 +437,6 @@ per page:
 | `sealed_deleted` | An admin deletes the sealed history | `null` | `{ "deleted_messages", "deleted_broadcasts" }` |
 | `webhooks_changed` | The webhook switch changes | `null` | `{ "enabled" }` |
 | `renamed` | An admin changes the display name | `null` | `{ "from", "to" }` |
-| `copies_purged` | The copies of a revoked external connection are deleted, with the mailbox | The member who bound the account | `{ "connection_id", "provider", "reason" }` (`retention` or `owner`) |
 
 `actor_user_id` is `null` for a change Zmail made itself, such as `owner_left`, `owner_returned`,
 and `member_removed` for a departure. `detail` holds ids, permissions, timestamps, counts, and display
@@ -825,9 +824,11 @@ Revoking a connection, by its member, an `owner` or `admin`, or because the memb
 organization, starts a retention of `EXTERNAL_MAIL_REVOKED_RETENTION` (720 hours, 30 days, by
 default). Binding the same account again before it ends keeps the mailbox and its copies and cancels
 the deletion. When it ends, the worker deletes the copies for good in bounded batches, then deletes
-the external mailbox and the connection with its sync runs, and writes `copies_purged` to the
-mailbox's access history with `{ "connection_id", "provider", "reason": "retention" }`. Binding the
-account afterwards starts a new mailbox.
+the external mailbox and the connection with its sync runs, and stores a `copies_purged` access
+event on the deleted mailbox with `{ "connection_id", "provider", "reason": "retention" }`, the
+member who bound the account as its subject. The event is an audit record: the access history route
+of a deleted mailbox answers `404`, so it is never listed. Binding the account afterwards starts a
+new mailbox.
 
 `POST /v1/external-mail-connections/:connection_id/purges` deletes the copies of the caller's own
 revoked connection at once, the same way, with `reason` `owner` and the caller as the actor:
