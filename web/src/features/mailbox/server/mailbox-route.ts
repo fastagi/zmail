@@ -4602,14 +4602,26 @@ function triageFailure(error: 'unavailable' | 'forbidden'): NextResponse {
 }
 
 /** Fixed routes only. Organization and upstream credentials come from the signed-in session. */
-export async function cloudflareManagementRoute(
+export async function getCloudflareConnectionRoute(request: Request) {
+  const target = await resolveMailboxReadRoute(request);
+  return forwardCloudflareManagement(request, target, 'status');
+}
+
+export async function changeCloudflareConnectionRoute(
   request: Request,
+  action: 'preview' | 'bind' | 'disconnect' | 'check' | 'domain',
+  id?: string
+) {
+  const target = await resolveMailboxMutationRoute(request);
+  return forwardCloudflareManagement(request, target, action, id);
+}
+
+async function forwardCloudflareManagement(
+  request: Request,
+  target: MailboxTarget,
   action: 'status' | 'preview' | 'bind' | 'disconnect' | 'check' | 'domain',
   id?: string
 ) {
-  const target = await (action === 'status'
-    ? resolveMailboxReadRoute(request)
-    : resolveMailboxMutationRoute(request));
   if (!target.available) return target.response;
   if (!mayManageMailboxes(target)) return forbidden();
   if (target.backend !== 'go-api')
