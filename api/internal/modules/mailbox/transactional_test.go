@@ -655,3 +655,17 @@ func transactionalOutcomeCount(t *testing.T, mode, outcome string) float64 {
 	}
 	return 0
 }
+
+func TestRenderedSubjectLimitCountsCharacters(t *testing.T) {
+	f := newTxFixture(t, nil)
+	input := codeInput("cjk", "lilei@example.com", "1")
+	input.Variables["app"] = strings.Repeat("中", 900)
+	f.send(t, liveActor(), input)
+
+	input = codeInput("cjk-long", "lilei@example.com", "1")
+	input.Variables["app"] = strings.Repeat("中", domain.MaxMailSubjectLength)
+	var fields *FieldsError
+	if _, _, err := f.service.SendTransactional(context.Background(), liveActor(), input); !errors.As(err, &fields) {
+		t.Fatalf("rendered subject over 998 characters error = %v; want a fields error", err)
+	}
+}
