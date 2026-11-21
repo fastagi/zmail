@@ -435,7 +435,7 @@ func TestExternalMailSavesRotatedToken(t *testing.T) {
 	}
 }
 
-// TestExternalMailCursorExpiryResyncs: when the provider no longer honours the cursor, the sync
+// TestExternalMailCursorExpiryResyncs: when the provider no longer honors the cursor, the sync
 // starts over at once from an empty cursor and stores no second copy.
 func TestExternalMailCursorExpiryResyncs(t *testing.T) {
 	f := newExternalFixture(t, config.ExternalMailSourceFake)
@@ -453,5 +453,61 @@ func TestExternalMailCursorExpiryResyncs(t *testing.T) {
 	}
 	if stored := len(f.storedExternal(t)); stored != 2 {
 		t.Fatalf("stored %d messages after the resync, want 2 without copies", stored)
+	}
+}
+
+// rotatingFailure rotates the grant and then fails the fetch, as a provider that redeems the
+// refresh token before a throttled or expired read does.
+type rotatingFailure struct {
+	*FakeExternalMailSource
+	next string
+	fail error
+}
+
+func (s rotatingFailure) Fetch(context.Context, ExternalMailFetchRequest) (ExternalMailFetch, error) {
+	return ExternalMailFetch{RefreshToken: s.next}, s.fail
+}
+
+// TestExternalMailKeepsRotatedTokenOfFailedFetch: a grant rotated before a fetch failed is saved,
+// whether the failure is retried later or restarts the sync.
+func TestExternalMailKeepsRotatedTokenOfFailedFetch(t *testing.T) {
+	for name, failure := range map[string]error{
+		"a retryable failure": errors.New("throttled"),
+		"an expired cursor":   ErrExternalMailCursorExpired,
+	} {
+		f := newExternalFixture(t, config.ExternalMailSourceFake)
+		f.service.externalConnectors = fakeExternalMailRegistry(rotatingFailure{f.source, "refresh-b-2", failure})
+		f.sync(t)
+		connection := f.reload(t)
+		stored, err := f.service.encryptor.DecryptString(connection.EncryptedRefreshToken)
+		if err != nil || stored != "refresh-b-2" || connection.Status != domain.ExternalMailStatusActive {
+			t.Fatalf("%s: stored token %q, status %q, err %v; want the rotated token on an active connection",
+				name, stored, connection.Status, err)
+		}
+	}
+}
+
+// TestExternalMailRegistryBuildsRegisteredConnectors: a connector registered by its adapter is
+// offered when the configuration enables it, once, and not otherwise.
+func TestExternalMailRegistryBuildsRegisteredConnectors(t *testing.T) {
+	saved := externalMailConnectorBuilders
+	t.Cleanup(func() { externalMailConnectorBuilders = saved })
+	externalMailConnectorBuilders = nil
+	builder := func(cfg config.ExternalMailConfig) (ExternalMailConnector, bool) {
+		return ExternalMailConnector{
+			ID: "imap", AuthKind: ExternalMailAuthPassword, Capabilities: ExternalMailCapabilities{Read: true},
+			Source: NewFakeExternalMailSource(),
+		}, cfg.Provides(config.ExternalMailProviderIMAP)
+	}
+	registerExternalMailConnector(builder)
+	registerExternalMailConnector(builder)
+
+	enabled := newExternalMailRegistry(config.ExternalMailConfig{Providers: []string{config.ExternalMailProviderIMAP}})
+	if connectors := enabled.list(); len(connectors) != 1 || connectors[0].ID != "imap" {
+		t.Fatalf("connectors = %+v, want imap once", connectors)
+	}
+	other := newExternalMailRegistry(config.ExternalMailConfig{Providers: []string{config.ExternalMailProviderGmail}})
+	if connectors := other.list(); len(connectors) != 0 {
+		t.Fatalf("connectors = %+v, want none when the provider is not enabled", connectors)
 	}
 }
