@@ -15,9 +15,9 @@ import {
   mailBadgeKey,
   mailEventKey,
   relativeTime,
-  useDateTimeFormat,
   useRelativeTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import { useMailDateTimeFormat } from '@/features/mailbox/components/mail-time';
 import { MailAttachmentList } from '@/features/mailbox/components/mail-attachments';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
 import { useMailMessage } from '@/features/mailbox/hooks/use-mailbox';
@@ -55,7 +55,7 @@ export function EmailDetail({
   onForward?: (message: MailMessage) => void;
 }) {
   const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
+  const formatter = useMailDateTimeFormat();
   const query = useMailMessage(useMailOrganizationId(), mailboxId, messageId);
   const relative = useRelativeTimeFormat();
   const [now] = useState(() => Date.now());

@@ -19,6 +19,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-reason';
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
+import { knownTimeZone } from '@/features/mailbox/components/mail-shared';
 import { rowUnread } from '@/features/mailbox/components/message-rows';
 import { MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
 import type { InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
@@ -30,16 +31,6 @@ const loadAheadMargin = '240px';
 /** Display names of connector ids; an id without one is shown as it is. */
 const SOURCE_NAMES: Record<string, string | undefined> = { gmail: 'Gmail', outlook: 'Outlook' };
 
-/** `zone` when this browser knows it, else undefined (the browser's own zone). */
-function knownZone(zone: string): string | undefined {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: zone });
-    return zone;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * The time of a row in the inbox's zone: `HH:mm` for today, the month and day for this year, the
  * full date before that.
@@ -47,7 +38,7 @@ function knownZone(zone: string): string | undefined {
 function useRowTime(zone: string): (iso: string) => string {
   const locale = useLocale();
   return useMemo(() => {
-    const timeZone = knownZone(zone);
+    const timeZone = knownTimeZone(zone);
     const time = new Intl.DateTimeFormat(locale, {
       hour: '2-digit',
       minute: '2-digit',

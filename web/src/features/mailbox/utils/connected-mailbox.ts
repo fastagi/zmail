@@ -12,3 +12,11 @@ export function isConnectedMailbox(mailbox: Pick<Mailbox, 'origin'>): boolean {
 export function isOwnConnectedMailbox(mailbox: Pick<Mailbox, 'type' | 'origin' | 'access'>): boolean {
   return isConnectedMailbox(mailbox) && mailbox.type === 'personal' && mailbox.access.view;
 }
+
+/**
+ * Whether mail may be written from `mailbox` in Zmail: its `send` access, and never a connected
+ * mailbox, whose copies are read-only. No composer, and so no kept draft, opens for one.
+ */
+export function canComposeFrom(mailbox: Pick<Mailbox, 'origin' | 'access'>): boolean {
+  return mailbox.access.send && !isConnectedMailbox(mailbox);
+}

@@ -1431,6 +1431,55 @@ describe('unified inbox', () => {
     expect(screen.getByRole('listbox').closest('section')).not.toHaveClass('max-lg:hidden');
     expect(screen.queryByRole('button', { name: 'Back to list' })).not.toBeInTheDocument();
   });
+
+  // Issue #74: a sent message is from the mailbox, to the people it was sent to.
+  it('reading a sent message names the mailbox as sender and shows its real recipients', async () => {
+    const sent = {
+      direction: 'outbound',
+      status: 'delivered',
+      from: { address: 'hello@mail.example.com', name: '' },
+      to: ['bob@example.com'],
+      cc: ['carol@example.com'],
+    };
+    state.inbox.data = listing([[{ ...singleRow(), ...sent }]]);
+    state.detail.data = message({ id: 12, mailbox_id: 1, ...sent });
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    await readingPaneLoaded();
+
+    const article = screen.getByRole('region', { name: 'Reading pane' });
+    expect(within(article).getByText('From hello@mail.example.com')).toBeInTheDocument();
+    expect(within(article).queryByText('To hello@mail.example.com')).toBeNull();
+    expect(within(article).getByText('To: bob@example.com')).toBeInTheDocument();
+    expect(within(article).getByText('Cc: carol@example.com')).toBeInTheDocument();
+  });
+
+  // Issue #81: the row and the reader of one message show one time, in the inbox's zone.
+  it('the list row and the reader show a message in the same time zone', async () => {
+    state.settingsEnabled = true;
+    state.userSettings.mockResolvedValue(timezoneSetting('Asia/Shanghai'));
+    // A minute ago, so the row shows the time of day rather than the date.
+    const createdAt = new Date(Date.now() - 60_000).toISOString();
+    const inShanghai = (options: Intl.DateTimeFormatOptions) =>
+      new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'Asia/Shanghai' }).format(
+        new Date(createdAt)
+      );
+    state.inbox.data = listing([[{ ...singleRow(), created_at: createdAt }]]);
+    state.detail.data = message({ id: 12, mailbox_id: 1, created_at: createdAt });
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+    await readingPaneLoaded();
+
+    // Both read in Shanghai, whatever zone the machine runs in.
+    await waitFor(() =>
+      expect(rowButton('Invoice').querySelector('time')?.textContent).toBe(
+        inShanghai({ hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      )
+    );
+    const article = screen.getByRole('region', { name: 'Reading pane' });
+    const readerTime = article.querySelector(`time[datetime="${createdAt}"]`);
+    expect(readerTime?.textContent).toBe(inShanghai({ dateStyle: 'medium', timeStyle: 'short' }));
+  });
 });
 
 describe('inbox keyboard shortcuts', () => {
@@ -1439,6 +1488,7 @@ describe('inbox keyboard shortcuts', () => {
     toast.success.mockReset();
     toast.error.mockReset();
     window.localStorage.clear();
+    state.settingsEnabled = false;
     window.history.replaceState(null, '', '/console/mailboxes');
     state.organizations.data = page([organization('owner')]);
     state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales')];
@@ -1710,6 +1760,39 @@ describe('inbox keyboard shortcuts', () => {
     expect(toast.success).not.toHaveBeenCalled();
     press('c');
     expect(await screen.findByLabelText('Subject')).toHaveValue('');
+  });
+
+  // Issue #86: leaving the page with the composer open keeps what was written.
+  it('navigating away with the composer open keeps the draft for the next compose', async () => {
+    const first = renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('Subject'), {
+      target: { value: 'Quarterly numbers' },
+    });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Line one\nLine two' } });
+    // The global sidebar leaves the mail route: the workspace and its composer unmount.
+    first.unmount();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    renderRoute();
+    press('c');
+    expect(await screen.findByLabelText('Subject')).toHaveValue('Quarterly numbers');
+    expect(screen.getByLabelText('Message')).toHaveValue('Line one\nLine two');
+  });
+
+  it('never offers a connected mailbox as a sender, even with send access', async () => {
+    state.mailboxes.data = [
+      { ...externalMailbox(3, 'me@gmail.com'), access: { ...noAccess(), view: true, send: true } },
+      mailbox(1, 'hello'),
+    ];
+    window.history.replaceState(null, '', '/console/mailboxes?box=3');
+    renderRoute();
+
+    press('c');
+    const from = await screen.findByLabelText('From');
+    expect(from).toHaveValue('1');
+    expect(within(from).queryByRole('option', { name: 'me@gmail.com' })).toBeNull();
   });
 
   it('c defaults the sender to the narrowed mailbox', async () => {
