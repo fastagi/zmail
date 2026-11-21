@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
   composeDraftKey,
+  draftToKeep,
   readComposeDraft,
   writeComposeDraft,
 } from '@/features/mailbox/components/compose-draft-store';
@@ -99,6 +100,13 @@ export function ComposeDialog({
   const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
   const [subject, setSubject] = useState(kept?.subject ?? draft.subject);
   const [body, setBody] = useState(kept?.body ?? draft.body ?? '');
+  // What is written is kept as it changes, so leaving the page any way (the global sidebar, the
+  // browser's back button, a reload) keeps the draft as closing the dialog does. Sending clears it.
+  const sentRef = useRef(false);
+  useEffect(() => {
+    if (sentRef.current) return;
+    writeComposeDraft(draftKey, draftToKeep({ to, cc, subject, body }, draft));
+  }, [draftKey, draft, to, cc, subject, body]);
   const [files, setFiles] = useState<File[]>([]);
   const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -175,6 +183,7 @@ export function ComposeDialog({
       });
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
+      sentRef.current = true;
       writeComposeDraft(draftKey, null);
       onStored?.();
       onClose();
@@ -225,6 +234,7 @@ export function ComposeDialog({
       });
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
+      sentRef.current = true;
       writeComposeDraft(draftKey, null);
       onStored?.();
       onClose();
@@ -241,19 +251,9 @@ export function ComposeDialog({
    */
   const dismiss = () => {
     if (send.isPending) return;
-    const written = { to, cc, subject, body };
-    const empty = Object.values(written).every(value => value.trim() === '');
-    const untouched =
-      to === draft.to &&
-      cc === (draft.cc ?? '') &&
-      subject === draft.subject &&
-      body === (draft.body ?? '');
-    if (empty || untouched) {
-      writeComposeDraft(draftKey, null);
-    } else {
-      writeComposeDraft(draftKey, written);
-      toast.success(t('compose.draftSaved'));
-    }
+    const keep = draftToKeep({ to, cc, subject, body }, draft);
+    writeComposeDraft(draftKey, keep);
+    if (keep) toast.success(t('compose.draftSaved'));
     onClose();
   };
 

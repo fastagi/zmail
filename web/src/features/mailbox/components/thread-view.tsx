@@ -14,8 +14,8 @@ import {
   MailHtmlFrame,
   ReaderArticleSkeleton,
   StaleNotice,
-  useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import { useMailDateTimeFormat } from '@/features/mailbox/components/mail-time';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
 import { SecretsPanel } from '@/features/mailbox/components/secrets-panel';
 import {
@@ -292,7 +292,7 @@ function senderName(message: MailMessage): string {
 /** A message of a thread that is not open: who, when, and the start of its text. */
 function CollapsedMessage({ message, onExpand }: { message: MailMessage; onExpand: () => void }) {
   const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
+  const formatter = useMailDateTimeFormat();
   const snippet = message.text_body.replace(/\s+/gu, ' ').trim().slice(0, 160);
   return (
     <button
@@ -435,7 +435,7 @@ function MessageCard({
 /** A message's addresses and date, with every action on it: the workspace's card header. */
 function MessageHeaders({ message, reader }: { message: MailMessage; reader: ReaderProps }) {
   const t = useT('mailbox');
-  const formatter = useDateTimeFormat();
+  const formatter = useMailDateTimeFormat();
   return (
     <div className="flex flex-wrap items-start justify-between gap-2">
       <dl className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
@@ -481,7 +481,7 @@ function MessageHeaders({ message, reader }: { message: MailMessage; reader: Rea
  * and moving belong to the pane's toolbar, so `send` is not passed on.
  */
 function SenderLine({ message, reader }: { message: MailMessage; reader: ReaderProps }) {
-  const formatter = useDateTimeFormat();
+  const formatter = useMailDateTimeFormat();
   const name = senderName(message);
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -497,6 +497,7 @@ function SenderLine({ message, reader }: { message: MailMessage; reader: ReaderP
           {message.direction === 'outbound' ? <SentMark /> : null}
         </p>
         <p className="truncate text-xs text-text-muted">{message.from.address}</p>
+        {message.direction === 'outbound' ? <RecipientLines message={message} /> : null}
       </div>
       <time dateTime={message.created_at} className="shrink-0 text-xs text-text-faint">
         {formatter.format(new Date(message.created_at))}
@@ -510,5 +511,22 @@ function SenderLine({ message, reader }: { message: MailMessage; reader: ReaderP
         onClose={reader.onClose}
       />
     </div>
+  );
+}
+
+/** Who a sent message went to, under its sender in the article layout. */
+function RecipientLines({ message }: { message: MailMessage }) {
+  const t = useT('mailbox');
+  return (
+    <>
+      <p className="truncate text-xs text-text-muted">
+        {t('thread.recipientsTo', { addresses: message.to.join(', ') })}
+      </p>
+      {message.cc.length > 0 ? (
+        <p className="truncate text-xs text-text-muted">
+          {t('thread.recipientsCc', { addresses: message.cc.join(', ') })}
+        </p>
+      ) : null}
+    </>
   );
 }

@@ -49,6 +49,7 @@ import {
   ReaderArticleSkeleton,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
+import { MailTimeZoneContext } from '@/features/mailbox/components/mail-time';
 import type { PaletteCommand } from '@/features/mailbox/components/command-palette';
 import {
   useInboxCounts,
@@ -81,7 +82,7 @@ import type {
   MailRole,
   Mailbox,
 } from '@/features/mailbox/types';
-import { isConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
+import { canComposeFrom, isConnectedMailbox } from '@/features/mailbox/utils/connected-mailbox';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -406,7 +407,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     /** The mailboxes a new message may be sent from; replies keep their own. */
     fromOptions?: readonly Mailbox[];
   } | null>(null);
-  const formatter = useDateTimeFormat();
+  // Quoted dates read in the zone the list shows, as the reader's do.
+  const formatter = useDateTimeFormat(timeZone);
   // The page's composer replaces the workspace; closing it gives the focus back.
   useComposeFocusReturn(draft?.draft.mode === 'compose');
   // Mounted from the first open on, so the dialog can animate closed.
@@ -608,7 +610,9 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     formatDate: (iso: string) => formatter.format(new Date(iso)),
   };
   const withSender = (build: (mailbox: Mailbox) => ComposeDraft) => {
-    if (openMailbox) setDraft({ mailbox: openMailbox, draft: build(openMailbox) });
+    if (openMailbox && canComposeFrom(openMailbox)) {
+      setDraft({ mailbox: openMailbox, draft: build(openMailbox) });
+    }
   };
   const navigation: InboxReaderNavigation = {
     onPrevious: openIndex > 0 ? () => setOpenParam(rows[openIndex - 1].id) : null,
@@ -660,7 +664,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         ? t('inbox.subtitle', { mailboxes: readable.length, roles: shownRoleCount })
         : t('inbox.subtitleMailboxes', { mailboxes: readable.length })
       : undefined;
-  const sendable = mailboxes.data.filter(mailbox => mailbox.access.send);
+  const sendable = mailboxes.data.filter(canComposeFrom);
   const sendableIds = new Set(sendable.map(mailbox => mailbox.id));
   // A new message starts from the narrowed mailbox when it may send, else the mailbox last
   // opened, else the first that may (D26).
@@ -965,33 +969,36 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       >
         {openItem ? (
           <Suspense fallback={<ReaderSkeleton />}>
-            <InboxReadingPane
-              key={openItem.id}
-              item={openItem}
-              access={openMailbox?.access ?? null}
-              externalProvider={externalProvider(openItem.mailbox_id)}
-              roleName={
-                openItem.role_id === null
-                  ? null
-                  : (roleList.find(role => role.id === openItem.role_id)?.name ?? null)
-              }
-              navigation={navigation}
-              onUnavailable={refreshListing}
-              actionsRef={paneActions}
-              triage={
-                triageCounts === null
-                  ? null
-                  : {
-                      menuOpen: triageMenuOpen,
-                      onMenuOpenChange: setTriageMenuOpen,
-                      onUseDraft: (message, body) =>
-                        withSender(() => {
-                          const reply = quotedReplyDraft(message, replyCopy);
-                          return { ...reply, body: `${body}\n\n${reply.body ?? ''}` };
-                        }),
-                    }
-              }
-            />
+            {/* The reader shows times in the list's zone, so a row and its mail agree. */}
+            <MailTimeZoneContext value={timeZone}>
+              <InboxReadingPane
+                key={openItem.id}
+                item={openItem}
+                access={openMailbox?.access ?? null}
+                externalProvider={externalProvider(openItem.mailbox_id)}
+                roleName={
+                  openItem.role_id === null
+                    ? null
+                    : (roleList.find(role => role.id === openItem.role_id)?.name ?? null)
+                }
+                navigation={navigation}
+                onUnavailable={refreshListing}
+                actionsRef={paneActions}
+                triage={
+                  triageCounts === null
+                    ? null
+                    : {
+                        menuOpen: triageMenuOpen,
+                        onMenuOpenChange: setTriageMenuOpen,
+                        onUseDraft: (message, body) =>
+                          withSender(() => {
+                            const reply = quotedReplyDraft(message, replyCopy);
+                            return { ...reply, body: `${body}\n\n${reply.body ?? ''}` };
+                          }),
+                      }
+                }
+              />
+            </MailTimeZoneContext>
           </Suspense>
         ) : (
           <div className="flex h-full min-h-48 flex-col items-center justify-center gap-5 px-6 text-center">
@@ -1064,7 +1071,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         </Suspense>
       ) : null}
 
-      {draft && draft.mailbox.access.send ? (
+      {draft && canComposeFrom(draft.mailbox) ? (
         <Suspense fallback={null}>
           <ComposeDialog
             mailbox={draft.mailbox}

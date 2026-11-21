@@ -73,6 +73,7 @@ import type {
   MailMessageSummary,
   Mailbox,
 } from '@/features/mailbox/types';
+import { canComposeFrom } from '@/features/mailbox/utils/connected-mailbox';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -375,7 +376,7 @@ function MailboxView({
   const reader: ReaderProps = {
     mailboxId: mailbox.id,
     mailboxAddress: mailbox.address,
-    canSend: mailbox.access.send,
+    canSend: canComposeFrom(mailbox),
     canOrganize: mailbox.access.organize,
     onPrevious: openIndex > 0 ? () => openRow(rows[openIndex - 1]) : null,
     onNext:
@@ -419,7 +420,7 @@ function MailboxView({
     }
   }
 
-  if (draft?.mode === 'compose' && mailbox.access.send) {
+  if (draft?.mode === 'compose' && canComposeFrom(mailbox)) {
     return (
       <ComposeDialog
         inline
@@ -449,7 +450,7 @@ function MailboxView({
             </Button>
           ) : null}
         </div>
-        {mailbox.access.send ? (
+        {canComposeFrom(mailbox) ? (
           <Button
             type="button"
             className="w-full"
@@ -538,7 +539,7 @@ function MailboxView({
         </section>
       </div>
 
-      {draft && mailbox.access.send ? (
+      {draft && canComposeFrom(mailbox) ? (
         <ComposeDialog
           mailbox={mailbox}
           draft={draft}
