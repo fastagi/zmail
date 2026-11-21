@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -37,8 +38,8 @@ func ParseID(c *gin.Context, param string) (uint, bool) {
 	idStr := c.Param(param)
 	// Resource IDs are positive; zero is malformed input, not a lookup.
 	id, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil || id == 0 {
-		response.BadRequest(c, "Invalid ID format", err)
+	if err != nil || id == 0 || uint64(uint(id)) != id {
+		response.BadRequest(c, "Invalid ID format", invalidParamError(param))
 		return 0, false
 	}
 	return uint(id), true
@@ -49,7 +50,7 @@ func ParseInt64ID(c *gin.Context, param string) (int64, bool) {
 	idStr := c.Param(param)
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		response.BadRequest(c, "Invalid ID format", err)
+		response.BadRequest(c, "Invalid ID format", invalidParamError(param))
 		return 0, false
 	}
 	return id, true
@@ -127,7 +128,7 @@ func BindJSON(c *gin.Context, obj any) bool {
 func BindQuery(c *gin.Context, obj any) bool {
 	useWireFieldNames()
 	if err := c.ShouldBindQuery(obj); err != nil {
-		response.BadRequest(c, "Invalid query parameters", err)
+		response.BadRequest(c, "Invalid query parameters", publicParameterError("query", err))
 		return false
 	}
 	return true
@@ -136,7 +137,7 @@ func BindQuery(c *gin.Context, obj any) bool {
 // BindURI binds URI parameters and sends error response if invalid.
 func BindURI(c *gin.Context, obj any) bool {
 	if err := c.ShouldBindUri(obj); err != nil {
-		response.BadRequest(c, "Invalid URI parameters", err)
+		response.BadRequest(c, "Invalid URI parameters", publicParameterError("path", err))
 		return false
 	}
 	return true
@@ -179,4 +180,21 @@ func QueryBool(c *gin.Context, key string, defaultVal bool) bool {
 		return defaultVal
 	}
 	return b
+}
+
+// invalidParamError is the stable, implementation-free detail for a malformed, zero, or
+// out-of-range numeric path parameter. Parser errors such as strconv.NumError never reach clients.
+func invalidParamError(param string) error {
+	return errors.New(param + " is invalid")
+}
+
+// publicParameterError replaces a query or path binding failure with a stable detail. Binding
+// errors carry Go parser and type names (strconv.ParseUint, struct fields), which are not part of
+// the public error contract.
+func publicParameterError(location string, err error) error {
+	var numeric *strconv.NumError
+	if errors.As(err, &numeric) {
+		return errors.New(location + " parameter is not a valid number")
+	}
+	return errors.New(location + " parameters are invalid")
 }
