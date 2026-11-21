@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { parseOptionalWebFeatures } from '@/config/optional-features';
 
@@ -27,6 +27,12 @@ const managedKeys = [
 ] as const;
 
 type MailboxRoute = typeof import('@/features/mailbox/server/mailbox-route');
+
+// The route module is large. Load it once up front so the first test does not spend its
+// five-second budget on a cold transform when the whole suite runs in parallel.
+beforeAll(async () => {
+  await import('@/features/mailbox/server/mailbox-route');
+}, 30_000);
 
 /** The `Organization-Id` every request of a test carries unless it names another. */
 let activeOrganization = '1';

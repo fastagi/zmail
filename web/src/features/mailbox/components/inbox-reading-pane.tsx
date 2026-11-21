@@ -2,7 +2,17 @@
 
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { type InfiniteData, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ChevronLeft, ChevronRight, Info } from 'lucide-react';
+import {
+  Archive,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Forward,
+  Info,
+  Reply,
+  ReplyAll,
+  Trash2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -29,6 +39,7 @@ import {
   useMarkMailMessageRead,
 } from '@/features/mailbox/hooks/use-mailbox';
 import type { InboxItem, InboxPage, MailMessage, Mailbox } from '@/features/mailbox/types';
+import { providerName } from '@/features/mailbox/utils/external-mail';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -95,6 +106,10 @@ function newestInbound(messages: readonly MailMessage[]): MailMessage | undefine
  * `roleName` names the mailbox's role in the line above the subject. While the mail can be read,
  * `actionsRef` holds what the keyboard may ask of it; its star stars the row (every message of a
  * thread), shown in the list at once and put back if the request fails.
+ *
+ * `externalProvider` names the connector of an `external` mailbox, null for Zmail's own. Its mail
+ * is a read-only copy: Reply, Reply all, and Forward never show (the API refuses to send from it),
+ * Archive and Delete show only with `organize`, and the bar says where the mail came from.
  */
 export function InboxReadingPane({
   item,
@@ -104,9 +119,11 @@ export function InboxReadingPane({
   onUnavailable,
   actionsRef,
   triage = null,
+  externalProvider = null,
 }: {
   item: InboxItem;
   access: Mailbox['access'] | null;
+  externalProvider?: string | null;
   roleName?: string | null;
   navigation: InboxReaderNavigation;
   onUnavailable: () => void;
@@ -133,6 +150,10 @@ export function InboxReadingPane({
   const gone = isMailGone(item.thread ? thread.error : detail.error);
   // Either the mailbox list already knows the view is gone, or the API just said so.
   const unavailable = !readable || gone;
+  const external = externalProvider !== null;
+  // A copy of an outside account is never answered from Zmail and moves only with `organize`.
+  const canReply = access?.send === true && !external;
+  const canMove = external ? access?.organize === true : access?.send === true;
   const marked = useRef<number | null>(null);
   const reported = useRef<number | null>(null);
 
@@ -257,7 +278,7 @@ export function InboxReadingPane({
       ...navigation,
       mailboxId: item.mailbox_id,
       mailboxAddress: item.mailbox_address,
-      canSend: access.send,
+      canSend: canReply,
       canOrganize: access.organize,
     };
     body = item.thread ? (
@@ -281,53 +302,73 @@ export function InboxReadingPane({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-[52px] shrink-0 items-center gap-3.5 border-b border-border-subtle px-3 text-xs text-text-muted sm:px-7">
+      <div className="@container flex h-[52px] shrink-0 items-center gap-2 border-b border-border-subtle px-3 text-xs text-text-muted sm:gap-3.5 sm:px-7">
         <Button
           type="button"
           size="sm"
           variant="ghost"
           icon={<ArrowLeft className="size-4" />}
           className="-ml-2 shrink-0 lg:hidden"
+          title={t('actions.back')}
           onClick={navigation.onClose}
         >
-          {t('actions.back')}
+          <span className="@max-xl:sr-only">{t('actions.back')}</span>
         </Button>
-        {!unavailable && access.send ? (
+        {!unavailable && (canReply || canMove) ? (
           <div
             role="toolbar"
             aria-label={t('inbox.actions.label')}
-            className="flex min-w-0 flex-1 items-center gap-3.5 overflow-x-auto"
+            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto @xl:gap-3.5"
           >
-            <ToolbarAction
-              label={t('actions.reply')}
-              keyCap="R"
-              disabled={!replyTarget}
-              onClick={reply}
-            />
-            <ToolbarAction
-              label={t('actions.replyAll')}
-              keyCap="A"
-              disabled={!replyTarget}
-              onClick={replyAll}
-            />
-            <ToolbarAction
-              label={t('actions.forward')}
-              keyCap="F"
-              disabled={!newest}
-              onClick={forward}
-            />
+            {canReply ? (
+              <>
+                <ToolbarAction
+                  label={t('actions.reply')}
+                  icon={<Reply className="size-4" />}
+                  keyCap="R"
+                  disabled={!replyTarget}
+                  onClick={reply}
+                />
+                <ToolbarAction
+                  label={t('actions.replyAll')}
+                  icon={<ReplyAll className="size-4" />}
+                  keyCap="A"
+                  disabled={!replyTarget}
+                  onClick={replyAll}
+                />
+                <ToolbarAction
+                  label={t('actions.forward')}
+                  icon={<Forward className="size-4" />}
+                  keyCap="F"
+                  disabled={!newest}
+                  onClick={forward}
+                />
+              </>
+            ) : null}
             <span className="flex-1" />
-            <ToolbarAction
-              label={t('inbox.actions.archive')}
-              keyCap="E"
-              onClick={() => void move('archive')}
-            />
-            <ToolbarAction
-              label={t('inbox.actions.trash')}
-              keyCap="#"
-              onClick={() => void move('trash')}
-            />
+            {canMove ? (
+              <>
+                <ToolbarAction
+                  label={t('inbox.actions.archive')}
+                  icon={<Archive className="size-4" />}
+                  keyCap="E"
+                  onClick={() => void move('archive')}
+                />
+                <ToolbarAction
+                  label={t('inbox.actions.trash')}
+                  icon={<Trash2 className="size-4" />}
+                  keyCap="#"
+                  onClick={() => void move('trash')}
+                />
+              </>
+            ) : null}
           </div>
+        ) : !unavailable && external ? (
+          <ReadOnlyNote
+            text={t('external.reader.readOnly', {
+              provider: providerName(externalProvider) || t('external.providerFallback'),
+            })}
+          />
         ) : (
           <span className="flex-1" />
         )}
@@ -363,7 +404,7 @@ export function InboxReadingPane({
           <InboxTriagePanel
             item={item}
             replyTarget={replyTarget}
-            canSend={access.send}
+            canSend={canReply}
             menuOpen={triage.menuOpen}
             onMenuOpenChange={triage.onMenuOpenChange}
             onUseDraft={triage.onUseDraft}
@@ -375,30 +416,48 @@ export function InboxReadingPane({
   );
 }
 
+/** Where a read-only copy came from; the full sentence shows on hover when it is cut short. */
+function ReadOnlyNote({ text }: { text: string }) {
+  return (
+    <p className="min-w-0 flex-1 truncate" title={text} data-reader-read-only="">
+      {text}
+    </p>
+  );
+}
+
 /** A labelled toolbar action with its key cap; the cap is not part of its name. */
 function ToolbarAction({
   label,
+  icon,
   keyCap,
   disabled = false,
   onClick,
 }: {
   label: string;
+  icon: ReactNode;
   keyCap: string;
   disabled?: boolean;
   onClick: () => void;
 }) {
+  // A narrow pane (below 36rem) shows each action as its icon, keeping the label as its name and
+  // tooltip, so Archive and Delete stay in view instead of scrolling off the bar.
   return (
     <button
       type="button"
       disabled={disabled}
+      title={`${label} (${keyCap})`}
       className={cn(
         'inline-flex shrink-0 items-center gap-1.5 rounded-md whitespace-nowrap text-text-muted focus-ring hover:text-text-main motion-reduce:transition-none',
+        '@max-xl:size-8 @max-xl:justify-center @max-xl:hover:bg-accent',
         'disabled:pointer-events-none disabled:opacity-50'
       )}
       onClick={onClick}
     >
-      {label}
-      <Kbd aria-hidden="true" className="max-md:hidden">
+      <span aria-hidden="true" className="@xl:hidden">
+        {icon}
+      </span>
+      <span className="@max-xl:sr-only">{label}</span>
+      <Kbd aria-hidden="true" className="@max-xl:hidden">
         {keyCap}
       </Kbd>
     </button>
