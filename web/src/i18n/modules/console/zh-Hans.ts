@@ -5,6 +5,8 @@ const messages = {
   notifications: '通知',
   profile: '个人资料',
   returnToSite: '返回站点',
+  navigation: '控制台导航',
+  openNavigation: '打开导航菜单',
   greeting: {
     hello: '你好，{name}',
     late: '夜深了，{name}',
