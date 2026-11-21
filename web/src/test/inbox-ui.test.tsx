@@ -26,6 +26,10 @@ beforeAll(async () => {
     import('@/features/mailbox/components/inbox-triage'),
     import('@/features/mailbox/components/command-palette'),
     import('@/components/ui/sheet'),
+    import('@/features/mailbox/components/external-connect-dialog'),
+    import('@/features/mailbox/components/external-reconnect-banner'),
+    import('@/features/mailbox/components/connected-mailboxes-dialog'),
+    import('@/features/mailbox/components/inbox-sidebar-connected'),
   ]);
 });
 
@@ -70,6 +74,15 @@ const state = vi.hoisted(() => {
     updateRole: mutation(),
     deleteRole: mutation(),
     assignRole: mutation(),
+    /** External mail: the instance's connectors, the caller's connections, and the sign-in. */
+    connectors: query(),
+    connections: query(),
+    begin: {
+      begin: vi.fn(),
+      isPending: false,
+      error: null as unknown,
+      reset: vi.fn(),
+    },
     /** Whether the `setting` feature runs; the user's settings come from `userSettings`. */
     settingsEnabled: false,
     userSettings: vi.fn(async (): Promise<unknown> => []),
@@ -143,6 +156,18 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', async importOriginal => ({
   useDeleteMailMessage: () => state.removeMessage,
   useSendMailMessage: () => state.send,
 }));
+vi.mock('@/features/mailbox/hooks/use-external-mail', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/features/mailbox/hooks/use-external-mail')>()),
+  useExternalMailConnectors: () => state.connectors,
+  useExternalMailConnections: (
+    _organizationId: number,
+    { enabled = true }: { enabled?: boolean } = {}
+  ) => (enabled ? state.connections : { ...state.connections, data: undefined }),
+}));
+vi.mock('@/features/mailbox/hooks/use-external-mail-actions', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/features/mailbox/hooks/use-external-mail-actions')>()),
+  useBeginExternalAuthorization: () => state.begin,
+}));
 // The role dialog counts each role's platform accounts; the ledger is not under test here.
 vi.mock('@/features/mailbox/hooks/use-platform-accounts', () => ({
   usePlatformAccountCount: () => ({ data: undefined }),
@@ -202,6 +227,10 @@ describe('unified inbox', () => {
     state.detail.data = message({ id: 12, mailbox_id: 1 });
     state.roles.data = [];
     state.members.data = page([]);
+    state.connectors.data = [];
+    state.connections.data = [];
+    state.begin.begin.mockReset();
+    state.begin.error = null;
     state.settingsEnabled = false;
     state.userSettings.mockReset();
     state.userSettings.mockResolvedValue([]);
@@ -280,6 +309,165 @@ describe('unified inbox', () => {
     // The mailbox workspace loads on demand.
     expect(await screen.findByTestId('mailbox-workspace')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 1, name: 'Inbox' })).not.toBeInTheDocument();
+  });
+
+  it('hides every external mailbox control while the instance lists no connector', () => {
+    renderRoute();
+
+    expect(screen.queryByRole('navigation', { name: 'Connected by me' })).not.toBeInTheDocument();
+    expect(
+      screen.queryAllByRole('button', { name: 'Add external mailbox' })
+    ).toHaveLength(0);
+    expect(within(groupsNav()).getByText('Mailboxes')).toBeInTheDocument();
+  });
+
+  it('splits team mailboxes from the ones the viewer connected, with status dots', async () => {
+    state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
+    state.mailboxes.data = [
+      mailbox(1, 'hello'),
+      mailbox(2, 'sales'),
+      externalMailbox(41, 'me@gmail.com'),
+      // An API with the origin field marks a connected mailbox `personal` + `connected`.
+      { ...externalMailbox(42, 'old@outlook.com'), type: 'personal', origin: 'connected' },
+      // Another member's external mailbox, which an admin sees with `administer` only.
+      { ...externalMailbox(43, 'them@gmail.com'), access: { ...noAccess(), administer: true } },
+    ];
+    state.connections.data = [
+      connection({ id: 1, mailbox_id: 41, account_address: 'me@gmail.com' }),
+      connection({
+        id: 2,
+        mailbox_id: 42,
+        provider: 'outlook',
+        account_address: 'old@outlook.com',
+        status: 'needs_reconnect',
+        last_error_code: 'external.auth_failed',
+      }),
+    ];
+    renderRoute();
+
+    const team = groupsNav();
+    expect(within(team).getByText('Team mailboxes')).toBeInTheDocument();
+    expect(within(team).queryByText(/gmail\.com|outlook\.com/u)).not.toBeInTheDocument();
+    const mine = (await screen.findAllByRole('navigation', { name: 'Connected by me' }))[0];
+    const active = within(mine).getByRole('button', {
+      name: 'me@gmail.com, Gmail, Syncing',
+    });
+    expect(active).toHaveAttribute('data-connection-status', 'active');
+    expect(active.querySelector('[data-status-dot="active"]')).toHaveClass('bg-success');
+    const broken = within(mine).getByRole('button', {
+      name: 'old@outlook.com, Outlook, Needs reconnecting',
+    });
+    expect(broken.querySelector('[data-status-dot="needs_reconnect"]')).toHaveClass('bg-warning');
+    expect(within(mine).queryByText('them@gmail.com')).not.toBeInTheDocument();
+
+    // A connected mailbox narrows the list to itself.
+    fireEvent.click(active);
+    expect(new URLSearchParams(window.location.search).get('box')).toBe('41');
+
+    // "Add external mailbox" opens the connect dialog with the instance's connectors.
+    fireEvent.click(within(mine).getByRole('button', { name: 'Add external mailbox' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add an external mailbox' });
+    expect(within(dialog).getByRole('button', { name: 'Gmail' })).toBeEnabled();
+  });
+
+  it('keeps connected mailboxes listed while connectors are off or connections are unknown', async () => {
+    // No connector offered, and the connections have not answered (pending or failed).
+    state.connectors.data = [];
+    state.connections.data = undefined;
+    state.mailboxes.data = [
+      mailbox(1, 'hello'),
+      { ...externalMailbox(42, 'old@outlook.com'), type: 'personal', origin: 'connected' },
+    ];
+    renderRoute();
+
+    const mine = (await screen.findAllByRole('navigation', { name: 'Connected by me' }))[0];
+    const row = within(mine).getByRole('button', { name: /old@outlook\.com/u });
+    expect(row.querySelector('[data-status-dot]')).toBeNull();
+    expect(within(mine).queryByRole('button', { name: 'Add external mailbox' })).toBeNull();
+    expect(
+      within(mine).queryByRole('button', { name: 'Manage connected mailboxes' })
+    ).toBeNull();
+    expect(within(groupsNav()).queryByText('old@outlook.com')).not.toBeInTheDocument();
+    fireEvent.click(row);
+    expect(new URLSearchParams(window.location.search).get('box')).toBe('42');
+  });
+
+  it('decorates a connected mailbox with its status once the connections answer', async () => {
+    state.connectors.data = [];
+    state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];
+    state.connections.data = [
+      connection({ id: 1, mailbox_id: 41, account_address: 'me@gmail.com', status: 'revoked' }),
+    ];
+    renderRoute();
+
+    const mine = (await screen.findAllByRole('navigation', { name: 'Connected by me' }))[0];
+    const row = within(mine).getByRole('button', { name: 'me@gmail.com, Gmail, Disconnected' });
+    expect(row.querySelector('[data-status-dot="revoked"]')).toHaveClass('bg-text-faint');
+    expect(within(mine).queryByRole('button', { name: 'Add external mailbox' })).toBeNull();
+  });
+
+  it('shows a one-time reconnect notice for a connection that lost its grant', async () => {
+    state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
+    state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];
+    state.connections.data = [
+      connection({
+        id: 5,
+        mailbox_id: 41,
+        account_address: 'me@gmail.com',
+        status: 'needs_reconnect',
+        last_synced_at: '2026-11-20T08:00:00Z',
+        last_error_code: 'external.auth_failed',
+      }),
+    ];
+    const { unmount } = renderRoute();
+
+    const notice = await screen.findByText('Your Gmail account needs reconnecting');
+    const banner = notice.closest('[role="status"]') as HTMLElement;
+    expect(banner).toHaveTextContent(/me@gmail\.com stopped syncing\. Last synced Nov 20, 2026/u);
+    fireEvent.click(within(banner).getByRole('button', { name: 'Reconnect' }));
+    expect(state.begin.begin).toHaveBeenCalledWith({
+      kind: 'reconnect',
+      provider: 'gmail',
+      connectionId: 5,
+    });
+
+    // Dismissed, the same failure stays quiet after a reload.
+    fireEvent.click(within(banner).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText('Your Gmail account needs reconnecting')).not.toBeInTheDocument();
+    unmount();
+    renderRoute();
+    await screen.findAllByRole('navigation', { name: 'Connected by me' });
+    expect(screen.queryByText('Your Gmail account needs reconnecting')).not.toBeInTheDocument();
+  });
+
+  it('reads mail of an external mailbox without Reply, Forward, or Archive', async () => {
+    state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
+    state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];
+    state.connections.data = [
+      connection({ id: 1, mailbox_id: 41, account_address: 'me@gmail.com' }),
+    ];
+    state.inbox.data = listing([
+      [
+        {
+          ...summary({ id: 70, mailbox_id: 41, subject: 'Shipped', source: 'gmail' }),
+          mailbox_address: 'me@gmail.com',
+          role_id: null,
+          snippet: 'Your order has shipped',
+        },
+      ],
+    ]);
+    state.detail.data = message({ id: 70, mailbox_id: 41, subject: 'Shipped', source: 'gmail' });
+    renderRoute();
+
+    fireEvent.click(rowButton('Shipped'));
+    await readingPaneLoaded();
+
+    const pane = screen.getByRole('region', { name: 'Reading pane' });
+    expect(within(pane).queryByRole('toolbar')).not.toBeInTheDocument();
+    for (const name of ['Reply', 'Reply all', 'Forward', 'Archive']) {
+      expect(within(pane).queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(within(pane).getByText(/Read-only copy from Gmail/u)).toBeInTheDocument();
   });
 
   it('opening a thread row loads the thread and marks it read', async () => {
@@ -1878,6 +2066,42 @@ function mailbox(
     unread_count: 0,
     created_at: now(),
     role_id: roleId,
+  };
+}
+
+function noAccess() {
+  return {
+    view: false,
+    send: false,
+    manage_members: false,
+    administer: false,
+    see_history: false,
+    organize: false,
+  };
+}
+
+/** The viewer's own external mailbox: they read it; nobody sends from it or organizes it. */
+function externalMailbox(id: number, address: string) {
+  return {
+    ...mailbox(id, 'external'),
+    address,
+    type: 'external',
+    owner_user_id: 1,
+    access: { ...noAccess(), view: true, see_history: true },
+  };
+}
+
+function connection(overrides: Record<string, unknown>) {
+  return {
+    id: 1,
+    provider: 'gmail',
+    account_address: 'me@gmail.com',
+    mailbox_id: 41,
+    status: 'active',
+    last_synced_at: '2026-11-20T08:00:00Z',
+    last_error_code: null,
+    created_at: '2026-11-19T08:00:00Z',
+    ...overrides,
   };
 }
 

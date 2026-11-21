@@ -11,6 +11,7 @@ import {
   optional,
   positive,
   record,
+  regex,
   strictObject,
   string,
   looseObject,
@@ -285,6 +286,11 @@ export const mailDnsRecordPatchSchema = strictObject({
 export const mailboxTypeSchema = union([literal('personal'), literal('shared')]);
 /** Every type the API reports; `external` holds read-only copies of a member's bound account. */
 export const mailboxKindSchema = union([literal('personal'), literal('shared'), literal('external')]);
+/**
+ * Where a mailbox comes from: `zmail` for Zmail's own, `connected` for a member's bound outside
+ * account. Optional until every API emits it; older APIs mark a connected mailbox `external`.
+ */
+export const mailboxOriginSchema = union([literal('zmail'), literal('connected')]);
 
 /** AI triage categories; `review` means the model could not decide (`contracts/MAILBOXES.md`). */
 export const MAIL_TRIAGE_CATEGORIES = ['reply', 'deadline', 'fyi', 'review'] as const;
@@ -337,6 +343,7 @@ export const mailboxSchema = strictObject({
   created_at: timestampSchema,
   // The mail role the mailbox belongs to; null when ungrouped. Optional until every API emits it.
   role_id: optional(nullable(safeIdSchema)),
+  origin: optional(mailboxOriginSchema),
 });
 export const mailboxListSchema = array(mailboxSchema);
 
@@ -375,8 +382,11 @@ export const MAIL_LABEL_COLORS = [
 ] as const;
 
 /** The fields every listing shares, the log included. */
-/** `zmail` for Zmail's own mail; `gmail` and `outlook` for read-only copies of a bound account. */
-export const mailSourceSchema = union([literal('zmail'), literal('gmail'), literal('outlook')]);
+/**
+ * `zmail` for Zmail's own mail; otherwise the id of the connector that synced a read-only copy of a
+ * bound account, such as `gmail` or `outlook`. New connectors add ids without a contract change.
+ */
+export const mailSourceSchema = string().check(regex(/^[a-z][a-z0-9_]{1,15}$/u));
 
 const logSummaryShape = {
   id: safeIdSchema,

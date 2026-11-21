@@ -106,8 +106,13 @@ recorded but has no special rights to it. A removed member loses access on their
 | Delete a platform account | `DELETE /api/platform-accounts/:accountId` | `DELETE /v1/platform-accounts/:account_id` | `204` |
 | Platform account history | `GET /api/platform-accounts/:accountId/events` | `GET /v1/platform-accounts/:account_id/events` | Paginated envelope |
 | Hand over platform accounts | `POST /api/platform-account-handovers` | `POST /v1/platform-account-handovers` | `201` envelope |
+| List the connectors accounts can be bound with | none yet | `GET /v1/external-mail-connectors` | `200` envelope, at most 32 items |
+| Start binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations` | `201` |
+| Finish binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations/completions` | `201` new, `200` restored |
 | List the caller's external mailboxes | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 10 items |
 | Unbind an external mailbox | none yet | `DELETE /v1/external-mail-connections/:connection_id` | `204` |
+| List a connection's latest sync runs | none yet | `GET /v1/external-mail-connections/:connection_id/sync-runs` | `200` envelope, at most 50 items |
+| Delete a revoked connection's copies at once | none yet | `POST /v1/external-mail-connections/:connection_id/purges` | `200` done, `202` finishing in the background |
 | Send with an API key | none | `POST /v1/outbound-mail-messages` | `201`, or `200` for a repeat |
 | Get a sent message with an API key | none | `GET /v1/outbound-mail-messages/:message_id` | `200` envelope |
 | Send a transactional message | none | `POST /v1/transactional-messages` | `202`, or `200` for a repeat |
@@ -695,18 +700,98 @@ no platform account.
 
 ## External Mailboxes
 
-A member can bind an outside Gmail or Outlook account read-only. Its mail is copied into an
-`external` mailbox the member owns alone (see [Access](#access)); every copy is inbound, `received`,
-and carries `source` `gmail` or `outlook`, and the provider's receive time as `created_at`. A copy is
-stored once per mailbox and provider message id, so a reconnect or a repeated fetch never adds a
-second one. The first sync looks back 14 days.
+A member can bind an outside account read-only through a **connector**: Gmail, Outlook, or any
+provider the instance adds later. Its mail is copied into an `external` mailbox the member owns
+alone (see [Access](#access)); every copy is inbound, `received`, carries the connector id as
+`source` (`gmail`, `outlook`, ...), and the provider's receive time as `created_at`. A copy is stored
+once per mailbox and provider message id, so a reconnect or a repeated fetch never adds a second
+one. The first sync looks back 14 days unless the binding asked for 1 to 90.
 
-Binding itself (the OAuth flow) is not available yet. While the instance enables no source
-(`EXTERNAL_MAIL_PROVIDERS` empty, the default) both routes below answer
-`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` and no account is synced.
+Connector ids match `^[a-z][a-z0-9_]{1,15}$`; a new connector adds ids without a contract change, so
+clients render an id they do not know generically. An external mailbox carries the outside account's
+address, but that address is never Zmail's to deliver to: inbound delivery, sending, and the address
+directory ignore external mailboxes, and two members may each bind their own copy of an address.
 
-`GET /v1/external-mail-connections` lists the caller's own connections in the organization, id
-ascending, at most 10; it never carries a token:
+Every newly stored message, delivered by Zmail or synced, goes through the same post-store step in
+the transaction that stores it: it is queued for [AI triage](#ai-triage) when the switches allow,
+and announced as `mail.message.received` (webhooks still publish for shared mailboxes only). Only an
+external mailbox's owner may switch triage on for it.
+
+While the instance enables no connector (`EXTERNAL_MAIL_PROVIDERS` empty, the default) the connector
+list is empty, starting a sign-in answers `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`, the connection
+routes answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, and no account is synced.
+
+### Binding
+
+`GET /v1/external-mail-connectors` lists the instance's connectors in a stable order:
+`{ "id": "gmail", "auth_kind": "oauth2", "capabilities": { "read": true } }`.
+
+`POST /v1/external-mail-authorizations` with `{ "provider": "gmail" }` (optionally
+`"backfill_days"`) starts a sign-in; with `{ "connection_id": 3 }` it reconnects that connection,
+which must be the caller's own. It stores a pending sign-in, single use and valid for 10 minutes,
+holding only the SHA-256 of a random `state` and the sealed PKCE verifier, and answers `201`
+`{ "authorization_url", "expires_at" }`. The browser goes to `authorization_url`; the provider sends
+it back to `EXTERNAL_MAIL_REDIRECT_URL` with `state` and `code`.
+
+`POST /v1/external-mail-authorizations/completions` with `{ "state", "code" }` uses the pending
+sign-in up, whatever the outcome, then exchanges the code with the PKCE verifier:
+
+| Account signed in to | Result |
+|---|---|
+| New in the organization for this connector | `201`: a private, read-only `external` mailbox and an active connection, synced at once |
+| The caller's own connection, in any state | `200`: the same connection, active, error cleared, synced at once; mailbox and history kept (a `revoked` one backfills again, without copies) |
+| A reconnect that signed in to another account | `409 MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`; nothing changes |
+| Bound by another member | `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` |
+| A new account past the caller's 10 | `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT` |
+
+On a `409` the grant is handed back to the provider. A refused code is
+`422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`; an unknown, expired, used, or another member's `state`
+is `404 MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`. Both routes are session only and never cached.
+
+### Binding With An App Password
+
+Connectors whose `auth_kind` is `password` never redirect: the generic `imap` connector (enabled by
+`imap` in `EXTERNAL_MAIL_PROVIDERS`) reads INBOX of any provider that offers IMAP over TLS and app
+passwords, such as iCloud, Yahoo, Fastmail, QQ, 163, or a self-hosted server.
+
+`POST /v1/external-mail-credentials` takes
+`{ "provider": "imap", "host", "port"?, "username", "password", "backfill_days"? }`.
+Before anything is stored the server signs in once over implicit TLS on port 993 (the only port
+accepted) with a verified certificate, and opens INBOX read-only, within 45 seconds in all. A host
+that resolves to a loopback, private, shared, benchmarking, reserved, link-local, multicast, or
+unspecified address, or to an IPv6 form embedding an IPv4 address (NAT64, 6to4, IPv4-compatible), is
+refused.
+
+The bound account is never named by the caller: it is the lowercased `username` when it contains
+`@`, otherwise `username@host`. The sealed grant keeps the lowercased host, and restoring a
+connection with credentials for another host starts its backfill over. The outcomes are those of a
+completed sign-in: `201` for a new account, `200` for the caller's own connection restored with the
+new password, `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`, and `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT`. In
+addition:
+
+| Failure | Result |
+|---|---|
+| The server refused the username or password | `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED` |
+| The host does not resolve, is not allowed, does not answer over TLS in time, its certificate does not verify, or the server refused the login for a transient reason (`UNAVAILABLE`, `LIMIT`, `INUSE`, `SERVERBUG`, `CONTACTADMIN`, or a `BAD`) | `422 MAILBOX.EXTERNAL_SERVER_UNREACHABLE` |
+| A value carries a control character, or `backfill_days` is out of range | `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID` |
+| More than 10 attempts by the member in 15 minutes, or 30 by the organization's members in an hour | `429 COMMON.RATE_LIMITED` with `Retry-After` |
+| The connector is not enabled or binds with OAuth | `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE` |
+
+The password is sealed at rest with the connection's grant, never logged, never returned, and never
+written to audit metadata. The sync reads INBOX only and never changes the account: messages are
+fetched with `BODY.PEEK`, and a message larger than 5 MiB is skipped. One sync of a connection takes
+at most 45 seconds and bounds the bytes it accepts; a message the server fails to deliver is retried
+on its own once and then skipped, so it never blocks the mailbox. Copies carry `source` `imap` and
+are known by their Message-ID, so a mailbox the provider rebuilds (a new UIDVALIDITY) is read again
+from the backfill window without second copies. Only a refused login without a transient reason
+moves the connection to `needs_reconnect`; posting the credentials again restores it. Unbinding erases the stored password; revoking the app password itself is done at
+the provider. The route is session only and never cached.
+
+### Connections
+
+`GET /v1/external-mail-connections` lists the caller's own connections in the organization, live
+ones first and then id ascending, at most 10; it never carries a token. Revoked connections are kept
+so a rebind restores the same mailbox, and do not count toward the limit of 10:
 
 ```json
 { "id": 3, "provider": "gmail", "account_address": "me@gmail.com", "mailbox_id": 41,
@@ -717,17 +802,124 @@ ascending, at most 10; it never carries a token:
 | `status` | Meaning |
 |---|---|
 | `active` | Synced every two minutes |
-| `needs_reconnect` | The provider refused the grant (`last_error_code` `external.auth_failed`); syncing stops until the member binds the account again |
+| `needs_reconnect` | The provider refused the grant (`last_error_code` `external.auth_failed`); syncing stops until the member reconnects |
 | `revoked` | Unbound; never synced again |
 
 A provider failure that is not about the grant keeps the connection `active` with
-`last_error_code` `external.fetch_failed` and retries at the next interval.
+`last_error_code` `external.fetch_failed` and retries with exponential backoff: two minutes after
+the first failure in a row, then 4, 8, 16, 32 minutes, and at most one hour, each less up to a fifth
+of random jitter. A successful fetch resets the backoff to the two-minute interval. A connection whose
+connector the instance no longer runs stays `active` with its grant and records
+`external.provider_unavailable` until the connector is enabled again.
 
 `DELETE /v1/external-mail-connections/:connection_id` unbinds: the member who bound the account, or
 an `owner` or `admin`, may. The grant is revoked at the provider on a best-effort basis, the stored
 token is erased, and syncing stops for good, including a fetch already running. Mail already synced
-stays in the external mailbox. Unbinding a revoked connection answers `204` again. Another member's
+stays in the external mailbox until the retention below ends or the member purges it. Unbinding a
+revoked connection answers `204` again. A member who leaves the organization has every connection there revoked the same way at once:
+the accounts are their own, so nothing awaits a handover, and the copies stay readable by nobody.
+Binding the account again after rejoining restores the same mailbox without copies. Another member's
 connection and another organization's id are `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+
+### Outlook
+
+The `outlook` connector runs when `EXTERNAL_MAIL_PROVIDERS` lists it and its OAuth client is set
+(`EXTERNAL_MAIL_OUTLOOK_CLIENT_ID`, `EXTERNAL_MAIL_OUTLOOK_CLIENT_SECRET`, and
+`EXTERNAL_MAIL_OUTLOOK_TENANT`, `common` by default). It signs in through the Microsoft identity
+platform with the delegated scopes `offline_access Mail.Read User.Read openid email` and binds the
+account's `mail` address, or its user principal name when it has none. It syncs the Inbox through
+Microsoft Graph message delta; Sent Items, Drafts, Deleted Items, and Junk Email are not synced, and
+neither are drafts. A message removed at Microsoft stays in the external mailbox. Graph returns at
+most about 5,000 messages in the first sync's look-back, so the first sync of a busier Inbox may
+stop short of it; later syncs read every new message. A body over 256 KiB is cut there, and a message whose
+body Graph cannot return within the connector's bound is kept with its headers only. Unbinding erases
+the stored grant; Microsoft has no per-grant revocation, so the member removes the app's consent in
+their Microsoft account to end it there as well.
+
+### Gmail
+
+The `gmail` connector signs in on Google's consent page with the read-only Gmail scope and offline
+access. The first sync copies the backfill window newest first, a page at a time, and then follows
+the account's history from where the backfill began, so mail that arrives during the backfill is
+not missed. Only inbound mail is copied: drafts, spam, trash, and sent mail that is not also in the
+inbox are skipped; mail moved out of spam into the inbox is copied then. When Google no longer
+replays the history, the sync starts the backfill over without copies. Only a grant Google refuses
+or one that lost access to the mailbox moves the connection to `needs_reconnect`; rate limits,
+quotas, outages, and a misconfigured OAuth client are retried at the next interval.
+
+### Sync Budget
+
+Each pass of the `mail:external:sync` worker takes due connections round-robin across providers:
+the oldest due connection of every provider, then the second of every provider, and so on, and at
+most `EXTERNAL_MAIL_PROVIDER_FETCHES_PER_PASS` (20 by default) of one provider. One provider's
+outage or one large backfill therefore never starves the others. Each fetch has its own deadline,
+`EXTERNAL_MAIL_FETCH_TIMEOUT` (60 seconds by default): a fetch that hits it is `fetch_failed`, backs
+off, and the pass moves on to the next connection. A connection whose provider has another page
+ready is fetched again at once, for at most `EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES` (20 by default)
+pages in a row; after that each further page waits `EXTERNAL_MAIL_MIN_FETCH_SPACING` (5 seconds by
+default), so one backfill cannot monopolize the worker. A connection whose cursor the provider no
+longer honors starts over from an empty cursor at once; the restart counts toward the same bound.
+
+### Sync Runs
+
+Every fetch records one sync run, in the transaction that saves its result. A run holds times,
+counts, and codes, never message data. The worker keeps a connection's latest 50 runs and none older
+than 14 days.
+
+`GET /v1/external-mail-connections/:connection_id/sync-runs` lists the latest runs of the caller's
+own connection, newest first, at most 50. Anyone else, an `owner` or `admin` included, gets
+`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached:
+
+```json
+{ "id": 912, "started_at": "2026-11-20T08:00:00Z", "finished_at": "2026-11-20T08:00:01Z",
+  "outcome": "ok", "fetched_count": 25, "stored_count": 24, "more": true, "error_code": null,
+  "timed_out": false, "throttled": false }
+```
+
+| `outcome` | Meaning | `error_code` |
+|---|---|---|
+| `ok` | A page was saved | `null` |
+| `auth_failed` | The provider refused the grant; the connection needs reconnecting | `external.auth_failed` |
+| `fetch_failed` | Any other provider failure; the next attempt backs off | `external.fetch_failed` |
+| `cursor_expired` | The provider no longer honored the cursor; the sync starts over within the backfill window without repeating stored copies | `null` |
+| `provider_unavailable` | The instance no longer runs the connector | `external.provider_unavailable` |
+| `dropped` | The connection was revoked or lost its grant while the fetch ran; nothing fetched was stored | `null` |
+
+`fetched_count` is how many messages the provider returned and `stored_count` how many were new;
+`more` says the provider had another page ready. `timed_out` marks a `fetch_failed` fetch that hit
+its deadline, and `throttled` a page after which the next one waits the spacing because the
+connection already fetched the most pages in a row allowed at once.
+
+### Retention Of Revoked Copies
+
+Revoking a connection, by its member, an `owner` or `admin`, or because the member left the
+organization, starts a retention of `EXTERNAL_MAIL_REVOKED_RETENTION` (720 hours, 30 days, by
+default; at least 24 hours, written as a duration such as `720h` or a day count such as `90d`; a
+value that does not parse stops startup). Binding the same account again before it ends keeps the
+mailbox and its copies and cancels the deletion. When it ends, the mail worker (`mail:broadcast:work`
+ticks, which run whenever the mailbox starter is on, with or without `EXTERNAL_MAIL_PROVIDERS`)
+deletes the copies for good in bounded batches, then deletes
+the external mailbox and the connection with its sync runs, and stores a `copies_purged` access
+event on the deleted mailbox with `{ "connection_id", "provider", "reason": "retention" }`, the
+member who bound the account as its subject. The event is an audit record: the access history route
+of a deleted mailbox answers `404`, so it is never listed. Binding the account afterwards starts a
+new mailbox.
+
+`POST /v1/external-mail-connections/:connection_id/purges` deletes the copies of the caller's own
+revoked connection at once, the same way, with `reason` `owner` and the caller as the actor:
+
+| Case | Answer |
+|---|---|
+| Every copy, the mailbox, and the connection are deleted | `200` `{ "deleted_messages": 120, "completed": true }` |
+| More copies than one request deletes | `202` `{ "deleted_messages": 5000, "completed": false }`: the rest is due at once and the worker deletes it in its next passes |
+| The connection is not revoked | `409 MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` |
+| Another member's connection, an `owner` or `admin` included | `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` |
+
+The route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never
+strands copies. A purge only ever touches the connection's own mailbox, and only when that mailbox
+holds synced copies; a purge that fails is logged and retried an hour later without holding up the
+connections revoked after it. A claimed connection whose mailbox is gone is not fetched: its grant
+is handed back, it is revoked, and its run is recorded as `dropped`.
 
 ## Domains
 
@@ -2402,6 +2594,7 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.TRIAGE_UNAVAILABLE` | 409 |
 | `MAILBOX.TRIAGE_MODEL_FAILED` | 502 |
 | `MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` | 404 |
+| `MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED` | 409 |
 
 ### Organization Cloudflare discovery
 

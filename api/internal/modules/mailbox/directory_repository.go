@@ -111,7 +111,8 @@ func (r *repository) MailboxAddressUsed(ctx context.Context, address string) (bo
 	}
 	var count int64
 	if err := r.conn(ctx).Unscoped().Model(&MailboxPO{}).
-		Where("address = ?", strings.ToLower(strings.TrimSpace(address))).Count(&count).Error; err != nil {
+		Where("address = ? AND type <> ?", strings.ToLower(strings.TrimSpace(address)), string(domain.MailboxTypeExternal)).
+		Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil

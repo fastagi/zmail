@@ -263,6 +263,10 @@ type Service interface {
 	TriageService
 	// ExternalMailService lists and revokes bound external mailboxes.
 	ExternalMailService
+	// ExternalMailBindingService binds and reconnects outside accounts.
+	ExternalMailBindingService
+	// ExternalMailOpsService shows a connection's sync history and purges revoked copies.
+	ExternalMailOpsService
 	// ListLog lists messages across the mailboxes the viewer may read.
 	ListLog(ctx context.Context, viewer domain.OrganizationContext, filter domain.MailLogFilter) ([]*domain.MailMessage, int64, error)
 	// Stats returns one entry per UTC day for the last days days, oldest first, including empty
@@ -359,8 +363,11 @@ type service struct {
 	triageModel TriageModel
 	// externalMail stores external mail connections; nil when repo does not implement it.
 	externalMail domain.ExternalMailRepository
-	// externalSource reads outside mailboxes; settings.ExternalMail selects it.
-	externalSource ExternalMailSource
+	// externalConnectors are the providers outside mailboxes can be bound with; settings.ExternalMail
+	// selects them.
+	externalConnectors *externalMailRegistry
+	// externalCredentialLimits bound password bindings per member and per organization.
+	externalCredentialLimits externalCredentialLimits
 }
 
 var _ Service = (*service)(nil)
@@ -423,7 +430,8 @@ func NewService(
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
 		recordAudit: auditstarter.RecordChange,
 		triage:      triage, triageModel: newTriageModel(settings.Triage),
-		externalMail: externalMail, externalSource: newExternalMailSource(settings.ExternalMail),
+		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
+		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 	}
 }
 
@@ -1285,13 +1293,7 @@ func (s *service) ReceiveInbound(ctx context.Context, delivery InboundDelivery) 
 		if created, createErr = s.repo.CreateInboundMessage(tx, message); createErr != nil || !created {
 			return nil, createErr
 		}
-		if enqueueErr := s.enqueueTriage(tx, message); enqueueErr != nil {
-			return nil, enqueueErr
-		}
-		notification := mailNotificationFor(mailbox, message)
-		notification.Type = WebhookMailReceived
-		notification.OccurredAt = s.now().UTC()
-		return []MailNotification{notification}, nil
+		return s.afterInboundStored(tx, mailbox, message)
 	})
 	if err != nil {
 		return nil, false, err
@@ -1343,4 +1345,18 @@ func sendFingerprint(to, cc []string, subject, text, html, inReplyTo, attachment
 		write(attachments)
 	}
 	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// afterInboundStored is the one post-store step of every newly stored inbound message, whatever
+// its source: Zmail delivery or a synced outside account. It runs in the storing transaction, so
+// a message is queued for triage and announced exactly when it is stored. Consumers of new mail
+// (triage, webhooks, and later agent grants) attach here and nowhere else.
+func (s *service) afterInboundStored(tx context.Context, mailbox *domain.Mailbox, message *domain.MailMessage) ([]MailNotification, error) {
+	if err := s.enqueueTriage(tx, message); err != nil {
+		return nil, err
+	}
+	notification := mailNotificationFor(mailbox, message)
+	notification.Type = WebhookMailReceived
+	notification.OccurredAt = s.now().UTC()
+	return []MailNotification{notification}, nil
 }

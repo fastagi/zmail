@@ -201,7 +201,8 @@ func (r *repository) FindMailboxByAddress(ctx context.Context, address string) (
 		return nil, domain.ErrServiceUnavailable
 	}
 	var po MailboxPO
-	if err := r.conn(ctx).Where("address = ?", strings.ToLower(address)).First(&po).Error; err != nil {
+	// External mailboxes carry an outside account's address and never take delivery.
+	if err := r.conn(ctx).Where("address = ? AND type <> ?", strings.ToLower(address), string(domain.MailboxTypeExternal)).First(&po).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrMailboxNotFound
 		}
