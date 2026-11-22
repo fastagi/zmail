@@ -335,6 +335,21 @@ export function useRevokeOrganizationInvitation(organizationId: number) {
   });
 }
 
+export function useResendOrganizationInvitation(organizationId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (invitationId: number) =>
+      organizationService.resendInvitation(organizationId, invitationId),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: () => {
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.invitations(organizationId),
+      });
+    },
+  });
+}
+
 export function useAcceptOrganizationInvitation() {
   const queryClient = useQueryClient();
 

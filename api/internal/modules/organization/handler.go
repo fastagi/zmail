@@ -233,6 +233,32 @@ func (h *Handler) RevokeInvitation(c *gin.Context) {
 	response.NoContent(c)
 }
 
+// ResendInvitation emails a pending invitation again with a fresh one-time link.
+func (h *Handler) ResendInvitation(c *gin.Context) {
+	userID, ok := handler.GetUserID(c)
+	if !ok {
+		return
+	}
+	organizationID, ok := handler.ParseID(c, "id")
+	if !ok {
+		return
+	}
+	invitationID, ok := handler.ParseID(c, "invitation_id")
+	if !ok {
+		return
+	}
+
+	result, err := h.service.ResendInvitation(c.Request.Context(), userID, organizationID, invitationID)
+	if err != nil {
+		response.HandleError(c, "Failed to resend organization invitation", err)
+		return
+	}
+	response.Created(c, &CreateOrganizationInvitationResponse{
+		Invitation:      toInvitationResponse(result.Invitation, time.Now().UTC()),
+		EmailSendStatus: result.EmailSendStatus,
+	})
+}
+
 // AcceptInvitation creates membership and consumes a one-time invitation token atomically.
 func (h *Handler) AcceptInvitation(c *gin.Context) {
 	userID, ok := handler.GetUserID(c)

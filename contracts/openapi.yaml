@@ -891,6 +891,38 @@ paths:
             is absent or no longer pending (accepted, revoked, or expired).'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/organizations/{organization_id}/invitations/{invitation_id}/emails:
+    post:
+      operationId: resendOrganizationInvitationEmail
+      summary: Email a pending invitation again with a fresh one-time link
+      description: Issues a new token and expiry, so earlier links stop working, then makes one send attempt.
+      tags:
+        - Organizations
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationID'
+        - $ref: '#/components/parameters/OrganizationInvitationID'
+      responses:
+        '201':
+          description: The reissued invitation and the synchronous email send attempt status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationInvitationCreateResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: '`PERMISSION.DENIED`: only `owner` and `admin` manage invitations.'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: '`ORGANIZATION.NOT_FOUND`, or `ORGANIZATION.INVITATION.NOT_FOUND` when the invitation
+            is absent or no longer pending (accepted, revoked, or expired).'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/organizations/{organization_id}/members:
     get:
       operationId: listOrganizationMembers
@@ -11399,6 +11431,8 @@ components:
         - role
         - status
         - expires_at
+        - email_send_status
+        - email_attempted_at
         - created_at
         - updated_at
       properties:
@@ -11416,6 +11450,16 @@ components:
           $ref: '#/components/schemas/OrganizationInvitationStatus'
         expires_at:
           type: string
+          format: date-time
+        email_send_status:
+          description: Latest email attempt; null when unknown (created before attempts were recorded).
+          oneOf:
+            - $ref: '#/components/schemas/OrganizationInvitationEmailSendStatus'
+            - type: 'null'
+        email_attempted_at:
+          type:
+            - string
+            - 'null'
           format: date-time
         created_at:
           type: string

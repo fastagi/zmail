@@ -62,6 +62,10 @@ type OrganizationInvitationPO struct {
 	Inviter        user.UserPO    `gorm:"foreignKey:InvitedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
 	Acceptor       *user.UserPO   `gorm:"foreignKey:AcceptedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
 	Revoker        *user.UserPO   `gorm:"foreignKey:RevokedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+
+	// Latest invitation email attempt; NULL when unknown.
+	EmailSendStatus  *string `gorm:"size:32"`
+	EmailAttemptedAt *time.Time
 }
 
 // TableName returns the stable organization invitation table name.
@@ -102,20 +106,29 @@ func newInvitationPO(invitation *domain.OrganizationInvitation) *OrganizationInv
 		return nil
 	}
 	return &OrganizationInvitationPO{
-		ID:             invitation.ID,
-		OrganizationID: invitation.OrganizationID,
-		InvitedBy:      invitation.InvitedBy,
-		Email:          invitation.Email,
-		Role:           string(invitation.Role),
-		TokenHash:      invitation.TokenHash,
-		ExpiresAt:      invitation.ExpiresAt,
-		AcceptedAt:     invitation.AcceptedAt,
-		AcceptedBy:     invitation.AcceptedBy,
-		RevokedAt:      invitation.RevokedAt,
-		RevokedBy:      invitation.RevokedBy,
-		CreatedAt:      invitation.CreatedAt,
-		UpdatedAt:      invitation.UpdatedAt,
+		ID:               invitation.ID,
+		OrganizationID:   invitation.OrganizationID,
+		InvitedBy:        invitation.InvitedBy,
+		Email:            invitation.Email,
+		Role:             string(invitation.Role),
+		TokenHash:        invitation.TokenHash,
+		ExpiresAt:        invitation.ExpiresAt,
+		AcceptedAt:       invitation.AcceptedAt,
+		AcceptedBy:       invitation.AcceptedBy,
+		RevokedAt:        invitation.RevokedAt,
+		RevokedBy:        invitation.RevokedBy,
+		EmailSendStatus:  optionalString(invitation.EmailSendStatus),
+		EmailAttemptedAt: invitation.EmailAttemptedAt,
+		CreatedAt:        invitation.CreatedAt,
+		UpdatedAt:        invitation.UpdatedAt,
 	}
+}
+
+func optionalString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func (po *OrganizationPO) toDomain() *domain.Organization {
@@ -161,18 +174,27 @@ func (po *OrganizationInvitationPO) toDomain() *domain.OrganizationInvitation {
 		return nil
 	}
 	return &domain.OrganizationInvitation{
-		ID:             po.ID,
-		OrganizationID: po.OrganizationID,
-		InvitedBy:      po.InvitedBy,
-		Email:          po.Email,
-		Role:           domain.OrganizationRole(po.Role),
-		TokenHash:      po.TokenHash,
-		ExpiresAt:      po.ExpiresAt,
-		AcceptedAt:     po.AcceptedAt,
-		AcceptedBy:     po.AcceptedBy,
-		RevokedAt:      po.RevokedAt,
-		RevokedBy:      po.RevokedBy,
-		CreatedAt:      po.CreatedAt,
-		UpdatedAt:      po.UpdatedAt,
+		ID:               po.ID,
+		OrganizationID:   po.OrganizationID,
+		InvitedBy:        po.InvitedBy,
+		Email:            po.Email,
+		Role:             domain.OrganizationRole(po.Role),
+		TokenHash:        po.TokenHash,
+		ExpiresAt:        po.ExpiresAt,
+		AcceptedAt:       po.AcceptedAt,
+		AcceptedBy:       po.AcceptedBy,
+		RevokedAt:        po.RevokedAt,
+		RevokedBy:        po.RevokedBy,
+		EmailSendStatus:  derefString(po.EmailSendStatus),
+		EmailAttemptedAt: po.EmailAttemptedAt,
+		CreatedAt:        po.CreatedAt,
+		UpdatedAt:        po.UpdatedAt,
 	}
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

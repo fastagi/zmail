@@ -99,8 +99,11 @@ type OrganizationInvitationResponse struct {
 	Role           domain.OrganizationRole             `json:"role"`
 	Status         domain.OrganizationInvitationStatus `json:"status"`
 	ExpiresAt      time.Time                           `json:"expires_at"`
-	CreatedAt      time.Time                           `json:"created_at"`
-	UpdatedAt      time.Time                           `json:"updated_at"`
+	// EmailSendStatus and EmailAttemptedAt describe the latest email attempt; null when unknown.
+	EmailSendStatus  *InvitationEmailSendStatus `json:"email_send_status"`
+	EmailAttemptedAt *time.Time                 `json:"email_attempted_at"`
+	CreatedAt        time.Time                  `json:"created_at"`
+	UpdatedAt        time.Time                  `json:"updated_at"`
 }
 
 // CreateOrganizationInvitationResponse keeps resource state separate from the email attempt.
@@ -245,13 +248,23 @@ func toInvitationResponse(invitation *domain.OrganizationInvitation, now time.Ti
 		return nil
 	}
 	return &OrganizationInvitationResponse{
-		ID:             invitation.ID,
-		OrganizationID: invitation.OrganizationID,
-		Email:          invitation.Email,
-		Role:           invitation.Role,
-		Status:         invitation.Status(now),
-		ExpiresAt:      invitation.ExpiresAt,
-		CreatedAt:      invitation.CreatedAt,
-		UpdatedAt:      invitation.UpdatedAt,
+		ID:               invitation.ID,
+		OrganizationID:   invitation.OrganizationID,
+		Email:            invitation.Email,
+		Role:             invitation.Role,
+		Status:           invitation.Status(now),
+		ExpiresAt:        invitation.ExpiresAt,
+		EmailSendStatus:  invitationEmailSendStatus(invitation.EmailSendStatus),
+		EmailAttemptedAt: invitation.EmailAttemptedAt,
+		CreatedAt:        invitation.CreatedAt,
+		UpdatedAt:        invitation.UpdatedAt,
 	}
+}
+
+func invitationEmailSendStatus(value string) *InvitationEmailSendStatus {
+	if value == "" {
+		return nil
+	}
+	status := InvitationEmailSendStatus(value)
+	return &status
 }

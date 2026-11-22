@@ -140,6 +140,8 @@ export const organizationInvitationSchema = strictObject({
   role: organizationInvitationRoleSchema,
   status: organizationInvitationStatusSchema,
   expires_at: timestampSchema,
+  email_send_status: nullable(invitationEmailSendStatusSchema),
+  email_attempted_at: nullable(timestampSchema),
   created_at: timestampSchema,
   updated_at: timestampSchema,
 });

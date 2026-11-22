@@ -181,3 +181,43 @@ func TestRepositoryInvitationRejectsExistingMember(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrOrganizationMemberAlreadyExists)
 	assert.Zero(t, softDeletedMember.ID)
 }
+
+func TestRepositoryInvitationReissueAndEmailAttempt(t *testing.T) {
+	db := newOrganizationRepositoryTestDB(t)
+	repo := NewRepository(db)
+	now := time.Date(2026, time.July, 15, 20, 0, 0, 0, time.UTC)
+	ownerID := createOrganizationTestUser(t, db, "reissue-owner")
+	organization := createInvitationTestOrganization(t, db, ownerID)
+
+	invitation := newPendingInvitation(organization.ID, ownerID, "resend@example.com", "oinv_first.secret", now)
+	require.NoError(t, repo.CreateInvitation(context.Background(), invitation, now))
+	require.NoError(t, repo.RecordInvitationEmailAttempt(context.Background(), organization.ID, invitation.ID, "failed", now))
+
+	later := now.Add(time.Hour)
+	newHash := crypto.SHA256Hex("oinv_second.secret")
+	reissued, err := repo.ReissueInvitation(context.Background(), organization.ID, invitation.ID, newHash, later.Add(7*24*time.Hour), later)
+	require.NoError(t, err)
+	assert.Equal(t, newHash, reissued.TokenHash)
+	assert.Equal(t, "failed", reissued.EmailSendStatus)
+	require.NotNil(t, reissued.EmailAttemptedAt)
+
+	_, _, err = repo.AcceptInvitation(context.Background(), invitation.TokenHash, ownerID, later)
+	require.ErrorIs(t, err, domain.ErrOrganizationInvitationInvalid, "the old link stops working")
+
+	other := createInvitationTestOrganization2(t, db, ownerID)
+	_, err = repo.ReissueInvitation(context.Background(), other.ID, invitation.ID, newHash, later.Add(time.Hour), later)
+	require.ErrorIs(t, err, domain.ErrOrganizationInvitationNotFound)
+
+	_, err = repo.RevokeInvitation(context.Background(), organization.ID, invitation.ID, ownerID, later)
+	require.NoError(t, err)
+	_, err = repo.ReissueInvitation(context.Background(), organization.ID, invitation.ID, crypto.SHA256Hex("oinv_third.secret"), later.Add(time.Hour), later)
+	require.ErrorIs(t, err, domain.ErrOrganizationInvitationNotFound, "a revoked invitation cannot be resent")
+}
+
+func createInvitationTestOrganization2(t *testing.T, db *gorm.DB, ownerID uint) *domain.Organization {
+	t.Helper()
+	organization := &domain.Organization{Name: "Other", Slug: "other-invitations", CreatedBy: ownerID}
+	owner := &domain.OrganizationMembership{UserID: ownerID, Role: domain.OrganizationRoleOwner}
+	require.NoError(t, NewRepository(db).CreateWithOwner(context.Background(), organization, owner))
+	return organization
+}

@@ -188,6 +188,71 @@ func (r *repository) RevokeInvitation(ctx context.Context, organizationID, invit
 	return invitation.toDomain(), nil
 }
 
+// ReissueInvitation replaces the token hash and expiry of a pending invitation, so a resent email
+// carries a fresh link and every earlier link stops working.
+func (r *repository) ReissueInvitation(ctx context.Context, organizationID, invitationID uint, tokenHash string, expiresAt, now time.Time) (*domain.OrganizationInvitation, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if organizationID == 0 || invitationID == 0 || len(tokenHash) != 64 || !expiresAt.After(now) {
+		return nil, domain.ErrInvalidInput
+	}
+
+	var invitation OrganizationInvitationPO
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND organization_id = ?", invitationID, organizationID).
+			First(&invitation).Error; findErr != nil {
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return domain.ErrOrganizationInvitationNotFound
+			}
+			return findErr
+		}
+		if invitation.PendingKey == nil || invitation.AcceptedAt != nil || invitation.RevokedAt != nil || !now.Before(invitation.ExpiresAt) {
+			return domain.ErrOrganizationInvitationNotFound
+		}
+		result := tx.Model(&OrganizationInvitationPO{}).
+			Where("id = ? AND pending_key IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL", invitation.ID).
+			Updates(map[string]any{
+				"token_hash": tokenHash,
+				"expires_at": expiresAt,
+				"updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrOrganizationInvitationNotFound
+		}
+		invitation.TokenHash = tokenHash
+		invitation.ExpiresAt = expiresAt
+		invitation.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return invitation.toDomain(), nil
+}
+
+// RecordInvitationEmailAttempt stores the outcome of the latest invitation email attempt.
+func (r *repository) RecordInvitationEmailAttempt(ctx context.Context, organizationID, invitationID uint, status string, now time.Time) error {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return err
+	}
+	if organizationID == 0 || invitationID == 0 || status == "" {
+		return domain.ErrInvalidInput
+	}
+	return db.Model(&OrganizationInvitationPO{}).
+		Where("id = ? AND organization_id = ?", invitationID, organizationID).
+		Updates(map[string]any{
+			"email_send_status":  status,
+			"email_attempted_at": now,
+		}).Error
+}
+
 func (r *repository) AcceptInvitation(ctx context.Context, tokenHash string, userID uint, now time.Time) (*domain.OrganizationMembership, *domain.OrganizationInvitation, error) {
 	db, err := r.withContext(ctx)
 	if err != nil {
@@ -253,7 +318,7 @@ func (r *repository) AcceptInvitation(ctx context.Context, tokenHash string, use
 		}
 
 		result := tx.Model(&OrganizationInvitationPO{}).
-			Where("id = ? AND pending_key IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL", invitationPO.ID).
+			Where("id = ? AND token_hash = ? AND pending_key IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL", invitationPO.ID, tokenHash).
 			Updates(map[string]any{
 				"pending_key": nil,
 				"accepted_at": now,

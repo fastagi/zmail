@@ -83,6 +83,17 @@ const messages = {
     failed: 'The invitation was saved, but email delivery failed',
     not_configured: 'The invitation was saved, but email is not configured',
   },
+  emailDelivery: {
+    accepted_by_provider: 'Email sent',
+    failed: 'Email not sent',
+    not_configured: 'Email not sent',
+  },
+  emailDeliveryHint: {
+    failed: 'Sending failed. Resend it, or share the invitation another way.',
+    not_configured: 'Email is not set up here, so nothing was sent.',
+  },
+  resendInvitation: 'Resend',
+  resendInvitationLabel: 'Resend the invitation to {email}',
   invitationStatus: {
     pending: 'Pending',
     accepted: 'Accepted',

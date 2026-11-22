@@ -210,6 +210,7 @@ organization-scoped; acceptance is top-level because the opaque token identifies
 | Invite | `POST /v1/organizations/:id/invitations` | `{ email, role }` | `{ invitation, email_send_status }` |
 | List invitations | `GET /v1/organizations/:id/invitations` | Pagination query | Paginated invitation views |
 | Revoke | `DELETE /v1/organizations/:id/invitations/:invitation_id` | none | `204 No Content` |
+| Resend email | `POST /v1/organizations/:id/invitations/:invitation_id/emails` | none | `201` `{ invitation, email_send_status }` |
 | Accept | `POST /v1/organization-invitations/accept` | `{ token }` | Organization membership view |
 
 An invitation view contains no plaintext token:
@@ -222,6 +223,8 @@ An invitation view contains no plaintext token:
   "role": "member",
   "status": "pending",
   "expires_at": "2026-07-22T20:00:00Z",
+  "email_send_status": "failed",
+  "email_attempted_at": "2026-07-15T20:00:01Z",
   "created_at": "2026-07-15T20:00:00Z",
   "updated_at": "2026-07-15T20:00:00Z"
 }
@@ -246,6 +249,12 @@ An invitation view contains no plaintext token:
   when email is unavailable or rejected so retrying the HTTP request cannot accidentally create a
   second business record. `email_send_status` is one of `accepted_by_provider`, `failed`, or
   `not_configured`; it describes only this synchronous send attempt and is not a delivery receipt.
+- The invitation view keeps the latest attempt as `email_send_status` and `email_attempted_at`. Both
+  are `null` for invitations created before attempts were recorded, or when recording failed.
+- `owner` and `admin` may resend the email of a pending, unexpired invitation. Resending issues a
+  new token and a new `ORGANIZATION_INVITATION_TTL` expiry, so earlier links stop working, then
+  makes one send attempt and returns `201` with the invitation and that attempt's status.
+  An accepted, revoked, expired, or absent invitation gets `404 ORGANIZATION.INVITATION.NOT_FOUND`.
 - Invitation create, revoke, and accept transitions emit audit changes using internal invitation,
   organization, and user IDs. Email addresses and tokens are not audit metadata.
 

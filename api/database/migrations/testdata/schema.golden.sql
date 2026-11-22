@@ -525,6 +525,8 @@ TABLE organization_invitations
   COLUMN revoked_by bigint
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
+  COLUMN email_send_status character varying(32)
+  COLUMN email_attempted_at timestamp with time zone
 
 TABLE organization_memberships
   COLUMN id bigint NOT NULL DEFAULT nextval('organization_memberships_id_seq'::regclass)
@@ -989,6 +991,7 @@ CONSTRAINT organization_invitations.fk_organization_invitations_acceptor FOREIGN
 CONSTRAINT organization_invitations.fk_organization_invitations_inviter FOREIGN KEY (invited_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organization_invitations.fk_organization_invitations_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT organization_invitations.fk_organization_invitations_revoker FOREIGN KEY (revoked_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
+CONSTRAINT organization_invitations.organization_invitations_email_send_status_check CHECK (((email_send_status)::text = ANY ((ARRAY['accepted_by_provider'::character varying, 'failed'::character varying, 'not_configured'::character varying])::text[])))
 CONSTRAINT organization_invitations.organization_invitations_pkey PRIMARY KEY (id)
 CONSTRAINT organization_invitations.organization_invitations_role_check CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'member'::character varying])::text[])))
 CONSTRAINT organization_memberships.fk_organization_memberships_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE

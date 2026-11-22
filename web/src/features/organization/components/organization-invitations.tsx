@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useLocale } from 'next-intl';
-import { AlertCircle, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -30,6 +30,7 @@ import {
 import { CreateOrganizationInvitationDialog } from '@/features/organization/components/create-organization-invitation-dialog';
 import {
   useOrganizationInvitations,
+  useResendOrganizationInvitation,
   useRevokeOrganizationInvitation,
 } from '@/features/organization/hooks/use-organizations';
 import type {
@@ -40,16 +41,25 @@ import { formatOrganizationDate } from '@/features/organization/utils/format-org
 import { resolveOrganizationErrorKey } from '@/features/organization/utils/organization-error';
 import { useT } from '@/i18n';
 
-export function OrganizationInvitations({
-  organizationId,
-}: {
-  organizationId: number;
-}) {
+export function OrganizationInvitations({ organizationId }: { organizationId: number }) {
   const t = useT('organization');
   const common = useT('common');
   const locale = useLocale();
   const query = useOrganizationInvitations(organizationId);
   const mutation = useRevokeOrganizationInvitation(organizationId);
+  const resend = useResendOrganizationInvitation(organizationId);
+
+  const resendInvitation = (invitation: OrganizationInvitation) => {
+    resend.mutate(invitation.id, {
+      onSuccess: ({ email_send_status: status }) => {
+        const notify = status === 'accepted_by_provider' ? toast.success : toast.warning;
+        notify(t(`emailSendStatus.${status}`));
+      },
+      onError: error => {
+        toast.error(t(resolveOrganizationErrorKey(error)));
+      },
+    });
+  };
   const [selected, setSelected] = useState<OrganizationInvitation>();
 
   const revoke = () => {
@@ -69,9 +79,7 @@ export function OrganizationInvitations({
           <h2 id="organization-invitations-heading" className="text-base font-semibold">
             {t('invitationsTitle')}
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t('invitationsDescription')}
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{t('invitationsDescription')}</p>
         </div>
         <CreateOrganizationInvitationDialog organizationId={organizationId} />
       </div>
@@ -114,30 +122,47 @@ export function OrganizationInvitations({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {query.data.items.map((invitation) => (
+              {query.data.items.map(invitation => (
                 <TableRow key={invitation.id}>
                   <TableCell className="font-medium">{invitation.email}</TableCell>
                   <TableCell>{t(`roles.${invitation.role}`)}</TableCell>
                   <TableCell>
                     <InvitationStatusBadge status={invitation.status} />
+                    {invitation.status === 'pending' ? (
+                      <InvitationEmailState invitation={invitation} />
+                    ) : null}
                   </TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
                     {formatOrganizationDate(invitation.expires_at, locale)}
                   </TableCell>
                   <TableCell className="text-right">
                     {invitation.status === 'pending' ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        icon={<Trash2 className="size-3.5" />}
-                        onClick={() => {
-                          mutation.reset();
-                          setSelected(invitation);
-                        }}
-                      >
-                        {t('revokeInvitation')}
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          icon={<Send className="size-3.5" />}
+                          aria-label={t('resendInvitationLabel', { email: invitation.email })}
+                          loading={resend.isPending && resend.variables === invitation.id}
+                          disabled={resend.isPending}
+                          onClick={() => resendInvitation(invitation)}
+                        >
+                          {t('resendInvitation')}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          icon={<Trash2 className="size-3.5" />}
+                          onClick={() => {
+                            mutation.reset();
+                            setSelected(invitation);
+                          }}
+                        >
+                          {t('revokeInvitation')}
+                        </Button>
+                      </div>
                     ) : null}
                   </TableCell>
                 </TableRow>
@@ -149,7 +174,7 @@ export function OrganizationInvitations({
 
       <Dialog
         open={Boolean(selected)}
-        onOpenChange={(open) => {
+        onOpenChange={open => {
           if (!open && !mutation.isPending) {
             setSelected(undefined);
             mutation.reset();
@@ -192,14 +217,29 @@ export function OrganizationInvitations({
   );
 }
 
-function InvitationStatusBadge({
-  status,
-}: {
-  status: OrganizationInvitationStatus;
-}) {
+function InvitationStatusBadge({ status }: { status: OrganizationInvitationStatus }) {
   const t = useT('organization');
   const variant = status === 'pending' ? 'default' : status === 'expired' ? 'outline' : 'secondary';
   return <Badge variant={variant}>{t(`invitationStatus.${status}`)}</Badge>;
+}
+
+function InvitationEmailState({ invitation }: { invitation: OrganizationInvitation }) {
+  const t = useT('organization');
+  const status = invitation.email_send_status;
+  if (!status) return null;
+  if (status === 'accepted_by_provider') {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">
+        {t('emailDelivery.accepted_by_provider')}
+      </p>
+    );
+  }
+  return (
+    <p className="mt-1 text-xs text-error" title={t(`emailDeliveryHint.${status}`)}>
+      {t(`emailDelivery.${status}`)}
+      <span className="sr-only"> {t(`emailDeliveryHint.${status}`)}</span>
+    </p>
+  );
 }
 
 function InvitationTableSkeleton() {
