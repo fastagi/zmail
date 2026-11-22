@@ -9185,12 +9185,16 @@ export interface operations {
                 q?: string;
                 /** @description Keep only the mailboxes of one mail role, or `none` for the mailboxes without a role. A role the caller cannot see matches nothing. */
                 role_id?: components["schemas"]["PositiveID"] | "none";
+                /** @description A calendar day in `tz`, 1970 or later; keeps messages created on or after its start. Never with `group`. */
+                since?: string;
                 /** @description Keep only messages whose triage result is one of these comma-separated, distinct categories, for example `reply,review`. Only with `view` `all` or `today`, and without `group` and `q`. While the organization's AI triage is off it matches nothing. */
                 triage?: string;
                 /** @description The IANA time zone that defines today for `view=today`, at most 64 characters. Defaults to `UTC`. `Local` and an empty value are `400 COMMON.INVALID_INPUT`. */
                 tz?: string;
                 /** @description `true` keeps only inbound messages the caller has not read; outbound messages are always read and never match. `false` keeps the others. Read state is the caller's own. */
                 unread?: boolean;
+                /** @description A calendar day in `tz`, not before `since`; keeps messages created before the end of that day. Never with `group`. */
+                until?: string;
                 /** @description `all` is inbound mail in `default` (every Inbox). `today` is inbound mail outside the trash that arrived since the start of today in `tz`. `pending` is mail of both directions the caller starred, outside `archive` and the trash. `sent` is outbound mail in `default` (every Sent). Defaults to `all`. */
                 view?: components["schemas"]["InboxView"];
             };

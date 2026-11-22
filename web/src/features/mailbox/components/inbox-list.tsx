@@ -22,12 +22,18 @@ import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-rea
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { knownTimeZone } from '@/features/mailbox/components/mail-shared';
 import { rowUnread } from '@/features/mailbox/components/message-rows';
-import { INBOX_ASSIGNMENTS, MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
+import {
+  INBOX_ASSIGNMENTS,
+  INBOX_DATE_RANGES,
+  MAIL_SEARCH_MAX_LENGTH,
+} from '@/features/mailbox/schemas';
 import type { InboxAssignment, InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
 
-type ListTab = 'all' | 'unread' | 'attachments' | InboxAssignment;
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
+
+type ListTab = 'all' | 'unread' | 'attachments' | InboxAssignment;
+type DateRange = (typeof INBOX_DATE_RANGES)[number];
 
 /** How far below the visible rows the next page starts loading. */
 const loadAheadMargin = '240px';
@@ -85,6 +91,8 @@ export function InboxListHeader({
   onAttachmentsChange,
   assignment = null,
   onAssignmentChange,
+  dateRange = null,
+  onDateRangeChange,
   q,
   onSearch,
   mailboxHref = null,
@@ -108,6 +116,9 @@ export function InboxListHeader({
   /** The assignment tabs of shared conversations, shown when `onAssignmentChange` is given. */
   assignment?: InboxAssignment | null;
   onAssignmentChange?: (assignment: InboxAssignment | null) => void;
+  /** How far back the list reaches; the date menu shows when `onDateRangeChange` is given. */
+  dateRange?: DateRange | null;
+  onDateRangeChange?: (range: DateRange | null) => void;
   q: string;
   onSearch: (q: string) => void;
   mailboxHref?: string | null;
@@ -243,23 +254,47 @@ export function InboxListHeader({
         role="search"
         aria-label={t('inbox.search.label')}
         onSubmit={submit}
-        className="relative mt-3"
+        className="mt-3 flex gap-2"
       >
-        <Search
-          className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-text-muted"
-          aria-hidden="true"
-        />
-        <Input
-          ref={searchRef}
-          type="search"
-          value={search}
-          maxLength={MAIL_SEARCH_MAX_LENGTH}
-          aria-label={t('inbox.search.label')}
-          placeholder={t('inbox.search.placeholder')}
-          className="h-8 pl-8 text-[13px]"
-          onChange={event => change(event.target.value)}
-          onKeyDown={escape}
-        />
+        <div className="relative min-w-0 flex-1">
+          <Search
+            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-text-muted"
+            aria-hidden="true"
+          />
+          <Input
+            ref={searchRef}
+            type="search"
+            value={search}
+            maxLength={MAIL_SEARCH_MAX_LENGTH}
+            aria-label={t('inbox.search.label')}
+            placeholder={t('inbox.search.placeholder')}
+            className="h-8 pl-8 text-[13px]"
+            onChange={event => change(event.target.value)}
+            onKeyDown={escape}
+          />
+        </div>
+        {onDateRangeChange ? (
+          <select
+            aria-label={t('inbox.date.label')}
+            value={dateRange ?? ''}
+            className={cn(
+              'h-8 shrink-0 rounded-md border border-border-main bg-bg-surface px-2 text-[13px] focus-ring',
+              dateRange ? 'font-medium text-text-main' : 'text-text-muted'
+            )}
+            onChange={event =>
+              onDateRangeChange(
+                event.target.value === '' ? null : (event.target.value as DateRange)
+              )
+            }
+          >
+            <option value="">{t('inbox.date.any')}</option>
+            {INBOX_DATE_RANGES.map(range => (
+              <option key={range} value={range}>
+                {t(`inbox.date.${range}`)}
+              </option>
+            ))}
+          </select>
+        ) : null}
       </form>
       <div
         role="tablist"

@@ -256,6 +256,10 @@ export interface InboxFilters {
   triage?: MailTriageCategory[];
   /** Conversations assigned to the caller and open, open without an assignee, or done. */
   assignment?: InboxAssignment;
+  /** First calendar day kept, `YYYY-MM-DD` in `tz`; never with `group`. */
+  since?: string;
+  /** Last calendar day kept, `YYYY-MM-DD` in `tz`, not before `since`; never with `group`. */
+  until?: string;
   tz: string;
 }
 

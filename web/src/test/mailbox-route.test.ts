@@ -3264,6 +3264,7 @@ describe('mailbox browser route boundary', () => {
     await inbox('?per_page=99999999999999999999');
     await inbox('?per_page=-99999999999999999999');
     await inbox('?assignment=mine&group=thread');
+    await inbox('?q=invoice&since=2026-11-01&until=2026-11-30&tz=Asia%2FShanghai');
 
     const calls = fetchMock.mock.calls.map(([url, init]) => {
       const target = new URL(String(url));
@@ -3278,6 +3279,7 @@ describe('mailbox browser route boundary', () => {
       'GET /v1/inbox-messages?per_page=100',
       'GET /v1/inbox-messages?per_page=1',
       'GET /v1/inbox-messages?group=thread&assignment=mine&per_page=15',
+      'GET /v1/inbox-messages?q=invoice&since=2026-11-01&until=2026-11-30&tz=Asia%2FShanghai&per_page=15',
     ]);
     for (const [, init] of fetchMock.mock.calls) {
       expect(new Headers(init?.headers).get('organization-id')).toBe('7');
@@ -3349,6 +3351,12 @@ describe('mailbox browser route boundary', () => {
       '?group=thread&has_attachments=false',
       '?assignment=everyone',
       '?assignment=',
+      '?since=2026-02-30',
+      '?until=2026-11-01T00:00:00Z',
+      '?since=1969-12-31',
+      '?since=',
+      '?since=2026-11-02&until=2026-11-01',
+      '?since=2026-11-01&group=thread',
     ]) {
       await expectError(
         await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`)),
@@ -3392,6 +3400,21 @@ describe('mailbox browser route boundary', () => {
     expect(await boxes('?assignment=closed')).toEqual([ops.id]);
     expect(await boxes('?assignment=unassigned')).toEqual([mine.id]);
     expect(await boxes('?assignment=mine&group=thread')).toEqual([team.id]);
+  });
+
+  it('mock inbox keeps messages within the since and until days', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    await create(route, { local_part: 'dated', type: 'personal', owner_user_id: 1 });
+    const count = async (query: string) =>
+      (
+        (await (await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`))).json())
+          .data as unknown[]
+      ).length;
+    expect(await count('?since=1970-01-01')).toBeGreaterThan(0);
+    expect(await count('?until=1970-01-02')).toBe(0);
+    expect(await count('?since=9999-12-31')).toBe(0);
   });
 
   it("mock inbox hides another member's personal mailbox and pages by cursor", async () => {

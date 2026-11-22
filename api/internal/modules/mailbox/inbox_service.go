@@ -40,6 +40,8 @@ type InboxRequest struct {
 	Triage []domain.MailTriageCategory
 	// Assignment keeps only conversations in one assignment state; empty applies no filter.
 	Assignment domain.InboxAssignment
+	// SinceDate and UntilDate are inclusive calendar days in Location, parsed at UTC midnight.
+	SinceDate, UntilDate *time.Time
 }
 
 // InboxItem is one row of the unified inbox: a message summary without bodies, the mail role of
@@ -138,6 +140,8 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 	if request.View == domain.InboxViewToday {
 		query.DayStart, query.DayEnd = inboxDay(s.now(), request.Location)
 	}
+	query.Since = inboxDateBound(request.SinceDate, request.Location, 0)
+	query.Until = inboxDateBound(request.UntilDate, request.Location, 1)
 	messages, err := s.inbox.ListInbox(ctx, query)
 	if err != nil {
 		return InboxPage{ReadableMailboxes: page.ReadableMailboxes}, err
@@ -287,4 +291,16 @@ func inboxSnippet(raw string) string {
 	}
 	runes := []rune(collapsed)
 	return strings.TrimRightFunc(string(runes[:inboxSnippetLength]), unicode.IsSpace)
+}
+
+// inboxDateBound is the start of the calendar day of date, plus days, in location; nil stays nil.
+func inboxDateBound(date *time.Time, location *time.Location, days int) *time.Time {
+	if date == nil {
+		return nil
+	}
+	if location == nil {
+		location = time.UTC
+	}
+	bound := time.Date(date.Year(), date.Month(), date.Day()+days, 0, 0, 0, 0, location)
+	return &bound
 }

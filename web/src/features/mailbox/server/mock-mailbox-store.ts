@@ -907,6 +907,8 @@ export class MockMailboxStore {
       return { ok: false, error: 'search_too_broad' };
     }
     const day = viewerDay(this.dependencies.now(), query.tz);
+    const since = query.since === undefined ? -Infinity : dayStart(query.since, query.tz, 0);
+    const until = query.until === undefined ? Infinity : dayStart(query.until, query.tz, 1);
     const rows: { item: InboxItem; createdAt: bigint }[] = [];
     for (const state of this.readableStates(organizationId, viewer)) {
       if (query.mailboxId !== undefined && state.mailbox.id !== query.mailboxId) continue;
@@ -918,7 +920,11 @@ export class MockMailboxStore {
       }
       const matching = this.visibleMessages(state)
         .map(message => this.forViewer(state, message, viewer))
-        .filter(message => inInboxView(message, query, needle, day));
+        .filter(message => inInboxView(message, query, needle, day))
+        .filter(message => {
+          const created = Date.parse(message.created_at);
+          return created >= since && created < until;
+        });
       const summaries = query.group === 'thread' ? threadRows(matching) : matching.map(summaryOf);
       for (const summary of summaries) {
         rows.push({
@@ -2424,6 +2430,12 @@ function viewerDay(now: Date, zone: string): ViewerDay {
     start: zonedMidnight(year, month, day, zone),
     end: zonedMidnight(year, month, day + 1, zone),
   };
+}
+
+/** The UTC instant of 00:00 on the calendar day `YYYY-MM-DD` plus `days`, in `zone`. */
+function dayStart(date: string, zone: string, days: number): number {
+  const [year, month, day] = date.split('-').map(Number);
+  return zonedMidnight(year, month, day + days, zone);
 }
 
 /** The UTC instant of 00:00 on a calendar day in `zone`; `day` may overflow into the next month. */

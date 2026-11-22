@@ -90,6 +90,10 @@ type InboxQuery struct {
 	Assignment InboxAssignment
 	// ViewerUserID is the viewer, whom InboxAssignmentMine matches.
 	ViewerUserID uint
+	// Since keeps messages created at or after it; nil applies no bound.
+	Since *time.Time
+	// Until keeps messages created before it; nil applies no bound.
+	Until *time.Time
 	// Limit is how many rows to return at most: the page size plus one, to tell whether more follow.
 	Limit int
 }

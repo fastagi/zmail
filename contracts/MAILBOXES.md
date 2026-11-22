@@ -2077,7 +2077,9 @@ own stars.
 | `unread` | `true` or `false`, as in the single-mailbox list; outbound messages are always read |
 | `has_attachments` | `true` keeps only messages with files, `false` only those without |
 | `q` | Search, only with `view=all`; the same rules, matching, and 2-second limit as the single-mailbox search |
-| `group` | `thread`, only with `view` `all` or `sent`, and never with `unread`, `has_attachments`, or `q` |
+| `since` | A calendar day `YYYY-MM-DD` (1970 or later) in `tz`; keeps messages created on or after its start |
+| `until` | A calendar day `YYYY-MM-DD` in `tz`, not before `since`; keeps messages created before the end of that day |
+| `group` | `thread`, only with `view` `all` or `sent`, and never with `unread`, `has_attachments`, `q`, `since`, or `until` |
 | `assignment` | `mine` keeps open conversations assigned to the caller, `unassigned` open conversations without an assignee, `closed` conversations marked done; see [Assignment](#assignment). Allowed with `group`. A conversation never assigned is open and unassigned, so in a personal mailbox only `unassigned` matches. |
 | `triage` | Comma-separated distinct [triage](#ai-triage) categories, such as `reply,review`; only with `view` `all` or `today`, and never with `group` or `q`. Matches nothing while the organization's AI triage is off. |
 | `tz` | The IANA time zone that defines today, at most 64 characters; defaults to `UTC` |
