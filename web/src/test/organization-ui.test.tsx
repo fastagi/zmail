@@ -167,6 +167,10 @@ describe('organization browser workflow', () => {
       'href',
       '/console/organizations/42'
     );
+    expect(screen.getByRole('link', { name: 'Acme Europe' })).toHaveAttribute(
+      'href',
+      '/console/organizations/42'
+    );
   });
 
   it('uses local copy for malformed successful responses', () => {
