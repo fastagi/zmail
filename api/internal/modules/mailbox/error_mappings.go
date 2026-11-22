@@ -105,6 +105,11 @@ var mailboxErrorCodes = []struct {
 	{ErrExternalMailServerUnreachable, http.StatusUnprocessableEntity, domain.CodeExternalMailServerUnreachable},
 	{ErrExternalMailCredentialsRateLimited, http.StatusTooManyRequests, domain.CodeRateLimited},
 	{ErrExternalMailConnectionNotRevoked, http.StatusConflict, domain.CodeExternalMailConnectionNotRevoked},
+	// Tenants reuse the connection codes: a tenant is the organization's connection to a whole
+	// directory, and each new code costs every Web route bundle bytes.
+	{ErrExternalMailTenantNotFound, http.StatusNotFound, domain.CodeExternalMailConnectionNotFound},
+	{ErrExternalMailTenantInactive, http.StatusConflict, domain.CodeMailboxAccessConflict},
+	{ErrExternalMailDirectoryNotFound, http.StatusConflict, domain.CodeExternalMailAccountMismatch},
 	{ErrMailAgentGrantNotFound, http.StatusNotFound, domain.CodeMailAgentGrantNotFound},
 	{ErrMailAgentGrantInvalid, http.StatusUnprocessableEntity, domain.CodeMailAgentGrantInvalid},
 	{ErrMailAgentGrantLimit, http.StatusConflict, domain.CodeMailAgentGrantLimit},

@@ -86,6 +86,17 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("external_mail_connection_directory.index")
 		auth.DELETE("/external-mail-connection-directory/:connection_id", h.ForceDisconnectExternalMailConnection).
 			Name("external_mail_connection_directory.destroy").WhereNumber("connection_id")
+		// Tenants are session-only: no API key, and so no agent, ever reaches tenant-level access.
+		auth.GET("/external-mail-tenants", h.ListExternalMailTenants).Name("external_mail_tenants.index")
+		auth.POST("/external-mail-tenants", h.AuthorizeExternalMailTenant).
+			Name("external_mail_tenants.store").Middleware(middleware.BodyLimit(maxExternalMailTenantBodyBytes))
+		auth.DELETE("/external-mail-tenants/:tenant_id", h.RevokeExternalMailTenant).
+			Name("external_mail_tenants.destroy").WhereNumber("tenant_id")
+		auth.GET("/external-mail-tenants/:tenant_id/directory", h.ListExternalMailTenantDirectory).
+			Name("external_mail_tenants.directory.index").WhereNumber("tenant_id")
+		auth.POST("/external-mail-tenants/:tenant_id/assignments", h.AssignExternalMailTenantMailboxes).
+			Name("external_mail_tenants.assignments.store").WhereNumber("tenant_id").
+			Middleware(middleware.BodyLimit(maxExternalMailAssignmentsBodyBytes))
 
 		auth.GET("/transactional-mail-log", h.ListTransactionalLog).Name("transactional_mail_log.index")
 		auth.GET("/transactional-mail-log/:message_id", h.GetTransactionalLogEntry).

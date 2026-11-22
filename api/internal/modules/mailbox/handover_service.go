@@ -31,8 +31,9 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 	if mailbox.Type != domain.MailboxTypePersonal {
 		return nil, fmt.Errorf("%w: only a personal mailbox is handed over", ErrMailboxAccessConflict)
 	}
-	if mailbox.Connected() {
-		// The outside account is the member's own; it is disconnected, never handed over.
+	if mailbox.PrivateConnected() {
+		// The outside account is the member's own; it is disconnected, never handed over. A mailbox
+		// assigned from the organization's tenant is at the organization's address and is handed over.
 		return nil, fmt.Errorf("%w: a connected mailbox is never handed over", ErrMailboxAccessConflict)
 	}
 	successor, err := s.currentMembership(ctx, viewer.OrganizationID, successorUserID)
@@ -46,6 +47,13 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 
 	var boundary time.Time
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if mailbox.TenantAssigned() && s.externalMail != nil {
+			// The holder of an organization address changes: in turn with assignments and restores,
+			// which take the same lock, so none of them commits on a stale record.
+			if lockErr := s.externalMail.LockSharedExternalMailBindings(tx, viewer.OrganizationID); lockErr != nil {
+				return lockErr
+			}
+		}
 		// The former owner is read inside the transaction: an owner who rejoined before the
 		// handover is sealed at the handover, never at their earlier departure.
 		var boundaryErr error
@@ -59,6 +67,13 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 		}
 		if !converted {
 			return fmt.Errorf("%w: the mailbox was already handed over", ErrMailboxAccessConflict)
+		}
+		if mailbox.TenantAssigned() && s.externalMail != nil {
+			// The connection follows its mailbox: the organization's, with no owner, as a shared
+			// assignment's is. It keeps syncing; the successor reads it, and nobody sends from it.
+			if shareErr := s.externalMail.ShareTenantConnection(tx, mailbox.ID, boundary); shareErr != nil {
+				return shareErr
+			}
 		}
 		// Only the former owner could read a personal mailbox, under any of their memberships.
 		if readErr := s.repo.DeleteMailboxReads(tx, mailbox.ID, 0); readErr != nil {
@@ -155,9 +170,23 @@ func (s *service) MemberRemoved(ctx context.Context, event domain.OrganizationMe
 		at = s.now().UTC()
 	}
 	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if s.externalMail != nil {
+			// The organization's binding lock comes before any mailbox row, in the order handovers,
+			// assignments, and restores take them, so none of them deadlocks with a departure.
+			if err := s.externalMail.LockSharedExternalMailBindings(tx, event.OrganizationID); err != nil {
+				return err
+			}
+		}
 		owned, err := s.repo.MarkOwnerLeft(tx, event.OrganizationID, event.UserID, at)
 		if err != nil {
 			return err
+		}
+		if s.externalMail != nil {
+			// Addresses personally assigned to the leaver from a tenant: whoever reads them later never
+			// gets mail received before now.
+			if err = s.externalMail.MarkPersonalBoundary(tx, event.OrganizationID, event.UserID, at); err != nil {
+				return err
+			}
 		}
 		for _, mailbox := range owned {
 			if recordErr := s.recordAccess(tx, mailbox, domain.MailboxAccessOwnerLeft, 0, event.UserID,

@@ -126,6 +126,10 @@ func (r *repository) PurgeRevokedExternalMail(ctx context.Context, step domain.E
 		// A connection whose purge failed waits for its retry time, so it never blocks the
 		// connections revoked after it.
 		query = query.Where("revoked_at <= ? AND (purge_retry_at IS NULL OR purge_retry_at <= ?)", step.RevokedBefore, step.Now).
+			// A mailbox whose owner left awaits its handover, which seals it; its copies are kept for
+			// the successor or a returning owner, whatever the retention.
+			Where(`NOT EXISTS (SELECT 1 FROM mailboxes AS left_box WHERE left_box.id = external_mail_connections.mailbox_id
+				AND left_box.owner_left_at IS NOT NULL AND left_box.deleted_at IS NULL)`).
 			Order("revoked_at, id")
 	}
 	// Find, not Take: no due connection is the usual case and must not be logged as an error.

@@ -32,9 +32,11 @@ type MailboxPO struct {
 	RoleID *uint
 	// AITriageEnabled queues the mailbox's inbound mail for AI triage.
 	AITriageEnabled bool `gorm:"column:ai_triage_enabled;not null;default:false"`
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       gorm.DeletedAt
+	// ExternalMailTenantID is the tenant a connected mailbox was assigned from.
+	ExternalMailTenantID *uint
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            gorm.DeletedAt
 }
 
 func (MailboxPO) TableName() string {
@@ -67,11 +69,12 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 		OwnerLeftAt:    po.OwnerLeftAt,
 		SealedBefore:   po.SealedBefore,
 		// WebhooksEnabled is only meaningful for shared mailboxes; the schema enforces it too.
-		WebhooksEnabled: po.WebhooksEnabled,
-		RoleID:          po.RoleID,
-		AITriageEnabled: po.AITriageEnabled,
-		CreatedAt:       po.CreatedAt,
-		UpdatedAt:       po.UpdatedAt,
+		WebhooksEnabled:  po.WebhooksEnabled,
+		RoleID:           po.RoleID,
+		AITriageEnabled:  po.AITriageEnabled,
+		ExternalTenantID: po.ExternalMailTenantID,
+		CreatedAt:        po.CreatedAt,
+		UpdatedAt:        po.UpdatedAt,
 	}
 }
 

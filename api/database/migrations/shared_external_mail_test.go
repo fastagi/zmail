@@ -15,6 +15,7 @@ func TestSharedExternalMailUpDown(t *testing.T) {
 	db, exec := externalMailFixture(t)
 	migrated := dumpSchema(t, db)
 
+	require.NoError(t, (&addExternalMailTenants{}).Down(db))
 	require.NoError(t, (&addSharedExternalMail{}).Down(db))
 	rolledBack := dumpSchema(t, db)
 	assert.NotContains(t, rolledBack, "bound_by_user_id")
@@ -25,6 +26,7 @@ func TestSharedExternalMailUpDown(t *testing.T) {
 		VALUES (10, 2, 'gmail', 'owner@gmail.example', 901, now(), now(), now())`)
 
 	require.NoError(t, (&addSharedExternalMail{}).Up(db))
+	require.NoError(t, (&addExternalMailTenants{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 	var row struct {
 		Shared        bool

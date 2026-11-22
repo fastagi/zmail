@@ -122,6 +122,9 @@ func (s *service) ForceDisconnectExternalMailConnection(ctx context.Context, vie
 	if err != nil {
 		return err
 	}
+	if connection.TenantID != nil {
+		return s.unassignTenantConnection(ctx, viewer, connection)
+	}
 	if connection.Shared {
 		return s.disconnectShared(ctx, viewer, connection)
 	}
@@ -162,6 +165,7 @@ type ExternalMailConnectionDirectoryEntryResponse struct {
 	Provider             string     `json:"provider"`
 	Status               string     `json:"status"`
 	Shared               bool       `json:"shared"`
+	TenantID             *uint      `json:"tenant_id"`
 	AccountAddress       *string    `json:"account_address"`
 	MailboxID            *uint      `json:"mailbox_id"`
 	MaskedAccountAddress string     `json:"masked_account_address"`
@@ -177,8 +181,10 @@ func toExternalMailConnectionDirectoryEntryResponse(entry ExternalMailConnection
 		ID: connection.ID, Provider: string(connection.Provider), Status: string(connection.Status), Shared: connection.Shared,
 		MaskedAccountAddress: maskAccountAddress(connection.AccountAddress), OwnerUserID: connection.OwnerUserID,
 		OwnerDisplayName: optionalText(entry.OwnerDisplayName), CreatedAt: connection.CreatedAt.UTC(),
+		TenantID: connection.TenantID,
 	}
-	if connection.Shared {
+	// A shared connection and a tenant assignment are at the organization's own addresses.
+	if connection.Shared || connection.TenantID != nil {
 		item.AccountAddress, item.MailboxID = new(connection.AccountAddress), new(connection.MailboxID)
 	}
 	if connection.LastSyncedAt != nil {

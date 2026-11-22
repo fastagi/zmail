@@ -168,8 +168,142 @@ type ExternalMailConnection struct {
 	ConsecutiveMore int
 	// RevokedAt is when the connection was revoked; its copies are deleted a retention later.
 	RevokedAt *time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// TenantID is the authorized tenant the connection reads through; nil for an account bound with
+	// its own grant. A tenant connection stores no per-account token.
+	TenantID *uint
+	// TenantDirectoryID is the mailbox's stable id in the tenant's directory; empty without a tenant.
+	TenantDirectoryID string
+	// ReceivedNotBefore is the privacy boundary of a connection that reads an address another member
+	// held as a personal mailbox: no copy of mail the provider received before it is ever stored. Nil
+	// for no boundary.
+	ReceivedNotBefore *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+// ExternalMailPersonalAssignment is the record of an organization address assigned from a tenant. It
+// is never deleted, and its floor never goes down.
+type ExternalMailPersonalAssignment struct {
+	// UserID is the member who holds it as a personal mailbox; 0 for a shared mailbox, after a
+	// handover, or once the user account was deleted.
+	UserID uint
+	// FloorAt is the privacy floor: whoever reads the address, unless exempt, gets nothing received
+	// before it. Nil while nobody but the first holder has held it.
+	FloorAt *time.Time
+	// ExemptUserID is the first personal holder, while nobody else has held the address since: the
+	// floor does not apply to them. 0 once anyone else held it.
+	ExemptUserID uint
+	// Released marks a handover: the address may go to someone else.
+	Released bool
+	// TenantHeld marks an address a tenant ever assigned; only then do the personal-holder and
+	// self-binding refusals apply.
+	TenantHeld bool
+}
+
+// ExternalMailTenantStatus is the state of an authorized tenant.
+type ExternalMailTenantStatus string
+
+const (
+	// ExternalMailTenantActive tenants mint tokens for their assigned mailboxes.
+	ExternalMailTenantActive ExternalMailTenantStatus = "active"
+	// ExternalMailTenantNeedsReauthorization tenants lost their credential at the provider; every
+	// connection of them waits for the owner to authorize the tenant again.
+	ExternalMailTenantNeedsReauthorization ExternalMailTenantStatus = "needs_reauthorization"
+	// ExternalMailTenantRevoked tenants were revoked by the owner; the row stays for the record.
+	ExternalMailTenantRevoked ExternalMailTenantStatus = "revoked"
+)
+
+// ExternalMailTenant is a whole Google Workspace or Microsoft 365 tenant an organization owner
+// authorized once. It reads nothing by itself: only mailboxes assigned from its directory are synced.
+type ExternalMailTenant struct {
+	ID             uint
+	OrganizationID uint
+	Provider       ExternalMailProvider
+	// TenantIdentifier is the provider's id of the tenant: the Workspace customer id, or the Entra
+	// tenant id. It is live in at most one organization of the instance.
+	TenantIdentifier string
+	// DisplayName is a label such as the Workspace primary domain; may be empty.
+	DisplayName string
+	Status      ExternalMailTenantStatus
+	// EncryptedCredential is the sealed tenant credential; empty once revoked.
+	EncryptedCredential string
+	// AuthorizedByUserID is the owner who authorized the tenant last; nil once that user was deleted.
+	AuthorizedByUserID *uint
+	// LastErrorCode is set while the tenant needs reauthorization.
+	LastErrorCode string
+	AuthorizedAt  time.Time
+	RevokedAt     *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// ExternalMailErrorTenantAuthFailed is stored on a tenant and its connections when the provider
+// refused the tenant credential.
+const ExternalMailErrorTenantAuthFailed = "external.tenant_auth_failed"
+
+// MaxExternalMailTenantsPerOrganization bounds the tenants, in any state, one organization lists.
+const MaxExternalMailTenantsPerOrganization = 50
+
+// MaxExternalMailTenantAssignmentsCeiling is the highest per-tenant assignment ceiling an instance
+// may configure.
+const MaxExternalMailTenantAssignmentsCeiling = 10000
+
+// ExternalMailTenantRepository stores authorized tenants.
+type ExternalMailTenantRepository interface {
+	// CreateExternalMailTenant stores a new active tenant and fills its id.
+	CreateExternalMailTenant(ctx context.Context, tenant *ExternalMailTenant) error
+	// FindExternalMailTenant returns one tenant of the organization, in any state.
+	FindExternalMailTenant(ctx context.Context, organizationID, id uint) (*ExternalMailTenant, error)
+	// FindLiveExternalMailTenant returns the tenant of the provider and identifier that is not
+	// revoked, in any organization.
+	FindLiveExternalMailTenant(ctx context.Context, provider ExternalMailProvider, identifier string) (*ExternalMailTenant, error)
+	// ListExternalMailTenants returns the organization's tenants, live ones first, then id ascending.
+	ListExternalMailTenants(ctx context.Context, organizationID uint) ([]*ExternalMailTenant, error)
+	// CountLiveExternalMailTenants counts the organization's tenants that are not revoked.
+	CountLiveExternalMailTenants(ctx context.Context, organizationID uint) (int, error)
+	// LockActiveExternalMailTenant holds a shared lock on the tenant row until the surrounding
+	// transaction ends and fails with an inactive-tenant error unless it is active, so a revocation,
+	// which locks the row for update, waits for an assignment in progress and then revokes it too.
+	LockActiveExternalMailTenant(ctx context.Context, tenantID uint) error
+	// ReauthorizeExternalMailTenant stores a fresh credential, makes the tenant active, and returns
+	// to active, due now, only its connections that the lost tenant credential stopped.
+	ReauthorizeExternalMailTenant(ctx context.Context, tenantID uint, encryptedCredential, displayName string, authorizedBy uint, now time.Time) (*ExternalMailTenant, error)
+	// MarkExternalMailTenantLost moves the tenant to needs_reauthorization and every active connection
+	// of it to needs_reconnect, in one statement each, but only while it is active and still holds the
+	// credential authorized at authorizedAt; false otherwise, so a sync that used a credential the owner
+	// has since replaced never stops the re-authorized tenant. refusedConnectionID, when not zero, is
+	// the connection whose refused fetch revealed the loss; it is marked as stopped by the tenant too.
+	MarkExternalMailTenantLost(ctx context.Context, tenantID uint, authorizedAt, now time.Time, refusedConnectionID uint) (bool, error)
+	// RevokeExternalMailTenant marks the tenant revoked, erases its credential, revokes every live
+	// connection of it, and returns those connections as they were before.
+	RevokeExternalMailTenant(ctx context.Context, organizationID, tenantID uint, now time.Time) ([]*ExternalMailConnection, error)
+	// CountLiveTenantConnections counts the tenant's connections that are not revoked.
+	CountLiveTenantConnections(ctx context.Context, tenantID uint) (int, error)
+	// ListLiveConnectionsByAccounts returns the organization's connections of the provider that are
+	// not revoked and whose address is one of addresses, ignoring case.
+	ListLiveConnectionsByAccounts(ctx context.Context, organizationID uint, provider ExternalMailProvider, addresses []string) ([]*ExternalMailConnection, error)
+	// ListTenantPersonalConnections returns the owner's tenant-assigned personal connections, live
+	// ones first, at most limit.
+	ListTenantPersonalConnections(ctx context.Context, organizationID, ownerUserID uint, limit int) ([]*ExternalMailConnection, error)
+	// RestoreTenantConnection makes a revoked tenant connection active again under tenantID, with an
+	// empty cursor, and raises its received_not_before to notBefore (nil keeps it; it never goes down).
+	// Its mailbox moves to tenantID too.
+	RestoreTenantConnection(ctx context.Context, connectionID, tenantID uint, directoryID string, notBefore *time.Time, now time.Time) (*ExternalMailConnection, error)
+	// ShareTenantConnection makes a tenant connection the organization's (shared, no owner), as a
+	// handover of its personal mailbox does, and marks the address's personal record released with
+	// the handover's seal boundary.
+	ShareTenantConnection(ctx context.Context, mailboxID uint, boundary time.Time) error
+	// RecordAddressHolder stores who now reads the address by any binding (0 for a shared mailbox),
+	// raises its floor to floor (never lowering it; nil keeps it), sets the exempt member (0 for none),
+	// and marks a tenant assignment (tenantID not 0), which stays marked.
+	RecordAddressHolder(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string, holderUserID, tenantID uint, floor *time.Time, exemptUserID uint, at time.Time) error
+	// FindPersonalAssignment returns the record of the address under any provider, or of the
+	// provider's directory user when directoryID is not empty, ignoring the address's case; nil when
+	// none.
+	FindPersonalAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string) (*ExternalMailPersonalAssignment, error)
+	// MarkPersonalBoundary raises the floor of every address personally assigned to userID to at when
+	// the member leaves; it never lowers one.
+	MarkPersonalBoundary(ctx context.Context, organizationID, userID uint, at time.Time) error
 }
 
 // ExternalMailSyncResult is the outcome of one fetch of one connection.
@@ -257,6 +391,7 @@ type ExternalMailRepository interface {
 	// so it is used at most once.
 	TakeExternalMailAuthorization(ctx context.Context, stateHash string, now time.Time) (*ExternalMailAuthorization, error)
 	ExternalMailOpsRepository
+	ExternalMailTenantRepository
 }
 
 // ExternalMailSyncWorker syncs external mail outside request paths.

@@ -777,6 +777,9 @@ func Load() (*Config, error) {
 				MaxImmediatePages:      env.Get("EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES", ""),
 			}),
 			MaxSharedConnections: parseExternalMailMaxSharedConnections(env.Get("EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS", "")),
+			// The same parser: empty is the default, anything but a positive whole number is refused.
+			MaxTenantAssignments: parseExternalMailMaxSharedConnections(env.Get("EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS", "")),
+			TenantsEnabled:       env.GetBool("EXTERNAL_MAIL_TENANTS_ENABLED", false),
 		},
 		Mailbox: MailboxConfig{
 			Domain:              env.Get("MAILBOX_DOMAIN", ""),

@@ -39,7 +39,8 @@ func (r *repository) updateOwnedMailboxes(ctx context.Context, organizationID, u
 	}
 	var rows []MailboxPO
 	err := r.conn(ctx).Raw(`UPDATE mailboxes SET owner_left_at = ?, updated_at = now()
-		WHERE organization_id = ? AND owner_user_id = ? AND type = 'personal' AND origin = 'zmail'
+		WHERE organization_id = ? AND owner_user_id = ? AND type = 'personal'
+		  AND (origin = 'zmail' OR external_mail_tenant_id IS NOT NULL)
 		  AND deleted_at IS NULL AND `+condition+`
 		RETURNING *`, leftAt, organizationID, userID).Scan(&rows).Error
 	if err != nil {
@@ -86,7 +87,8 @@ func (r *repository) HandOverMailbox(ctx context.Context, mailboxID uint, sealed
 	converted := false
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&MailboxPO{}).
-			Where("id = ? AND type = ? AND origin = ?", mailboxID, string(domain.MailboxTypePersonal), string(domain.MailboxOriginZmail)).
+			Where("id = ? AND type = ? AND (origin = ? OR external_mail_tenant_id IS NOT NULL)", mailboxID,
+				string(domain.MailboxTypePersonal), string(domain.MailboxOriginZmail)).
 			Updates(map[string]any{
 				"type":          string(domain.MailboxTypeShared),
 				"owner_user_id": nil,

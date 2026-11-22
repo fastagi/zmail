@@ -62,7 +62,14 @@ func (s *service) ListExternalMailConnectors(context.Context) []ExternalMailConn
 	if !s.externalMailAvailable() {
 		return nil
 	}
-	return s.externalConnectors.list()
+	connectors := s.externalConnectors.list()
+	if !s.settings.ExternalMail.TenantsEnabled {
+		// Tenant connect is switched off: no connector offers it.
+		for i := range connectors {
+			connectors[i].Tenant = nil
+		}
+	}
+	return connectors
 }
 
 func (s *service) StartExternalMailAuthorization(ctx context.Context, viewer domain.OrganizationContext, input ExternalMailAuthorizationInput) (ExternalMailAuthorizationStart, error) {
@@ -94,6 +101,10 @@ func (s *service) StartExternalMailAuthorization(ctx context.Context, viewer dom
 		connection, err := s.managedConnection(ctx, viewer, *input.ConnectionID)
 		if err != nil {
 			return ExternalMailAuthorizationStart{}, err
+		}
+		if connection.TenantID != nil {
+			// A tenant assignment has no account grant to renew: its tenant is authorized again.
+			return ExternalMailAuthorizationStart{}, ErrExternalMailAuthorizationInvalid
 		}
 		if provider != "" && provider != connection.Provider {
 			return ExternalMailAuthorizationStart{}, ErrExternalMailAuthorizationInvalid
@@ -201,7 +212,7 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 		}
 		return nil, false, err
 	}
-	binding.address = account.Address
+	binding.address, binding.accountDirectoryID = account.Address, account.DirectoryID
 	return s.saveExternalBinding(ctx, viewer, connector, token, binding)
 }
 
@@ -217,6 +228,14 @@ type externalBinding struct {
 	reconnectShared bool
 	// sharing binds a new account into a shared connected mailbox; nil binds the viewer's own.
 	sharing *sharedBinding
+	// tenantID and directoryID mark a mailbox assigned from an authorized tenant, which stores no
+	// account grant.
+	tenantID    *uint
+	directoryID string
+	// notBefore is the privacy boundary of the new connection: nothing received before it is stored.
+	notBefore *time.Time
+	// accountDirectoryID is the directory id the provider reported for a signed-in account, if any.
+	accountDirectoryID string
 	// sends records that the grant names the account's SMTP server, so its connected mailbox
 	// sends through it; stored with the grant in one transaction.
 	sends bool
@@ -252,6 +271,15 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 				return lockErr
 			}
 		}
+		// An address ever personally assigned from a tenant is bound with an own grant only by its last
+		// personal holder.
+		reader := viewer.UserID
+		if binding.sharing != nil {
+			reader = 0
+		}
+		if holderErr := s.checkSelfBinding(tx, viewer.OrganizationID, binding.provider, address, binding.accountDirectoryID, reader); holderErr != nil {
+			return holderErr
+		}
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, binding.provider, address)
 		switch {
 		case errors.Is(findErr, ErrExternalMailConnectionNotFound):
@@ -263,6 +291,21 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 			return findErr
 		case findErr != nil:
 			return findErr
+		}
+		if existing.TenantID != nil {
+			// The organization assigned the account from its tenant: it is never also bound with an
+			// account's own grant. Once unassigned it is freed as any revoked account is.
+			if existing.Status != domain.ExternalMailStatusRevoked || binding.connectionID != nil {
+				return ErrExternalMailAccountTaken
+			}
+			if !existing.Shared {
+				if purgeErr := s.purgeForRebind(tx, viewer, existing); purgeErr != nil {
+					return purgeErr
+				}
+				connection, findErr = s.bindAccount(tx, viewer, binding, sealed)
+				created = findErr == nil
+				return findErr
+			}
 		}
 		if existing.Shared {
 			connection, created, findErr = s.saveOverShared(tx, viewer, connector, token, binding, existing, sealed)
@@ -323,7 +366,11 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 		if bindErr := bind(tx); bindErr != nil {
 			return bindErr
 		}
-		return s.externalMail.SetConnectedMailboxSend(tx, connection.OrganizationID, connection.MailboxID, binding.sends)
+		if sendErr := s.externalMail.SetConnectedMailboxSend(tx, connection.OrganizationID, connection.MailboxID, binding.sends); sendErr != nil {
+			return sendErr
+		}
+		// Every reader of an address is a tenure, whatever the binding.
+		return s.recordSelfBinding(tx, connection, binding.accountDirectoryID)
 	})
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
 		// Another sign-in bound the same account in the meantime.

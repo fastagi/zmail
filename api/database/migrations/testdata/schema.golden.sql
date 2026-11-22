@@ -73,6 +73,19 @@ TABLE authentication_sessions
   COLUMN revocation_reason character varying(32) NOT NULL DEFAULT ''::character varying
   COLUMN audience character varying(16) NOT NULL DEFAULT 'user'::character varying
 
+TABLE external_mail_address_records
+  COLUMN organization_id bigint NOT NULL
+  COLUMN provider character varying(16) NOT NULL
+  COLUMN address_key character varying(320) NOT NULL
+  COLUMN directory_id character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN user_id bigint
+  COLUMN tenant_id bigint
+  COLUMN tenant_held boolean NOT NULL DEFAULT false
+  COLUMN assigned_at timestamp with time zone NOT NULL
+  COLUMN floor_at timestamp with time zone
+  COLUMN exempt_user_id bigint
+  COLUMN released boolean NOT NULL DEFAULT false
+
 TABLE external_mail_authorizations
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_authorizations_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -108,6 +121,9 @@ TABLE external_mail_connections
   COLUMN purge_retry_at timestamp with time zone
   COLUMN shared boolean NOT NULL DEFAULT false
   COLUMN bound_by_user_id bigint
+  COLUMN tenant_id bigint
+  COLUMN tenant_directory_id character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN received_not_before timestamp with time zone
 
 TABLE external_mail_sync_runs
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_sync_runs_id_seq'::regclass)
@@ -121,6 +137,21 @@ TABLE external_mail_sync_runs
   COLUMN error_code character varying(64)
   COLUMN timed_out boolean NOT NULL DEFAULT false
   COLUMN throttled boolean NOT NULL DEFAULT false
+
+TABLE external_mail_tenants
+  COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_tenants_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN provider character varying(16) NOT NULL
+  COLUMN tenant_identifier character varying(255) NOT NULL
+  COLUMN display_name character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN status character varying(24) NOT NULL DEFAULT 'active'::character varying
+  COLUMN encrypted_credential text NOT NULL DEFAULT ''::text
+  COLUMN authorized_by_user_id bigint
+  COLUMN last_error_code character varying(64)
+  COLUMN authorized_at timestamp with time zone NOT NULL
+  COLUMN revoked_at timestamp with time zone
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
 
 TABLE mail_agent_audit
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_agent_audit_id_seq'::regclass)
@@ -519,6 +550,7 @@ TABLE mailboxes
   COLUMN ai_triage_enabled boolean NOT NULL DEFAULT false
   COLUMN origin character varying(16) NOT NULL DEFAULT 'zmail'::character varying
   COLUMN connected_send boolean NOT NULL DEFAULT false
+  COLUMN external_mail_tenant_id bigint
 
 TABLE migrations
   COLUMN id integer NOT NULL DEFAULT nextval('migrations_id_seq'::regclass)
@@ -902,6 +934,12 @@ CONSTRAINT assets.fk_assets_user FOREIGN KEY (user_id) REFERENCES users(id) ON U
 CONSTRAINT audit_logs.audit_logs_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.authentication_sessions_pkey PRIMARY KEY (id)
 CONSTRAINT authentication_sessions.chk_authentication_sessions_audience CHECK (((audience)::text = ANY ((ARRAY['user'::character varying, 'operator'::character varying])::text[])))
+CONSTRAINT external_mail_address_records.chk_external_mail_address_records_key CHECK ((((address_key)::text = lower((address_key)::text)) AND ((address_key)::text <> ''::text)))
+CONSTRAINT external_mail_address_records.external_mail_address_records_exempt_user_id_fkey FOREIGN KEY (exempt_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT external_mail_address_records.external_mail_address_records_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT external_mail_address_records.external_mail_address_records_pkey PRIMARY KEY (organization_id, provider, address_key)
+CONSTRAINT external_mail_address_records.external_mail_address_records_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)
+CONSTRAINT external_mail_address_records.external_mail_address_records_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT external_mail_authorizations.external_mail_authorizations_backfill_days_check CHECK (((backfill_days >= 1) AND (backfill_days <= 90)))
 CONSTRAINT external_mail_authorizations.external_mail_authorizations_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES external_mail_connections(id) ON DELETE CASCADE
 CONSTRAINT external_mail_authorizations.external_mail_authorizations_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -911,6 +949,7 @@ CONSTRAINT external_mail_authorizations.external_mail_authorizations_state_hash_
 CONSTRAINT external_mail_authorizations.external_mail_authorizations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT external_mail_connections.chk_external_mail_connections_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
 CONSTRAINT external_mail_connections.chk_external_mail_connections_shared CHECK (((NOT shared) OR (owner_user_id IS NULL)))
+CONSTRAINT external_mail_connections.chk_external_mail_connections_tenant_token CHECK (((tenant_id IS NULL) OR (encrypted_refresh_token = ''::text)))
 CONSTRAINT external_mail_connections.external_mail_connections_backfill_days_check CHECK (((backfill_days >= 1) AND (backfill_days <= 90)))
 CONSTRAINT external_mail_connections.external_mail_connections_bound_by_user_id_fkey FOREIGN KEY (bound_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT external_mail_connections.external_mail_connections_consecutive_failures_check CHECK ((consecutive_failures >= 0))
@@ -921,11 +960,19 @@ CONSTRAINT external_mail_connections.external_mail_connections_organization_id_f
 CONSTRAINT external_mail_connections.external_mail_connections_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT external_mail_connections.external_mail_connections_pkey PRIMARY KEY (id)
 CONSTRAINT external_mail_connections.external_mail_connections_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'needs_reconnect'::character varying, 'revoked'::character varying])::text[])))
+CONSTRAINT external_mail_connections.external_mail_connections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES external_mail_connections(id) ON DELETE CASCADE
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_fetched_count_check CHECK ((fetched_count >= 0))
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_outcome_check CHECK (((outcome)::text = ANY ((ARRAY['ok'::character varying, 'auth_failed'::character varying, 'fetch_failed'::character varying, 'cursor_expired'::character varying, 'provider_unavailable'::character varying, 'dropped'::character varying])::text[])))
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_pkey PRIMARY KEY (id)
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_stored_count_check CHECK ((stored_count >= 0))
+CONSTRAINT external_mail_tenants.chk_external_mail_tenants_credential CHECK ((((status)::text = 'revoked'::text) OR (encrypted_credential <> ''::text)))
+CONSTRAINT external_mail_tenants.chk_external_mail_tenants_identifier CHECK (((tenant_identifier)::text <> ''::text))
+CONSTRAINT external_mail_tenants.chk_external_mail_tenants_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
+CONSTRAINT external_mail_tenants.chk_external_mail_tenants_status CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'needs_reauthorization'::character varying, 'revoked'::character varying])::text[])))
+CONSTRAINT external_mail_tenants.external_mail_tenants_authorized_by_user_id_fkey FOREIGN KEY (authorized_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT external_mail_tenants.external_mail_tenants_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT external_mail_tenants.external_mail_tenants_pkey PRIMARY KEY (id)
 CONSTRAINT mail_agent_audit.mail_agent_audit_action_check CHECK (((action)::text = ANY ((ARRAY['read'::character varying, 'read_revealed'::character varying, 'draft'::character varying])::text[])))
 CONSTRAINT mail_agent_audit.mail_agent_audit_pkey PRIMARY KEY (id)
 CONSTRAINT mail_agent_drafts.mail_agent_drafts_grant_id_fkey FOREIGN KEY (grant_id) REFERENCES mail_agent_grants(id) ON DELETE CASCADE
@@ -1063,8 +1110,10 @@ CONSTRAINT mailbox_members.mailbox_members_permission_check CHECK (((permission)
 CONSTRAINT mailbox_members.mailbox_members_pkey PRIMARY KEY (mailbox_id, membership_id)
 CONSTRAINT mailboxes.chk_mailboxes_origin CHECK (((origin)::text = ANY ((ARRAY['zmail'::character varying, 'connected'::character varying])::text[])))
 CONSTRAINT mailboxes.chk_mailboxes_personal_webhooks CHECK ((((type)::text = 'shared'::text) OR (NOT webhooks_enabled)))
+CONSTRAINT mailboxes.chk_mailboxes_tenant_origin CHECK (((external_mail_tenant_id IS NULL) OR ((origin)::text = 'connected'::text)))
 CONSTRAINT mailboxes.chk_mailboxes_type CHECK (((type)::text = ANY ((ARRAY['personal'::character varying, 'shared'::character varying])::text[])))
 CONSTRAINT mailboxes.fk_mailboxes_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
+CONSTRAINT mailboxes.mailboxes_external_mail_tenant_id_fkey FOREIGN KEY (external_mail_tenant_id) REFERENCES external_mail_tenants(id)
 CONSTRAINT mailboxes.mailboxes_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mailboxes.mailboxes_pkey PRIMARY KEY (id)
 CONSTRAINT mailboxes.mailboxes_role_id_fkey FOREIGN KEY (role_id) REFERENCES mail_roles(id) ON DELETE SET NULL
@@ -1236,6 +1285,8 @@ INDEX CREATE INDEX idx_authentication_sessions_idle_expires_at ON authentication
 INDEX CREATE INDEX idx_authentication_sessions_revoked_at ON authentication_sessions USING btree (revoked_at)
 INDEX CREATE UNIQUE INDEX idx_authentication_sessions_token_hash ON authentication_sessions USING btree (token_hash)
 INDEX CREATE INDEX idx_authentication_sessions_user_id ON authentication_sessions USING btree (user_id)
+INDEX CREATE UNIQUE INDEX external_mail_address_records_pkey ON external_mail_address_records USING btree (organization_id, provider, address_key)
+INDEX CREATE INDEX idx_external_mail_address_records_directory ON external_mail_address_records USING btree (organization_id, provider, directory_id) WHERE ((directory_id)::text <> ''::text)
 INDEX CREATE UNIQUE INDEX external_mail_authorizations_pkey ON external_mail_authorizations USING btree (id)
 INDEX CREATE UNIQUE INDEX external_mail_authorizations_state_hash_key ON external_mail_authorizations USING btree (state_hash)
 INDEX CREATE INDEX idx_external_mail_authorizations_expiry ON external_mail_authorizations USING btree (expires_at)
@@ -1246,9 +1297,13 @@ INDEX CREATE INDEX idx_external_mail_connections_due ON external_mail_connection
 INDEX CREATE INDEX idx_external_mail_connections_owner ON external_mail_connections USING btree (organization_id, owner_user_id)
 INDEX CREATE INDEX idx_external_mail_connections_revoked ON external_mail_connections USING btree (revoked_at, id) WHERE ((status)::text = 'revoked'::text)
 INDEX CREATE INDEX idx_external_mail_connections_shared ON external_mail_connections USING btree (organization_id) WHERE shared
+INDEX CREATE INDEX idx_external_mail_connections_tenant ON external_mail_connections USING btree (tenant_id, status) WHERE (tenant_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX external_mail_sync_runs_pkey ON external_mail_sync_runs USING btree (id)
 INDEX CREATE INDEX idx_external_mail_sync_runs_connection ON external_mail_sync_runs USING btree (connection_id, id DESC)
 INDEX CREATE INDEX idx_external_mail_sync_runs_started ON external_mail_sync_runs USING btree (started_at, id)
+INDEX CREATE UNIQUE INDEX external_mail_tenants_pkey ON external_mail_tenants USING btree (id)
+INDEX CREATE UNIQUE INDEX idx_external_mail_tenants_live ON external_mail_tenants USING btree (provider, lower((tenant_identifier)::text)) WHERE ((status)::text <> 'revoked'::text)
+INDEX CREATE INDEX idx_external_mail_tenants_organization ON external_mail_tenants USING btree (organization_id, id)
 INDEX CREATE INDEX idx_mail_agent_audit_grant ON mail_agent_audit USING btree (grant_id, id DESC)
 INDEX CREATE UNIQUE INDEX mail_agent_audit_pkey ON mail_agent_audit USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_agent_drafts_grant_message ON mail_agent_drafts USING btree (grant_id, message_id)
@@ -1365,6 +1420,7 @@ INDEX CREATE UNIQUE INDEX mailbox_access_events_pkey ON mailbox_access_events US
 INDEX CREATE INDEX idx_mailbox_members_membership ON mailbox_members USING btree (membership_id, mailbox_id)
 INDEX CREATE UNIQUE INDEX mailbox_members_pkey ON mailbox_members USING btree (mailbox_id, membership_id)
 INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address) WHERE ((origin)::text = 'zmail'::text)
+INDEX CREATE INDEX idx_mailboxes_external_mail_tenant ON mailboxes USING btree (external_mail_tenant_id) WHERE (external_mail_tenant_id IS NOT NULL)
 INDEX CREATE INDEX idx_mailboxes_organization ON mailboxes USING btree (organization_id, id) WHERE (deleted_at IS NULL)
 INDEX CREATE INDEX idx_mailboxes_owner ON mailboxes USING btree (organization_id, owner_user_id) WHERE ((deleted_at IS NULL) AND ((type)::text = 'personal'::text))
 INDEX CREATE INDEX idx_mailboxes_role ON mailboxes USING btree (role_id) WHERE (role_id IS NOT NULL)

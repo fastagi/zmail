@@ -81,6 +81,7 @@ func buildOutlookConnector(cfg config.ExternalMailConfig) (ExternalMailConnector
 		AuthKind:     ExternalMailAuthOAuth2,
 		Capabilities: ExternalMailCapabilities{Read: true},
 		Source:       newOutlookMailSource(client),
+		Tenant:       newOutlookTenantSource(client),
 	}, true
 }
 
@@ -158,10 +159,11 @@ func (s *outlookMailSource) Exchange(ctx context.Context, exchange ExternalMailC
 		return ExternalMailToken{}, ExternalMailAccount{}, fmt.Errorf("%w: microsoft issued no refresh token", ErrExternalMailAuth)
 	}
 	var profile struct {
+		ID                string `json:"id"`
 		Mail              string `json:"mail"`
 		UserPrincipalName string `json:"userPrincipalName"`
 	}
-	if err = s.graphGet(ctx, grant.AccessToken, s.graphURL("/me?$select=mail,userPrincipalName"), 0, outlookMaxTokenResponse, &profile); err != nil {
+	if err = s.graphGet(ctx, grant.AccessToken, s.graphURL("/me?$select=id,mail,userPrincipalName"), 0, outlookMaxTokenResponse, &profile); err != nil {
 		return ExternalMailToken{}, ExternalMailAccount{}, err
 	}
 	address := strings.TrimSpace(profile.Mail)
@@ -171,7 +173,9 @@ func (s *outlookMailSource) Exchange(ctx context.Context, exchange ExternalMailC
 	if address == "" {
 		return ExternalMailToken{}, ExternalMailAccount{}, errors.New("outlook: the account has no mail address")
 	}
-	return ExternalMailToken{RefreshToken: grant.RefreshToken}, ExternalMailAccount{Address: strings.ToLower(address)}, nil
+	return ExternalMailToken{RefreshToken: grant.RefreshToken}, ExternalMailAccount{
+		Address: strings.ToLower(address), DirectoryID: strings.TrimSpace(profile.ID),
+	}, nil
 }
 
 // Revoke does nothing at Microsoft: the identity platform has no endpoint that revokes a single
@@ -190,19 +194,23 @@ func (s *outlookMailSource) Fetch(ctx context.Context, request ExternalMailFetch
 	if err != nil {
 		return ExternalMailFetch{}, err
 	}
-	grant, err := s.redeem(ctx, url.Values{
+	var grant outlookGrant
+	if request.Token.AccessToken != "" {
+		// A tenant's application token: it is read as it is, and only this mailbox is addressed.
+		grant.AccessToken = request.Token.AccessToken
+	} else if grant, err = s.redeem(ctx, url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {request.Token.RefreshToken},
-	})
-	if err != nil {
+	}); err != nil {
 		return ExternalMailFetch{}, err
 	}
 	rotated := ExternalMailFetch{RefreshToken: grant.RefreshToken}
+	root := outlookMailboxRoot(request)
 
 	folder := cursor.next()
 	link := folder.Link
 	if link == "" {
-		link = s.initialDeltaURL(folder.Folder, request)
+		link = s.initialDeltaURL(root, folder.Folder, request)
 		folder.Backfill, folder.Count = true, 0
 	}
 	page, err := s.deltaPage(ctx, grant.AccessToken, link)
@@ -215,7 +223,7 @@ func (s *outlookMailSource) Fetch(ctx context.Context, request ExternalMailFetch
 		if !ok {
 			continue
 		}
-		bodyErr := s.readBody(ctx, grant.AccessToken, item.ID, &message)
+		bodyErr := s.readBody(ctx, grant.AccessToken, root, item.ID, &message)
 		if errors.Is(bodyErr, errOutlookNotFound) {
 			// Deleted since the page was read.
 			continue
@@ -266,14 +274,14 @@ func (s *outlookMailSource) deltaPage(ctx context.Context, accessToken, link str
 
 // readBody reads a message's body into message. A body over its bound leaves the message with
 // its headers only, as an oversized inbound part is dropped.
-func (s *outlookMailSource) readBody(ctx context.Context, accessToken, id string, message *ExternalMessage) error {
+func (s *outlookMailSource) readBody(ctx context.Context, accessToken, root, id string, message *ExternalMessage) error {
 	var body struct {
 		Body struct {
 			ContentType string `json:"contentType"`
 			Content     string `json:"content"`
 		} `json:"body"`
 	}
-	err := s.graphGet(ctx, accessToken, s.graphURL("/me/messages/"+url.PathEscape(id)+"?$select=body"), 0, s.maxBodyBytes, &body)
+	err := s.graphGet(ctx, accessToken, s.graphURL(root+"/messages/"+url.PathEscape(id)+"?$select=body"), 0, s.maxBodyBytes, &body)
 	if errors.Is(err, errOutlookResponseTooLarge) {
 		return nil
 	}
@@ -290,7 +298,7 @@ func (s *outlookMailSource) readBody(ctx context.Context, accessToken, id string
 }
 
 // initialDeltaURL starts a folder's first delta round, bounded by the backfill window.
-func (s *outlookMailSource) initialDeltaURL(folder string, request ExternalMailFetchRequest) string {
+func (s *outlookMailSource) initialDeltaURL(root, folder string, request ExternalMailFetchRequest) string {
 	days := request.BackfillDays
 	if days <= 0 {
 		days = outlookDefaultBackfillDays
@@ -299,12 +307,29 @@ func (s *outlookMailSource) initialDeltaURL(folder string, request ExternalMailF
 	if now.IsZero() {
 		now = time.Now()
 	}
-	since := now.UTC().AddDate(0, 0, -days).Format(time.RFC3339)
+	start := now.UTC().AddDate(0, 0, -days)
+	if request.NotBefore.After(start) {
+		start = request.NotBefore.UTC()
+	}
+	since := start.Format(time.RFC3339)
 	query := url.Values{
 		"$select": {outlookMessageFields},
 		"$filter": {"receivedDateTime ge " + since},
 	}
-	return s.graphURL("/me/mailFolders/" + url.PathEscape(folder) + "/messages/delta?" + query.Encode())
+	return s.graphURL(root + "/mailFolders/" + url.PathEscape(folder) + "/messages/delta?" + query.Encode())
+}
+
+// outlookMailboxRoot is the Graph path of the mailbox a fetch reads: /me for a member's own grant,
+// /users/{id} for a tenant's application token, which has no signed-in user.
+func outlookMailboxRoot(request ExternalMailFetchRequest) string {
+	if request.Token.AccessToken == "" {
+		return "/me"
+	}
+	user := request.Token.DirectoryID
+	if user == "" {
+		user = request.AccountAddress
+	}
+	return "/users/" + url.PathEscape(user)
 }
 
 // outlookCursor is the opaque sync position: one Graph link per folder. A pending folder is in the

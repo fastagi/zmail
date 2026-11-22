@@ -17,8 +17,9 @@ func (r *repository) ListMailboxDirectory(ctx context.Context, organizationID ui
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	// A connected personal mailbox is a member's own outside account, never the organization's to list.
-	query := r.conn(ctx).Where("organization_id = ? AND NOT (origin = ? AND type = ?)", organizationID,
+	// A connected personal mailbox is a member's own outside account, never the organization's to list,
+	// unless it was assigned from the organization's tenant: that address is the organization's.
+	query := r.conn(ctx).Where("organization_id = ? AND NOT (origin = ? AND type = ? AND external_mail_tenant_id IS NULL)", organizationID,
 		string(domain.MailboxOriginConnected), string(domain.MailboxTypePersonal))
 	if filter.Type != "" {
 		query = query.Where("type = ?", string(filter.Type))

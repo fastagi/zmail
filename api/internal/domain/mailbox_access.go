@@ -120,14 +120,15 @@ func (a MailboxAccess) Any() bool {
 // A connected mailbox holds copies of an outside account: whatever the type and the permission, it
 // never grants organize, and grants send only when the account was bound with its SMTP server. A connected personal mailbox is the owner's own
 // outside account, so the organization role grants nothing on it at all: owners and admins
-// neither see nor administer it, and disconnect it through the connection directory instead.
+// neither see nor administer it, and disconnect it through the connection directory instead. A
+// personal mailbox assigned from the organization's tenant is at the organization's own address, so
+// the role administers it as it does a Zmail personal mailbox, still without reading it.
 func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMember) MailboxAccess {
 	var access MailboxAccess
 	if m == nil || m.OrganizationID == 0 || m.OrganizationID != viewer.OrganizationID {
 		return access
 	}
-	connectedPersonal := m.Connected() && m.Type == MailboxTypePersonal
-	if viewer.Role.CanManageOrganization() && !connectedPersonal {
+	if viewer.Role.CanManageOrganization() && !m.PrivateConnected() {
 		access.Administer = true
 		access.SeeHistory = true
 		if m.Type == MailboxTypeShared {
@@ -154,7 +155,8 @@ func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMem
 		}
 	}
 	if m.Connected() {
-		access.Send = access.Send && m.ConnectedSend
+		// A mailbox assigned from a tenant reads through a token that reads only: never send.
+		access.Send = access.Send && m.ConnectedSend && !m.TenantAssigned()
 		access.Organize = false
 	}
 	return access

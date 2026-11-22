@@ -29,7 +29,10 @@ type ExternalMailConnectionResponse struct {
 	AccountAddress string `json:"account_address"`
 	MailboxID      uint   `json:"mailbox_id"`
 	// Shared marks an organization's connection of a shared connected mailbox.
-	Shared        bool       `json:"shared"`
+	Shared bool `json:"shared"`
+	// TenantID names the authorized tenant a mailbox was assigned from; null for an account bound
+	// with its own grant.
+	TenantID      *uint      `json:"tenant_id"`
 	Status        string     `json:"status"`
 	LastSyncedAt  *time.Time `json:"last_synced_at"`
 	LastErrorCode *string    `json:"last_error_code"`
@@ -41,7 +44,7 @@ func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnect
 	for _, connection := range connections {
 		item := ExternalMailConnectionResponse{
 			ID: connection.ID, Provider: string(connection.Provider), AccountAddress: connection.AccountAddress,
-			MailboxID: connection.MailboxID, Shared: connection.Shared, Status: string(connection.Status),
+			MailboxID: connection.MailboxID, Shared: connection.Shared, TenantID: connection.TenantID, Status: string(connection.Status),
 			LastErrorCode: optionalText(connection.LastErrorCode), CreatedAt: connection.CreatedAt.UTC(),
 		}
 		if connection.LastSyncedAt != nil {
@@ -53,7 +56,7 @@ func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnect
 }
 
 // ListExternalMailConnections lists the caller's own connections, then the shared ones they manage.
-// fastbuild:bounded-list max=120 reason=at most MaxExternalMailConnectionsPerUser live and MaxRevokedExternalMailConnectionsListed revoked own connections, then at most MaxSharedExternalMailConnectionsCeiling shared ones
+// fastbuild:bounded-list max=220 reason=at most MaxExternalMailConnectionsPerUser live and MaxRevokedExternalMailConnectionsListed revoked own connections, then at most maxListedTenantPersonalConnections tenant assignments, then at most MaxSharedExternalMailConnectionsCeiling shared ones
 func (h *Handler) ListExternalMailConnections(c *gin.Context) {
 	viewer, ok := organizationScope(c)
 	if !ok {
@@ -92,6 +95,8 @@ type ExternalMailConnectorResponse struct {
 type ExternalMailCapabilitiesResponse struct {
 	Read bool `json:"read"`
 	Send bool `json:"send"`
+	// Tenant means an owner may authorize a whole tenant of the provider (POST /v1/external-mail-tenants).
+	Tenant bool `json:"tenant"`
 }
 
 // ListExternalMailConnectors lists the connectors the instance enables, so a client offers one
@@ -106,7 +111,9 @@ func (h *Handler) ListExternalMailConnectors(c *gin.Context) {
 	for _, connector := range connectors {
 		items = append(items, ExternalMailConnectorResponse{
 			ID: string(connector.ID), AuthKind: string(connector.AuthKind),
-			Capabilities: ExternalMailCapabilitiesResponse{Read: connector.Capabilities.Read, Send: connector.Capabilities.Send},
+			Capabilities: ExternalMailCapabilitiesResponse{
+				Read: connector.Capabilities.Read, Send: connector.Capabilities.Send, Tenant: connector.Tenant != nil,
+			},
 		})
 	}
 	privateResponse(c)

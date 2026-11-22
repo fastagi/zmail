@@ -123,11 +123,15 @@ func (s *service) PurgeExternalMailCopies(ctx context.Context, viewer domain.Org
 	// Purging a shared connection deletes its mailbox with every copy and member, so only those who
 	// may delete the mailbox may: owners and admins. A manage member reconnects and unbinds it, and
 	// the worker purges it once the retention ends.
-	if connection.Shared && !viewer.Role.CanManageOrganization() {
+	if (connection.Shared || connection.TenantID != nil) && !viewer.Role.CanManageOrganization() {
+		// A tenant assignment is the organization's address too: its copies are the organization's.
 		return ExternalMailPurgeResult{}, domain.ErrPermissionDenied
 	}
 	if connection.Status != domain.ExternalMailStatusRevoked {
 		return ExternalMailPurgeResult{}, ErrExternalMailConnectionNotRevoked
+	}
+	if err = s.refuseAwaitingHandover(ctx, connection); err != nil {
+		return ExternalMailPurgeResult{}, err
 	}
 	var result ExternalMailPurgeResult
 	for range externalMailImmediatePurgeSteps {

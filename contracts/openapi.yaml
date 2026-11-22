@@ -10082,6 +10082,274 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-tenants:
+    get:
+      operationId: listExternalMailTenants
+      summary: List the organization's authorized tenants
+      description: Needs the `owner` or `admin` organization role. Lists the Google Workspace and Microsoft
+        365 tenants the organization authorized, live ones first, then id ascending, at most 50, each with
+        its count of live assignments. Never the credential. Works even while tenant connect or external
+        mail is off, so a stored credential is always visible. Never cached. Session only; no API key
+        reaches any tenant route.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The organization's tenants.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailTenantListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: authorizeExternalMailTenant
+      summary: Authorize a whole tenant
+      description: Needs the `owner` organization role and `EXTERNAL_MAIL_TENANTS_ENABLED`. Only a credential
+        the organization owns is accepted. Google Workspace takes the organization's service account key
+        with domain-wide delegation (`gmail.readonly` and `admin.directory.user.readonly`) and an
+        administrator to read the directory as; Microsoft 365 takes the Entra tenant id with the client id
+        and secret of the organization's own application (Graph application permissions `Mail.Read` and
+        `User.Read.All`). The credential is proven with the provider, then sealed. Authorizing creates no
+        mailbox and grants no read access by itself. A tenant this organization already holds is
+        re-authorized in place (`200`) and the assignments its lost credential stopped resume. An
+        organization holds at most 50 live tenants.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeExternalMailTenantRequest'
+      responses:
+        '200':
+          description: The tenant was already authorized by this organization and is re-authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailTenantResponse'
+        '201':
+          description: The tenant is authorized.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailTenantResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The caller is not the organization's `owner` (`PERMISSION.DENIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: The organization is not found (`ORGANIZATION.NOT_FOUND`), or tenant connect is off or
+            no enabled connector serves tenants of the provider (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The tenant is authorized by another organization (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), or
+            the organization holds 50 live tenants (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: The body is malformed or carries no complete credential of the organization's own
+            (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`, or `COMMON.VALIDATION_FAILED`), or the provider refused
+            the credential
+            (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-tenants/{tenant_id}:
+    delete:
+      operationId: revokeExternalMailTenant
+      summary: Revoke a tenant and every assignment of it
+      description: Needs the `owner` organization role. Works even while tenant connect or external mail is
+        off. Marks the tenant `revoked`, erases its credential,
+        and in the same transaction revokes every connection of it, each recorded as `connection_revoked`
+        with `detail.reason` `tenant_revoked`; every sync stops at once. Revoking a revoked tenant
+        answers `204` again. The customer should also remove the application or key at the provider.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/ExternalMailTenantID'
+      responses:
+        '204':
+          description: The tenant and its connections are revoked.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The caller is not the organization's `owner` (`PERMISSION.DENIED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the tenant
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-tenants/{tenant_id}/directory:
+    get:
+      operationId: listExternalMailTenantDirectory
+      summary: Read one page of a tenant's directory
+      description: Needs the `owner` or `admin` organization role. Reads one page of the tenant's users from
+        the provider, each marked as assigned (a live connection of this tenant) and as available (no live
+        connection of the organization holds the address). Suspended and archived Google users and
+        Microsoft users without a mail address are left out. Pass `meta.next_cursor` as `cursor` for the
+        next page; the cursor carries only the provider's page token, and Zmail builds every provider
+        request itself. Never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/ExternalMailTenantID'
+        - name: cursor
+          in: query
+          description: Opaque position from `meta.next_cursor`; absent or empty starts at the first page.
+          schema:
+            type: string
+            maxLength: 4096
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: One page of the directory.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailTenantDirectoryPageResponse'
+        '400':
+          description: The cursor is malformed or the provider refused it (`COMMON.INVALID_INPUT`), or the
+            organization header is missing or malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the tenant
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The tenant is not `active`, or the provider refused its credential now
+            (`MAILBOX.ACCESS_CONFLICT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-tenants/{tenant_id}/assignments:
+    post:
+      operationId: assignExternalMailTenantMailboxes
+      summary: Assign mailboxes from a tenant's directory
+      description: Needs the `owner` or `admin` organization role. Assigns 1 to 100 directory mailboxes,
+        each to a member as a private personal connected mailbox or as a shared connected mailbox with
+        members. Each row is checked and stored on its own and idempotently per address, so the answer
+        is `200` with one result per row, in order, and a failed row is retried by sending it again.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/ExternalMailTenantID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignExternalMailTenantMailboxesRequest'
+      responses:
+        '200':
+          description: One result per row.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalMailTenantAssignmentListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The organization (`ORGANIZATION.NOT_FOUND`) or the tenant
+            (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The tenant is not `active` (`MAILBOX.ACCESS_CONFLICT`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          description: The batch is empty or holds more than 100 rows (`MAILBOX.ACCESS_INVALID`), or the body
+            is invalid (`COMMON.VALIDATION_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mail-triage-setting:
     get:
       operationId: getMailTriageSetting
@@ -10601,6 +10869,13 @@ components:
       in: path
       required: true
       description: Positive mail role identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
+    ExternalMailTenantID:
+      name: tenant_id
+      in: path
+      required: true
+      description: Positive external mail tenant identifier.
       schema:
         $ref: '#/components/schemas/PositiveID'
     ExternalMailConnectionID:
@@ -16188,6 +16463,7 @@ components:
           additionalProperties: false
           required:
             - read
+            - tenant
           properties:
             read:
               type: boolean
@@ -16196,6 +16472,10 @@ components:
               type: boolean
               description: The connector can send mail written in Zmail through the account's own server,
                 when the binding names it (`smtp_host` for `imap`).
+            tenant:
+              type: boolean
+              description: An organization owner may authorize a whole tenant of the provider
+                (`POST /v1/external-mail-tenants`).
     ExternalMailConnectorListResponse:
       type: object
       additionalProperties: false
@@ -16378,6 +16658,7 @@ components:
         - account_address
         - mailbox_id
         - shared
+        - tenant_id
         - status
         - last_synced_at
         - last_error_code
@@ -16387,6 +16668,12 @@ components:
           $ref: '#/components/schemas/PositiveID'
         provider:
           $ref: '#/components/schemas/ExternalMailConnectorID'
+        tenant_id:
+          description: The authorized tenant the mailbox was assigned from; null for an account bound with
+            its own grant.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
         account_address:
           type: string
           maxLength: 320
@@ -16438,7 +16725,7 @@ components:
           type: string
         data:
           type: array
-          maxItems: 120
+          maxItems: 220
           items:
             $ref: '#/components/schemas/ExternalMailConnection'
     ExternalMailSyncRun:
@@ -16545,6 +16832,291 @@ components:
             completed:
               description: True when no copy is left and the mailbox and connection are deleted.
               type: boolean
+    AuthorizeExternalMailTenantRequest:
+      type: object
+      additionalProperties: false
+      description: Google takes `service_account_key` and `admin_subject`; Microsoft takes `tenant_id`,
+        `client_id`, and `client_secret` of the organization's own application. A `client_id` without
+        `client_secret`, or the reverse, is refused.
+      required:
+        - provider
+      properties:
+        provider:
+          $ref: '#/components/schemas/ExternalMailConnectorID'
+        service_account_key:
+          description: The service account's JSON key file, as an object or as a string; at most 16 KiB. Its
+            RSA key has 2048 to 4096 bits. Its `token_uri` is ignored.
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: string
+              maxLength: 16384
+        admin_subject:
+          type: string
+          description: A Workspace administrator's address; the directory is read as this user.
+          maxLength: 320
+        tenant_id:
+          type: string
+          description: The Entra tenant id, a GUID.
+          maxLength: 255
+        client_id:
+          type: string
+          maxLength: 128
+        client_secret:
+          type: string
+          maxLength: 1024
+          writeOnly: true
+    ExternalMailTenant:
+      type: object
+      additionalProperties: false
+      description: One authorized tenant; never its credential.
+      required:
+        - id
+        - provider
+        - tenant_identifier
+        - display_name
+        - status
+        - last_error_code
+        - assignments
+        - authorized_by_user_id
+        - authorized_at
+        - revoked_at
+        - created_at
+        - updated_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        provider:
+          $ref: '#/components/schemas/ExternalMailConnectorID'
+        tenant_identifier:
+          type: string
+          description: The Workspace customer id or the Entra tenant id.
+          maxLength: 255
+        display_name:
+          type: string
+          description: A label such as the Workspace domain; may be empty.
+          maxLength: 255
+        status:
+          type: string
+          description: '`active` mints tokens for its assignments; `needs_reauthorization` lost its credential
+            at the provider and every assignment waits; `revoked` was revoked by the owner.'
+          enum:
+            - active
+            - needs_reauthorization
+            - revoked
+        last_error_code:
+          description: '`external.tenant_auth_failed` while the tenant needs reauthorization; null otherwise.'
+          oneOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        assignments:
+          type: integer
+          minimum: 0
+          description: Live connections of the tenant.
+        authorized_by_user_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        authorized_at:
+          type: string
+          format: date-time
+        revoked_at:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ExternalMailTenantResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/ExternalMailTenant'
+    ExternalMailTenantListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/ExternalMailTenant'
+    ExternalMailTenantDirectoryEntry:
+      type: object
+      additionalProperties: false
+      required:
+        - address
+        - display_name
+        - directory_id
+        - assigned
+        - assignment
+        - connection_id
+        - mailbox_id
+        - available
+      properties:
+        address:
+          type: string
+          maxLength: 320
+        display_name:
+          type: string
+          maxLength: 120
+        directory_id:
+          type: string
+          description: The provider's stable id of the user.
+          maxLength: 255
+        assigned:
+          type: boolean
+          description: A live connection of this tenant assigns the mailbox.
+        assignment:
+          oneOf:
+            - type: string
+              enum:
+                - personal
+                - shared
+            - type: 'null'
+        connection_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        mailbox_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        available:
+          type: boolean
+          description: False while any live connection of the organization holds the address.
+    ExternalMailTenantDirectoryPageResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+        - meta
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ExternalMailTenantDirectoryEntry'
+        meta:
+          $ref: '#/components/schemas/CursorPageMeta'
+    AssignExternalMailTenantMailboxesRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - assignments
+      properties:
+        assignments:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ExternalMailTenantAssignmentRequest'
+    ExternalMailTenantAssignmentRequest:
+      type: object
+      additionalProperties: false
+      description: '`personal` takes `user_id`, a current member; `shared` takes `members` (and optionally
+        `display_name`) with the rules of `POST /v1/mailboxes`.'
+      required:
+        - address
+        - assign
+      properties:
+        address:
+          type: string
+          maxLength: 320
+        assign:
+          type: string
+          enum:
+            - personal
+            - shared
+        user_id:
+          $ref: '#/components/schemas/PositiveID'
+        display_name:
+          type: string
+          maxLength: 255
+        members:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/MailboxMemberRequest'
+    ExternalMailTenantAssignmentResult:
+      type: object
+      additionalProperties: false
+      required:
+        - address
+        - status
+        - connection_id
+        - mailbox_id
+        - error_code
+      properties:
+        address:
+          type: string
+          maxLength: 320
+        status:
+          type: string
+          enum:
+            - created
+            - restored
+            - unchanged
+            - failed
+        connection_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        mailbox_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        error_code:
+          description: The public error code of a failed row; null otherwise.
+          oneOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+    ExternalMailTenantAssignmentListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ExternalMailTenantAssignmentResult'
     ExternalMailConnectionDirectoryEntry:
       type: object
       additionalProperties: false
@@ -16556,6 +17128,7 @@ components:
         - provider
         - status
         - shared
+        - tenant_id
         - account_address
         - mailbox_id
         - masked_account_address
@@ -16577,14 +17150,21 @@ components:
         shared:
           type: boolean
           description: True for the organization's connection of a shared connected mailbox.
+        tenant_id:
+          description: The authorized tenant a mailbox was assigned from; null otherwise.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
         account_address:
-          description: The full address of a shared connection; null for a member's own account.
+          description: The full address of a shared connection or a tenant assignment; null for a
+            member's own account.
           oneOf:
             - type: string
               maxLength: 320
             - type: 'null'
         mailbox_id:
-          description: The shared connected mailbox of a shared connection; null for a member's own account.
+          description: The mailbox of a shared connection or a tenant assignment; null for a member's own
+            account.
           oneOf:
             - $ref: '#/components/schemas/PositiveID'
             - type: 'null'

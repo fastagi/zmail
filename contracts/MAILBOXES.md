@@ -368,6 +368,12 @@ where its mail comes from:
   Domain receiving and domain deletion ignore connected mailboxes too: an address on an
   organization domain gets no routing rule because of one, and never keeps the domain from being
   deleted. Operator mailbox counts count Zmail mailboxes only.
+- A connected `personal` mailbox **assigned from the organization's tenant** (see
+  [Tenant Connections](#tenant-connections)) is at the organization's own address, so the owner and
+  admin roles get `administer` and `see_history` on it as on a Zmail personal mailbox: it is in the
+  directory with its full address, can be deleted and handed over, and its history read. They still
+  never read its mail, and it is absent from their `GET /v1/mailboxes` (a tenant may hold thousands;
+  the paginated directory lists them).
 - Deleting a connected mailbox (only a connected shared one has `administer`) revokes its connection
   in the same operation: the grant is handed back and the token erased, so no stored grant outlives
   its mailbox.
@@ -512,6 +518,20 @@ a shared one:
 - A shared mailbox, including one a concurrent handover already converted, is
   `409 MAILBOX.ACCESS_CONFLICT`.
 - `handed_over` is written, and the answer is `201` with the mailbox as the caller sees it.
+
+A personal mailbox [assigned from a tenant](#tenant-connections) follows these rules too, because its
+address is the organization's: when its owner leaves it awaits handover (`owner_left`), its agent
+grants end, and nobody reads it, but its connection is **not** revoked and keeps syncing, so mail
+that arrives meanwhile is waiting for the successor. The handover seals what arrived before the
+departure, makes the mailbox `shared` + `connected`, and makes its connection the organization's
+(`shared: true`, no owner). The successor becomes a `send` member, which on a tenant-assigned mailbox
+reads only: a mailbox assigned from a tenant is always read-only (its Gmail or Outlook token reads
+mail and nothing else, and it never gets an SMTP server of its own), so nobody sends as the address,
+neither before nor after the handover; this is the one part of the Zmail rule that cannot apply. A rejoin before the handover restores it as for any personal mailbox. Until then the
+assignment cannot be disconnected, purged, deleted, or reassigned, and the worker's retention purge leaves it
+alone. The handover does not check the organization's shared connection limit. Whoever is later
+assigned the address gets nothing received before the departure or the handover (see
+[Tenant Connections](#tenant-connections)).
 
 ### Sealed History
 
@@ -766,9 +786,11 @@ routes answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, and no account is syn
 ### Binding
 
 `GET /v1/external-mail-connectors` lists the instance's connectors in a stable order:
-`{ "id": "gmail", "auth_kind": "oauth2", "capabilities": { "read": true } }`. `capabilities.send`
-is `true` for a connector that can also send through the account's own server (`imap`, when bound
-with `smtp_host`; see [Sending From A Connected Mailbox](#sending-from-a-connected-mailbox)).
+`{ "id": "gmail", "auth_kind": "oauth2", "capabilities": { "read": true, "send": false, "tenant": true } }`.
+`capabilities.send` is `true` for a connector that can also send through the account's own server
+(`imap`, when bound with `smtp_host`; see [Sending From A Connected Mailbox](#sending-from-a-connected-mailbox)).
+`tenant` says an owner may authorize a whole tenant of the provider (see
+[Tenant Connections](#tenant-connections)).
 
 `POST /v1/external-mail-authorizations` with `{ "provider": "gmail" }` (optionally
 `"backfill_days"`) starts a sign-in; with `{ "connection_id": 3 }` it reconnects that connection,
@@ -915,17 +937,19 @@ reconnected, or the mailbox is deleted.
 ### Connections
 
 `GET /v1/external-mail-connections` lists the caller's own connections in the organization, then
-the shared connections the caller manages, at most 120 in all; it never carries a token. The
+the shared connections the caller manages, at most 220 in all; it never carries a token. The
 caller's own live connections come first, id ascending (at most 10, the limit), then their 10 most
 recently revoked ones, newest revocation first, so a member at the limit still sees the revoked ones
-whose copies they may purge or rebind. Then come the shared connections the caller manages (every
-one for an `owner` or `admin`, those of mailboxes held with `manage` otherwise) whose mailbox still
-exists, live ones first and then id ascending, at most 100. Revoked connections are kept so a rebind
-restores the same mailbox, and do not count toward the limits:
+whose copies they may purge or rebind. Then come the caller's personal mailboxes
+[assigned from a tenant](#tenant-connections), live ones first, at most 100, with `tenant_id` set (it
+is `null` otherwise). Then come the shared connections the caller manages (every one for an `owner`
+or `admin`, those of mailboxes held with `manage` otherwise) whose mailbox still exists, live ones
+first and then id ascending, at most 100. Revoked connections are kept so a rebind restores the same
+mailbox, and do not count toward the limits:
 
 ```json
 { "id": 3, "provider": "gmail", "account_address": "me@gmail.com", "mailbox_id": 41, "shared": false,
-  "status": "active", "last_synced_at": "2026-11-20T08:00:00Z", "last_error_code": null,
+  "tenant_id": null, "status": "active", "last_synced_at": "2026-11-20T08:00:00Z", "last_error_code": null,
   "created_at": "2026-11-19T08:00:00Z" }
 ```
 
@@ -1062,7 +1086,7 @@ organization in any status, newest first (`cursor`, `per_page` 1 to 100, default
 `400 COMMON.INVALID_INPUT`). It is empty while external mail is off, and never cached:
 
 ```json
-{ "id": 3, "provider": "gmail", "status": "active", "shared": false, "account_address": null,
+{ "id": 3, "provider": "gmail", "status": "active", "shared": false, "tenant_id": null, "account_address": null,
   "mailbox_id": null, "masked_account_address": "st***@gmail.com", "owner_user_id": 5,
   "owner_display_name": "stark", "last_synced_at": "2026-11-20T08:00:00Z",
   "created_at": "2026-11-19T08:00:00Z" }
@@ -1073,7 +1097,8 @@ domain. `owner_display_name` is the owner's nickname, or username without one, w
 member, otherwise `null`. No token, message, or count is ever returned, and for a member's own
 account neither its full address nor its mailbox id. A shared connection is the organization's own
 team account: it carries `"shared": true`, its full `account_address`, and its `mailbox_id`, with
-`owner_user_id` and `owner_display_name` `null`.
+`owner_user_id` and `owner_display_name` `null`. A tenant assignment carries its `tenant_id`, and,
+being at an organization address, its full `account_address` and `mailbox_id` too.
 
 `DELETE /v1/external-mail-connection-directory/:connection_id` force-disconnects any connection of
 the organization with the effect of the owner's unbind and writes `connection_force_disconnected`
@@ -1088,6 +1113,206 @@ of them finds it in `GET /v1/audit-logs?resource=external_mail_connections` and 
 disconnected which account. The owner may bind the account again afterwards, which restores the
 same mailbox like any rebind of their own; until then another member who proves control of the
 account may bind it instead (see [Binding](#binding)).
+
+### Tenant Connections
+
+An organization **owner** authorizes a whole Google Workspace or Microsoft 365 tenant once; owners
+and admins then pick mailboxes from its directory and assign each to a member (a personal connected
+mailbox) or as a shared connected mailbox, without anyone signing in to the mailbox.
+
+What this guarantees: authorizing a tenant grants no read access by itself; it creates no mailbox,
+and only assigned mailboxes are synced, each with a short-lived token the tenant credential mints
+for that one mailbox. Owners and admins decide who is assigned which mailbox; every assignment is
+written to the organization audit log and the mailbox access history. A personal assignment cannot
+be redirected to another reader while its member is in the organization (see the assignment rules
+below). Every tenant route needs a session; there is none on the API key surface, so an agent never
+gets tenant-level access, only the per-mailbox [agent grants](#agent-grants) of assigned mailboxes,
+issued as for any mailbox. Members get `403 PERMISSION.DENIED` on every tenant route.
+
+Tenant connect is off unless the instance sets `EXTERNAL_MAIL_TENANTS_ENABLED=true` (and enables the
+`gmail` or `outlook` connector). While it is off, as while external mail is off, no connector lists
+`capabilities.tenant`, authorizing answers `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`, and the
+directory and assignment routes answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. Listing
+(`GET /v1/external-mail-tenants`) and revoking (`DELETE /v1/external-mail-tenants/:tenant_id`) keep
+working, so an owner can always see and revoke a stored credential. Mailboxes already assigned keep
+syncing, and owners and admins still disconnect them one by one with the connection routes.
+
+`POST /v1/external-mail-tenants` (owner only; `admin` is `403 PERMISSION.DENIED`):
+
+| Provider | Body | Answer |
+|---|---|---|
+| `gmail` (Google Workspace) | `service_account_key` (the JSON key file, as an object or a string) and `admin_subject` (an administrator's address) | `201` tenant |
+| `outlook` (Microsoft 365) | `tenant_id` (the Entra tenant id, a GUID), `client_id`, and `client_secret` of the organization's own application | `201` tenant |
+
+Only a credential the organization owns is accepted. A body without one, or with `client_id` and no
+`client_secret` (or the reverse), is `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID` before any provider
+is asked. There is no admin consent redirect: an admin consent to an operator's application cannot be
+tied to the organization that claims it.
+
+- **Google**: the organization creates a service account in its own Google Cloud project, authorizes
+  its client id for domain-wide delegation in the Workspace Admin console with the scopes
+  `https://www.googleapis.com/auth/gmail.readonly` and
+  `https://www.googleapis.com/auth/admin.directory.user.readonly`, and posts its key. Zmail signs an
+  RS256 assertion with the key for the administrator (both scopes) and reads one Directory API user to
+  learn the customer id, which becomes `tenant_identifier`; `display_name` is the administrator's
+  domain. A mailbox token is an assertion with the mailbox as the subject and `gmail.readonly` only.
+  The key's own `token_uri` is ignored. The customer revokes by deleting the key or the delegation.
+- **Microsoft**: the organization registers an application in its own Entra tenant with the Graph
+  application permissions `Mail.Read` and `User.Read.All`, grants admin consent there, and posts the
+  tenant id with the application's client id and secret. Zmail proves them with a client credentials
+  token and one Graph `/users` read before anything is stored, and repeats both whenever it checks
+  the tenant, so a removed permission is noticed. Tokens are cached in memory for their lifetime, never
+  logged.
+- **Microsoft, scope**: an application token is tenant-wide at Microsoft; Zmail only ever
+  addresses the assigned mailbox (`/users/{id}`) with it. The customer should restrict the
+  application to the assigned mailboxes with **RBAC for Applications in Exchange Online** (a
+  management scope and an `Application Mail.Read` role assignment; changes take 30 minutes to 2 hours
+  at Microsoft). When revoking in Zmail, the customer should also delete the application's secret
+  in Entra.
+
+A malformed body is `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`; a credential the provider refuses
+is `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`. A tenant identifier is live (not `revoked`) in at most
+one organization of the instance: another organization's is `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`.
+An organization holds at most 50 live tenants; one more is `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT`
+(revoked ones do not count). Authorizing a tenant this organization already holds re-authorizes it in
+place (`200`): the new credential replaces the old, the tenant is `active` again, and the assignments
+the lost tenant credential stopped (`last_error_code` `external.tenant_auth_failed`) resume at once;
+one stopped by its own mailbox's refusal stays `needs_reconnect`. A check that ran with a credential
+the owner has since replaced never stops the re-authorized tenant. The tenant, never its credential:
+
+```json
+{ "id": 4, "provider": "gmail", "tenant_identifier": "C01abc2de", "display_name": "acme.com",
+  "status": "active", "last_error_code": null, "assignments": 12, "authorized_by_user_id": 1,
+  "authorized_at": "2026-12-08T09:00:00Z", "revoked_at": null,
+  "created_at": "2026-12-08T09:00:00Z", "updated_at": "2026-12-08T09:00:00Z" }
+```
+
+| `status` | Meaning |
+|---|---|
+| `active` | Mints tokens for its assigned mailboxes |
+| `needs_reauthorization` | The provider refused the tenant credential (`last_error_code` `external.tenant_auth_failed`); every assignment is `needs_reconnect` until the owner authorizes the tenant again |
+| `revoked` | Revoked by the owner; kept for the record without its credential |
+
+`GET /v1/external-mail-tenants` (owners and admins) lists the organization's tenants, live first,
+then id ascending, at most 50. `DELETE /v1/external-mail-tenants/:tenant_id` (owner only) revokes the
+tenant and, in one transaction, every connection of it: each stops syncing at once, follows the
+revoke path (triage off, agent grants end) and records `connection_revoked` with
+`detail.reason` `tenant_revoked`; the tenant's credential is erased. It answers `204`, again for a
+revoked tenant; another organization's id is `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+
+`GET /v1/external-mail-tenants/:tenant_id/directory` (owners and admins) reads one page of the
+tenant's directory from the provider (`cursor`, `per_page` 1 to 100, default 50). The cursor is
+opaque and carries only the provider's page token: Zmail always builds the provider request itself,
+so a cursor never names another resource. A cursor that is malformed or that the provider refuses is
+`400 COMMON.INVALID_INPUT` and says nothing about the tenant. Suspended and archived Google users and
+Microsoft users without a mail address are left out. A tenant that is not `active` is
+`409 MAILBOX.ACCESS_CONFLICT`, and so is one whose credential the provider refuses now (it becomes
+`needs_reauthorization`):
+
+```json
+{ "address": "alice@acme.com", "display_name": "Alice", "directory_id": "1067...", "assigned": true,
+  "assignment": "personal", "connection_id": 31, "mailbox_id": 88, "available": false }
+```
+
+`assigned` marks a live connection of this tenant (`assignment` `personal` or `shared`);
+`available` is `false` while any live connection of the organization holds the address, such as a
+member's own binding.
+
+`POST /v1/external-mail-tenants/:tenant_id/assignments` (owners and admins) takes 1 to 100 rows
+(`422 MAILBOX.ACCESS_INVALID` otherwise) and answers `200` with one result per row, in order:
+
+```json
+{ "assignments": [
+  { "address": "alice@acme.com", "assign": "personal", "user_id": 7 },
+  { "address": "support@acme.com", "assign": "shared", "display_name": "Support",
+    "members": [ { "user_id": 7, "permission": "manage" }, { "user_id": 9, "permission": "view" } ] } ] }
+```
+
+```json
+{ "address": "alice@acme.com", "status": "created", "connection_id": 31, "mailbox_id": 88, "error_code": null }
+```
+
+`status` is `created`, `restored` (a revoked assignment of the same target comes back with its
+copies), `unchanged` (the same live assignment already exists: rows are idempotent per address), or
+`failed` with `error_code`; each row is stored in its own transaction, so a failed row is retried by
+sending it again alone. Row failures:
+
+| `error_code` | Why |
+|---|---|
+| `MAILBOX.ACCESS_INVALID` | Not one address; `personal` without a current member `user_id`, or with members; `shared` without valid members (the `POST /v1/mailboxes` rules); the address twice in the batch |
+| `MAILBOX.EXTERNAL_ACCOUNT_MISMATCH` | Not a mailbox of the tenant's directory (an alias is not its user's address) |
+| `MAILBOX.EXTERNAL_ACCOUNT_TAKEN` | A live connection of the address that is a member's own, a shared one, another tenant's, or this tenant's with another target; a revoked shared one whose mailbox exists; or an address last assigned as personal to another member who is still in the organization |
+| `MAILBOX.EXTERNAL_CONNECTION_LIMIT` | The tenant holds `EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS` (1000 by default, 1 to 10000) live assignments, or a shared row would pass `EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS` |
+| `MAILBOX.ACCESS_CONFLICT` | The tenant credential stopped working, or the tenant was revoked, during the batch; this and later rows are not tried |
+| `MAILBOX.EXTERNAL_SERVER_UNREACHABLE` | The provider could not be asked; retry the row |
+
+Each row holds the tenant row shared until it commits, so a revocation waits for rows in progress and
+revokes what they created. Restoring a shared assignment makes its members exactly the posted set:
+the others are removed (`member_removed`).
+
+A personal assignment cannot be redirected, and **a holder only ever reads mail received during their
+own tenures**:
+
+- Zmail keeps a record of every address any connection of the organization ever read, by any kind
+  of binding (a member's own grant, a team account, a tenant assignment), under every connector
+  (matched by address, ignoring case, and by directory id): who holds it now, its privacy floor, which
+  only ever rises, and the member exempt from the floor. It is written when the binding is made, so
+  it survives disconnects, purges, deletions, departures, handovers, and tenant revocation. A member's
+  own binding is a tenure like any other: assigning the address from the tenant to someone else
+  afterwards starts after it.
+- The first personal holder is exempt, with the normal look-back, across departures and returns, for
+  as long as nobody else has held the address. Once anyone else held it (another member, a shared
+  mailbox, or a handover), nobody is exempt any more.
+- Every other assignment, personal or shared, and every restore of one, starts its connection at the
+  later of the floor and the moment of the assignment: the connector is asked for nothing older, and
+  every copy the provider received before it, or without a receive time, is dropped before it is
+  stored, whatever the connector returned. A connection's start never goes down and is never
+  cleared. A member assigned the address again keeps the copies their mailbox still holds from their
+  own earlier tenure, but nothing received while they did not hold it is fetched.
+- While that member is in the organization, the address goes to nobody else, personal or shared
+  (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), unless it was handed over. The same member may have it back
+  at any time, with the normal look-back.
+- When the member leaves, the assignment awaits handover: it cannot be disconnected, purged, or its
+  mailbox deleted (`409 MAILBOX.ACCESS_CONFLICT`), the worker's retention purge skips it, and it is not reassigned
+  (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`). The only ways on are the handover, which seals it, or the
+  member's return, which finds it intact.
+- A departure or a handover raises the floor to that time; the handover's seal keeps the successor
+  from what came before it.
+- Once a tenant assigned the address, nobody but the exempt first holder binds it with an own grant,
+  personal or shared (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; matched by address and by the directory id
+  the provider reports): such a binding has no floor. This strict rule is pending confirmation. Before
+  any tenant assignment the earlier rules hold: a member who proves control of the account may bind it
+  once the previous binding is revoked.
+- After the tenant was revoked and authorized again, assigning the address back to its holder (or the
+  same shared mailbox) restores the existing mailbox under the new tenant, under the same rules.
+
+A mailbox assigned from a tenant, personal or shared, is read-only whatever the permission: sending
+from a connected mailbox through its own SMTP server is only for an IMAP account bound with
+`smtp_host`, and a tenant-assigned mailbox never sends even if its record says otherwise.
+
+A personal assignment creates a `personal` + `connected` mailbox owned by the member with
+`created` and `connection_bound` events naming the tenant. It is private to that member exactly like
+a self-bound one, never counts toward their 10 own connections, and follows the leave rule in
+[Departure And Handover](#departure-and-handover). The member cannot unbind, reconnect, or purge it
+(`403 PERMISSION.DENIED`; a reconnect with its `connection_id` is
+`422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); the member and owners and admins read its sync runs,
+which carry counts and codes only, never message content or headers, and owners and admins purge it
+once disconnected, unless it awaits handover, and cannot self-bind an assigned address
+(`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`). A shared assignment follows
+[Shared Connected Mailboxes](#shared-connected-mailboxes) and counts toward the organization's shared
+limit. Owners and admins unassign one mailbox with `DELETE /v1/external-mail-connections/:id` or the
+connection directory route (`connection_force_disconnected`, or `connection_revoked` with an audit
+`reason` `shared_disconnect` for a shared one).
+
+When a mailbox token is refused, Zmail checks the tenant credential: if it is refused too, the tenant
+becomes `needs_reauthorization` and every `active` assignment `needs_reconnect` in one statement, so
+all sync stops at once; otherwise only that assignment becomes `needs_reconnect` (for example a
+Microsoft mailbox outside the application's RBAC scope, or a deleted Google user). Every
+authorization, re-authorization, revocation, and created or restored assignment is written to the
+organization audit log (resources `external_mail_tenants` and `external_mail_connections`,
+`reason` `tenant_authorized`, `tenant_revoked`, or `tenant_assignment`, with the tenant id), and
+assignment and revocation events to the mailbox access history; neither ever carries a key, secret,
+token, or credential.
 
 ## Domains
 

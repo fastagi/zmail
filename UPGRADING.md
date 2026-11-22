@@ -11,6 +11,59 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Tenant connect
+
+An organization `owner` authorizes a whole Google Workspace (the organization's service account with
+domain-wide delegation) or Microsoft 365 tenant (the organization's own application with application
+permissions) once; owners and admins assign mailboxes from its directory to members or as shared
+connected mailboxes. It is off unless `EXTERNAL_MAIL_TENANTS_ENABLED=true`. Contract: `contracts/MAILBOXES.md`, Tenant Connections. Plan:
+`docs/plans/tenant-connect.plan.md`.
+
+### Medium — New routes and response fields
+
+Five session-only routes under `/v1/external-mail-tenants`, answering as an unavailable feature while
+`EXTERNAL_MAIL_TENANTS_ENABLED` is false (the default). `ExternalMailConnection` and
+`ExternalMailConnectionDirectoryEntry` gain the required, nullable `tenant_id`; the connector
+`capabilities` gain the required `tenant` boolean. A client with strict response schemas must accept
+them. `GET /v1/external-mail-connections` also lists the caller's tenant assignments (at most 100)
+between their own and the shared connections, so it may return up to 220 items. A directory entry of
+a tenant assignment carries its full `account_address` and `mailbox_id`. No error code was added:
+tenants reuse `MAILBOX.EXTERNAL_*`, `MAILBOX.ACCESS_INVALID`, and `MAILBOX.ACCESS_CONFLICT`.
+
+### Medium — Owners and admins administer tenant-assigned personal mailboxes
+
+`MailboxAccessFor` (and every listing that hides other members' connected personal mailboxes) now
+hides only those a member bound with their own grant (`Mailbox.PrivateConnected`). A personal
+mailbox assigned from a tenant is at the organization's address: owners and admins get `administer`
+and `see_history` (never `view`), it appears in the mailbox directory, and when its owner leaves it
+awaits handover instead of being revoked; the handover makes its connection the organization's.
+Code that checked `Connected() && Type == personal` to mean "a member's own account" should use
+`PrivateConnected()`. The retention purge of revoked copies now skips a mailbox whose owner left and
+that awaits handover, and deleting such a mailbox assigned from a tenant answers
+`409 MAILBOX.ACCESS_CONFLICT`. `ExternalMailAccount` gains `DirectoryID` (the Outlook connector
+reports the Microsoft user id).
+
+### High — Roll every instance forward before switching tenant connect on
+
+An older API or `mail:external:sync` instance would try to sync a tenant connection with an empty
+account token, which fails as `needs_reconnect`. Roll every instance forward before setting
+`EXTERNAL_MAIL_TENANTS_ENABLED=true` and assigning mailboxes. Microsoft tenants are accepted only with
+the organization's own application; there is no admin consent redirect.
+
+### Low — Migration `2026_12_14_090000_add_external_mail_tenants` and a new limit
+
+The migration creates `external_mail_tenants` (a tenant identifier is live in one organization of the
+instance) and `external_mail_address_records` (every reader an address had by any binding, with a
+privacy floor that only rises and the member exempt from it; existing connections are recorded as
+their first holders, and every binding now writes it), adds `external_mail_connections.tenant_id`,
+`tenant_directory_id`, and `received_not_before` (copies received before it are never stored) with a
+CHECK that a
+tenant connection stores no account token, and `mailboxes.external_mail_tenant_id` with a CHECK that
+only a connected mailbox has one and a partial index; no table is rewritten. Its Down refuses while a connection or mailbox
+comes from a tenant. `EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS` (default 1000, 1 to 10000; a set but
+invalid value stops startup) bounds the live assignments of one tenant; an organization holds at most
+50 live tenants. `EXTERNAL_MAIL_TENANTS_ENABLED` (default false) switches the feature on.
+
 ## Unreleased — Shared connected mailboxes
 
 An `owner` or `admin` can bind a team account at an outside provider into a `shared` mailbox with

@@ -299,6 +299,8 @@ type Service interface {
 	ExternalMailOpsService
 	// ExternalMailDirectoryService lists and force-disconnects members' connections for managers.
 	ExternalMailDirectoryService
+	// ExternalMailTenantService authorizes whole tenants and assigns mailboxes from them.
+	ExternalMailTenantService
 	// AgentGrantService issues agent grants and serves the agent mail feed.
 	AgentGrantService
 	// ListLog lists messages across the mailboxes the viewer may read.
@@ -796,6 +798,11 @@ func (s *service) DeleteMailbox(ctx context.Context, viewer domain.OrganizationC
 	if err != nil {
 		return err
 	}
+	if mailbox.TenantAssigned() && mailbox.AwaitingHandover() {
+		// A departed member's mailbox at an organization address awaits its handover or the member's
+		// return; deleting it would lose their copies.
+		return fmt.Errorf("%w: the mailbox awaits its handover", ErrMailboxAccessConflict)
+	}
 	if mailbox.Connected() {
 		// No stored grant outlives its mailbox: the connection is revoked, its token erased and
 		// handed back, in the transaction that deletes the mailbox.
@@ -933,7 +940,7 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 // and gets ErrMailSendLimitReached there, which pauses the broadcast.
 func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput, queueAtLimit bool) (*domain.MailMessage, bool, error) {
 	// A connected mailbox sends only through its account's own SMTP server, verified at binding.
-	if mailbox.Connected() && !mailbox.ConnectedSend {
+	if mailbox.Connected() && (!mailbox.ConnectedSend || mailbox.TenantAssigned()) {
 		return nil, false, domain.ErrPermissionDenied
 	}
 	var templateID uint
