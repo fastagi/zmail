@@ -5775,10 +5775,7 @@ export async function createMailThreadNoteRoute(
       'This conversation keeps the most notes allowed'
     );
   }
-  return NextResponse.json(
-    { code: 0, message: 'created', data: note },
-    { status: 201, headers: privateMailboxHeaders() }
-  );
+  return success(note, 201);
 }
 
 /** Deletes one of the caller's own notes. */
