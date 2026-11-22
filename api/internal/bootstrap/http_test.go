@@ -442,3 +442,16 @@ func TestCORSPolicyAllowsOperatorOriginsOnlyWhenSelected(t *testing.T) {
 		t.Fatalf("configured CORS origins were mutated: %v", cfg.CORS.AllowOrigins)
 	}
 }
+
+func TestHTTPKernelAnswersUnknownRoutesWithTheErrorEnvelope(t *testing.T) {
+	cfg := testHTTPConfig()
+	cfg.Server.Mode = gin.TestMode
+	kernel := NewHttpKernel(&app.Application{Config: cfg, Starters: testHTTPStarterRegistry()})
+
+	recorder := httptest.NewRecorder()
+	kernel.Engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/nonexistent", nil))
+
+	if recorder.Code != http.StatusNotFound || !strings.Contains(recorder.Body.String(), `"error_code":"COMMON.NOT_FOUND"`) {
+		t.Fatalf("GET /v1/nonexistent = %d %s; want 404 COMMON.NOT_FOUND", recorder.Code, recorder.Body.String())
+	}
+}

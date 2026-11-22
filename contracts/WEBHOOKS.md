@@ -78,6 +78,8 @@ Target rules:
 - no user information, fragment, query string, or ambiguous hostname;
 - at most 2,048 bytes;
 - redirects are never followed;
+- setup resolves the hostname: a name that does not exist or has no address fails with
+  `WEBHOOK.INVALID_TARGET`, and a transient resolver failure with `503 COMMON.SERVICE_UNAVAILABLE`;
 - DNS is resolved again at delivery time and the exact resolved IP is dialed;
 - loopback, private, link-local, multicast, unspecified, metadata-network, and IPv6 transition
   (IPv4-compatible, NAT64, Teredo, 6to4) destinations are rejected unless explicitly allowed for
