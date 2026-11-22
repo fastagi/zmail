@@ -18,9 +18,18 @@ const composeDraftPrefix = 'zmail.compose-draft';
 // Files are too large for localStorage, so a draft's files live only as long as this page does.
 const draftFiles = new Map<string, File[]>();
 
-/** The files attached to the draft at `key` earlier in this page; empty after a reload. */
+/**
+ * The files attached to the draft at `key` earlier in this page: empty after a reload, and once the
+ * kept draft no longer lists exactly these files (it was sent, discarded, or cleared on sign-out).
+ */
 export function readComposeDraftFiles(key: string): File[] {
-  return draftFiles.get(key) ?? [];
+  const files = draftFiles.get(key) ?? [];
+  const names = readComposeDraft(key)?.attachments ?? [];
+  if (files.length !== names.length || files.some((file, index) => file.name !== names[index])) {
+    draftFiles.delete(key);
+    return [];
+  }
+  return files;
 }
 
 /** Keeps `files` with the draft at `key` for the rest of this page; empty or null forgets them. */

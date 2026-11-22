@@ -29,11 +29,19 @@ describe('compose draft store', () => {
     expect(readComposeDraftFiles('k')).toEqual([]);
   });
 
-  it('keeps files for the page until they are cleared', () => {
+  it('keeps files for the page while the kept draft lists them', () => {
     const file = new File(['x'], 'a.txt');
+    writeComposeDraft('k', { ...blank, attachments: ['a.txt'] });
     writeComposeDraftFiles('k', [file]);
     expect(readComposeDraftFiles('k')).toEqual([file]);
     writeComposeDraftFiles('k', []);
+    expect(readComposeDraftFiles('k')).toEqual([]);
+  });
+
+  it('drops the files once the kept draft is gone', () => {
+    writeComposeDraft('k', { ...blank, attachments: ['a.txt'] });
+    writeComposeDraftFiles('k', [new File(['x'], 'a.txt')]);
+    writeComposeDraft('k', null);
     expect(readComposeDraftFiles('k')).toEqual([]);
   });
 
