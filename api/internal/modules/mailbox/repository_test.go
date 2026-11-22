@@ -18,7 +18,10 @@ import (
 // mailboxOwnerPO stands in for the organizations table so the owner rows exist without
 // importing another module.
 type mailboxOwnerPO struct {
-	ID uint `gorm:"primaryKey"`
+	ID             uint `gorm:"primaryKey"`
+	CreatedAt      time.Time
+	SuspendedAt    *time.Time
+	DailySendLimit *int
 }
 
 func (mailboxOwnerPO) TableName() string { return "organizations" }
