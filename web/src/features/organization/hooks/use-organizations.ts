@@ -8,6 +8,7 @@ import {
 
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import { organizationService } from '@/features/organization/services/organization-service';
+import { forgetActiveOrganization } from '@/features/organization/utils/active-organization';
 import type {
   AcceptOrganizationInvitationInput,
   CreateOrganizationInvitationInput,
@@ -230,6 +231,38 @@ export function useRemoveOrganizationMember(organizationId: number) {
       });
     },
   });
+}
+
+/**
+ * Drops an organization the user no longer belongs to (they left it) from the client: the cached
+ * list loses it and is refetched, its cached pages are marked stale so a later visit asks the API
+ * again, and it stops being the remembered active organization (#114).
+ */
+export function useForgetOrganization() {
+  const queryClient = useQueryClient();
+
+  return (organizationId: number) => {
+    forgetActiveOrganization(organizationId);
+    queryClient.setQueryData<OrganizationPage>(organizationKeys.list(), (current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.filter((organization) => organization.id !== organizationId),
+            meta: { ...current.meta, total: Math.max(0, current.meta.total - 1) },
+          }
+        : current
+    );
+    void queryClient.invalidateQueries({ queryKey: organizationKeys.list() });
+    for (const queryKey of [
+      organizationKeys.detail(organizationId),
+      organizationKeys.context(organizationId),
+      organizationKeys.members(organizationId),
+      organizationKeys.invitations(organizationId),
+    ]) {
+      // Not refetched now: the API would refuse, and the user is navigating away.
+      void queryClient.invalidateQueries({ queryKey, refetchType: 'none' });
+    }
+  };
 }
 
 export function useTransferOrganizationOwnership(organizationId: number) {
