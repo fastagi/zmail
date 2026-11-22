@@ -22,6 +22,7 @@ import {
   toLowerCase,
   transform,
   trim,
+  unknown,
 } from 'zod/mini';
 
 export const organizationRoleSchema = enumSchema(['owner', 'admin', 'member']);
@@ -156,17 +157,23 @@ export const organizationInvitationPageEnvelopeSchema = strictObject({
 
 /**
  * The one-time accept link of a token minted by a create or resend call, in the shape invitation
- * emails use: `<console origin>/invite#<token>`. A bearer secret: keep it out of caches and logs.
+ * emails use: `<console origin>/invite#<token>`, where the console origin (MAILBOX_PUBLIC_URL) may
+ * carry a path. A bearer secret: keep it out of caches and logs.
  */
-const invitationUrlSchema = string().check(
+export const invitationUrlSchema = string().check(
   maxLength(2048),
   refine(isInvitationUrl)
 );
 
-export const organizationInvitationCreateResultSchema = strictObject({
+/**
+ * The create and resend result. The invitation view inside stays strict, but the wrapper ignores
+ * fields it does not know, so an additive API change cannot turn a saved invitation into an error.
+ * `invitation_url` is read loosely here and validated on its own: an unusable link is dropped.
+ */
+export const organizationInvitationCreateResultSchema = object({
   invitation: organizationInvitationSchema,
   email_send_status: invitationEmailSendStatusSchema,
-  invitation_url: optional(invitationUrlSchema),
+  invitation_url: optional(unknown()),
 });
 
 export const organizationOwnershipTransferSchema = strictObject({
@@ -213,6 +220,8 @@ function hasValidOrganizationNameLength(value: string): boolean {
   return length >= 2 && length <= 100;
 }
 
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+
 function isInvitationUrl(value: string): boolean {
   let url: URL;
   try {
@@ -220,12 +229,15 @@ function isInvitationUrl(value: string): boolean {
   } catch {
     return false;
   }
+  const secure =
+    url.protocol === 'https:' ||
+    (url.protocol === 'http:' && LOCAL_HOSTNAMES.has(url.hostname));
   return (
-    (url.protocol === 'https:' || url.protocol === 'http:') &&
+    secure &&
     url.username === '' &&
     url.password === '' &&
     url.search === '' &&
-    url.pathname === '/invite' &&
+    url.pathname.endsWith('/invite') &&
     url.hash.length > 1
   );
 }

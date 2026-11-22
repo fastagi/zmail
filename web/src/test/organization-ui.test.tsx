@@ -463,6 +463,11 @@ describe('organization browser workflow', () => {
       await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(link));
       expect(await within(dialog).findByRole('button', { name: 'Copied' })).toBeInTheDocument();
       expect(within(dialog).getByRole('status')).toHaveTextContent('Invitation link copied');
+
+      state.invite.reset.mockClear();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(state.invite.reset).toHaveBeenCalled();
     });
 
     it('closes as before when the response carries no link', async () => {
@@ -496,6 +501,11 @@ describe('organization browser workflow', () => {
       expect(dialog).toHaveTextContent('The previous link no longer works.');
       fireEvent.click(within(dialog).getByRole('button', { name: 'Copy invitation link' }));
       await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(link));
+
+      // Closing drops the link from the mutation state too.
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(state.resendInvitation.reset).toHaveBeenCalled();
     });
 
     it('shows the link selectable when the clipboard refuses', async () => {
@@ -513,7 +523,13 @@ describe('organization browser workflow', () => {
       });
       expect(field).toHaveValue(link);
       expect(field).toHaveAttribute('readonly');
-      expect(dialog).toHaveTextContent('Copying failed. Select the link and copy it manually.');
+      await waitFor(() => expect(field).toHaveFocus());
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        'Copying failed. Select the link and copy it manually.'
+      );
+      expect(field).toHaveAccessibleDescription(
+        'Copying failed. Select the link and copy it manually.'
+      );
     });
 
     it('shows the link selectable when the Clipboard API is unavailable', async () => {
@@ -543,11 +559,17 @@ describe('organization browser workflow', () => {
       renderWithMessages(<OrganizationOverview organizationId={42} />);
       activateTab('Invitations');
 
+      // A sent or failed email means a mailer is configured, so a resend replaces the link; whether
+      // the new link can be copied depends on MAILBOX_PUBLIC_URL, which the Web cannot see.
       expect(
-        screen.getByText('Need the link again? Resend: it shows a new link and the previous one stops working.')
+        screen.getByText(
+          'Resending replaces the link: the previous one stops working, and the new one is shown once if links can be copied here.'
+        )
       ).toBeInTheDocument();
       expect(
-        screen.getByText('The link is shown only when inviting. For a new one, revoke and invite again.')
+        screen.getByText(
+          'A link can be copied only right after inviting or resending. Revoking and inviting again always issues a new one.'
+        )
       ).toBeInTheDocument();
       expect(screen.queryByText(/oinv_/)).not.toBeInTheDocument();
     });
@@ -567,7 +589,7 @@ describe('organization browser workflow', () => {
       renderWithMessages(<OrganizationOverview organizationId={42} />, 'zh-Hans');
       activateTab('邀请');
       expect(
-        screen.getByText('需要再次获取链接？请重发：会显示新链接，之前的链接随即失效。')
+        screen.getByText('重发会替换链接：之前的链接随即失效；如果这里可以复制链接，新链接会显示一次。')
       ).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '重发给 again@example.com 的邀请' }));
 
@@ -577,7 +599,7 @@ describe('organization browser workflow', () => {
       expect(
         await within(dialog).findByRole('textbox', { name: 'again@example.com 的邀请链接' })
       ).toHaveValue(link);
-      expect(dialog).toHaveTextContent('复制失败。请选中链接后手动复制。');
+      expect(within(dialog).getByRole('alert')).toHaveTextContent('复制失败。请选中链接后手动复制。');
     });
   });
 });

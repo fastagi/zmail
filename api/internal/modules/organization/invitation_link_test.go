@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/clause"
 
 	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -190,6 +191,7 @@ func TestInvitationLinkHandlersAreNoStoreAndListNeverCarriesALink(t *testing.T) 
 	f.service.invitationPolicy.PublicURL = invitationLinkTestOrigin
 	h := &Handler{service: f.service}
 	h.RegisterErrorMappings(response.DefaultErrorMapper)
+	registerSharedInvitationErrorMappings()
 	organizationID := strconv.FormatUint(uint64(f.organization.ID), 10)
 
 	call := func(userID uint, method, body string, params gin.Params, handle func(*gin.Context)) *httptest.ResponseRecorder {
@@ -228,8 +230,8 @@ func TestInvitationLinkHandlersAreNoStoreAndListNeverCarriesALink(t *testing.T) 
 		{Key: "invitation_id", Value: strconv.FormatUint(uint64(invited.Data.Invitation.ID), 10)},
 	}
 	denied := call(f.memberID, http.MethodPost, "", invitationParams, h.ResendInvitation)
-	// The 403 mapping of PERMISSION.DENIED is registered at bootstrap; here only the refusal matters.
-	require.GreaterOrEqual(t, denied.Code, http.StatusBadRequest, denied.Body.String())
+	require.Equal(t, http.StatusForbidden, denied.Code, denied.Body.String())
+	assert.Contains(t, denied.Body.String(), `"error_code":"`+domain.CodePermissionDenied+`"`)
 	assert.NotContains(t, denied.Body.String(), "invite#")
 
 	resent := call(f.ownerID, http.MethodPost, "", invitationParams, h.ResendInvitation)
@@ -270,4 +272,66 @@ func TestRevokedAndExpiredInvitationsNeverYieldALink(t *testing.T) {
 	result, err = f.service.ResendInvitation(ctx, f.ownerID, f.organization.ID, expired.Invitation.ID)
 	require.ErrorIs(t, err, domain.ErrOrganizationInvitationNotFound)
 	assert.Nil(t, result)
+}
+
+// registerSharedInvitationErrorMappings installs the core mappings bootstrap registers for every
+// starter, so handler tests see the real status of a shared domain error.
+func registerSharedInvitationErrorMappings() {
+	response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)
+}
+
+func TestOutsidersAndOtherOrganizationsAdminsGetNoInvitationLink(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	f := newInvitationResendFixture(t)
+	f.service.invitationPolicy.PublicURL = invitationLinkTestOrigin
+	h := &Handler{service: f.service}
+	h.RegisterErrorMappings(response.DefaultErrorMapper)
+	registerSharedInvitationErrorMappings()
+	invited := f.invite(t, "kept@example.com")
+	mintedBefore := len(f.mailer.tokens)
+	storedBefore := f.stored(t, invited.Invitation.ID)
+
+	outsiderID := createOrganizationTestUser(t, f.db, "link-outsider")
+	otherOwnerID := createOrganizationTestUser(t, f.db, "link-other-owner")
+	otherAdminID := createOrganizationTestUser(t, f.db, "link-other-admin")
+	other := createInvitationTestOrganization2(t, f.db, otherOwnerID)
+	require.NoError(t, f.db.Omit(clause.Associations).Create(&OrganizationMembershipPO{
+		OrganizationID: other.ID, UserID: otherAdminID, Role: string(domain.OrganizationRoleAdmin),
+	}).Error)
+
+	organizationID := strconv.FormatUint(uint64(f.organization.ID), 10)
+	invitationID := strconv.FormatUint(uint64(invited.Invitation.ID), 10)
+	call := func(userID uint, body string, params gin.Params, handle func(*gin.Context)) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Set("userID", userID)
+		c.Params = params
+		handle(c)
+		return recorder
+	}
+
+	for name, userID := range map[string]uint{"outsider": outsiderID, "other organization admin": otherAdminID} {
+		t.Run(name, func(t *testing.T) {
+			created := call(userID, `{"email":"sneaky@example.com","role":"member"}`,
+				gin.Params{{Key: "id", Value: organizationID}}, h.Invite)
+			require.Equal(t, http.StatusNotFound, created.Code, created.Body.String())
+			assert.Contains(t, created.Body.String(), `"error_code":"`+domain.CodeOrganizationNotFound+`"`)
+			assert.NotContains(t, created.Body.String(), "invite#")
+
+			resent := call(userID, "", gin.Params{
+				{Key: "id", Value: organizationID}, {Key: "invitation_id", Value: invitationID},
+			}, h.ResendInvitation)
+			require.Equal(t, http.StatusNotFound, resent.Code, resent.Body.String())
+			assert.Contains(t, resent.Body.String(), `"error_code":"`+domain.CodeOrganizationNotFound+`"`)
+			assert.NotContains(t, resent.Body.String(), "invite#")
+		})
+	}
+
+	assert.Len(t, f.mailer.tokens, mintedBefore, "no token was minted for a refused caller")
+	assert.Equal(t, storedBefore.TokenHash, f.stored(t, invited.Invitation.ID).TokenHash)
+	var sneaky int64
+	require.NoError(t, f.db.Model(&OrganizationInvitationPO{}).Where("email = ?", "sneaky@example.com").Count(&sneaky).Error)
+	assert.Zero(t, sneaky)
 }

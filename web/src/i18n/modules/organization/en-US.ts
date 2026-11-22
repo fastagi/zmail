@@ -104,9 +104,10 @@ const messages = {
     field: 'Invitation link for {email}',
     acceptHint: 'Only someone signed in as {email} can accept it.',
     done: 'Done',
-    rowHint: 'Need the link again? Resend: it shows a new link and the previous one stops working.',
+    rowHint:
+      'Resending replaces the link: the previous one stops working, and the new one is shown once if links can be copied here.',
     rowHintWithoutEmail:
-      'The link is shown only when inviting. For a new one, revoke and invite again.',
+      'A link can be copied only right after inviting or resending. Revoking and inviting again always issues a new one.',
   },
   resendInvitation: 'Resend',
   resendInvitationLabel: 'Resend the invitation to {email}',

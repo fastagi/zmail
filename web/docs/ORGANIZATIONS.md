@@ -49,10 +49,12 @@ from the console shell.
   browser storage, the query cache, or rendered history.
 - When a create or resend response carries the one-time `invitation_url`, the confirmation dialog
   offers **Copy invitation link** to the manager who made that call. The link stays in component
-  state only and is dropped when the dialog closes. If the Clipboard API is missing or refuses,
-  the link appears in a read-only, selected field to copy by hand. Pending rows explain that a
-  resend shows a new link and invalidates the previous one, or, where email is not configured (a
-  resend then mints no token), that a new link needs revoking and inviting again.
+  state only; the create and resend mutations use `gcTime: 0` and are reset when the dialog
+  closes, so the link does not stay in the mutation cache either. If the Clipboard API is missing
+  or refuses, an alert says so and the link appears in a focused, selected, read-only field to copy
+  by hand. A missing or unusable link only removes the copy action. Pending rows explain that a
+  resend replaces the link (shown once where links can be copied), or, where no email was sent, that
+  revoking and inviting again always issues a new one.
 - Successful payloads are validated before entering TanStack Query. Paginated organization,
   member, and invitation lists preserve `meta` and `links` through the explicit `getEnvelope()`
   HTTP mode. Strict member and invitation objects reject accidental PII or token fields.

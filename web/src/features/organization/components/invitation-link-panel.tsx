@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ export function InvitationLinkPanel({ email, url }: { email: string; url: string
   const [copied, setCopied] = useState(false);
   const [manual, setManual] = useState(false);
   const field = useRef<HTMLInputElement>(null);
+  const failureId = useId();
 
   useEffect(() => {
     if (!copied) return;
@@ -25,7 +26,9 @@ export function InvitationLinkPanel({ email, url }: { email: string; url: string
   }, [copied]);
 
   useEffect(() => {
-    if (manual) field.current?.select();
+    if (!manual) return;
+    field.current?.focus();
+    field.current?.select();
   }, [manual]);
 
   const copy = async () => {
@@ -54,12 +57,15 @@ export function InvitationLinkPanel({ email, url }: { email: string; url: string
       </p>
       {manual ? (
         <div className="space-y-2">
-          <p className="text-sm text-error">{t('invitationLink.copyFailed')}</p>
+          <p id={failureId} role="alert" className="text-sm text-error">
+            {t('invitationLink.copyFailed')}
+          </p>
           <Input
             ref={field}
             readOnly
             value={url}
             aria-label={t('invitationLink.field', { email })}
+            aria-describedby={failureId}
             spellCheck={false}
             autoComplete="off"
             className="font-mono text-xs"

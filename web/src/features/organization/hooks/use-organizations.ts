@@ -295,6 +295,8 @@ export function useCreateOrganizationInvitation(organizationId: number) {
   return useMutation({
     mutationFn: (input: CreateOrganizationInvitationInput) =>
       organizationService.invite(organizationId, input),
+    // The result may carry the one-time invitation link: drop it as soon as the confirmation resets.
+    gcTime: 0,
     meta: LOCAL_ERROR_HANDLING_META,
     onSuccess: ({ invitation }) => {
       queryClient.setQueryData<OrganizationInvitationPage>(
@@ -341,6 +343,8 @@ export function useResendOrganizationInvitation(organizationId: number) {
   return useMutation({
     mutationFn: (invitationId: number) =>
       organizationService.resendInvitation(organizationId, invitationId),
+    // The result may carry the one-time invitation link: drop it as soon as the confirmation resets.
+    gcTime: 0,
     meta: LOCAL_ERROR_HANDLING_META,
     onSettled: () => {
       queryClient.invalidateQueries({

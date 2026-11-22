@@ -146,9 +146,10 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
                       <>
                         <InvitationEmailState invitation={invitation} />
                         <p className="mt-1 max-w-xs text-xs text-muted-foreground">
-                          {invitation.email_send_status === 'not_configured'
-                            ? t('invitationLink.rowHintWithoutEmail')
-                            : t('invitationLink.rowHint')}
+                          {invitation.email_send_status === 'accepted_by_provider' ||
+                          invitation.email_send_status === 'failed'
+                            ? t('invitationLink.rowHint')
+                            : t('invitationLink.rowHintWithoutEmail')}
                         </p>
                       </>
                     ) : null}
@@ -200,7 +201,9 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
       <Dialog
         open={Boolean(reissued)}
         onOpenChange={open => {
-          if (!open) setReissued(undefined);
+          if (open) return;
+          setReissued(undefined);
+          resend.reset();
         }}
       >
         <DialogContent>

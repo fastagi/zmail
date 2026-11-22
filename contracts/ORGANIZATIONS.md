@@ -139,7 +139,11 @@ The browser feature owns these fixed same-origin paths:
 - The browser service validates every successful organization, member, invitation, and ownership
   payload before caching it. Public member and invitation objects are strict: unexpected fields
   such as member email or invitation token produce client-owned `CLIENT.INVALID_RESPONSE` instead
-  of entering the UI cache.
+  of entering the UI cache. The create and resend result that wraps the invitation ignores fields
+  it does not know, and validates `invitation_url` on its own: a missing or unusable link (not
+  `https`, or `http` on a loopback host; path not ending in `/invite`; empty fragment; query or
+  credentials present) is dropped and only the copy action disappears, because the invitation was
+  saved either way.
 - Paginated calls explicitly preserve and validate the global `meta` and `links` envelope fields;
   the default Web response interceptor continues to extract `data` for non-paginated callers.
 - Unsafe same-origin routes reject cross-origin requests before reading the body. Both incoming
@@ -254,6 +258,10 @@ An invitation view contains no plaintext token:
   The invitation list never carries it, members can never obtain it, and accepted, revoked, or
   expired invitations never yield one. To share a pending invitation again, a manager resends it,
   which mints and shows a new link and invalidates the previous one.
+- Compatibility: `invitation_url` is an additive response field, but a Web console released before
+  it validated the create and resend result strictly and reports a saved invitation (and a sent
+  resend) as a failure when the field is present. Deploy the Web before the API for this change;
+  the API only sends the field when `MAILBOX_PUBLIC_URL` is set.
 - `ORGANIZATION_INVITATION_TTL` defaults to `168h` (7 days) and must be positive. A token is
   one-time use and must belong to the authenticated user's email, compared case-insensitively.
 - Accepting an invitation and creating the membership is one database transaction. Revoked,

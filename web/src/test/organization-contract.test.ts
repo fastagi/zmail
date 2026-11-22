@@ -164,7 +164,7 @@ describe('organization network contract validation', () => {
     );
   });
 
-  it('accepts only the invitation link shape emails use as the one-time invitation_url', () => {
+  it('keeps a well-formed invitation_url and drops any other without failing the response', () => {
     const invitation = {
       id: 73,
       organization_id: 42,
@@ -177,34 +177,72 @@ describe('organization network contract validation', () => {
       created_at: timestamp,
       updated_at: timestamp,
     };
-    const invitationUrl = 'https://app.example.com/invite#oinv_abc.0123456789abcdef';
-    expect(
+    const parse = (invitationUrl: unknown) =>
       parseOrganizationInvitationCreateResponse({
         invitation,
         email_send_status: 'accepted_by_provider',
         invitation_url: invitationUrl,
-      })
-    ).toEqual({ invitation, email_send_status: 'accepted_by_provider', invitation_url: invitationUrl });
+      });
+
+    for (const accepted of [
+      'https://app.example.com/invite#oinv_abc.0123456789abcdef',
+      // MAILBOX_PUBLIC_URL may carry a path; emails use the same link.
+      'https://example.com/console/invite#oinv_abc.0123456789abcdef',
+      'http://localhost:3000/invite#oinv_abc.01',
+      'http://127.0.0.1:3000/invite#oinv_abc.01',
+    ]) {
+      expect(parse(accepted)).toEqual({
+        invitation,
+        email_send_status: 'accepted_by_provider',
+        invitation_url: accepted,
+      });
+    }
 
     for (const malformed of [
       null,
       '',
+      42,
       'javascript:alert(1)//invite#x',
+      'http://app.example.com/invite#oinv_abc.01',
       'https://app.example.com/invite',
       'https://app.example.com/invite#',
       'https://app.example.com/other#oinv_abc.01',
+      'https://app.example.com/uninvite#oinv_abc.01',
       'https://app.example.com/invite?token=oinv_abc.01#oinv_abc.01',
       'https://user:pass@app.example.com/invite#oinv_abc.01',
       `https://app.example.com/invite#${'a'.repeat(2048)}`,
     ]) {
-      expectInvalidResponse(() =>
-        parseOrganizationInvitationCreateResponse({
-          invitation,
-          email_send_status: 'accepted_by_provider',
-          invitation_url: malformed,
-        })
-      );
+      // The invitation was saved: an unusable link is dropped, never turned into an error.
+      expect(parse(malformed)).toEqual({ invitation, email_send_status: 'accepted_by_provider' });
     }
+  });
+
+  it('tolerates new result fields but keeps the invitation view strict', () => {
+    const invitation = {
+      id: 73,
+      organization_id: 42,
+      email: 'member@example.com',
+      role: 'member',
+      status: 'pending',
+      expires_at: timestamp,
+      email_send_status: 'accepted_by_provider',
+      email_attempted_at: timestamp,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    expect(
+      parseOrganizationInvitationCreateResponse({
+        invitation,
+        email_send_status: 'accepted_by_provider',
+        future_field: { anything: true },
+      })
+    ).toEqual({ invitation, email_send_status: 'accepted_by_provider' });
+    expectInvalidResponse(() =>
+      parseOrganizationInvitationCreateResponse({
+        invitation: { ...invitation, token: 'must-not-cross-the-contract' },
+        email_send_status: 'accepted_by_provider',
+      })
+    );
   });
 
   it('validates ownership transfer and normalizes invitation inputs', () => {
