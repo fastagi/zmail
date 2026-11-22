@@ -122,6 +122,8 @@ const (
 	CodeMailDeliveryEventInvalid     = "MAILBOX.DELIVERY_EVENT_INVALID"
 	CodeMailRecipientNotFound        = "MAILBOX.RECIPIENT_NOT_FOUND"
 	CodeMailTemplateNotFound         = "MAILBOX.TEMPLATE_NOT_FOUND"
+	CodeMailDraftNotFound            = "MAILBOX.DRAFT_NOT_FOUND"
+	CodeMailDraftLimitReached        = "MAILBOX.DRAFT_LIMIT_REACHED"
 	CodeMailTemplateInvalid          = "MAILBOX.TEMPLATE_INVALID"
 	CodeMailTemplateNameTaken        = "MAILBOX.TEMPLATE_NAME_TAKEN"
 	CodeMailTemplateLimitReached     = "MAILBOX.TEMPLATE_LIMIT_REACHED"

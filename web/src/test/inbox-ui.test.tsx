@@ -144,6 +144,20 @@ vi.mock('@/features/mailbox/components/mailbox-workspace', async importOriginal 
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
   useMailTemplates: () => ({ data: [] }),
 }));
+const drafts = vi.hoisted(() => ({
+  list: [] as Array<Record<string, unknown>>,
+  save: vi.fn<(variables: unknown) => Promise<{ id: number }>>(() => Promise.resolve({ id: 7 })),
+  remove: vi.fn<(id: number) => Promise<void>>(() => Promise.resolve()),
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-drafts', () => ({
+  useMailDrafts: () => ({ data: drafts.list, isPending: false, isError: false }),
+  useSaveMailDraft: () => ({ mutateAsync: drafts.save }),
+  useDeleteMailDraft: () => ({
+    mutate: drafts.remove,
+    mutateAsync: drafts.remove,
+    isPending: false,
+  }),
+}));
 vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
   useMailSignature: (_organizationId: number, mailboxId: number, enabled: boolean) => ({
     data:
@@ -2143,6 +2157,48 @@ describe('inbox keyboard shortcuts', () => {
     expect(await screen.findByLabelText('Subject')).toHaveValue('Second thoughts');
     expect(screen.getByLabelText('To')).toHaveValue('ann@example.com');
     expect(state.send.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('a closed new message is saved to Drafts, and a saved draft continues and leaves once sent', async () => {
+    setUndoSendDelayMs(0);
+    drafts.save.mockClear();
+    drafts.remove.mockClear();
+    const first = renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('To'), {
+      target: { value: 'bob@example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Plan' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(drafts.save).toHaveBeenCalledOnce());
+    expect(drafts.save.mock.calls[0]?.[0]).toMatchObject({
+      id: null,
+      input: { to: 'bob@example.com', subject: 'Plan', in_reply_to: '' },
+    });
+
+    drafts.list = [
+      {
+        id: 7,
+        mailbox_id: 1,
+        to: 'bob@example.com',
+        cc: '',
+        subject: 'Plan',
+        body: 'Draft body',
+        in_reply_to: '',
+        created_at: '2026-11-22T05:00:00Z',
+        updated_at: '2026-11-22T05:00:00Z',
+      },
+    ];
+    first.unmount();
+    renderRoute();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Drafts: 1' }))[0]!);
+    const list = await screen.findByRole('dialog', { name: 'Drafts' });
+    fireEvent.click(within(list).getByRole('button', { name: /^Plan/u }));
+    expect(await screen.findByLabelText('Message')).toHaveValue('Draft body');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(drafts.remove).toHaveBeenCalledWith(7));
+    drafts.list = [];
   });
 
   it('a reply sends at once, without the Undo wait', async () => {

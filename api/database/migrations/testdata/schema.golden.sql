@@ -283,6 +283,19 @@ TABLE mail_domains
   COLUMN capability character varying(20) NOT NULL DEFAULT 'send_receive'::character varying
   COLUMN cloudflare_connection_id uuid
 
+TABLE mail_drafts
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_drafts_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN user_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN to_recipients text NOT NULL
+  COLUMN cc_recipients text NOT NULL
+  COLUMN subject text NOT NULL
+  COLUMN body text NOT NULL
+  COLUMN in_reply_to text NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_folders
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_folders_id_seq'::regclass)
   COLUMN mailbox_id bigint NOT NULL
@@ -935,6 +948,15 @@ CONSTRAINT mail_domains.fk_mail_domains_mail_zone FOREIGN KEY (mail_zone_id) REF
 CONSTRAINT mail_domains.fk_mail_domains_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_domains.mail_domains_cloudflare_connection_id_fkey FOREIGN KEY (cloudflare_connection_id) REFERENCES mail_cloudflare_connections(id)
 CONSTRAINT mail_domains.mail_domains_pkey PRIMARY KEY (id)
+CONSTRAINT mail_drafts.mail_drafts_body_check CHECK ((char_length(body) <= 100000))
+CONSTRAINT mail_drafts.mail_drafts_cc_recipients_check CHECK ((char_length(cc_recipients) <= 4000))
+CONSTRAINT mail_drafts.mail_drafts_in_reply_to_check CHECK ((char_length(in_reply_to) <= 998))
+CONSTRAINT mail_drafts.mail_drafts_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_drafts.mail_drafts_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_drafts.mail_drafts_pkey PRIMARY KEY (id)
+CONSTRAINT mail_drafts.mail_drafts_subject_check CHECK ((char_length(subject) <= 998))
+CONSTRAINT mail_drafts.mail_drafts_to_recipients_check CHECK ((char_length(to_recipients) <= 4000))
+CONSTRAINT mail_drafts.mail_drafts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT mail_folders.mail_folders_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT mail_folders.mail_folders_pkey PRIMARY KEY (id)
 CONSTRAINT mail_labels.mail_labels_color_check CHECK (((color)::text = ANY ((ARRAY['gray'::character varying, 'red'::character varying, 'orange'::character varying, 'yellow'::character varying, 'green'::character varying, 'teal'::character varying, 'blue'::character varying, 'purple'::character varying, 'pink'::character varying])::text[])))
@@ -1233,6 +1255,10 @@ INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
 INDEX CREATE INDEX idx_mail_domains_organization ON mail_domains USING btree (organization_id)
 INDEX CREATE UNIQUE INDEX mail_domains_pkey ON mail_domains USING btree (id)
+INDEX CREATE INDEX idx_mail_drafts_mailbox ON mail_drafts USING btree (mailbox_id)
+INDEX CREATE INDEX idx_mail_drafts_owner ON mail_drafts USING btree (organization_id, user_id, updated_at DESC, id DESC)
+INDEX CREATE INDEX idx_mail_drafts_user ON mail_drafts USING btree (user_id)
+INDEX CREATE UNIQUE INDEX mail_drafts_pkey ON mail_drafts USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_folders_name ON mail_folders USING btree (mailbox_id, lower((name)::text))
 INDEX CREATE UNIQUE INDEX mail_folders_pkey ON mail_folders USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_labels_name ON mail_labels USING btree (mailbox_id, lower((name)::text))

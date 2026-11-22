@@ -63,6 +63,8 @@ import {
   useInboxTimezone,
   useMailRoles,
 } from '@/features/mailbox/hooks/use-inbox';
+import { useMailDrafts } from '@/features/mailbox/hooks/use-mail-drafts';
+import type { MailDraft } from '@/features/mailbox/draft-schemas';
 import {
   useExternalMailConnections,
   useExternalMailConnectors,
@@ -96,6 +98,7 @@ import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
 // Administration dialogs load when opened, not with the mail page.
+const DraftsDialog = lazy(() => import('./drafts-dialog'));
 const ManageRolesDialog = lazy(async () => {
   const feature = await import('@/features/mailbox/components/manage-roles-dialog');
   return { default: feature.ManageRolesDialog };
@@ -438,6 +441,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const triageCounts = counts.data?.triage ?? null;
   const filters = inboxFilters(urlState, timeZone, triageCounts !== null);
   const inbox = useInboxMessages(organizationId, filters, { enabled: zoneReady });
+  const savedDrafts = useMailDrafts(organizationId, mailboxes.data?.some(canComposeFrom) ?? false);
   const [triageMenuOpen, setTriageMenuOpen] = useState(false);
   const [managingRoles, setManagingRoles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -452,6 +456,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   } | null>(null);
   // Undo send opens the composer again on what it held.
   const reopenDraft = (value: NonNullable<typeof draft>) => () => setDraft(value);
+  const [draftsOpen, setDraftsOpen] = useState(false);
+  const [draftsMounted, setDraftsMounted] = useState(false);
   // Quoted dates read in the zone the list shows, as the reader's do.
   const formatter = useDateTimeFormat(timeZone);
   // The page's composer replaces the workspace; closing it gives the focus back.
@@ -741,6 +747,23 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             fromOptions: sendable,
           })
       : null;
+  const openSavedDraft = (saved: MailDraft) => {
+    setDraftsOpen(false);
+    setDraft({
+      mailbox:
+        sendable.find(mailbox => mailbox.id === saved.mailbox_id) ??
+        newMessageSender(sendable, urlState.box, organizationId),
+      draft: {
+        ...emptyDraft,
+        to: saved.to,
+        cc: saved.cc,
+        subject: saved.subject,
+        body: saved.body,
+        savedId: saved.id,
+      },
+      fromOptions: sendable,
+    });
+  };
   // Rows name their mailbox, tinted by its role, unless the list is one mailbox.
   const roleTags = new Map<number, MailRole>(roleList.map(role => [role.id, role]));
   const emptyTitle =
@@ -891,6 +914,16 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     role: urlState.role,
     onManageRoles: () => setManagingRoles(true),
     onShortcuts: showHelp,
+    drafts:
+      sendable.length > 0
+        ? {
+            count: savedDrafts.data?.length,
+            onOpen: () => {
+              setDraftsMounted(true);
+              setDraftsOpen(true);
+            },
+          }
+        : null,
   };
   const onView = (view: InboxView) =>
     setListing({ [VIEW_PARAM]: view === 'all' ? null : view, [SEARCH_PARAM]: null });
@@ -1138,6 +1171,18 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       {canManage && managingRoles ? (
         <Suspense fallback={null}>
           <ManageRolesDialog open onOpenChange={open => setManagingRoles(open)} />
+        </Suspense>
+      ) : null}
+
+      {draftsMounted ? (
+        <Suspense fallback={null}>
+          <DraftsDialog
+            organizationId={organizationId}
+            mailboxes={sendable}
+            open={draftsOpen}
+            onOpenChange={setDraftsOpen}
+            onOpenDraft={openSavedDraft}
+          />
         </Suspense>
       ) : null}
 

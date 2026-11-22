@@ -32,6 +32,7 @@ import { authConfig } from '@/config/auth';
 import { AuthStoreContext } from '@/features/auth/store/auth-store';
 import { withReturnUrl } from '@/features/auth/utils/return-url';
 import {
+  type StoredComposeDraft,
   composeDraftKey,
   draftToKeep,
   readComposeDraft,
@@ -63,6 +64,7 @@ import {
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
 import { useMailSignature } from '@/features/mailbox/hooks/use-mail-signature';
+import { useDeleteMailDraft, useSaveMailDraft } from '@/features/mailbox/hooks/use-mail-drafts';
 import {
   flushPendingSend,
   markReopenedCompose,
@@ -134,6 +136,15 @@ export function ComposeDialog({
   // Replies and forwards quote an existing message, so they are always written by hand.
   const isReplyOrForward = draft.reply || draft.mode === 'reply' || draft.mode === 'forward';
   const templates = useMailTemplates(isReplyOrForward ? 0 : organizationId, 'standard');
+  // New messages are also kept by the API as drafts, so they show in the list on every device.
+  const saveDraft = useSaveMailDraft(organizationId);
+  const removeDraft = useDeleteMailDraft(organizationId).mutateAsync;
+  const savedId = () => draft.savedId ?? kept?.savedId;
+  /** A sent message is no longer a draft. */
+  const forgetSaved = () => {
+    const id = savedId();
+    if (id !== undefined) void removeDraft(id).catch(() => undefined);
+  };
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
@@ -342,6 +353,7 @@ export function ComposeDialog({
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       sentRef.current = true;
+      forgetSaved();
       writeComposeDraft(draftKey, null);
       writeComposeDraftFiles(draftKey, null);
       onStored?.();
@@ -378,6 +390,7 @@ export function ComposeDialog({
             toast.success(
               t(result.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent')
             );
+            forgetSaved();
             // A composer opened meanwhile may have kept a draft of its own; that one stays.
             if (JSON.stringify(readComposeDraft(draftKey)) === stored) {
               writeComposeDraft(draftKey, null);
@@ -439,6 +452,7 @@ export function ComposeDialog({
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       sentRef.current = true;
+      forgetSaved();
       writeComposeDraft(draftKey, null);
       writeComposeDraftFiles(draftKey, null);
       onStored?.();
@@ -450,14 +464,47 @@ export function ComposeDialog({
   };
 
   /**
+   * Saves a closed new message as a draft of the API too. The browser copy remembers the saved
+   * id, so closing again updates that draft rather than adding another one.
+   */
+  const keepOnServer = (keep: StoredComposeDraft) => {
+    saveDraft
+      .mutateAsync({
+        input: {
+          mailbox_id: from.id,
+          to: keep.to,
+          cc: keep.cc,
+          subject: keep.subject,
+          body: keep.body,
+          in_reply_to: '',
+        },
+        id: savedId() ?? null,
+      })
+      .then(
+        saved => {
+          const current = readComposeDraft(draftKey);
+          const textOf = (value: StoredComposeDraft | null) =>
+            JSON.stringify({ ...value, savedId: undefined });
+          if (textOf(current) === textOf(keep)) {
+            writeComposeDraft(draftKey, { ...keep, savedId: saved.id });
+          }
+        },
+        () => toast.error(t('drafts.saveFailed'))
+      );
+  };
+
+  /**
    * Closing never asks: what was written is kept as this browser's draft and the dialog says so.
    * Nothing written, or only the starting text, keeps no draft.
    */
   const dismiss = () => {
     if (send.isPending) return;
-    const keep = draftToKeep(written(), startingDraft);
+    const found = draftToKeep(written(), startingDraft);
+    const known = savedId();
+    const keep = found && known !== undefined ? { ...found, savedId: known } : found;
     writeComposeDraft(draftKey, keep);
     writeComposeDraftFiles(draftKey, files);
+    if (keep && !isReplyOrForward) keepOnServer(keep);
     if (keep)
       toast.success(t(files.length > 0 ? 'compose.draftSavedWithFiles' : 'compose.draftSaved'));
     onClose();

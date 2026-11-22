@@ -38,6 +38,8 @@ var mailboxErrorCodes = []struct {
 	{ErrMailDeliveryEventInvalid, http.StatusUnprocessableEntity, domain.CodeMailDeliveryEventInvalid},
 	{ErrMailRecipientNotFound, http.StatusNotFound, domain.CodeMailRecipientNotFound},
 	{ErrMailTemplateNotFound, http.StatusNotFound, domain.CodeMailTemplateNotFound},
+	{ErrMailDraftNotFound, http.StatusNotFound, domain.CodeMailDraftNotFound},
+	{ErrMailDraftLimitReached, http.StatusConflict, domain.CodeMailDraftLimitReached},
 	{ErrMailTemplateInvalid, http.StatusUnprocessableEntity, domain.CodeMailTemplateInvalid},
 	{ErrMailTemplateNameTaken, http.StatusConflict, domain.CodeMailTemplateNameTaken},
 	{ErrMailTemplateLimitReached, http.StatusConflict, domain.CodeMailTemplateLimitReached},

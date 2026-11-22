@@ -6691,6 +6691,131 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-drafts:
+    get:
+      operationId: listMailDrafts
+      summary: List the caller's drafts
+      description: The caller's own drafts in the organization, the latest change first; at most
+        200. Never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The caller's drafts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDraftListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailDraft
+      summary: Save a new draft
+      description: Needs `send` on `mailbox_id`. `to` and `cc` are kept as written and checked only
+        when the message is sent. A member keeps at most 200 drafts per organization.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveMailDraftRequest'
+      responses:
+        '201':
+          description: The saved draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDraftResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-drafts/{draft_id}:
+    put:
+      operationId: updateMailDraft
+      summary: Replace one of the caller's drafts
+      description: Replaces everything the draft holds; needs `send` on `mailbox_id`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDraftID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveMailDraftRequest'
+      responses:
+        '200':
+          description: The draft after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDraftResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailDraft
+      summary: Delete one of the caller's drafts
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDraftID'
+      responses:
+        '204':
+          description: The draft was deleted.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/signature:
     get:
       operationId: getMailSignature
@@ -10176,6 +10301,13 @@ components:
       schema:
         type: string
         pattern: ^[A-Za-z0-9]{1,64}$
+    MailDraftID:
+      name: draft_id
+      in: path
+      required: true
+      description: Positive mail draft identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     MailTemplateID:
       name: template_id
       in: path
@@ -10713,6 +10845,8 @@ components:
         - MAILBOX.SEND_IN_PROGRESS
         - MAILBOX.DELIVERY_EVENT_INVALID
         - MAILBOX.TEMPLATE_NOT_FOUND
+        - MAILBOX.DRAFT_NOT_FOUND
+        - MAILBOX.DRAFT_LIMIT_REACHED
         - MAILBOX.TEMPLATE_INVALID
         - MAILBOX.TEMPLATE_NAME_TAKEN
         - MAILBOX.TEMPLATE_LIMIT_REACHED
@@ -16382,6 +16516,97 @@ components:
       properties:
         enabled:
           type: boolean
+    SaveMailDraftRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - mailbox_id
+      properties:
+        mailbox_id:
+          type: integer
+          minimum: 1
+        to:
+          type: string
+          maxLength: 4000
+        cc:
+          type: string
+          maxLength: 4000
+        subject:
+          type: string
+          maxLength: 998
+        body:
+          type: string
+          maxLength: 100000
+        in_reply_to:
+          type: string
+          maxLength: 998
+    MailDraft:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mailbox_id
+        - to
+        - cc
+        - subject
+        - body
+        - in_reply_to
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        mailbox_id:
+          type: integer
+          minimum: 1
+        to:
+          type: string
+        cc:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+        in_reply_to:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MailDraftResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailDraft'
+    MailDraftListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/MailDraft'
     UpdateMailSignatureRequest:
       type: object
       additionalProperties: false
