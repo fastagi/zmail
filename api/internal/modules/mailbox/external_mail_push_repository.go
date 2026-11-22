@@ -54,7 +54,7 @@ var _ domain.ExternalMailPushRepository = (*repository)(nil)
 // pushTargetSQL is when a notification makes a connection (aliased c) due, given its subscription
 // columns (aliased m): now, or the end of the coalescing window after the latest push-triggered
 // sync. Its parameters are now, now, and the window in seconds.
-const pushTargetSQL = `GREATEST(?::timestamptz, COALESCE(m.last_push_sync_at + make_interval(secs => ?), ?::timestamptz))`
+const pushTargetSQL = `GREATEST(CAST(? AS timestamptz), COALESCE(m.last_push_sync_at + make_interval(secs => ?), CAST(? AS timestamptz)))`
 
 // pushPromotableSQL is when a connection may be made due sooner: it is active, not backing off, not
 // leased (next_sync_at is still what its latest save scheduled), and not due earlier already.
@@ -135,11 +135,11 @@ func (r *repository) MarkExternalMailPush(ctx context.Context, mark domain.Exter
 		  RETURNING s.connection_id, s.scheduled_sync_at, s.last_push_sync_at
 		)
 		UPDATE external_mail_connections c
-		SET next_sync_at = GREATEST(@now::timestamptz, COALESCE(m.last_push_sync_at + make_interval(secs => @window), @now::timestamptz))
+		SET next_sync_at = GREATEST(CAST(@now AS timestamptz), COALESCE(m.last_push_sync_at + make_interval(secs => @window), CAST(@now AS timestamptz)))
 		FROM m
 		WHERE c.id = m.connection_id AND c.status = 'active' AND c.consecutive_failures = 0
 		  AND m.scheduled_sync_at IS NOT NULL AND c.next_sync_at = m.scheduled_sync_at
-		  AND c.next_sync_at > GREATEST(@now::timestamptz, COALESCE(m.last_push_sync_at + make_interval(secs => @window), @now::timestamptz))`,
+		  AND c.next_sync_at > GREATEST(CAST(@now AS timestamptz), COALESCE(m.last_push_sync_at + make_interval(secs => @window), CAST(@now AS timestamptz)))`,
 		map[string]any{"now": mark.Now, "ids": mark.SubscriptionIDs, "window": window})
 	return int(result.RowsAffected), result.Error
 }
@@ -206,7 +206,7 @@ func (r *repository) RecordExternalMailPushSync(ctx context.Context, synced doma
 	}
 	return r.conn(ctx).Exec(`UPDATE external_mail_subscriptions s
 		SET pending_at = CASE WHEN s.pending_at <= @started THEN NULL ELSE s.pending_at END,
-		  last_push_sync_at = CASE WHEN @pushed THEN @started::timestamptz ELSE s.last_push_sync_at END,
+		  last_push_sync_at = CASE WHEN @pushed THEN CAST(@started AS timestamptz) ELSE s.last_push_sync_at END,
 		  scheduled_sync_at = c.next_sync_at, updated_at = @now
 		FROM external_mail_connections c
 		WHERE s.connection_id = @connection AND c.id = s.connection_id AND s.status <> 'stopped'`,

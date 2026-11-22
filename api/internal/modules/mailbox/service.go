@@ -512,8 +512,8 @@ func NewService(
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
 		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),
-		pushStore:                pushStore,
-		pushLimits:               newExternalMailPushLimit(limits, settings.ExternalMail.Push.RequestsPerMinute()),
+		pushStore:  pushStore,
+		pushLimits: newExternalMailPushLimit(limits, settings.ExternalMail.Push.RequestsPerMinute()),
 	}
 }
 
