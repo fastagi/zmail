@@ -92,6 +92,23 @@ const messages = {
     failed: 'Sending failed. Resend it, or share the invitation another way.',
     not_configured: 'Email is not set up here, so nothing was sent.',
   },
+  invitationLink: {
+    resentTitle: 'New invitation link',
+    createdDescription: 'Share this link with {email} only. It is shown just this once.',
+    resentDescription:
+      'A new link was issued for {email}. The previous link no longer works. It is shown just this once.',
+    copy: 'Copy invitation link',
+    copied: 'Copied',
+    copiedAnnouncement: 'Invitation link copied',
+    copyFailed: 'Copying failed. Select the link and copy it manually.',
+    field: 'Invitation link for {email}',
+    acceptHint: 'Only someone signed in as {email} can accept it.',
+    done: 'Done',
+    rowHint:
+      'Resending replaces the link: the previous one stops working, and the new one is shown once if links can be copied here.',
+    rowHintWithoutEmail:
+      'A link can be copied only right after inviting or resending. Revoking and inviting again always issues a new one.',
+  },
   resendInvitation: 'Resend',
   resendInvitationLabel: 'Resend the invitation to {email}',
   resendInvitationCooldown: 'Resend in {seconds}s',

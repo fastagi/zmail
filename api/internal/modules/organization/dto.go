@@ -110,12 +110,17 @@ type OrganizationInvitationResponse struct {
 type CreateOrganizationInvitationResponse struct {
 	Invitation      *OrganizationInvitationResponse `json:"invitation"`
 	EmailSendStatus InvitationEmailSendStatus       `json:"email_send_status"`
+	// InvitationURL is shown once, to the manager whose call minted its token; omitted otherwise.
+	InvitationURL string `json:"invitation_url,omitempty"`
 }
 
 // OrganizationInvitationResult is the service result before transport mapping.
 type OrganizationInvitationResult struct {
 	Invitation      *domain.OrganizationInvitation
 	EmailSendStatus InvitationEmailSendStatus
+	// InvitationURL is the accept link for a token minted by this call; empty when no token was
+	// minted or no console origin is configured. It is a bearer secret: never log or store it.
+	InvitationURL string
 }
 
 func (r *CreateOrganizationRequest) validationErrors() map[string][]string {
@@ -258,6 +263,14 @@ func toInvitationResponse(invitation *domain.OrganizationInvitation, now time.Ti
 		EmailAttemptedAt: invitation.EmailAttemptedAt,
 		CreatedAt:        invitation.CreatedAt,
 		UpdatedAt:        invitation.UpdatedAt,
+	}
+}
+
+func toCreateInvitationResponse(result *OrganizationInvitationResult) *CreateOrganizationInvitationResponse {
+	return &CreateOrganizationInvitationResponse{
+		Invitation:      toInvitationResponse(result.Invitation, time.Now().UTC()),
+		EmailSendStatus: result.EmailSendStatus,
+		InvitationURL:   result.InvitationURL,
 	}
 }
 

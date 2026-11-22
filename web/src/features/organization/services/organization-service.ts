@@ -11,6 +11,7 @@ import request, { ApiError } from '@/http/request';
 import { ClientErrorCode } from '@/http/codes';
 import {
   organizationContextSchema,
+  invitationUrlSchema,
   organizationInvitationCreateResultSchema,
   organizationInvitationPageEnvelopeSchema,
   organizationMemberPageEnvelopeSchema,
@@ -243,7 +244,10 @@ export function parseOrganizationInvitationCreateResponse(
   if (!parsed.success) {
     throw invalidResponse();
   }
-  return parsed.data;
+  // The invitation is saved either way: a missing or unusable link only drops the copy action.
+  const { invitation_url: rawUrl, ...result } = parsed.data;
+  const url = invitationUrlSchema.safeParse(rawUrl);
+  return url.success ? { ...result, invitation_url: url.data } : result;
 }
 
 export function parseOrganizationOwnershipTransferResponse(

@@ -985,7 +985,10 @@ paths:
               $ref: '#/components/schemas/OrganizationInvitationCreateRequest'
       responses:
         '201':
-          description: The persisted invitation and the synchronous email send attempt status.
+          description: >-
+            The persisted invitation, the synchronous email send attempt status, and, when a
+            console origin is configured, the invitation link shown once to this caller. Sent with
+            `Cache-Control: private, no-store`.
           content:
             application/json:
               schema:
@@ -1053,7 +1056,10 @@ paths:
         - $ref: '#/components/parameters/OrganizationInvitationID'
       responses:
         '201':
-          description: The reissued invitation and the synchronous email send attempt status.
+          description: >-
+            The reissued invitation, the synchronous email send attempt status, and, when a new
+            token was minted and a console origin is configured, the new invitation link shown once to
+            this caller. Sent with `Cache-Control: private, no-store`.
           content:
             application/json:
               schema:
@@ -12667,6 +12673,16 @@ components:
           $ref: '#/components/schemas/OrganizationInvitation'
         email_send_status:
           $ref: '#/components/schemas/OrganizationInvitationEmailSendStatus'
+        invitation_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: >-
+            One-time copy of the accept link for the token this call minted, in the same
+            `<console origin>/invite#<token>` shape invitation emails use. It is a bearer secret, returned
+            only to the `owner` or `admin` who invited or resent, never listed, logged, or audited.
+            Omitted when no token was minted (a resend without a configured mailer) or no console origin
+            (`MAILBOX_PUBLIC_URL`) is configured.
     OrganizationInvitationCreateResponse:
       type: object
       additionalProperties: false

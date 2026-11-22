@@ -28,12 +28,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { CreateOrganizationInvitationDialog } from '@/features/organization/components/create-organization-invitation-dialog';
+import { InvitationLinkPanel } from '@/features/organization/components/invitation-link-panel';
 import {
   useOrganizationInvitations,
   useResendOrganizationInvitation,
   useRevokeOrganizationInvitation,
 } from '@/features/organization/hooks/use-organizations';
 import type {
+  InvitationEmailSendStatus,
   OrganizationInvitation,
   OrganizationInvitationStatus,
 } from '@/features/organization/types';
@@ -50,11 +52,17 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
   const mutation = useRevokeOrganizationInvitation(organizationId);
   const resend = useResendOrganizationInvitation(organizationId);
   const cooldown = useResendCooldowns();
+  // The one-time link of the latest resend; component state only, dropped when its dialog closes.
+  const [reissued, setReissued] = useState<ReissuedInvitationLink>();
 
   const resendInvitation = (invitation: OrganizationInvitation) => {
     resend.mutate(invitation.id, {
-      onSuccess: ({ email_send_status: status }) => {
+      onSuccess: ({ email_send_status: status, invitation_url: url }) => {
         cooldown.start(invitation.id, RESEND_COOLDOWN_SECONDS);
+        if (url) {
+          setReissued({ email: invitation.email, url, status });
+          return;
+        }
         const notify = status === 'accepted_by_provider' ? toast.success : toast.warning;
         notify(t(`emailSendStatus.${status}`));
       },
@@ -135,7 +143,15 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
                   <TableCell>
                     <InvitationStatusBadge status={invitation.status} />
                     {invitation.status === 'pending' ? (
-                      <InvitationEmailState invitation={invitation} />
+                      <>
+                        <InvitationEmailState invitation={invitation} />
+                        <p className="mt-1 max-w-xs text-xs text-muted-foreground">
+                          {invitation.email_send_status === 'accepted_by_provider' ||
+                          invitation.email_send_status === 'failed'
+                            ? t('invitationLink.rowHint')
+                            : t('invitationLink.rowHintWithoutEmail')}
+                        </p>
+                      </>
                     ) : null}
                   </TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
@@ -181,6 +197,37 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
           </Table>
         </div>
       ) : null}
+
+      <Dialog
+        open={Boolean(reissued)}
+        onOpenChange={open => {
+          if (open) return;
+          setReissued(undefined);
+          resend.reset();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('invitationLink.resentTitle')}</DialogTitle>
+            <DialogDescription>
+              {reissued ? t('invitationLink.resentDescription', { email: reissued.email }) : null}
+            </DialogDescription>
+          </DialogHeader>
+          {reissued ? (
+            <DialogBody className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {t(`emailSendStatus.${reissued.status}`)}
+              </p>
+              <InvitationLinkPanel email={reissued.email} url={reissued.url} />
+            </DialogBody>
+          ) : null}
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button">{t('invitationLink.done')}</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(selected)}
@@ -260,6 +307,12 @@ function InvitationTableSkeleton() {
       <Skeleton className="h-10 w-full" />
     </div>
   );
+}
+
+interface ReissuedInvitationLink {
+  email: string;
+  url: string;
+  status: InvitationEmailSendStatus;
 }
 
 // Each invitation may be resent once a minute; a 429's Retry-After replaces this wait.

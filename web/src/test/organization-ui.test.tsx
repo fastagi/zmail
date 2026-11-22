@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,6 +7,7 @@ import { OrganizationOverview } from '@/features/organization/components/organiz
 import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { messages } from '@/i18n/modules';
+import zhHansOrganization from '@/i18n/modules/organization/zh-Hans';
 
 const state = vi.hoisted(() => ({
   organizations: {
@@ -81,16 +82,18 @@ vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useForgetOrganization: () => state.forgetOrganization,
 }));
 
-function withMessages(children: React.ReactNode) {
+function withMessages(children: React.ReactNode, locale: 'en-US' | 'zh-Hans' = 'en-US') {
+  const localized =
+    locale === 'en-US' ? messages : { ...messages, organization: zhHansOrganization };
   return (
-    <NextIntlClientProvider locale="en-US" messages={messages as unknown as AbstractIntlMessages}>
+    <NextIntlClientProvider locale={locale} messages={localized as unknown as AbstractIntlMessages}>
       {children}
     </NextIntlClientProvider>
   );
 }
 
-function renderWithMessages(children: React.ReactNode) {
-  return render(withMessages(children));
+function renderWithMessages(children: React.ReactNode, locale: 'en-US' | 'zh-Hans' = 'en-US') {
+  return render(withMessages(children, locale));
 }
 
 describe('organization browser workflow', () => {
@@ -415,6 +418,189 @@ describe('organization browser workflow', () => {
     expect(toastError).toHaveBeenCalledWith(
       'This invitation was resent recently. Try again in a moment.'
     );
+  });
+
+  describe('one-time invitation link (#195)', () => {
+    const link = 'https://app.example.com/invite#oinv_abc.0123456789abcdef';
+    const clipboard = { writeText: vi.fn() };
+
+    beforeEach(() => {
+      clipboard.writeText.mockReset().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
+    });
+
+    function inviteWithLink(invitationUrl: string | null = link) {
+      state.invite.mutate.mockImplementation(
+        (_input: unknown, options: { onSuccess: (value: unknown) => void }) =>
+          options.onSuccess({
+            invitation: pendingInvitation(80, 'linked@example.com'),
+            email_send_status: 'accepted_by_provider',
+            ...(invitationUrl ? { invitation_url: invitationUrl } : {}),
+          })
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Invite member' }));
+      fireEvent.change(screen.getByLabelText('Email'), {
+        target: { value: 'linked@example.com' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+    }
+
+    it('offers Copy invitation link right after creating an invitation', async () => {
+      state.context.data = organizationContext('admin');
+      state.invitations.data = { items: [], meta: { total: 0 } };
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Invitations');
+      inviteWithLink();
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText('Invitation created')).toBeInTheDocument();
+      expect(within(dialog).queryByDisplayValue(link)).not.toBeInTheDocument();
+      const copy = within(dialog).getByRole('button', { name: 'Copy invitation link' });
+      copy.focus();
+      expect(copy).toHaveFocus();
+      fireEvent.click(copy);
+
+      await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(link));
+      expect(await within(dialog).findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+      expect(within(dialog).getByRole('status')).toHaveTextContent('Invitation link copied');
+
+      state.invite.reset.mockClear();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(state.invite.reset).toHaveBeenCalled();
+    });
+
+    it('closes as before when the response carries no link', async () => {
+      state.context.data = organizationContext('admin');
+      state.invitations.data = { items: [], meta: { total: 0 } };
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Invitations');
+      inviteWithLink(null);
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(screen.queryByRole('button', { name: 'Copy invitation link' })).not.toBeInTheDocument();
+    });
+
+    it('offers the new link after a resend and says the previous one stopped working', async () => {
+      state.context.data = organizationContext('owner');
+      state.invitations.data = { items: [pendingInvitation(74, 'again@example.com')], meta: { total: 1 } };
+      state.resendInvitation.mutate.mockImplementation(
+        (_id: number, options: { onSuccess: (value: unknown) => void }) =>
+          options.onSuccess({
+            invitation: pendingInvitation(74, 'again@example.com'),
+            email_send_status: 'accepted_by_provider',
+            invitation_url: link,
+          })
+      );
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Invitations');
+      fireEvent.click(screen.getByRole('button', { name: 'Resend the invitation to again@example.com' }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText('New invitation link')).toBeInTheDocument();
+      expect(dialog).toHaveTextContent('The previous link no longer works.');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Copy invitation link' }));
+      await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(link));
+
+      // Closing drops the link from the mutation state too.
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(state.resendInvitation.reset).toHaveBeenCalled();
+    });
+
+    it('shows the link selectable when the clipboard refuses', async () => {
+      clipboard.writeText.mockRejectedValue(new Error('NotAllowedError'));
+      state.context.data = organizationContext('admin');
+      state.invitations.data = { items: [], meta: { total: 0 } };
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Invitations');
+      inviteWithLink();
+
+      const dialog = await screen.findByRole('dialog');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Copy invitation link' }));
+      const field = await within(dialog).findByRole('textbox', {
+        name: 'Invitation link for linked@example.com',
+      });
+      expect(field).toHaveValue(link);
+      expect(field).toHaveAttribute('readonly');
+      await waitFor(() => expect(field).toHaveFocus());
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        'Copying failed. Select the link and copy it manually.'
+      );
+      expect(field).toHaveAccessibleDescription(
+        'Copying failed. Select the link and copy it manually.'
+      );
+    });
+
+    it('shows the link selectable when the Clipboard API is unavailable', async () => {
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+      state.context.data = organizationContext('admin');
+      state.invitations.data = { items: [], meta: { total: 0 } };
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Invitations');
+      inviteWithLink();
+
+      const dialog = await screen.findByRole('dialog');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Copy invitation link' }));
+      expect(
+        await within(dialog).findByRole('textbox', { name: 'Invitation link for linked@example.com' })
+      ).toHaveValue(link);
+    });
+
+    it('tells managers on pending rows how to get a link again', () => {
+      state.context.data = organizationContext('admin');
+      state.invitations.data = {
+        items: [
+          pendingInvitation(74, 'again@example.com'),
+          { ...pendingInvitation(75, 'unsent@example.com'), email_send_status: 'not_configured' },
+        ],
+        meta: { total: 2 },
+      };
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Invitations');
+
+      // A sent or failed email means a mailer is configured, so a resend replaces the link; whether
+      // the new link can be copied depends on MAILBOX_PUBLIC_URL, which the Web cannot see.
+      expect(
+        screen.getByText(
+          'Resending replaces the link: the previous one stops working, and the new one is shown once if links can be copied here.'
+        )
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'A link can be copied only right after inviting or resending. Revoking and inviting again always issues a new one.'
+        )
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/oinv_/)).not.toBeInTheDocument();
+    });
+
+    it('speaks zh-Hans', async () => {
+      clipboard.writeText.mockRejectedValue(new Error('NotAllowedError'));
+      state.context.data = organizationContext('owner');
+      state.invitations.data = { items: [pendingInvitation(74, 'again@example.com')], meta: { total: 1 } };
+      state.resendInvitation.mutate.mockImplementation(
+        (_id: number, options: { onSuccess: (value: unknown) => void }) =>
+          options.onSuccess({
+            invitation: pendingInvitation(74, 'again@example.com'),
+            email_send_status: 'accepted_by_provider',
+            invitation_url: link,
+          })
+      );
+      renderWithMessages(<OrganizationOverview organizationId={42} />, 'zh-Hans');
+      activateTab('邀请');
+      expect(
+        screen.getByText('重发会替换链接：之前的链接随即失效；如果这里可以复制链接，新链接会显示一次。')
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '重发给 again@example.com 的邀请' }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText('新的邀请链接')).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: '复制邀请链接' }));
+      expect(
+        await within(dialog).findByRole('textbox', { name: 'again@example.com 的邀请链接' })
+      ).toHaveValue(link);
+      expect(within(dialog).getByRole('alert')).toHaveTextContent('复制失败。请选中链接后手动复制。');
+    });
   });
 });
 

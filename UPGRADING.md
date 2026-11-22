@@ -11,6 +11,19 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Copy invitation link
+
+### High — Deploy the Web before the API
+
+Organization invitation create and resend responses gain an optional `invitation_url`: the accept
+link of the token that call minted, returned once to the owner or admin who made it, with
+`Cache-Control: private, no-store`. The API sends it only when `MAILBOX_PUBLIC_URL` is set. A Web
+console from before this change validates that result strictly, so against the new API it reports a
+saved invitation or a sent resend as a failure and does not start the resend cooldown. Roll the Web
+forward first, then the API. The new Web accepts results with or without the field, ignores result
+fields it does not know, and drops a link it cannot use rather than failing. Audit metadata of
+invite and resend gains `link_issued`. See [`contracts/ORGANIZATIONS.md`](contracts/ORGANIZATIONS.md).
+
 ## Unreleased — Push enablement fixes
 
 ### Medium — Production push needs to tell senders apart
