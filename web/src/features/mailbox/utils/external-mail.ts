@@ -1,3 +1,5 @@
+import { ROUTES } from '@/constants/routes';
+import { MAIL_ORGANIZATION_PARAM } from '@/features/mailbox/components/mailbox-params';
 import type { ExternalMailConnectionStatus } from '@/features/mailbox/external-mail-schemas';
 
 /**
@@ -97,3 +99,12 @@ export function navigateToProvider(url: string): void {
 
 /** The callback page of the connect flow; the API's `EXTERNAL_MAIL_REDIRECT_URL` points here. */
 export const EXTERNAL_MAIL_CALLBACK_PATH = '/console/mailboxes/connected/callback';
+
+/** The inbox narrowed to a connected mailbox, as after a completed connect. */
+export function connectedMailboxHref(organizationId: number, mailboxId: number): string {
+  const params = new URLSearchParams({
+    [MAIL_ORGANIZATION_PARAM]: String(organizationId),
+    box: String(mailboxId),
+  });
+  return `${ROUTES.CONSOLE.MAILBOXES}?${params.toString()}`;
+}

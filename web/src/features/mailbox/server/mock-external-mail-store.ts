@@ -5,6 +5,8 @@ import { createHash, randomBytes } from 'node:crypto';
 import type {
   ExternalMailConnection,
   ExternalMailConnector,
+  ExternalMailDirectoryEntry,
+  ExternalMailSyncRun,
 } from '@/features/mailbox/external-mail-schemas';
 
 /**
@@ -16,11 +18,25 @@ import type {
  * the same connection (`200`) and a reconnect never mismatches. Everything else follows the
  * contract: single-use states valid for 10 minutes, kept only as a SHA-256; at most 10 live
  * connections per member; revoked connections kept so a rebind restores the same mailbox.
+ *
+ * The `imap` connector binds with an app password and never stores or logs it. Its fake server
+ * answers by what it is sent, so every outcome can be tried without a real account: a host that
+ * starts with `unreachable` cannot be reached, the password `wrong-password` is refused, and
+ * anything else signs in. More than 10 attempts by a member in 15 minutes are rate limited.
  */
 export const MOCK_EXTERNAL_MAIL_CONNECTORS: readonly ExternalMailConnector[] = [
   { id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } },
   { id: 'outlook', auth_kind: 'oauth2', capabilities: { read: true } },
+  { id: 'imap', auth_kind: 'password', capabilities: { read: true } },
 ];
+
+export const MOCK_IMAP_UNREACHABLE_HOST_PREFIX = 'unreachable';
+export const MOCK_IMAP_REFUSED_PASSWORD = 'wrong-password';
+const credentialAttemptWindowMs = 15 * 60 * 1_000;
+const maxCredentialAttempts = 10;
+const maxSyncRuns = 50;
+/** A first sync reports `more` until this long after the binding, then finishes its backfill. */
+const mockBackfillMs = 30 * 1_000;
 
 const providerDomains: Record<string, string> = {
   gmail: 'gmail.com',
@@ -50,6 +66,29 @@ interface StoredConnection extends ExternalMailConnection {
 export type MockStartResult =
   | { ok: true; value: { authorization_url: string; expires_at: string } }
   | { ok: false; error: 'provider_unavailable' | 'connection_not_found' | 'invalid' };
+
+export type MockBindCredentialsResult =
+  | { ok: true; status: 200 | 201; value: ExternalMailConnection }
+  | { ok: false; error: 'rate_limited'; retryAfterSeconds: number }
+  | {
+      ok: false;
+      error:
+        | 'provider_unavailable'
+        | 'server_unreachable'
+        | 'authorization_failed'
+        | 'account_taken'
+        | 'connection_limit'
+        | 'invalid';
+    };
+
+export type MockPurgeResult =
+  | { ok: true; value: { deleted_messages: number; completed: boolean } }
+  | { ok: false; error: 'not_found' | 'not_revoked' };
+
+export interface MockDirectoryPage {
+  items: ExternalMailDirectoryEntry[];
+  nextBeforeId: number | null;
+}
 
 export type MockCompleteResult =
   | { ok: true; status: 200 | 201; value: ExternalMailConnection }
@@ -90,6 +129,10 @@ export class MockExternalMailStore {
   private pending = new Map<string, PendingAuthorization>();
   private connections = new Map<number, StoredConnection>();
   private nextConnectionId = 1;
+  private runs = new Map<number, ExternalMailSyncRun[]>();
+  private nextRunId = 1;
+  /** Attempt times per member of an organization, for the credential rate limit. */
+  private attempts = new Map<string, number[]>();
 
   constructor(private readonly dependencies: MockExternalMailDependencies = defaultDependencies) {}
 
@@ -182,49 +225,108 @@ export class MockExternalMailStore {
     }
     const localPart = memberEmail.split('@')[0] || `member${userId}`;
     const address = `${localPart}@${providerDomains[pending.provider] ?? `${pending.provider}.example`}`;
-    const now = this.dependencies.now().toISOString();
 
     if (pending.connectionId !== null) {
       const own = this.connections.get(pending.connectionId);
       if (!own) return { ok: false, error: 'authorization_not_found' };
       if (own.account_address !== address) return { ok: false, error: 'account_mismatch' };
     }
+    return this.bindAccount(
+      organizationId,
+      userId,
+      pending.provider,
+      address,
+      pending.backfillDays,
+      mailboxes
+    );
+  }
+
+  /**
+   * Binds an account with an app password. The password is compared with the fake server's one
+   * refused value and dropped; it is never stored, logged, or returned.
+   */
+  bindCredentials(
+    organizationId: number,
+    userId: number,
+    input: {
+      provider: string;
+      host: string;
+      username: string;
+      password: string;
+      backfill_days?: number;
+    },
+    mailboxes: MockExternalMailboxes
+  ): MockBindCredentialsResult {
+    const connector = MOCK_EXTERNAL_MAIL_CONNECTORS.find(item => item.id === input.provider);
+    if (!connector || connector.auth_kind !== 'password') {
+      return { ok: false, error: 'provider_unavailable' };
+    }
+    const limited = this.recordAttempt(organizationId, userId);
+    if (limited !== null) return { ok: false, error: 'rate_limited', retryAfterSeconds: limited };
+    const host = input.host.trim().toLowerCase();
+    if (host === '' || host.startsWith(MOCK_IMAP_UNREACHABLE_HOST_PREFIX)) {
+      return { ok: false, error: 'server_unreachable' };
+    }
+    if (input.password === MOCK_IMAP_REFUSED_PASSWORD) {
+      return { ok: false, error: 'authorization_failed' };
+    }
+    const username = input.username.trim().toLowerCase();
+    const address = username.includes('@') ? username : `${username}@${host}`;
+    return this.bindAccount(
+      organizationId,
+      userId,
+      input.provider,
+      address,
+      input.backfill_days ?? defaultBackfillDays,
+      mailboxes
+    );
+  }
+
+  private bindAccount(
+    organizationId: number,
+    userId: number,
+    provider: string,
+    address: string,
+    backfillDays: number,
+    mailboxes: MockExternalMailboxes
+  ):
+    | { ok: true; status: 200 | 201; value: ExternalMailConnection }
+    | { ok: false; error: 'account_taken' | 'connection_limit' } {
+    const now = this.dependencies.now().toISOString();
     const existing = [...this.connections.values()].find(
       item =>
         item.organizationId === organizationId &&
-        item.provider === pending.provider &&
+        item.provider === provider &&
         item.account_address === address
     );
     if (existing && existing.userId !== userId) return { ok: false, error: 'account_taken' };
+    const live = [...this.connections.values()].filter(
+      item =>
+        item.organizationId === organizationId && item.userId === userId && item.status !== 'revoked'
+    );
     if (existing) {
       const backfill = existing.status === 'revoked';
+      if (backfill && live.length >= maxLiveConnections) {
+        return { ok: false, error: 'connection_limit' };
+      }
       Object.assign(existing, {
         status: 'active',
         last_error_code: null,
         last_synced_at: now,
       } satisfies Partial<StoredConnection>);
       if (backfill) {
-        mailboxes.sync(organizationId, existing.mailbox_id, existing.provider, pending.backfillDays);
+        mailboxes.sync(organizationId, existing.mailbox_id, existing.provider, backfillDays);
       }
+      this.recordRun(existing.id, { outcome: 'ok', fetched: 3, stored: backfill ? 3 : 0, more: backfill });
       return { ok: true, status: 200, value: publicConnection(existing) };
     }
-    const live = [...this.connections.values()].filter(
-      item =>
-        item.organizationId === organizationId && item.userId === userId && item.status !== 'revoked'
-    );
     if (live.length >= maxLiveConnections) return { ok: false, error: 'connection_limit' };
-    const mailboxId = mailboxes.create(
-      organizationId,
-      userId,
-      address,
-      pending.provider,
-      pending.backfillDays
-    );
+    const mailboxId = mailboxes.create(organizationId, userId, address, provider, backfillDays);
     const connection: StoredConnection = {
       id: this.nextConnectionId++,
       organizationId,
       userId,
-      provider: pending.provider,
+      provider,
       account_address: address,
       mailbox_id: mailboxId,
       status: 'active',
@@ -233,7 +335,78 @@ export class MockExternalMailStore {
       created_at: now,
     };
     this.connections.set(connection.id, connection);
+    this.recordRun(connection.id, { outcome: 'ok', fetched: 3, stored: 3, more: true });
     return { ok: true, status: 201, value: publicConnection(connection) };
+  }
+
+  /**
+   * The latest runs of the member's own connection, newest first; null for anyone else. A first
+   * backfill reports `more` for a short while, then the mock records the page that finishes it.
+   */
+  syncRuns(organizationId: number, userId: number, connectionId: number): ExternalMailSyncRun[] | null {
+    const connection = this.connections.get(connectionId);
+    if (!connection || connection.organizationId !== organizationId || connection.userId !== userId) {
+      return null;
+    }
+    const runs = this.runs.get(connectionId) ?? [];
+    const latest = runs[0];
+    if (
+      connection.status === 'active' &&
+      latest?.outcome === 'ok' &&
+      latest.more &&
+      this.dependencies.now().getTime() - Date.parse(latest.finished_at) >= mockBackfillMs
+    ) {
+      this.recordRun(connectionId, { outcome: 'ok', fetched: 0, stored: 0, more: false });
+      connection.last_synced_at = this.dependencies.now().toISOString();
+    }
+    return (this.runs.get(connectionId) ?? []).map(run => ({ ...run }));
+  }
+
+  /** Deletes the copies, mailbox, connection, and runs of the member's own revoked connection. */
+  purge(
+    organizationId: number,
+    userId: number,
+    connectionId: number,
+    removeMailbox: (organizationId: number, mailboxId: number) => number | null
+  ): MockPurgeResult {
+    const connection = this.connections.get(connectionId);
+    if (!connection || connection.organizationId !== organizationId || connection.userId !== userId) {
+      return { ok: false, error: 'not_found' };
+    }
+    if (connection.status !== 'revoked') return { ok: false, error: 'not_revoked' };
+    const deleted = removeMailbox(organizationId, connection.mailbox_id) ?? 0;
+    this.connections.delete(connectionId);
+    this.runs.delete(connectionId);
+    return { ok: true, value: { deleted_messages: deleted, completed: true } };
+  }
+
+  /** Every connection of the organization, newest first, with the address masked. */
+  directory(
+    organizationId: number,
+    query: { beforeId?: number; perPage: number; ownerName: (userId: number) => string | null }
+  ): MockDirectoryPage {
+    const matching = [...this.connections.values()]
+      .filter(
+        item =>
+          item.organizationId === organizationId &&
+          (query.beforeId === undefined || item.id < query.beforeId)
+      )
+      .sort((left, right) => right.id - left.id);
+    const page = matching.slice(0, query.perPage);
+    const last = page.at(-1);
+    return {
+      items: page.map(item => ({
+        id: item.id,
+        provider: item.provider,
+        status: item.status,
+        masked_account_address: maskAddress(item.account_address),
+        owner_user_id: item.userId,
+        owner_display_name: query.ownerName(item.userId),
+        last_synced_at: item.last_synced_at,
+        created_at: item.created_at,
+      })),
+      nextBeforeId: matching.length > page.length && last ? last.id : null,
+    };
   }
 
   /** Unbinds; the member who bound it, or an owner or admin, may. Revoked again answers ok. */
@@ -260,12 +433,54 @@ export class MockExternalMailStore {
     if (!connection || connection.status === 'revoked') return;
     connection.status = 'needs_reconnect';
     connection.last_error_code = 'external.auth_failed';
+    this.recordRun(connectionId, { outcome: 'auth_failed', fetched: 0, stored: 0, more: false });
   }
 
   reset(): void {
     this.pending.clear();
     this.connections.clear();
     this.nextConnectionId = 1;
+    this.runs.clear();
+    this.nextRunId = 1;
+    this.attempts.clear();
+  }
+
+  /** Seconds until the member may try again, or null when this attempt is allowed. */
+  private recordAttempt(organizationId: number, userId: number): number | null {
+    const key = `${organizationId}:${userId}`;
+    const now = this.dependencies.now().getTime();
+    const recent = (this.attempts.get(key) ?? []).filter(
+      time => now - time < credentialAttemptWindowMs
+    );
+    if (recent.length >= maxCredentialAttempts) {
+      this.attempts.set(key, recent);
+      const oldest = recent[0] ?? now;
+      return Math.max(1, Math.ceil((oldest + credentialAttemptWindowMs - now) / 1_000));
+    }
+    recent.push(now);
+    this.attempts.set(key, recent);
+    return null;
+  }
+
+  private recordRun(
+    connectionId: number,
+    run: { outcome: ExternalMailSyncRun['outcome']; fetched: number; stored: number; more: boolean }
+  ): void {
+    const time = this.dependencies.now().toISOString();
+    const runs = this.runs.get(connectionId) ?? [];
+    runs.unshift({
+      id: this.nextRunId++,
+      started_at: time,
+      finished_at: time,
+      outcome: run.outcome,
+      fetched_count: run.fetched,
+      stored_count: run.stored,
+      more: run.more,
+      error_code: run.outcome === 'auth_failed' ? 'external.auth_failed' : null,
+      timed_out: false,
+      throttled: false,
+    });
+    this.runs.set(connectionId, runs.slice(0, maxSyncRuns));
   }
 
   private prune(): void {
@@ -279,6 +494,15 @@ export class MockExternalMailStore {
       this.pending.delete(oldest);
     }
   }
+}
+
+/** The first two characters of the local part (one when it is that short), `***`, the domain. */
+export function maskAddress(address: string): string {
+  const at = address.lastIndexOf('@');
+  const local = at < 0 ? address : address.slice(0, at);
+  const domain = at < 0 ? '' : address.slice(at);
+  const keep = Array.from(local).slice(0, local.length <= 2 ? 1 : 2).join('');
+  return `${keep}***${domain}`;
 }
 
 function hash(state: string): string {

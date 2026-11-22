@@ -51,6 +51,7 @@ import {
 } from '@/features/mailbox/components/mail-shared';
 import { MailTimeZoneContext } from '@/features/mailbox/components/mail-time';
 import type { PaletteCommand } from '@/features/mailbox/components/command-palette';
+import type { ExternalConnectPreset } from '@/features/mailbox/components/external-connect-dialog';
 import {
   useInboxCounts,
   useInboxMessages,
@@ -379,8 +380,11 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   // Where focus goes back when the external mailbox dialogs close, shared because each opens the
   // other: the sidebar control that started the flow.
   const externalReturnFocus = useRef<HTMLElement | null>(null);
-  const openConnect = () => {
+  // A password connection being restored opens the connect dialog on its form.
+  const [connectPreset, setConnectPreset] = useState<ExternalConnectPreset | null>(null);
+  const openConnect = (preset: ExternalConnectPreset | null = null) => {
     setManageExternalOpen(false);
+    setConnectPreset(preset);
     setConnectMounted(true);
     setConnectOpen(true);
   };
@@ -520,10 +524,12 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       {connectMounted ? (
         <Suspense fallback={null}>
           <ExternalConnectDialog
+            key={connectPreset ? `${connectPreset.provider}:${connectPreset.address}` : 'new'}
             open={connectOpen}
             onOpenChange={setConnectOpen}
             organizationId={organizationId}
             connectors={connectorList}
+            preset={connectPreset}
             returnFocusRef={externalReturnFocus}
           />
         </Suspense>
@@ -535,8 +541,10 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             onOpenChange={setManageExternalOpen}
             organizationId={organizationId}
             connections={connections.data}
+            connectors={connectorList}
             error={!connections.data && connections.isError}
-            onAdd={externalOn ? openConnect : null}
+            onAdd={externalOn ? () => openConnect() : null}
+            onReconnectWithPassword={externalOn ? openConnect : null}
             returnFocusRef={externalReturnFocus}
           />
         </Suspense>
@@ -591,7 +599,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
                     size="sm"
                     variant="outline"
                     icon={<Plus className="size-4" />}
-                    onClick={openConnect}
+                    onClick={() => openConnect()}
                   >
                     {t('external.sidebar.add')}
                   </Button>
@@ -812,7 +820,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
 
   const external: InboxSidebarExternal = {
     connections: connections.data,
-    onAdd: externalOn ? openConnect : null,
+    onAdd: externalOn ? () => openConnect() : null,
     onManage: openManageExternal,
   };
   const externalProvider = (mailboxId: number): string | null => {
@@ -944,7 +952,12 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         />
         {connectionList.some(connection => connection.status === 'needs_reconnect') ? (
           <Suspense fallback={null}>
-            <ExternalReconnectBanner organizationId={organizationId} connections={connectionList} />
+            <ExternalReconnectBanner
+              organizationId={organizationId}
+              connections={connectionList}
+              connectors={connectorList}
+              onReconnectWithPassword={externalOn ? openConnect : null}
+            />
           </Suspense>
         ) : null}
         {triageCounts !== null &&

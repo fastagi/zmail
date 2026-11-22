@@ -19,6 +19,7 @@ const messages = {
   adminSharedMailboxes: 'Shared mailboxes',
   adminPlatformAccounts: 'Platform accounts',
   adminAiTriage: 'AI triage',
+  adminExternalConnections: 'External connections',
   developers: 'Developers',
   // fastbuild:slot web.i18n.nav.en-us
 } as const;

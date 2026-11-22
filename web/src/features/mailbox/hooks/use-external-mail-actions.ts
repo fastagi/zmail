@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import type {
+  BindExternalMailCredentialsInput,
   CompleteExternalMailAuthorizationInput,
   StartExternalMailAuthorizationInput,
 } from '@/features/mailbox/external-mail-schemas';
@@ -40,6 +41,72 @@ export function useCompleteExternalMailAuthorization(organizationId: number) {
         queryClient.invalidateQueries({ queryKey: externalMailKeys.connections(organizationId) }),
         queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
       ]),
+  });
+}
+
+/** The bind request without its password: all a mutation may keep in the cache. */
+export type ExternalMailCredentialsRequest = Omit<BindExternalMailCredentialsInput, 'password'>;
+
+/**
+ * Binds an account with an app password. The password never becomes a mutation variable, so the
+ * mutation cache, devtools, and a retry never hold it: it waits in a ref only until the request
+ * is built, and the ref is cleared before the request is sent.
+ */
+export function useBindExternalMailCredentials(organizationId: number) {
+  const queryClient = useQueryClient();
+  const secret = useRef<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: async (input: ExternalMailCredentialsRequest) => {
+      const password = secret.current;
+      secret.current = null;
+      if (password === null) throw new Error('missing password');
+      return (await service()).bindCredentials(organizationId, { ...input, password });
+    },
+    gcTime: 0,
+    retry: false,
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: externalMailKeys.connections(organizationId) }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+      ]),
+  });
+  const { mutate } = mutation;
+  const bind = (
+    input: BindExternalMailCredentialsInput,
+    options?: Parameters<typeof mutate>[1]
+  ) => {
+    const { password, ...rest } = input;
+    secret.current = password;
+    mutate(rest, options);
+  };
+  return { ...mutation, bind };
+}
+
+/** Deletes a revoked connection's copies at once; the connection list is read again. */
+export function usePurgeExternalMail(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (connectionId: number) =>
+      (await service()).purge(organizationId, connectionId),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: externalMailKeys.connections(organizationId) }),
+        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
+      ]),
+  });
+}
+
+/** An owner or admin disconnects a member's account from the connection directory. */
+export function useForceDisconnectExternalMail(organizationId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (connectionId: number) =>
+      (await service()).forceDisconnect(organizationId, connectionId),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: externalMailKeys.directories(organizationId) }),
   });
 }
 

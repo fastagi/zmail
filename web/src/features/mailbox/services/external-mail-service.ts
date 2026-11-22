@@ -3,15 +3,28 @@ import type { z } from 'zod/mini';
 
 import {
   EXTERNAL_MAIL_CONNECTOR_ID_PATTERN,
+  EXTERNAL_MAIL_DIRECTORY_CURSOR_MAX_LENGTH,
+  EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE,
+  EXTERNAL_MAIL_HOST_MAX_LENGTH,
+  EXTERNAL_MAIL_IMAP_PORT,
+  EXTERNAL_MAIL_PASSWORD_MAX_LENGTH,
+  EXTERNAL_MAIL_USERNAME_MAX_LENGTH,
   externalMailAuthorizationSchema,
+  externalMailDirectoryPageEnvelopeSchema,
+  externalMailPurgeSchema,
+  externalMailSyncRunListSchema,
   externalMailConnectionListSchema,
   externalMailConnectionSchema,
   externalMailConnectorListSchema,
+  type BindExternalMailCredentialsInput,
   type CompleteExternalMailAuthorizationInput,
   type ExternalMailAuthorization,
   type ExternalMailCompletion,
   type ExternalMailConnection,
   type ExternalMailConnector,
+  type ExternalMailDirectoryPage,
+  type ExternalMailPurge,
+  type ExternalMailSyncRun,
   type StartExternalMailAuthorizationInput,
 } from '@/features/mailbox/external-mail-schemas';
 import { ClientErrorCode } from '@/http/codes';
@@ -20,6 +33,7 @@ import {
   type Accepts,
   type ContractData,
   type ContractRequest,
+  type ContractResponse,
   type Sends,
 } from '@/http/contract';
 import request, { ApiError } from '@/http/request';
@@ -105,19 +119,94 @@ export const externalMailService = {
       { state: input.state, code: input.code },
       { headers, fastbuildResponseMode: 'response' }
     );
-    const body: unknown = response.data;
-    const data =
-      typeof body === 'object' && body !== null && 'data' in body
-        ? (body as { data: unknown }).data
-        : undefined;
-    const parsed = externalMailConnectionSchema.safeParse(data);
-    if (!parsed.success || (response.status !== 200 && response.status !== 201)) {
-      throw invalidResponse();
-    }
-    return {
-      outcome: response.status === 201 ? 'created' : 'restored',
-      connection: parsed.data,
+    return completionOf(response.status, response.data);
+  },
+
+  /**
+   * Binds an account with an app password (`auth_kind: "password"`). The server signs in once
+   * before anything is stored and derives the account from the login. Only the status and the
+   * connection are read from the answer; nothing of the request, the password above all, is kept.
+   */
+  async bindCredentials(
+    organizationId: number,
+    input: BindExternalMailCredentialsInput
+  ): Promise<ExternalMailCompletion> {
+    const headers = organizationHeaders(organizationId);
+    if (!validCredentials(input)) throw invalidRequest();
+    const body: BindExternalMailCredentialsInput = {
+      provider: input.provider,
+      host: input.host,
+      port: input.port,
+      username: input.username,
+      password: input.password,
+      ...(input.backfill_days === undefined ? {} : { backfill_days: input.backfill_days }),
     };
+    const response = await request.post<AxiosResponse<unknown>, BindExternalMailCredentialsInput>(
+      '/external-mail-credentials',
+      body,
+      { headers, fastbuildResponseMode: 'response' }
+    );
+    return completionOf(response.status, response.data);
+  },
+
+  /** The latest sync runs of one of the caller's own connections, newest first. */
+  async syncRuns(organizationId: number, connectionId: number): Promise<ExternalMailSyncRun[]> {
+    const headers = organizationHeaders(organizationId);
+    checkedId(connectionId);
+    const parsed = externalMailSyncRunListSchema.safeParse(
+      await request.get<unknown>(`/external-mail-connections/${connectionId}/sync-runs`, {
+        headers,
+      })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /**
+   * Deletes the copies of one of the caller's revoked connections at once. `completed` is false
+   * when more copies remain than one request deletes; the worker finishes them.
+   */
+  async purge(organizationId: number, connectionId: number): Promise<ExternalMailPurge> {
+    const headers = organizationHeaders(organizationId);
+    checkedId(connectionId);
+    const parsed = externalMailPurgeSchema.safeParse(
+      await request.post<unknown>(`/external-mail-connections/${connectionId}/purges`, undefined, {
+        headers,
+      })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** One keyset page of the organization's connections, newest first; owners and admins only. */
+  async directory(organizationId: number, cursor?: string): Promise<ExternalMailDirectoryPage> {
+    const headers = organizationHeaders(organizationId);
+    if (
+      cursor !== undefined &&
+      (cursor === '' || cursor.length > EXTERNAL_MAIL_DIRECTORY_CURSOR_MAX_LENGTH)
+    ) {
+      throw invalidRequest();
+    }
+    const parsed = externalMailDirectoryPageEnvelopeSchema.safeParse(
+      await request.getEnvelope<unknown>('/external-mail-connection-directory', {
+        headers,
+        params: {
+          per_page: EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE,
+          ...(cursor === undefined ? {} : { cursor }),
+        },
+      })
+    );
+    if (!parsed.success) throw invalidResponse();
+    return { items: parsed.data.data, meta: parsed.data.meta };
+  },
+
+  /** Disconnects another member's account; the member may connect it again. */
+  async forceDisconnect(organizationId: number, connectionId: number): Promise<void> {
+    const headers = organizationHeaders(organizationId);
+    checkedId(connectionId);
+    await request.delete<void>(`/external-mail-connection-directory/${connectionId}`, {
+      headers,
+    });
   },
 
   /** Unbinds an account; syncing stops and the copies already synced stay. */
@@ -159,6 +248,33 @@ export function isNavigableUrl(value: string): boolean {
     host === '127.0.0.1' ||
     host === '[::1]'
   );
+}
+
+/** `201` is a new mailbox, `200` the caller's own account restored; anything else is refused. */
+function completionOf(status: number, body: unknown): ExternalMailCompletion {
+  const data =
+    typeof body === 'object' && body !== null && 'data' in body
+      ? (body as { data: unknown }).data
+      : undefined;
+  const parsed = externalMailConnectionSchema.safeParse(data);
+  if (!parsed.success || (status !== 200 && status !== 201)) throw invalidResponse();
+  return { outcome: status === 201 ? 'created' : 'restored', connection: parsed.data };
+}
+
+function validCredentials(input: BindExternalMailCredentialsInput): boolean {
+  const days = input.backfill_days;
+  return (
+    EXTERNAL_MAIL_CONNECTOR_ID_PATTERN.test(input.provider) &&
+    boundedText(input.host, EXTERNAL_MAIL_HOST_MAX_LENGTH) &&
+    boundedText(input.username, EXTERNAL_MAIL_USERNAME_MAX_LENGTH) &&
+    boundedText(input.password, EXTERNAL_MAIL_PASSWORD_MAX_LENGTH) &&
+    input.port === EXTERNAL_MAIL_IMAP_PORT &&
+    (days === undefined || (Number.isSafeInteger(days) && days >= 1 && days <= 90))
+  );
+}
+
+function boundedText(value: string, max: number): boolean {
+  return value.length > 0 && value.length <= max && !/\p{Cc}/u.test(value);
 }
 
 function validCallbackValue(value: string): boolean {
@@ -224,5 +340,32 @@ assertContract<
   Sends<
     CompleteExternalMailAuthorizationInput,
     ContractRequest<'completeExternalMailAuthorization'>
+  >
+>();
+assertContract<
+  Sends<BindExternalMailCredentialsInput, ContractRequest<'bindExternalMailCredentials'>>
+>();
+assertContract<
+  Accepts<
+    z.input<typeof externalMailConnectionSchema>,
+    ContractData<'bindExternalMailCredentials', 201>
+  >
+>();
+assertContract<
+  Accepts<
+    z.input<typeof externalMailSyncRunListSchema>,
+    ContractData<'listExternalMailSyncRuns', 200>
+  >
+>();
+assertContract<
+  Accepts<z.input<typeof externalMailPurgeSchema>, ContractData<'purgeExternalMailCopies', 200>>
+>();
+assertContract<
+  Accepts<z.input<typeof externalMailPurgeSchema>, ContractData<'purgeExternalMailCopies', 202>>
+>();
+assertContract<
+  Accepts<
+    z.input<typeof externalMailDirectoryPageEnvelopeSchema>,
+    ContractResponse<'listExternalMailConnectionDirectory', 200>
   >
 >();

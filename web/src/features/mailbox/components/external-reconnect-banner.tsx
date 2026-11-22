@@ -5,7 +5,11 @@ import { AlertTriangle, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useDateTimeFormat } from '@/features/mailbox/components/mail-shared';
-import type { ExternalMailConnection } from '@/features/mailbox/external-mail-schemas';
+import {
+  EXTERNAL_MAIL_PASSWORD_AUTH_KIND,
+  type ExternalMailConnection,
+  type ExternalMailConnector,
+} from '@/features/mailbox/external-mail-schemas';
 import { useBeginExternalAuthorization } from '@/features/mailbox/hooks/use-external-mail-actions';
 import { providerName } from '@/features/mailbox/utils/external-mail';
 import { useT } from '@/i18n';
@@ -45,9 +49,15 @@ const subscribeToNothing = () => () => {};
 export function ExternalReconnectBanner({
   organizationId,
   connections,
+  connectors = [],
+  onReconnectWithPassword = null,
 }: {
   organizationId: number;
   connections: readonly ExternalMailConnection[];
+  /** The instance's connectors, to tell an app password connection from an OAuth one. */
+  connectors?: readonly ExternalMailConnector[];
+  /** Opens the connect form for an app password connection, which has no sign-in page. */
+  onReconnectWithPassword?: ((preset: { provider: string; address: string }) => void) | null;
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
@@ -68,6 +78,9 @@ export function ExternalReconnectBanner({
 
   const provider = providerName(connection.provider);
   const address = connection.account_address;
+  const password = connectors.some(
+    item => item.id === connection.provider && item.auth_kind === EXTERNAL_MAIL_PASSWORD_AUTH_KIND
+  );
   const dismiss = () => {
     const next = [...known, failureKey(connection)];
     writeDismissed(next);
@@ -97,21 +110,25 @@ export function ExternalReconnectBanner({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          loading={reconnect.isPending}
-          onClick={() =>
-            reconnect.begin({
-              kind: 'reconnect',
-              provider: connection.provider,
-              connectionId: connection.id,
-            })
-          }
-        >
-          {t('external.banner.reconnect')}
-        </Button>
+        {password && !onReconnectWithPassword ? null : (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            loading={reconnect.isPending}
+            onClick={() =>
+              password && onReconnectWithPassword
+                ? onReconnectWithPassword({ provider: connection.provider, address })
+                : reconnect.begin({
+                    kind: 'reconnect',
+                    provider: connection.provider,
+                    connectionId: connection.id,
+                  })
+            }
+          >
+            {t('external.banner.reconnect')}
+          </Button>
+        )}
         <Button
           type="button"
           isIcon
