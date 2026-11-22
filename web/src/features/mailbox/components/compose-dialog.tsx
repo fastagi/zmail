@@ -156,9 +156,10 @@ export function ComposeDialog({
   const templateHintId = useId();
   const [kept] = useState(() => restored?.draft ?? (flushed ? null : readComposeDraft(draftKey)));
   const knownSavedId = draft.savedId ?? kept?.savedId;
-  // A draft opened from the list starts from the API's text, which another device may have changed;
-  // this browser's copy still lends it its files.
-  const keptText = draft.savedId !== undefined && !restored ? null : kept;
+  // A draft opened from the list starts from the API's text, which another device may have changed,
+  // unless this browser holds edits the API never received (a close while offline); this browser's
+  // copy still lends it its files.
+  const keptText = draft.savedId !== undefined && !restored && (!kept || kept.synced) ? null : kept;
   const [to, setTo] = useState(keptText?.to ?? draft.to);
   const [cc, setCc] = useState(keptText?.cc ?? draft.cc ?? '');
   const [subject, setSubject] = useState(keptText?.subject ?? draft.subject);
@@ -477,7 +478,7 @@ export function ComposeDialog({
    * Saves a closed new message as a draft of the API too. The browser copy remembers the saved
    * id, so closing again updates that draft rather than adding another one.
    */
-  const keepOnServer = (keep: StoredComposeDraft) => {
+  const keepOnServer = (keep: StoredComposeDraft, withFiles: boolean) => {
     saveDraft
       .mutateAsync({
         input: {
@@ -494,10 +495,11 @@ export function ComposeDialog({
         saved => {
           const current = readComposeDraft(draftKey);
           const textOf = (value: StoredComposeDraft | null) =>
-            JSON.stringify({ ...value, savedId: undefined });
+            JSON.stringify({ ...value, savedId: undefined, synced: undefined });
           if (textOf(current) === textOf(keep)) {
-            writeComposeDraft(draftKey, { ...keep, savedId: saved.id });
+            writeComposeDraft(draftKey, { ...keep, savedId: saved.id, synced: true });
           }
+          toast.success(t(withFiles ? 'compose.draftSavedWithFiles' : 'compose.draftSaved'));
         },
         () => toast.error(t('drafts.saveFailed'))
       );
@@ -520,8 +522,9 @@ export function ComposeDialog({
     // Clearing a saved draft and closing it discards it everywhere.
     if (blank && !isReplyOrForward) forgetSaved();
     writeComposeDraftFiles(draftKey, files);
-    if (keep && !isReplyOrForward) keepOnServer(keep);
-    if (keep)
+    // A new message says it is saved once the API has it; a refusal says it stays in this browser.
+    if (keep && !isReplyOrForward) keepOnServer(keep, files.length > 0);
+    else if (keep)
       toast.success(t(files.length > 0 ? 'compose.draftSavedWithFiles' : 'compose.draftSaved'));
     onClose();
   };
