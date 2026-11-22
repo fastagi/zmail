@@ -765,6 +765,7 @@ func Load() (*Config, error) {
 				FetchTimeout:           env.Get("EXTERNAL_MAIL_FETCH_TIMEOUT", ""),
 				MaxImmediatePages:      env.Get("EXTERNAL_MAIL_MAX_IMMEDIATE_PAGES", ""),
 			}),
+			MaxSharedConnections: parseExternalMailMaxSharedConnections(env.Get("EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS", "")),
 		},
 		Mailbox: MailboxConfig{
 			Domain:              env.Get("MAILBOX_DOMAIN", ""),
