@@ -109,7 +109,7 @@ export function ThreadAssignment({
         </Button>
       ) : null}
       {save.isError ? (
-        <p role="alert" className="w-full text-destructive">
+        <p role="alert" className="w-full text-error">
           {t(resolveMailboxErrorKey(save.error))}
         </p>
       ) : null}
