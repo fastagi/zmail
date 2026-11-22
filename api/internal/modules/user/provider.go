@@ -30,6 +30,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(Service), new(*service)),
 	wire.Bind(new(domain.CredentialSignIn), new(*service)),
 	wire.Bind(new(domain.UserAdministrator), new(*service)),
+	wire.Bind(new(domain.UserProvisioner), new(*service)),
 	NewAuthAbuseGuard,
 	NewHandler,
 )

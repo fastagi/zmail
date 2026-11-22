@@ -55,6 +55,11 @@ func TestPaginatorFromTo(t *testing.T) {
 	p = NewPaginator([]string{}, 0, 1, 15)
 	assert.Equal(t, 0, p.From())
 	assert.Equal(t, 0, p.To())
+
+	// Past the last page
+	p = NewPaginator([]string{}, 2, 99999999999, 15)
+	assert.Equal(t, 0, p.From())
+	assert.Equal(t, 0, p.To())
 }
 
 func TestPaginatorNavigation(t *testing.T) {

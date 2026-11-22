@@ -51,6 +51,22 @@ type UserListFilter struct {
 
 // UserAdministrator is the user starter's seam for platform operators. The user starter remains the
 // only writer of accounts and sessions; disabling an account revokes its sessions atomically.
+// UserProvisionRequest names the account an operator provisions from the console.
+type UserProvisionRequest struct {
+	Email string
+	// Username is optional; empty derives one from the email's local part.
+	Username string
+	// Password is the plaintext password, read from standard input and never from arguments.
+	Password string
+}
+
+// UserProvisioner creates or resets an account from the operator console. It never sends mail.
+type UserProvisioner interface {
+	// ProvisionUser creates an active account, or, when the email already has one, replaces its
+	// password, re-enables it, and revokes its sessions. created reports which happened.
+	ProvisionUser(ctx context.Context, req UserProvisionRequest) (user *User, created bool, err error)
+}
+
 type UserAdministrator interface {
 	ListUsers(ctx context.Context, filter UserListFilter, page, pageSize int) ([]*User, int64, error)
 	GetUser(ctx context.Context, id uint) (*User, error)

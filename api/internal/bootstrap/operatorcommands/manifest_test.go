@@ -24,4 +24,5 @@ func TestManifestRegistersBusinessOperatorCommands(t *testing.T) {
 	assert.True(t, application.HasCommand("webhook:publish-test"))
 	assert.True(t, application.HasCommand("webhook:replay"))
 	assert.True(t, application.HasCommand("webhook:prune"))
+	assert.True(t, application.HasCommand("user:provision"))
 }

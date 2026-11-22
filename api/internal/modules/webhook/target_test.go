@@ -109,3 +109,18 @@ func TestTargetPolicyMayAllowPrivateTargetsOnlyWhenExplicitlyConfigured(t *testi
 	_, _, err = policy.Normalize(context.Background(), "http://hooks.example.com/hook")
 	assert.Error(t, err)
 }
+
+func TestTargetPolicySetupRejectsNamesThatDoNotResolve(t *testing.T) {
+	policy := NewTargetPolicy(nil)
+	policy.resolver = staticIPResolver{err: &net.DNSError{Err: "no such host", Name: "2130706433", IsNotFound: true}}
+	_, _, err := policy.Normalize(context.Background(), "https://2130706433/hook")
+	assert.ErrorIs(t, err, domain.ErrWebhookInvalidTarget)
+
+	policy.resolver = staticIPResolver{}
+	_, _, err = policy.Normalize(context.Background(), "https://hooks.example.com/hook")
+	assert.ErrorIs(t, err, domain.ErrWebhookInvalidTarget)
+
+	policy.resolver = staticIPResolver{err: &net.DNSError{Err: "i/o timeout", Name: "hooks.example.com", IsTimeout: true}}
+	_, _, err = policy.Normalize(context.Background(), "https://hooks.example.com/hook")
+	assert.ErrorIs(t, err, domain.ErrServiceUnavailable)
+}
