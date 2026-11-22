@@ -350,3 +350,115 @@ func TestExternalMailSyncKeepsARotatedGrantWhenTheSaveFails(t *testing.T) {
 		t.Fatalf("after a failed save the stored grant is %q (%v), want the rotated one", grant, err)
 	}
 }
+
+// TestExternalMailSyncKeepsAReconnectOverAFailedSave: a member who reconnects while a sync runs keeps
+// the new grant even when that sync's save fails after the provider rotated the old one: the rotated
+// grant is stored only over the grant the sync started with.
+func TestExternalMailSyncKeepsAReconnectOverAFailedSave(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	fail := &atomic.Bool{}
+	fail.Store(true)
+	f.service.externalMail = failingSaveRepository{ExternalMailRepository: f.service.externalMail, fail: fail}
+	reconnected, err := f.service.sealRefreshToken("reconnected-grant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.service.externalConnectors = fakeExternalMailRegistry(notifyingSource{FakeExternalMailSource: f.source, during: func() {
+		if _, rebindErr := f.service.externalMail.RebindExternalMailConnection(context.Background(), domain.ExternalMailRebind{
+			ConnectionID: f.connection.ID, EncryptedRefreshToken: reconnected, Now: f.service.now().UTC(),
+		}); rebindErr != nil {
+			t.Errorf("reconnect: %v", rebindErr)
+		}
+	}})
+	f.source.RotateOnNextFetch(externalTestToken, "rotated-grant")
+	if _, err = f.service.SyncExternalMail(context.Background(), 20); err == nil {
+		t.Fatal("the failed save went unreported")
+	}
+	grant, err := f.service.encryptor.DecryptString(f.reload(t).EncryptedRefreshToken)
+	if err != nil || grant != "reconnected-grant" {
+		t.Fatalf("after the reconnect and a failed save the stored grant is %q (%v), want the reconnected one", grant, err)
+	}
+}
+
+// rebindingStopSource rebinds the connection while the worker's stop call is at the provider, the
+// slow part of a release.
+type rebindingStopSource struct {
+	*FakeExternalMailSource
+	during func()
+}
+
+func (s rebindingStopSource) Unsubscribe(ctx context.Context, request ExternalMailPushRequest) error {
+	if s.during != nil {
+		s.during()
+	}
+	return s.FakeExternalMailSource.Unsubscribe(ctx, request)
+}
+
+// TestExternalMailProviderReleaseRechecksBeforeTheHandBack: a member who binds the account again
+// while the worker is stopping the old subscription keeps the new grant: the conditions are checked
+// again right before the hand-back.
+func TestExternalMailProviderReleaseRechecksBeforeTheHandBack(t *testing.T) {
+	f := newPushFixture(t)
+	f.sync(t)
+	crashed, _ := withDeferredReleases(context.Background())
+	if err := f.service.revokeConnection(crashed, f.reload(t), accessB, domain.MailboxAccessConnectionRevoked); err != nil {
+		t.Fatal(err)
+	}
+	rebound, err := f.service.sealRefreshToken("rebound-grant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	once := false
+	f.service.externalConnectors = fakeExternalMailRegistry(rebindingStopSource{FakeExternalMailSource: f.source, during: func() {
+		if once {
+			return
+		}
+		once = true
+		// The rebind commits on its own; the release row it deletes is already in the worker's hands.
+		if _, rebindErr := f.service.externalMail.RebindExternalMailConnection(context.Background(), domain.ExternalMailRebind{
+			ConnectionID: f.connection.ID, EncryptedRefreshToken: rebound, ResetCursor: true, Now: f.service.now().UTC(),
+		}); rebindErr != nil {
+			t.Errorf("rebind: %v", rebindErr)
+		}
+	}})
+	f.advance(externalMailReleaseGrace + time.Second)
+	f.sync(t)
+	if !once {
+		t.Fatal("the worker never stopped the subscription")
+	}
+	if f.source.Revoked(externalTestToken) {
+		t.Fatal("the grant was handed back although the account was bound again during the stop")
+	}
+}
+
+// TestExternalMailProviderReleaseWaitsForAPendingSignIn: while the member has a sign-in pending for
+// the provider, the release is postponed, not dropped; once the sign-in is gone it runs.
+func TestExternalMailProviderReleaseWaitsForAPendingSignIn(t *testing.T) {
+	f := newPushFixture(t)
+	f.sync(t)
+	crashed, _ := withDeferredReleases(context.Background())
+	if err := f.service.revokeConnection(crashed, f.reload(t), accessB, domain.MailboxAccessConnectionRevoked); err != nil {
+		t.Fatal(err)
+	}
+	now := f.service.now().UTC()
+	if err := f.service.externalMail.CreateExternalMailAuthorization(context.Background(), &domain.ExternalMailAuthorization{
+		OrganizationID: accessOrg, UserID: accessB, Provider: domain.ExternalMailProviderGmail,
+		StateHash: pushHash("pending-state"), SealedVerifier: "sealed", BackfillDays: 14,
+		ExpiresAt: now.Add(10 * time.Minute), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.advance(externalMailReleaseGrace + time.Second)
+	f.sync(t)
+	if f.source.Revoked(externalTestToken) || len(f.source.Unsubscribed()) != 0 {
+		t.Fatal("a release ran while the member was signing in again")
+	}
+	if rows := f.releaseRows(t, f.connection.ID); len(rows) != 1 || rows[0].Attempts != 1 {
+		t.Fatalf("the release was not postponed: %+v", rows)
+	}
+	f.advance(10 * time.Minute)
+	f.runReleaseWorker(t)
+	if !f.source.Revoked(externalTestToken) {
+		t.Fatal("the release never ran once the sign-in expired")
+	}
+}

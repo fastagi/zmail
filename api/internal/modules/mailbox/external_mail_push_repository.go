@@ -180,14 +180,16 @@ func (r *repository) MarkExternalMailPush(ctx context.Context, mark domain.Exter
 }
 
 // KeepExternalMailRotatedToken stores a grant the provider rotated during a sync whose save failed,
-// so the spent grant is never used again. A revoked connection, or one without a grant of its own,
-// is left as it is.
-func (r *repository) KeepExternalMailRotatedToken(ctx context.Context, connectionID uint, sealed string) error {
+// so the spent grant is never used again: only while the connection still holds the grant the sync
+// started with (previous), so a member's reconnect meanwhile is never overwritten. A revoked
+// connection, or one without a grant of its own, is left as it is.
+func (r *repository) KeepExternalMailRotatedToken(ctx context.Context, connectionID uint, previous, sealed string) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Exec(`UPDATE external_mail_connections SET encrypted_refresh_token = ?
-		WHERE id = ? AND status <> 'revoked' AND tenant_id IS NULL AND encrypted_refresh_token <> ''`, sealed, connectionID).Error
+		WHERE id = ? AND status <> 'revoked' AND tenant_id IS NULL AND encrypted_refresh_token <> ''
+		  AND encrypted_refresh_token = ?`, sealed, connectionID, previous).Error
 }
 
 func (r *repository) PromotePendingExternalMailPush(ctx context.Context, now time.Time, window, spacing time.Duration, limit int) (int, error) {

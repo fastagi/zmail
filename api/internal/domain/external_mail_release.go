@@ -52,6 +52,10 @@ type ExternalMailReleaseRepository interface {
 	// DeleteExternalMailProviderReleasesForAccount deletes the organization's pending releases of the
 	// provider account, ignoring the address's case: the account was bound again.
 	DeleteExternalMailProviderReleasesForAccount(ctx context.Context, organizationID uint, provider ExternalMailProvider, address string) error
+	// CountPendingExternalMailAuthorizations counts the organization's unexpired sign-ins of the
+	// provider that may bind the account again: those of the member userID, or reconnecting the
+	// connection; every member's when userID is 0.
+	CountPendingExternalMailAuthorizations(ctx context.Context, organizationID uint, provider ExternalMailProvider, userID, connectionID uint, now time.Time) (int, error)
 	// CountLiveExternalMailAccountGrants counts the connections other than exceptConnectionID, in any
 	// organization, that read the provider account with a grant of their own and are not revoked.
 	CountLiveExternalMailAccountGrants(ctx context.Context, provider ExternalMailProvider, address string, exceptConnectionID uint) (int, error)

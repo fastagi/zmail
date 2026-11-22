@@ -317,7 +317,12 @@ func (r *repository) RestoreTenantConnection(ctx context.Context, connectionID, 
 		Update("external_mail_tenant_id", tenantID).Error; err != nil {
 		return nil, err
 	}
-	return rows[0].toDomain(), nil
+	restored := rows[0].toDomain()
+	// The address is read again: what an earlier revocation left to do at the provider must not run.
+	if err = r.DeleteExternalMailProviderReleasesForAccount(ctx, restored.OrganizationID, restored.Provider, restored.AccountAddress); err != nil {
+		return nil, err
+	}
+	return restored, nil
 }
 
 func (r *repository) ShareTenantConnection(ctx context.Context, mailboxID uint, boundary time.Time) error {

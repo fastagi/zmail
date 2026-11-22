@@ -136,3 +136,14 @@ func (r *repository) CountLiveExternalMailAccountGrants(ctx context.Context, pro
 		string(provider), address, exceptConnectionID).Scan(&count).Error
 	return int(count), err
 }
+
+func (r *repository) CountPendingExternalMailAuthorizations(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, userID, connectionID uint, now time.Time) (int, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	var count int64
+	err := r.conn(ctx).Raw(`SELECT count(*) FROM external_mail_authorizations
+		WHERE organization_id = ? AND provider = ? AND expires_at > ? AND (? = 0 OR user_id = ? OR connection_id = ?)`,
+		organizationID, string(provider), now, userID, userID, connectionID).Scan(&count).Error
+	return int(count), err
+}

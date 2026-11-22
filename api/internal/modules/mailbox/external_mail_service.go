@@ -258,7 +258,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		return notifications, nil
 	})
 	if saveErr != nil {
-		s.keepRotatedToken(ctx, connection.ID, result.EncryptedRefreshToken)
+		s.keepRotatedToken(ctx, connection.ID, connection.EncryptedRefreshToken, result.EncryptedRefreshToken)
 		return saveErr
 	}
 	if !applied && push != nil && upkeep.subscribed != nil {
@@ -595,17 +595,17 @@ func (s *service) openGrant(sealed string) (string, bool) {
 
 // rotatedTokenKeeper stores a rotated grant on its own; the repository implements it.
 type rotatedTokenKeeper interface {
-	KeepExternalMailRotatedToken(ctx context.Context, connectionID uint, sealed string) error
+	KeepExternalMailRotatedToken(ctx context.Context, connectionID uint, previous, sealed string) error
 }
 
 // keepRotatedToken stores the grant a provider rotated during a sync whose save failed (a lost
 // transaction, a deadlock, a failover), since the grant it replaced may already be spent. Best effort.
-func (s *service) keepRotatedToken(ctx context.Context, connectionID uint, sealed string) {
+func (s *service) keepRotatedToken(ctx context.Context, connectionID uint, previous, sealed string) {
 	keeper, ok := s.repo.(rotatedTokenKeeper)
 	if sealed == "" || !ok {
 		return
 	}
-	if err := keeper.KeepExternalMailRotatedToken(context.WithoutCancel(ctx), connectionID, sealed); err != nil {
+	if err := keeper.KeepExternalMailRotatedToken(context.WithoutCancel(ctx), connectionID, previous, sealed); err != nil {
 		slog.ErrorContext(ctx, "external_mail.rotated_token_lost", slog.Uint64("connection_id", uint64(connectionID)))
 	}
 }

@@ -646,15 +646,7 @@ func (s *service) releaseNow(ctx context.Context, release *domain.ExternalMailPr
 // its own: at Google, revoking one token revokes the user's whole grant. A stored release is deleted
 // once done, retried with backoff otherwise until its deadline. Nothing secret is logged.
 func (s *service) performProviderRelease(ctx context.Context, release *domain.ExternalMailProviderRelease, sealed string) {
-	connection, err := s.externalMail.FindExternalMailConnection(ctx, release.OrganizationID, release.ConnectionID)
-	switch {
-	case errors.Is(err, ErrExternalMailConnectionNotFound):
-		// Purged since: it cannot have been bound again; the account check below still applies.
-	case err != nil:
-		s.deferProviderRelease(ctx, release)
-		return
-	case connection.Status != domain.ExternalMailStatusRevoked || connection.RevokedAt == nil || connection.RevokedAt.After(release.CreatedAt):
-		s.finishProviderRelease(ctx, release, "rebound")
+	if s.releaseBlocked(ctx, release) {
 		return
 	}
 	held := &domain.ExternalMailConnection{
@@ -672,15 +664,18 @@ func (s *service) performProviderRelease(ctx context.Context, release *domain.Ex
 			failed = s.stopPushAtProvider(ctx, held, release.StopSubscriptionID)
 		}
 	}
-	if sealed != "" {
+	if sealed != "" && failed == nil {
+		// The stop is the slow call: everything that would make the hand-back harmful is checked
+		// again right before it, so only a sign-in started after this check can still race it.
+		if s.releaseBlocked(ctx, release) {
+			return
+		}
 		live, countErr := s.liveAccountGrants(ctx, release)
 		switch {
 		case countErr != nil:
 			failed = countErr
 		case live == 0:
-			if err := s.returnExternalGrant(ctx, held); err != nil && failed == nil {
-				failed = err
-			}
+			failed = s.returnExternalGrant(ctx, held)
 		default:
 			slog.InfoContext(ctx, "external_mail.provider_revoke_skipped", slog.Uint64("connection_id", uint64(release.ConnectionID)),
 				slog.String("provider", string(release.Provider)), slog.String("reason", "account_bound_elsewhere"))
@@ -695,6 +690,40 @@ func (s *service) performProviderRelease(ctx context.Context, release *domain.Ex
 		return
 	}
 	s.finishProviderRelease(ctx, release, "done")
+}
+
+// releaseBlocked reports whether the release must not run now, and settles it: it is dropped when
+// its connection was bound again since (still there, but no longer revoked as of the release), and
+// postponed while a sign-in that may bind the account again is pending in the organization (the
+// connection's member's, or any member's when the connection has none or is gone).
+func (s *service) releaseBlocked(ctx context.Context, release *domain.ExternalMailProviderRelease) bool {
+	var owner uint
+	connection, err := s.externalMail.FindExternalMailConnection(ctx, release.OrganizationID, release.ConnectionID)
+	switch {
+	case errors.Is(err, ErrExternalMailConnectionNotFound):
+		// Purged since: it cannot have been bound again; the account checks still apply.
+	case err != nil:
+		s.deferProviderRelease(ctx, release)
+		return true
+	case connection.Status != domain.ExternalMailStatusRevoked || connection.RevokedAt == nil || connection.RevokedAt.After(release.CreatedAt):
+		s.finishProviderRelease(ctx, release, "rebound")
+		return true
+	case connection.OwnerUserID != nil:
+		owner = *connection.OwnerUserID
+	}
+	if s.releases == nil {
+		return false
+	}
+	pending, err := s.releases.CountPendingExternalMailAuthorizations(ctx, release.OrganizationID, release.Provider, owner, release.ConnectionID, s.now().UTC())
+	if err != nil || pending > 0 {
+		if err == nil {
+			slog.InfoContext(ctx, "external_mail.provider_release_postponed", slog.Uint64("connection_id", uint64(release.ConnectionID)),
+				slog.String("provider", string(release.Provider)), slog.String("reason", "sign_in_pending"))
+		}
+		s.deferProviderRelease(ctx, release)
+		return true
+	}
+	return false
 }
 
 // liveAccountGrants counts the other live connections that read the release's account with a grant
