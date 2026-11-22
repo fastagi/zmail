@@ -527,7 +527,6 @@ const messages = {
     cfReadable: 'Readable',
     cfUnverified: 'Access unverified',
     cfCheckHint: 'Test delivery by sending a message and replying from an external mailbox.',
-    cfFailed: 'Request failed',
     cfLoading: 'Loading connection…',
     cfUnavailable: 'Cloudflare settings are unavailable. Check the API connection.',
     cfWorker: 'Set up the receiving Worker',
@@ -545,6 +544,20 @@ const messages = {
     cfCancel: 'Cancel',
     cfDisconnect: 'Disconnect',
     cfToken: 'Cloudflare API token',
+    cfTitle: 'Option 1: Use your own Cloudflare account',
+    cfWhen:
+      "Choose this when the domain's DNS is already in your own Cloudflare account and should stay there. Paste an API token with Zone Read, DNS Edit and Email Routing Rules Edit on the zone, and Email Sending Edit on its account. Zmail stores the token encrypted.",
+    cfTokenRefused:
+      'Cloudflare did not accept the token you entered. Check that it is copied completely, still active, has Zone Read, and that its IP restrictions allow this server.',
+    cfTokenMissingPermission:
+      "Cloudflare refused your token's request for the DNS records of this domain. Give the token DNS Edit and Zone Read on {zone}, then try again.",
+    cfZoneNotVisible:
+      'Your token can no longer see the selected zone. Find the accessible zones again and pick one.',
+    cfDomainOutsideZone: 'Use {zone} or a subdomain of it, such as mail.{zone}.',
+    cfAlreadyConnected:
+      'This organization is already connected to a Cloudflare account. Reload the page to see it.',
+    methodsIntro:
+      'There are two ways to connect a domain. Most domains use option 2, which needs no token. Use option 1 only if you manage the DNS in your own Cloudflare account.',
     cfList: 'Find accessible zones',
     cfEmpty: 'No active zones visible to this token.',
     cfZone: 'Cloudflare zone',
@@ -555,6 +568,11 @@ const messages = {
     connectedDisabled:
       'Your own domains are not enabled on this server. An operator can turn them on with MAILBOX_CUSTOM_DOMAINS_ENABLED.',
     connectedEmpty: 'No domains connected yet.',
+    connectTitle: 'Option 2: Let Zmail set up DNS (no token needed)',
+    connectWhen:
+      "Choose this for a new domain, or when its DNS is elsewhere. Zmail uses this server's Cloudflare account and shows the name servers to set at your registrar if needed.",
+    connectProviderFailed:
+      "Cloudflare refused the request Zmail made with this server's Cloudflare account (no token of yours was used). Check that the domain is spelled correctly and registered; reserved names such as .example or .test cannot be used. If it keeps failing, try again later or ask the server operator.",
     connectLabel: 'Domain',
     connectPlaceholder: 'example.com',
     connectHint:
@@ -1511,7 +1529,7 @@ const messages = {
     domainNotVerified: 'This domain is not verified yet. Check its DNS records on the Domain page.',
     domainsDisabled: 'Your own domains are not enabled on this server.',
     domainProviderFailed:
-      'Cloudflare refused the request. Check that the API token has the DNS and Email permissions.',
+      'Cloudflare refused the request. If this domain uses your own Cloudflare token, check that the token still has its DNS and Email permissions; otherwise try again later.',
     zoneNotFound: 'This zone does not exist or belongs to another organization.',
     zonePending:
       'The name servers of this domain do not point at Cloudflare yet. Change them at your registrar, then check again.',
