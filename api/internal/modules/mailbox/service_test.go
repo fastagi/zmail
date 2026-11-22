@@ -52,6 +52,12 @@ type fakeMemberships struct {
 	absent map[uint]bool
 	// ids overrides the membership id of a user, as a rejoin with a new membership does.
 	ids map[uint]uint
+	// managers are the owners and admins ListManagerUserIDs returns.
+	managers []uint
+}
+
+func (f *fakeMemberships) ListManagerUserIDs(context.Context, uint) ([]uint, error) {
+	return slices.Clone(f.managers), nil
 }
 
 func (f *fakeMemberships) FindForUser(_ context.Context, organizationID, userID uint) (*domain.OrganizationMembership, error) {

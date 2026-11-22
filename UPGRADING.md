@@ -25,7 +25,7 @@ Six session-only routes under `/v1/external-mail-tenants`. `ExternalMailConnecti
 `ExternalMailConnectionDirectoryEntry` gain the required, nullable `tenant_id`; the connector
 `capabilities` gain the required `tenant` boolean. A client with strict response schemas must accept
 them. `GET /v1/external-mail-connections` also lists the caller's tenant assignments (at most 100)
-between their own and the shared connections, so it may return up to 210 items. A directory entry of
+between their own and the shared connections, so it may return up to 220 items. A directory entry of
 a tenant assignment carries its full `account_address` and `mailbox_id`. No error code was added:
 tenants reuse `MAILBOX.EXTERNAL_*`, `MAILBOX.ACCESS_INVALID`, and `MAILBOX.ACCESS_CONFLICT`.
 

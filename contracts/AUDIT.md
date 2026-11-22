@@ -16,6 +16,10 @@ event stream, debug log, authorization source, or immutable regulatory archive.
   `AUDIT_WRITE_MODE=sync` to write each record before the response completes.
 - The read API returns only records whose `user_id` is the authenticated caller. It does not expose
   organization-wide, other-user, anonymous, API-key-only, or system-operator history.
+- A starter may file a copy of a request's record under other users who must see the change, for
+  example the organization's other owners and admins for a forced disconnect of a connected
+  mailbox. The copy's `user_id` is that user; it keeps the actor, action, resource, target,
+  changes, and metadata, and leaves out the actor's `ip_address` and `user_agent`.
 - Audit records assist investigation; authorization always uses current application state.
 
 ## List Current User Audit History

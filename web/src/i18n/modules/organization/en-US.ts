@@ -94,6 +94,7 @@ const messages = {
   },
   resendInvitation: 'Resend',
   resendInvitationLabel: 'Resend the invitation to {email}',
+  resendInvitationCooldown: 'Resend in {seconds}s',
   invitationStatus: {
     pending: 'Pending',
     accepted: 'Accepted',
@@ -129,6 +130,7 @@ const messages = {
     invitationEmailMismatch: 'This invitation belongs to another account email.',
     invitationAlreadyPending: 'This email already has an unexpired invitation.',
     invitationNotFound: 'This invitation no longer exists or cannot be managed.',
+    rateLimited: 'This invitation was resent recently. Try again in a moment.',
     memberAlreadyExists: 'This email already belongs to an organization member.',
     memberNotFound: 'This organization member no longer exists.',
     ownershipTransferRequired: 'The owner must transfer ownership first.',

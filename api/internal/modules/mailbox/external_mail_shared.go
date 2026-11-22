@@ -226,6 +226,8 @@ func (s *service) disconnectShared(ctx context.Context, viewer domain.Organizati
 			Metadata: map[string]any{
 				"provider": string(connection.Provider), "reason": "shared_disconnect", "mailbox_id": connection.MailboxID,
 			},
+			// Every owner and admin sees who disconnected the organization's account.
+			AlsoVisibleTo: s.otherManagers(ctx, connection.OrganizationID, viewer.UserID),
 		})
 	}
 	return nil

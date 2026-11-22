@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -61,13 +62,50 @@ func (s *service) RecordRequest(ctx context.Context, entry *domain.AuditLog) err
 	if err := s.prepare(ctx, entry); err != nil {
 		return err
 	}
-	if s.writer == nil {
-		return s.repo.Create(ctx, entry)
-	}
-	if entry.CreatedAt.IsZero() {
+	if s.writer != nil && entry.CreatedAt.IsZero() {
 		entry.CreatedAt = time.Now().UTC() // the request time, not the later flush time
 	}
-	return s.writer.Write(ctx, entry)
+	entries := append([]*domain.AuditLog{entry}, visibleCopies(ctx, entry)...)
+	var errs []error
+	for _, item := range entries {
+		if s.writer == nil {
+			errs = append(errs, s.repo.Create(ctx, item))
+			continue
+		}
+		errs = append(errs, s.writer.Write(ctx, item))
+	}
+	return errors.Join(errs...)
+}
+
+// visibleCopies files the request's record under each user of the change's AlsoVisibleTo: the
+// actor stays, the actor's IP address and user agent do not.
+func visibleCopies(ctx context.Context, entry *domain.AuditLog) []*domain.AuditLog {
+	change := changeFromContext(ctx)
+	if change == nil || len(change.AlsoVisibleTo) == 0 {
+		return nil
+	}
+	seen := map[uint]bool{0: true}
+	if entry.UserID != nil {
+		seen[*entry.UserID] = true
+	}
+	copies := make([]*domain.AuditLog, 0, len(change.AlsoVisibleTo))
+	for _, userID := range change.AlsoVisibleTo {
+		if seen[userID] {
+			continue
+		}
+		seen[userID] = true
+		visible := *entry
+		visible.ID = 0
+		visible.UserID = &userID
+		visible.ActorID = cloneUintPointer(entry.ActorID)
+		visible.APIKeyID = cloneUintPointer(entry.APIKeyID)
+		visible.IPAddress = ""
+		visible.UserAgent = ""
+		visible.Changes = cloneChanges(entry.Changes)
+		visible.Metadata = cloneMetadata(entry.Metadata)
+		copies = append(copies, &visible)
+	}
+	return copies
 }
 
 // Shutdown writes every queued request audit record.

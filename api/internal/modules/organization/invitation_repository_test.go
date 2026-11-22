@@ -191,7 +191,7 @@ func TestRepositoryInvitationReissueAndEmailAttempt(t *testing.T) {
 
 	invitation := newPendingInvitation(organization.ID, ownerID, "resend@example.com", "oinv_first.secret", now)
 	require.NoError(t, repo.CreateInvitation(context.Background(), invitation, now))
-	require.NoError(t, repo.RecordInvitationEmailAttempt(context.Background(), organization.ID, invitation.ID, "failed", now))
+	require.NoError(t, repo.RecordInvitationEmailAttempt(context.Background(), organization.ID, invitation.ID, invitation.TokenHash, "failed", now))
 
 	later := now.Add(time.Hour)
 	newHash := crypto.SHA256Hex("oinv_second.secret")

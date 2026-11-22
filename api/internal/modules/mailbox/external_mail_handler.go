@@ -56,7 +56,7 @@ func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnect
 }
 
 // ListExternalMailConnections lists the caller's own connections, then the shared ones they manage.
-// fastbuild:bounded-list max=210 reason=one member binds at most MaxExternalMailConnectionsPerUser accounts per organization, tenant assignments are listed up to maxListedTenantPersonalConnections, and shared connections are capped at MaxSharedExternalMailConnectionsCeiling
+// fastbuild:bounded-list max=220 reason=at most MaxExternalMailConnectionsPerUser live and MaxRevokedExternalMailConnectionsListed revoked own connections, then at most maxListedTenantPersonalConnections tenant assignments, then at most MaxSharedExternalMailConnectionsCeiling shared ones
 func (h *Handler) ListExternalMailConnections(c *gin.Context) {
 	viewer, ok := organizationScope(c)
 	if !ok {

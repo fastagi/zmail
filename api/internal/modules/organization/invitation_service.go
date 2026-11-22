@@ -2,14 +2,17 @@ package organization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/capabilities/idgen"
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
@@ -95,7 +98,9 @@ func (s *service) Invite(
 }
 
 // ResendInvitation gives a pending invitation a fresh token and expiry and emails the new link.
-// Earlier links stop working, so only the latest email can be accepted.
+// Earlier links stop working, so only the latest email can be accepted. Without a configured
+// mailer nothing would carry a new link, so the token and expiry are kept and the attempt is
+// recorded as not_configured. Resends are limited per invitation and per organization.
 func (s *service) ResendInvitation(ctx context.Context, userID, organizationID, invitationID uint) (*OrganizationInvitationResult, error) {
 	if userID == 0 || organizationID == 0 || invitationID == 0 {
 		return nil, domain.ErrInvalidInput
@@ -107,13 +112,28 @@ func (s *service) ResendInvitation(ctx context.Context, userID, organizationID, 
 	if err != nil {
 		return nil, err
 	}
+	now := s.now()
+	// Check the invitation before spending quota, so a stale row cannot use up the budget.
+	invitation, err := s.invitationRepo.FindPendingInvitation(ctx, organizationID, invitationID, now)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.takeResendQuota(ctx, organizationID, invitationID); err != nil {
+		return nil, err
+	}
+
+	rotated := s.invitationMailer != nil && s.invitationMailer.IsConfigured()
+	if !rotated {
+		emailStatus := s.sendInvitationEmail(ctx, invitation, manager.Organization.Name, "")
+		s.recordResend(ctx, invitation, emailStatus, false)
+		return &OrganizationInvitationResult{Invitation: invitation, EmailSendStatus: emailStatus}, nil
+	}
 
 	token, err := generateOrganizationInvitationToken()
 	if err != nil {
 		return nil, err
 	}
-	now := s.now()
-	invitation, err := s.invitationRepo.ReissueInvitation(
+	invitation, err = s.invitationRepo.ReissueInvitation(
 		ctx,
 		organizationID,
 		invitationID,
@@ -125,7 +145,19 @@ func (s *service) ResendInvitation(ctx context.Context, userID, organizationID, 
 		return nil, fmt.Errorf("reissue organization invitation: %w", err)
 	}
 	emailStatus := s.sendInvitationEmail(ctx, invitation, manager.Organization.Name, token)
+	s.recordResend(ctx, invitation, emailStatus, true)
+	return &OrganizationInvitationResult{
+		Invitation:      invitation,
+		EmailSendStatus: emailStatus,
+	}, nil
+}
 
+func (s *service) recordResend(
+	ctx context.Context,
+	invitation *domain.OrganizationInvitation,
+	emailStatus InvitationEmailSendStatus,
+	tokenRotated bool,
+) {
 	auditstarter.RecordChange(ctx, auditstarter.Change{
 		Action:     "resend",
 		Resource:   "organization_invitations",
@@ -133,14 +165,46 @@ func (s *service) ResendInvitation(ctx context.Context, userID, organizationID, 
 		TargetID:   strconv.FormatUint(uint64(invitation.ID), 10),
 		Result:     domain.AuditResultSuccess,
 		Metadata: map[string]any{
-			"organization_id":   organizationID,
+			"organization_id":   invitation.OrganizationID,
+			"role":              invitation.Role,
 			"email_send_status": emailStatus,
+			"token_rotated":     tokenRotated,
 		},
 	})
-	return &OrganizationInvitationResult{
-		Invitation:      invitation,
-		EmailSendStatus: emailStatus,
-	}, nil
+}
+
+// ErrInvitationResendRateLimited refuses a resend over the per-invitation or per-organization quota.
+var ErrInvitationResendRateLimited = errors.New("organization invitation resend is rate limited")
+
+// InvitationRetryAfterError carries when a refused resend may be tried again.
+type InvitationRetryAfterError struct {
+	Err        error
+	RetryAfter time.Duration
+}
+
+func (e *InvitationRetryAfterError) Error() string { return e.Err.Error() }
+
+func (e *InvitationRetryAfterError) Unwrap() error { return e.Err }
+
+// takeResendQuota consumes one unit of each resend quota, refusing with the wait of the first
+// exhausted one.
+func (s *service) takeResendQuota(ctx context.Context, organizationID, invitationID uint) error {
+	invitationKey := strconv.FormatUint(uint64(invitationID), 10)
+	checks := []struct {
+		store ratelimit.Store
+		key   string
+	}{
+		{s.invitationPolicy.ResendCooldown, invitationKey},
+		{s.invitationPolicy.ResendDaily, invitationKey},
+		{s.invitationPolicy.ResendOrganization, strconv.FormatUint(uint64(organizationID), 10)},
+	}
+	for _, check := range checks {
+		allowed, _, resetAt := check.store.Take(ctx, check.key)
+		if !allowed {
+			return &InvitationRetryAfterError{Err: ErrInvitationResendRateLimited, RetryAfter: time.Until(resetAt)}
+		}
+	}
+	return nil
 }
 
 // sendInvitationEmail makes one synchronous send attempt and records its outcome on the
@@ -172,7 +236,9 @@ func (s *service) sendInvitationEmail(
 	}
 
 	attemptedAt := s.now()
-	if err := s.invitationRepo.RecordInvitationEmailAttempt(ctx, invitation.OrganizationID, invitation.ID, string(status), attemptedAt); err != nil {
+	if err := s.invitationRepo.RecordInvitationEmailAttempt(
+		ctx, invitation.OrganizationID, invitation.ID, invitation.TokenHash, string(status), attemptedAt,
+	); err != nil {
 		slog.WarnContext(ctx, "organization.invitation_email_status_not_recorded",
 			"organization_id", invitation.OrganizationID,
 			"invitation_id", invitation.ID,

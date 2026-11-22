@@ -150,6 +150,8 @@ type OrganizationRepository interface {
 	// ListMembershipsByUserIDs returns the organization's memberships of the given users, with User
 	// (and its Email) loaded. Users of other organizations are never returned.
 	ListMembershipsByUserIDs(ctx context.Context, organizationID uint, userIDs []uint) ([]*OrganizationMembership, error)
+	// ListManagerUserIDs returns the user ids of the organization's owners and admins, ascending.
+	ListManagerUserIDs(ctx context.Context, organizationID uint) ([]uint, error)
 }
 
 // OrganizationInvitationRepository owns invitation persistence and atomic acceptance.
@@ -159,7 +161,10 @@ type OrganizationInvitationRepository interface {
 	RevokeInvitation(ctx context.Context, organizationID, invitationID, revokedBy uint, now time.Time) (*OrganizationInvitation, error)
 	AcceptInvitation(ctx context.Context, tokenHash string, userID uint, now time.Time) (*OrganizationMembership, *OrganizationInvitation, error)
 	ReissueInvitation(ctx context.Context, organizationID, invitationID uint, tokenHash string, expiresAt, now time.Time) (*OrganizationInvitation, error)
-	RecordInvitationEmailAttempt(ctx context.Context, organizationID, invitationID uint, status string, now time.Time) error
+	// FindPendingInvitation returns an invitation that is pending and unexpired at now.
+	FindPendingInvitation(ctx context.Context, organizationID, invitationID uint, now time.Time) (*OrganizationInvitation, error)
+	// RecordInvitationEmailAttempt stores an attempt outcome only while tokenHash is still current.
+	RecordInvitationEmailAttempt(ctx context.Context, organizationID, invitationID uint, tokenHash, status string, now time.Time) error
 }
 
 // Organization membership events, published after the membership change commits.

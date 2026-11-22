@@ -437,7 +437,7 @@ export interface paths {
         };
         /**
          * List the caller's connected accounts
-         * @description Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in this organization, at most 10, live ones first, then the shared connections the caller manages (every one for an `owner` or `admin`; those of mailboxes the caller holds with `manage` otherwise), at most 100, whose mailbox still exists. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty) the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached and never carries a token.
+         * @description Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in this organization, at most 120 - their live connections (at most 10, id ascending) and their 10 most recently revoked ones, whose copies they may still purge or rebind, then the shared connections the caller manages (every one for an `owner` or `admin`; those of mailboxes the caller holds with `manage` otherwise), at most 100, whose mailbox still exists. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty) the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached and never carries a token.
          */
         get: operations["listExternalMailConnections"];
         put?: never;
@@ -2989,7 +2989,7 @@ export interface paths {
         put?: never;
         /**
          * Email a pending invitation again with a fresh one-time link
-         * @description Issues a new token and expiry, so earlier links stop working, then makes one send attempt.
+         * @description Issues a new token and expiry, so earlier links stop working, then makes one send attempt. Without a configured mailer the token and expiry are kept and the attempt is recorded as `not_configured`. Each invitation allows one resend per minute and five per 24 hours, and each organization 30 resends per hour.
          */
         post: operations["resendOrganizationInvitationEmail"];
         delete?: never;
@@ -8632,7 +8632,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The caller's own connections, then the shared ones they manage; each part live first, then id ascending. */
+            /** @description The caller's live connections id ascending and their most recently revoked ones, then the shared ones they manage, live first, then id ascending. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -15464,6 +15464,8 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `ORGANIZATION.NOT_FOUND`, or `ORGANIZATION.INVITATION.NOT_FOUND` when the invitation is absent or no longer pending (accepted, revoked, or expired). */
             404: components["responses"]["NotFound"];
+            /** @description `COMMON.RATE_LIMITED`: the invitation was resent within the last minute or five times in 24 hours, or the organization reached 30 resends in an hour; `Retry-After` gives the seconds to wait. */
+            429: components["responses"]["RateLimited"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

@@ -236,17 +236,41 @@ func (r *repository) ReissueInvitation(ctx context.Context, organizationID, invi
 	return invitation.toDomain(), nil
 }
 
-// RecordInvitationEmailAttempt stores the outcome of the latest invitation email attempt.
-func (r *repository) RecordInvitationEmailAttempt(ctx context.Context, organizationID, invitationID uint, status string, now time.Time) error {
+// FindPendingInvitation returns an invitation that can still be accepted at now.
+func (r *repository) FindPendingInvitation(ctx context.Context, organizationID, invitationID uint, now time.Time) (*domain.OrganizationInvitation, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if organizationID == 0 || invitationID == 0 {
+		return nil, domain.ErrInvalidInput
+	}
+	var invitation OrganizationInvitationPO
+	if err := db.Where("id = ? AND organization_id = ?", invitationID, organizationID).First(&invitation).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrOrganizationInvitationNotFound
+		}
+		return nil, err
+	}
+	if invitation.PendingKey == nil || invitation.AcceptedAt != nil || invitation.RevokedAt != nil || !now.Before(invitation.ExpiresAt) {
+		return nil, domain.ErrOrganizationInvitationNotFound
+	}
+	return invitation.toDomain(), nil
+}
+
+// RecordInvitationEmailAttempt stores the outcome of the latest invitation email attempt. It
+// matches the token hash that was sent, so a slow attempt for a token a later resend replaced
+// cannot overwrite the newer outcome.
+func (r *repository) RecordInvitationEmailAttempt(ctx context.Context, organizationID, invitationID uint, tokenHash, status string, now time.Time) error {
 	db, err := r.withContext(ctx)
 	if err != nil {
 		return err
 	}
-	if organizationID == 0 || invitationID == 0 || status == "" {
+	if organizationID == 0 || invitationID == 0 || !validTokenHash(tokenHash) || status == "" {
 		return domain.ErrInvalidInput
 	}
 	return db.Model(&OrganizationInvitationPO{}).
-		Where("id = ? AND organization_id = ?", invitationID, organizationID).
+		Where("id = ? AND organization_id = ? AND token_hash = ?", invitationID, organizationID, tokenHash).
 		Updates(map[string]any{
 			"email_send_status":  status,
 			"email_attempted_at": now,

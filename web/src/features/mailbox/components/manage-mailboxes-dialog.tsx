@@ -16,7 +16,8 @@ import { CreateMailboxForm } from '@/features/mailbox/components/create-mailbox-
 import { hasAccessPanel } from '@/features/mailbox/components/mailbox-access-panel';
 import { MailboxMarks } from '@/features/mailbox/components/mailbox-switcher';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { ConfirmDialog, nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
+import { ConfirmDialog } from '@/features/mailbox/components/confirm-dialog';
+import { nativeSelectClassName } from '@/features/mailbox/components/mail-shared';
 import { useAssignMailboxRole, useMailRoles } from '@/features/mailbox/hooks/use-inbox';
 import { useDeleteMailbox } from '@/features/mailbox/hooks/use-mailbox';
 import type { MailRole, Mailbox, MailboxDomain } from '@/features/mailbox/types';

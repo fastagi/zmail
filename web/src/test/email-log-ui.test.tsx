@@ -932,7 +932,7 @@ describe('emails console', () => {
     renderLog();
     fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
     fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = await screen.findByRole('dialog');
 
     expect(within(dialog).queryByLabelText('From')).toBeNull();
     expect(dialog).toHaveTextContent('Sent from sales@mail.example.com.');
@@ -964,7 +964,7 @@ describe('emails console', () => {
     expect(screen.getByRole('button', { name: 'Forward' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Reply' })).toBeInTheDocument();
 
     const bodyField = within(dialog).getByLabelText('Message') as HTMLTextAreaElement;
@@ -1010,7 +1010,7 @@ describe('emails console', () => {
     fireEvent.click(screen.getByRole('button', { name: /Bob/u }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Reply all' }));
-    const dialog = screen.getByRole('dialog');
+    const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Reply' })).toBeInTheDocument();
     expect(within(dialog).getByLabelText('To')).toHaveValue('bob@example.com');
     expect(within(dialog).getByLabelText('Cc (optional)')).toHaveValue(
@@ -1055,7 +1055,7 @@ describe('emails console', () => {
     expect(screen.queryByRole('button', { name: 'Reply all' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
 
-    const dialog = screen.getByRole('dialog');
+    const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Forward message' })).toBeInTheDocument();
     expect(within(dialog).getByLabelText('To')).toHaveValue('');
     expect(within(dialog).getByLabelText('Cc (optional)')).toHaveValue('');
@@ -1146,7 +1146,7 @@ describe('emails console', () => {
     renderLog({ page: 2 });
 
     fireEvent.click(screen.getByRole('button', { name: 'Send email' }));
-    const dialog = screen.getByRole('region', { name: 'New message' });
+    const dialog = await screen.findByRole('region', { name: 'New message' });
     expect(within(dialog).getByRole('heading', { name: 'New message' })).toBeInTheDocument();
     const from = within(dialog).getByLabelText('From') as HTMLSelectElement;
     expect(from.tagName).toBe('SELECT');
@@ -1184,7 +1184,7 @@ describe('emails console', () => {
     renderLog({ mailboxId: 2, page: 1 });
 
     fireEvent.click(screen.getByRole('button', { name: 'Send email' }));
-    const dialog = screen.getByRole('region', { name: 'New message' });
+    const dialog = await screen.findByRole('region', { name: 'New message' });
     expect(within(dialog).getByLabelText('From')).toHaveValue('2');
     fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'bob@example.com' } });
     fireEvent.change(within(dialog).getByLabelText('Subject'), { target: { value: 'Hello' } });

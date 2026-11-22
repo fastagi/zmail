@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useLocale } from 'next-intl';
 import { ArrowDownLeft, ArrowUpRight, Inbox, Search, Send, SearchX } from 'lucide-react';
@@ -19,13 +19,12 @@ import {
 } from '@/components/ui/table';
 import { ROUTES } from '@/constants/routes';
 import {
-  ComposeDialog,
   emptyDraft,
   forwardDraft,
   quotedReplyDraft,
   replyAllDraft,
   type ComposeDraft,
-} from '@/features/mailbox/components/compose-dialog';
+} from '@/features/mailbox/components/compose-drafts';
 import { EmailDetail } from '@/features/mailbox/components/email-detail';
 import {
   MailOrganizationBoundary,
@@ -74,6 +73,11 @@ import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/u
 import { AttachmentIndicator } from '@/features/mailbox/components/mail-attachments';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
+
+// The composer loads when it first opens.
+const ComposeDialog = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/compose-dialog')).ComposeDialog,
+}));
 
 const searchDelayMilliseconds = 300;
 const statuses: readonly MailStatus[] = ['received', 'queued', 'sent', 'failed'];
@@ -240,14 +244,16 @@ function EmailLogContent({
   const lost = isOrganizationLost(mailboxes.error);
   if (composition?.pickFrom && !lost) {
     return (
-      <ComposeDialog
-        inline
-        mailbox={composition.mailbox}
-        fromOptions={senders}
-        draft={composition.draft}
-        onClose={() => setComposition(null)}
-        onStored={() => setView(current => ({ ...current, page: 1 }))}
-      />
+      <Suspense fallback={null}>
+        <ComposeDialog
+          inline
+          mailbox={composition.mailbox}
+          fromOptions={senders}
+          draft={composition.draft}
+          onClose={() => setComposition(null)}
+          onStored={() => setView(current => ({ ...current, page: 1 }))}
+        />
+      </Suspense>
     );
   }
 
@@ -368,13 +374,15 @@ function EmailLogContent({
       )}
 
       {composition ? (
-        <ComposeDialog
-          mailbox={composition.mailbox}
-          fromOptions={composition.pickFrom ? senders : undefined}
-          draft={composition.draft}
-          onClose={() => setComposition(null)}
-          onStored={() => setView(current => ({ ...current, page: 1 }))}
-        />
+        <Suspense fallback={null}>
+          <ComposeDialog
+            mailbox={composition.mailbox}
+            fromOptions={composition.pickFrom ? senders : undefined}
+            draft={composition.draft}
+            onClose={() => setComposition(null)}
+            onStored={() => setView(current => ({ ...current, page: 1 }))}
+          />
+        </Suspense>
       ) : null}
     </>
   );

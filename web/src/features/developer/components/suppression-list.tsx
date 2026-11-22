@@ -23,8 +23,8 @@ import { MAIL_SUPPRESSION_EMAIL_MAX_LENGTH } from '@/features/developer/schemas'
 import type { MailSuppression, MailSuppressionFilters } from '@/features/developer/types';
 import { useDeveloperErrorMessage } from '@/features/developer/utils/developer-error';
 import { OrganizationLostState } from '@/features/mailbox/components/mail-organization';
+import { ConfirmDialog } from '@/features/mailbox/components/confirm-dialog';
 import {
-  ConfirmDialog,
   EmptyState,
   ErrorAlert,
   useDateTimeFormat,

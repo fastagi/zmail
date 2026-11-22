@@ -348,6 +348,97 @@ describe('organization browser route boundary', () => {
     expect(init?.method).toBe('POST');
     expect(JSON.parse(String(init?.body))).toEqual({ new_owner_member_id: 3 });
   });
+
+  it('resends a mock invitation without rotating it and enforces the cooldown', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockOwner());
+    const { createOrganizationInvitationRoute, resendOrganizationInvitationRoute } = await import(
+      '@/features/organization/server/organization-lifecycle-route'
+    );
+    const created = await createOrganizationInvitationRoute(
+      request('/api/organizations/1/invitations', {
+        method: 'POST',
+        body: JSON.stringify({ email: 'resend.member@example.com', role: 'member' }),
+      }),
+      '1'
+    );
+    const invitation = (await created.json()).data.invitation;
+    const invitationId = String(invitation.id);
+    const resend = () =>
+      resendOrganizationInvitationRoute(
+        request(`/api/organizations/1/invitations/${invitationId}/emails`, { method: 'POST' }),
+        '1',
+        invitationId
+      );
+
+    const first = await resend();
+    expect(first.status).toBe(201);
+    const firstBody = await first.json();
+    expect(firstBody.data).toMatchObject({
+      invitation: { expires_at: invitation.expires_at, email_send_status: 'not_configured' },
+      email_send_status: 'not_configured',
+    });
+    expect(JSON.stringify(firstBody)).not.toContain('oinv_');
+
+    const second = await resend();
+    expect(second.status).toBe(429);
+    expect(await second.json()).toMatchObject({ error_code: 'COMMON.RATE_LIMITED' });
+    expect(Number(second.headers.get('Retry-After'))).toBeGreaterThan(0);
+
+    const missing = await resendOrganizationInvitationRoute(
+      request('/api/organizations/1/invitations/999/emails', { method: 'POST' }),
+      '1',
+      '999'
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it('rejects a cross-origin resend before authentication', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    const { resendOrganizationInvitationRoute } = await import(
+      '@/features/organization/server/organization-lifecycle-route'
+    );
+
+    const response = await resendOrganizationInvitationRoute(
+      request('/api/organizations/1/invitations/1/emails', {
+        method: 'POST',
+        origin: 'https://evil.example',
+      }),
+      '1',
+      '1'
+    );
+
+    expect(response.status).toBe(403);
+    expect(getSessionUser).not.toHaveBeenCalled();
+  });
+
+  it('forwards resend to the fixed production path and keeps Retry-After', async () => {
+    process.env.API_ADAPTER_ENABLED = 'true';
+    process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+    cookieStore.get.mockReturnValue({ value: opaqueCredential() });
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { code: 429, error_code: 'COMMON.RATE_LIMITED', message: 'upstream text', request_id: 'req-1' },
+        { status: 429, headers: { 'Retry-After': '37' } }
+      )
+    );
+    const { resendOrganizationInvitationRoute } = await import(
+      '@/features/organization/server/organization-lifecycle-route'
+    );
+
+    const response = await resendOrganizationInvitationRoute(
+      request('/api/organizations/1/invitations/73/emails', { method: 'POST' }),
+      '1',
+      '73'
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('37');
+    expect(await response.json()).toMatchObject({ error_code: 'COMMON.RATE_LIMITED' });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('https://api.example.com/v1/organizations/1/invitations/73/emails');
+    expect(init?.method).toBe('POST');
+  });
 });
 
 function request(

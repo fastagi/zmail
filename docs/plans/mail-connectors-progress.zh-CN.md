@@ -137,6 +137,38 @@
 
 第二波已派出：Agent 页签界面、管理员连接页与 IMAP 接入界面、共享接入（API）、第二轮验收。尚未派出：租户接入、以原地址回复、推送订阅。
 
+## 2026-11-22 第二波落地；第二轮验收修复合并
+
+第二波已全部在 `main`（每个 PR 都在"最新 `main` + 该 PR"的合并结果上跑完整 `make check`，通过后合并）：
+
+| PR | 内容 |
+|---|---|
+| fastagi/zmail#131 | Agent 页签界面（按邮箱授权、期限、撤销） |
+| fastagi/zmail#132 | 共享接入：所有者或管理员把团队账号接成组织所有的共享外接邮箱 |
+| fastagi/zmail#133 | 管理员连接页、IMAP 接入界面 |
+| fastagi/zmail#127 | 第二轮验收报告（`docs/testing/reports/connectors-acceptance-main-2.md`） |
+| fastagi/zmail#135 | 第二轮验收的 3 处缺陷（N1 到 N3）修复，以及仅开发环境可用的模拟投递入口 |
+| fastagi/zmail#138 | 邀请重发的频率限制及相关缺口 |
+| fastagi/zmail#139 | Web 首屏体积：最大路由从 1,064,251 字节降到 1,035,354 字节，预算 1,070,000 字节 |
+
+第二轮验收：43 项中 37 通过、3 失败、3 无法在运行环境测。3 处失败已在 #135 修复。
+
+测试方提的缺陷 issue 已全部关闭。仍开着的只有 fastagi/zmail#98（路线图讨论），等负责人定方向。
+
+新增的默认决策（待负责人确认）：共享外接邮箱的本地副本只能由所有者或管理员清除。
+
+进行中：租户接入（C4，只做接口与契约）。Google Workspace 用组织提供的服务账号加全域委派，Microsoft 365 用应用权限加管理员同意。
+
+尚未开始：
+
+- 以原地址回复（C6）、推送订阅替代轮询（C7）。
+- Agent 任务（D2）：需要 AI 服务密钥，等负责人提供。
+- 真实的 Gmail、Outlook 联调：需要负责人注册 OAuth 应用，回调地址 `https://zmail.im/console/mailboxes/connected/callback`。
+- Kubernetes 部署包里的邮件 worker：等负责人决定。
+- 第三轮验收：等租户接入合并后进行。
+
+需要负责人注意：另有贡献者直接向 `main` 推送并修了同一批 issue，出现过重复劳动。建议约定分工，或都走 PR。
+
 ## 2026-11-22 租户接入（C4，T10）
 
 分支 `feat/tenant-connect`，计划 [tenant-connect.plan.md](tenant-connect.plan.md)，只做 API 和契约。

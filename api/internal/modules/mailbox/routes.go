@@ -80,6 +80,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("external_mail_connections.sync_runs.index").WhereNumber("connection_id")
 		auth.POST("/external-mail-connections/:connection_id/purges", h.PurgeExternalMailCopies).
 			Name("external_mail_connections.purges.store").WhereNumber("connection_id")
+		// Development only: exists while `fake` is the active external mail source.
+		h.registerFakeExternalMailDelivery(auth)
 		auth.GET("/external-mail-connection-directory", h.ListExternalMailConnectionDirectory).
 			Name("external_mail_connection_directory.index")
 		auth.DELETE("/external-mail-connection-directory/:connection_id", h.ForceDisconnectExternalMailConnection).

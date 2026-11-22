@@ -11,6 +11,7 @@ import type {
   ExternalMailConnector,
   ExternalMailSyncRun,
 } from '@/features/mailbox/external-mail-schemas';
+import { externalMailConnectionListSchema } from '@/features/mailbox/external-mail-schemas';
 import { mailboxKeys } from '@/features/mailbox/hooks/mailbox-keys';
 import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
@@ -46,8 +47,16 @@ vi.mock('@/features/mailbox/services/external-mail-service', async importOrigina
 
 const SECRET = 'xq7-app-PASS-9z';
 
-const gmail: ExternalMailConnector = { id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } };
-const imap: ExternalMailConnector = { id: 'imap', auth_kind: 'password', capabilities: { read: true } };
+const gmail: ExternalMailConnector = {
+  id: 'gmail',
+  auth_kind: 'oauth2',
+  capabilities: { read: true },
+};
+const imap: ExternalMailConnector = {
+  id: 'imap',
+  auth_kind: 'password',
+  capabilities: { read: true },
+};
 
 let queryClient: QueryClient;
 
@@ -464,7 +473,12 @@ describe('sync status in the connected mailboxes dialog', () => {
         onOpenChange={() => {}}
         organizationId={7}
         connections={[
-          connectionOf({ id: 3, provider: 'imap', account_address: 'me@example.com', status: 'needs_reconnect' }),
+          connectionOf({
+            id: 3,
+            provider: 'imap',
+            account_address: 'me@example.com',
+            status: 'needs_reconnect',
+          }),
         ]}
         connectors={undefined}
         error={false}
@@ -485,8 +499,18 @@ describe('sync status in the connected mailboxes dialog', () => {
         onOpenChange={() => {}}
         organizationId={7}
         connections={[
-          connectionOf({ id: 3, provider: 'imap', account_address: 'me@example.com', status: 'needs_reconnect' }),
-          connectionOf({ id: 4, provider: 'outlook', account_address: 'o@outlook.com', status: 'revoked' }),
+          connectionOf({
+            id: 3,
+            provider: 'imap',
+            account_address: 'me@example.com',
+            status: 'needs_reconnect',
+          }),
+          connectionOf({
+            id: 4,
+            provider: 'outlook',
+            account_address: 'o@outlook.com',
+            status: 'revoked',
+          }),
         ]}
         connectors={[gmail]}
         error={false}
@@ -501,6 +525,46 @@ describe('sync status in the connected mailboxes dialog', () => {
       );
     }
     expect(within(rowOf(4)).getByRole('button', { name: 'Delete synced mail now' })).toBeEnabled();
+  });
+
+  it('accepts and renders ten live connections followed by the recently revoked ones', async () => {
+    service.syncRuns.mockResolvedValue([]);
+    // The list answers up to 10 live connections, then the 10 most recently revoked ones.
+    const listed = [
+      ...Array.from({ length: 10 }, (_, index) =>
+        connectionOf({ id: index + 1, account_address: `live${index}@gmail.com` })
+      ),
+      connectionOf({
+        id: 21,
+        account_address: 'gone@gmail.com',
+        status: 'revoked',
+        last_synced_at: '2026-11-20T08:00:00Z',
+      }),
+      connectionOf({ id: 20, account_address: 'older@gmail.com', status: 'revoked' }),
+    ];
+    const parsed = externalMailConnectionListSchema.safeParse(listed);
+    expect(parsed.success).toBe(true);
+    renderWith(
+      <ConnectedMailboxesDialog
+        open
+        onOpenChange={() => {}}
+        organizationId={7}
+        connections={parsed.success ? parsed.data : []}
+        connectors={[gmail]}
+        error={false}
+        onAdd={null}
+        onReconnectWithPassword={vi.fn()}
+      />
+    );
+    for (let id = 1; id <= 10; id += 1) {
+      expect(within(rowOf(id)).getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
+    }
+    for (const id of [21, 20]) {
+      const row = rowOf(id);
+      expect(within(row).getByRole('button', { name: 'Delete synced mail now' })).toBeEnabled();
+      expect(within(row).queryByRole('button', { name: 'Disconnect' })).toBeNull();
+    }
+    expect(rowOf(21)).toHaveTextContent('Last synced');
   });
 
   it('reads the mailbox, its agent grants, and the unified inbox again after a disconnect', async () => {
@@ -518,9 +582,13 @@ describe('sync status in the connected mailboxes dialog', () => {
       />
     );
     fireEvent.click(within(rowOf(1)).getByRole('button', { name: 'Disconnect' }));
-    fireEvent.click(within(within(rowOf(1)).getByRole('group')).getByRole('button', { name: 'Disconnect' }));
+    fireEvent.click(
+      within(within(rowOf(1)).getByRole('group')).getByRole('button', { name: 'Disconnect' })
+    );
     await waitFor(() => expect(service.disconnect).toHaveBeenCalledWith(7, 1));
-    await waitFor(() => expect(invalidatedKeys(invalidate)).toEqual(expect.arrayContaining(connectedMailboxKeys(41))));
+    await waitFor(() =>
+      expect(invalidatedKeys(invalidate)).toEqual(expect.arrayContaining(connectedMailboxKeys(41)))
+    );
   });
 });
 
@@ -717,7 +785,14 @@ function connectedMailboxKeys(mailboxId: number): string[] {
 }
 
 function apiError(code: string, status: number, retryAfterSeconds?: number): ApiError {
-  return new ApiError('refused', code as ApiError['errorCode'], status, 'req-1', undefined, retryAfterSeconds);
+  return new ApiError(
+    'refused',
+    code as ApiError['errorCode'],
+    status,
+    'req-1',
+    undefined,
+    retryAfterSeconds
+  );
 }
 
 function run(overrides: Partial<ExternalMailSyncRun>): ExternalMailSyncRun {

@@ -702,6 +702,13 @@ func TestAgentRoutes(t *testing.T) {
 		t.Fatalf("ungranted read = %d %v", recorder.Code, body)
 	}
 
+	// A draft without text, or with blank text, is the documented MAILBOX.MESSAGE_INVALID.
+	for _, draft := range []string{`{"message_id":%d}`, `{"message_id":%d,"text":"  "}`} {
+		recorder, body = f.call(engine, http.MethodPost, "/v1/agent-mail-drafts", "b", fmt.Sprintf(draft, message.ID))
+		if recorder.Code != http.StatusUnprocessableEntity || body["error_code"] != domain.CodeMailMessageInvalid {
+			t.Fatalf("draft %s = %d %v; want 422 %s", draft, recorder.Code, body, domain.CodeMailMessageInvalid)
+		}
+	}
 	recorder, body = f.call(engine, http.MethodPost, "/v1/agent-mail-drafts", "b", fmt.Sprintf(`{"message_id":%d,"text":"Thanks"}`, message.ID))
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("draft = %d %v", recorder.Code, body)
