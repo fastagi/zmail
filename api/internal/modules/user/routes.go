@@ -30,6 +30,12 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.PUT("/users/profile", h.UpdateProfile).Name("users.profile.update")
 		auth.PUT("/users/password", h.ChangePassword).Name("users.password.update")
 		auth.DELETE("/users/account", h.DeleteAccount).Name("users.account.delete")
+
+		// Two-factor sign-in
+		auth.GET("/users/totp", h.GetTOTP).Name("users.totp")
+		auth.POST("/users/totp/enrollments", h.StartTOTPEnrollment).Name("users.totp.enrollments.create")
+		auth.PUT("/users/totp", h.ConfirmTOTP).Name("users.totp.confirm")
+		auth.DELETE("/users/totp", h.DisableTOTP).Name("users.totp.delete")
 	})
 }
 
