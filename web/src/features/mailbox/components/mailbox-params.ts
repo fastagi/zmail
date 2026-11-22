@@ -5,6 +5,13 @@ export const MAIL_ORGANIZATION_PARAM = 'org';
 export const MAILBOX_PARAM = 'mailbox';
 
 /**
+ * Query parameter that opens a new message as the page loads, on the draft kept in this browser:
+ * the composer's way back after signing in again (`compose=new`).
+ */
+export const COMPOSE_PARAM = 'compose';
+export const COMPOSE_RESUME = 'new';
+
+/**
  * Query parameters naming mail of one organization: the open message, the narrowed mailbox or
  * role, and the open mailbox. A link moved to another organization drops them.
  */

@@ -1366,6 +1366,27 @@ describe('mailbox workspace', () => {
       state.organizations.data = organizations(organization(1, 'Acme', 'owner'));
     });
 
+    // Issue #118: deleting the label or folder being shown goes back to the inbox.
+    it('deleting the label or folder being shown returns to the inbox, without its id', () => {
+      state.folders.data = [folder(4, 'Contracts')];
+      state.labels.data = [label(7, 'Urgent', 'red')];
+      const view = renderWorkspace();
+
+      fireEvent.click(screen.getByRole('button', { name: /Urgent/u }));
+      expect(state.filterCalls.at(-1)?.filters).toMatchObject({ labelId: 7 });
+      state.labels.data = [];
+      view.rerender(wrap(<MailboxWorkspace />));
+      expect(state.filterCalls.at(-1)?.filters).not.toHaveProperty('labelId');
+      expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'inbound', page: 1 });
+
+      fireEvent.click(screen.getByRole('button', { name: /Contracts/u }));
+      expect(state.filterCalls.at(-1)?.filters).toMatchObject({ folderId: 4 });
+      state.folders.data = [];
+      view.rerender(wrap(<MailboxWorkspace />));
+      expect(state.filterCalls.at(-1)?.filters).not.toHaveProperty('folderId');
+      expect(state.listCalls.at(-1)).toEqual({ mailboxId: 1, direction: 'inbound', page: 1 });
+    });
+
     it('view-only member sees no move or label actions', () => {
       state.organizations.data = organizations(organization(1, 'Acme', 'member'));
       state.mailboxes.data = [{ ...mailbox(1, 'hello', 'Hello Team'), access: viewOnlyAccess }];

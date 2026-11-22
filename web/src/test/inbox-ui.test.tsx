@@ -1961,6 +1961,42 @@ describe('inbox keyboard shortcuts', () => {
     expect(within(from).queryByRole('option', { name: 'me@gmail.com' })).toBeNull();
   });
 
+  // Issue #117: a send refused because the session ended keeps the draft and offers sign-in.
+  it('a send refused for an ended session keeps the draft and links to sign in and back', async () => {
+    state.send.mutateAsync.mockRejectedValue(
+      new ApiError('unauthorized', ApiErrorCode.AUTH_UNAUTHORIZED, 401)
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?box=1');
+    const first = renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('To'), { target: { value: 'ann@example.com' } });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Quarterly numbers' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Draft body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText(/Your session ended/u)).toBeInTheDocument();
+    const signIn = screen.getByRole('link', { name: 'Sign in' });
+    const target = new URL(signIn.getAttribute('href') ?? '', 'https://zmail.test');
+    expect(target.pathname).toBe('/login');
+    const back = new URL(target.searchParams.get('returnUrl') ?? '', 'https://zmail.test');
+    expect(back.pathname).toBe('/console/mailboxes');
+    expect(back.searchParams.get('box')).toBe('1');
+    expect(back.searchParams.get('compose')).toBe('new');
+    // The composer stays open with what was written.
+    expect(screen.getByLabelText('Subject')).toHaveValue('Quarterly numbers');
+    first.unmount();
+
+    // Back from signing in, the composer opens again on the draft and the marker leaves the URL.
+    window.history.replaceState(null, '', '/console/mailboxes?box=1&compose=new');
+    renderRoute();
+    expect(await screen.findByLabelText('Subject')).toHaveValue('Quarterly numbers');
+    expect(screen.getByLabelText('Message')).toHaveValue('Draft body');
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).has('compose')).toBe(false)
+    );
+  });
+
   it('c defaults the sender to the narrowed mailbox', async () => {
     window.localStorage.setItem('zmail.mailbox.1', '1');
     window.history.replaceState(null, '', '/console/mailboxes?box=2');

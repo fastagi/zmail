@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import Link from 'next/link';
 import { AlertCircle, Paperclip, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -18,12 +19,15 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { authConfig } from '@/config/auth';
+import { withReturnUrl } from '@/features/auth/utils/return-url';
 import {
   composeDraftKey,
   draftToKeep,
   readComposeDraft,
   writeComposeDraft,
 } from '@/features/mailbox/components/compose-draft-store';
+import { COMPOSE_PARAM, COMPOSE_RESUME } from '@/features/mailbox/components/mailbox-params';
 import { type ComposeDraft } from '@/features/mailbox/components/compose-drafts';
 import { fileToBase64, formatBytes } from '@/features/mailbox/components/mail-attachments';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
@@ -185,6 +189,28 @@ export function ComposeDialog({
     setFiles(current => [...current, ...chosen]);
   };
 
+  /**
+   * A refused send. When the session ended, what is written is kept as this browser's draft, so
+   * signing in again and coming back (see `signInHref`) opens it once more.
+   */
+  const failed = (failure: unknown) => {
+    const key = resolveMailboxErrorKey(failure);
+    setErrorKey(key);
+    if (key === 'errors.sessionEnded') {
+      writeComposeDraft(draftKey, draftToKeep({ to, cc, subject, body }, draft));
+    }
+    if (isStoredSendFailure(failure)) onStored?.();
+  };
+
+  /** Sign-in that returns to this page, reopening a new message on its kept draft. */
+  const signInHref = () => {
+    const back = new URL(window.location.href);
+    if ((draft.mode ?? 'compose') === 'compose') {
+      back.searchParams.set(COMPOSE_PARAM, COMPOSE_RESUME);
+    }
+    return withReturnUrl(authConfig.routes.login, `${back.pathname}${back.search}`);
+  };
+
   const submitTemplate = async () => {
     if (!template) return;
     if (!checkRecipients()) return;
@@ -218,8 +244,7 @@ export function ComposeDialog({
       onStored?.();
       onClose();
     } catch (failure) {
-      setErrorKey(resolveMailboxErrorKey(failure));
-      if (isStoredSendFailure(failure)) onStored?.();
+      failed(failure);
     }
   };
 
@@ -264,8 +289,7 @@ export function ComposeDialog({
       onClose();
     } catch (failure) {
       // The dialog stays open so the failure cannot be missed or mistaken for a delivery.
-      setErrorKey(resolveMailboxErrorKey(failure));
-      if (isStoredSendFailure(failure)) onStored?.();
+      failed(failure);
     }
   };
 
@@ -520,7 +544,17 @@ export function ComposeDialog({
         {errorKey ? (
           <Alert variant="destructive">
             <AlertCircle className="size-4" aria-hidden="true" />
-            <AlertDescription>{t(errorKey)}</AlertDescription>
+            <AlertDescription>
+              {t(errorKey)}
+              {errorKey === 'errors.sessionEnded' ? (
+                <>
+                  <span className="block">{t('compose.sessionEndedDraft')}</span>
+                  <Button asChild size="sm" variant="outline" className="mt-2">
+                    <Link href={signInHref()}>{t('compose.signIn')}</Link>
+                  </Button>
+                </>
+              ) : null}
+            </AlertDescription>
           </Alert>
         ) : null}
       </DialogBody>
