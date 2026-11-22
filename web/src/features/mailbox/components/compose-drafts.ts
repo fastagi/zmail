@@ -1,4 +1,4 @@
-import type { MailMessage } from '@/features/mailbox/types';
+import type { MailAttachment, MailMessage } from '@/features/mailbox/types';
 
 export type ComposeMode = 'compose' | 'reply' | 'forward';
 
@@ -10,6 +10,11 @@ export interface ComposeDraft {
   inReplyTo: string;
   reply: boolean;
   mode?: ComposeMode;
+  /**
+   * The files of the message being forwarded and where they are stored: the composer shows them
+   * and, on send, reads each one and attaches it again.
+   */
+  forwarded?: { mailboxId: number; messageId: number; attachments: readonly MailAttachment[] };
 }
 
 export interface QuotedReplyCopy {
@@ -164,5 +169,14 @@ export function forwardDraft(message: MailMessage, copy: ForwardDraftCopy): Comp
     inReplyTo: '',
     reply: false,
     mode: 'forward',
+    ...(message.attachments.length > 0
+      ? {
+          forwarded: {
+            mailboxId: message.mailbox_id,
+            messageId: message.id,
+            attachments: message.attachments,
+          },
+        }
+      : {}),
   };
 }

@@ -2,11 +2,16 @@
 
 import { useEffect, useSyncExternalStore } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
 
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
 import type { Organization } from '@/features/organization/types';
+import { useT } from '@/i18n';
 
-import { MAIL_ORGANIZATION_PARAM } from '@/features/mailbox/components/mailbox-params';
+import {
+  MAIL_ORGANIZATION_PARAM,
+  ORGANIZATION_SCOPED_PARAMS,
+} from '@/features/mailbox/components/mailbox-params';
 
 export { MAIL_ORGANIZATION_PARAM };
 
@@ -101,12 +106,19 @@ export function useChosenMailOrganization(): Organization | undefined {
  * The organization of a mail page. The choice lives in the `org` query parameter, so a link or a
  * reload keeps it. Navigating via the sidebar (no `org` parameter) restores the last chosen
  * organization of the session; an unknown explicit `org` parameter falls back to the first one.
+ * When that unknown organization is a real id (one the user left or was removed from), the
+ * switch is said aloud and the ids of the old organization's mail (`open`, `box`, ...) are
+ * dropped, so a stale link never opens anything in the new one.
  */
 export function useMailOrganization(): MailOrganizationScope {
+  const t = useT('mailbox');
   const router = useRouter();
   const pathname = usePathname();
   const { organizations, hydrated, items, requestedId, selected } = useOrganizationChoice();
   const selectedId = selected?.id;
+  const selectedName = selected?.name ?? '';
+  const lost =
+    requestedId !== null && items !== undefined && !items.some(item => item.id === requestedId);
 
   useEffect(() => {
     if (selectedId === undefined) return;
@@ -115,8 +127,14 @@ export function useMailOrganization(): MailOrganizationScope {
     const next = new URLSearchParams(window.location.search);
     if (next.get(MAIL_ORGANIZATION_PARAM) === String(selectedId)) return;
     next.set(MAIL_ORGANIZATION_PARAM, String(selectedId));
+    if (lost) {
+      for (const param of ORGANIZATION_SCOPED_PARAMS) next.delete(param);
+      toast.error(t('organization.unavailable', { name: selectedName }), {
+        id: 'mail-organization-unavailable',
+      });
+    }
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-  }, [pathname, requestedId, router, selectedId]);
+  }, [lost, pathname, requestedId, router, selectedId, selectedName, t]);
 
   if (!hydrated || organizations.isPending) return { status: 'loading' };
   if (organizations.error || !items) {
