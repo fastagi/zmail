@@ -4773,7 +4773,8 @@ describe('mailbox browser route boundary', () => {
   });
 
   describe('thread assignment', () => {
-    const path = (id: number, thread: number) => `/api/mailboxes/${id}/threads/${thread}/assignment`;
+    const path = (id: number, thread: number) =>
+      `/api/mailboxes/${id}/threads/${thread}/assignment`;
     const read = (route: MailboxRoute, id: number, thread: number) =>
       route.getMailThreadAssignmentRoute(request(path(id, thread)), String(id), String(thread));
     const save = (route: MailboxRoute, id: number, thread: number, body: unknown) =>
@@ -4796,9 +4797,13 @@ describe('mailbox browser route boundary', () => {
         updated_at: '2026-11-22T00:00:00Z',
         assignable_user_ids: [2],
       };
-      fetchMock.mockImplementation(async () => Response.json({ code: 0, message: 'success', data }));
+      fetchMock.mockImplementation(async () =>
+        Response.json({ code: 0, message: 'success', data })
+      );
 
-      expect((await save(route, 4, 9, { assignee_user_id: 2, status: 'snoozed' })).status).toBe(422);
+      expect((await save(route, 4, 9, { assignee_user_id: 2, status: 'snoozed' })).status).toBe(
+        422
+      );
       expect((await save(route, 4, 9, { assignee_user_id: -1, status: 'open' })).status).toBe(422);
       expect(fetchMock).not.toHaveBeenCalled();
 
@@ -4815,6 +4820,52 @@ describe('mailbox browser route boundary', () => {
       expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
         assignee_user_id: 2,
         status: 'closed',
+      });
+    });
+  });
+
+  describe('thread notes', () => {
+    const path = (id: number, thread: number) => `/api/mailboxes/${id}/threads/${thread}/notes`;
+    const add = (route: MailboxRoute, body: unknown) =>
+      route.createMailThreadNoteRoute(
+        request(path(4, 9), { method: 'POST', body: JSON.stringify(body) }),
+        '4',
+        '9'
+      );
+
+    it('validates and normalizes the body before forwarding notes to the API', async () => {
+      process.env.API_ADAPTER_ENABLED = 'true';
+      process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+      cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+      const route = await loadRoute();
+      fetchMock.mockImplementation(async () =>
+        Response.json({ code: 0, message: 'success', data: { items: [] } })
+      );
+
+      expect((await add(route, { body: '   ' })).status).toBe(422);
+      expect((await add(route, { body: 'bell\u0007' })).status).toBe(422);
+      expect((await add(route, { body: 'x'.repeat(2001) })).status).toBe(422);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      await route.listMailThreadNotesRoute(request(path(4, 9)), '4', '9');
+      await add(route, { body: '  Call back\r\ntomorrow ' });
+      await route.deleteMailThreadNoteRoute(
+        request(`${path(4, 9)}/5`, { method: 'DELETE' }),
+        '4',
+        '9',
+        '5'
+      );
+      const calls = fetchMock.mock.calls.map(([url, init]) => {
+        const parsed = new URL(String(url));
+        return `${init?.method} ${parsed.pathname}`;
+      });
+      expect(calls).toEqual([
+        'GET /v1/mailboxes/4/threads/9/notes',
+        'POST /v1/mailboxes/4/threads/9/notes',
+        'DELETE /v1/mailboxes/4/threads/9/notes/5',
+      ]);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+        body: 'Call back\ntomorrow',
       });
     });
   });
@@ -5790,6 +5841,8 @@ async function loadRoute(): Promise<MailboxRoute> {
   signatures.mockSignatureStore.reset();
   const assignments = await import('@/features/mailbox/server/mock-assignment-store');
   assignments.mockAssignmentStore.reset();
+  const notes = await import('@/features/mailbox/server/mock-note-store');
+  notes.mockNoteStore.reset();
   return route;
 }
 

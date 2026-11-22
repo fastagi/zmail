@@ -41,6 +41,8 @@ var (
 	ErrMailDraftNotFound               = errors.New("mail draft not found")
 	ErrMailDraftLimitReached           = errors.New("mail draft limit reached")
 	ErrMailThreadAssignmentUnavailable = errors.New("only a shared Zmail mailbox assigns its threads")
+	ErrMailThreadNoteNotFound          = errors.New("mail thread note not found")
+	ErrMailThreadNoteLimitReached      = errors.New("mail thread note limit reached")
 	ErrMailTemplateInvalid             = errors.New("mail template is invalid")
 	ErrMailTemplateNameTaken           = errors.New("mail template name is already taken")
 	ErrMailTemplateLimitReached        = errors.New("mail template limit reached")

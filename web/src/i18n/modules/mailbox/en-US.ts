@@ -291,6 +291,16 @@ const messages = {
     close: 'Mark as done',
     reopen: 'Reopen',
   },
+  notes: {
+    label: 'Internal notes',
+    hint: 'Only members of this mailbox see notes. They are never sent.',
+    empty: 'No notes yet.',
+    placeholder: 'Add a note for your team…',
+    add: 'Add note',
+    delete: 'Delete note',
+    deletedAuthor: 'Former member',
+    count: '{count, plural, one {# note} other {# notes}}',
+  },
   thread: {
     label: 'Conversation',
     expand: 'Show the message from {sender}',
@@ -1683,6 +1693,8 @@ const messages = {
     draftNotFound: 'This draft was sent or deleted.',
     draftLimitReached: 'You have 200 drafts. Delete one to save another.',
     assignmentUnavailable: 'Only a shared mailbox assigns its conversations.',
+    noteNotFound: 'That note was already deleted.',
+    noteLimitReached: 'This conversation already has 200 notes. Delete one to add another.',
     templateVariablesMissing:
       'Some variables of the template have no value and no fallback. Fill them in and send again.',
     attachmentsInvalid: 'Attach at most 10 non-empty files, 4 MB in total.',

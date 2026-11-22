@@ -280,6 +280,12 @@ type Service interface {
 	MailThreadAssignment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint) (MailThreadAssignmentView, error)
 	// SaveMailThreadAssignment assigns a shared mailbox's thread and sets its status.
 	SaveMailThreadAssignment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint, input MailThreadAssignmentInput) (MailThreadAssignmentView, error)
+	// MailThreadNotes reads the internal notes on a shared mailbox's thread.
+	MailThreadNotes(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint) ([]domain.MailThreadNote, error)
+	// AddMailThreadNote leaves an internal note on a shared mailbox's thread.
+	AddMailThreadNote(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint, body string) (domain.MailThreadNote, error)
+	// DeleteMailThreadNote removes one of the viewer's own notes.
+	DeleteMailThreadNote(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID, noteID uint) error
 	CreateMailDraft(ctx context.Context, viewer domain.OrganizationContext, input MailDraftInput) (domain.MailDraft, error)
 	// UpdateMailDraft replaces what one of the viewer's drafts holds.
 	UpdateMailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint, input MailDraftInput) (domain.MailDraft, error)
@@ -393,6 +399,8 @@ type service struct {
 	drafts domain.MailDraftRepository
 	// assignments stores thread assignments; nil when repo does not implement it.
 	assignments domain.MailThreadAssignmentRepository
+	// notes stores internal thread notes; nil when repo does not implement it.
+	notes domain.MailThreadNoteRepository
 	// triageModel classifies and drafts; settings.Triage selects it.
 	triageModel TriageModel
 	// externalMail stores external mail connections; nil when repo does not implement it.
@@ -460,6 +468,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailThreadAssignmentRepository); ok {
 		assignments = seam
 	}
+	var notes domain.MailThreadNoteRepository
+	if seam, ok := repo.(domain.MailThreadNoteRepository); ok {
+		notes = seam
+	}
 	var externalMail domain.ExternalMailRepository
 	if seam, ok := repo.(domain.ExternalMailRepository); ok {
 		externalMail = seam
@@ -485,6 +497,7 @@ func NewService(
 		recordAudit: auditstarter.RecordChange,
 		triage:      triage, triageModel: newTriageModel(settings.Triage), signatures: signatures, drafts: drafts,
 		assignments:  assignments,
+		notes:        notes,
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
 		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),

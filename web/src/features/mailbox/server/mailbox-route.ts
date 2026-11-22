@@ -103,6 +103,7 @@ import {
   normalizeMailSignature,
 } from '@/features/mailbox/signature-schemas';
 import { mockAssignmentStore } from '@/features/mailbox/server/mock-assignment-store';
+import { mockNoteStore } from '@/features/mailbox/server/mock-note-store';
 import { mockSignatureStore } from '@/features/mailbox/server/mock-signature-store';
 import { mockDraftStore } from '@/features/mailbox/server/mock-draft-store';
 import { MAIL_DRAFT_LIMITS, draftRecipientLine } from '@/features/mailbox/draft-schemas';
@@ -5700,6 +5701,114 @@ function mockAssignableThread(
     canSend: mailbox.access.send,
     assignable: mailbox.access.send ? [viewer.userId] : [],
   };
+}
+
+/* Thread notes (`contracts/MAILBOXES.md`, Thread Notes): internal, shared mailboxes only. */
+
+const maxNoteBodyBytes = 16 * 1024;
+
+/** Lists the notes on a thread of a shared mailbox; it needs `view`. */
+export async function listMailThreadNotesRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawThreadId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawThreadId);
+  if (!ids.ok) return ids.response;
+  const { mailboxId, messageId: threadId } = ids.value;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${mailboxId}/threads/${threadId}/notes`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const scope = mockAssignableThread(target.organizationId, mailboxId, threadId, viewerOf(target));
+  if (!scope.ok) return scope.response;
+  return success({ items: mockNoteStore.list(target.organizationId, mailboxId, threadId) });
+}
+
+/** Leaves a note on a thread of a shared mailbox; it needs `send`. */
+export async function createMailThreadNoteRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawThreadId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawThreadId);
+  if (!ids.ok) return ids.response;
+  const { mailboxId, messageId: threadId } = ids.value;
+  const parsed = await jsonObject(request, maxNoteBodyBytes);
+  if (!parsed.ok) return parsed.response;
+  const raw = parsed.value.body;
+  const body = typeof raw === 'string' ? raw.replace(/\r\n/g, '\n').trim() : '';
+  if (
+    !body ||
+    [...body].length > 2000 ||
+    /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(body)
+  ) {
+    return validationFailed({ body: ['must be 1 to 2000 characters without control characters'] });
+  }
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mailboxes/${mailboxId}/threads/${threadId}/notes`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { body },
+      fieldMap: { body: 'body' },
+    });
+  }
+  const viewer = viewerOf(target);
+  const scope = mockAssignableThread(target.organizationId, mailboxId, threadId, viewer);
+  if (!scope.ok) return scope.response;
+  if (!scope.canSend) return forbidden();
+  const note = mockNoteStore.add(target.organizationId, mailboxId, threadId, viewer.userId, body);
+  if (!note) {
+    return failure(
+      409,
+      ApiErrorCode.MAILBOX_NOTE_LIMIT_REACHED,
+      'This conversation keeps the most notes allowed'
+    );
+  }
+  return success(note, 201);
+}
+
+/** Deletes one of the caller's own notes. */
+export async function deleteMailThreadNoteRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawThreadId: string,
+  rawNoteId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const ids = parseMessageIds(rawMailboxId, rawThreadId);
+  if (!ids.ok) return ids.response;
+  const noteId = parseRouteId(rawNoteId);
+  if (!noteId.ok) return noteId.response;
+  const { mailboxId, messageId: threadId } = ids.value;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mailboxes/${mailboxId}/threads/${threadId}/notes/${noteId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const viewer = viewerOf(target);
+  const scope = mockAssignableThread(target.organizationId, mailboxId, threadId, viewer);
+  if (!scope.ok) return scope.response;
+  if (
+    !mockNoteStore.remove(target.organizationId, mailboxId, threadId, noteId.value, viewer.userId)
+  ) {
+    return failure(404, ApiErrorCode.MAILBOX_NOTE_NOT_FOUND, 'Note not found');
+  }
+  return new NextResponse(null, { status: 204, headers: privateMailboxHeaders() });
 }
 
 /* Drafts (`contracts/MAILBOXES.md`, Drafts): each visible to its writer only. */

@@ -41,6 +41,8 @@ var mailboxErrorCodes = []struct {
 	{ErrMailDraftNotFound, http.StatusNotFound, domain.CodeMailDraftNotFound},
 	{ErrMailDraftLimitReached, http.StatusConflict, domain.CodeMailDraftLimitReached},
 	{ErrMailThreadAssignmentUnavailable, http.StatusConflict, domain.CodeMailThreadAssignmentUnavailable},
+	{ErrMailThreadNoteNotFound, http.StatusNotFound, domain.CodeMailThreadNoteNotFound},
+	{ErrMailThreadNoteLimitReached, http.StatusConflict, domain.CodeMailThreadNoteLimitReached},
 	{ErrMailTemplateInvalid, http.StatusUnprocessableEntity, domain.CodeMailTemplateInvalid},
 	{ErrMailTemplateNameTaken, http.StatusConflict, domain.CodeMailTemplateNameTaken},
 	{ErrMailTemplateLimitReached, http.StatusConflict, domain.CodeMailTemplateLimitReached},

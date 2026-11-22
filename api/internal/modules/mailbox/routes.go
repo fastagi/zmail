@@ -212,6 +212,12 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.threads.assignment.show").WhereNumber("mailbox_id", "thread_id")
 		auth.PUT("/mailboxes/:mailbox_id/threads/:thread_id/assignment", h.UpdateMailThreadAssignment).
 			Name("mailboxes.threads.assignment.update").WhereNumber("mailbox_id", "thread_id")
+		auth.GET("/mailboxes/:mailbox_id/threads/:thread_id/notes", h.ListMailThreadNotes).
+			Name("mailboxes.threads.notes.index").WhereNumber("mailbox_id", "thread_id")
+		auth.POST("/mailboxes/:mailbox_id/threads/:thread_id/notes", h.CreateMailThreadNote).
+			Name("mailboxes.threads.notes.store").WhereNumber("mailbox_id", "thread_id")
+		auth.DELETE("/mailboxes/:mailbox_id/threads/:thread_id/notes/:note_id", h.DeleteMailThreadNote).
+			Name("mailboxes.threads.notes.destroy").WhereNumber("mailbox_id", "thread_id", "note_id")
 		auth.GET("/mailboxes/:mailbox_id/message-counts", h.MessageCounts).
 			Name("mailboxes.message_counts.show").WhereNumber("mailbox_id")
 		auth.POST("/mailboxes/:mailbox_id/message-updates", h.UpdateMessages).

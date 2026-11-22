@@ -19,6 +19,7 @@ import { useMailDateTimeFormat } from '@/features/mailbox/components/mail-time';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
 import { SecretsPanel } from '@/features/mailbox/components/secrets-panel';
 import { ThreadAssignment } from '@/features/mailbox/components/thread-assignment';
+import { ThreadNotes } from '@/features/mailbox/components/thread-notes';
 import {
   useMailMessage,
   useMailThread,
@@ -162,6 +163,14 @@ export function ThreadView({
                 </li>
               ))}
             </ol>
+            {reader.shared ? (
+              <ThreadNotes
+                key={`notes-${threadId}`}
+                mailboxId={reader.mailboxId}
+                threadId={threadId}
+                canSend={reader.canSend}
+              />
+            ) : null}
           </article>
         );
       }}
@@ -200,6 +209,14 @@ export function MessageDetail({
             reader={reader}
             variant={variant}
           />
+          {reader.shared ? (
+            <ThreadNotes
+              key={`notes-${message.thread_id}`}
+              mailboxId={reader.mailboxId}
+              threadId={message.thread_id}
+              canSend={reader.canSend}
+            />
+          ) : null}
         </article>
       )}
     </ReaderState>
