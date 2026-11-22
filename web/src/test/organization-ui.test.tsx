@@ -49,6 +49,7 @@ const state = vi.hoisted(() => ({
   invite: mutationState(),
   removeMember: mutationState(),
   revokeInvitation: mutationState(),
+  resendInvitation: mutationState(),
   transferOwnership: mutationState(),
   updateMember: mutationState(),
   forgetOrganization: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useCreateOrganizationInvitation: () => state.invite,
   useRemoveOrganizationMember: () => state.removeMember,
   useRevokeOrganizationInvitation: () => state.revokeInvitation,
+  useResendOrganizationInvitation: () => state.resendInvitation,
   useTransferOrganizationOwnership: () => state.transferOwnership,
   useUpdateOrganization: () => state.update,
   useUpdateOrganizationMember: () => state.updateMember,
@@ -113,6 +115,7 @@ describe('organization browser workflow', () => {
       state.invite,
       state.removeMember,
       state.revokeInvitation,
+      state.resendInvitation,
       state.transferOwnership,
       state.updateMember,
     ]) {
@@ -305,6 +308,8 @@ describe('organization browser workflow', () => {
           role: 'member',
           status: 'pending',
           expires_at: '2026-07-22T10:00:00Z',
+          email_send_status: null,
+          email_attempted_at: null,
           created_at: '2026-07-15T10:00:00Z',
           updated_at: '2026-07-15T10:00:00Z',
         },
@@ -321,6 +326,37 @@ describe('organization browser workflow', () => {
     view.rerender(withMessages(<OrganizationOverview organizationId={42} />));
     expect(screen.queryByRole('tab', { name: 'Invitations' })).not.toBeInTheDocument();
   });
+
+  it('marks an unsent invitation and resends it', () => {
+    state.context.data = organizationContext('admin');
+    state.invitations.data = {
+      items: [
+        {
+          id: 73,
+          organization_id: 42,
+          email: 'new.member@example.com',
+          role: 'member',
+          status: 'pending',
+          expires_at: '2026-07-22T10:00:00Z',
+          email_send_status: 'failed',
+          email_attempted_at: '2026-07-15T10:00:01Z',
+          created_at: '2026-07-15T10:00:00Z',
+          updated_at: '2026-07-15T10:00:00Z',
+        },
+      ],
+      meta: { total: 1 },
+    };
+
+    renderWithMessages(<OrganizationOverview organizationId={42} />);
+    activateTab('Invitations');
+    expect(screen.getByText('Email not sent')).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resend the invitation to new.member@example.com' })
+    );
+    expect(state.resendInvitation.mutate).toHaveBeenCalledWith(73, expect.any(Object));
+  });
+
 });
 
 function mutationState() {

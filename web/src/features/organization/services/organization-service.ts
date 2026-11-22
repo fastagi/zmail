@@ -151,6 +151,16 @@ export const organizationService = {
     );
   },
 
+  async resendInvitation(
+    organizationId: number,
+    invitationId: number
+  ): Promise<OrganizationInvitationCreateResult> {
+    const value = await request.post<unknown>(
+      `/organizations/${organizationId}/invitations/${invitationId}/emails`
+    );
+    return parseOrganizationInvitationCreateResponse(value);
+  },
+
   async acceptInvitation(
     input: AcceptOrganizationInvitationInput
   ): Promise<Organization> {

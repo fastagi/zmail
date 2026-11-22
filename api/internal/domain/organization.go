@@ -109,8 +109,12 @@ type OrganizationInvitation struct {
 	AcceptedBy     *uint            `json:"accepted_by,omitempty"`
 	RevokedAt      *time.Time       `json:"revoked_at,omitempty"`
 	RevokedBy      *uint            `json:"revoked_by,omitempty"`
-	CreatedAt      time.Time        `json:"created_at"`
-	UpdatedAt      time.Time        `json:"updated_at"`
+	// EmailSendStatus and EmailAttemptedAt record the latest invitation email attempt; empty and
+	// nil for invitations created before attempts were recorded.
+	EmailSendStatus  string     `json:"email_send_status,omitempty"`
+	EmailAttemptedAt *time.Time `json:"email_attempted_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // Status derives expiry without mutating invitation history on read.
@@ -154,6 +158,8 @@ type OrganizationInvitationRepository interface {
 	ListInvitations(ctx context.Context, organizationID uint, page, pageSize int) ([]*OrganizationInvitation, int64, error)
 	RevokeInvitation(ctx context.Context, organizationID, invitationID, revokedBy uint, now time.Time) (*OrganizationInvitation, error)
 	AcceptInvitation(ctx context.Context, tokenHash string, userID uint, now time.Time) (*OrganizationMembership, *OrganizationInvitation, error)
+	ReissueInvitation(ctx context.Context, organizationID, invitationID uint, tokenHash string, expiresAt, now time.Time) (*OrganizationInvitation, error)
+	RecordInvitationEmailAttempt(ctx context.Context, organizationID, invitationID uint, status string, now time.Time) error
 }
 
 // Organization membership events, published after the membership change commits.

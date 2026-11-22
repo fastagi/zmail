@@ -29,6 +29,7 @@ type Service interface {
 	Invite(ctx context.Context, userID, organizationID uint, req *CreateOrganizationInvitationRequest) (*OrganizationInvitationResult, error)
 	ListInvitations(ctx context.Context, userID, organizationID uint, page, pageSize int) ([]*domain.OrganizationInvitation, int64, error)
 	RevokeInvitation(ctx context.Context, userID, organizationID, invitationID uint) error
+	ResendInvitation(ctx context.Context, userID, organizationID, invitationID uint) (*OrganizationInvitationResult, error)
 	AcceptInvitation(ctx context.Context, userID uint, req *AcceptOrganizationInvitationRequest) (*domain.OrganizationMembership, error)
 }
 

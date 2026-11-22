@@ -44,24 +44,26 @@ func (OrganizationMembershipPO) TableName() string {
 // nullable so every database driver can enforce one active invite while still
 // retaining accepted and revoked history.
 type OrganizationInvitationPO struct {
-	ID             uint       `gorm:"primaryKey"`
-	OrganizationID uint       `gorm:"not null;index:idx_organization_invitations_org_created,priority:1;index:idx_organization_invitations_org_email,priority:1"`
-	InvitedBy      uint       `gorm:"not null;index"`
-	Email          string     `gorm:"size:100;not null;index:idx_organization_invitations_org_email,priority:2"`
-	Role           string     `gorm:"size:16;not null;check:organization_invitations_role_check,role IN ('admin','member')"`
-	TokenHash      string     `gorm:"size:64;not null;uniqueIndex"`
-	PendingKey     *string    `gorm:"size:64;uniqueIndex"`
-	ExpiresAt      time.Time  `gorm:"not null;index"`
-	AcceptedAt     *time.Time `gorm:"index"`
-	AcceptedBy     *uint      `gorm:"index"`
-	RevokedAt      *time.Time `gorm:"index"`
-	RevokedBy      *uint      `gorm:"index"`
-	CreatedAt      time.Time  `gorm:"index:idx_organization_invitations_org_created,priority:2"`
-	UpdatedAt      time.Time
-	Organization   OrganizationPO `gorm:"foreignKey:OrganizationID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	Inviter        user.UserPO    `gorm:"foreignKey:InvitedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
-	Acceptor       *user.UserPO   `gorm:"foreignKey:AcceptedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
-	Revoker        *user.UserPO   `gorm:"foreignKey:RevokedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	ID               uint       `gorm:"primaryKey"`
+	OrganizationID   uint       `gorm:"not null;index:idx_organization_invitations_org_created,priority:1;index:idx_organization_invitations_org_email,priority:1"`
+	InvitedBy        uint       `gorm:"not null;index"`
+	Email            string     `gorm:"size:100;not null;index:idx_organization_invitations_org_email,priority:2"`
+	Role             string     `gorm:"size:16;not null;check:organization_invitations_role_check,role IN ('admin','member')"`
+	TokenHash        string     `gorm:"size:64;not null;uniqueIndex"`
+	PendingKey       *string    `gorm:"size:64;uniqueIndex"`
+	ExpiresAt        time.Time  `gorm:"not null;index"`
+	AcceptedAt       *time.Time `gorm:"index"`
+	AcceptedBy       *uint      `gorm:"index"`
+	RevokedAt        *time.Time `gorm:"index"`
+	RevokedBy        *uint      `gorm:"index"`
+	EmailSendStatus  *string    `gorm:"size:32"`
+	EmailAttemptedAt *time.Time
+	CreatedAt        time.Time `gorm:"index:idx_organization_invitations_org_created,priority:2"`
+	UpdatedAt        time.Time
+	Organization     OrganizationPO `gorm:"foreignKey:OrganizationID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	Inviter          user.UserPO    `gorm:"foreignKey:InvitedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	Acceptor         *user.UserPO   `gorm:"foreignKey:AcceptedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	Revoker          *user.UserPO   `gorm:"foreignKey:RevokedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
 }
 
 // TableName returns the stable organization invitation table name.
@@ -102,20 +104,29 @@ func newInvitationPO(invitation *domain.OrganizationInvitation) *OrganizationInv
 		return nil
 	}
 	return &OrganizationInvitationPO{
-		ID:             invitation.ID,
-		OrganizationID: invitation.OrganizationID,
-		InvitedBy:      invitation.InvitedBy,
-		Email:          invitation.Email,
-		Role:           string(invitation.Role),
-		TokenHash:      invitation.TokenHash,
-		ExpiresAt:      invitation.ExpiresAt,
-		AcceptedAt:     invitation.AcceptedAt,
-		AcceptedBy:     invitation.AcceptedBy,
-		RevokedAt:      invitation.RevokedAt,
-		RevokedBy:      invitation.RevokedBy,
-		CreatedAt:      invitation.CreatedAt,
-		UpdatedAt:      invitation.UpdatedAt,
+		ID:               invitation.ID,
+		OrganizationID:   invitation.OrganizationID,
+		InvitedBy:        invitation.InvitedBy,
+		Email:            invitation.Email,
+		Role:             string(invitation.Role),
+		TokenHash:        invitation.TokenHash,
+		ExpiresAt:        invitation.ExpiresAt,
+		AcceptedAt:       invitation.AcceptedAt,
+		AcceptedBy:       invitation.AcceptedBy,
+		RevokedAt:        invitation.RevokedAt,
+		RevokedBy:        invitation.RevokedBy,
+		EmailSendStatus:  optionalString(invitation.EmailSendStatus),
+		EmailAttemptedAt: invitation.EmailAttemptedAt,
+		CreatedAt:        invitation.CreatedAt,
+		UpdatedAt:        invitation.UpdatedAt,
 	}
+}
+
+func optionalString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func (po *OrganizationPO) toDomain() *domain.Organization {
@@ -161,18 +172,27 @@ func (po *OrganizationInvitationPO) toDomain() *domain.OrganizationInvitation {
 		return nil
 	}
 	return &domain.OrganizationInvitation{
-		ID:             po.ID,
-		OrganizationID: po.OrganizationID,
-		InvitedBy:      po.InvitedBy,
-		Email:          po.Email,
-		Role:           domain.OrganizationRole(po.Role),
-		TokenHash:      po.TokenHash,
-		ExpiresAt:      po.ExpiresAt,
-		AcceptedAt:     po.AcceptedAt,
-		AcceptedBy:     po.AcceptedBy,
-		RevokedAt:      po.RevokedAt,
-		RevokedBy:      po.RevokedBy,
-		CreatedAt:      po.CreatedAt,
-		UpdatedAt:      po.UpdatedAt,
+		ID:               po.ID,
+		OrganizationID:   po.OrganizationID,
+		InvitedBy:        po.InvitedBy,
+		Email:            po.Email,
+		Role:             domain.OrganizationRole(po.Role),
+		TokenHash:        po.TokenHash,
+		ExpiresAt:        po.ExpiresAt,
+		AcceptedAt:       po.AcceptedAt,
+		AcceptedBy:       po.AcceptedBy,
+		RevokedAt:        po.RevokedAt,
+		RevokedBy:        po.RevokedBy,
+		EmailSendStatus:  derefString(po.EmailSendStatus),
+		EmailAttemptedAt: po.EmailAttemptedAt,
+		CreatedAt:        po.CreatedAt,
+		UpdatedAt:        po.UpdatedAt,
 	}
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

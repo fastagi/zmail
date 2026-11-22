@@ -80,6 +80,17 @@ const messages = {
     failed: '邀请已保存，但邮件发送失败',
     not_configured: '邀请已保存，但未配置邮件服务',
   },
+  emailDelivery: {
+    accepted_by_provider: '邮件已发出',
+    failed: '邮件未发出',
+    not_configured: '邮件未发出',
+  },
+  emailDeliveryHint: {
+    failed: '发送失败。可以重发，或用其他方式把邀请告诉对方。',
+    not_configured: '这里没有配置邮件服务，所以没有发出邮件。',
+  },
+  resendInvitation: '重发',
+  resendInvitationLabel: '重发给 {email} 的邀请',
   invitationStatus: {
     pending: '待接受',
     accepted: '已接受',

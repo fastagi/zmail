@@ -139,6 +139,8 @@ describe('organization network contract validation', () => {
       role: 'member',
       status: 'pending',
       expires_at: timestamp,
+      email_send_status: 'failed',
+      email_attempted_at: timestamp,
       created_at: timestamp,
       updated_at: timestamp,
     };

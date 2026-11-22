@@ -2874,6 +2874,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/organizations/{organization_id}/invitations/{invitation_id}/emails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email a pending invitation again with a fresh one-time link
+         * @description Issues a new token and expiry, so earlier links stop working, then makes one send attempt.
+         */
+        post: operations["resendOrganizationInvitationEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/{organization_id}/members": {
         parameters: {
             query?: never;
@@ -5995,6 +6015,10 @@ export interface components {
             created_at: string;
             /** Format: email */
             email: string;
+            /** Format: date-time */
+            email_attempted_at: string | null;
+            /** @description Latest email attempt; null when unknown (created before attempts were recorded). */
+            email_send_status: components["schemas"]["OrganizationInvitationEmailSendStatus"] | null;
             /** Format: date-time */
             expires_at: string;
             id: components["schemas"]["PositiveID"];
@@ -14772,6 +14796,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `PERMISSION.DENIED`: only `owner` and `admin` manage invitations. */
+            403: components["responses"]["Forbidden"];
+            /** @description `ORGANIZATION.NOT_FOUND`, or `ORGANIZATION.INVITATION.NOT_FOUND` when the invitation is absent or no longer pending (accepted, revoked, or expired). */
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    resendOrganizationInvitationEmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization invitation identifier. */
+                invitation_id: components["parameters"]["OrganizationInvitationID"];
+                /** @description Organization identifier; resolved only through the caller's membership. */
+                organization_id: components["parameters"]["OrganizationID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The reissued invitation and the synchronous email send attempt status. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationInvitationCreateResponse"];
+                };
             };
             400: components["responses"]["InvalidInput"];
             401: components["responses"]["Unauthorized"];

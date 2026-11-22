@@ -387,11 +387,41 @@ export class MockOrganizationStore {
       role: input.role,
       status: 'pending',
       expires_at: new Date(now.getTime() + INVITATION_TTL_MS).toISOString(),
+      email_send_status: 'not_configured',
+      email_attempted_at: timestamp,
       created_at: timestamp,
       updated_at: timestamp,
       token: this.dependencies.invitationToken(),
     };
     this.invitations = [invitation, ...this.invitations];
+    return {
+      invitation: publicInvitation(invitation, now),
+      email_send_status: 'not_configured',
+    };
+  }
+
+  resendInvitation(
+    actor: AuthUser,
+    organizationId: number,
+    invitationId: number
+  ): OrganizationInvitationCreateResult | MockOrganizationStoreError {
+    const managerError = this.managerError(actor, organizationId);
+    if (managerError) return managerError;
+    const now = this.dependencies.now();
+    const invitation = this.invitations.find(
+      (candidate) =>
+        candidate.organization_id === organizationId &&
+        candidate.id === invitationId
+    );
+    if (!invitation || invitationStatus(invitation, now) !== 'pending') {
+      return 'invitation_not_found';
+    }
+    const timestamp = now.toISOString();
+    invitation.token = this.dependencies.invitationToken();
+    invitation.expires_at = new Date(now.getTime() + INVITATION_TTL_MS).toISOString();
+    invitation.email_send_status = 'not_configured';
+    invitation.email_attempted_at = timestamp;
+    invitation.updated_at = timestamp;
     return {
       invitation: publicInvitation(invitation, now),
       email_send_status: 'not_configured',
@@ -585,6 +615,8 @@ function publicInvitation(
     role: invitation.role,
     status: invitationStatus(invitation, now),
     expires_at: invitation.expires_at,
+    email_send_status: invitation.email_send_status,
+    email_attempted_at: invitation.email_attempted_at,
     created_at: invitation.created_at,
     updated_at: invitation.updated_at,
   };

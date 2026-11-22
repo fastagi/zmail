@@ -19,6 +19,8 @@ type invitationRepositoryStub struct {
 	listInvitationsFn  func(context.Context, uint, int, int) ([]*domain.OrganizationInvitation, int64, error)
 	revokeInvitationFn func(context.Context, uint, uint, uint, time.Time) (*domain.OrganizationInvitation, error)
 	acceptInvitationFn func(context.Context, string, uint, time.Time) (*domain.OrganizationMembership, *domain.OrganizationInvitation, error)
+	reissueFn          func(context.Context, uint, uint, string, time.Time, time.Time) (*domain.OrganizationInvitation, error)
+	recordedStatuses   []string
 }
 
 func (r *invitationRepositoryStub) CreateWithOwner(context.Context, *domain.Organization, *domain.OrganizationMembership) error {
@@ -75,6 +77,15 @@ func (r *invitationRepositoryStub) RevokeInvitation(ctx context.Context, organiz
 
 func (r *invitationRepositoryStub) AcceptInvitation(ctx context.Context, tokenHash string, userID uint, now time.Time) (*domain.OrganizationMembership, *domain.OrganizationInvitation, error) {
 	return r.acceptInvitationFn(ctx, tokenHash, userID, now)
+}
+
+func (r *invitationRepositoryStub) ReissueInvitation(ctx context.Context, organizationID, invitationID uint, tokenHash string, expiresAt, now time.Time) (*domain.OrganizationInvitation, error) {
+	return r.reissueFn(ctx, organizationID, invitationID, tokenHash, expiresAt, now)
+}
+
+func (r *invitationRepositoryStub) RecordInvitationEmailAttempt(_ context.Context, _, _ uint, status string, _ time.Time) error {
+	r.recordedStatuses = append(r.recordedStatuses, status)
+	return nil
 }
 
 type invitationMailerStub struct {
@@ -261,4 +272,80 @@ func (r *invitationRepositoryStub) FindMembershipsByEmails(context.Context, uint
 
 func (r *invitationRepositoryStub) ListMembershipsByUserIDs(context.Context, uint, []uint) ([]*domain.OrganizationMembership, error) {
 	return nil, nil
+}
+
+func TestServiceInviteRecordsEmailAttempt(t *testing.T) {
+	repo := &invitationRepositoryStub{
+		findFn: func(context.Context, uint, uint) (*domain.OrganizationMembership, error) {
+			return invitationManager(domain.OrganizationRoleOwner), nil
+		},
+		createInvitationFn: func(_ context.Context, invitation *domain.OrganizationInvitation, _ time.Time) error {
+			invitation.ID = 73
+			return nil
+		},
+	}
+	mailer := &invitationMailerStub{
+		configured: true,
+		sendFn: func(context.Context, string, string, domain.OrganizationRole, string, time.Time) error {
+			return errors.New("provider unavailable")
+		},
+	}
+	svc := NewService(repo, repo, mailer, InvitationPolicy{TTL: 7 * 24 * time.Hour}, nil)
+
+	result, err := svc.Invite(context.Background(), 17, 42, &CreateOrganizationInvitationRequest{
+		Email: "member@example.com",
+		Role:  domain.OrganizationRoleMember,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"failed"}, repo.recordedStatuses)
+	assert.Equal(t, "failed", result.Invitation.EmailSendStatus)
+	require.NotNil(t, result.Invitation.EmailAttemptedAt)
+}
+
+func TestServiceResendInvitationRotatesTokenAndEmailsIt(t *testing.T) {
+	now := time.Date(2026, time.July, 16, 9, 0, 0, 0, time.UTC)
+	var reissuedHash string
+	repo := &invitationRepositoryStub{
+		findFn: func(context.Context, uint, uint) (*domain.OrganizationMembership, error) {
+			return invitationManager(domain.OrganizationRoleAdmin), nil
+		},
+		reissueFn: func(_ context.Context, organizationID, invitationID uint, tokenHash string, expiresAt, at time.Time) (*domain.OrganizationInvitation, error) {
+			assert.Equal(t, uint(42), organizationID)
+			assert.Equal(t, uint(73), invitationID)
+			assert.Equal(t, now.Add(7*24*time.Hour), expiresAt)
+			assert.Equal(t, now, at)
+			reissuedHash = tokenHash
+			return &domain.OrganizationInvitation{
+				ID: 73, OrganizationID: 42, Email: "member@example.com", Role: domain.OrganizationRoleMember,
+				TokenHash: tokenHash, ExpiresAt: expiresAt,
+			}, nil
+		},
+	}
+	mailer := &invitationMailerStub{
+		configured: true,
+		sendFn: func(_ context.Context, to, _ string, _ domain.OrganizationRole, token string, _ time.Time) error {
+			assert.Equal(t, "member@example.com", to)
+			assert.Equal(t, reissuedHash, crypto.SHA256Hex(token), "the email carries the reissued token")
+			return nil
+		},
+	}
+	svc := NewService(repo, repo, mailer, InvitationPolicy{TTL: 7 * 24 * time.Hour}, nil)
+	svc.now = func() time.Time { return now }
+
+	result, err := svc.ResendInvitation(context.Background(), 17, 42, 73)
+	require.NoError(t, err)
+	assert.Equal(t, InvitationEmailSendStatusAcceptedByProvider, result.EmailSendStatus)
+	assert.Equal(t, []string{"accepted_by_provider"}, repo.recordedStatuses)
+}
+
+func TestServiceResendInvitationRequiresManager(t *testing.T) {
+	repo := &invitationRepositoryStub{
+		findFn: func(context.Context, uint, uint) (*domain.OrganizationMembership, error) {
+			return invitationManager(domain.OrganizationRoleMember), nil
+		},
+	}
+	svc := NewService(repo, repo, &invitationMailerStub{}, InvitationPolicy{TTL: time.Hour}, nil)
+
+	_, err := svc.ResendInvitation(context.Background(), 17, 42, 73)
+	require.ErrorIs(t, err, domain.ErrPermissionDenied)
 }

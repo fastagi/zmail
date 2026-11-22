@@ -74,25 +74,7 @@ func (s *service) Invite(
 		return nil, fmt.Errorf("create organization invitation: %w", err)
 	}
 
-	emailStatus := InvitationEmailSendStatusNotConfigured
-	if s.invitationMailer != nil && s.invitationMailer.IsConfigured() {
-		emailStatus = InvitationEmailSendStatusAcceptedByProvider
-		if sendErr := s.invitationMailer.SendInvitation(
-			ctx,
-			invitation.Email,
-			manager.Organization.Name,
-			invitation.Role,
-			token,
-			invitation.ExpiresAt,
-		); sendErr != nil {
-			emailStatus = InvitationEmailSendStatusFailed
-			slog.WarnContext(ctx, "organization.invitation_email_send_failed",
-				"organization_id", organizationID,
-				"invitation_id", invitation.ID,
-				"error_type", fmt.Sprintf("%T", sendErr),
-			)
-		}
-	}
+	emailStatus := s.sendInvitationEmail(ctx, invitation, manager.Organization.Name, token)
 
 	auditstarter.RecordChange(ctx, auditstarter.Change{
 		Action:     "invite",
@@ -110,6 +92,97 @@ func (s *service) Invite(
 		Invitation:      invitation,
 		EmailSendStatus: emailStatus,
 	}, nil
+}
+
+// ResendInvitation gives a pending invitation a fresh token and expiry and emails the new link.
+// Earlier links stop working, so only the latest email can be accepted.
+func (s *service) ResendInvitation(ctx context.Context, userID, organizationID, invitationID uint) (*OrganizationInvitationResult, error) {
+	if userID == 0 || organizationID == 0 || invitationID == 0 {
+		return nil, domain.ErrInvalidInput
+	}
+	if s.invitationRepo == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	manager, err := s.invitationManager(ctx, userID, organizationID)
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := generateOrganizationInvitationToken()
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	invitation, err := s.invitationRepo.ReissueInvitation(
+		ctx,
+		organizationID,
+		invitationID,
+		crypto.SHA256Hex(token),
+		now.Add(s.invitationPolicy.TTL),
+		now,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("reissue organization invitation: %w", err)
+	}
+	emailStatus := s.sendInvitationEmail(ctx, invitation, manager.Organization.Name, token)
+
+	auditstarter.RecordChange(ctx, auditstarter.Change{
+		Action:     "resend",
+		Resource:   "organization_invitations",
+		TargetType: "organization_invitation",
+		TargetID:   strconv.FormatUint(uint64(invitation.ID), 10),
+		Result:     domain.AuditResultSuccess,
+		Metadata: map[string]any{
+			"organization_id":   organizationID,
+			"email_send_status": emailStatus,
+		},
+	})
+	return &OrganizationInvitationResult{
+		Invitation:      invitation,
+		EmailSendStatus: emailStatus,
+	}, nil
+}
+
+// sendInvitationEmail makes one synchronous send attempt and records its outcome on the
+// invitation. A failure to record is logged; the attempt outcome is still returned.
+func (s *service) sendInvitationEmail(
+	ctx context.Context,
+	invitation *domain.OrganizationInvitation,
+	organizationName,
+	token string,
+) InvitationEmailSendStatus {
+	status := InvitationEmailSendStatusNotConfigured
+	if s.invitationMailer != nil && s.invitationMailer.IsConfigured() {
+		status = InvitationEmailSendStatusAcceptedByProvider
+		if sendErr := s.invitationMailer.SendInvitation(
+			ctx,
+			invitation.Email,
+			organizationName,
+			invitation.Role,
+			token,
+			invitation.ExpiresAt,
+		); sendErr != nil {
+			status = InvitationEmailSendStatusFailed
+			slog.WarnContext(ctx, "organization.invitation_email_send_failed",
+				"organization_id", invitation.OrganizationID,
+				"invitation_id", invitation.ID,
+				"error_type", fmt.Sprintf("%T", sendErr),
+			)
+		}
+	}
+
+	attemptedAt := s.now()
+	if err := s.invitationRepo.RecordInvitationEmailAttempt(ctx, invitation.OrganizationID, invitation.ID, string(status), attemptedAt); err != nil {
+		slog.WarnContext(ctx, "organization.invitation_email_status_not_recorded",
+			"organization_id", invitation.OrganizationID,
+			"invitation_id", invitation.ID,
+			"error_type", fmt.Sprintf("%T", err),
+		)
+		return status
+	}
+	invitation.EmailSendStatus = string(status)
+	invitation.EmailAttemptedAt = &attemptedAt
+	return status
 }
 
 func (s *service) ListInvitations(
