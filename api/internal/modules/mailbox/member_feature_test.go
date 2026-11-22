@@ -218,10 +218,10 @@ func TestGrantedMembersStopOnlyBroadcastsTheyCanSend(t *testing.T) {
 
 	_, _, err := f.service.CancelBroadcast(context.Background(), f.viewer, 9)
 	if err == nil {
-		t.Fatal("a member without send on the sender mailbox cancelled the broadcast")
+		t.Fatal("a member without send on the sender mailbox canceled the broadcast")
 	}
-	if broadcasts.cancelled {
-		t.Fatal("the broadcast was cancelled before access was checked")
+	if broadcasts.canceled {
+		t.Fatal("the broadcast was canceled before access was checked")
 	}
 	_, _, err = f.service.PauseBroadcast(context.Background(), f.viewer, 9)
 	if err == nil || broadcasts.paused {
@@ -232,8 +232,8 @@ func TestGrantedMembersStopOnlyBroadcastsTheyCanSend(t *testing.T) {
 // recordingBroadcasts finds one broadcast and records whether it was stopped.
 type recordingBroadcasts struct {
 	stubBroadcasts
-	broadcast         *domain.MailBroadcast
-	cancelled, paused bool
+	broadcast        *domain.MailBroadcast
+	canceled, paused bool
 }
 
 func (r *recordingBroadcasts) FindBroadcast(context.Context, uint, uint) (*domain.MailBroadcast, error) {
@@ -242,7 +242,7 @@ func (r *recordingBroadcasts) FindBroadcast(context.Context, uint, uint) (*domai
 }
 
 func (r *recordingBroadcasts) CancelBroadcast(context.Context, uint, uint) error {
-	r.cancelled = true
+	r.canceled = true
 	return nil
 }
 
