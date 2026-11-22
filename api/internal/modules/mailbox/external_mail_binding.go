@@ -217,6 +217,9 @@ type externalBinding struct {
 	reconnectShared bool
 	// sharing binds a new account into a shared connected mailbox; nil binds the viewer's own.
 	sharing *sharedBinding
+	// sends records that the grant names the account's SMTP server, so its connected mailbox
+	// sends through it; stored with the grant in one transaction.
+	sends bool
 }
 
 // saveExternalBinding stores a fresh grant: a new account gets a private read-only connected
@@ -237,7 +240,7 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 
 	var connection *domain.ExternalMailConnection
 	created := false
-	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+	bind := func(tx context.Context) error {
 		// The viewer's bindings run one at a time, so the limit is counted against committed rows.
 		if lockErr := s.externalMail.LockExternalMailBindings(tx, viewer.OrganizationID, viewer.UserID); lockErr != nil {
 			return lockErr
@@ -315,6 +318,12 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 			return findErr
 		}
 		return s.recordConnectionEvent(tx, connection, domain.MailboxAccessConnectionReconnected, viewer.UserID)
+	}
+	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if bindErr := bind(tx); bindErr != nil {
+			return bindErr
+		}
+		return s.externalMail.SetConnectedMailboxSend(tx, connection.OrganizationID, connection.MailboxID, binding.sends)
 	})
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
 		// Another sign-in bound the same account in the meantime.

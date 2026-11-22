@@ -12,9 +12,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
+	"mime"
 	"net"
+	"net/mail"
 	"net/netip"
+	"net/smtp"
 	"strings"
 	"sync"
 	"testing"
@@ -206,7 +210,7 @@ func TestIMAPSourceSendMailDeliversThroughTheAccountServer(t *testing.T) {
 		for _, want := range []string{
 			"Message-ID: <id-1@example.com>", "In-Reply-To: <parent@example.org>",
 			"References: <root@example.org> <parent@example.org>", "Cc: <b@example.org>",
-			"multipart/mixed", "multipart/alternative", "filename=\"note.txt\"", "Subject: =?utf-8?q?Hello_",
+			"multipart/mixed", "multipart/alternative", "filename=note.txt", "Subject: =?utf-8?q?Hello_",
 		} {
 			if !strings.Contains(data, want) {
 				t.Fatalf("plain=%v: message lacks %q:\n%s", plain, want, data)
@@ -274,5 +278,62 @@ func TestBuildMIMEMessageRefusesHeaderInjection(t *testing.T) {
 	raw, err := buildMIMEMessage(mailtransport.Message{FromAddress: "a@b.c", To: []string{"d@e.f"}, Subject: "s", TextBody: "line1\nline2"}, "id@b.c", time.Now())
 	if err != nil || !strings.Contains(string(raw), "Content-Type: text/plain; charset=utf-8") || !strings.Contains(string(raw), "line1\r\nline2") {
 		t.Fatalf("plain message: %v\n%s", err, raw)
+	}
+}
+
+func TestBuildMIMEMessageKeepsHeaderLinesShort(t *testing.T) {
+	recipients := make([]string, 50)
+	for i := range recipients {
+		recipients[i] = fmt.Sprintf("person%02d@example.org", i)
+	}
+	references := make([]string, 20)
+	for i := range references {
+		references[i] = fmt.Sprintf("reference-%02d-with-a-long-identifier@mail.example.org", i)
+	}
+	for _, subject := range []string{strings.Repeat("word ", 190), strings.Repeat("x", 990), strings.Repeat("你好", 400)} {
+		raw, err := buildMIMEMessage(mailtransport.Message{
+			FromAddress: "a@b.c", To: recipients, Cc: recipients[:10], Subject: subject, TextBody: "t", References: references,
+			Attachments: []mailtransport.Attachment{{Filename: `quote"d name.pdf`, ContentType: "application/pdf", Content: []byte("x")}},
+		}, "id@b.c", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		head, _, _ := strings.Cut(string(raw), "\r\n\r\n")
+		for _, line := range strings.Split(head, "\r\n") {
+			if len(line) > 998 {
+				t.Fatalf("header line of %d characters: %.80s", len(line), line)
+			}
+		}
+		parsed, err := mail.ReadMessage(strings.NewReader(string(raw)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if to, listErr := parsed.Header.AddressList("To"); listErr != nil || len(to) != 50 {
+			t.Fatalf("To parses to %d addresses, err %v", len(to), listErr)
+		}
+		decoded, decodeErr := new(mime.WordDecoder).DecodeHeader(parsed.Header.Get("Subject"))
+		if decodeErr != nil || strings.Join(strings.Fields(decoded), " ") != strings.Join(strings.Fields(subject), " ") {
+			t.Fatalf("subject round trip: %q, err %v", decoded, decodeErr)
+		}
+		if !strings.Contains(string(raw), `filename="quote\"d name.pdf"`) {
+			t.Fatalf("attachment name not quoted:\n%s", raw)
+		}
+	}
+}
+
+func TestSMTPResponseBudgetEndsAnEndlessGreeting(t *testing.T) {
+	server, client := net.Pipe()
+	t.Cleanup(func() { _ = server.Close(); _ = client.Close() })
+	go func() {
+		line := []byte("220-" + strings.Repeat("x", 1000) + "\r\n")
+		for {
+			if _, err := server.Write(line); err != nil {
+				return
+			}
+		}
+	}()
+	_, err := smtp.NewClient(&budgetConn{Conn: client, remaining: smtpResponseBudget}, "smtp.test")
+	if !errors.Is(err, errSMTPResponseTooLarge) {
+		t.Fatalf("endless greeting: %v", err)
 	}
 }

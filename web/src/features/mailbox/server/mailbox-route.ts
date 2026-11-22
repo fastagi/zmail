@@ -5258,6 +5258,8 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
         mockMailboxStore.createExternal(organizationId, ownerUserId, address, connector, days),
       sync: (organizationId, mailboxId, connector, days) =>
         mockMailboxStore.syncExternal(organizationId, mailboxId, connector, days),
+      setSend: (organizationId, mailboxId, sends) =>
+        mockMailboxStore.setConnectedSend(organizationId, mailboxId, sends),
     }
   );
   if (result.ok) return success(result.value, result.status);

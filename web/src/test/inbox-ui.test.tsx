@@ -607,6 +607,38 @@ describe('unified inbox', () => {
     expect(within(pane).getByText(/Read-only copy from Gmail/u)).toBeInTheDocument();
   });
 
+  it('replies to mail of an external mailbox that sends through its own server', async () => {
+    state.connectors.data = [
+      { id: 'imap', auth_kind: 'password', capabilities: { read: true, send: true } },
+    ];
+    state.mailboxes.data = [
+      mailbox(1, 'hello'),
+      { ...externalMailbox(41, 'me@qq.com'), access: { ...noAccess(), view: true, send: true } },
+    ];
+    state.connections.data = [
+      connection({ id: 1, mailbox_id: 41, account_address: 'me@qq.com', provider: 'imap' }),
+    ];
+    state.inbox.data = listing([
+      [
+        {
+          ...summary({ id: 71, mailbox_id: 41, subject: 'Invoice', source: 'imap' }),
+          mailbox_address: 'me@qq.com',
+          role_id: null,
+          snippet: 'Please find attached',
+        },
+      ],
+    ]);
+    state.detail.data = message({ id: 71, mailbox_id: 41, subject: 'Invoice', source: 'imap' });
+    renderRoute();
+
+    fireEvent.click(rowButton('Invoice'));
+    await readingPaneLoaded();
+
+    const pane = screen.getByRole('region', { name: 'Reading pane' });
+    expect(within(pane).getByRole('button', { name: 'Reply' })).toBeInTheDocument();
+    expect(within(pane).queryByText(/Read-only copy/u)).not.toBeInTheDocument();
+  });
+
   it('opening a thread row loads the thread and marks it read', async () => {
     queryClient.setQueryData(mailboxKeys.inbox(1, { view: 'all', group: 'thread', tz: 'UTC' }), {
       pages: [{ items: [threadRow(), singleRow()], meta: meta(false) }],

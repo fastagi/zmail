@@ -13,18 +13,43 @@ import (
 	"mime"
 	"mime/multipart"
 	"mime/quotedprintable"
+	"net"
 	"net/mail"
 	"net/smtp"
 	nettextproto "net/textproto"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/mailtransport"
 )
 
+// errSMTPResponseTooLarge ends a session whose server sent more than smtpResponseBudget.
+var errSMTPResponseTooLarge = errors.New("smtp server sent too much")
+
+// budgetConn fails reads once the server has sent remaining bytes.
+type budgetConn struct {
+	net.Conn
+	remaining int64
+}
+
+func (c *budgetConn) Read(p []byte) (int, error) {
+	if c.remaining <= 0 {
+		return 0, errSMTPResponseTooLarge
+	}
+	if int64(len(p)) > c.remaining {
+		p = p[:c.remaining]
+	}
+	n, err := c.Conn.Read(p)
+	c.remaining -= int64(n)
+	return n, err
+}
+
 const (
+	// smtpResponseBudget bounds what one SMTP session reads from the server.
+	smtpResponseBudget = 1 << 20
 	// smtpImplicitTLSPort is SMTP submission over implicit TLS, the default.
 	smtpImplicitTLSPort = 465
 	// smtpSubmissionPort is SMTP submission upgraded with a required STARTTLS.
@@ -68,17 +93,28 @@ func (s *imapSource) openSMTP(ctx context.Context, credentials imapCredentials) 
 		return nil, fmt.Errorf("%w: SMTP port %d is not allowed", ErrExternalMailServerUnreachable, port)
 	}
 	implicitTLS := port != smtpSubmissionPort
-	conn, err := s.dialServer(ctx, credentials.SMTPHost, port, implicitTLS)
+	raw, err := s.dialServer(ctx, credentials.SMTPHost, port, false)
 	if err != nil {
 		return nil, err
 	}
+	// Every byte the server sends, TLS included, counts against one budget: a member-chosen server
+	// cannot make the session allocate without bound.
+	var conn net.Conn = &budgetConn{Conn: raw, remaining: smtpResponseBudget}
 	deadline := time.Now().Add(s.overallTimeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	if deadlineErr := conn.SetDeadline(deadline); deadlineErr != nil {
-		closeQuietly(conn)
+	if deadlineErr := raw.SetDeadline(deadline); deadlineErr != nil {
+		closeQuietly(raw)
 		return nil, fmt.Errorf("%w: %v", ErrExternalMailServerUnreachable, deadlineErr)
+	}
+	if implicitTLS {
+		secured := tls.Client(conn, s.tlsConfig(credentials.SMTPHost))
+		if handshakeErr := secured.HandshakeContext(ctx); handshakeErr != nil {
+			closeQuietly(raw)
+			return nil, fmt.Errorf("%w: %v", ErrExternalMailServerUnreachable, handshakeErr)
+		}
+		conn = secured
 	}
 	client, err := smtp.NewClient(conn, credentials.SMTPHost)
 	if err != nil {
@@ -264,7 +300,7 @@ func buildMIMEMessage(message mailtransport.Message, messageID string, now time.
 	var out bytes.Buffer
 	header := func(name, value string) {
 		if value != "" {
-			out.WriteString(name + ": " + value + "\r\n")
+			out.WriteString(foldHeader(name, value))
 		}
 	}
 	for _, value := range append(append([]string{message.FromAddress, message.Subject, messageID}, message.To...), message.Cc...) {
@@ -275,7 +311,7 @@ func buildMIMEMessage(message mailtransport.Message, messageID string, now time.
 	header("From", (&mail.Address{Name: message.FromName, Address: message.FromAddress}).String())
 	header("To", addressList(message.To))
 	header("Cc", addressList(message.Cc))
-	header("Subject", mime.QEncoding.Encode("utf-8", message.Subject))
+	header("Subject", encodeSubject(message.Subject))
 	header("Date", now.UTC().Format(time.RFC1123Z))
 	header("Message-ID", "<"+messageID+">")
 	if message.InReplyTo != "" {
@@ -360,10 +396,17 @@ func writeMIMEBody(body *bytes.Buffer, message mailtransport.Message) (string, e
 		if kind == "" {
 			kind = "application/octet-stream"
 		}
-		name := mime.QEncoding.Encode("utf-8", file.Filename)
+		contentType := mime.FormatMediaType(kind, map[string]string{"name": file.Filename})
+		if contentType == "" {
+			contentType = mime.FormatMediaType("application/octet-stream", map[string]string{"name": file.Filename})
+		}
+		disposition := mime.FormatMediaType("attachment", map[string]string{"filename": file.Filename})
+		if disposition == "" {
+			disposition = "attachment"
+		}
 		part, err := mixed.CreatePart(nettextproto.MIMEHeader{
-			"Content-Type":              {mime.FormatMediaType(kind, nil) + "; name=\"" + name + "\""},
-			"Content-Disposition":       {"attachment; filename=\"" + name + "\""},
+			"Content-Type":              {contentType},
+			"Content-Disposition":       {disposition},
 			"Content-Transfer-Encoding": {"base64"},
 		})
 		if err != nil {
@@ -400,4 +443,53 @@ func addressList(addresses []string) string {
 		formatted = append(formatted, (&mail.Address{Address: address}).String())
 	}
 	return strings.Join(formatted, ", ")
+}
+
+// maxHeaderLineLength is where a header is folded; RFC 5322 recommends 78 and requires 998.
+const maxHeaderLineLength = 78
+
+// foldHeader writes one header, folded at spaces so no physical line passes 78 characters where a
+// space allows it.
+func foldHeader(name, value string) string {
+	var out strings.Builder
+	line := name + ":"
+	for _, word := range strings.Fields(value) {
+		if len(line)+1+len(word) > maxHeaderLineLength && strings.TrimSpace(line) != name+":" {
+			out.WriteString(line + "\r\n")
+			line = ""
+		}
+		line += " " + word
+	}
+	out.WriteString(line + "\r\n")
+	return out.String()
+}
+
+// encodeSubject encodes a subject as encoded words when it needs it, or when one of its words is
+// too long to fold, so every physical line stays short.
+func encodeSubject(subject string) string {
+	encoded := mime.QEncoding.Encode("utf-8", subject)
+	if encoded != subject {
+		return encoded
+	}
+	for _, word := range strings.Fields(subject) {
+		if len(word) > maxHeaderLineLength-len("Subject: ") {
+			return base64EncodedWords(subject)
+		}
+	}
+	return subject
+}
+
+// base64EncodedWords splits value into RFC 2047 B-encoded words of at most 45 bytes each, cut at
+// rune boundaries.
+func base64EncodedWords(value string) string {
+	var words []string
+	for len(value) > 0 {
+		end := min(len(value), 45)
+		for end < len(value) && !utf8.RuneStart(value[end]) {
+			end--
+		}
+		words = append(words, "=?utf-8?b?"+base64.StdEncoding.EncodeToString([]byte(value[:end]))+"?=")
+		value = value[end:]
+	}
+	return strings.Join(words, " ")
 }

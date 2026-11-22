@@ -124,8 +124,10 @@ export interface MockLedgerDirectory {
 
 interface MailboxAccessState {
   type: Mailbox['type'];
-  /** `connected` holds read-only copies of an outside account; `zmail` is Zmail's own. */
+  /** `connected` holds copies of an outside account; `zmail` is Zmail's own. */
   origin: 'zmail' | 'connected';
+  /** A connected mailbox bound with its SMTP server sends through it. */
+  connectedSend?: boolean;
   ownerUserId: number | null;
   /** Set while a personal mailbox's owner is not a member of the organization. */
   ownerLeft: { at: string; throughMessageId: number } | null;
@@ -281,7 +283,7 @@ const exportHeader = 'address,display_name,members,member_count,sent_last_24h,cr
 
 /** What a viewer may do with a mailbox: the union of role, personal ownership, and member row. */
 export function mailboxAccessFor(
-  access: Pick<MailboxAccessState, 'type' | 'origin' | 'ownerUserId' | 'members'>,
+  access: Pick<MailboxAccessState, 'type' | 'origin' | 'ownerUserId' | 'members' | 'connectedSend'>,
   viewer: MailboxViewer
 ): MailboxAccess {
   const connected = access.origin === 'connected';
@@ -314,8 +316,8 @@ export function mailboxAccessFor(
     }
   }
   if (connected) {
-    // Read-only origin: nobody sends from it or organizes it, whatever the permission.
-    result.send = false;
+    // Nobody organizes it, and it sends only through the account's own SMTP server.
+    result.send = result.send && access.connectedSend === true;
     result.organize = false;
   }
   return result;
@@ -537,6 +539,12 @@ export class MockMailboxStore {
     this.mailboxesOf(organizationId).set(mailbox.id, state);
     this.syncExternal(organizationId, mailbox.id, provider, backfillDays);
     return mailbox.id;
+  }
+
+  /** Records whether a connected mailbox sends through its account's SMTP server. */
+  setConnectedSend(organizationId: number, mailboxId: number, sends: boolean): void {
+    const state = this.mailboxesOf(organizationId).get(mailboxId);
+    if (state && state.access.origin === 'connected') state.access.connectedSend = sends;
   }
 
   /** Copies one more synced message into an external mailbox, as a sync would. */
