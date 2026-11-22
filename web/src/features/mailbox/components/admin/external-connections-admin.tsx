@@ -231,12 +231,12 @@ function ConnectionRow({
             {t(`external.status.${entry.status}`)}
           </span>
         </TableCell>
-        <TableCell className="whitespace-nowrap text-text-muted">
+        <TableCell className="min-w-28 whitespace-normal text-text-muted">
           {entry.last_synced_at
             ? formatter.format(new Date(entry.last_synced_at))
             : t('external.directory.never')}
         </TableCell>
-        <TableCell className="whitespace-nowrap text-text-muted">
+        <TableCell className="min-w-28 whitespace-normal text-text-muted">
           {formatter.format(new Date(entry.created_at))}
         </TableCell>
         <TableCell className="text-right">

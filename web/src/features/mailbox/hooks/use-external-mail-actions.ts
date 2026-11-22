@@ -65,20 +65,24 @@ export function useBindExternalMailCredentials(organizationId: number) {
     gcTime: 0,
     retry: false,
     meta: LOCAL_ERROR_HANDLING_META,
-    onSuccess: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: externalMailKeys.connections(organizationId) }),
-        queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) }),
-      ]),
   });
-  const { mutate } = mutation;
-  const bind = (
-    input: BindExternalMailCredentialsInput,
-    options?: Parameters<typeof mutate>[1]
-  ) => {
+  const { mutateAsync } = mutation;
+  /**
+   * Resolves with the completion even when the form unmounts meanwhile (the inbox re-renders as
+   * soon as the new mailbox is listed), so the caller can still close and navigate. The mailbox
+   * list and connections are read again only after the caller has acted on the answer.
+   */
+  const bind = async (input: BindExternalMailCredentialsInput) => {
     const { password, ...rest } = input;
     secret.current = password;
-    mutate(rest, options);
+    const completion = await mutateAsync(rest);
+    queueMicrotask(() => {
+      void queryClient.invalidateQueries({
+        queryKey: externalMailKeys.connections(organizationId),
+      });
+      void queryClient.invalidateQueries({ queryKey: mailboxKeys.list(organizationId) });
+    });
+    return completion;
   };
   return { ...mutation, bind };
 }

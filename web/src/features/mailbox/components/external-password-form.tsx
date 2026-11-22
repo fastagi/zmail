@@ -122,23 +122,22 @@ export function ExternalPasswordForm({
     const secret = password;
     // The password leaves component state before the request starts.
     setPassword('');
-    bind.bind(
-      {
+    bind
+      .bind({
         provider,
         host: trimmedHost,
         port: EXTERNAL_MAIL_IMAP_PORT,
         username: trimmedUser,
         password: secret,
         backfill_days: days,
-      },
-      {
-        onSuccess: completion => onConnected(completion, days),
-        onError: () => {
+      })
+      .then(
+        completion => onConnected(completion, days),
+        () => {
           // The error is announced; focus moves to it so the reason is read first.
           requestAnimationFrame(() => alertRef.current?.focus());
-        },
-      }
-    );
+        }
+      );
   };
 
   useEffect(() => {

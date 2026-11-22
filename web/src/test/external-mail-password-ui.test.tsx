@@ -163,6 +163,36 @@ describe('app password connect step', () => {
     );
   });
 
+  it('still closes and opens the mailbox when the dialog remounts before the answer', async () => {
+    let answer: (value: unknown) => void = () => {};
+    service.bindCredentials.mockReturnValue(new Promise(resolve => (answer = resolve)));
+    const onOpenChange = vi.fn();
+    const view = renderWith(<ConnectDialog onOpenChange={onOpenChange} />);
+    const form = await openForm();
+    fillForm(form);
+    fireEvent.click(within(form).getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(service.bindCredentials).toHaveBeenCalled());
+    // The inbox re-renders its dialogs elsewhere once the new mailbox is listed.
+    view.rerender(
+      <QueryClientProvider client={queryClient}>
+        <NextIntlClientProvider
+          locale="en-US"
+          messages={messages as unknown as AbstractIntlMessages}
+        >
+          <ConnectDialog key="remounted" onOpenChange={onOpenChange} />
+        </NextIntlClientProvider>
+      </QueryClientProvider>
+    );
+    answer({
+      outcome: 'created',
+      connection: connectionOf({ id: 9, provider: 'imap', mailbox_id: 77 }),
+    });
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith('/console/mailboxes?org=7&box=77')
+    );
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   const failures: [string, ApiError, string][] = [
     [
       'unreachable server',
