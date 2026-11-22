@@ -138,7 +138,7 @@ export function ComposeDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
   const templateHintId = useId();
-  const [kept] = useState(() => (flushed ? null : readComposeDraft(draftKey)));
+  const [kept] = useState(() => restored?.draft ?? (flushed ? null : readComposeDraft(draftKey)));
   const [to, setTo] = useState(kept?.to ?? draft.to);
   const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
   const [subject, setSubject] = useState(kept?.subject ?? draft.subject);
@@ -169,12 +169,13 @@ export function ComposeDialog({
   // What is written is kept as it changes, so leaving the page any way (the global sidebar, the
   // browser's back button, a reload) keeps the draft as closing the dialog does. Sending clears it.
   const sentRef = useRef(false);
-  const [files, setFiles] = useState<File[]>(() =>
-    flushed ? [] : readComposeDraftFiles(draftKey)
+  const [keptFiles] = useState<readonly File[]>(() =>
+    restored ? restored.files : flushed ? [] : readComposeDraftFiles(draftKey)
   );
+  const [files, setFiles] = useState<File[]>(() => [...keptFiles]);
   // Files named by a draft kept before a reload, which this page no longer holds.
   const [lostFiles, setLostFiles] = useState(() =>
-    flushed || readComposeDraftFiles(draftKey).length > 0 ? [] : (kept?.attachments ?? [])
+    keptFiles.length > 0 ? [] : (kept?.attachments ?? [])
   );
   // Until they are attached again, the names of lost files stay with the draft as a reminder.
   const attachments = files.length > 0 ? files.map(file => file.name) : lostFiles;
@@ -347,15 +348,17 @@ export function ComposeDialog({
   };
 
   /**
-   * Closes the composer and sends after `delayMs` unless Undo is chosen. The draft stays kept
-   * until the send succeeds, so Undo or a failure reopens the composer as it was. `onStored` is
-   * not called: by then the page may show another message or composer.
+   * Closes the composer and sends after `delayMs` unless Undo is chosen. What is written is held
+   * in memory, so Undo or a failure reopens the composer as it was even where the browser keeps
+   * no draft; the stored draft stays until the send succeeds, for a reload. `onStored` is not
+   * called: by then the page may show another message or composer.
    */
   const sendLater = (input: SendMailMessageInput, delayMs: number, reopen: () => void) => {
     const sender = from.id;
     const mutate = send.mutateAsync;
-    const reopenWith = (state: ReopenedCompose) => {
-      markReopenedCompose(draftKey, state);
+    const snapshot = { draft: written(), files: [...files] };
+    const reopenWith = (state: Omit<ReopenedCompose, 'draft' | 'files'>) => {
+      markReopenedCompose(draftKey, { ...snapshot, ...state });
       reopen();
     };
     onClose();
@@ -365,23 +368,19 @@ export function ComposeDialog({
       undoLabel: t('compose.undo'),
       undo: () => reopenWith({ fromId: sender }),
       run: () => {
-        // The send is under way: a composer opened now starts afresh, and a failure puts the
-        // draft back unless that composer has written one of its own.
-        const keptDraft = readComposeDraft(draftKey);
-        const keptFiles = readComposeDraftFiles(draftKey);
-        writeComposeDraft(draftKey, null);
-        writeComposeDraftFiles(draftKey, null);
-        mutate(input).then(
-          stored => {
+        const stored = JSON.stringify(readComposeDraft(draftKey));
+        return mutate(input).then(
+          result => {
             toast.success(
-              t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent')
+              t(result.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent')
             );
+            // A composer opened meanwhile may have kept a draft of its own; that one stays.
+            if (JSON.stringify(readComposeDraft(draftKey)) === stored) {
+              writeComposeDraft(draftKey, null);
+              writeComposeDraftFiles(draftKey, null);
+            }
           },
           (failure: unknown) => {
-            if (readComposeDraft(draftKey) === null) {
-              writeComposeDraft(draftKey, keptDraft);
-              writeComposeDraftFiles(draftKey, keptFiles);
-            }
             toast.error(t('compose.notSent'), {
               action: {
                 label: t('compose.openDraft'),

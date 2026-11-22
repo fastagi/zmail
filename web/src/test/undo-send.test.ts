@@ -69,20 +69,34 @@ describe('undo send', () => {
     expect(run).toHaveBeenCalledOnce();
   });
 
-  it('asks before the page unloads while a send waits', () => {
-    schedule();
-    const waiting = new Event('beforeunload', { cancelable: true });
-    window.dispatchEvent(waiting);
-    expect(waiting.defaultPrevented).toBe(true);
-    vi.advanceTimersByTime(5000);
-    const idle = new Event('beforeunload', { cancelable: true });
-    window.dispatchEvent(idle);
-    expect(idle.defaultPrevented).toBe(false);
+  it('asks before the page unloads until the send is answered', async () => {
+    const unloadBlocked = () => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    let answer = () => {};
+    const run = vi.fn(() => new Promise<void>(resolve => (answer = resolve)));
+    scheduleUndoableSend('draft', {
+      delayMs: 5000,
+      sending: 'Sending…',
+      undoLabel: 'Undo',
+      run,
+      undo: vi.fn(),
+    });
+    expect(unloadBlocked()).toBe(true);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(run).toHaveBeenCalledOnce();
+    expect(unloadBlocked()).toBe(true);
+    answer();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(unloadBlocked()).toBe(false);
   });
 
   it('hands the reopened state to the next composer once', () => {
-    markReopenedCompose('draft', { fromId: 7 });
-    expect(takeReopenedCompose('draft')).toEqual({ fromId: 7 });
+    const state = { fromId: 7, draft: { to: 'a@b.c', cc: '', subject: 'S', body: 'B' }, files: [] };
+    markReopenedCompose('draft', state);
+    expect(takeReopenedCompose('draft')).toEqual(state);
     expect(takeReopenedCompose('draft')).toBeUndefined();
   });
 });

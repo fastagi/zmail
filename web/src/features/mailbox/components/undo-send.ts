@@ -1,9 +1,11 @@
 import { toast } from 'sonner';
 
+import type { StoredComposeDraft } from '@/features/mailbox/components/compose-draft-store';
+
 /**
  * Undo send: a written message waits a few seconds after Send, with an Undo action, before it
- * goes to the API. The composer closes at once; its draft stays kept in this browser until the
- * send succeeds, so Undo (or a failure) reopens it exactly as written.
+ * goes to the API. The composer closes at once and its text and files are held in memory, so Undo
+ * (or a failure) reopens it exactly as written; the stored draft stays until the send succeeds.
  */
 
 const DEFAULT_UNDO_SEND_MS = 5000;
@@ -22,15 +24,17 @@ export function setUndoSendDelayMs(ms: number) {
 interface PendingSend {
   timer: ReturnType<typeof setTimeout>;
   toastId: string | number;
-  run: () => void;
+  run: () => Promise<unknown> | void;
 }
 
 /** Waiting sends by the draft key of the composer that made them. */
 const pending = new Map<string, PendingSend>();
 
-/** What a reopened composer starts with: the sender chosen and, after a failure, its cause. */
+/** What a reopened composer starts with: what was written, the sender and any failure's cause. */
 export interface ReopenedCompose {
   fromId: number;
+  draft: StoredComposeDraft;
+  files: readonly File[];
   failure?: unknown;
 }
 
@@ -52,9 +56,27 @@ function warnBeforeUnload(event: BeforeUnloadEvent) {
   event.preventDefault();
 }
 
+/** Sends that left the undo window but have not been answered yet. */
+let inFlight = 0;
+
+function release() {
+  if (pending.size === 0 && inFlight === 0) {
+    window.removeEventListener('beforeunload', warnBeforeUnload);
+  }
+}
+
 function settle(key: string) {
   pending.delete(key);
-  if (pending.size === 0) window.removeEventListener('beforeunload', warnBeforeUnload);
+  release();
+}
+
+/** Runs a send; leaving the page stays guarded until it is answered. */
+function launch(run: () => Promise<unknown> | void) {
+  inFlight += 1;
+  void Promise.resolve(run()).finally(() => {
+    inFlight -= 1;
+    release();
+  });
 }
 
 /**
@@ -66,8 +88,8 @@ export function flushPendingSend(key: string): boolean {
   if (!entry) return false;
   clearTimeout(entry.timer);
   toast.dismiss(entry.toastId);
-  settle(key);
-  entry.run();
+  pending.delete(key);
+  launch(entry.run);
   return true;
 }
 
@@ -87,7 +109,7 @@ export function scheduleUndoableSend(
     delayMs: number;
     sending: string;
     undoLabel: string;
-    run: () => void;
+    run: () => Promise<unknown> | void;
     undo: () => void;
   }
 ) {
@@ -106,10 +128,10 @@ export function scheduleUndoableSend(
     },
   });
   const timer = setTimeout(() => {
-    settle(key);
+    pending.delete(key);
     toast.dismiss(toastId);
-    run();
+    launch(run);
   }, delayMs);
-  if (pending.size === 0) window.addEventListener('beforeunload', warnBeforeUnload);
+  window.addEventListener('beforeunload', warnBeforeUnload);
   pending.set(key, { timer, toastId, run });
 }
