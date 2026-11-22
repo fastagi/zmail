@@ -121,7 +121,13 @@ export function ComposeDialog({
   // A draft kept when the dialog last closed takes the place of the starting text.
   // Drafts belong to the signed-in user; the composer reads them once as it opens.
   const userId = useContext(AuthStoreContext)?.getState().user?.id ?? 'anonymous';
-  const draftKey = composeDraftKey(userId, organizationId, draft);
+  // A saved draft this browser still keeps as its new message (with its files) continues there.
+  const [draftKey] = useState(() => {
+    const own = composeDraftKey(userId, organizationId, draft);
+    if (draft.savedId === undefined) return own;
+    const fresh = composeDraftKey(userId, organizationId, { ...draft, savedId: undefined });
+    return readComposeDraft(fresh)?.savedId === draft.savedId ? fresh : own;
+  });
   // A send of this draft still waiting to be undone goes now, and this composer starts afresh.
   const [flushed] = useState(() => flushPendingSend(draftKey));
   const [restored] = useState(() => takeReopenedCompose(draftKey));
@@ -139,10 +145,9 @@ export function ComposeDialog({
   // New messages are also kept by the API as drafts, so they show in the list on every device.
   const saveDraft = useSaveMailDraft(organizationId);
   const removeDraft = useDeleteMailDraft(organizationId).mutateAsync;
-  const savedId = () => draft.savedId ?? kept?.savedId;
   /** A sent message is no longer a draft. */
   const forgetSaved = () => {
-    const id = savedId();
+    const id = knownSavedId;
     if (id !== undefined) void removeDraft(id).catch(() => undefined);
   };
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -150,6 +155,7 @@ export function ComposeDialog({
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
   const templateHintId = useId();
   const [kept] = useState(() => restored?.draft ?? (flushed ? null : readComposeDraft(draftKey)));
+  const knownSavedId = draft.savedId ?? kept?.savedId;
   const [to, setTo] = useState(kept?.to ?? draft.to);
   const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
   const [subject, setSubject] = useState(kept?.subject ?? draft.subject);
@@ -199,25 +205,26 @@ export function ComposeDialog({
   });
   useEffect(() => {
     if (sentRef.current) return;
+    const keep = draftToKeep(
+      {
+        to,
+        cc,
+        subject,
+        body,
+        ...(files.length > 0
+          ? { attachments: files.map(file => file.name) }
+          : lostFiles.length > 0
+            ? { attachments: lostFiles }
+            : {}),
+      },
+      startingDraft
+    );
     writeComposeDraft(
       draftKey,
-      draftToKeep(
-        {
-          to,
-          cc,
-          subject,
-          body,
-          ...(files.length > 0
-            ? { attachments: files.map(file => file.name) }
-            : lostFiles.length > 0
-              ? { attachments: lostFiles }
-              : {}),
-        },
-        startingDraft
-      )
+      keep && knownSavedId !== undefined ? { ...keep, savedId: knownSavedId } : keep
     );
     writeComposeDraftFiles(draftKey, files);
-  }, [draftKey, startingDraft, to, cc, subject, body, files, lostFiles]);
+  }, [draftKey, startingDraft, to, cc, subject, body, files, lostFiles, knownSavedId]);
   // The forwarded message's files, carried along unless removed; read only when sending.
   const [carried, setCarried] = useState<readonly MailAttachment[]>(
     () => draft.forwarded?.attachments ?? []
@@ -476,9 +483,9 @@ export function ComposeDialog({
           cc: keep.cc,
           subject: keep.subject,
           body: keep.body,
-          in_reply_to: '',
+          in_reply_to: draft.inReplyTo,
         },
-        id: savedId() ?? null,
+        id: knownSavedId ?? null,
       })
       .then(
         saved => {
@@ -500,9 +507,12 @@ export function ComposeDialog({
   const dismiss = () => {
     if (send.isPending) return;
     const found = draftToKeep(written(), startingDraft);
-    const known = savedId();
+    const known = knownSavedId;
     const keep = found && known !== undefined ? { ...found, savedId: known } : found;
     writeComposeDraft(draftKey, keep);
+    const blank = files.length === 0 && [to, cc, subject, body].every(value => value.trim() === '');
+    // Clearing a saved draft and closing it discards it everywhere.
+    if (blank && !isReplyOrForward) forgetSaved();
     writeComposeDraftFiles(draftKey, files);
     if (keep && !isReplyOrForward) keepOnServer(keep);
     if (keep)

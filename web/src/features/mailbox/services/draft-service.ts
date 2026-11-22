@@ -2,6 +2,7 @@ import {
   mailDraftListSchema,
   mailDraftSchema,
   type MailDraft,
+  type MailDraftSummary,
   type MailDraftInput,
 } from '@/features/mailbox/draft-schemas';
 import { ClientErrorCode } from '@/http/codes';
@@ -13,11 +14,23 @@ import request, { ApiError } from '@/http/request';
  */
 export const draftService = {
   /** The caller's drafts in the organization, the latest change first. */
-  async drafts(organizationId: number): Promise<MailDraft[]> {
+  async drafts(organizationId: number): Promise<MailDraftSummary[]> {
     const parsed = mailDraftListSchema.safeParse(
       await request.get<unknown>('/mail-drafts', { headers: organizationHeaders(organizationId) })
     );
     if (!parsed.success) throw invalidResponse();
+    return parsed.data;
+  },
+
+  /** One of the caller's drafts in full. */
+  async draft(organizationId: number, id: number): Promise<MailDraft> {
+    validId(id);
+    const parsed = mailDraftSchema.safeParse(
+      await request.get<unknown>(`/mail-drafts/${id}`, {
+        headers: organizationHeaders(organizationId),
+      })
+    );
+    if (!parsed.success || parsed.data.id !== id) throw invalidResponse();
     return parsed.data;
   },
 

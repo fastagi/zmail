@@ -413,6 +413,7 @@ const messages = {
     toLine: 'To {to}',
     fromLine: 'from {from}',
     delete: 'Delete draft {subject}',
+    openFailed: 'The draft could not be opened. Try again.',
     deleted: 'Draft deleted',
     deleteFailed: 'The draft could not be deleted. Try again.',
     saveFailed: 'The draft could not be saved to your drafts. It is still kept in this browser.',

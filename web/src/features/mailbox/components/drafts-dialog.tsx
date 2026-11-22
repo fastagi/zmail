@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import type { MailDraft } from '@/features/mailbox/draft-schemas';
+import type { MailDraftSummary } from '@/features/mailbox/draft-schemas';
 import { useDeleteMailDraft, useMailDrafts } from '@/features/mailbox/hooks/use-mail-drafts';
 import { useMailDateTimeFormat } from '@/features/mailbox/components/mail-time';
 import type { Mailbox } from '@/features/mailbox/types';
@@ -30,7 +30,7 @@ export default function DraftsDialog({
   mailboxes: readonly Pick<Mailbox, 'id' | 'address'>[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onOpenDraft: (draft: MailDraft) => void;
+  onOpenDraft: (draft: MailDraftSummary) => void;
 }) {
   const t = useT('mailbox');
   const drafts = useMailDrafts(organizationId, open);
@@ -38,7 +38,7 @@ export default function DraftsDialog({
   const formatter = useMailDateTimeFormat();
   const addressOf = new Map(mailboxes.map(mailbox => [mailbox.id, mailbox.address]));
 
-  const deleteDraft = (draft: MailDraft) => {
+  const deleteDraft = (draft: MailDraftSummary) => {
     remove.mutate(draft.id, {
       onSuccess: () => toast.success(t('drafts.deleted')),
       onError: () => toast.error(t('drafts.deleteFailed')),
@@ -64,7 +64,7 @@ export default function DraftsDialog({
       <ul className="-mx-2 flex flex-col">
         {drafts.data.map(draft => {
           const subject = draft.subject.trim() || t('drafts.noSubject');
-          const preview = draft.body.replace(/\s+/g, ' ').trim();
+          const preview = draft.preview;
           return (
             <li
               key={draft.id}

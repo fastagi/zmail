@@ -63,8 +63,8 @@ import {
   useInboxTimezone,
   useMailRoles,
 } from '@/features/mailbox/hooks/use-inbox';
-import { useMailDrafts } from '@/features/mailbox/hooks/use-mail-drafts';
-import type { MailDraft } from '@/features/mailbox/draft-schemas';
+import { useMailDrafts, useOpenMailDraft } from '@/features/mailbox/hooks/use-mail-drafts';
+import type { MailDraftSummary } from '@/features/mailbox/draft-schemas';
 import {
   useExternalMailConnections,
   useExternalMailConnectors,
@@ -441,6 +441,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const triageCounts = counts.data?.triage ?? null;
   const filters = inboxFilters(urlState, timeZone, triageCounts !== null);
   const inbox = useInboxMessages(organizationId, filters, { enabled: zoneReady });
+  const openDraft = useOpenMailDraft(organizationId);
   const savedDrafts = useMailDrafts(organizationId, mailboxes.data?.some(canComposeFrom) ?? false);
   const [triageMenuOpen, setTriageMenuOpen] = useState(false);
   const [managingRoles, setManagingRoles] = useState(false);
@@ -747,21 +748,27 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             fromOptions: sendable,
           })
       : null;
-  const openSavedDraft = (saved: MailDraft) => {
-    setDraftsOpen(false);
-    setDraft({
-      mailbox:
-        sendable.find(mailbox => mailbox.id === saved.mailbox_id) ??
-        newMessageSender(sendable, urlState.box, organizationId),
-      draft: {
-        ...emptyDraft,
-        to: saved.to,
-        cc: saved.cc,
-        subject: saved.subject,
-        body: saved.body,
-        savedId: saved.id,
+  const openSavedDraft = (summary: MailDraftSummary) => {
+    openDraft.mutate(summary.id, {
+      onSuccess: saved => {
+        setDraftsOpen(false);
+        setDraft({
+          mailbox:
+            sendable.find(mailbox => mailbox.id === saved.mailbox_id) ??
+            newMessageSender(sendable, urlState.box, organizationId),
+          draft: {
+            ...emptyDraft,
+            to: saved.to,
+            cc: saved.cc,
+            subject: saved.subject,
+            body: saved.body,
+            inReplyTo: saved.in_reply_to,
+            savedId: saved.id,
+          },
+          fromOptions: sendable,
+        });
       },
-      fromOptions: sendable,
+      onError: () => toast.error(t('drafts.openFailed')),
     });
   };
   // Rows name their mailbox, tinted by its role, unless the list is one mailbox.

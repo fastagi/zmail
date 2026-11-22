@@ -126,6 +126,7 @@ vi.mock('@/features/mailbox/hooks/use-inbox', () => ({
 }));
 vi.mock('@/features/mailbox/hooks/use-mail-drafts', () => ({
   useMailDrafts: () => ({ data: [], isPending: false, isError: false }),
+  useOpenMailDraft: () => ({ mutate: () => undefined }),
   useSaveMailDraft: () => ({ mutateAsync: () => Promise.resolve({ id: 1 }) }),
   useDeleteMailDraft: () => ({
     mutate: () => undefined,

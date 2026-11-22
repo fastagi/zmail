@@ -1,19 +1,27 @@
 import 'server-only';
 
-import type { MailDraft, MailDraftInput } from '@/features/mailbox/draft-schemas';
-import { MAIL_DRAFTS_PER_MEMBER } from '@/features/mailbox/draft-schemas';
+import type { MailDraft, MailDraftInput, MailDraftSummary } from '@/features/mailbox/draft-schemas';
+import { MAIL_DRAFTS_PER_MEMBER, draftPreview } from '@/features/mailbox/draft-schemas';
 
 /** Development mock of drafts (`contracts/MAILBOXES.md`, Drafts): each visible to its writer. */
 class MockDraftStore {
   private readonly drafts = new Map<number, MailDraft & { owner: string }>();
   private nextId = 1;
 
-  list(organizationId: number, userId: number): MailDraft[] {
+  list(organizationId: number, userId: number): MailDraftSummary[] {
     const owner = key(organizationId, userId);
     return [...this.drafts.values()]
       .filter(draft => draft.owner === owner)
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id - a.id)
-      .map(strip);
+      .map(draft => {
+        const { body, ...rest } = strip(draft);
+        return { ...rest, preview: draftPreview(body) };
+      });
+  }
+
+  get(organizationId: number, userId: number, id: number): MailDraft | null {
+    const draft = this.drafts.get(id);
+    return draft?.owner === key(organizationId, userId) ? strip(draft) : null;
   }
 
   /** The saved draft; null when it is another's or gone, 'limit' at the per-member cap. */

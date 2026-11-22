@@ -104,7 +104,7 @@ import {
 } from '@/features/mailbox/signature-schemas';
 import { mockSignatureStore } from '@/features/mailbox/server/mock-signature-store';
 import { mockDraftStore } from '@/features/mailbox/server/mock-draft-store';
-import { MAIL_DRAFT_LIMITS } from '@/features/mailbox/draft-schemas';
+import { MAIL_DRAFT_LIMITS, draftRecipientLine } from '@/features/mailbox/draft-schemas';
 import { mockTriageStore } from '@/features/mailbox/server/mock-triage-store';
 import { mailAgentGrantInput } from '@/features/mailbox/server/agent-grant-input';
 import {
@@ -5599,6 +5599,27 @@ export async function listMailDraftsRoute(request: Request): Promise<NextRespons
   return success(mockDraftStore.list(target.organizationId, viewerOf(target).userId));
 }
 
+/** One of the caller's drafts in full. */
+export async function showMailDraftRoute(
+  request: Request,
+  rawDraftId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const draftId = parseRouteId(rawDraftId);
+  if (!draftId.ok) return draftId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mail-drafts/${draftId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const draft = mockDraftStore.get(target.organizationId, viewerOf(target).userId, draftId.value);
+  return draft ? success(draft) : draftNotFound();
+}
+
 /** Saves a new draft from a mailbox the caller may send from. */
 export async function createMailDraftRoute(request: Request): Promise<NextResponse> {
   const target = await resolveMailboxMutationRoute(request);
@@ -5696,14 +5717,13 @@ async function saveMailDraft(
     .find(item => item.id === input.mailbox_id);
   if (!mailbox) return mailboxNotFound();
   if (!mailbox.access.send) return forbidden();
-  const lineOf = (value: string) => value.replace(/\s+/g, ' ').trim();
   const saved = mockDraftStore.save(
     target.organizationId,
     viewer.userId,
     {
       ...input,
-      to: lineOf(input.to),
-      cc: lineOf(input.cc),
+      to: draftRecipientLine(input.to),
+      cc: draftRecipientLine(input.cc),
       body: input.body.replace(/\r\n?/g, '\n'),
       in_reply_to: input.in_reply_to.trim(),
     },

@@ -400,6 +400,7 @@ const messages = {
     toLine: '收件人 {to}',
     fromLine: '发件邮箱 {from}',
     delete: '删除草稿 {subject}',
+    openFailed: '草稿打开失败，请重试。',
     deleted: '草稿已删除',
     deleteFailed: '草稿删除失败，请重试。',
     saveFailed: '草稿没能保存到草稿箱，仍保留在这个浏览器里。',

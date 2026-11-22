@@ -23,6 +23,14 @@ export function useMailDrafts(organizationId: number, enabled = true) {
   });
 }
 
+/** Reads one draft in full, to continue it in the composer. */
+export function useOpenMailDraft(organizationId: number) {
+  return useMutation({
+    mutationFn: (id: number) => draftService.draft(organizationId, id),
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
 /** Saves a new draft (`id` null) or replaces one; the list refreshes either way. */
 export function useSaveMailDraft(organizationId: number) {
   const queryClient = useQueryClient();

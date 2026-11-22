@@ -146,11 +146,17 @@ vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
 }));
 const drafts = vi.hoisted(() => ({
   list: [] as Array<Record<string, unknown>>,
+  body: '',
   save: vi.fn<(variables: unknown) => Promise<{ id: number }>>(() => Promise.resolve({ id: 7 })),
   remove: vi.fn<(id: number) => Promise<void>>(() => Promise.resolve()),
 }));
 vi.mock('@/features/mailbox/hooks/use-mail-drafts', () => ({
   useMailDrafts: () => ({ data: drafts.list, isPending: false, isError: false }),
+  useOpenMailDraft: () => ({
+    mutate: (id: number, handlers: { onSuccess: (draft: unknown) => void }) => {
+      handlers.onSuccess({ ...drafts.list.find(draft => draft.id === id), body: drafts.body });
+    },
+  }),
   useSaveMailDraft: () => ({ mutateAsync: drafts.save }),
   useDeleteMailDraft: () => ({
     mutate: drafts.remove,
@@ -2170,6 +2176,7 @@ describe('inbox keyboard shortcuts', () => {
       target: { value: 'bob@example.com' },
     });
     fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Plan' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Draft body' } });
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(drafts.save).toHaveBeenCalledOnce());
     expect(drafts.save.mock.calls[0]?.[0]).toMatchObject({
@@ -2184,12 +2191,13 @@ describe('inbox keyboard shortcuts', () => {
         to: 'bob@example.com',
         cc: '',
         subject: 'Plan',
-        body: 'Draft body',
+        preview: 'Draft body',
         in_reply_to: '',
         created_at: '2026-11-22T05:00:00Z',
         updated_at: '2026-11-22T05:00:00Z',
       },
     ];
+    drafts.body = 'Draft body';
     first.unmount();
     renderRoute();
     fireEvent.click((await screen.findAllByRole('button', { name: 'Drafts: 1' }))[0]!);
