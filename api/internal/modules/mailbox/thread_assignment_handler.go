@@ -1,6 +1,8 @@
 package mailbox
 
 import (
+	"bytes"
+	"encoding/json"
 	"strconv"
 	"time"
 
@@ -13,8 +15,28 @@ import (
 
 // UpdateMailThreadAssignmentRequest replaces a thread's assignment; a null assignee unassigns it.
 type UpdateMailThreadAssignmentRequest struct {
-	AssigneeUserID *uint  `json:"assignee_user_id" binding:"omitempty,min=1"`
-	Status         string `json:"status" binding:"required"`
+	AssigneeUserID requiredNullableID `json:"assignee_user_id"`
+	Status         string             `json:"status" binding:"required"`
+}
+
+// requiredNullableID tells an explicit null from an omitted field, so a partial body cannot unassign.
+type requiredNullableID struct {
+	Set   bool
+	Value *uint
+}
+
+func (id *requiredNullableID) UnmarshalJSON(raw []byte) error {
+	id.Set = true
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		id.Value = nil
+		return nil
+	}
+	var value uint
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	id.Value = &value
+	return nil
 }
 
 // MailThreadAssignmentResponse is who works a thread, and who it may go to.
@@ -73,8 +95,12 @@ func (h *Handler) UpdateMailThreadAssignment(c *gin.Context) {
 	if !httphandler.BindJSON(c, &req) {
 		return
 	}
+	if !req.AssigneeUserID.Set {
+		response.ValidationFailed(c, map[string][]string{"assignee_user_id": {"is required; send null to unassign"}})
+		return
+	}
 	view, err := h.service.SaveMailThreadAssignment(c.Request.Context(), viewer, mailboxID, threadID, MailThreadAssignmentInput{
-		AssigneeUserID: req.AssigneeUserID, Status: domain.MailThreadStatus(req.Status),
+		AssigneeUserID: req.AssigneeUserID.Value, Status: domain.MailThreadStatus(req.Status),
 	})
 	if err != nil {
 		respondOrganizeError(c, "Failed to save the assignment", err)

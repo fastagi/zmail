@@ -44,7 +44,12 @@ func (s *service) SaveMailThreadAssignment(
 	if input.Status != domain.MailThreadOpen && input.Status != domain.MailThreadClosed {
 		invalid.add("status", "must be open or closed")
 	}
-	if input.AssigneeUserID != nil && !containsUint(assignable, *input.AssigneeUserID) {
+	current, err := store.FindMailThreadAssignment(ctx, mailboxID, threadID)
+	if err != nil {
+		return MailThreadAssignmentView{}, err
+	}
+	if input.AssigneeUserID != nil && !containsUint(assignable, *input.AssigneeUserID) &&
+		!sameUserID(current.AssigneeUserID, input.AssigneeUserID) {
 		invalid.add("assignee_user_id", "must be a member of the mailbox who may send")
 	}
 	if err = invalid.orNil(); err != nil {
@@ -99,4 +104,10 @@ func containsUint(values []uint, want uint) bool {
 		}
 	}
 	return false
+}
+
+// sameUserID reports whether a kept assignee is unchanged, so a member who lost send access can
+// stay on a thread while its status moves.
+func sameUserID(a, b *uint) bool {
+	return a != nil && b != nil && *a == *b
 }

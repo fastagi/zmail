@@ -1490,8 +1490,10 @@ assignable_user_ids }`.
 
 - A thread nobody assigned is `open`, `assignee_user_id` and `updated_at` are `null`.
 - `assignable_user_ids` lists, ascending, the mailbox's members with `send` or `manage`; the
-  assignee must be one of them, else `422 COMMON.VALIDATION_FAILED` on `assignee_user_id`. A
-  `null` assignee unassigns the thread. `status` is `open` or `closed`.
+  assignee must be one of them or the thread's current assignee (so a thread kept on a member who
+  lost `send` can still change status), else `422 COMMON.VALIDATION_FAILED` on
+  `assignee_user_id`. `assignee_user_id` is required: an explicit `null` unassigns the thread and
+  an omitted field is `422`. `status` is `open` or `closed`.
 - The thread must have a message the caller sees outside the trash, else
   `404 MAILBOX.MESSAGE_NOT_FOUND`.
 - When the assignee or the last editor is deleted, that field becomes `null`; removing a member

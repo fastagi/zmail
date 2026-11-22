@@ -5648,7 +5648,14 @@ export async function updateMailThreadAssignmentRoute(
   const scope = mockAssignableThread(target.organizationId, mailboxId, threadId, viewer);
   if (!scope.ok) return scope.response;
   if (!scope.canSend) return forbidden();
-  if (input.assignee_user_id !== null && !scope.assignable.includes(input.assignee_user_id)) {
+  const kept =
+    mockAssignmentStore.read(target.organizationId, mailboxId, threadId, scope.assignable)
+      .assignee_user_id === input.assignee_user_id;
+  if (
+    input.assignee_user_id !== null &&
+    !kept &&
+    !scope.assignable.includes(input.assignee_user_id)
+  ) {
     return validationFailed({ assignee_user_id: ['must be a member of the mailbox who may send'] });
   }
   return success(

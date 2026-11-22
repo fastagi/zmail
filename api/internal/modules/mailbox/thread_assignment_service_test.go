@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -66,6 +67,18 @@ func TestSharedThreadAssignmentNeedsSendAndASendingAssignee(t *testing.T) {
 		t.Fatalf("read back = %+v, %v", read, err)
 	}
 
+	// C may only view, so C cannot be newly assigned; a thread already on C still changes status.
+	if _, err = f.service.assignments.SaveMailThreadAssignment(ctx, domain.MailThreadAssignment{
+		MailboxID: f.team.ID, ThreadID: thread, AssigneeUserID: &c, Status: domain.MailThreadOpen,
+	}, f.service.now()); err != nil {
+		t.Fatalf("seed former assignee: %v", err)
+	}
+	if kept, keepErr := f.service.SaveMailThreadAssignment(ctx, f.b, f.team.ID, thread,
+		MailThreadAssignmentInput{AssigneeUserID: &c, Status: domain.MailThreadClosed}); keepErr != nil ||
+		kept.AssigneeUserID == nil || *kept.AssigneeUserID != c || kept.Status != domain.MailThreadClosed {
+		t.Fatalf("close a thread kept on a former assignee = %+v, %v", kept, keepErr)
+	}
+
 	if _, err = f.service.MailThreadAssignment(ctx, f.b, f.team.ID, thread+1000); !errors.Is(err, ErrMailMessageNotFound) {
 		t.Fatalf("missing thread = %v; want not found", err)
 	}
@@ -74,5 +87,34 @@ func TestSharedThreadAssignmentNeedsSendAndASendingAssignee(t *testing.T) {
 	}
 	if _, err = f.service.MailThreadAssignment(ctx, f.d, f.team.ID, thread); err == nil {
 		t.Fatal("outsider read an assignment")
+	}
+}
+
+func TestUpdateMailThreadAssignmentRequestTellsNullFromOmitted(t *testing.T) {
+	cases := map[string]struct {
+		body  string
+		set   bool
+		value uint
+	}{
+		"omitted": {body: `{"status":"open"}`},
+		"null":    {body: `{"assignee_user_id":null,"status":"open"}`, set: true},
+		"id":      {body: `{"assignee_user_id":7,"status":"open"}`, set: true, value: 7},
+	}
+	for name, tc := range cases {
+		var req UpdateMailThreadAssignmentRequest
+		if err := json.Unmarshal([]byte(tc.body), &req); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got := uint(0)
+		if req.AssigneeUserID.Value != nil {
+			got = *req.AssigneeUserID.Value
+		}
+		if req.AssigneeUserID.Set != tc.set || got != tc.value {
+			t.Fatalf("%s = %+v; want set=%v value=%d", name, req.AssigneeUserID, tc.set, tc.value)
+		}
+	}
+	var req UpdateMailThreadAssignmentRequest
+	if err := json.Unmarshal([]byte(`{"assignee_user_id":"7","status":"open"}`), &req); err == nil {
+		t.Fatal("a string assignee was accepted")
 	}
 }
