@@ -3,6 +3,8 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -245,14 +247,17 @@ func TestExternalMailProviderReleaseExpiresWithConnectorsOff(t *testing.T) {
 	}
 }
 
-// TestExternalMailPushNotificationAndSaveShareALockOrder: a sync's save locks the connection and then
-// its subscription; a notification for that subscription arriving meanwhile waits for the connection
-// instead of taking the subscription first, so neither is aborted as a deadlock and the notification
-// stays pending. Two real transactions on PostgreSQL.
-func TestExternalMailPushNotificationAndSaveShareALockOrder(t *testing.T) {
+// TestExternalMailPushEndpointNeverWaitsForAConnection: a sync's save that holds the connection row
+// (and is about to take the subscription) does not delay a notification: the endpoint records it on
+// the subscription at once, without touching the connection. Once the save commits, the worker's
+// promotion makes the connection due, and the save, taking the subscription afterwards, is never
+// aborted as a deadlock. Two real transactions on PostgreSQL.
+func TestExternalMailPushEndpointNeverWaitsForAConnection(t *testing.T) {
 	f := newPushFixture(t)
 	f.sync(t)
+	f.advance(time.Minute)
 	subscription := f.subscription(t, f.connection.ID)
+	id, secret, _ := f.source.PushSubscription(externalTestToken)
 	db := f.repo.(*repository).db
 	save := db.Begin()
 	t.Cleanup(func() { save.Rollback() })
@@ -260,39 +265,59 @@ func TestExternalMailPushNotificationAndSaveShareALockOrder(t *testing.T) {
 	if err := save.Exec(`UPDATE external_mail_connections SET updated_at = now() WHERE id = ?`, f.connection.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	notified := make(chan error, 1)
-	go func() {
-		_, err := f.service.pushStore.MarkExternalMailPush(context.Background(), domain.ExternalMailPushMark{
-			SubscriptionIDs: []uint{subscription.ID}, Now: f.service.now().UTC(), Window: time.Second, Spacing: time.Second,
-		})
-		notified <- err
-	}()
-	// The test pool has two connections, both busy now (the save and the notification), so the
-	// notification's lock wait cannot be watched from here; it starts at once and is given time to
-	// reach its first lock.
-	time.Sleep(500 * time.Millisecond)
-	select {
-	case err := <-notified:
-		t.Fatalf("the notification did not wait for the save's connection lock: %v", err)
-	default:
+	started := time.Now()
+	_, err := f.service.ReceiveExternalMailPush(context.Background(), domain.ExternalMailProviderGmail, ExternalMailPushDelivery{
+		Header: http.Header{}, Query: url.Values{}, Body: fakeNotificationBody(id, secret, ""), ClientIP: "40.0.0.1",
+	})
+	if took := time.Since(started); err != nil || took > time.Second {
+		t.Fatalf("the endpoint answered %v after %v while a connection row was held", err, took)
 	}
-	// The save then takes the subscription, as savePushUpkeep does.
-	if err := save.Exec(`UPDATE external_mail_subscriptions SET updated_at = now() WHERE id = ?`, subscription.ID).Error; err != nil {
+	if pending := f.subscription(t, f.connection.ID); pending.PendingAt == nil {
+		t.Fatal("the notification was not recorded")
+	}
+	// The save then takes the subscription, as savePushUpkeep does, and commits.
+	if err = save.Exec(`UPDATE external_mail_subscriptions SET updated_at = now() WHERE id = ?`, subscription.ID).Error; err != nil {
 		t.Fatalf("the save lost its transaction: %v", err)
 	}
-	if err := save.Commit().Error; err != nil {
+	if err = save.Commit().Error; err != nil {
 		t.Fatalf("the save did not commit: %v", err)
 	}
-	select {
-	case err := <-notified:
-		if err != nil {
-			t.Fatalf("the notification failed: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the notification never finished")
+	now := f.service.now().UTC()
+	f.promote(t)
+	if next := f.nextSyncAt(t, f.connection.ID); !next.Equal(now) {
+		t.Fatalf("after the save the worker did not make the connection due: %v", next)
 	}
-	if after := f.subscription(t, f.connection.ID); after.PendingAt == nil {
-		t.Fatal("the notification was lost")
+}
+
+// TestExternalMailPushEndpointAsksAgainWhileASaveHoldsTheSubscription: when a sync's save holds the
+// subscription row itself, the endpoint does not wait for it either: it answers 503 with Retry-After
+// at once, and the provider's redelivery is recorded.
+func TestExternalMailPushEndpointAsksAgainWhileASaveHoldsTheSubscription(t *testing.T) {
+	f := newPushFixture(t)
+	f.sync(t)
+	subscription := f.subscription(t, f.connection.ID)
+	id, secret, _ := f.source.PushSubscription(externalTestToken)
+	db := f.repo.(*repository).db
+	save := db.Begin()
+	t.Cleanup(func() { save.Rollback() })
+	if err := save.Exec(`UPDATE external_mail_subscriptions SET updated_at = now() WHERE id = ?`, subscription.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	delivery := ExternalMailPushDelivery{Header: http.Header{}, Query: url.Values{}, Body: fakeNotificationBody(id, secret, ""), ClientIP: "40.0.0.1"}
+	started := time.Now()
+	_, err := f.service.ReceiveExternalMailPush(context.Background(), domain.ExternalMailProviderGmail, delivery)
+	var retry *RetryAfterError
+	if took := time.Since(started); !errors.As(err, &retry) || !errors.Is(err, domain.ErrExternalMailPushBusy) || took > time.Second {
+		t.Fatalf("while the subscription was held the endpoint answered %v after %v", err, took)
+	}
+	if err = save.Commit().Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.service.ReceiveExternalMailPush(context.Background(), domain.ExternalMailProviderGmail, delivery); err != nil {
+		t.Fatalf("the redelivery = %v", err)
+	}
+	if pending := f.subscription(t, f.connection.ID); pending.PendingAt == nil {
+		t.Fatal("the redelivered notification was not recorded")
 	}
 }
 

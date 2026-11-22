@@ -42,6 +42,15 @@ func TestMailExternalSyncWorkerDefaultsAndOnce(t *testing.T) {
 	assert.Equal(t, []int{5}, worker.limits)
 }
 
+// TestMailExternalSyncPollsQuicklyForPush: with push on and no --poll the worker waits two seconds
+// between idle passes; an explicit --poll wins, and without push the default stays 30 seconds.
+func TestMailExternalSyncPollsQuicklyForPush(t *testing.T) {
+	push := config.ExternalMailPushConfig{Enabled: true}
+	assert.Equal(t, 2*time.Second, externalMailWorkerPoll(nil, 30*time.Second, push))
+	assert.Equal(t, 10*time.Second, externalMailWorkerPoll([]string{"--poll=10s"}, 10*time.Second, push))
+	assert.Equal(t, 30*time.Second, externalMailWorkerPoll(nil, 30*time.Second, config.ExternalMailPushConfig{}))
+}
+
 // TestMailExternalSyncDoesNotStartWhenOff: with EXTERNAL_MAIL_PROVIDERS empty the command exits
 // cleanly before it initializes the application or opens the database.
 func TestMailExternalSyncDoesNotStartWhenOff(t *testing.T) {

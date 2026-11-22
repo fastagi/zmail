@@ -90,6 +90,7 @@ func TestExternalMailPushJunkCannotStarveTheProvider(t *testing.T) {
 	if err := receive(domain.ExternalMailProviderGmail, "66.102.0.1", http.Header{"Authorization": {"Bearer good"}}, f.connection.AccountAddress); err != nil {
 		t.Fatalf("an authenticated notification after the flood = %v", err)
 	}
+	f.promote(t)
 	if next := f.nextSyncAt(t, f.connection.ID); next.After(now.Add(f.service.settings.ExternalMail.Sync.Spacing())) {
 		t.Fatalf("the authenticated notification did not make the connection due: %v", next)
 	}

@@ -37,7 +37,7 @@ const (
 	// externalMailPushReconcileBatch bounds the subscriptions of ended connections stopped per pass,
 	// externalMailPushPromoteBatch the notifications promoted per pass.
 	externalMailPushReconcileBatch = 100
-	externalMailPushPromoteBatch   = 200
+	externalMailPushPromoteBatch   = 1000
 	// externalMailPushCallTimeout bounds one subscribe, renewal, or stop at the provider.
 	externalMailPushCallTimeout = 20 * time.Second
 	// minExternalMailPushLife is the least life a provider must grant a new subscription.
@@ -70,6 +70,8 @@ var (
 	ErrExternalMailPushUnauthenticated = errors.New("external mail notification is not authenticated")
 	// ErrExternalMailPushRateLimited means the provider's notification budget, or the sender's, is used up.
 	ErrExternalMailPushRateLimited = errors.New("external mail notifications are rate limited")
+	// ErrExternalMailPushBusy is domain.ErrExternalMailPushBusy, answered 503 with Retry-After.
+	ErrExternalMailPushBusy = domain.ErrExternalMailPushBusy
 	// ErrExternalMailPushUnsupported means the provider cannot deliver push for this connection.
 	ErrExternalMailPushUnsupported = errors.New("external mail push is not supported for this connection")
 )
@@ -274,19 +276,26 @@ func (s *service) ReceiveExternalMailPush(ctx context.Context, provider domain.E
 	push := s.settings.ExternalMail.Push
 	accepted, promoted := 0, 0
 	for _, group := range matched {
-		made, markErr := s.pushStore.MarkExternalMailPush(ctx, domain.ExternalMailPushMark{
+		recorded, markErr := s.pushStore.MarkExternalMailPush(ctx, domain.ExternalMailPushMark{
 			SubscriptionIDs: group.ids, Now: now, Window: push.Coalesce(), Spacing: s.settings.ExternalMail.Sync.Spacing(),
 			Lifecycle: group.lifecycle,
 		})
+		if errors.Is(markErr, domain.ErrExternalMailPushBusy) {
+			// A sync was saving one of the subscriptions: the others are recorded, and the provider
+			// delivers this one again in a moment (Pub/Sub and Graph both redeliver), so nothing is lost
+			// and nothing waits.
+			metrics.RecordExternalMailPushNotification(string(provider), "busy")
+			return ExternalMailPushReply{}, &RetryAfterError{Err: ErrExternalMailPushBusy, RetryAfter: time.Second}
+		}
 		if markErr != nil {
 			return ExternalMailPushReply{}, markErr
 		}
 		accepted += len(group.ids)
-		promoted += made
+		promoted += recorded
 	}
 	metrics.RecordExternalMailPushNotification(string(provider), "accepted")
 	slog.InfoContext(ctx, "external_mail.push_received", slog.String("provider", string(provider)),
-		slog.Int("hints", len(hints)), slog.Int("matched", accepted), slog.Int("made_due", promoted))
+		slog.Int("hints", len(hints)), slog.Int("matched", accepted), slog.Int("recorded", promoted))
 	return ExternalMailPushReply{}, nil
 }
 

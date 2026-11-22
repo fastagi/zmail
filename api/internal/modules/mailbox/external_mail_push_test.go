@@ -79,6 +79,14 @@ func (f *externalFixture) notify(t *testing.T, body []byte) {
 	if err != nil || reply.Validation != "" {
 		t.Fatalf("ReceiveExternalMailPush = %+v, %v", reply, err)
 	}
+	f.promote(t)
+}
+
+// promote runs the worker's promotion step, as the start of its next pass does: the notifications
+// the endpoint recorded make their connections due.
+func (f *externalFixture) promote(t *testing.T) {
+	t.Helper()
+	f.service.maintainExternalMailPush(context.Background(), f.service.now().UTC())
 }
 
 // notifyFake notifies the fixture connection's live fake subscription with its secret.
@@ -394,6 +402,7 @@ func TestExternalMailPushByAddressSyncsEachGrant(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ReceiveExternalMailPush: %v", err)
 	}
+	f.promote(t)
 	for _, id := range []uint{f.connection.ID, other.ID} {
 		if next := f.nextSyncAt(t, id); !next.Equal(now) {
 			t.Fatalf("connection %d of the notified account is not due", id)
