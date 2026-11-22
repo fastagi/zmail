@@ -16,7 +16,7 @@ and admins then pick mailboxes from that tenant's directory and assign each one 
 in to the mailbox. Each assigned mailbox is synced by the existing worker with a short-lived token the
 tenant credential mints for that one mailbox.
 
-Out of scope: any Web or Admin screen; a scheduled directory reconciliation (§12 "租户目录同步");
+Out of scope: any Web or Admin screen; a scheduled directory reconciliation (roadmap §12, tenant directory sync);
 sending; push subscriptions.
 
 ## Actors
