@@ -117,7 +117,7 @@ func (p *Paginator[T]) LastPage() int {
 
 // From returns the starting item number for current page.
 func (p *Paginator[T]) From() int {
-	if p.total == 0 {
+	if int64(p.currentPage-1)*int64(p.perPage) >= p.total {
 		return 0
 	}
 	return (p.currentPage-1)*p.perPage + 1
@@ -125,7 +125,7 @@ func (p *Paginator[T]) From() int {
 
 // To returns the ending item number for current page.
 func (p *Paginator[T]) To() int {
-	if p.total == 0 {
+	if p.From() == 0 {
 		return 0
 	}
 	to := p.currentPage * p.perPage
@@ -282,7 +282,7 @@ func (p *TransformedPaginator) GetItems() any {
 func (p *TransformedPaginator) GetMeta() *response.Meta {
 	from := 0
 	to := 0
-	if p.total > 0 {
+	if int64(p.currentPage-1)*int64(p.perPage) < p.total {
 		from = (p.currentPage-1)*p.perPage + 1
 		to = p.currentPage * p.perPage
 		if int64(to) > p.total {

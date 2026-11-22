@@ -56,7 +56,29 @@ func normalizeRecipient(raw string) (string, bool) {
 	if at <= 0 || at == len(parsed.Address)-1 || !strings.Contains(parsed.Address[at+1:], ".") {
 		return "", false
 	}
+	if !withinSMTPLimits(parsed.Address, at) {
+		return "", false
+	}
 	return strings.ToLower(parsed.Address), true
+}
+
+// RFC 5321 section 4.5.3.1 limits.
+const (
+	maxAddressLength   = 254
+	maxLocalPartLength = 64
+	maxDomainLabel     = 63
+)
+
+func withinSMTPLimits(address string, at int) bool {
+	if len(address) > maxAddressLength || at > maxLocalPartLength {
+		return false
+	}
+	for _, label := range strings.Split(address[at+1:], ".") {
+		if label == "" || len(label) > maxDomainLabel {
+			return false
+		}
+	}
+	return true
 }
 
 // normalizeRecipients validates, lowercases, and de-duplicates addresses, keeping order.
