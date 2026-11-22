@@ -316,6 +316,8 @@ type Service interface {
 	Now() time.Time
 	DailyBroadcastLimit() int
 	DailyTransactionalLimit() int
+	// OrganizationDailyLimits returns the lane limits in effect for one organization.
+	OrganizationDailyLimits(ctx context.Context, organizationID uint) (DailyLimits, error)
 	// TransactionalPolicy reports the instance's transactional switch, rate limits, and simulator domain.
 	TransactionalPolicy() TransactionalPolicy
 	// SendTransactional sends one transactional message for an API key; created is false for an
@@ -634,6 +636,29 @@ func (s *service) DailyBroadcastLimit() int {
 
 func (s *service) DailyTransactionalLimit() int {
 	return s.settings.laneLimit(domain.SendLaneTransactional)
+}
+
+// DailyLimits holds an organization's limit in each send lane.
+type DailyLimits struct {
+	Personal      int
+	Broadcast     int
+	Transactional int
+}
+
+func (s *service) OrganizationDailyLimits(ctx context.Context, organizationID uint) (DailyLimits, error) {
+	var limits DailyLimits
+	for lane, target := range map[domain.SendLane]*int{
+		domain.SendLanePersonal:      &limits.Personal,
+		domain.SendLaneBroadcast:     &limits.Broadcast,
+		domain.SendLaneTransactional: &limits.Transactional,
+	} {
+		limit, err := s.organizationLaneLimit(ctx, organizationID, lane)
+		if err != nil {
+			return DailyLimits{}, err
+		}
+		*target = limit
+	}
+	return limits, nil
 }
 
 // laneLimit is the rolling 24-hour limit of one lane. A lane without its own limit takes the
