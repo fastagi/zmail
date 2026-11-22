@@ -49,6 +49,17 @@ export const EXTERNAL_MAIL_CONNECTION_STATUSES = ['active', 'needs_reconnect', '
 export const externalMailConnectionStatusSchema = zodEnum(EXTERNAL_MAIL_CONNECTION_STATUSES);
 
 /**
+ * A connection's push subscription (`contracts/MAILBOXES.md`, Push Subscriptions). The status is
+ * read as any text so a later state arrives intact; optional fields keep older APIs parsing.
+ */
+export const externalMailPushStateSchema = looseObject({
+  status: string(),
+  expires_at: nullable(timestampSchema),
+  last_notified_at: nullable(timestampSchema),
+  last_error_code: nullable(string()),
+});
+
+/**
  * One of the caller's bound accounts, or a shared connection they manage; it never carries a token.
  * `shared` is optional so an API from before shared connected mailboxes still parses.
  */
@@ -58,10 +69,12 @@ export const externalMailConnectionSchema = strictObject({
   account_address: string(),
   mailbox_id: safeIdSchema,
   shared: optional(boolean()),
+  tenant_id: optional(nullable(safeIdSchema)),
   status: externalMailConnectionStatusSchema,
   last_synced_at: nullable(timestampSchema),
   last_error_code: nullable(string()),
   created_at: timestampSchema,
+  push: optional(nullable(externalMailPushStateSchema)),
 });
 export const externalMailConnectionListSchema = array(externalMailConnectionSchema);
 
@@ -171,6 +184,8 @@ export const externalMailSyncRunSchema = strictObject({
   error_code: nullable(string()),
   timed_out: boolean(),
   throttled: boolean(),
+  /** `poll` or `push`; optional so an API from before push subscriptions still parses. */
+  trigger: optional(string()),
 });
 export const externalMailSyncRunListSchema = array(externalMailSyncRunSchema);
 

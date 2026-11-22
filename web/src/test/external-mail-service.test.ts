@@ -50,8 +50,9 @@ describe('external mail service', () => {
       expires_at: '2026-11-21T10:10:00Z',
     });
 
-    await expect(externalMailService.start(7, { provider: 'gmail', backfill_days: 30 })).resolves
-      .toMatchObject({ authorization_url: 'https://accounts.example.com/auth?state=s' });
+    await expect(
+      externalMailService.start(7, { provider: 'gmail', backfill_days: 30 })
+    ).resolves.toMatchObject({ authorization_url: 'https://accounts.example.com/auth?state=s' });
     expect(post).toHaveBeenCalledWith(
       '/external-mail-authorizations',
       { provider: 'gmail', backfill_days: 30 },
@@ -134,6 +135,41 @@ describe('external mail service: app passwords, sync runs, purges, directory', (
     });
     get.mockResolvedValueOnce([{ ...run, subject: 'leaked' }]);
     await expect(externalMailService.syncRuns(7, 3)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('reads the push state of connections and the trigger of sync runs', async () => {
+    const pushed = {
+      ...connection,
+      tenant_id: null,
+      push: {
+        status: 'active',
+        expires_at: '2026-11-24T08:00:00Z',
+        last_notified_at: '2026-11-21T10:05:00Z',
+        last_error_code: null,
+      },
+    };
+    const get = vi
+      .spyOn(request, 'get')
+      .mockResolvedValueOnce([pushed, { ...connection, push: null }]);
+    await expect(externalMailService.connections(7)).resolves.toEqual([
+      pushed,
+      { ...connection, push: null },
+    ]);
+    const run = {
+      id: 2,
+      started_at: '2026-11-21T10:05:01Z',
+      finished_at: '2026-11-21T10:05:02Z',
+      outcome: 'ok',
+      fetched_count: 1,
+      stored_count: 1,
+      more: false,
+      error_code: null,
+      timed_out: false,
+      throttled: false,
+      trigger: 'push',
+    };
+    get.mockResolvedValueOnce([run]);
+    await expect(externalMailService.syncRuns(7, 3)).resolves.toEqual([run]);
   });
 
   it('purges and reads the directory by cursor', async () => {
