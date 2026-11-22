@@ -1196,7 +1196,7 @@ CONSTRAINT organization_memberships.fk_organization_memberships_organization FOR
 CONSTRAINT organization_memberships.fk_organization_memberships_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organization_memberships.organization_memberships_pkey PRIMARY KEY (id)
 CONSTRAINT organization_memberships.organization_memberships_role_check CHECK (((role)::text = ANY ((ARRAY['owner'::character varying, 'admin'::character varying, 'member'::character varying])::text[])))
-CONSTRAINT organizations.chk_organizations_daily_send_limit CHECK (((daily_send_limit IS NULL) OR ((daily_send_limit >= 0) AND (daily_send_limit <= 1000000))))
+CONSTRAINT organizations.chk_organizations_daily_send_limit CHECK (((daily_send_limit IS NULL) OR ((daily_send_limit >= 1) AND (daily_send_limit <= 1000000))))
 CONSTRAINT organizations.fk_organizations_creator FOREIGN KEY (created_by) REFERENCES users(id) ON UPDATE CASCADE ON DELETE RESTRICT
 CONSTRAINT organizations.organizations_pkey PRIMARY KEY (id)
 CONSTRAINT password_reset_tokens.password_reset_tokens_pkey PRIMARY KEY (id)

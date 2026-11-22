@@ -186,6 +186,7 @@ describe('OrganizationControls', () => {
     expect(parseSendLimit(' 5000 ')).toBe(5000);
     expect(parseSendLimit('1000000')).toBe(1000000);
     expect(parseSendLimit('1000001')).toBeUndefined();
+    expect(parseSendLimit('0')).toBeUndefined();
     expect(parseSendLimit('-1')).toBeUndefined();
     expect(parseSendLimit('1.5')).toBeUndefined();
     expect(parseSendLimit('abc')).toBeUndefined();

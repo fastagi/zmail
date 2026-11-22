@@ -9,7 +9,7 @@ export const operatorOrganizationSchema = z.object({
   member_count: z.number().int().min(0),
   suspended_at: z.string().nullable(),
   suspension_reason: z.string(),
-  daily_send_limit: z.number().int().min(0).nullable(),
+  daily_send_limit: z.number().int().min(1).nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });

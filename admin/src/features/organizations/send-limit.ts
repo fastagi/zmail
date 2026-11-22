@@ -10,5 +10,5 @@ export function parseSendLimit(value: string): number | null | undefined {
     return undefined;
   }
   const limit = Number(trimmed);
-  return limit <= maxOrganizationDailySendLimit ? limit : undefined;
+  return limit >= 1 && limit <= maxOrganizationDailySendLimit ? limit : undefined;
 }

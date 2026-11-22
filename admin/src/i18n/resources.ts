@@ -263,7 +263,7 @@ const enUS = {
         notFound: 'This organization does not exist.',
         unavailable: 'Organizations are unavailable right now. Try again shortly.',
         reasonRequired: 'Enter a reason of up to 500 characters.',
-        limitInvalid: 'Enter a whole number from 0 to 1,000,000, or leave it empty.',
+        limitInvalid: 'Enter a whole number from 1 to 1,000,000, or leave it empty.',
         rejected: 'The change was rejected. Check the values and try again.',
       },
       status: {
@@ -854,7 +854,7 @@ const zhHans = {
         notFound: '该组织不存在。',
         unavailable: '暂时无法加载组织，请稍后重试。',
         reasonRequired: '请填写原因，最多 500 字。',
-        limitInvalid: '请输入 0 到 1,000,000 之间的整数，或留空。',
+        limitInvalid: '请输入 1 到 1,000,000 之间的整数，或留空。',
         rejected: '修改被拒绝，请检查后重试。',
       },
       status: {

@@ -25,7 +25,7 @@ func (m *addOrganizationControls) Up(db *gorm.DB) error {
 		`ALTER TABLE organizations ADD COLUMN suspension_reason varchar(500) NOT NULL DEFAULT ''`,
 		`ALTER TABLE organizations ADD COLUMN daily_send_limit integer`,
 		`ALTER TABLE organizations ADD CONSTRAINT chk_organizations_daily_send_limit
-		  CHECK (daily_send_limit IS NULL OR (daily_send_limit >= 0 AND daily_send_limit <= 1000000))`,
+		  CHECK (daily_send_limit IS NULL OR (daily_send_limit >= 1 AND daily_send_limit <= 1000000))`,
 	)
 }
 

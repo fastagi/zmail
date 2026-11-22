@@ -218,7 +218,7 @@ values.
 - `reason` is required: 1 to 500 characters after trimming, without control characters, otherwise
   `422 COMMON.VALIDATION_FAILED`. Suspending a suspended organization replaces the reason and keeps
   the first `suspended_at`. Restoring an active organization changes nothing.
-- `daily_send_limit` is required and is `null` or an integer from 0 to 1000000, otherwise
+- `daily_send_limit` is required and is `null` or an integer from 1 to 1000000, otherwise
   `422 COMMON.VALIDATION_FAILED`; a body that is not a JSON object is `400 COMMON.INVALID_INPUT`.
   A limit replaces the instance limit of every send lane (personal, broadcast, transactional) and
   the new-organization cap; `null` returns the organization to them.

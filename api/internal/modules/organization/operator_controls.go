@@ -74,23 +74,24 @@ func (h *OperatorHandler) SetSendLimit(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var body map[string]json.RawMessage
-	if err := c.ShouldBindJSON(&body); err != nil || body == nil {
-		response.AbortWithCode(c, http.StatusBadRequest, response.ErrorCodeInvalidInput, "body must be a JSON object")
+	var body struct {
+		DailySendLimit json.RawMessage `json:"daily_send_limit"`
+	}
+	if !handler.BindJSON(c, &body) {
 		return
 	}
-	value, present := body["daily_send_limit"]
+	value := body.DailySendLimit
 	var limit *int
-	if !present {
+	if value == nil {
 		response.AbortWithCode(c, http.StatusUnprocessableEntity, response.ErrorCodeValidationFailed,
 			"daily_send_limit is required; null clears it")
 		return
 	}
 	if string(value) != "null" {
 		var parsed int
-		if err := json.Unmarshal(value, &parsed); err != nil || parsed < 0 || parsed > MaxOrganizationDailySendLimit {
+		if err := json.Unmarshal(value, &parsed); err != nil || parsed < 1 || parsed > MaxOrganizationDailySendLimit {
 			response.AbortWithCode(c, http.StatusUnprocessableEntity, response.ErrorCodeValidationFailed,
-				"daily_send_limit must be null or an integer from 0 to 1000000")
+				"daily_send_limit must be null or an integer from 1 to 1000000")
 			return
 		}
 		limit = &parsed
