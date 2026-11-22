@@ -109,6 +109,29 @@ with `422 COMMON.VALIDATION_FAILED`. The login `username` field accepts a userna
 value that contains `@` resolves to the account that owns that email before any account whose
 legacy username equals it, so one account cannot capture another account's email sign-in.
 
+### Two-Factor Sign-In
+
+An account can add an authenticator app (RFC 6238 TOTP: SHA-1, six digits, 30-second step).
+
+- `POST /v1/users/totp/enrollments` creates a pending secret and returns it with its `otpauth://`
+  URI once, replacing an earlier pending one. Sign-in ignores a pending secret.
+- `PUT /v1/users/totp` with `{ "code" }` confirms it and returns ten one-time recovery codes once.
+  A wrong code is `422 AUTH.TOTP_INVALID`.
+- `GET /v1/users/totp` reports `available`, `enabled`, `confirmed_at`, and
+  `recovery_codes_remaining`.
+- `DELETE /v1/users/totp` with a current code or unused recovery code turns it off and deletes the
+  recovery codes.
+- With a confirmed factor, `POST /v1/login` needs `totp_code` after a correct password: absent is
+  `401 AUTH.TOTP_REQUIRED`, wrong or reused is `401 AUTH.TOTP_INVALID`. Both count against the
+  account's sign-in throttle, which resets only after both factors pass. Codes from the previous,
+  current, and next step are accepted, and a step is never accepted twice. A recovery code is
+  accepted in the same field, case- and hyphen-insensitively, and is consumed atomically.
+- Secrets are AES-GCM encrypted with `AUTH_TOTP_ENCRYPTION_KEY`; recovery codes are stored as
+  SHA-256 hashes. Without the key, `available` is false and enrollment is `503`, while existing
+  factors stay enforced.
+- Operator sign-in shares the credential path but does not yet send a code, so an operator account
+  with two-factor sign-in cannot open the Admin Console until it does.
+
 ### Public Failure Semantics
 
 - Unknown identifiers, wrong passwords, and disabled accounts all return HTTP `401` with

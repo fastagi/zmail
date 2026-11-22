@@ -140,7 +140,14 @@ paths:
         '400':
           $ref: '#/components/responses/InvalidInput'
         '401':
-          $ref: '#/components/responses/AuthenticationInvalidCredentials'
+          description: Unknown identifier, wrong password, or inactive account (`AUTH.INVALID_CREDENTIALS`,
+            deliberately indistinguishable). After a correct password, an account with two-factor sign-in
+            answers `AUTH.TOTP_REQUIRED` when `totp_code` is absent and `AUTH.TOTP_INVALID` when it is wrong
+            or already used; both count as failed attempts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '422':
@@ -348,6 +355,144 @@ paths:
         '409':
           description: An active starter blocks deletion, e.g. `ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED`,
             `ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED`, or `ASSET.CLEANUP_REQUIRED`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/users/totp:
+    get:
+      operationId: getUserTotp
+      summary: Read the authenticated user's two-factor sign-in state
+      tags:
+        - Users
+      security:
+        - bearerSession: []
+      responses:
+        '200':
+          description: The two-factor state. `available` is false when the instance cannot enroll authenticators.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserTotpStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthenticationAccountDisabled'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: confirmUserTotp
+      summary: Turn two-factor sign-in on with a first authenticator code
+      description: Confirms the pending enrollment and returns ten one-time recovery codes, shown only once.
+      tags:
+        - Users
+      security:
+        - bearerSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserTotpCodeRequest'
+      responses:
+        '200':
+          description: Two-factor sign-in is on.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserTotpRecoveryCodesResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthenticationAccountDisabled'
+        '409':
+          description: There is no pending enrollment (`AUTH.TOTP_NOT_ENABLED`) or the factor is already on
+            (`AUTH.TOTP_ALREADY_ENABLED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The code is wrong (`AUTH.TOTP_INVALID`) or the body is invalid (`COMMON.VALIDATION_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: disableUserTotp
+      summary: Turn two-factor sign-in off
+      description: Needs a current authenticator code or an unused recovery code; removes the recovery codes.
+      tags:
+        - Users
+      security:
+        - bearerSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserTotpCodeRequest'
+      responses:
+        '204':
+          description: Two-factor sign-in is off.
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthenticationAccountDisabled'
+        '409':
+          description: Two-factor sign-in is off (`AUTH.TOTP_NOT_ENABLED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: The code is wrong or used (`AUTH.TOTP_INVALID`) or the body is invalid (`COMMON.VALIDATION_FAILED`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/users/totp/enrollments:
+    post:
+      operationId: startUserTotpEnrollment
+      summary: Start authenticator enrollment
+      description: Creates a pending secret, replacing an earlier pending one. Sign-in does not ask for it until confirmed.
+      tags:
+        - Users
+      security:
+        - bearerSession: []
+      responses:
+        '201':
+          description: The new secret and its otpauth URI, shown only once.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserTotpEnrollmentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/AuthenticationAccountDisabled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Two-factor sign-in is already on (`AUTH.TOTP_ALREADY_ENABLED`).
           content:
             application/json:
               schema:
@@ -10400,6 +10545,10 @@ components:
         - AUTH.REGISTRATION_EMAIL_CODE_REQUIRED
         - AUTH.REGISTRATION_EMAIL_CODE_INVALID
         - AUTH.REGISTRATION_EMAIL_CODE_EXPIRED
+        - AUTH.TOTP_REQUIRED
+        - AUTH.TOTP_INVALID
+        - AUTH.TOTP_ALREADY_ENABLED
+        - AUTH.TOTP_NOT_ENABLED
         - USER.NOT_FOUND
         - USER.EMAIL_ALREADY_EXISTS
         - USER.USERNAME_ALREADY_EXISTS
@@ -10964,6 +11113,11 @@ components:
         password:
           type: string
           minLength: 1
+        totp_code:
+          type: string
+          maxLength: 32
+          description: The six-digit authenticator code or an unused recovery code of an account with
+            two-factor sign-in.
     AuthenticationSession:
       type: object
       additionalProperties: false
@@ -11079,6 +11233,102 @@ components:
         bio:
           type: string
           maxLength: 500
+    UserTotpStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - available
+        - enabled
+        - recovery_codes_remaining
+      properties:
+        available:
+          type: boolean
+        enabled:
+          type: boolean
+        confirmed_at:
+          type: string
+          format: date-time
+        recovery_codes_remaining:
+          type: integer
+          format: int64
+          minimum: 0
+    UserTotpEnrollment:
+      type: object
+      additionalProperties: false
+      required:
+        - secret
+        - otpauth_uri
+      properties:
+        secret:
+          type: string
+          description: Base32 secret for manual entry.
+        otpauth_uri:
+          type: string
+          description: '`otpauth://totp/...` URI for a QR code.'
+    UserTotpCodeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 32
+    UserTotpRecoveryCodes:
+      type: object
+      additionalProperties: false
+      required:
+        - recovery_codes
+      properties:
+        recovery_codes:
+          type: array
+          minItems: 10
+          maxItems: 10
+          items:
+            type: string
+    UserTotpStatusResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/UserTotpStatus'
+    UserTotpEnrollmentResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/UserTotpEnrollment'
+    UserTotpRecoveryCodesResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/UserTotpRecoveryCodes'
     UserChangePasswordRequest:
       type: object
       additionalProperties: false

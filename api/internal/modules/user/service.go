@@ -331,8 +331,8 @@ func (s *service) signIn(
 	}
 
 	// A missing or wrong second factor keeps the attempt counted against the account.
-	if err := s.totp.checkSignIn(ctx, user.ID, totpCode); err != nil {
-		return nil, nil, err
+	if factorErr := s.totp.checkSignIn(ctx, user.ID, totpCode); factorErr != nil {
+		return nil, nil, factorErr
 	}
 
 	// Both factors were right: clear the account's failures before any authorization decision.
