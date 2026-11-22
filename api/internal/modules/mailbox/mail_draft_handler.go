@@ -21,7 +21,7 @@ type SaveMailDraftRequest struct {
 }
 
 func (r SaveMailDraftRequest) input() MailDraftInput {
-	return MailDraftInput{MailboxID: r.MailboxID, To: r.To, Cc: r.Cc, Subject: r.Subject, Body: r.Body, InReplyTo: r.InReplyTo}
+	return MailDraftInput(r)
 }
 
 // MailDraftResponse is one of the caller's drafts.
