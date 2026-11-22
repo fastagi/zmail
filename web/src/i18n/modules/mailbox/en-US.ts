@@ -173,6 +173,9 @@ const messages = {
       all: 'All',
       unread: 'Unread',
       attachments: 'With attachments',
+      mine: 'Assigned to me',
+      unassigned: 'Unassigned',
+      closed: 'Done',
     },
     search: {
       label: 'Search all mail',
@@ -195,6 +198,12 @@ const messages = {
       sentHint: 'Mail sent from the mailboxes you read shows here.',
       unreadHint: 'You are all caught up.',
       searchHint: 'Search matches the subject, the sender, and the recipients. Try other words.',
+      mine: 'Nothing assigned to you',
+      mineHint: 'Open conversations a teammate assigns to you in a shared mailbox show here.',
+      unassigned: 'Every open conversation has an owner',
+      unassignedHint: 'Open shared-mailbox conversations nobody owns yet show here.',
+      closed: 'Nothing marked done',
+      closedHint: 'Conversations marked done in a shared mailbox show here.',
     },
     unavailable:
       'This mail is no longer available to you. Access to its mailbox may have changed; the list is refreshed.',

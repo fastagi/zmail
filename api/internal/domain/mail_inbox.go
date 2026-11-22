@@ -43,6 +43,27 @@ type MailboxAccessRow struct {
 	Member  *MailboxMember
 }
 
+// InboxAssignment narrows the unified inbox by the assignment of a shared-mailbox conversation.
+type InboxAssignment string
+
+const (
+	// InboxAssignmentMine keeps open conversations assigned to the viewer.
+	InboxAssignmentMine InboxAssignment = "mine"
+	// InboxAssignmentUnassigned keeps open conversations without an assignee.
+	InboxAssignmentUnassigned InboxAssignment = "unassigned"
+	// InboxAssignmentClosed keeps conversations marked done.
+	InboxAssignmentClosed InboxAssignment = "closed"
+)
+
+// Valid reports whether the value is a known assignment filter.
+func (a InboxAssignment) Valid() bool {
+	switch a {
+	case InboxAssignmentMine, InboxAssignmentUnassigned, InboxAssignmentClosed:
+		return true
+	}
+	return false
+}
+
 // InboxQuery selects one page of the unified inbox.
 type InboxQuery struct {
 	// MailboxIDs is the set to list, already narrowed to the mailboxes the viewer reads; never empty.
@@ -65,6 +86,10 @@ type InboxQuery struct {
 	// Triage keeps only messages with a visible AI triage result of one of these categories;
 	// empty applies no triage filter. Only the all and today views take it.
 	Triage []MailTriageCategory
+	// Assignment keeps only conversations in one assignment state; empty applies no filter.
+	Assignment InboxAssignment
+	// ViewerUserID is the viewer, whom InboxAssignmentMine matches.
+	ViewerUserID uint
 	// Limit is how many rows to return at most: the page size plus one, to tell whether more follow.
 	Limit int
 }

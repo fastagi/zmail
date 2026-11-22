@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -740,5 +741,54 @@ func TestInboxHasAttachmentsFilter(t *testing.T) {
 	query.GroupThreads = true
 	if _, err := f.inboxRepo().ListInbox(context.Background(), query); !errors.Is(err, domain.ErrInvalidInput) {
 		t.Fatalf("grouped with has_attachments = %v; want invalid input", err)
+	}
+}
+
+func TestInboxAssignmentFilter(t *testing.T) {
+	f := newInboxFixture(t)
+	mine := f.deliverAt(t, f.team, delivery{subject: "mine"}, minutes(1))
+	done := f.deliverAt(t, f.team, delivery{subject: "done"}, minutes(2))
+	untouched := f.deliverAt(t, f.team, delivery{subject: "untouched"}, minutes(3))
+	if err := f.inboxRepo().db.AutoMigrate(&MailThreadAssignmentPO{}); err != nil {
+		t.Fatalf("migrate assignments: %v", err)
+	}
+	viewer := f.c.UserID
+	for _, assignment := range []domain.MailThreadAssignment{
+		{MailboxID: f.team.ID, ThreadID: mine.ThreadID, AssigneeUserID: &viewer, Status: domain.MailThreadOpen},
+		{MailboxID: f.team.ID, ThreadID: done.ThreadID, AssigneeUserID: &viewer, Status: domain.MailThreadClosed},
+	} {
+		if _, err := f.inboxRepo().SaveMailThreadAssignment(context.Background(), assignment, inboxBase); err != nil {
+			t.Fatalf("SaveMailThreadAssignment: %v", err)
+		}
+	}
+
+	query := domain.InboxQuery{
+		MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, ViewerUserID: viewer, Limit: 10, View: domain.InboxViewAll,
+	}
+	query.Assignment = domain.InboxAssignmentMine
+	expectIDs(t, "mine", idsOf(f.inbox(t, query)), mine.ID)
+	query.Assignment = domain.InboxAssignmentUnassigned
+	expectIDs(t, "unassigned", idsOf(f.inbox(t, query)), untouched.ID, f.teamMessage.ID)
+	query.Assignment = domain.InboxAssignmentClosed
+	expectIDs(t, "closed", idsOf(f.inbox(t, query)), done.ID)
+	query.Assignment, query.GroupThreads = domain.InboxAssignmentMine, true
+	expectIDs(t, "mine grouped", idsOf(f.inbox(t, query)), mine.ID)
+	query.ViewerUserID = viewer + 1000
+	expectIDs(t, "another member's", idsOf(f.inbox(t, query)))
+}
+
+func TestParseInboxRequestAssignment(t *testing.T) {
+	request, err := parseInboxRequest(url.Values{"assignment": {"mine"}, "group": {"thread"}, "mailbox_id": {"3"}})
+	if err != nil || request.Assignment != domain.InboxAssignmentMine || !request.GroupThreads {
+		t.Fatalf("assignment=mine = %+v, %v", request, err)
+	}
+	for name, query := range map[string]url.Values{
+		"unknown": {"assignment": {"everyone"}},
+		"empty":   {"assignment": {""}},
+		"twice":   {"assignment": {"mine", "closed"}},
+	} {
+		if _, err := parseInboxRequest(query); !errors.Is(err, domain.ErrInvalidInput) {
+			t.Errorf("%s: err = %v, want invalid input", name, err)
+		}
 	}
 }

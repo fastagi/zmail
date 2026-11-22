@@ -27,7 +27,7 @@ const (
 )
 
 // inboxParameters are the parameters of the unified inbox; each may appear at most once.
-var inboxParameters = []string{"view", "role_id", "mailbox_id", "unread", "has_attachments", "q", "group", "tz", "cursor", "per_page", "triage"}
+var inboxParameters = []string{"view", "role_id", "mailbox_id", "unread", "has_attachments", "q", "group", "tz", "cursor", "per_page", "triage", "assignment"}
 
 // ListInboxMessages returns one cursor page of the caller's mail across every mailbox they read.
 func (h *Handler) ListInboxMessages(c *gin.Context) {
@@ -187,6 +187,12 @@ func parseInboxRequest(query url.Values) (InboxRequest, error) {
 			return invalid("triage")
 		}
 		request.Triage = categories
+	}
+	if raw, present := value("assignment"); present {
+		request.Assignment = domain.InboxAssignment(raw)
+		if !request.Assignment.Valid() {
+			return invalid("assignment")
+		}
 	}
 	if raw, present := value("per_page"); present {
 		perPage, err := strconv.Atoi(raw)

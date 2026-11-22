@@ -75,7 +75,7 @@ import {
   useMailOrganization,
   type MailOrganizationScope,
 } from '@/features/mailbox/hooks/use-mail-organization';
-import { INBOX_VIEWS, MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
+import { INBOX_ASSIGNMENTS, INBOX_VIEWS, MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
 import {
   INBOX_TRIAGE_TABS,
   triageTabCategories,
@@ -83,6 +83,7 @@ import {
 } from '@/features/mailbox/triage-tabs';
 import type {
   InboxCounts,
+  InboxAssignment,
   InboxFilters,
   InboxItem,
   InboxView,
@@ -197,6 +198,8 @@ interface InboxUrlState {
   attachments: boolean;
   /** The AI triage tab; it applies only to `all` and `today` without a search. */
   triage: InboxTriageTab | null;
+  /** The assignment tab of shared conversations. */
+  assignment: InboxAssignment | null;
 }
 
 /**
@@ -234,6 +237,9 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
     unread: params.get(TAB_PARAM) === UNREAD_TAB,
     attachments: params.get(TAB_PARAM) === ATTACHMENTS_TAB,
     triage,
+    assignment: (INBOX_ASSIGNMENTS as readonly string[]).includes(params.get(TAB_PARAM) ?? '')
+      ? (params.get(TAB_PARAM) as InboxAssignment)
+      : null,
   };
 }
 
@@ -243,7 +249,7 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
  * the organization's triage is on.
  */
 function inboxFilters(
-  { view, box, role, q, unread, attachments, triage }: InboxUrlState,
+  { view, box, role, q, unread, attachments, triage, assignment }: InboxUrlState,
   tz: string,
   triageOn: boolean
 ): InboxFilters {
@@ -263,6 +269,7 @@ function inboxFilters(
     ...(q === '' ? {} : { q }),
     ...(grouped ? { group: 'thread' as const } : {}),
     ...(triageTab === null ? {} : { triage: triageTabCategories(triageTab) }),
+    ...(assignment === null ? {} : { assignment }),
     tz,
   };
 }
@@ -435,7 +442,16 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   // The zone the inbox refused; UTC stands in for it only while it is still the inbox's zone.
   const [refusedZone, setRefusedZone] = useState<string | null>(null);
   const timeZone = refusedZone === inboxZone ? fallbackTimeZone : inboxZone;
-  const urlState = readInboxUrl(searchParams);
+  const urlParsed = readInboxUrl(searchParams);
+  // The assignment tabs show while the listing reaches a shared mailbox that is not connected.
+  const assignable = (mailboxes.data ?? []).filter(
+    mailbox => mailbox.access.view && mailbox.type === 'shared' && !isConnectedMailbox(mailbox)
+  );
+  const assignmentTabs =
+    urlParsed.box === null
+      ? assignable.length > 0
+      : assignable.some(mailbox => mailbox.id === urlParsed.box);
+  const urlState = assignmentTabs ? urlParsed : { ...urlParsed, assignment: null };
   const counts = useInboxCounts(organizationId, timeZone, { enabled: zoneReady });
   // AI triage shows only while the organization has it on, which its counts say by not being null.
   const triageCounts = counts.data?.triage ?? null;
@@ -776,19 +792,23 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const emptyTitle =
     urlState.q !== ''
       ? t('inbox.empty.search')
-      : urlState.unread
-        ? t('inbox.empty.unread')
-        : urlState.view === 'all'
-          ? t('inbox.empty.view')
-          : t(`inbox.empty.${urlState.view}`);
+      : urlState.assignment
+        ? t(`inbox.empty.${urlState.assignment}`)
+        : urlState.unread
+          ? t('inbox.empty.unread')
+          : urlState.view === 'all'
+            ? t('inbox.empty.view')
+            : t(`inbox.empty.${urlState.view}`);
   const emptyHint =
     urlState.q !== ''
       ? t('inbox.empty.searchHint')
-      : urlState.unread
-        ? t('inbox.empty.unreadHint')
-        : urlState.view === 'all'
-          ? t('inbox.empty.viewHint')
-          : t(`inbox.empty.${urlState.view}Hint`);
+      : urlState.assignment
+        ? t(`inbox.empty.${urlState.assignment}Hint`)
+        : urlState.unread
+          ? t('inbox.empty.unreadHint')
+          : urlState.view === 'all'
+            ? t('inbox.empty.viewHint')
+            : t(`inbox.empty.${urlState.view}Hint`);
 
   /** Moves the open row by `delta`; past the last loaded row, opens the first of the next page. */
   const step = (delta: 1 | -1) => {
@@ -1028,6 +1048,10 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           onUnreadChange={unread => setListing({ [TAB_PARAM]: unread ? UNREAD_TAB : null })}
           attachments={urlState.attachments}
           onAttachmentsChange={on => setListing({ [TAB_PARAM]: on ? ATTACHMENTS_TAB : null })}
+          assignment={urlState.assignment}
+          onAssignmentChange={
+            assignmentTabs ? assignment => setListing({ [TAB_PARAM]: assignment }) : undefined
+          }
           q={urlState.q}
           onSearch={q => setListing({ [SEARCH_PARAM]: q === '' ? null : q, [VIEW_PARAM]: null })}
           mailboxHref={urlState.box === null ? null : mailboxHref(urlState.box)}

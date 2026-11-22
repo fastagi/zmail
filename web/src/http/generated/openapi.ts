@@ -9169,6 +9169,8 @@ export interface operations {
     listInboxMessages: {
         parameters: {
             query?: {
+                /** @description `mine` keeps open conversations assigned to the caller, `unassigned` open conversations without an assignee, `closed` conversations marked done. Allowed with `group`. */
+                assignment?: "mine" | "unassigned" | "closed";
                 /** @description Opaque position from `meta.next_cursor`, passed back unchanged; absent requests the newest page. A malformed cursor is `400 COMMON.INVALID_INPUT`. */
                 cursor?: components["parameters"]["InboxCursor"];
                 /** @description `thread` lists one item per thread and mailbox. Only with `view` `all` or `sent`, and without `unread` and `q`. */

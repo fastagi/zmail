@@ -2,6 +2,7 @@ import type { infer as Infer } from 'zod/mini';
 
 import type {
   createMailboxSchema,
+  INBOX_ASSIGNMENTS,
   inboxCountsSchema,
   inboxTriageCountsSchema,
   mailTriageCategorySchema,
@@ -253,8 +254,12 @@ export interface InboxFilters {
   group?: 'thread';
   /** AI triage categories; only with `all` or `today`, never with `group` or `q`. */
   triage?: MailTriageCategory[];
+  /** Conversations assigned to the caller and open, open without an assignee, or done. */
+  assignment?: InboxAssignment;
   tz: string;
 }
+
+export type InboxAssignment = (typeof INBOX_ASSIGNMENTS)[number];
 
 export type InboxItem = Infer<typeof inboxItemSchema>;
 export type InboxCounts = Infer<typeof inboxCountsSchema>;

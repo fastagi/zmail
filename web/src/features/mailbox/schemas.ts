@@ -497,6 +497,8 @@ export const mailLogPageEnvelopeSchema = strictObject({
 });
 
 export const INBOX_VIEWS = ['all', 'today', 'pending', 'sent'] as const;
+/** Shared-conversation assignment filters of the unified inbox; see `contracts/MAILBOXES.md`. */
+export const INBOX_ASSIGNMENTS = ['mine', 'unassigned', 'closed'] as const;
 /** The longest `tz` the unified inbox accepts. */
 export const INBOX_TIME_ZONE_MAX_LENGTH = 64;
 /** The longest cursor the API writes is about 56 characters; anything past this is not one. */

@@ -3263,6 +3263,7 @@ describe('mailbox browser route boundary', () => {
     await inbox('?view=pending&unread=true&per_page=%2B5');
     await inbox('?per_page=99999999999999999999');
     await inbox('?per_page=-99999999999999999999');
+    await inbox('?assignment=mine&group=thread');
 
     const calls = fetchMock.mock.calls.map(([url, init]) => {
       const target = new URL(String(url));
@@ -3276,6 +3277,7 @@ describe('mailbox browser route boundary', () => {
       'GET /v1/inbox-messages?view=pending&unread=true&per_page=5',
       'GET /v1/inbox-messages?per_page=100',
       'GET /v1/inbox-messages?per_page=1',
+      'GET /v1/inbox-messages?group=thread&assignment=mine&per_page=15',
     ]);
     for (const [, init] of fetchMock.mock.calls) {
       expect(new Headers(init?.headers).get('organization-id')).toBe('7');
@@ -3345,6 +3347,8 @@ describe('mailbox browser route boundary', () => {
       '?group=thread&q=invoice',
       '?group=thread&has_attachments=true',
       '?group=thread&has_attachments=false',
+      '?assignment=everyone',
+      '?assignment=',
     ]) {
       await expectError(
         await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`)),
@@ -3353,6 +3357,41 @@ describe('mailbox browser route boundary', () => {
       );
     }
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('mock inbox filters conversations by assignment', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const created = async (body: Record<string, unknown>) =>
+      (await (await create(route, body)).json()).data as { id: number };
+    const mine = await created({ local_part: 'mine', type: 'personal', owner_user_id: 1 });
+    const members = [{ user_id: 1, permission: 'manage' }];
+    const team = await created({ local_part: 'team', type: 'shared', members });
+    const ops = await created({ local_part: 'ops', type: 'shared', members });
+    const items = async (query = '') =>
+      (await (await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`))).json())
+        .data as { id: number; mailbox_id: number; thread_id: number }[];
+    const welcome = new Map((await items()).map(item => [item.mailbox_id, item]));
+    const assign = (box: number, body: Record<string, unknown>) => {
+      const thread = welcome.get(box)!.thread_id;
+      return route.updateMailThreadAssignmentRoute(
+        request(`/api/mailboxes/${box}/threads/${thread}/assignment`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        }),
+        String(box),
+        String(thread)
+      );
+    };
+    expect((await assign(team.id, { assignee_user_id: 1, status: 'open' })).status).toBe(200);
+    expect((await assign(ops.id, { assignee_user_id: null, status: 'closed' })).status).toBe(200);
+    const boxes = async (query: string) => (await items(query)).map(item => item.mailbox_id);
+
+    expect(await boxes('?assignment=mine')).toEqual([team.id]);
+    expect(await boxes('?assignment=closed')).toEqual([ops.id]);
+    expect(await boxes('?assignment=unassigned')).toEqual([mine.id]);
+    expect(await boxes('?assignment=mine&group=thread')).toEqual([team.id]);
   });
 
   it("mock inbox hides another member's personal mailbox and pages by cursor", async () => {

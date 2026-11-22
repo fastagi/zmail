@@ -167,6 +167,9 @@ const messages = {
       all: '全部',
       unread: '未读',
       attachments: '有附件',
+      mine: '分派给我',
+      unassigned: '未分派',
+      closed: '已完成',
     },
     search: {
       label: '搜索全部邮件',
@@ -189,6 +192,12 @@ const messages = {
       sentHint: '从你能阅读的邮箱发出的邮件会出现在这里。',
       unreadHint: '邮件都读完了。',
       searchHint: '搜索会匹配主题、发件人和收件人。换个关键词试试。',
+      mine: '没有分派给你的会话',
+      mineHint: '共享邮箱里同事分派给你、尚未完成的会话会出现在这里。',
+      unassigned: '待处理的会话都有负责人了',
+      unassignedHint: '共享邮箱里还没有负责人、尚未完成的会话会出现在这里。',
+      closed: '没有已完成的会话',
+      closedHint: '共享邮箱里标记为已完成的会话会出现在这里。',
     },
     unavailable: '你已无法查看这封邮件。它所在邮箱的访问权限可能已变更，列表已刷新。',
     actions: {

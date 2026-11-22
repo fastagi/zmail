@@ -9021,6 +9021,14 @@ paths:
             `group`.'
           schema:
             type: boolean
+        - name: assignment
+          in: query
+          required: false
+          description: '`mine` keeps open conversations assigned to the caller, `unassigned` open
+            conversations without an assignee, `closed` conversations marked done. Allowed with `group`.'
+          schema:
+            type: string
+            enum: [mine, unassigned, closed]
         - name: q
           in: query
           required: false
