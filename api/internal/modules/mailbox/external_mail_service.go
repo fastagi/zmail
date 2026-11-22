@@ -263,7 +263,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	if !applied && push != nil && upkeep.subscribed != nil {
 		// The connection was revoked while the sync subscribed: its revocation found no live
 		// subscription to stop, so this one is stopped here.
-		s.unsubscribeOrphan(ctx, push, connection, *upkeep.subscribed)
+		s.unsubscribeOrphan(ctx, push, connection, upkeep.save.LookupKey, *upkeep.subscribed)
 	}
 	if tenant != nil && result.Run.Outcome == domain.ExternalMailSyncAuthFailed {
 		s.checkTenantAfterRefusal(ctx, connector, tenant, connection.ID, budget.Timeout())

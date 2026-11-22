@@ -157,7 +157,9 @@ func (r *repository) MarkExternalMailPush(ctx context.Context, mark domain.Exter
 	window := mark.Window.Seconds()
 	result := r.conn(ctx).Exec(`WITH m AS (
 		  UPDATE external_mail_subscriptions s
-		  SET last_notified_at = @now, pending_at = COALESCE(s.pending_at, @now), degraded_at = NULL, updated_at = @now`+renewal+`
+		  SET last_notified_at = @now, pending_at = COALESCE(s.pending_at, @now),
+		    -- Only a change notification shows delivery works; a lifecycle event does not.
+		    degraded_at = CASE WHEN @lifecycle = '' THEN NULL ELSE s.degraded_at END, updated_at = @now`+renewal+`
 		  WHERE s.id IN @ids AND s.status <> 'stopped'
 		  RETURNING s.connection_id, s.scheduled_sync_at, s.last_push_sync_at
 		)
@@ -165,7 +167,7 @@ func (r *repository) MarkExternalMailPush(ctx context.Context, mark domain.Exter
 		SET next_sync_at = `+pushTargetSQL+`
 		FROM m
 		WHERE c.id = m.connection_id AND `+pushPromotableSQL,
-		map[string]any{"now": mark.Now, "ids": mark.SubscriptionIDs, "window": window, "spacing": mark.Spacing.Seconds()})
+		map[string]any{"now": mark.Now, "ids": mark.SubscriptionIDs, "window": window, "spacing": mark.Spacing.Seconds(), "lifecycle": mark.Lifecycle})
 	return int(result.RowsAffected), result.Error
 }
 

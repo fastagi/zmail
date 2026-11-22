@@ -29,9 +29,9 @@ const (
 	// maxExternalMailPushHints bounds the notifications one request is read for; the rest are
 	// dropped, and the poll picks up whatever they announced.
 	maxExternalMailPushHints = 20
-	// maxExternalMailPushMatches bounds the connections one notification may name: one Gmail account
-	// bound by several connections.
-	maxExternalMailPushMatches = 10
+	// maxExternalMailPushMatches bounds the subscriptions one request marks, in one bounded query:
+	// every connection of one Gmail account, however many organizations bound it.
+	maxExternalMailPushMatches = 1000
 	// maxExternalMailPushBodyBytes bounds a notification request body.
 	maxExternalMailPushBodyBytes = 64 << 10
 	// externalMailPushReconcileBatch bounds the subscriptions of ended connections stopped per pass,
@@ -327,15 +327,13 @@ func (s *service) matchPushHints(ctx context.Context, provider domain.ExternalMa
 	for _, hint := range hints {
 		keys = append(keys, hint.Key)
 	}
-	hits, err := s.pushStore.MatchExternalMailSubscriptions(ctx, provider, keys, maxExternalMailPushHints*maxExternalMailPushMatches)
+	hits, err := s.pushStore.MatchExternalMailSubscriptions(ctx, provider, keys, maxExternalMailPushMatches)
 	if err != nil {
 		return nil, err
 	}
 	byKey := map[string][]domain.ExternalMailPushHit{}
 	for _, hit := range hits {
-		if len(byKey[hit.LookupKey]) < maxExternalMailPushMatches {
-			byKey[hit.LookupKey] = append(byKey[hit.LookupKey], hit)
-		}
+		byKey[hit.LookupKey] = append(byKey[hit.LookupKey], hit)
 	}
 	var matched []pushMatch
 	for _, hint := range hints {
@@ -715,8 +713,10 @@ func (s *service) stopPushAtProvider(ctx context.Context, connection *domain.Ext
 
 // unsubscribeOrphan stops at the provider a subscription a sync created or renewed for a connection
 // that was revoked while the sync ran, so no watch outlives its connection. Best effort.
-func (s *service) unsubscribeOrphan(ctx context.Context, source ExternalMailPushSource, connection *domain.ExternalMailConnection, request ExternalMailPushRequest) {
-	if others, err := s.pushStore.CountLiveExternalMailWatchers(ctx, connection.Provider, normalizedPushKey(connection.AccountAddress), connection.ID); err != nil || others > 0 {
+// Other live connections are counted by the key the provider names the account by (Gmail's primary
+// address), so a watch another connection shares is left running.
+func (s *service) unsubscribeOrphan(ctx context.Context, source ExternalMailPushSource, connection *domain.ExternalMailConnection, lookupKey string, request ExternalMailPushRequest) {
+	if others, err := s.pushStore.CountLiveExternalMailWatchers(ctx, connection.Provider, lookupKey, connection.ID); err != nil || others > 0 {
 		return
 	}
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), externalMailPushCallTimeout)

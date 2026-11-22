@@ -193,3 +193,97 @@ func TestExternalMailProviderReleaseRetriesThenExpires(t *testing.T) {
 		t.Fatalf("a release past its deadline kept its sealed grant: %+v", rows)
 	}
 }
+
+// primaryPushSource keys every account by one primary address, as Gmail does for aliases of one
+// account, and lets the test revoke a connection while its subscribe call is at the provider.
+type primaryPushSource struct {
+	*FakeExternalMailSource
+	during func(request ExternalMailPushRequest)
+}
+
+const pushTestPrimary = "primary@gmail.example"
+
+func (s primaryPushSource) Subscribe(ctx context.Context, request ExternalMailPushRequest) (ExternalMailPushSubscription, error) {
+	got, err := s.FakeExternalMailSource.Subscribe(ctx, request)
+	if s.during != nil {
+		s.during(request)
+	}
+	return ExternalMailPushSubscription{LookupKey: pushTestPrimary, ExpiresAt: got.ExpiresAt}, err
+}
+
+// TestExternalMailPushOrphanCleanupKeepsASharedWatch: when a connection is revoked while its sync
+// subscribes, the watch it renewed is left running if another live connection of the same account,
+// bound under another of its addresses, shares it.
+func TestExternalMailPushOrphanCleanupKeepsASharedWatch(t *testing.T) {
+	f := newPushFixture(t)
+	db := f.repo.(*repository).db
+	revoked := false
+	registry := fakeExternalMailRegistry(f.source)
+	registry.connectors[0].Push = primaryPushSource{FakeExternalMailSource: f.source, during: func(request ExternalMailPushRequest) {
+		if request.Token.RefreshToken == externalTestToken && !revoked {
+			revoked = true
+			if err := f.service.RevokeExternalMailConnection(context.Background(), f.b, f.connection.ID); err != nil {
+				t.Errorf("revoke: %v", err)
+			}
+		}
+	}}
+	f.service.externalConnectors = registry
+	alias := f.connectionIn(t, accessOrg+100, "alias@gmail.example", "alias-token")
+	if err := db.Exec(`UPDATE external_mail_connections SET next_sync_at = ? WHERE id = ?`, f.service.now().Add(time.Hour), f.connection.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.sync(t) // the alias connection watches the account
+	if err := db.Exec(`UPDATE external_mail_connections SET next_sync_at = ? WHERE id = ?`, f.service.now(), f.connection.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	f.sync(t)
+	if !revoked {
+		t.Fatal("the fixture connection never subscribed")
+	}
+	if stopped := f.source.Unsubscribed(); len(stopped) != 0 {
+		t.Fatalf("the watch %v shares with a live connection was stopped", stopped)
+	}
+	if subscription := f.subscription(t, alias.ID); subscription.Status != domain.ExternalMailSubscriptionActive {
+		t.Fatalf("the sharing connection's subscription = %+v", subscription)
+	}
+}
+
+// TestExternalMailPushWakesEveryConnectionOfAnAccount: one Gmail notification makes every live
+// connection of the account due, more than ten included.
+func TestExternalMailPushWakesEveryConnectionOfAnAccount(t *testing.T) {
+	f := newAddressPushFixture(t)
+	ids := []uint{f.connection.ID}
+	for i := 0; i < 14; i++ {
+		ids = append(ids, f.connectionIn(t, accessOrg+100+uint(i), f.connection.AccountAddress, "shared-token-"+string(rune('a'+i))).ID)
+	}
+	f.sync(t)
+	now := f.advance(time.Minute)
+	f.notifyAddress(t)
+	for _, id := range ids {
+		if next := f.nextSyncAt(t, id); !next.Equal(now) {
+			t.Fatalf("connection %d of the notified account is not due (%v)", id, next)
+		}
+	}
+}
+
+// TestExternalMailPushMissedEventKeepsDegraded: a Graph missed lifecycle event marks the connection
+// due but does not show that delivery works, so a degraded subscription stays degraded; a change
+// notification clears it.
+func TestExternalMailPushMissedEventKeepsDegraded(t *testing.T) {
+	f := newPushFixture(t)
+	f.sync(t)
+	if err := f.repo.(*repository).db.Exec(`UPDATE external_mail_subscriptions SET degraded_at = ? WHERE connection_id = ?`,
+		f.service.now(), f.connection.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	id, secret, _ := f.source.PushSubscription(externalTestToken)
+	f.advance(time.Minute)
+	f.notify(t, fakeNotificationBody(id, secret, domain.ExternalMailPushMissed))
+	if subscription := f.subscription(t, f.connection.ID); subscription.DegradedAt == nil {
+		t.Fatal("a missed lifecycle event cleared the degraded mark")
+	}
+	f.notify(t, fakeNotificationBody(id, secret, ""))
+	if subscription := f.subscription(t, f.connection.ID); subscription.DegradedAt != nil {
+		t.Fatal("a change notification left the subscription degraded")
+	}
+}
