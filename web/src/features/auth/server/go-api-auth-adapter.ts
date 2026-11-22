@@ -44,7 +44,8 @@ type AdapterOperation =
   | 'session'
   | 'password-reset'
   | 'password-reset-confirm'
-  | 'password-change';
+  | 'password-change'
+  | 'profile-update';
 
 interface GoApiUser {
   id: number;
@@ -274,6 +275,30 @@ export class GoApiAuthAdapter {
     return result.ok ? { ok: true, data: { success: true } } : result;
   }
 
+  /** Renames the signed-in user; the API leaves the fields it is not sent unchanged. */
+  async updateProfile(
+    accessToken: string,
+    input: { name: string },
+    incomingHeaders: Headers,
+    signal?: AbortSignal
+  ): Promise<AdapterResult<AuthResponse>> {
+    if (!isOpaqueAuthenticationCredential(accessToken)) {
+      return adapterUnavailable(this.dependencies.randomUUID());
+    }
+    const result = await this.request(
+      'profile-update',
+      'users/profile',
+      { method: 'PUT', accessToken, body: { nickname: input.name } },
+      incomingHeaders,
+      signal
+    );
+    if (!result.ok) {
+      return result;
+    }
+    const user = mapGoApiUser(result.data.data);
+    return user ? { ok: true, data: { user } } : adapterUnavailable(result.data.requestId);
+  }
+
   private sessionFromLoginData(value: unknown, requestId: string): AdapterResult<AdapterSession> {
     if (!isRecord(value)) {
       return adapterUnavailable(requestId);
@@ -400,6 +425,8 @@ function authFieldMap(operation: AdapterOperation): Readonly<Record<string, stri
       return { token: 'token', new_password: 'password' };
     case 'password-change':
       return { old_password: 'currentPassword', new_password: 'newPassword' };
+    case 'profile-update':
+      return { nickname: 'name' };
     default:
       return {};
   }

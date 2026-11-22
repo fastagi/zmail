@@ -49,8 +49,7 @@ const messages = {
     samples: '代码示例',
     language: '语言',
     keyPlaceholder: 'YOUR_API_KEY',
-    originHint:
-      '运维尚未配置 NEXT_PUBLIC_DEVELOPER_API_ORIGIN，示例里暂时显示 https://api.example.com。',
+    originHint: '示例使用当前站点地址；如果 API 部署在其他地址，请替换为实际地址。',
     template: '模板',
     noTemplate: '请先创建一个事务模板；在此之前示例使用示意的模板 key。',
     sendTest: '发一封试试',
@@ -287,7 +286,8 @@ const messages = {
     fallbackFor: '{name} 的默认值',
     sampleFor: '{name} 的示例值',
     secretHint: '秘密变量总是必填，且不能有默认值。',
-    sampleHint: '示例值只用于预览。它们按原样保存、所有成员可见，请填写虚构的示例，不要填真实的秘密值。',
+    sampleHint:
+      '示例值只用于预览。它们按原样保存、所有成员可见，请填写虚构的示例，不要填真实的秘密值。',
     noDomain: '创建事务模板前，请先验证一个发信域名。',
     fallbackMismatch: '必填变量不能有默认值；可选变量的每一处使用都需要默认值。',
     save: '保存',

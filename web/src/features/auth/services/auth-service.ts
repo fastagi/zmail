@@ -78,6 +78,14 @@ export const authService = {
       'password-reset-confirm'
     ),
 
+  /** Renames the signed-in user and returns the user as now stored. */
+  updateProfile: (name: string) =>
+    validateResponse<AuthResponse>(
+      request.put<unknown, { name: string }>('/auth/me', { name }),
+      isAuthResponse,
+      'profile-update'
+    ),
+
   /** Changes the signed-in user's password; every session of the account ends, this one included. */
   changePassword: (currentPassword: string, newPassword: string) =>
     validateResponse<LogoutResponse>(

@@ -214,12 +214,15 @@ function BroadcastWorkspace({ canManage }: { canManage: boolean }) {
   );
 }
 
-function StatusBadge({ status }: { status: MailBroadcastStatus }) {
+function StatusBadge({ broadcast }: { broadcast: Pick<MailBroadcast, 'status' | 'stop_reason'> }) {
   const t = useT('mailbox');
+  const { status } = broadcast;
+  // A test wave waiting out its observation window continues on its own; it is not a pause.
+  const waiting = status === 'paused' && broadcast.stop_reason === 'test_wave_complete';
   return (
     <Badge
       variant={
-        status === 'sending' || status === 'scheduled'
+        status === 'sending' || status === 'scheduled' || waiting
           ? 'default'
           : status === 'paused'
             ? 'outline'
@@ -230,7 +233,7 @@ function StatusBadge({ status }: { status: MailBroadcastStatus }) {
       {status === 'sending' ? (
         <span className="size-1.5 rounded-full bg-current animate-pulse" aria-hidden="true" />
       ) : null}
-      {t(statusKey[status])}
+      {t(waiting ? 'broadcasts.statusWaitingTestWave' : statusKey[status])}
     </Badge>
   );
 }
@@ -353,7 +356,7 @@ function BroadcastList({
                   </button>
                 </TableCell>
                 <TableCell>
-                  <StatusBadge status={broadcast.status} />
+                  <StatusBadge broadcast={broadcast} />
                 </TableCell>
                 <TableCell>
                   <Progress broadcast={broadcast} />
@@ -1323,7 +1326,7 @@ function BroadcastDetail({
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="text-lg font-semibold break-words">{broadcast.name}</h2>
-          <StatusBadge status={broadcast.status} />
+          <StatusBadge broadcast={broadcast} />
         </div>
         <p className="text-sm text-muted-foreground">{when(broadcast)}</p>
       </div>

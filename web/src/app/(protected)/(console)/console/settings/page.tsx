@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { KeyRound, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { KeyRound, ShieldCheck, SlidersHorizontal, UserRound } from 'lucide-react';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -12,24 +12,46 @@ const AccountSecurityPanel = lazy(async () => {
   return { default: feature.AccountSecurityPanel };
 });
 
+const ProfilePanel = lazy(async () => {
+  const feature = await import('@/features/auth/components/profile-panel');
+  return { default: feature.ProfilePanel };
+});
+
 const UserSettingPanel = lazy(async () => {
   const feature = await import('@/features/setting/components/user-setting-panel');
   return { default: feature.UserSettingPanel };
 });
 
+const settingsTabs = ['profile', 'preferences', 'security', 'api'] as const;
+type SettingsTab = (typeof settingsTabs)[number];
+
+interface SettingsPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
 /**
- * Replaceable settings surface for the starter console.
+ * Replaceable settings surface for the starter console. `?tab=` opens one tab directly.
  */
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: SettingsPageProps) {
   const t = await getT('settings');
   const settingEnabled = isWebFeatureEnabled('setting');
+  const requested = (await searchParams).tab;
+  const tab: SettingsTab =
+    settingsTabs.find(
+      value => value === requested && (value !== 'preferences' || settingEnabled)
+    ) ?? 'profile';
 
   return (
     <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 lg:py-8">
       <h1 className="text-2xl font-semibold">{t('title')}</h1>
 
-      <Tabs defaultValue={settingEnabled ? 'preferences' : 'api'} className="mt-5">
+      {/* Keyed so following a ?tab= link while already on this page selects that tab. */}
+      <Tabs key={tab} defaultValue={tab} className="mt-5">
         <TabsList className="max-w-full overflow-x-auto">
+          <TabsTrigger value="profile">
+            <UserRound aria-hidden="true" />
+            {t('tabs.profile')}
+          </TabsTrigger>
           {settingEnabled ? (
             <TabsTrigger value="preferences">
               <SlidersHorizontal aria-hidden="true" />
@@ -45,6 +67,12 @@ export default async function SettingsPage() {
             {t('tabs.api')}
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="profile" className="pt-5">
+          <Suspense fallback={<UserSettingPanelFallback />}>
+            <ProfilePanel />
+          </Suspense>
+        </TabsContent>
 
         {settingEnabled ? (
           <TabsContent value="preferences" className="pt-5">
