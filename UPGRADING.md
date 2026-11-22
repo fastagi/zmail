@@ -11,6 +11,53 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Shared connected mailboxes
+
+An `owner` or `admin` can bind a team account at an outside provider into a `shared` mailbox with
+`origin` `connected` and assign members as for any shared mailbox; the connection belongs to the
+organization. Contract: `contracts/MAILBOXES.md`, Shared Connected Mailboxes. Plan:
+`docs/plans/shared-connected-mailboxes.plan.md`.
+
+### Medium — New response fields and request options on the connector routes
+
+`ExternalMailConnection` gains the required `shared` boolean, and `ExternalMailConnectionDirectoryEntry`
+gains the required `shared`, `account_address`, and `mailbox_id` (both `null` for a member's own
+account, filled for a shared connection, whose `owner_user_id` is `null`). A client with strict
+response schemas must accept them. `POST /v1/external-mail-authorizations` and
+`POST /v1/external-mail-credentials` accept an optional `sharing` object (and the credentials route an
+optional `connection_id`); a request without them behaves as before. These routes can now answer
+`403 PERMISSION.DENIED` and `422 MAILBOX.ACCESS_INVALID`. `GET /v1/external-mail-connections` also
+lists the shared connections the caller manages after their own, so it may return up to 110 items,
+and the sync-runs, purge, and unbind routes accept a shared connection from whoever manages its
+mailbox's members. No error code was added. The credentials route's body limit rises from 4 KiB
+to 16 KiB to carry 100 members.
+
+### High — Roll every API instance forward before anyone binds a team account
+
+A sign-in started as shared on this version must be completed by this version. An older instance
+would ignore the stored `sharing`, so a shared sign-in seals its verifier behind a marker the older
+code cannot open: such a completion answers `404 MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND` before the
+code is exchanged, and the admin signs in again once every instance runs this version. Nothing is
+misbound, but shared binding is unreliable until the rollout completes. Rolling back the migration
+deletes pending shared sign-ins and refuses while a shared connection exists.
+
+### Medium — Display names count characters; shared purges need an owner or admin
+
+Every mailbox display name (`POST /v1/mailboxes`, renames, `sharing.display_name`) is now limited to
+120 characters, not 120 bytes, matching the column and the contract: multi-byte names up to 120
+characters that were refused before are accepted. Purging a revoked shared connection's copies at
+once (`POST /v1/external-mail-connections/{connection_id}/purges`) deletes its mailbox, so it is
+reserved to owners and admins; a `manage` member gets `403 PERMISSION.DENIED`.
+
+### Low — Migration `2026_12_07_090000_add_shared_external_mail` and a new limit
+
+The migration adds `external_mail_connections.shared` and `bound_by_user_id` (backfilled from the
+owner), a CHECK that a shared connection has no owner, a partial index, and
+`external_mail_authorizations.sharing`; constant defaults rewrite no table. Its Down refuses while a
+shared connection exists. `EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS` (default 20, 1 to 100; a set but
+invalid value stops startup) bounds the live shared connections of one organization; add it to your
+environment if you template it.
+
 ## Unreleased — Mail connector acceptance fixes
 
 ### Medium — Restoring a revoked connection counts toward the limit of 10

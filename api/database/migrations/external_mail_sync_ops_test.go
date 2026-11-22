@@ -20,11 +20,13 @@ func TestExternalMailSyncOpsUpDown(t *testing.T) {
 	exec(`INSERT INTO external_mail_sync_runs (connection_id, started_at, finished_at, outcome, fetched_count, stored_count)
 		VALUES (1, now(), now(), 'ok', 3, 2)`)
 
+	require.NoError(t, (&addSharedExternalMail{}).Down(db))
 	require.NoError(t, (&addExternalMailSyncOps{}).Down(db))
 	rolledBack := dumpSchema(t, db)
 	assert.NotContains(t, rolledBack, "TABLE external_mail_sync_runs")
 	assert.NotContains(t, rolledBack, "idx_external_mail_connections_revoked")
 	require.NoError(t, (&addExternalMailSyncOps{}).Up(db))
+	require.NoError(t, (&addSharedExternalMail{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 
 	var backfilled bool

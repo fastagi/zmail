@@ -45,6 +45,7 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 		VALUES (1, 'inbound', 'received', 'bob@sender.test', 'gmail', 'g-1', now(), now())`)
 
 	// Later migrations that build on these tables roll back first.
+	require.NoError(t, (&addSharedExternalMail{}).Down(db))
 	require.NoError(t, (&addExternalMailSyncOps{}).Down(db))
 	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	require.NoError(t, (&openMailConnectors{}).Down(db))
@@ -59,6 +60,7 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 	require.NoError(t, (&openMailConnectors{}).Up(db))
 	require.NoError(t, (&addMailboxOrigin{}).Up(db))
 	require.NoError(t, (&addExternalMailSyncOps{}).Up(db))
+	require.NoError(t, (&addSharedExternalMail{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 

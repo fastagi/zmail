@@ -381,6 +381,7 @@ func (f *externalFixture) callWith(t *testing.T, viewer domain.OrganizationConte
 	router.GET("/external-mail-connectors", handler.ListExternalMailConnectors)
 	router.POST("/external-mail-authorizations", handler.StartExternalMailAuthorization)
 	router.POST("/external-mail-authorizations/completions", handler.CompleteExternalMailAuthorization)
+	router.POST("/external-mail-credentials", handler.BindExternalMailCredentials)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {

@@ -220,9 +220,16 @@ func TestConnectionDirectoryMasksAndIsManagerOnly(t *testing.T) {
 		t.Fatalf("newest entry = %v", newest)
 	}
 	text := fmt.Sprint(body)
-	for _, leak := range []string{"dan@external.invalid", "carol@external.invalid", f.mailbox.Address, "refresh", "mailbox_id"} {
+	for _, leak := range []string{"dan@external.invalid", "carol@external.invalid", f.mailbox.Address, "refresh"} {
 		if strings.Contains(text, leak) {
 			t.Fatalf("the connection directory leaks %q: %v", leak, body)
+		}
+	}
+	// A member's own account never shows its mailbox or full address, only a shared one does.
+	for _, item := range items {
+		entry := item.(map[string]any)
+		if entry["mailbox_id"] != nil || entry["account_address"] != nil || entry["shared"] != false {
+			t.Fatalf("a personal entry carries its mailbox or address: %v", entry)
 		}
 	}
 	meta, _ := body["meta"].(map[string]any)

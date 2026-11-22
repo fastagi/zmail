@@ -73,10 +73,23 @@ func (s *service) MailboxDirectory(ctx context.Context, viewer domain.Organizati
 	return page, nil
 }
 
+// maxMailboxDisplayNameLength is the longest display name in characters, as mailboxes.display_name.
+const maxMailboxDisplayNameLength = 120
+
+// truncateDisplayName cuts a name to the display-name limit in characters.
+func truncateDisplayName(name string) string {
+	runes := []rune(name)
+	if len(runes) <= maxMailboxDisplayNameLength {
+		return name
+	}
+	return string(runes[:maxMailboxDisplayNameLength])
+}
+
 // normalizeDisplayName collapses whitespace and applies the display-name rules of a create.
 func normalizeDisplayName(raw string) (string, error) {
 	displayName := strings.Join(strings.Fields(raw), " ")
-	if len(displayName) > 120 || strings.ContainsAny(displayName, "<>\"") {
+	// The column and the contract count characters, so a multi-byte name gets the same 120.
+	if utf8.RuneCountInString(displayName) > maxMailboxDisplayNameLength || strings.ContainsAny(displayName, "<>\"") {
 		return "", fmt.Errorf("%w: display name", ErrMailboxAddressInvalid)
 	}
 	return displayName, nil

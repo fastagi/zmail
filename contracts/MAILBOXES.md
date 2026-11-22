@@ -738,8 +738,9 @@ Connector ids match `^[a-z][a-z0-9_]{1,15}$`; a new connector adds ids without a
 clients render an id they do not know generically. A connected mailbox carries the outside account's
 address, but that address is never Zmail's to deliver to: inbound delivery, sending, and the address
 check ignore connected mailboxes. Within one organization and connector an outside account belongs
-to one member at a time; the same address may still exist under another connector or as a Zmail
-mailbox, which is all the relaxed address index allows.
+to one member at a time, or to the organization as a [shared connected mailbox](#shared-connected-mailboxes);
+the same address may still exist under another connector or as a Zmail mailbox, which is all the
+relaxed address index allows.
 
 Every newly stored message, delivered by Zmail or synced, goes through the same post-store step in
 the transaction that stores it: it is queued for [AI triage](#ai-triage) when the switches allow,
@@ -822,14 +823,79 @@ from the backfill window without second copies. Only a refused login without a t
 moves the connection to `needs_reconnect`; posting the credentials again restores it. Unbinding erases the stored password; revoking the app password itself is done at
 the provider. The route is session only and never cached.
 
+### Shared Connected Mailboxes
+
+An `owner` or `admin` binds a **team account** hosted at an outside provider (for example
+`support@` at Google Workspace) into a `shared` mailbox with `origin` `connected`, and assigns its
+members exactly as `POST /v1/mailboxes` creates a shared mailbox. Both binding routes take one
+optional object; without it the personal flow above is unchanged:
+
+```json
+{ "provider": "gmail",
+  "sharing": { "display_name": "Support",
+               "members": [ { "user_id": 7, "permission": "manage" }, { "user_id": 9, "permission": "view" } ] } }
+```
+
+`POST /v1/external-mail-authorizations` stores `sharing` with the pending sign-in;
+`POST /v1/external-mail-credentials` takes it next to the credentials. `members` follows the shared
+mailbox rules: 1 to 100 distinct current members, each `view`, `send`, or `manage`
+(`422 MAILBOX.ACCESS_INVALID`). `display_name` is optional, at most 120 characters (not bytes, as
+for every mailbox), and defaults to the account address cut to 120 characters
+(`422 MAILBOX.ADDRESS_INVALID` when invalid). A caller who is not an `owner` or `admin` gets
+`403 PERMISSION.DENIED`, checked before any attempt is counted or any server contacted; `sharing`
+with `connection_id` is `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`. The role and the members are
+checked again when the sign-in completes, before the code is exchanged, so a member who left or a
+role that changed in between refuses the completion (`422 MAILBOX.ACCESS_INVALID` or
+`403 PERMISSION.DENIED`) and nothing is stored. A shared sign-in is completed only by an API version
+that knows shared bindings; an older one answers `404 MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`.
+
+A new account creates, in one transaction, the mailbox, its `created` and `member_set` access
+events, the connection, and `connection_bound`, and answers `201` with `"shared": true`. The
+connection belongs to the **organization**:
+
+- It has no owner. Who bound it is recorded for the history only; it never counts toward that
+  person's 10 connections, and leaving the organization does not revoke it.
+- An organization holds at most `EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS` (20 by default, 1 to 100)
+  live (`active` or `needs_reconnect`) shared connections; one more, or restoring a revoked one at
+  the limit, is `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT`. Like every connected mailbox it is outside
+  the organization's mailbox limit.
+- An account is either a member's own or the team's: a live connection of the other kind, or a live
+  shared connection of the same account, is `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`. A revoked personal
+  connection is freed for a shared binding as for any other binder (purged with `reason` `rebound`).
+  A revoked shared connection stays the team's while its mailbox exists: it is restored by a
+  reconnect, never taken over; once the mailbox is deleted, a new binding of either kind purges it
+  and binds fresh. Converting a member's connection into a shared one, or back, is not offered:
+  unbind and bind again.
+
+Access follows the shared mailbox rules (see [Access](#access)), minus what the read-only origin
+forbids: members read with their own read state according to `view`, `send`, or `manage`; nobody
+sends, replies, composes from it, deletes mail for good, or changes its folders, whatever the
+permission; an `owner` or `admin` who is not a member manages members, webhooks, and the history but
+reads no mail until adding themselves, which is recorded. The member, webhook, and AI triage
+switches and agent grants follow the shared mailbox matrix; an agent grant never gets `draft`. Handover
+does not apply, and deleting the mailbox revokes its connection in the same transaction.
+
+Whoever manages the mailbox's members (a `manage` member, an `owner`, or an `admin`) manages the
+connection: they reconnect it with `connection_id` on either binding route (the same account, or
+`409 MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`; checked again at completion), unbind it, and read its sync
+runs. Purging a revoked shared connection at once deletes the mailbox with every copy and member, so
+only an `owner` or `admin`, who may delete the mailbox anyway, may do it; a `manage` member gets
+`403 PERMISSION.DENIED`, and the worker's purge after the retention is unchanged. Everyone else gets
+`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, and so does anyone once the mailbox is deleted. An unbind follows the revoke path below and records
+`connection_revoked` with the caller as actor, plus an organization audit entry with `reason`
+`shared_disconnect`; the mailbox and its members stay until the retention ends, the connection is
+reconnected, or the mailbox is deleted.
+
 ### Connections
 
 `GET /v1/external-mail-connections` lists the caller's own connections in the organization, live
-ones first and then id ascending, at most 10; it never carries a token. Revoked connections are kept
-so a rebind restores the same mailbox, and do not count toward the limit of 10:
+ones first and then id ascending, at most 10, followed by the shared connections the caller manages
+(every one for an `owner` or `admin`, those of mailboxes held with `manage` otherwise), whose mailbox
+still exists, in the same order, at most 100; it never carries a token. Revoked connections are kept
+so a rebind restores the same mailbox, and do not count toward the limits:
 
 ```json
-{ "id": 3, "provider": "gmail", "account_address": "me@gmail.com", "mailbox_id": 41,
+{ "id": 3, "provider": "gmail", "account_address": "me@gmail.com", "mailbox_id": 41, "shared": false,
   "status": "active", "last_synced_at": "2026-11-20T08:00:00Z", "last_error_code": null,
   "created_at": "2026-11-19T08:00:00Z" }
 ```
@@ -903,7 +969,7 @@ counts, and codes, never message data. The worker keeps a connection's latest 50
 than 14 days.
 
 `GET /v1/external-mail-connections/:connection_id/sync-runs` lists the latest runs of the caller's
-own connection, newest first, at most 50. Anyone else, an `owner` or `admin` included, gets
+own connection, or of a shared connection they manage, newest first, at most 50. Anyone else, an `owner` or `admin` included, gets
 `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached:
 
 ```json
@@ -942,7 +1008,7 @@ of a deleted mailbox answers `404`, so it is never listed. Binding the account a
 new mailbox.
 
 `POST /v1/external-mail-connections/:connection_id/purges` deletes the copies of the caller's own
-revoked connection at once, the same way, with `reason` `owner` and the caller as the actor:
+revoked connection, or, for an `owner` or `admin`, of a revoked shared connection, at once, the same way, with `reason` `owner` and the caller as the actor:
 
 | Case | Answer |
 |---|---|
@@ -967,18 +1033,23 @@ organization in any status, newest first (`cursor`, `per_page` 1 to 100, default
 `400 COMMON.INVALID_INPUT`). It is empty while external mail is off, and never cached:
 
 ```json
-{ "id": 3, "provider": "gmail", "status": "active", "masked_account_address": "st***@gmail.com",
-  "owner_user_id": 5, "owner_display_name": "stark", "last_synced_at": "2026-11-20T08:00:00Z",
+{ "id": 3, "provider": "gmail", "status": "active", "shared": false, "account_address": null,
+  "mailbox_id": null, "masked_account_address": "st***@gmail.com", "owner_user_id": 5,
+  "owner_display_name": "stark", "last_synced_at": "2026-11-20T08:00:00Z",
   "created_at": "2026-11-19T08:00:00Z" }
 ```
 
 The mask keeps the first two characters of the local part (one when it is that short) and the
 domain. `owner_display_name` is the owner's nickname, or username without one, while they are a
-member, otherwise `null`. No token, mailbox id, message, or count is ever returned.
+member, otherwise `null`. No token, message, or count is ever returned, and for a member's own
+account neither its full address nor its mailbox id. A shared connection is the organization's own
+team account: it carries `"shared": true`, its full `account_address`, and its `mailbox_id`, with
+`owner_user_id` and `owner_display_name` `null`.
 
 `DELETE /v1/external-mail-connection-directory/:connection_id` force-disconnects any connection of
 the organization with the effect of the owner's unbind and writes `connection_force_disconnected`
-to the connected mailbox's history. A revoked connection answers `204` again and writes nothing;
+to the connected mailbox's history; a shared connection is unbound as in
+[Shared Connected Mailboxes](#shared-connected-mailboxes) instead. A revoked connection answers `204` again and writes nothing;
 another organization's id, and any id while external mail is off, is
 `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. A forced disconnect that changed anything is also
 written to the organization audit log (resource `external_mail_connections`, the connection id,
