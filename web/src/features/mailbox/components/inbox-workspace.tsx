@@ -63,6 +63,8 @@ import {
   useInboxTimezone,
   useMailRoles,
 } from '@/features/mailbox/hooks/use-inbox';
+import { useMailDrafts, useOpenMailDraft } from '@/features/mailbox/hooks/use-mail-drafts';
+import type { MailDraftSummary } from '@/features/mailbox/draft-schemas';
 import {
   useExternalMailConnections,
   useExternalMailConnectors,
@@ -73,7 +75,12 @@ import {
   useMailOrganization,
   type MailOrganizationScope,
 } from '@/features/mailbox/hooks/use-mail-organization';
-import { INBOX_VIEWS, MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
+import {
+  INBOX_ASSIGNMENTS,
+  INBOX_DATE_RANGES,
+  INBOX_VIEWS,
+  MAIL_SEARCH_MAX_LENGTH,
+} from '@/features/mailbox/schemas';
 import {
   INBOX_TRIAGE_TABS,
   triageTabCategories,
@@ -81,6 +88,7 @@ import {
 } from '@/features/mailbox/triage-tabs';
 import type {
   InboxCounts,
+  InboxAssignment,
   InboxFilters,
   InboxItem,
   InboxView,
@@ -96,6 +104,7 @@ import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
 // Administration dialogs load when opened, not with the mail page.
+const DraftsDialog = lazy(() => import('./drafts-dialog'));
 const ManageRolesDialog = lazy(async () => {
   const feature = await import('@/features/mailbox/components/manage-roles-dialog');
   return { default: feature.ManageRolesDialog };
@@ -161,6 +170,7 @@ const ROLE_PARAM = 'role';
 const SEARCH_PARAM = 'q';
 const TAB_PARAM = 'tab';
 const TRIAGE_PARAM = 'triage';
+const DATE_PARAM = 'date';
 /** `new=mailbox`: the team was just created, so mailbox creation opens at once. */
 const NEW_PARAM = 'new';
 
@@ -170,6 +180,7 @@ const TeamSetupCard = lazy(async () => {
   return { default: feature.TeamSetupCard };
 });
 const UNREAD_TAB = 'unread';
+const ATTACHMENTS_TAB = 'attachments';
 const NO_ROLE = 'none';
 const filterParams = [
   VIEW_PARAM,
@@ -178,6 +189,7 @@ const filterParams = [
   SEARCH_PARAM,
   TAB_PARAM,
   TRIAGE_PARAM,
+  DATE_PARAM,
 ] as const;
 const rowIdPattern = /^[1-9]\d{0,15}$/u;
 const fallbackTimeZone = 'UTC';
@@ -189,8 +201,44 @@ interface InboxUrlState {
   role: InboxRoleFilter | null;
   q: string;
   unread: boolean;
+  /** The With attachments tab: only messages with files. */
+  attachments: boolean;
   /** The AI triage tab; it applies only to `all` and `today` without a search. */
   triage: InboxTriageTab | null;
+  /** The assignment tab of shared conversations. */
+  assignment: InboxAssignment | null;
+  /** How far back the list reaches, in the inbox's zone. */
+  date: InboxDateRange | null;
+}
+
+export type InboxDateRange = (typeof INBOX_DATE_RANGES)[number];
+
+/** The calendar day `YYYY-MM-DD` that is `days` before today in `tz`. */
+function daysAgo(tz: string, days: number): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    timeZone: tz,
+  }).formatToParts(new Date());
+  const part = (type: 'year' | 'month' | 'day') =>
+    Number(parts.find(item => item.type === type)?.value);
+  const [year, month, day] = [part('year'), part('month'), part('day')];
+  return new Date(Date.UTC(year, month - 1, day - days)).toISOString().slice(0, 10);
+}
+
+/** The `since` or `until` day of a date range; the past week includes today and six days back. */
+function dateBounds(range: InboxDateRange, tz: string): Pick<InboxFilters, 'since' | 'until'> {
+  switch (range) {
+    case 'week':
+      return { since: daysAgo(tz, 6) };
+    case 'month':
+      return { since: daysAgo(tz, 29) };
+    case 'year':
+      return { since: daysAgo(tz, 364) };
+    case 'older':
+      return { until: daysAgo(tz, 365) };
+  }
 }
 
 /**
@@ -226,7 +274,14 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
     role,
     q,
     unread: params.get(TAB_PARAM) === UNREAD_TAB,
+    attachments: params.get(TAB_PARAM) === ATTACHMENTS_TAB,
     triage,
+    assignment: (INBOX_ASSIGNMENTS as readonly string[]).includes(params.get(TAB_PARAM) ?? '')
+      ? (params.get(TAB_PARAM) as InboxAssignment)
+      : null,
+    date: (INBOX_DATE_RANGES as readonly string[]).includes(params.get(DATE_PARAM) ?? '')
+      ? (params.get(DATE_PARAM) as InboxDateRange)
+      : null,
   };
 }
 
@@ -236,20 +291,29 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
  * the organization's triage is on.
  */
 function inboxFilters(
-  { view, box, role, q, unread, triage }: InboxUrlState,
+  { view, box, role, q, unread, attachments, triage, assignment, date }: InboxUrlState,
   tz: string,
   triageOn: boolean
 ): InboxFilters {
   const triageTab = triageOn ? triage : null;
-  const grouped = !unread && q === '' && triageTab === null && (view === 'all' || view === 'sent');
+  const grouped =
+    !unread &&
+    !attachments &&
+    date === null &&
+    q === '' &&
+    triageTab === null &&
+    (view === 'all' || view === 'sent');
   return {
     view,
     ...(role === null ? {} : { roleId: role }),
     ...(box === null ? {} : { mailboxId: box }),
     ...(unread ? { unread: true } : {}),
+    ...(attachments ? { hasAttachments: true } : {}),
     ...(q === '' ? {} : { q }),
     ...(grouped ? { group: 'thread' as const } : {}),
     ...(triageTab === null ? {} : { triage: triageTabCategories(triageTab) }),
+    ...(assignment === null ? {} : { assignment }),
+    ...(date === null ? {} : dateBounds(date, tz)),
     tz,
   };
 }
@@ -422,12 +486,23 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   // The zone the inbox refused; UTC stands in for it only while it is still the inbox's zone.
   const [refusedZone, setRefusedZone] = useState<string | null>(null);
   const timeZone = refusedZone === inboxZone ? fallbackTimeZone : inboxZone;
-  const urlState = readInboxUrl(searchParams);
+  const urlParsed = readInboxUrl(searchParams);
+  // The assignment tabs show while the listing reaches a shared mailbox that is not connected.
+  const assignable = (mailboxes.data ?? []).filter(
+    mailbox => mailbox.access.view && mailbox.type === 'shared' && !isConnectedMailbox(mailbox)
+  );
+  const assignmentTabs =
+    urlParsed.box === null
+      ? assignable.length > 0
+      : assignable.some(mailbox => mailbox.id === urlParsed.box);
+  const urlState = assignmentTabs ? urlParsed : { ...urlParsed, assignment: null };
   const counts = useInboxCounts(organizationId, timeZone, { enabled: zoneReady });
   // AI triage shows only while the organization has it on, which its counts say by not being null.
   const triageCounts = counts.data?.triage ?? null;
   const filters = inboxFilters(urlState, timeZone, triageCounts !== null);
   const inbox = useInboxMessages(organizationId, filters, { enabled: zoneReady });
+  const openDraft = useOpenMailDraft(organizationId);
+  const savedDrafts = useMailDrafts(organizationId, mailboxes.data?.some(canComposeFrom) ?? false);
   const [triageMenuOpen, setTriageMenuOpen] = useState(false);
   const [managingRoles, setManagingRoles] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -440,6 +515,10 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     /** The mailboxes a new message may be sent from; replies keep their own. */
     fromOptions?: readonly Mailbox[];
   } | null>(null);
+  // Undo send opens the composer again on what it held.
+  const reopenDraft = (value: NonNullable<typeof draft>) => () => setDraft(value);
+  const [draftsOpen, setDraftsOpen] = useState(false);
+  const [draftsMounted, setDraftsMounted] = useState(false);
   // Quoted dates read in the zone the list shows, as the reader's do.
   const formatter = useDateTimeFormat(timeZone);
   // The page's composer replaces the workspace; closing it gives the focus back.
@@ -729,24 +808,51 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             fromOptions: sendable,
           })
       : null;
+  const openSavedDraft = (summary: MailDraftSummary) => {
+    openDraft.mutate(summary.id, {
+      onSuccess: saved => {
+        setDraftsOpen(false);
+        setDraft({
+          mailbox:
+            sendable.find(mailbox => mailbox.id === saved.mailbox_id) ??
+            newMessageSender(sendable, urlState.box, organizationId),
+          draft: {
+            ...emptyDraft,
+            to: saved.to,
+            cc: saved.cc,
+            subject: saved.subject,
+            body: saved.body,
+            inReplyTo: saved.in_reply_to,
+            savedId: saved.id,
+          },
+          fromOptions: sendable,
+        });
+      },
+      onError: () => toast.error(t('drafts.openFailed')),
+    });
+  };
   // Rows name their mailbox, tinted by its role, unless the list is one mailbox.
   const roleTags = new Map<number, MailRole>(roleList.map(role => [role.id, role]));
   const emptyTitle =
     urlState.q !== ''
       ? t('inbox.empty.search')
-      : urlState.unread
-        ? t('inbox.empty.unread')
-        : urlState.view === 'all'
-          ? t('inbox.empty.view')
-          : t(`inbox.empty.${urlState.view}`);
+      : urlState.assignment
+        ? t(`inbox.empty.${urlState.assignment}`)
+        : urlState.unread
+          ? t('inbox.empty.unread')
+          : urlState.view === 'all'
+            ? t('inbox.empty.view')
+            : t(`inbox.empty.${urlState.view}`);
   const emptyHint =
     urlState.q !== ''
       ? t('inbox.empty.searchHint')
-      : urlState.unread
-        ? t('inbox.empty.unreadHint')
-        : urlState.view === 'all'
-          ? t('inbox.empty.viewHint')
-          : t(`inbox.empty.${urlState.view}Hint`);
+      : urlState.assignment
+        ? t(`inbox.empty.${urlState.assignment}Hint`)
+        : urlState.unread
+          ? t('inbox.empty.unreadHint')
+          : urlState.view === 'all'
+            ? t('inbox.empty.viewHint')
+            : t(`inbox.empty.${urlState.view}Hint`);
 
   /** Moves the open row by `delta`; past the last loaded row, opens the first of the next page. */
   const step = (delta: 1 | -1) => {
@@ -879,6 +985,16 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     role: urlState.role,
     onManageRoles: () => setManagingRoles(true),
     onShortcuts: showHelp,
+    drafts:
+      sendable.length > 0
+        ? {
+            count: savedDrafts.data?.length,
+            onOpen: () => {
+              setDraftsMounted(true);
+              setDraftsOpen(true);
+            },
+          }
+        : null,
   };
   const onView = (view: InboxView) =>
     setListing({ [VIEW_PARAM]: view === 'all' ? null : view, [SEARCH_PARAM]: null });
@@ -936,6 +1052,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           fromOptions={sendable}
           draft={draft.draft}
           onClose={() => setDraft(null)}
+          onReopen={reopenDraft(draft)}
         />
       </Suspense>
     );
@@ -973,6 +1090,14 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           unread={urlState.unread}
           unreadCount={listingUnread(counts.data, urlState)}
           onUnreadChange={unread => setListing({ [TAB_PARAM]: unread ? UNREAD_TAB : null })}
+          attachments={urlState.attachments}
+          onAttachmentsChange={on => setListing({ [TAB_PARAM]: on ? ATTACHMENTS_TAB : null })}
+          dateRange={urlState.date}
+          onDateRangeChange={date => setListing({ [DATE_PARAM]: date })}
+          assignment={urlState.assignment}
+          onAssignmentChange={
+            assignmentTabs ? assignment => setListing({ [TAB_PARAM]: assignment }) : undefined
+          }
           q={urlState.q}
           onSearch={q => setListing({ [SEARCH_PARAM]: q === '' ? null : q, [VIEW_PARAM]: null })}
           mailboxHref={urlState.box === null ? null : mailboxHref(urlState.box)}
@@ -1030,6 +1155,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
                 key={openItem.id}
                 item={openItem}
                 access={openMailbox?.access ?? null}
+                shared={openMailbox?.type === 'shared'}
                 externalProvider={externalProvider(openItem.mailbox_id)}
                 roleName={
                   openItem.role_id === null
@@ -1126,6 +1252,18 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
         </Suspense>
       ) : null}
 
+      {draftsMounted ? (
+        <Suspense fallback={null}>
+          <DraftsDialog
+            organizationId={organizationId}
+            mailboxes={sendable}
+            open={draftsOpen}
+            onOpenChange={setDraftsOpen}
+            onOpenDraft={openSavedDraft}
+          />
+        </Suspense>
+      ) : null}
+
       {draft && canComposeFrom(draft.mailbox) ? (
         <Suspense fallback={null}>
           <ComposeDialog
@@ -1134,6 +1272,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             draft={draft.draft}
             onClose={() => setDraft(null)}
             onStored={() => setDraft(null)}
+            onReopen={reopenDraft(draft)}
           />
         </Suspense>
       ) : null}

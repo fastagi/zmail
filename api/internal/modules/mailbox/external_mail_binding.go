@@ -236,6 +236,9 @@ type externalBinding struct {
 	notBefore *time.Time
 	// accountDirectoryID is the directory id the provider reported for a signed-in account, if any.
 	accountDirectoryID string
+	// sends records that the grant names the account's SMTP server, so its connected mailbox
+	// sends through it; stored with the grant in one transaction.
+	sends bool
 }
 
 // saveExternalBinding stores a fresh grant: a new account gets a private read-only connected
@@ -362,6 +365,9 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
 		if bindErr := bind(tx); bindErr != nil {
 			return bindErr
+		}
+		if sendErr := s.externalMail.SetConnectedMailboxSend(tx, connection.OrganizationID, connection.MailboxID, binding.sends); sendErr != nil {
+			return sendErr
 		}
 		// Every reader of an address is a tenure, whatever the binding.
 		return s.recordSelfBinding(tx, connection, binding.accountDirectoryID)

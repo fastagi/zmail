@@ -81,6 +81,15 @@ const navigation = vi.hoisted(() => {
 
 const downloadAttachment = vi.hoisted(() => vi.fn());
 
+vi.mock('@/features/mailbox/hooks/use-thread-assignment', () => ({
+  useThreadAssignment: () => ({ data: undefined, isSuccess: false }),
+  useSaveThreadAssignment: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
+vi.mock('@/features/mailbox/hooks/use-thread-notes', () => ({
+  useThreadNotes: () => ({ data: undefined, isSuccess: false }),
+  useAddThreadNote: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useDeleteThreadNote: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('@/features/mailbox/services/mailbox-service', async importOriginal => {
   const original =
@@ -123,6 +132,20 @@ vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
 vi.mock('@/features/mailbox/hooks/use-inbox', () => ({
   useMailRoles: () => ({ data: [], isPending: false, error: null }),
   useAssignMailboxRole: () => ({ isPending: false, mutateAsync: vi.fn() }),
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-drafts', () => ({
+  useMailDrafts: () => ({ data: [], isPending: false, isError: false }),
+  useOpenMailDraft: () => ({ mutate: () => undefined }),
+  useSaveMailDraft: () => ({ mutateAsync: () => Promise.resolve({ id: 1 }) }),
+  useDeleteMailDraft: () => ({
+    mutate: () => undefined,
+    mutateAsync: () => Promise.resolve(),
+    isPending: false,
+  }),
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
+  useMailSignature: () => ({ data: undefined, isPending: false, isError: false }),
+  useSaveMailSignature: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
   const scoped = <T,>(organizationId: number, result: T): T => {
@@ -891,9 +914,7 @@ describe('mailbox workspace', () => {
     // The last row has no next one: archiving it goes back to the list.
     fireEvent.click(reader().getByRole('button', { name: 'Archive' }));
     await waitFor(() => expect(state.update.mutateAsync).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Back to list' })).toBeNull()
-    );
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Back to list' })).toBeNull());
   });
 
   it('Esc closes the reader, but not while typing in a field', () => {

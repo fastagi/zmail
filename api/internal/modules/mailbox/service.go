@@ -267,6 +267,30 @@ type Service interface {
 	PlatformAccountService
 	// TriageService serves the AI triage switches, overrides, and reply drafts.
 	TriageService
+	// MailSignature reads the viewer's own signature for a mailbox they may send from.
+	MailSignature(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (domain.MailSignature, error)
+	// SaveMailSignature replaces the viewer's own signature for a mailbox they may send from; an
+	// empty body removes it.
+	SaveMailSignature(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, body string) (domain.MailSignature, error)
+	// MailDrafts lists the viewer's own drafts in the organization, the latest change first.
+	MailDrafts(ctx context.Context, viewer domain.OrganizationContext) ([]domain.MailDraft, error)
+	// CreateMailDraft saves a new draft from a mailbox the viewer may send from.
+	MailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint) (domain.MailDraft, error)
+	// MailThreadAssignment reads who works a shared mailbox's thread.
+	MailThreadAssignment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint) (MailThreadAssignmentView, error)
+	// SaveMailThreadAssignment assigns a shared mailbox's thread and sets its status.
+	SaveMailThreadAssignment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint, input MailThreadAssignmentInput) (MailThreadAssignmentView, error)
+	// MailThreadNotes reads the internal notes on a shared mailbox's thread.
+	MailThreadNotes(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint) ([]domain.MailThreadNote, error)
+	// AddMailThreadNote leaves an internal note on a shared mailbox's thread.
+	AddMailThreadNote(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint, body string) (domain.MailThreadNote, error)
+	// DeleteMailThreadNote removes one of the viewer's own notes.
+	DeleteMailThreadNote(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID, noteID uint) error
+	CreateMailDraft(ctx context.Context, viewer domain.OrganizationContext, input MailDraftInput) (domain.MailDraft, error)
+	// UpdateMailDraft replaces what one of the viewer's drafts holds.
+	UpdateMailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint, input MailDraftInput) (domain.MailDraft, error)
+	// DeleteMailDraft removes one of the viewer's drafts.
+	DeleteMailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint) error
 	// ExternalMailService lists and revokes the caller's connected mailboxes.
 	ExternalMailService
 	// ExternalMailBindingService binds and reconnects outside accounts.
@@ -371,6 +395,14 @@ type service struct {
 	fingerprintKey []byte
 	// triage stores AI triage rows and settings; nil when repo does not implement it.
 	triage domain.MailTriageRepository
+	// signatures stores members' signatures; nil when repo does not implement it.
+	signatures domain.MailSignatureRepository
+	// drafts stores members' drafts; nil when repo does not implement it.
+	drafts domain.MailDraftRepository
+	// assignments stores thread assignments; nil when repo does not implement it.
+	assignments domain.MailThreadAssignmentRepository
+	// notes stores internal thread notes; nil when repo does not implement it.
+	notes domain.MailThreadNoteRepository
 	// triageModel classifies and drafts; settings.Triage selects it.
 	triageModel TriageModel
 	// externalMail stores external mail connections; nil when repo does not implement it.
@@ -426,6 +458,22 @@ func NewService(
 	if seam, ok := repo.(domain.MailTriageRepository); ok {
 		triage = seam
 	}
+	var signatures domain.MailSignatureRepository
+	if seam, ok := repo.(domain.MailSignatureRepository); ok {
+		signatures = seam
+	}
+	var drafts domain.MailDraftRepository
+	if seam, ok := repo.(domain.MailDraftRepository); ok {
+		drafts = seam
+	}
+	var assignments domain.MailThreadAssignmentRepository
+	if seam, ok := repo.(domain.MailThreadAssignmentRepository); ok {
+		assignments = seam
+	}
+	var notes domain.MailThreadNoteRepository
+	if seam, ok := repo.(domain.MailThreadNoteRepository); ok {
+		notes = seam
+	}
 	var externalMail domain.ExternalMailRepository
 	if seam, ok := repo.(domain.ExternalMailRepository); ok {
 		externalMail = seam
@@ -449,7 +497,9 @@ func NewService(
 		background: func(run func()) { go run() },
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
 		recordAudit: auditstarter.RecordChange,
-		triage:      triage, triageModel: newTriageModel(settings.Triage),
+		triage:      triage, triageModel: newTriageModel(settings.Triage), signatures: signatures, drafts: drafts,
+		assignments:  assignments,
+		notes:        notes,
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
 		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),

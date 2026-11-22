@@ -115,6 +115,8 @@ export interface MockExternalMailboxes {
     backfillDays: number
   ) => number;
   sync: (organizationId: number, mailboxId: number, provider: string, backfillDays: number) => void;
+  /** Records whether the mailbox sends through the account's SMTP server (password bindings). */
+  setSend?: (organizationId: number, mailboxId: number, sends: boolean) => void;
 }
 
 interface MockExternalMailDependencies {
@@ -255,6 +257,7 @@ export class MockExternalMailStore {
       host: string;
       username: string;
       password: string;
+      smtp_host?: string;
       backfill_days?: number;
       connection_id?: number;
     },
@@ -287,7 +290,7 @@ export class MockExternalMailStore {
     const username = input.username.trim().toLowerCase();
     const address = username.includes('@') ? username : `${username}@${host}`;
     if (own && own.account_address !== address) return { ok: false, error: 'account_mismatch' };
-    return this.bindAccount(
+    const result = this.bindAccount(
       organizationId,
       userId,
       input.provider,
@@ -295,6 +298,10 @@ export class MockExternalMailStore {
       input.backfill_days ?? defaultBackfillDays,
       mailboxes
     );
+    if (result.ok) {
+      mailboxes.setSend?.(organizationId, result.value.mailbox_id, Boolean(input.smtp_host));
+    }
+    return result;
   }
 
   private bindAccount(

@@ -6691,6 +6691,227 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-drafts:
+    get:
+      operationId: listMailDrafts
+      summary: List the caller's drafts
+      description: The caller's own drafts in the organization, the latest change first; at most
+        200. Never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      responses:
+        '200':
+          description: The caller's drafts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDraftListResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailDraft
+      summary: Save a new draft
+      description: Needs `send` on `mailbox_id`. `to` and `cc` are kept as written and checked only
+        when the message is sent. A member keeps at most 200 drafts per organization.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveMailDraftRequest'
+      responses:
+        '201':
+          description: The saved draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDraftResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mail-drafts/{draft_id}:
+    get:
+      operationId: showMailDraft
+      summary: Read one of the caller's drafts in full
+      description: The whole draft, body included. Never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDraftID'
+      responses:
+        '200':
+          description: The draft.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDraftResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailDraft
+      summary: Replace one of the caller's drafts
+      description: Replaces everything the draft holds; needs `send` on `mailbox_id`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDraftID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveMailDraftRequest'
+      responses:
+        '200':
+          description: The draft after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailDraftResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      operationId: deleteMailDraft
+      summary: Delete one of the caller's drafts
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailDraftID'
+      responses:
+        '204':
+          description: The draft was deleted.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/signature:
+    get:
+      operationId: getMailSignature
+      summary: Read the caller's signature for a mailbox
+      description: Each member keeps their own plain-text signature per mailbox they may send from
+        (`send`). `body` is empty and `updated_at` null until one is saved. Never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      responses:
+        '200':
+          description: The caller's signature.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailSignatureResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailSignature
+      summary: Replace the caller's signature for a mailbox
+      description: Needs `send`. Line breaks become `\n` and trailing white space is dropped; an
+        empty result removes the signature. At most 2000 characters, without control characters
+        other than line breaks and tabs.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailSignatureRequest'
+      responses:
+        '200':
+          description: The caller's signature after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailSignatureResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/role-assignment:
     put:
       operationId: setMailboxRoleAssignment
@@ -7306,6 +7527,186 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/threads/{thread_id}/assignment:
+    get:
+      operationId: getMailThreadAssignment
+      summary: Read who works a shared mailbox's thread and whether it is done
+      description: Needs `view`. A thread nobody assigned is `open` and unassigned. Personal and
+        connected mailboxes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+      responses:
+        '200':
+          description: The thread's assignment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThreadAssignmentEnvelope'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailThreadAssignment
+      summary: Assign a shared mailbox's thread and set its status
+      description: Needs `send`. The assignee must be a member with `send` or `manage`; `null`
+        unassigns. Personal and connected mailboxes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailThreadAssignmentRequest'
+      responses:
+        '200':
+          description: The saved assignment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThreadAssignmentEnvelope'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/threads/{thread_id}/notes:
+    get:
+      operationId: listMailThreadNotes
+      summary: Read the internal notes on a shared mailbox's thread
+      description: Needs `view`. Oldest first; a thread keeps at most 200 notes. Personal and
+        connected mailboxes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+      responses:
+        '200':
+          description: The thread's notes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThreadNotesEnvelope'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    post:
+      operationId: createMailThreadNote
+      summary: Leave an internal note on a shared mailbox's thread
+      description: Needs `send`. The note is never sent to the correspondent. A thread already
+        keeping 200 notes is `409 MAILBOX.NOTE_LIMIT_REACHED`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMailThreadNoteRequest'
+      responses:
+        '201':
+          description: The saved note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThreadNoteEnvelope'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/threads/{thread_id}/notes/{note_id}:
+    delete:
+      operationId: deleteMailThreadNote
+      summary: Delete one of the caller's own notes
+      description: Needs `view`. Another member's note is `404 MAILBOX.NOTE_NOT_FOUND`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+        - name: note_id
+          in: path
+          required: true
+          description: Positive note identifier.
+          schema:
+            $ref: '#/components/schemas/PositiveID'
+      responses:
+        '204':
+          description: The note is gone.
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/message-counts:
@@ -8613,6 +9014,37 @@ paths:
             always read and never match. `false` keeps the others. Read state is the caller''s own.'
           schema:
             type: boolean
+        - name: has_attachments
+          in: query
+          required: false
+          description: '`true` keeps only messages with files; `false` keeps those without. Never with
+            `group`.'
+          schema:
+            type: boolean
+        - name: since
+          in: query
+          required: false
+          description: A calendar day in `tz`, 1970 or later; keeps messages created on or after its
+            start. Never with `group`.
+          schema:
+            type: string
+            format: date
+        - name: until
+          in: query
+          required: false
+          description: A calendar day in `tz`, not before `since`; keeps messages created before the
+            end of that day. Never with `group`.
+          schema:
+            type: string
+            format: date
+        - name: assignment
+          in: query
+          required: false
+          description: '`mine` keeps open conversations assigned to the caller, `unassigned` open
+            conversations without an assignee, `closed` conversations marked done. Allowed with `group`.'
+          schema:
+            type: string
+            enum: [mine, unassigned, closed]
         - name: q
           in: query
           required: false
@@ -10367,6 +10799,13 @@ components:
       schema:
         type: string
         pattern: ^[A-Za-z0-9]{1,64}$
+    MailDraftID:
+      name: draft_id
+      in: path
+      required: true
+      description: Positive mail draft identifier.
+      schema:
+        $ref: '#/components/schemas/PositiveID'
     MailTemplateID:
       name: template_id
       in: path
@@ -10911,6 +11350,11 @@ components:
         - MAILBOX.SEND_IN_PROGRESS
         - MAILBOX.DELIVERY_EVENT_INVALID
         - MAILBOX.TEMPLATE_NOT_FOUND
+        - MAILBOX.DRAFT_NOT_FOUND
+        - MAILBOX.DRAFT_LIMIT_REACHED
+        - MAILBOX.ASSIGNMENT_UNAVAILABLE
+        - MAILBOX.NOTE_NOT_FOUND
+        - MAILBOX.NOTE_LIMIT_REACHED
         - MAILBOX.TEMPLATE_INVALID
         - MAILBOX.TEMPLATE_NAME_TAKEN
         - MAILBOX.TEMPLATE_LIMIT_REACHED
@@ -16885,6 +17329,316 @@ components:
       properties:
         enabled:
           type: boolean
+    SaveMailDraftRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - mailbox_id
+      properties:
+        mailbox_id:
+          type: integer
+          minimum: 1
+        to:
+          type: string
+          maxLength: 4000
+        cc:
+          type: string
+          maxLength: 4000
+        subject:
+          type: string
+          maxLength: 998
+        body:
+          type: string
+          maxLength: 100000
+        in_reply_to:
+          type: string
+          maxLength: 998
+    MailDraft:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mailbox_id
+        - to
+        - cc
+        - subject
+        - body
+        - in_reply_to
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        mailbox_id:
+          type: integer
+          minimum: 1
+        to:
+          type: string
+        cc:
+          type: string
+        subject:
+          type: string
+        body:
+          type: string
+        in_reply_to:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    UpdateMailThreadAssignmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - assignee_user_id
+        - status
+      properties:
+        assignee_user_id:
+          description: A member with `send` or `manage`; null unassigns the thread.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        status:
+          $ref: '#/components/schemas/MailThreadStatus'
+    MailThreadStatus:
+      type: string
+      enum:
+        - open
+        - closed
+    MailThreadAssignment:
+      type: object
+      additionalProperties: false
+      required:
+        - thread_id
+        - assignee_user_id
+        - status
+        - updated_by_user_id
+        - updated_at
+        - assignable_user_ids
+      properties:
+        thread_id:
+          $ref: '#/components/schemas/PositiveID'
+        assignee_user_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        status:
+          $ref: '#/components/schemas/MailThreadStatus'
+        updated_by_user_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        updated_at:
+          description: Null until someone first assigns the thread or sets its status.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        assignable_user_ids:
+          type: array
+          description: The mailbox's members with `send` or `manage`, ascending.
+          items:
+            $ref: '#/components/schemas/PositiveID'
+    CreateMailThreadNoteRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - body
+      properties:
+        body:
+          description: 1 to 2000 characters after trimming; line breaks kept, no other control characters.
+          type: string
+          minLength: 1
+          maxLength: 2000
+    MailThreadNote:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - thread_id
+        - author_user_id
+        - body
+        - created_at
+      properties:
+        id:
+          $ref: '#/components/schemas/PositiveID'
+        thread_id:
+          $ref: '#/components/schemas/PositiveID'
+        author_user_id:
+          description: Null once the author's account is deleted.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    MailThreadNoteEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailThreadNote'
+    MailThreadNotesEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: false
+          required:
+            - items
+          properties:
+            items:
+              type: array
+              maxItems: 200
+              items:
+                $ref: '#/components/schemas/MailThreadNote'
+    MailThreadAssignmentEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailThreadAssignment'
+    MailDraftSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - mailbox_id
+        - to
+        - cc
+        - subject
+        - preview
+        - in_reply_to
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        mailbox_id:
+          type: integer
+          minimum: 1
+        to:
+          type: string
+        cc:
+          type: string
+        subject:
+          type: string
+        preview:
+          type: string
+          maxLength: 200
+          description: The first characters of the body, on one line.
+        in_reply_to:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MailDraftResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailDraft'
+    MailDraftListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/MailDraftSummary'
+    UpdateMailSignatureRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - body
+      properties:
+        body:
+          type: string
+          maxLength: 2000
+    MailSignature:
+      type: object
+      additionalProperties: false
+      required:
+        - mailbox_id
+        - body
+        - updated_at
+      properties:
+        mailbox_id:
+          type: integer
+          minimum: 1
+        body:
+          type: string
+          maxLength: 2000
+        updated_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    MailSignatureResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailSignature'
     UpdateMailTriageRequest:
       type: object
       additionalProperties: false

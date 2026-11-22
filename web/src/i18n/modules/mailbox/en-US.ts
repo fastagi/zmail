@@ -172,6 +172,18 @@ const messages = {
       label: 'Show',
       all: 'All',
       unread: 'Unread',
+      attachments: 'With attachments',
+      mine: 'Assigned to me',
+      unassigned: 'Unassigned',
+      closed: 'Done',
+    },
+    date: {
+      label: 'Date',
+      any: 'Any time',
+      week: 'Past week',
+      month: 'Past month',
+      year: 'Past year',
+      older: 'Older than a year',
     },
     search: {
       label: 'Search all mail',
@@ -194,6 +206,12 @@ const messages = {
       sentHint: 'Mail sent from the mailboxes you read shows here.',
       unreadHint: 'You are all caught up.',
       searchHint: 'Search matches the subject, the sender, and the recipients. Try other words.',
+      mine: 'Nothing assigned to you',
+      mineHint: 'Open conversations a teammate assigns to you in a shared mailbox show here.',
+      unassigned: 'Every open conversation has an owner',
+      unassignedHint: 'Open shared-mailbox conversations nobody owns yet show here.',
+      closed: 'Nothing marked done',
+      closedHint: 'Conversations marked done in a shared mailbox show here.',
     },
     unavailable:
       'This mail is no longer available to you. Access to its mailbox may have changed; the list is refreshed.',
@@ -279,6 +297,26 @@ const messages = {
     placeholder: 'Search this mailbox…',
     results: 'Results for “{q}”',
     clear: 'Clear search',
+  },
+  assignment: {
+    label: 'Assignment',
+    assignee: 'Assignee',
+    unassigned: 'Unassigned',
+    member: 'Member #{id}',
+    open: 'Open',
+    closed: 'Done',
+    close: 'Mark as done',
+    reopen: 'Reopen',
+  },
+  notes: {
+    label: 'Internal notes',
+    hint: 'Only members of this mailbox see notes. They are never sent.',
+    empty: 'No notes yet.',
+    placeholder: 'Add a note for your team…',
+    add: 'Add note',
+    delete: 'Delete note',
+    deletedAuthor: 'Former member',
+    count: '{count, plural, one {# note} other {# notes}}',
   },
   thread: {
     label: 'Conversation',
@@ -398,6 +436,25 @@ const messages = {
     title: 'Delete message',
     description: 'Delete "{subject}"? This cannot be undone.',
   },
+  drafts: {
+    title: 'Drafts',
+    description: 'Messages you closed without sending. Only you see them.',
+    sidebar: 'Drafts',
+    sidebarCount: 'Drafts: {count}',
+    loading: 'Loading drafts…',
+    loadFailed: 'Drafts could not be loaded.',
+    retry: 'Try again',
+    empty: 'No drafts. A new message you close without sending is kept here.',
+    noSubject: '(no subject)',
+    noRecipients: 'no recipients yet',
+    toLine: 'To {to}',
+    fromLine: 'from {from}',
+    delete: 'Delete draft {subject}',
+    openFailed: 'The draft could not be opened. Try again.',
+    deleted: 'Draft deleted',
+    deleteFailed: 'The draft could not be deleted. Try again.',
+    saveFailed: 'The draft could not be saved to your drafts. It is still kept in this browser.',
+  },
   compose: {
     from: 'From',
     descriptionPick: 'Choose the mailbox to send from.',
@@ -421,6 +478,10 @@ const messages = {
     template: 'Template',
     templateNone: 'None, write the message',
     templateHint: 'An empty variable uses the fallback written in the template.',
+    sending: 'Sending…',
+    undo: 'Undo',
+    notSent: 'Not sent. Your message is kept as a draft.',
+    openDraft: 'Open',
     draftSaved: 'Saved as a draft',
     draftSavedWithFiles:
       'Saved as a draft. Attached files stay only while this page is open; after a reload, attach them again.',
@@ -777,7 +838,8 @@ const messages = {
     empty:
       'Mailboxes belong to an organization. Create an organization or join one to send and receive mail.',
     open: 'Go to organizations',
-    unavailable: 'The organization in this link is no longer available to you. Showing {name} instead.',
+    unavailable:
+      'The organization in this link is no longer available to you. Showing {name} instead.',
     lostTitle: 'No access to this organization',
     readOnly: 'Owners and admins of this organization create and delete mailboxes.',
   },
@@ -813,6 +875,14 @@ const messages = {
     webhooks: {
       label: 'Push to organization webhooks',
       hint: 'Sends the mail events of this mailbox (received, sent, delivered, bounced) to the webhooks of the organization. Off by default, because those endpoints see subjects and addresses.',
+    },
+    signature: {
+      label: 'My signature',
+      hint: 'Added below new messages you write from this mailbox. Only you see it; you can still edit it in each message.',
+      placeholder: 'For example: Ada Lovelace, Analytical Engines Ltd.',
+      count: '{count} / {max}',
+      save: 'Save signature',
+      loadFailed: 'Your signature could not be loaded. Try again later.',
     },
     triage: {
       label: 'AI triage for this mailbox',
@@ -865,8 +935,8 @@ const messages = {
       connectionForceDisconnected: '{actor} disconnected this account for the organization',
       connectionRevokedOnLeave: 'Disconnected because {subject} left the organization',
       agentGranted: "{actor} let an agent key of {subject} receive this mailbox's mail",
-      agentRevoked: "{actor} revoked an agent key of {subject}",
-      agentEnded: "An agent key of {subject} lost access",
+      agentRevoked: '{actor} revoked an agent key of {subject}',
+      agentEnded: 'An agent key of {subject} lost access',
     },
     conflict: 'This mailbox changed in the meantime. Refresh to see its current access.',
     refresh: 'Refresh',
@@ -880,7 +950,8 @@ const messages = {
     loading: 'Loading the agent settings',
     intro:
       "An agent is one of your API keys with the mail:agent scope. It reads this mailbox's new mail, never more than the key's owner may read, and stops the moment you revoke it.",
-    neverSends: 'Agents never send. A draft an agent writes waits here until a person reviews it and sends it.',
+    neverSends:
+      'Agents never send. A draft an agent writes waits here until a person reviews it and sends it.',
     grants: {
       title: 'Authorized agents',
       count: '{count} of {max} active',
@@ -924,7 +995,8 @@ const messages = {
     },
     activity: {
       title: 'Recent activity',
-      description: 'The newest 100 reads and drafts of this agent, kept 90 days. Message bodies are never recorded.',
+      description:
+        'The newest 100 reads and drafts of this agent, kept 90 days. Message bodies are never recorded.',
       empty: 'This agent has not read anything yet.',
       loadFailed: 'The activity could not be loaded.',
       message: 'Message #{id}',
@@ -949,7 +1021,8 @@ const messages = {
       scopeAll: 'All new mail of this mailbox',
       scopeFiltered: 'Only mail matching filters',
       senders: 'Senders',
-      sendersHint: 'Addresses or domains, one per line or separated by commas. A domain also matches its subdomains. At most {max}.',
+      sendersHint:
+        'Addresses or domains, one per line or separated by commas. A domain also matches its subdomains. At most {max}.',
       sendersWarning:
         'Filters narrow what is delivered; they are not authentication. The sender address can be forged, so an agent must not trust a matching sender.',
       labels: 'Labels',
@@ -984,7 +1057,8 @@ const messages = {
     },
     drafts: {
       title: 'Drafts awaiting review',
-      description: 'Replies agents wrote for this mailbox. Open one in the composer to edit and send it yourself.',
+      description:
+        'Replies agents wrote for this mailbox. Open one in the composer to edit and send it yourself.',
       empty: 'No drafts are waiting.',
       loadFailed: 'The drafts could not be loaded.',
       by: 'By {name}',
@@ -1056,6 +1130,8 @@ const messages = {
     webhooksOff: 'Organization webhooks turned off',
     triageOn: 'AI triage turned on for this mailbox',
     triageOff: 'AI triage turned off for this mailbox',
+    signatureSaved: 'Signature saved',
+    signatureRemoved: 'Signature removed',
   },
   templates: {
     title: 'Templates',
@@ -1631,6 +1707,11 @@ const messages = {
     templateKindImmutable: 'A template cannot change between standard and transactional.',
     templateKindMismatch: 'Transactional templates are sent only through the developer API.',
     templateNotFound: 'This template does not exist or was deleted.',
+    draftNotFound: 'This draft was sent or deleted.',
+    draftLimitReached: 'You have 200 drafts. Delete one to save another.',
+    assignmentUnavailable: 'Only a shared mailbox assigns its conversations.',
+    noteNotFound: 'That note was already deleted.',
+    noteLimitReached: 'This conversation already has 200 notes. Delete one to add another.',
     templateVariablesMissing:
       'Some variables of the template have no value and no fallback. Fill them in and send again.',
     attachmentsInvalid: 'Attach at most 10 non-empty files, 4 MB in total.',
@@ -1814,7 +1895,8 @@ const messages = {
         failed: 'The provider did not accept the sign-in. Try again.',
         denied: 'The sign-in was cancelled, so nothing was connected.',
         unavailable: 'This provider is no longer available in your organization.',
-        missing: 'This page is missing the details the provider sends back. Start again from your inbox.',
+        missing:
+          'This page is missing the details the provider sends back. Start again from your inbox.',
         generic: 'The mailbox could not be connected. Try again.',
       },
     },
@@ -1841,7 +1923,8 @@ const messages = {
       cancel: 'Cancel',
       disconnected: 'Disconnected {address}',
       disconnectFailed: 'The mailbox could not be disconnected. Try again.',
-      connectorOff: 'This provider is no longer enabled in your organization, so it cannot be reconnected.',
+      connectorOff:
+        'This provider is no longer enabled in your organization, so it cannot be reconnected.',
       add: 'Add external mailbox',
     },
     password: {
@@ -1856,8 +1939,10 @@ const messages = {
         apple: 'iCloud Mail: Apple Account settings, Sign-In and Security, App-Specific Passwords.',
         yahoo: 'Yahoo Mail: Account Security, Generate app password.',
         fastmail: 'Fastmail: Settings, Privacy & Security, Manage app passwords.',
-        chinese: 'QQ Mail and 163 Mail: turn on IMAP in the mail settings, then create an authorization code.',
-        other: 'Other services: look for “app passwords” or “IMAP access” in the security settings.',
+        chinese:
+          'QQ Mail and 163 Mail: turn on IMAP in the mail settings, then create an authorization code.',
+        other:
+          'Other services: look for “app passwords” or “IMAP access” in the security settings.',
       },
       continue: 'Continue',
       intro: 'Enter the server and login your mail service gives for {provider} access.',
@@ -1866,9 +1951,11 @@ const messages = {
       hostPlaceholder: 'imap.example.com',
       port: 'Port',
       portHint: 'Only port {port} (IMAP over TLS) is accepted.',
+      presets: 'Fill in the servers of a common provider:',
       smtpHost: 'SMTP server (optional)',
       smtpHostPlaceholder: 'smtp.example.com',
-      smtpHint: 'Add the outgoing server to reply and send from this address in Zmail. Leave it empty to only read mail.',
+      smtpHint:
+        'Add the outgoing server to reply and send from this address in Zmail. Leave it empty to only read mail.',
       smtpPort: 'SMTP port',
       smtpPortOption: '{port}',
       username: 'Username',
@@ -1897,7 +1984,8 @@ const messages = {
           'The server refused the username or app password. Check them, and use an app password rather than your account password.',
         taken: 'Another member of your organization already connected this account.',
         limit: 'You have connected the most accounts allowed (10). Disconnect one first.',
-        rateLimited: 'Too many attempts. Try again in {minutes, plural, one {# minute} other {# minutes}}.',
+        rateLimited:
+          'Too many attempts. Try again in {minutes, plural, one {# minute} other {# minutes}}.',
         rateLimitedLater: 'Too many attempts. Try again later.',
         invalid: 'These details cannot be used. Check them for stray characters.',
         unavailable: 'This connector is no longer available in your organization.',

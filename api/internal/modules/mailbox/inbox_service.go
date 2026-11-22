@@ -25,10 +25,12 @@ type InboxRequest struct {
 	// Ungrouped keeps only the mailboxes without a role (role_id=none).
 	Ungrouped bool
 	// MailboxID keeps only one mailbox; 0 applies no mailbox filter.
-	MailboxID    uint
-	Unread       *bool
-	Query        string
-	GroupThreads bool
+	MailboxID uint
+	Unread    *bool
+	// HasAttachments keeps only messages with (or without) files; nil keeps both.
+	HasAttachments *bool
+	Query          string
+	GroupThreads   bool
 	// Location defines today for the today view; nil is UTC.
 	Location *time.Location
 	// After is the cursor of the previous page; nil for the newest page.
@@ -36,6 +38,10 @@ type InboxRequest struct {
 	PerPage int
 	// Triage keeps only messages triaged into one of these categories; empty applies no filter.
 	Triage []domain.MailTriageCategory
+	// Assignment keeps only conversations in one assignment state; empty applies no filter.
+	Assignment domain.InboxAssignment
+	// SinceDate and UntilDate are inclusive calendar days in Location, parsed at UTC midnight.
+	SinceDate, UntilDate *time.Time
 }
 
 // InboxItem is one row of the unified inbox: a message summary without bodies, the mail role of
@@ -127,12 +133,15 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 
 	query := domain.InboxQuery{
 		MailboxIDs: ids, MembershipID: viewer.MembershipID, View: request.View,
-		Unread: request.Unread, Query: request.Query, GroupThreads: request.GroupThreads,
+		Unread: request.Unread, HasAttachments: request.HasAttachments, Query: request.Query, GroupThreads: request.GroupThreads,
 		After: request.After, Limit: request.PerPage + 1, Triage: request.Triage,
+		Assignment: request.Assignment, ViewerUserID: viewer.UserID,
 	}
 	if request.View == domain.InboxViewToday {
 		query.DayStart, query.DayEnd = inboxDay(s.now(), request.Location)
 	}
+	query.Since = inboxDateBound(request.SinceDate, request.Location, 0)
+	query.Until = inboxDateBound(request.UntilDate, request.Location, 1)
 	messages, err := s.inbox.ListInbox(ctx, query)
 	if err != nil {
 		return InboxPage{ReadableMailboxes: page.ReadableMailboxes}, err
@@ -282,4 +291,22 @@ func inboxSnippet(raw string) string {
 	}
 	runes := []rune(collapsed)
 	return strings.TrimRightFunc(string(runes[:inboxSnippetLength]), unicode.IsSpace)
+}
+
+// inboxDateBound is the start of the calendar day of date, plus days, in location; nil stays nil.
+func inboxDateBound(date *time.Time, location *time.Location, days int) *time.Time {
+	if date == nil {
+		return nil
+	}
+	if location == nil {
+		location = time.UTC
+	}
+	bound := time.Date(date.Year(), date.Month(), date.Day()+days, 0, 0, 0, 0, location)
+	if bound.Hour() != 0 {
+		// A clock change skipped midnight: the day starts when the clock jumps forward.
+		_, before := bound.Zone()
+		_, after := bound.Add(24 * time.Hour).Zone()
+		bound = bound.Add(time.Duration(after-before) * time.Second)
+	}
+	return &bound
 }

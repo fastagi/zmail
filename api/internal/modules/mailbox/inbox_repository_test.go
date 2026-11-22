@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -723,5 +724,120 @@ func TestInboxCountViews(t *testing.T) {
 	empty, err := (&repository{}).CountInboxViews(ctx, 1, nil, dayStart, dayEnd)
 	if err != nil || empty != (domain.InboxViewCounts{}) {
 		t.Fatalf("CountInboxViews(nil) = %+v, %v; want zero counts", empty, err)
+	}
+}
+
+func TestInboxHasAttachmentsFilter(t *testing.T) {
+	f := newInboxFixture(t)
+	withFiles := f.deliverAt(t, f.team, delivery{subject: "with files", files: true}, minutes(1))
+	plain := f.deliverAt(t, f.team, delivery{subject: "plain"}, minutes(2))
+
+	query := domain.InboxQuery{MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, Limit: 10, View: domain.InboxViewAll}
+	query.HasAttachments = boolPtr(true)
+	// The fixture's team message carries files too.
+	expectIDs(t, "with attachments", idsOf(f.inbox(t, query)), withFiles.ID, f.teamMessage.ID)
+	query.HasAttachments = boolPtr(false)
+	expectIDs(t, "without attachments", idsOf(f.inbox(t, query)), plain.ID)
+	query.GroupThreads = true
+	if _, err := f.inboxRepo().ListInbox(context.Background(), query); !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("grouped with has_attachments = %v; want invalid input", err)
+	}
+}
+
+func TestInboxAssignmentFilter(t *testing.T) {
+	f := newInboxFixture(t)
+	mine := f.deliverAt(t, f.team, delivery{subject: "mine"}, minutes(1))
+	done := f.deliverAt(t, f.team, delivery{subject: "done"}, minutes(2))
+	untouched := f.deliverAt(t, f.team, delivery{subject: "untouched"}, minutes(3))
+	if err := f.inboxRepo().db.AutoMigrate(&MailThreadAssignmentPO{}); err != nil {
+		t.Fatalf("migrate assignments: %v", err)
+	}
+	viewer := f.c.UserID
+	for _, assignment := range []domain.MailThreadAssignment{
+		{MailboxID: f.team.ID, ThreadID: mine.ThreadID, AssigneeUserID: &viewer, Status: domain.MailThreadOpen},
+		{MailboxID: f.team.ID, ThreadID: done.ThreadID, AssigneeUserID: &viewer, Status: domain.MailThreadClosed},
+	} {
+		if _, err := f.inboxRepo().SaveMailThreadAssignment(context.Background(), assignment, inboxBase); err != nil {
+			t.Fatalf("SaveMailThreadAssignment: %v", err)
+		}
+	}
+
+	query := domain.InboxQuery{
+		MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, ViewerUserID: viewer, Limit: 10, View: domain.InboxViewAll,
+	}
+	query.Assignment = domain.InboxAssignmentMine
+	expectIDs(t, "mine", idsOf(f.inbox(t, query)), mine.ID)
+	query.Assignment = domain.InboxAssignmentUnassigned
+	expectIDs(t, "unassigned", idsOf(f.inbox(t, query)), untouched.ID, f.teamMessage.ID)
+	query.Assignment = domain.InboxAssignmentClosed
+	expectIDs(t, "closed", idsOf(f.inbox(t, query)), done.ID)
+	query.Assignment, query.GroupThreads = domain.InboxAssignmentMine, true
+	expectIDs(t, "mine grouped", idsOf(f.inbox(t, query)), mine.ID)
+	query.ViewerUserID = viewer + 1000
+	expectIDs(t, "another member's", idsOf(f.inbox(t, query)))
+}
+
+func TestParseInboxRequestAssignment(t *testing.T) {
+	request, err := parseInboxRequest(url.Values{"assignment": {"mine"}, "group": {"thread"}, "mailbox_id": {"3"}})
+	if err != nil || request.Assignment != domain.InboxAssignmentMine || !request.GroupThreads {
+		t.Fatalf("assignment=mine = %+v, %v", request, err)
+	}
+	for name, query := range map[string]url.Values{
+		"unknown": {"assignment": {"everyone"}},
+		"empty":   {"assignment": {""}},
+		"twice":   {"assignment": {"mine", "closed"}},
+	} {
+		if _, err := parseInboxRequest(query); !errors.Is(err, domain.ErrInvalidInput) {
+			t.Errorf("%s: err = %v, want invalid input", name, err)
+		}
+	}
+}
+
+func TestInboxDateFilter(t *testing.T) {
+	f := newInboxFixture(t)
+	early := f.deliverAt(t, f.team, delivery{subject: "early"}, minutes(1))
+	late := f.deliverAt(t, f.team, delivery{subject: "late"}, minutes(90))
+	query := domain.InboxQuery{MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, Limit: 10, View: domain.InboxViewAll}
+	since, until := early.CreatedAt.Add(time.Minute), late.CreatedAt
+	query.Since = &since
+	expectIDs(t, "since", idsOf(f.inbox(t, query)), late.ID)
+	query.Since, query.Until = nil, &until
+	expectIDs(t, "until", idsOf(f.inbox(t, query)), early.ID, f.teamMessage.ID)
+	query.Since = &since
+	expectIDs(t, "between", idsOf(f.inbox(t, query)))
+	query.GroupThreads = true
+	if _, err := f.inboxRepo().ListInbox(context.Background(), query); !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("grouped with a date bound = %v; want invalid input", err)
+	}
+}
+
+func TestParseInboxRequestDates(t *testing.T) {
+	request, err := parseInboxRequest(url.Values{"since": {"2026-11-01"}, "until": {"2026-11-01"}, "q": {"invoice"}})
+	if err != nil || request.SinceDate == nil || request.UntilDate == nil {
+		t.Fatalf("since and until = %+v, %v", request, err)
+	}
+	shanghai, _ := time.LoadLocation("Asia/Shanghai")
+	start := inboxDateBound(request.SinceDate, shanghai, 0)
+	end := inboxDateBound(request.UntilDate, shanghai, 1)
+	if !start.Equal(time.Date(2026, 10, 31, 16, 0, 0, 0, time.UTC)) || end.Sub(*start) != 24*time.Hour {
+		t.Fatalf("bounds = %v .. %v", start, end)
+	}
+	santiago, _ := time.LoadLocation("America/Santiago")
+	skipped := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)
+	if got := inboxDateBound(&skipped, santiago, 0); !got.Equal(time.Date(2026, 9, 6, 4, 0, 0, 0, time.UTC)) {
+		t.Errorf("a day whose midnight is skipped starts at %v, want 01:00 -03", got)
+	}
+	for name, query := range map[string]url.Values{
+		"not a date":  {"since": {"2026-13-01"}},
+		"with time":   {"until": {"2026-11-01T00:00:00Z"}},
+		"empty":       {"since": {""}},
+		"twice":       {"since": {"2026-11-01", "2026-11-02"}},
+		"reversed":    {"since": {"2026-11-02"}, "until": {"2026-11-01"}},
+		"with group":  {"since": {"2026-11-01"}, "group": {"thread"}},
+		"before 1970": {"since": {"1969-12-31"}},
+	} {
+		if _, err := parseInboxRequest(query); !errors.Is(err, domain.ErrInvalidInput) {
+			t.Errorf("%s: err = %v, want invalid input", name, err)
+		}
 	}
 }

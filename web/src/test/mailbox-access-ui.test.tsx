@@ -43,6 +43,15 @@ const state = vi.hoisted(() => {
   };
 });
 
+vi.mock('@/features/mailbox/hooks/use-thread-assignment', () => ({
+  useThreadAssignment: () => ({ data: undefined, isSuccess: false }),
+  useSaveThreadAssignment: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
+vi.mock('@/features/mailbox/hooks/use-thread-notes', () => ({
+  useThreadNotes: () => ({ data: undefined, isSuccess: false }),
+  useAddThreadNote: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useDeleteThreadNote: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
@@ -69,6 +78,14 @@ const triage = vi.hoisted(() => ({
 vi.mock('@/features/mailbox/hooks/use-mail-triage', () => ({
   useMailTriageSetting: () => triage.setting,
   useSetMailboxTriage: () => triage.setMailbox,
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
+  useMailSignature: () => ({
+    data: { mailbox_id: 1, body: '', updated_at: null },
+    isPending: false,
+    isError: false,
+  }),
+  useSaveMailSignature: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useMailboxDomains: () => state.domains,

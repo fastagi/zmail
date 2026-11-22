@@ -497,6 +497,8 @@ export const mailLogPageEnvelopeSchema = strictObject({
 });
 
 export const INBOX_VIEWS = ['all', 'today', 'pending', 'sent'] as const;
+/** Shared-conversation assignment filters of the unified inbox; see `contracts/MAILBOXES.md`. */
+export const INBOX_ASSIGNMENTS = ['mine', 'unassigned', 'closed'] as const;
 /** The longest `tz` the unified inbox accepts. */
 export const INBOX_TIME_ZONE_MAX_LENGTH = 64;
 /** The longest cursor the API writes is about 56 characters; anything past this is not one. */
@@ -1194,3 +1196,19 @@ export const mailboxImportResultSchema = strictObject({
   failed: nonnegativeIntegerSchema,
   rows: array(mailboxImportRowResultSchema),
 });
+
+/** A calendar day `YYYY-MM-DD` the unified inbox accepts as `since` or `until`: 1970 or later. */
+export function isInboxDay(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    year >= 1970 &&
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+/** Date ranges of the unified inbox list: the past week, month, or year, or older than a year. */
+export const INBOX_DATE_RANGES = ['week', 'month', 'year', 'older'] as const;

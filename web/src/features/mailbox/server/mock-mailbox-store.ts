@@ -124,8 +124,10 @@ export interface MockLedgerDirectory {
 
 interface MailboxAccessState {
   type: Mailbox['type'];
-  /** `connected` holds read-only copies of an outside account; `zmail` is Zmail's own. */
+  /** `connected` holds copies of an outside account; `zmail` is Zmail's own. */
   origin: 'zmail' | 'connected';
+  /** A connected mailbox bound with its SMTP server sends through it. */
+  connectedSend?: boolean;
   ownerUserId: number | null;
   /** Set while a personal mailbox's owner is not a member of the organization. */
   ownerLeft: { at: string; throughMessageId: number } | null;
@@ -281,7 +283,7 @@ const exportHeader = 'address,display_name,members,member_count,sent_last_24h,cr
 
 /** What a viewer may do with a mailbox: the union of role, personal ownership, and member row. */
 export function mailboxAccessFor(
-  access: Pick<MailboxAccessState, 'type' | 'origin' | 'ownerUserId' | 'members'>,
+  access: Pick<MailboxAccessState, 'type' | 'origin' | 'ownerUserId' | 'members' | 'connectedSend'>,
   viewer: MailboxViewer
 ): MailboxAccess {
   const connected = access.origin === 'connected';
@@ -314,8 +316,8 @@ export function mailboxAccessFor(
     }
   }
   if (connected) {
-    // Read-only origin: nobody sends from it or organizes it, whatever the permission.
-    result.send = false;
+    // Nobody organizes it, and it sends only through the account's own SMTP server.
+    result.send = result.send && access.connectedSend === true;
     result.organize = false;
   }
   return result;
@@ -537,6 +539,12 @@ export class MockMailboxStore {
     this.mailboxesOf(organizationId).set(mailbox.id, state);
     this.syncExternal(organizationId, mailbox.id, provider, backfillDays);
     return mailbox.id;
+  }
+
+  /** Records whether a connected mailbox sends through its account's SMTP server. */
+  setConnectedSend(organizationId: number, mailboxId: number, sends: boolean): void {
+    const state = this.mailboxesOf(organizationId).get(mailboxId);
+    if (state && state.access.origin === 'connected') state.access.connectedSend = sends;
   }
 
   /** Copies one more synced message into an external mailbox, as a sync would. */
@@ -899,6 +907,8 @@ export class MockMailboxStore {
       return { ok: false, error: 'search_too_broad' };
     }
     const day = viewerDay(this.dependencies.now(), query.tz);
+    const since = query.since === undefined ? -Infinity : dayStart(query.since, query.tz, 0);
+    const until = query.until === undefined ? Infinity : dayStart(query.until, query.tz, 1);
     const rows: { item: InboxItem; createdAt: bigint }[] = [];
     for (const state of this.readableStates(organizationId, viewer)) {
       if (query.mailboxId !== undefined && state.mailbox.id !== query.mailboxId) continue;
@@ -910,7 +920,11 @@ export class MockMailboxStore {
       }
       const matching = this.visibleMessages(state)
         .map(message => this.forViewer(state, message, viewer))
-        .filter(message => inInboxView(message, query, needle, day));
+        .filter(message => inInboxView(message, query, needle, day))
+        .filter(message => {
+          const created = Date.parse(message.created_at);
+          return created >= since && created < until;
+        });
       const summaries = query.group === 'thread' ? threadRows(matching) : matching.map(summaryOf);
       for (const summary of summaries) {
         rows.push({
@@ -2361,12 +2375,18 @@ interface ViewerDay {
  */
 function inInboxView(
   message: MailMessage,
-  query: Pick<MockInboxQuery, 'view' | 'unread'>,
+  query: Pick<MockInboxQuery, 'view' | 'unread' | 'hasAttachments'>,
   needle?: string,
   day?: ViewerDay
 ): boolean {
   const unread = message.direction === 'inbound' && !message.read;
   if (query.unread !== undefined && unread !== query.unread) return false;
+  if (
+    query.hasAttachments !== undefined &&
+    message.attachment_count > 0 !== query.hasAttachments
+  ) {
+    return false;
+  }
   if (needle !== undefined) {
     return message.placement !== 'trash' && matchesSearch(message, needle);
   }
@@ -2410,6 +2430,12 @@ function viewerDay(now: Date, zone: string): ViewerDay {
     start: zonedMidnight(year, month, day, zone),
     end: zonedMidnight(year, month, day + 1, zone),
   };
+}
+
+/** The UTC instant of 00:00 on the calendar day `YYYY-MM-DD` plus `days`, in `zone`. */
+function dayStart(date: string, zone: string, days: number): number {
+  const [year, month, day] = date.split('-').map(Number);
+  return zonedMidnight(year, month, day + days, zone);
 }
 
 /** The UTC instant of 00:00 on a calendar day in `zone`; `day` may overflow into the next month. */

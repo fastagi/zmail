@@ -314,6 +314,19 @@ TABLE mail_domains
   COLUMN capability character varying(20) NOT NULL DEFAULT 'send_receive'::character varying
   COLUMN cloudflare_connection_id uuid
 
+TABLE mail_drafts
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_drafts_id_seq'::regclass)
+  COLUMN organization_id bigint NOT NULL
+  COLUMN user_id bigint NOT NULL
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN to_recipients text NOT NULL
+  COLUMN cc_recipients text NOT NULL
+  COLUMN subject text NOT NULL
+  COLUMN body text NOT NULL
+  COLUMN in_reply_to text NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_folders
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_folders_id_seq'::regclass)
   COLUMN mailbox_id bigint NOT NULL
@@ -399,6 +412,13 @@ TABLE mail_roles
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
 
+TABLE mail_signatures
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN user_id bigint NOT NULL
+  COLUMN body text NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_suppressions
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_suppressions_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -424,6 +444,22 @@ TABLE mail_templates
   COLUMN from_address character varying(320)
   COLUMN from_name character varying(100) NOT NULL DEFAULT ''::character varying
   COLUMN variable_definitions jsonb NOT NULL DEFAULT '[]'::jsonb
+
+TABLE mail_thread_assignments
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN thread_id bigint NOT NULL
+  COLUMN assignee_user_id bigint
+  COLUMN status text NOT NULL
+  COLUMN updated_by_user_id bigint
+  COLUMN updated_at timestamp with time zone NOT NULL
+
+TABLE mail_thread_notes
+  COLUMN id bigint NOT NULL DEFAULT nextval('mail_thread_notes_id_seq'::regclass)
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN thread_id bigint NOT NULL
+  COLUMN author_user_id bigint
+  COLUMN body text NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
 
 TABLE mail_triage
   COLUMN message_id bigint NOT NULL
@@ -975,6 +1011,15 @@ CONSTRAINT mail_domains.fk_mail_domains_mail_zone FOREIGN KEY (mail_zone_id) REF
 CONSTRAINT mail_domains.fk_mail_domains_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_domains.mail_domains_cloudflare_connection_id_fkey FOREIGN KEY (cloudflare_connection_id) REFERENCES mail_cloudflare_connections(id)
 CONSTRAINT mail_domains.mail_domains_pkey PRIMARY KEY (id)
+CONSTRAINT mail_drafts.mail_drafts_body_check CHECK ((char_length(body) <= 100000))
+CONSTRAINT mail_drafts.mail_drafts_cc_recipients_check CHECK ((char_length(cc_recipients) <= 4000))
+CONSTRAINT mail_drafts.mail_drafts_in_reply_to_check CHECK ((char_length(in_reply_to) <= 998))
+CONSTRAINT mail_drafts.mail_drafts_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_drafts.mail_drafts_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT mail_drafts.mail_drafts_pkey PRIMARY KEY (id)
+CONSTRAINT mail_drafts.mail_drafts_subject_check CHECK ((char_length(subject) <= 998))
+CONSTRAINT mail_drafts.mail_drafts_to_recipients_check CHECK ((char_length(to_recipients) <= 4000))
+CONSTRAINT mail_drafts.mail_drafts_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT mail_folders.mail_folders_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
 CONSTRAINT mail_folders.mail_folders_pkey PRIMARY KEY (id)
 CONSTRAINT mail_labels.mail_labels_color_check CHECK (((color)::text = ANY ((ARRAY['gray'::character varying, 'red'::character varying, 'orange'::character varying, 'yellow'::character varying, 'green'::character varying, 'teal'::character varying, 'blue'::character varying, 'purple'::character varying, 'pink'::character varying])::text[])))
@@ -1006,6 +1051,10 @@ CONSTRAINT mail_roles.mail_roles_name_check CHECK (((char_length(btrim((name)::t
 CONSTRAINT mail_roles.mail_roles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT mail_roles.mail_roles_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mail_roles.mail_roles_pkey PRIMARY KEY (id)
+CONSTRAINT mail_signatures.mail_signatures_body_check CHECK (((char_length(body) >= 1) AND (char_length(body) <= 2000)))
+CONSTRAINT mail_signatures.mail_signatures_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_signatures.mail_signatures_pkey PRIMARY KEY (mailbox_id, user_id)
+CONSTRAINT mail_signatures.mail_signatures_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT mail_suppressions.chk_mail_suppressions_reason CHECK (((reason)::text = ANY ((ARRAY['bounced'::character varying, 'complained'::character varying])::text[])))
 CONSTRAINT mail_suppressions.chk_mail_suppressions_source CHECK (((source)::text = ANY ((ARRAY['broadcast'::character varying, 'transactional'::character varying, 'backfill'::character varying])::text[])))
 CONSTRAINT mail_suppressions.fk_mail_suppressions_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -1014,6 +1063,14 @@ CONSTRAINT mail_templates.chk_mail_templates_kind CHECK (((kind)::text = ANY ((A
 CONSTRAINT mail_templates.chk_mail_templates_transactional_fields CHECK (((((kind)::text = 'transactional'::text) AND (template_key IS NOT NULL) AND (from_address IS NOT NULL)) OR (((kind)::text = 'standard'::text) AND (template_key IS NULL) AND (from_address IS NULL) AND ((from_name)::text = ''::text) AND (variable_definitions = '[]'::jsonb))))
 CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_templates.mail_templates_pkey PRIMARY KEY (id)
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_assignee_user_id_fkey FOREIGN KEY (assignee_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_pkey PRIMARY KEY (mailbox_id, thread_id)
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_status_check CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text])))
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_thread_notes.mail_thread_notes_author_user_id_fkey FOREIGN KEY (author_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_thread_notes.mail_thread_notes_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_thread_notes.mail_thread_notes_pkey PRIMARY KEY (id)
 CONSTRAINT mail_triage.mail_triage_attempts_check CHECK ((attempts >= 0))
 CONSTRAINT mail_triage.mail_triage_category_check CHECK (((category)::text = ANY ((ARRAY['reply'::character varying, 'deadline'::character varying, 'fyi'::character varying, 'review'::character varying])::text[])))
 CONSTRAINT mail_triage.mail_triage_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
@@ -1277,6 +1334,10 @@ INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
 INDEX CREATE INDEX idx_mail_domains_organization ON mail_domains USING btree (organization_id)
 INDEX CREATE UNIQUE INDEX mail_domains_pkey ON mail_domains USING btree (id)
+INDEX CREATE INDEX idx_mail_drafts_mailbox ON mail_drafts USING btree (mailbox_id)
+INDEX CREATE INDEX idx_mail_drafts_owner ON mail_drafts USING btree (organization_id, user_id, updated_at DESC, id DESC)
+INDEX CREATE INDEX idx_mail_drafts_user ON mail_drafts USING btree (user_id)
+INDEX CREATE UNIQUE INDEX mail_drafts_pkey ON mail_drafts USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_folders_name ON mail_folders USING btree (mailbox_id, lower((name)::text))
 INDEX CREATE UNIQUE INDEX mail_folders_pkey ON mail_folders USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_labels_name ON mail_labels USING btree (mailbox_id, lower((name)::text))
@@ -1314,12 +1375,20 @@ INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_roles_name ON mail_roles USING btree (organization_id, lower((name)::text))
 INDEX CREATE INDEX idx_mail_roles_owner ON mail_roles USING btree (owner_user_id) WHERE (owner_user_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_roles_pkey ON mail_roles USING btree (id)
+INDEX CREATE INDEX idx_mail_signatures_user ON mail_signatures USING btree (user_id)
+INDEX CREATE UNIQUE INDEX mail_signatures_pkey ON mail_signatures USING btree (mailbox_id, user_id)
 INDEX CREATE UNIQUE INDEX mail_suppressions_email_idx ON mail_suppressions USING btree (organization_id, email)
 INDEX CREATE INDEX mail_suppressions_list_idx ON mail_suppressions USING btree (organization_id, created_at DESC, id DESC)
 INDEX CREATE UNIQUE INDEX mail_suppressions_pkey ON mail_suppressions USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
 INDEX CREATE UNIQUE INDEX mail_templates_key_idx ON mail_templates USING btree (organization_id, template_key) WHERE (template_key IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
+INDEX CREATE INDEX idx_mail_thread_assignments_assignee ON mail_thread_assignments USING btree (assignee_user_id)
+INDEX CREATE INDEX idx_mail_thread_assignments_updated_by ON mail_thread_assignments USING btree (updated_by_user_id)
+INDEX CREATE UNIQUE INDEX mail_thread_assignments_pkey ON mail_thread_assignments USING btree (mailbox_id, thread_id)
+INDEX CREATE INDEX idx_mail_thread_notes_author ON mail_thread_notes USING btree (author_user_id)
+INDEX CREATE INDEX idx_mail_thread_notes_thread ON mail_thread_notes USING btree (mailbox_id, thread_id, id)
+INDEX CREATE UNIQUE INDEX mail_thread_notes_pkey ON mail_thread_notes USING btree (id)
 INDEX CREATE INDEX idx_mail_triage_overrides ON mail_triage USING btree (mailbox_id, updated_at) WHERE ((source)::text = 'manual'::text)
 INDEX CREATE INDEX idx_mail_triage_pending ON mail_triage USING btree (next_attempt_at, message_id) WHERE ((status)::text = 'pending'::text)
 INDEX CREATE INDEX idx_mail_triage_results ON mail_triage USING btree (mailbox_id, category) WHERE ((status)::text = ANY ((ARRAY['done'::character varying, 'failed'::character varying])::text[]))

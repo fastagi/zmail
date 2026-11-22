@@ -3263,6 +3263,8 @@ describe('mailbox browser route boundary', () => {
     await inbox('?view=pending&unread=true&per_page=%2B5');
     await inbox('?per_page=99999999999999999999');
     await inbox('?per_page=-99999999999999999999');
+    await inbox('?assignment=mine&group=thread');
+    await inbox('?q=invoice&since=2026-11-01&until=2026-11-30&tz=Asia%2FShanghai');
 
     const calls = fetchMock.mock.calls.map(([url, init]) => {
       const target = new URL(String(url));
@@ -3276,6 +3278,8 @@ describe('mailbox browser route boundary', () => {
       'GET /v1/inbox-messages?view=pending&unread=true&per_page=5',
       'GET /v1/inbox-messages?per_page=100',
       'GET /v1/inbox-messages?per_page=1',
+      'GET /v1/inbox-messages?group=thread&assignment=mine&per_page=15',
+      'GET /v1/inbox-messages?q=invoice&since=2026-11-01&until=2026-11-30&tz=Asia%2FShanghai&per_page=15',
     ]);
     for (const [, init] of fetchMock.mock.calls) {
       expect(new Headers(init?.headers).get('organization-id')).toBe('7');
@@ -3343,6 +3347,16 @@ describe('mailbox browser route boundary', () => {
       '?view=pending&group=thread',
       '?group=thread&unread=true',
       '?group=thread&q=invoice',
+      '?group=thread&has_attachments=true',
+      '?group=thread&has_attachments=false',
+      '?assignment=everyone',
+      '?assignment=',
+      '?since=2026-02-30',
+      '?until=2026-11-01T00:00:00Z',
+      '?since=1969-12-31',
+      '?since=',
+      '?since=2026-11-02&until=2026-11-01',
+      '?since=2026-11-01&group=thread',
     ]) {
       await expectError(
         await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`)),
@@ -3351,6 +3365,56 @@ describe('mailbox browser route boundary', () => {
       );
     }
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('mock inbox filters conversations by assignment', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    const created = async (body: Record<string, unknown>) =>
+      (await (await create(route, body)).json()).data as { id: number };
+    const mine = await created({ local_part: 'mine', type: 'personal', owner_user_id: 1 });
+    const members = [{ user_id: 1, permission: 'manage' }];
+    const team = await created({ local_part: 'team', type: 'shared', members });
+    const ops = await created({ local_part: 'ops', type: 'shared', members });
+    const items = async (query = '') =>
+      (await (await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`))).json())
+        .data as { id: number; mailbox_id: number; thread_id: number }[];
+    const welcome = new Map((await items()).map(item => [item.mailbox_id, item]));
+    const assign = (box: number, body: Record<string, unknown>) => {
+      const thread = welcome.get(box)!.thread_id;
+      return route.updateMailThreadAssignmentRoute(
+        request(`/api/mailboxes/${box}/threads/${thread}/assignment`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        }),
+        String(box),
+        String(thread)
+      );
+    };
+    expect((await assign(team.id, { assignee_user_id: 1, status: 'open' })).status).toBe(200);
+    expect((await assign(ops.id, { assignee_user_id: null, status: 'closed' })).status).toBe(200);
+    const boxes = async (query: string) => (await items(query)).map(item => item.mailbox_id);
+
+    expect(await boxes('?assignment=mine')).toEqual([team.id]);
+    expect(await boxes('?assignment=closed')).toEqual([ops.id]);
+    expect(await boxes('?assignment=unassigned')).toEqual([mine.id]);
+    expect(await boxes('?assignment=mine&group=thread')).toEqual([team.id]);
+  });
+
+  it('mock inbox keeps messages within the since and until days', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    getSessionUser.mockResolvedValue(mockUser('demo-admin'));
+    const route = await loadRoute();
+    await create(route, { local_part: 'dated', type: 'personal', owner_user_id: 1 });
+    const count = async (query: string) =>
+      (
+        (await (await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`))).json())
+          .data as unknown[]
+      ).length;
+    expect(await count('?since=1970-01-01')).toBeGreaterThan(0);
+    expect(await count('?until=1970-01-02')).toBe(0);
+    expect(await count('?since=9999-12-31')).toBe(0);
   });
 
   it("mock inbox hides another member's personal mailbox and pages by cursor", async () => {
@@ -4692,6 +4756,182 @@ describe('mailbox browser route boundary', () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  describe('mail signatures in the mock', () => {
+    const as = (user: 'demo-admin' | 'demo-operator' | 'demo-member') =>
+      getSessionUser.mockResolvedValue(mockUser(user));
+    const read = (route: MailboxRoute, id: number) =>
+      route.getMailSignatureRoute(request(`/api/mailboxes/${id}/signature`), String(id));
+    const save = (route: MailboxRoute, id: number, body: unknown) =>
+      route.updateMailSignatureRoute(
+        request(`/api/mailboxes/${id}/signature`, {
+          method: 'PUT',
+          body: JSON.stringify({ body }),
+        }),
+        String(id)
+      );
+
+    beforeEach(() => {
+      process.env.MOCK_BFF_ENABLED = 'true';
+    });
+
+    it('keeps one normalized signature per member and needs send', async () => {
+      const route = await loadRoute();
+      as('demo-admin');
+      const created = await create(route, {
+        local_part: 'signed',
+        type: 'shared',
+        members: [
+          { user_id: 1, permission: 'manage' },
+          { user_id: 2, permission: 'send' },
+          { user_id: 3, permission: 'view' },
+        ],
+      });
+      const { id } = (await created.json()).data as { id: number };
+
+      const empty = await (await read(route, id)).json();
+      expect(empty.data).toEqual({ mailbox_id: id, body: '', updated_at: null });
+
+      const saved = await (await save(route, id, 'Best,\r\nAda  \n\n')).json();
+      expect(saved.data.body).toBe('Best,\nAda');
+      expect(saved.data.updated_at).toEqual(expect.any(String));
+
+      as('demo-operator');
+      expect((await (await read(route, id)).json()).data.body).toBe('');
+
+      as('demo-member');
+      expect((await read(route, id)).status).toBe(403);
+      expect((await save(route, id, 'x')).status).toBe(403);
+
+      as('demo-admin');
+      expect((await save(route, id, 'é'.repeat(2001))).status).toBe(422);
+      expect((await save(route, id, 'a\u0000b')).status).toBe(422);
+      expect((await save(route, id, 42)).status).toBe(422);
+      const cleared = await (await save(route, id, ' \n')).json();
+      expect(cleared.data).toEqual({ mailbox_id: id, body: '', updated_at: null });
+    });
+
+    it('forwards reads and writes to the API', async () => {
+      delete process.env.MOCK_BFF_ENABLED;
+      process.env.API_ADAPTER_ENABLED = 'true';
+      process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+      cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+      const route = await loadRoute();
+      fetchMock.mockImplementation(async () =>
+        Response.json({
+          code: 0,
+          message: 'success',
+          data: { mailbox_id: 4, body: 'Hi', updated_at: null },
+        })
+      );
+      expect((await read(route, 4)).status).toBe(200);
+      expect((await save(route, 4, 'Hi')).status).toBe(200);
+      const calls = fetchMock.mock.calls.map(([url, init]) => {
+        const parsed = new URL(String(url));
+        return `${init?.method} ${parsed.pathname}`;
+      });
+      expect(calls).toEqual(['GET /v1/mailboxes/4/signature', 'PUT /v1/mailboxes/4/signature']);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ body: 'Hi' });
+    });
+  });
+
+  describe('thread assignment', () => {
+    const path = (id: number, thread: number) =>
+      `/api/mailboxes/${id}/threads/${thread}/assignment`;
+    const read = (route: MailboxRoute, id: number, thread: number) =>
+      route.getMailThreadAssignmentRoute(request(path(id, thread)), String(id), String(thread));
+    const save = (route: MailboxRoute, id: number, thread: number, body: unknown) =>
+      route.updateMailThreadAssignmentRoute(
+        request(path(id, thread), { method: 'PUT', body: JSON.stringify(body) }),
+        String(id),
+        String(thread)
+      );
+
+    it('validates the body before forwarding it to the API', async () => {
+      process.env.API_ADAPTER_ENABLED = 'true';
+      process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+      cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+      const route = await loadRoute();
+      const data = {
+        thread_id: 9,
+        assignee_user_id: 2,
+        status: 'closed',
+        updated_by_user_id: 2,
+        updated_at: '2026-11-22T00:00:00Z',
+        assignable_user_ids: [2],
+      };
+      fetchMock.mockImplementation(async () =>
+        Response.json({ code: 0, message: 'success', data })
+      );
+
+      expect((await save(route, 4, 9, { assignee_user_id: 2, status: 'snoozed' })).status).toBe(
+        422
+      );
+      expect((await save(route, 4, 9, { assignee_user_id: -1, status: 'open' })).status).toBe(422);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      expect((await read(route, 4, 9)).status).toBe(200);
+      expect((await save(route, 4, 9, { assignee_user_id: 2, status: 'closed' })).status).toBe(200);
+      const calls = fetchMock.mock.calls.map(([url, init]) => {
+        const parsed = new URL(String(url));
+        return `${init?.method} ${parsed.pathname}`;
+      });
+      expect(calls).toEqual([
+        'GET /v1/mailboxes/4/threads/9/assignment',
+        'PUT /v1/mailboxes/4/threads/9/assignment',
+      ]);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+        assignee_user_id: 2,
+        status: 'closed',
+      });
+    });
+  });
+
+  describe('thread notes', () => {
+    const path = (id: number, thread: number) => `/api/mailboxes/${id}/threads/${thread}/notes`;
+    const add = (route: MailboxRoute, body: unknown) =>
+      route.createMailThreadNoteRoute(
+        request(path(4, 9), { method: 'POST', body: JSON.stringify(body) }),
+        '4',
+        '9'
+      );
+
+    it('validates and normalizes the body before forwarding notes to the API', async () => {
+      process.env.API_ADAPTER_ENABLED = 'true';
+      process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+      cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+      const route = await loadRoute();
+      fetchMock.mockImplementation(async () =>
+        Response.json({ code: 0, message: 'success', data: { items: [] } })
+      );
+
+      expect((await add(route, { body: '   ' })).status).toBe(422);
+      expect((await add(route, { body: 'bell\u0007' })).status).toBe(422);
+      expect((await add(route, { body: 'x'.repeat(2001) })).status).toBe(422);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      await route.listMailThreadNotesRoute(request(path(4, 9)), '4', '9');
+      await add(route, { body: '  Call back\r\ntomorrow ' });
+      await route.deleteMailThreadNoteRoute(
+        request(`${path(4, 9)}/5`, { method: 'DELETE' }),
+        '4',
+        '9',
+        '5'
+      );
+      const calls = fetchMock.mock.calls.map(([url, init]) => {
+        const parsed = new URL(String(url));
+        return `${init?.method} ${parsed.pathname}`;
+      });
+      expect(calls).toEqual([
+        'GET /v1/mailboxes/4/threads/9/notes',
+        'POST /v1/mailboxes/4/threads/9/notes',
+        'DELETE /v1/mailboxes/4/threads/9/notes/5',
+      ]);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+        body: 'Call back\ntomorrow',
+      });
+    });
+  });
+
   describe('mailbox organize in the mock', () => {
     // Seeded organization 1: user 1 demo-admin (owner), 2 demo-operator (admin), 3 demo-member.
     const as = (user: 'demo-admin' | 'demo-operator' | 'demo-member') =>
@@ -5659,6 +5899,12 @@ async function loadRoute(): Promise<MailboxRoute> {
   contacts.mockContactStore.reset();
   const broadcasts = await import('@/features/mailbox/server/mock-broadcast-store');
   broadcasts.mockBroadcastStore.reset();
+  const signatures = await import('@/features/mailbox/server/mock-signature-store');
+  signatures.mockSignatureStore.reset();
+  const assignments = await import('@/features/mailbox/server/mock-assignment-store');
+  assignments.mockAssignmentStore.reset();
+  const notes = await import('@/features/mailbox/server/mock-note-store');
+  notes.mockNoteStore.reset();
   return route;
 }
 

@@ -61,6 +61,10 @@ const navigation = vi.hoisted(() => {
   };
 });
 
+vi.mock('@/features/mailbox/hooks/use-thread-assignment', () => ({
+  useThreadAssignment: () => ({ data: undefined, isSuccess: false }),
+  useSaveThreadAssignment: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('next/navigation', async () => {
   const { useSyncExternalStore } = await import('react');
@@ -82,6 +86,19 @@ vi.mock('@/features/organization/hooks/use-organizations', () => ({
 const templateState = vi.hoisted(() => ({ data: [] as unknown[] }));
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
   useMailTemplates: () => templateState,
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-drafts', () => ({
+  useMailDrafts: () => ({ data: [], isPending: false, isError: false }),
+  useOpenMailDraft: () => ({ mutate: () => undefined }),
+  useSaveMailDraft: () => ({ mutateAsync: () => Promise.resolve({ id: 1 }) }),
+  useDeleteMailDraft: () => ({
+    mutate: () => undefined,
+    mutateAsync: () => Promise.resolve(),
+    isPending: false,
+  }),
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
+  useMailSignature: () => ({ data: undefined }),
 }));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
   const scoped = <T,>(organizationId: number, result: T): T => {

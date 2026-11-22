@@ -110,9 +110,13 @@ export const mailboxKeys = {
       filters.roleId ?? '',
       filters.mailboxId ?? 0,
       filters.unread ?? '',
+      filters.hasAttachments ?? '',
       filters.q ?? '',
       filters.group ?? '',
       filters.triage?.join(',') ?? '',
+      filters.assignment ?? '',
+      filters.since ?? '',
+      filters.until ?? '',
       filters.tz,
     ] as const,
   /** Every unified inbox count of the organization, whatever the zone. */

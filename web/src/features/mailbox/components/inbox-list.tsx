@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -21,10 +22,18 @@ import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-rea
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { knownTimeZone } from '@/features/mailbox/components/mail-shared';
 import { rowUnread } from '@/features/mailbox/components/message-rows';
-import { MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
-import type { InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
+import {
+  INBOX_ASSIGNMENTS,
+  INBOX_DATE_RANGES,
+  MAIL_SEARCH_MAX_LENGTH,
+} from '@/features/mailbox/schemas';
+import type { InboxAssignment, InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
+
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
+
+type ListTab = 'all' | 'unread' | 'attachments' | InboxAssignment;
+type DateRange = (typeof INBOX_DATE_RANGES)[number];
 
 /** How far below the visible rows the next page starts loading. */
 const loadAheadMargin = '240px';
@@ -78,6 +87,12 @@ export function InboxListHeader({
   unread,
   unreadCount,
   onUnreadChange,
+  attachments = false,
+  onAttachmentsChange,
+  assignment = null,
+  onAssignmentChange,
+  dateRange = null,
+  onDateRangeChange,
   q,
   onSearch,
   mailboxHref = null,
@@ -95,6 +110,15 @@ export function InboxListHeader({
   unread: boolean;
   unreadCount?: number;
   onUnreadChange: (unread: boolean) => void;
+  /** The With attachments tab, shown when `onAttachmentsChange` is given. */
+  attachments?: boolean;
+  onAttachmentsChange?: (attachments: boolean) => void;
+  /** The assignment tabs of shared conversations, shown when `onAssignmentChange` is given. */
+  assignment?: InboxAssignment | null;
+  onAssignmentChange?: (assignment: InboxAssignment | null) => void;
+  /** How far back the list reaches; the date menu shows when `onDateRangeChange` is given. */
+  dateRange?: DateRange | null;
+  onDateRangeChange?: (range: DateRange | null) => void;
   q: string;
   onSearch: (q: string) => void;
   mailboxHref?: string | null;
@@ -126,18 +150,27 @@ export function InboxListHeader({
     event.preventDefault();
     change('');
   };
-  const tab = (value: boolean, label: string, count?: number) => (
+  const selectTab = (value: ListTab) => {
+    if (value === 'attachments') onAttachmentsChange?.(true);
+    else if (value === 'unread') onUnreadChange(true);
+    else if (value !== 'all') onAssignmentChange?.(value);
+    else if (assignment) onAssignmentChange?.(null);
+    else if (attachments) onAttachmentsChange?.(false);
+    else onUnreadChange(false);
+  };
+  const current: ListTab = assignment ?? (attachments ? 'attachments' : unread ? 'unread' : 'all');
+  const tab = (value: ListTab, label: string, count?: number) => (
     <button
       type="button"
       role="tab"
-      aria-selected={unread === value}
+      aria-selected={current === value}
       className={cn(
-        '-mb-px border-b-2 pb-2.5 transition-colors focus-ring motion-reduce:transition-none',
-        unread === value
+        '-mb-px shrink-0 border-b-2 pb-2.5 whitespace-nowrap transition-colors focus-ring motion-reduce:transition-none',
+        current === value
           ? 'border-text-main font-semibold text-text-main'
           : 'border-transparent text-text-muted hover:text-text-main'
       )}
-      onClick={() => onUnreadChange(value)}
+      onClick={() => selectTab(value)}
     >
       {label}
       {count ? (
@@ -221,31 +254,61 @@ export function InboxListHeader({
         role="search"
         aria-label={t('inbox.search.label')}
         onSubmit={submit}
-        className="relative mt-3"
+        className="mt-3 flex gap-2"
       >
-        <Search
-          className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-text-muted"
-          aria-hidden="true"
-        />
-        <Input
-          ref={searchRef}
-          type="search"
-          value={search}
-          maxLength={MAIL_SEARCH_MAX_LENGTH}
-          aria-label={t('inbox.search.label')}
-          placeholder={t('inbox.search.placeholder')}
-          className="h-8 pl-8 text-[13px]"
-          onChange={event => change(event.target.value)}
-          onKeyDown={escape}
-        />
+        <div className="relative min-w-0 flex-1">
+          <Search
+            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-text-muted"
+            aria-hidden="true"
+          />
+          <Input
+            ref={searchRef}
+            type="search"
+            value={search}
+            maxLength={MAIL_SEARCH_MAX_LENGTH}
+            aria-label={t('inbox.search.label')}
+            placeholder={t('inbox.search.placeholder')}
+            className="h-8 pl-8 text-[13px]"
+            onChange={event => change(event.target.value)}
+            onKeyDown={escape}
+          />
+        </div>
+        {onDateRangeChange ? (
+          <select
+            aria-label={t('inbox.date.label')}
+            value={dateRange ?? ''}
+            className={cn(
+              'h-8 shrink-0 rounded-md border border-border-main bg-bg-surface px-2 text-[13px] focus-ring',
+              dateRange ? 'font-medium text-text-main' : 'text-text-muted'
+            )}
+            onChange={event =>
+              onDateRangeChange(
+                event.target.value === '' ? null : (event.target.value as DateRange)
+              )
+            }
+          >
+            <option value="">{t('inbox.date.any')}</option>
+            {INBOX_DATE_RANGES.map(range => (
+              <option key={range} value={range}>
+                {t(`inbox.date.${range}`)}
+              </option>
+            ))}
+          </select>
+        ) : null}
       </form>
       <div
         role="tablist"
         aria-label={t('inbox.tabs.label')}
-        className="mt-3.5 flex gap-[18px] border-b border-border-subtle"
+        className="mt-3.5 flex gap-[18px] overflow-x-auto border-b border-border-subtle [scrollbar-width:none]"
       >
-        {tab(false, t('inbox.tabs.all'))}
-        {tab(true, t('inbox.tabs.unread'), unreadCount)}
+        {tab('all', t('inbox.tabs.all'))}
+        {tab('unread', t('inbox.tabs.unread'), unreadCount)}
+        {onAttachmentsChange ? tab('attachments', t('inbox.tabs.attachments')) : null}
+        {onAssignmentChange
+          ? INBOX_ASSIGNMENTS.map(value => (
+              <Fragment key={value}>{tab(value, t(`inbox.tabs.${value}`))}</Fragment>
+            ))
+          : null}
       </div>
     </div>
   );

@@ -108,12 +108,14 @@ function newestInbound(messages: readonly MailMessage[]): MailMessage | undefine
  * thread), shown in the list at once and put back if the request fails.
  *
  * `externalProvider` names the connector of an `external` mailbox, null for Zmail's own. Its mail
- * is a read-only copy: Reply, Reply all, and Forward never show (the API refuses to send from it),
- * Archive and Delete show only with `organize`, and the bar says where the mail came from.
+ * is a copy: Reply, Reply all, and Forward show only with `send` (granted when the account was bound
+ * with its SMTP server), Archive and Delete only with `organize`, and without `send` the bar says
+ * where the mail came from.
  */
 export function InboxReadingPane({
   item,
   access,
+  shared = false,
   roleName = null,
   navigation,
   onUnavailable,
@@ -123,6 +125,8 @@ export function InboxReadingPane({
 }: {
   item: InboxItem;
   access: Mailbox['access'] | null;
+  /** The mailbox is shared, so its conversations can be assigned. */
+  shared?: boolean;
   externalProvider?: string | null;
   roleName?: string | null;
   navigation: InboxReaderNavigation;
@@ -151,8 +155,9 @@ export function InboxReadingPane({
   // Either the mailbox list already knows the view is gone, or the API just said so.
   const unavailable = !readable || gone;
   const external = externalProvider !== null;
-  // A copy of an outside account is never answered from Zmail and moves only with `organize`.
-  const canReply = access?.send === true && !external;
+  // A copy of an outside account is answered only through its own server (`send`) and moves only
+  // with `organize`.
+  const canReply = access?.send === true;
   const canMove = external ? access?.organize === true : access?.send === true;
   const marked = useRef<number | null>(null);
   const reported = useRef<number | null>(null);
@@ -285,6 +290,7 @@ export function InboxReadingPane({
       mailboxAddress: item.mailbox_address,
       canSend: canReply,
       canOrganize: access.organize,
+      shared: shared && !external,
     };
     body = item.thread ? (
       <ThreadView

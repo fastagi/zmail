@@ -58,6 +58,11 @@ export type MailboxErrorKey =
   | 'errors.templateLimitReached'
   | 'errors.templateNameTaken'
   | 'errors.templateNotFound'
+  | 'errors.draftNotFound'
+  | 'errors.draftLimitReached'
+  | 'errors.assignmentUnavailable'
+  | 'errors.noteNotFound'
+  | 'errors.noteLimitReached'
   | 'errors.templateVariablesMissing'
   | 'errors.tooLarge'
   | 'errors.triageUnavailable'
@@ -120,6 +125,11 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_CONTACT_LIST_LIMIT_REACHED]: 'errors.contactListLimitReached',
   [ApiErrorCode.MAILBOX_CONTACT_IMPORT_INVALID]: 'errors.contactImportInvalid',
   [ApiErrorCode.MAILBOX_TEMPLATE_NOT_FOUND]: 'errors.templateNotFound',
+  [ApiErrorCode.MAILBOX_DRAFT_NOT_FOUND]: 'errors.draftNotFound',
+  [ApiErrorCode.MAILBOX_DRAFT_LIMIT_REACHED]: 'errors.draftLimitReached',
+  [ApiErrorCode.MAILBOX_ASSIGNMENT_UNAVAILABLE]: 'errors.assignmentUnavailable',
+  [ApiErrorCode.MAILBOX_NOTE_NOT_FOUND]: 'errors.noteNotFound',
+  [ApiErrorCode.MAILBOX_NOTE_LIMIT_REACHED]: 'errors.noteLimitReached',
   [ApiErrorCode.MAILBOX_TEMPLATE_INVALID]: 'errors.templateInvalid',
   [ApiErrorCode.MAILBOX_TEMPLATE_NAME_TAKEN]: 'errors.templateNameTaken',
   [ApiErrorCode.MAILBOX_TEMPLATE_KEY_TAKEN]: 'errors.templateKeyTaken',

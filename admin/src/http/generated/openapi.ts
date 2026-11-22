@@ -1201,6 +1201,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mail-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's drafts
+         * @description The caller's own drafts in the organization, the latest change first; at most 200. Never cached.
+         */
+        get: operations["listMailDrafts"];
+        put?: never;
+        /**
+         * Save a new draft
+         * @description Needs `send` on `mailbox_id`. `to` and `cc` are kept as written and checked only when the message is sent. A member keeps at most 200 drafts per organization.
+         */
+        post: operations["createMailDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mail-drafts/{draft_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one of the caller's drafts in full
+         * @description The whole draft, body included. Never cached.
+         */
+        get: operations["showMailDraft"];
+        /**
+         * Replace one of the caller's drafts
+         * @description Replaces everything the draft holds; needs `send` on `mailbox_id`.
+         */
+        put: operations["updateMailDraft"];
+        post?: never;
+        /** Delete one of the caller's drafts */
+        delete: operations["deleteMailDraft"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mail-message-stats": {
         parameters: {
             query?: never;
@@ -2145,6 +2194,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mailboxes/{mailbox_id}/signature": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the caller's signature for a mailbox
+         * @description Each member keeps their own plain-text signature per mailbox they may send from (`send`). `body` is empty and `updated_at` null until one is saved. Never cached.
+         */
+        get: operations["getMailSignature"];
+        /**
+         * Replace the caller's signature for a mailbox
+         * @description Needs `send`. Line breaks become `\n` and trailing white space is dropped; an empty result removes the signature. At most 2000 characters, without control characters other than line breaks and tabs.
+         */
+        put: operations["updateMailSignature"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mailboxes/{mailbox_id}/threads/{thread_id}": {
         parameters: {
             query?: never;
@@ -2160,6 +2233,74 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/threads/{thread_id}/assignment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read who works a shared mailbox's thread and whether it is done
+         * @description Needs `view`. A thread nobody assigned is `open` and unassigned. Personal and connected mailboxes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+         */
+        get: operations["getMailThreadAssignment"];
+        /**
+         * Assign a shared mailbox's thread and set its status
+         * @description Needs `send`. The assignee must be a member with `send` or `manage`; `null` unassigns. Personal and connected mailboxes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+         */
+        put: operations["updateMailThreadAssignment"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/threads/{thread_id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the internal notes on a shared mailbox's thread
+         * @description Needs `view`. Oldest first; a thread keeps at most 200 notes. Personal and connected mailboxes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+         */
+        get: operations["listMailThreadNotes"];
+        put?: never;
+        /**
+         * Leave an internal note on a shared mailbox's thread
+         * @description Needs `send`. The note is never sent to the correspondent. A thread already keeping 200 notes is `409 MAILBOX.NOTE_LIMIT_REACHED`.
+         */
+        post: operations["createMailThreadNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/mailboxes/{mailbox_id}/threads/{thread_id}/notes/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete one of the caller's own notes
+         * @description Needs `view`. Another member's note is `404 MAILBOX.NOTE_NOT_FOUND`.
+         */
+        delete: operations["deleteMailThreadNote"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4114,6 +4255,10 @@ export interface components {
             ttl?: number;
             type: components["schemas"]["MailDNSRecordType"];
         };
+        CreateMailThreadNoteRequest: {
+            /** @description 1 to 2000 characters after trimming; line breaks kept, no other control characters. */
+            body: string;
+        };
         CursorPageMeta: {
             has_more: boolean;
             /** @description Pass as `cursor` to read the next, older page; null on the last page. */
@@ -4128,7 +4273,7 @@ export interface components {
          * @description Stable dotted code used for client behavior.
          * @enum {string}
          */
-        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "AUTH.TOTP_REQUIRED" | "AUTH.TOTP_INVALID" | "AUTH.TOTP_ALREADY_ENABLED" | "AUTH.TOTP_NOT_ENABLED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.SENDING_PAUSED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_INVALID" | "MAILBOX.EXTERNAL_AUTHORIZATION_FAILED" | "MAILBOX.EXTERNAL_ACCOUNT_MISMATCH" | "MAILBOX.EXTERNAL_ACCOUNT_TAKEN" | "MAILBOX.EXTERNAL_CONNECTION_LIMIT" | "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE" | "MAILBOX.EXTERNAL_SERVER_UNREACHABLE" | "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED" | "MAILBOX.AGENT_GRANT_NOT_FOUND" | "MAILBOX.AGENT_GRANT_INVALID" | "MAILBOX.AGENT_GRANT_LIMIT" | "MAILBOX.AGENT_GRANT_EXISTS";
+        ErrorCode: "COMMON.INTERNAL" | "COMMON.NOT_FOUND" | "COMMON.CONFLICT" | "COMMON.INVALID_INPUT" | "COMMON.VALIDATION_FAILED" | "COMMON.RATE_LIMITED" | "COMMON.REQUEST_TOO_LARGE" | "COMMON.TIMEOUT" | "COMMON.SERVICE_UNAVAILABLE" | "AUTH.UNAUTHORIZED" | "AUTH.FORBIDDEN" | "AUTH.INVALID_CREDENTIALS" | "AUTH.ACCOUNT_DISABLED" | "AUTH.PASSWORD_RESET_TOKEN_INVALID" | "AUTH.PASSWORD_RESET_TOKEN_EXPIRED" | "AUTH.REGISTRATION_EMAIL_CODE_REQUIRED" | "AUTH.REGISTRATION_EMAIL_CODE_INVALID" | "AUTH.REGISTRATION_EMAIL_CODE_EXPIRED" | "AUTH.TOTP_REQUIRED" | "AUTH.TOTP_INVALID" | "AUTH.TOTP_ALREADY_ENABLED" | "AUTH.TOTP_NOT_ENABLED" | "USER.NOT_FOUND" | "USER.EMAIL_ALREADY_EXISTS" | "USER.USERNAME_ALREADY_EXISTS" | "API_KEY.NOT_FOUND" | "API_KEY.INVALID" | "API_KEY.EXPIRED" | "API_KEY.REVOKED" | "ORGANIZATION.NOT_FOUND" | "ORGANIZATION.CONTEXT_REQUIRED" | "ORGANIZATION.CONTEXT_INVALID" | "ORGANIZATION.SLUG_ALREADY_EXISTS" | "ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED" | "ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID" | "ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED" | "ORGANIZATION.MEMBER_NOT_FOUND" | "ORGANIZATION.INVITATION.NOT_FOUND" | "ORGANIZATION.INVITATION.INVALID" | "ORGANIZATION.INVITATION.EXPIRED" | "ORGANIZATION.INVITATION.EMAIL_MISMATCH" | "ORGANIZATION.INVITATION.ALREADY_PENDING" | "ORGANIZATION.MEMBER_ALREADY_EXISTS" | "PERMISSION.DENIED" | "PERMISSION.UNKNOWN" | "PERMISSION.ROLE_NOT_FOUND" | "PERMISSION.ROLE_SLUG_ALREADY_EXISTS" | "NOTIFICATION.NOT_FOUND" | "NOTIFICATION.IDEMPOTENCY_CONFLICT" | "NOTIFICATION.INVALID_CHANNEL" | "ASSET.NOT_FOUND" | "ASSET.NOT_READY" | "ASSET.IDEMPOTENCY_CONFLICT" | "ASSET.CLEANUP_REQUIRED" | "ASSET.UPLOAD_EXPIRED" | "ASSET.SIZE_EXCEEDED" | "ASSET.INVALID_MEDIA_TYPE" | "SETTING.NOT_FOUND" | "SETTING.INVALID_VALUE" | "SETTING.VERSION_CONFLICT" | "SETTING.PRECONDITION_REQUIRED" | "USAGE.METRIC_NOT_FOUND" | "USAGE.INVALID_EVENT" | "USAGE.EVENT_OUTSIDE_WINDOW" | "USAGE.IDEMPOTENCY_CONFLICT" | "USAGE.QUOTA_EXCEEDED" | "USAGE.QUOTA_VERSION_CONFLICT" | "USAGE.PRECONDITION_REQUIRED" | "WEBHOOK.ENDPOINT_NOT_FOUND" | "WEBHOOK.DELIVERY_NOT_FOUND" | "WEBHOOK.INVALID_EVENT_TYPE" | "WEBHOOK.INVALID_TARGET" | "WEBHOOK.IDEMPOTENCY_CONFLICT" | "WEBHOOK.ENDPOINT_VERSION_CONFLICT" | "WEBHOOK.PRECONDITION_REQUIRED" | "WEBHOOK.REPLAY_NOT_ALLOWED" | "OPERATOR.FORBIDDEN" | "OPERATOR.CAPABILITY_REQUIRED" | "OPERATOR.ORIGIN_REJECTED" | "OPERATOR.CSRF_REJECTED" | "OPERATOR.TARGET_PROTECTED" | "OPERATOR.CONTENT_NOT_ELIGIBLE" | "MAILBOX.NOT_FOUND" | "MAILBOX.ADDRESS_TAKEN" | "MAILBOX.ADDRESS_INVALID" | "MAILBOX.ADDRESS_RESERVED" | "MAILBOX.LIMIT_REACHED" | "MAILBOX.IMPORT_DUPLICATE_ROW" | "MAILBOX.IMPORT_MEMBER_NOT_FOUND" | "MAILBOX.ACCESS_INVALID" | "MAILBOX.ACCESS_CONFLICT" | "MAILBOX.MESSAGE_NOT_FOUND" | "MAILBOX.MESSAGE_INVALID" | "MAILBOX.SEND_LIMIT_REACHED" | "MAILBOX.SENDING_PAUSED" | "MAILBOX.DELIVERY_FAILED" | "MAILBOX.SENDER_NOT_CONFIGURED" | "MAILBOX.INBOUND_DISABLED" | "MAILBOX.INBOUND_SIGNATURE_INVALID" | "MAILBOX.INBOUND_UNPARSEABLE" | "MAILBOX.INBOUND_TOO_LARGE" | "MAILBOX.RECIPIENT_NOT_FOUND" | "MAILBOX.IDEMPOTENCY_CONFLICT" | "MAILBOX.IDEMPOTENCY_KEY_INVALID" | "MAILBOX.SEND_IN_PROGRESS" | "MAILBOX.DELIVERY_EVENT_INVALID" | "MAILBOX.TEMPLATE_NOT_FOUND" | "MAILBOX.DRAFT_NOT_FOUND" | "MAILBOX.DRAFT_LIMIT_REACHED" | "MAILBOX.ASSIGNMENT_UNAVAILABLE" | "MAILBOX.NOTE_NOT_FOUND" | "MAILBOX.NOTE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_INVALID" | "MAILBOX.TEMPLATE_NAME_TAKEN" | "MAILBOX.TEMPLATE_LIMIT_REACHED" | "MAILBOX.TEMPLATE_VARIABLES_MISSING" | "MAILBOX.TEMPLATE_KEY_TAKEN" | "MAILBOX.TEMPLATE_KIND_IMMUTABLE" | "MAILBOX.TEMPLATE_KIND_MISMATCH" | "MAILBOX.TRANSACTIONAL_MESSAGE_NOT_FOUND" | "MAILBOX.RECIPIENT_RATE_LIMITED" | "MAILBOX.TRANSACTIONAL_DISABLED" | "MAILBOX.CONTACT_NOT_FOUND" | "MAILBOX.CONTACT_EXISTS" | "MAILBOX.CONTACT_INVALID" | "MAILBOX.CONTACT_LIMIT_REACHED" | "MAILBOX.CONTACT_LIST_NOT_FOUND" | "MAILBOX.CONTACT_LIST_NAME_TAKEN" | "MAILBOX.CONTACT_LIST_LIMIT_REACHED" | "MAILBOX.CONTACT_IMPORT_INVALID" | "MAILBOX.BROADCAST_NOT_FOUND" | "MAILBOX.BROADCAST_INVALID" | "MAILBOX.BROADCAST_NOT_EDITABLE" | "MAILBOX.BROADCAST_NO_RECIPIENTS" | "MAILBOX.BROADCAST_DISABLED" | "MAILBOX.UNSUBSCRIBE_INVALID" | "MAILBOX.DOMAIN_NOT_FOUND" | "MAILBOX.DOMAIN_INVALID" | "MAILBOX.DOMAIN_TAKEN" | "MAILBOX.DOMAIN_LIMIT_REACHED" | "MAILBOX.DOMAIN_ZONE_NOT_FOUND" | "MAILBOX.DOMAIN_IN_USE" | "MAILBOX.DOMAIN_NOT_VERIFIED" | "MAILBOX.DOMAINS_DISABLED" | "MAILBOX.DOMAIN_PROVIDER_FAILED" | "MAILBOX.FOLDER_NOT_FOUND" | "MAILBOX.LABEL_NOT_FOUND" | "MAILBOX.FOLDER_NAME_TAKEN" | "MAILBOX.LABEL_NAME_TAKEN" | "MAILBOX.FOLDER_LIMIT_REACHED" | "MAILBOX.LABEL_LIMIT_REACHED" | "MAILBOX.SEARCH_TOO_BROAD" | "MAILBOX.PLATFORM_ACCOUNT_NOT_FOUND" | "MAILBOX.PLATFORM_ACCOUNT_TAKEN" | "MAILBOX.ROLE_NOT_FOUND" | "MAILBOX.ROLE_NAME_TAKEN" | "MAILBOX.ROLE_LIMIT_REACHED" | "MAILBOX.ZONE_NOT_FOUND" | "MAILBOX.ZONE_PENDING" | "MAILBOX.ZONE_IN_USE" | "MAILBOX.ZONE_STILL_DELEGATED" | "MAILBOX.ZONE_LIMIT_REACHED" | "MAILBOX.DNS_RECORD_NOT_FOUND" | "MAILBOX.DNS_RECORD_INVALID" | "MAILBOX.DNS_RECORD_LOCKED" | "MAILBOX.DNS_RECORD_REJECTED" | "MAILBOX.TRIAGE_UNAVAILABLE" | "MAILBOX.TRIAGE_MODEL_FAILED" | "MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND" | "MAILBOX.EXTERNAL_AUTHORIZATION_INVALID" | "MAILBOX.EXTERNAL_AUTHORIZATION_FAILED" | "MAILBOX.EXTERNAL_ACCOUNT_MISMATCH" | "MAILBOX.EXTERNAL_ACCOUNT_TAKEN" | "MAILBOX.EXTERNAL_CONNECTION_LIMIT" | "MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE" | "MAILBOX.EXTERNAL_SERVER_UNREACHABLE" | "MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED" | "MAILBOX.AGENT_GRANT_NOT_FOUND" | "MAILBOX.AGENT_GRANT_INVALID" | "MAILBOX.AGENT_GRANT_LIMIT" | "MAILBOX.AGENT_GRANT_EXISTS";
         ErrorResponse: {
             code: number;
             error?: string;
@@ -5311,6 +5456,45 @@ export interface components {
             data: components["schemas"]["MailDomain"];
             message: string;
         };
+        MailDraft: {
+            body: string;
+            cc: string;
+            /** Format: date-time */
+            created_at: string;
+            id: number;
+            in_reply_to: string;
+            mailbox_id: number;
+            subject: string;
+            to: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        MailDraftListResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailDraftSummary"][];
+            message: string;
+        };
+        MailDraftResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailDraft"];
+            message: string;
+        };
+        MailDraftSummary: {
+            cc: string;
+            /** Format: date-time */
+            created_at: string;
+            id: number;
+            in_reply_to: string;
+            mailbox_id: number;
+            /** @description The first characters of the body, on one line. */
+            preview: string;
+            subject: string;
+            to: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         MailEvent: {
             /** @description Short machine-readable reason such as `5.1.1 permanent_failure`; never provider free text. */
             detail: string;
@@ -5639,6 +5823,18 @@ export interface components {
             data: components["schemas"]["MailSendLaneUsageList"];
             message: string;
         };
+        MailSignature: {
+            body: string;
+            mailbox_id: number;
+            /** Format: date-time */
+            updated_at: string | null;
+        };
+        MailSignatureResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailSignature"];
+            message: string;
+        };
         /** @description Where the message came from. `zmail` is mail Zmail itself received or sent; any other value is the id of the connector that synced a read-only copy from a bound outside account into a connected mailbox, such as `gmail` or `outlook`. New connectors add values without a contract change, so clients render an unknown value generically. */
         MailSource: string;
         /**
@@ -5795,6 +5991,48 @@ export interface components {
         MailTemplateVariables: {
             [key: string]: string;
         };
+        MailThreadAssignment: {
+            /** @description The mailbox's members with `send` or `manage`, ascending. */
+            assignable_user_ids: components["schemas"]["PositiveID"][];
+            assignee_user_id: components["schemas"]["PositiveID"] | null;
+            status: components["schemas"]["MailThreadStatus"];
+            thread_id: components["schemas"]["PositiveID"];
+            /**
+             * Format: date-time
+             * @description Null until someone first assigns the thread or sets its status.
+             */
+            updated_at: string | null;
+            updated_by_user_id: components["schemas"]["PositiveID"] | null;
+        };
+        MailThreadAssignmentEnvelope: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailThreadAssignment"];
+            message: string;
+        };
+        MailThreadNote: {
+            /** @description Null once the author's account is deleted. */
+            author_user_id: components["schemas"]["PositiveID"] | null;
+            body: string;
+            /** Format: date-time */
+            created_at: string;
+            id: components["schemas"]["PositiveID"];
+            thread_id: components["schemas"]["PositiveID"];
+        };
+        MailThreadNoteEnvelope: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailThreadNote"];
+            message: string;
+        };
+        MailThreadNotesEnvelope: {
+            /** @constant */
+            code: 0;
+            data: {
+                items: components["schemas"]["MailThreadNote"][];
+            };
+            message: string;
+        };
         MailThreadResponse: {
             /** @constant */
             code: 0;
@@ -5802,6 +6040,8 @@ export interface components {
             data: components["schemas"]["MailMessage"][];
             message: string;
         };
+        /** @enum {string} */
+        MailThreadStatus: "open" | "closed";
         /** @description The thread of a listed message with `group=thread`. Every count and flag covers only the thread's messages in the listed view (placement, folder, and direction); the message carrying it is the latest of them. */
         MailThreadSummary: {
             /** @description Every label on at least one of them, ascending. */
@@ -6591,6 +6831,14 @@ export interface components {
         PlatformAccountStatus: "invited" | "awaiting_confirmation" | "active" | "timed_out" | "needs_review" | "retired";
         /** Format: int64 */
         PositiveID: number;
+        SaveMailDraftRequest: {
+            body?: string;
+            cc?: string;
+            in_reply_to?: string;
+            mailbox_id: number;
+            subject?: string;
+            to?: string;
+        };
         /** @description Give `subject` with `text` or `html`, or give `template` and none of the three. */
         SendMailMessageRequest: {
             /** @description Optional files to send with the message. */
@@ -6860,6 +7108,14 @@ export interface components {
             remove_label_ids?: components["schemas"]["PositiveID"][];
             /** @description The caller's own star; needs `view`. */
             starred?: boolean;
+        };
+        UpdateMailSignatureRequest: {
+            body: string;
+        };
+        UpdateMailThreadAssignmentRequest: {
+            /** @description A member with `send` or `manage`; null unassigns the thread. */
+            assignee_user_id: components["schemas"]["PositiveID"] | null;
+            status: components["schemas"]["MailThreadStatus"];
         };
         UpdateMailTriageRequest: {
             /** @enum {string} */
@@ -7545,6 +7801,8 @@ export interface components {
         MailDNSRecordID: string;
         /** @description Positive connected mail domain identifier. */
         MailDomainID: components["schemas"]["PositiveID"];
+        /** @description Positive mail draft identifier. */
+        MailDraftID: components["schemas"]["PositiveID"];
         /** @description Positive mail folder identifier. */
         MailFolderID: components["schemas"]["PositiveID"];
         /** @description Names this send within its mailbox. A repeat with the same key and the same content returns the first attempt's outcome and does not call the provider again. */
@@ -9374,10 +9632,14 @@ export interface operations {
     listInboxMessages: {
         parameters: {
             query?: {
+                /** @description `mine` keeps open conversations assigned to the caller, `unassigned` open conversations without an assignee, `closed` conversations marked done. Allowed with `group`. */
+                assignment?: "mine" | "unassigned" | "closed";
                 /** @description Opaque position from `meta.next_cursor`, passed back unchanged; absent requests the newest page. A malformed cursor is `400 COMMON.INVALID_INPUT`. */
                 cursor?: components["parameters"]["InboxCursor"];
                 /** @description `thread` lists one item per thread and mailbox. Only with `view` `all` or `sent`, and without `unread` and `q`. */
                 group?: "thread";
+                /** @description `true` keeps only messages with files; `false` keeps those without. Never with `group`. */
+                has_attachments?: boolean;
                 /** @description Keep only one mailbox. A mailbox the caller may not read, or another organization's, matches nothing. */
                 mailbox_id?: components["schemas"]["PositiveID"];
                 /** @description Requested page size, capped by the API. */
@@ -9386,12 +9648,16 @@ export interface operations {
                 q?: string;
                 /** @description Keep only the mailboxes of one mail role, or `none` for the mailboxes without a role. A role the caller cannot see matches nothing. */
                 role_id?: components["schemas"]["PositiveID"] | "none";
+                /** @description A calendar day in `tz`, 1970 or later; keeps messages created on or after its start. Never with `group`. */
+                since?: string;
                 /** @description Keep only messages whose triage result is one of these comma-separated, distinct categories, for example `reply,review`. Only with `view` `all` or `today`, and without `group` and `q`. While the organization's AI triage is off it matches nothing. */
                 triage?: string;
                 /** @description The IANA time zone that defines today for `view=today`, at most 64 characters. Defaults to `UTC`. `Local` and an empty value are `400 COMMON.INVALID_INPUT`. */
                 tz?: string;
                 /** @description `true` keeps only inbound messages the caller has not read; outbound messages are always read and never match. `false` keeps the others. Read state is the caller's own. */
                 unread?: boolean;
+                /** @description A calendar day in `tz`, not before `since`; keeps messages created before the end of that day. Never with `group`. */
+                until?: string;
                 /** @description `all` is inbound mail in `default` (every Inbox). `today` is inbound mail outside the trash that arrived since the start of today in `tz`. `pending` is mail of both directions the caller starred, outside `archive` and the trash. `sent` is outbound mail in `default` (every Sent). Defaults to `all`. */
                 view?: components["schemas"]["InboxView"];
             };
@@ -10891,6 +11157,162 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailDrafts: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's drafts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDraftListResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createMailDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveMailDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved draft. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDraftResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    showMailDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail draft identifier. */
+                draft_id: components["parameters"]["MailDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDraftResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail draft identifier. */
+                draft_id: components["parameters"]["MailDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveMailDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description The draft after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailDraftResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mail draft identifier. */
+                draft_id: components["parameters"]["MailDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft was deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -13695,6 +14117,74 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    getMailSignature: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's signature. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSignatureResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailSignature: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailSignatureRequest"];
+            };
+        };
+        responses: {
+            /** @description The caller's signature after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSignatureResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     getMailThread: {
         parameters: {
             query?: never;
@@ -13725,6 +14215,186 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getMailThreadAssignment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail thread identifier, the `thread_id` of its messages. */
+                thread_id: components["parameters"]["MailThreadID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The thread's assignment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailThreadAssignmentEnvelope"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailThreadAssignment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail thread identifier, the `thread_id` of its messages. */
+                thread_id: components["parameters"]["MailThreadID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailThreadAssignmentRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved assignment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailThreadAssignmentEnvelope"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InvalidInput"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listMailThreadNotes: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail thread identifier, the `thread_id` of its messages. */
+                thread_id: components["parameters"]["MailThreadID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The thread's notes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailThreadNotesEnvelope"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createMailThreadNote: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive mail thread identifier, the `thread_id` of its messages. */
+                thread_id: components["parameters"]["MailThreadID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMailThreadNoteRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved note. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailThreadNoteEnvelope"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["InvalidInput"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteMailThreadNote: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+                /** @description Positive note identifier. */
+                note_id: components["schemas"]["PositiveID"];
+                /** @description Positive mail thread identifier, the `thread_id` of its messages. */
+                thread_id: components["parameters"]["MailThreadID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The note is gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

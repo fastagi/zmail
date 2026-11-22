@@ -172,6 +172,18 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.role_assignment.update").WhereNumber("mailbox_id")
 		auth.PUT("/mailboxes/:mailbox_id/triage-setting", h.SetMailboxTriageSetting).
 			Name("mailboxes.triage_setting.update").WhereNumber("mailbox_id")
+		auth.GET("/mailboxes/:mailbox_id/signature", h.GetMailSignature).
+			Name("mailboxes.signature.show").WhereNumber("mailbox_id")
+		auth.PUT("/mailboxes/:mailbox_id/signature", h.UpdateMailSignature).
+			Name("mailboxes.signature.update").WhereNumber("mailbox_id")
+		auth.GET("/mail-drafts", h.ListMailDrafts).Name("mail_drafts.index")
+		auth.POST("/mail-drafts", h.CreateMailDraft).Name("mail_drafts.store")
+		auth.GET("/mail-drafts/:draft_id", h.ShowMailDraft).
+			Name("mail_drafts.show").WhereNumber("draft_id")
+		auth.PUT("/mail-drafts/:draft_id", h.UpdateMailDraft).
+			Name("mail_drafts.update").WhereNumber("draft_id")
+		auth.DELETE("/mail-drafts/:draft_id", h.DeleteMailDraft).
+			Name("mail_drafts.destroy").WhereNumber("draft_id")
 		auth.GET("/mailboxes/:mailbox_id/agent-grants", h.ListAgentGrants).
 			Name("mailboxes.agent_grants.index").WhereNumber("mailbox_id")
 		auth.POST("/mailboxes/:mailbox_id/agent-grants", h.IssueAgentGrant).
@@ -207,6 +219,16 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.messages.destroy").WhereNumber("mailbox_id").WhereNumber("message_id")
 		auth.GET("/mailboxes/:mailbox_id/threads/:thread_id", h.GetThread).
 			Name("mailboxes.threads.show").WhereNumber("mailbox_id").WhereNumber("thread_id")
+		auth.GET("/mailboxes/:mailbox_id/threads/:thread_id/assignment", h.GetMailThreadAssignment).
+			Name("mailboxes.threads.assignment.show").WhereNumber("mailbox_id", "thread_id")
+		auth.PUT("/mailboxes/:mailbox_id/threads/:thread_id/assignment", h.UpdateMailThreadAssignment).
+			Name("mailboxes.threads.assignment.update").WhereNumber("mailbox_id", "thread_id")
+		auth.GET("/mailboxes/:mailbox_id/threads/:thread_id/notes", h.ListMailThreadNotes).
+			Name("mailboxes.threads.notes.index").WhereNumber("mailbox_id", "thread_id")
+		auth.POST("/mailboxes/:mailbox_id/threads/:thread_id/notes", h.CreateMailThreadNote).
+			Name("mailboxes.threads.notes.store").WhereNumber("mailbox_id", "thread_id")
+		auth.DELETE("/mailboxes/:mailbox_id/threads/:thread_id/notes/:note_id", h.DeleteMailThreadNote).
+			Name("mailboxes.threads.notes.destroy").WhereNumber("mailbox_id", "thread_id", "note_id")
 		auth.GET("/mailboxes/:mailbox_id/message-counts", h.MessageCounts).
 			Name("mailboxes.message_counts.show").WhereNumber("mailbox_id")
 		auth.POST("/mailboxes/:mailbox_id/message-updates", h.UpdateMessages).

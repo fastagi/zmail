@@ -13,6 +13,7 @@ import type { InboxFilters, InboxItem } from '@/features/mailbox/types';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { messages } from '@/i18n/modules';
+import { setUndoSendDelayMs } from '@/features/mailbox/components/undo-send';
 
 // The workspace loads its dialogs, reader, and sheet on demand. Load those modules once up front:
 // when the whole suite runs in parallel, a cold dynamic import can outlast findBy's one-second
@@ -34,7 +35,9 @@ beforeAll(async () => {
   ]);
 });
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() =>
+  Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() })
+);
 const state = vi.hoisted(() => {
   const query = () => ({
     data: undefined as unknown,
@@ -102,6 +105,16 @@ const navigation = vi.hoisted(() => {
   };
 });
 
+const signatures = vi.hoisted(() => new Map<number, string>());
+vi.mock('@/features/mailbox/hooks/use-thread-assignment', () => ({
+  useThreadAssignment: () => ({ data: undefined, isSuccess: false }),
+  useSaveThreadAssignment: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
+vi.mock('@/features/mailbox/hooks/use-thread-notes', () => ({
+  useThreadNotes: () => ({ data: undefined, isSuccess: false }),
+  useAddThreadNote: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useDeleteThreadNote: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('next/navigation', async () => {
   const { useSyncExternalStore } = await import('react');
@@ -139,6 +152,34 @@ vi.mock('@/features/mailbox/components/mailbox-workspace', async importOriginal 
 }));
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
   useMailTemplates: () => ({ data: [] }),
+}));
+const drafts = vi.hoisted(() => ({
+  list: [] as Array<Record<string, unknown>>,
+  body: '',
+  save: vi.fn<(variables: unknown) => Promise<{ id: number }>>(() => Promise.resolve({ id: 7 })),
+  remove: vi.fn<(id: number) => Promise<void>>(() => Promise.resolve()),
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-drafts', () => ({
+  useMailDrafts: () => ({ data: drafts.list, isPending: false, isError: false }),
+  useOpenMailDraft: () => ({
+    mutate: (id: number, handlers: { onSuccess: (draft: unknown) => void }) => {
+      handlers.onSuccess({ ...drafts.list.find(draft => draft.id === id), body: drafts.body });
+    },
+  }),
+  useSaveMailDraft: () => ({ mutateAsync: drafts.save }),
+  useDeleteMailDraft: () => ({
+    mutate: drafts.remove,
+    mutateAsync: drafts.remove,
+    isPending: false,
+  }),
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
+  useMailSignature: (_organizationId: number, mailboxId: number, enabled: boolean) => ({
+    data:
+      enabled && signatures.has(mailboxId)
+        ? { mailbox_id: mailboxId, body: signatures.get(mailboxId), updated_at: null }
+        : undefined,
+  }),
 }));
 vi.mock('@/features/mailbox/hooks/use-mailbox', async importOriginal => ({
   ...(await importOriginal<typeof import('@/features/mailbox/hooks/use-mailbox')>()),
@@ -210,6 +251,7 @@ const originalResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
 describe('unified inbox', () => {
   beforeEach(() => {
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    toast.mockReset();
     toast.success.mockReset();
     toast.error.mockReset();
     navigation.replace.mockClear();
@@ -605,6 +647,38 @@ describe('unified inbox', () => {
       expect(within(pane).queryByRole('button', { name })).not.toBeInTheDocument();
     }
     expect(within(pane).getByText(/Read-only copy from Gmail/u)).toBeInTheDocument();
+  });
+
+  it('replies to mail of an external mailbox that sends through its own server', async () => {
+    state.connectors.data = [
+      { id: 'imap', auth_kind: 'password', capabilities: { read: true, send: true } },
+    ];
+    state.mailboxes.data = [
+      mailbox(1, 'hello'),
+      { ...externalMailbox(41, 'me@qq.com'), access: { ...noAccess(), view: true, send: true } },
+    ];
+    state.connections.data = [
+      connection({ id: 1, mailbox_id: 41, account_address: 'me@qq.com', provider: 'imap' }),
+    ];
+    state.inbox.data = listing([
+      [
+        {
+          ...summary({ id: 71, mailbox_id: 41, subject: 'Invoice', source: 'imap' }),
+          mailbox_address: 'me@qq.com',
+          role_id: null,
+          snippet: 'Please find attached',
+        },
+      ],
+    ]);
+    state.detail.data = message({ id: 71, mailbox_id: 41, subject: 'Invoice', source: 'imap' });
+    renderRoute();
+
+    fireEvent.click(rowButton('Invoice'));
+    await readingPaneLoaded();
+
+    const pane = screen.getByRole('region', { name: 'Reading pane' });
+    expect(within(pane).getByRole('button', { name: 'Reply' })).toBeInTheDocument();
+    expect(within(pane).queryByText(/Read-only copy/u)).not.toBeInTheDocument();
   });
 
   it('opening a thread row loads the thread and marks it read', async () => {
@@ -1014,6 +1088,46 @@ describe('unified inbox', () => {
     expect(new URLSearchParams(window.location.search).get('tab')).toBe('unread');
     expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', unread: true, tz: 'UTC' });
     expect(screen.getByRole('tab', { name: /^Unread/u })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('assignment tabs request shared conversations by owner and state', () => {
+    renderRoute();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Assigned to me' }));
+    expect(new URLSearchParams(window.location.search).get('tab')).toBe('mine');
+    expect(state.inboxCalls.at(-1)).toEqual({
+      view: 'all',
+      group: 'thread',
+      assignment: 'mine',
+      tz: 'UTC',
+    });
+    expect(screen.getByRole('tab', { name: 'Assigned to me' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    fireEvent.click(screen.getByRole('tab', { name: 'Done' }));
+    expect(state.inboxCalls.at(-1)).toMatchObject({ assignment: 'closed' });
+    fireEvent.click(screen.getByRole('tab', { name: /^All/u }));
+    expect(new URLSearchParams(window.location.search).get('tab')).toBeNull();
+    expect(state.inboxCalls.at(-1)).not.toHaveProperty('assignment');
+  });
+
+  it('the date menu narrows the list by calendar days in the inbox zone, ungrouped', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-22T10:00:00Z') });
+    try {
+      renderRoute();
+      const menu = screen.getByRole('combobox', { name: 'Date' });
+      fireEvent.change(menu, { target: { value: 'week' } });
+      expect(new URLSearchParams(window.location.search).get('date')).toBe('week');
+      expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', since: '2026-11-16', tz: 'UTC' });
+      fireEvent.change(menu, { target: { value: 'older' } });
+      expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', until: '2025-11-22', tz: 'UTC' });
+      fireEvent.change(menu, { target: { value: '' } });
+      expect(new URLSearchParams(window.location.search).get('date')).toBeNull();
+      expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', group: 'thread', tz: 'UTC' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('search requests view=all with q and shows the too-broad notice on 422', () => {
@@ -1913,6 +2027,22 @@ describe('inbox keyboard shortcuts', () => {
     expect(rowButton('Renewal')).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('a new message starts with the signature, and an untouched one keeps no draft', async () => {
+    const mailboxes = state.mailboxes.data as ReturnType<typeof mailbox>[];
+    signatures.set(mailboxes[0]!.id, 'Best,\nAda');
+    try {
+      renderRoute();
+      press('c');
+      expect(await screen.findByLabelText('Message')).toHaveValue('\n\n-- \nBest,\nAda');
+      toast.success.mockReset();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+      expect(toast.success).not.toHaveBeenCalled();
+    } finally {
+      signatures.clear();
+    }
+  });
+
   it('closing the compose dialog keeps what was written as a draft, without asking', async () => {
     renderRoute();
 
@@ -2055,6 +2185,110 @@ describe('inbox keyboard shortcuts', () => {
     // Fixing the field clears its error.
     fireEvent.change(to, { target: { value: 'ann@example.com' } });
     expect(to).not.toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('Send waits with Undo, and Undo reopens the composer as written', async () => {
+    setUndoSendDelayMs(60_000);
+    renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('To'), {
+      target: { value: 'ann@example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Second thoughts' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    expect(state.send.mutateAsync).not.toHaveBeenCalled();
+    const [text, options] = toast.mock.calls.at(-1) as unknown as [
+      string,
+      { action: { label: string; onClick: () => void } },
+    ];
+    expect(text).toBe('Sending…');
+    expect(options.action.label).toBe('Undo');
+
+    act(() => options.action.onClick());
+    expect(await screen.findByLabelText('Subject')).toHaveValue('Second thoughts');
+    expect(screen.getByLabelText('To')).toHaveValue('ann@example.com');
+    expect(state.send.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('a closed new message is saved to Drafts, and a saved draft continues and leaves once sent', async () => {
+    setUndoSendDelayMs(0);
+    drafts.save.mockClear();
+    drafts.remove.mockClear();
+    const first = renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('To'), {
+      target: { value: 'bob@example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Plan' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Draft body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(drafts.save).toHaveBeenCalledOnce());
+    expect(drafts.save.mock.calls[0]?.[0]).toMatchObject({
+      id: null,
+      input: { to: 'bob@example.com', subject: 'Plan', in_reply_to: '' },
+    });
+
+    drafts.list = [
+      {
+        id: 7,
+        mailbox_id: 1,
+        to: 'bob@example.com',
+        cc: '',
+        subject: 'Plan',
+        preview: 'Draft body',
+        in_reply_to: '',
+        created_at: '2026-11-22T05:00:00Z',
+        updated_at: '2026-11-22T05:00:00Z',
+      },
+    ];
+    drafts.body = 'Draft body';
+    first.unmount();
+    renderRoute();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Drafts: 1' }))[0]!);
+    const list = await screen.findByRole('dialog', { name: 'Drafts' });
+    fireEvent.click(within(list).getByRole('button', { name: /^Plan/u }));
+    expect(await screen.findByLabelText('Message')).toHaveValue('Draft body');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(drafts.remove).toHaveBeenCalledWith(7));
+    drafts.list = [];
+  });
+
+  it('a reply sends at once, without the Undo wait', async () => {
+    setUndoSendDelayMs(60_000);
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+    await readingPaneLoaded();
+
+    press('r');
+    const dialog = await screen.findByRole('dialog', { name: 'Reply' });
+    fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Thanks' } });
+    const toastsBefore = toast.mock.calls.length;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(state.send.mutateAsync).toHaveBeenCalledOnce());
+    expect(toast.mock.calls.slice(toastsBefore).map(call => call[0])).not.toContain('Sending…');
+  });
+
+  it('a reply the provider refuses still says so after the composer closes', async () => {
+    state.send.mutateAsync.mockRejectedValueOnce(
+      new ApiError('provider said no', ApiErrorCode.MAILBOX_DELIVERY_FAILED, 502)
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+    await readingPaneLoaded();
+
+    press('r');
+    const dialog = await screen.findByRole('dialog', { name: 'Reply' });
+    fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Thanks' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Reply' })).toBeNull());
+    expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/NOT delivered/u));
   });
 
   // Issue #86: leaving the page with the composer open keeps what was written.

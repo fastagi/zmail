@@ -3,6 +3,7 @@ import type { z } from 'zod/mini';
 import {
   INBOX_CURSOR_MAX_LENGTH,
   INBOX_TIME_ZONE_MAX_LENGTH,
+  INBOX_ASSIGNMENTS,
   INBOX_VIEWS,
   inboxCountsSchema,
   inboxPageEnvelopeSchema,
@@ -55,6 +56,7 @@ import {
   mailMessageUpdatesResultSchema,
   mailThreadSchema,
   mailTrashPurgeSchema,
+  isInboxDay,
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
@@ -563,14 +565,34 @@ export const mailboxService = {
    */
   async listInbox(
     organizationId: number,
-    { view, roleId, mailboxId, unread, q, group, triage, tz }: InboxFilters,
+    {
+      view,
+      roleId,
+      mailboxId,
+      unread,
+      hasAttachments,
+      q,
+      group,
+      triage,
+      assignment,
+      since,
+      until,
+      tz,
+    }: InboxFilters,
     cursor?: string,
     perPage?: number
   ): Promise<InboxPage> {
     const headers = organizationHeaders(organizationId);
     if (!(INBOX_VIEWS as readonly string[]).includes(view)) throw invalidResponse();
+    if (
+      assignment !== undefined &&
+      !(INBOX_ASSIGNMENTS as readonly string[]).includes(assignment)
+    ) {
+      throw invalidResponse();
+    }
     if (roleId !== undefined && roleId !== 'none') validId(roleId);
     if (mailboxId !== undefined) validId(mailboxId);
+    if ([since, until].some(day => day !== undefined && !isInboxDay(day))) throw invalidResponse();
     if (
       triage?.some(category => !(MAIL_TRIAGE_CATEGORIES as readonly string[]).includes(category))
     ) {
@@ -600,9 +622,13 @@ export const mailboxService = {
         ...(roleId === undefined ? {} : { role_id: roleId }),
         ...(mailboxId === undefined ? {} : { mailbox_id: mailboxId }),
         ...(unread === undefined ? {} : { unread }),
+        ...(hasAttachments === undefined ? {} : { has_attachments: hasAttachments }),
         ...(query === undefined ? {} : { q: query }),
         ...(group ? { group } : {}),
         ...(triage === undefined ? {} : { triage: triage.join(',') }),
+        ...(assignment === undefined ? {} : { assignment }),
+        ...(since === undefined ? {} : { since }),
+        ...(until === undefined ? {} : { until }),
         tz,
         ...(cursor === undefined ? {} : { cursor }),
         ...(perPage === undefined ? {} : { per_page: perPage }),

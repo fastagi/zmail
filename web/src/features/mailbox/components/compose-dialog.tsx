@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -31,6 +32,7 @@ import { authConfig } from '@/config/auth';
 import { AuthStoreContext } from '@/features/auth/store/auth-store';
 import { withReturnUrl } from '@/features/auth/utils/return-url';
 import {
+  type StoredComposeDraft,
   composeDraftKey,
   draftToKeep,
   readComposeDraft,
@@ -55,12 +57,23 @@ import {
   normalizeRecipientLists,
   splitRecipients,
 } from '@/features/mailbox/schemas';
-import type { MailAttachment, Mailbox } from '@/features/mailbox/types';
+import type { MailAttachment, Mailbox, SendMailMessageInput } from '@/features/mailbox/types';
 import {
   isStoredSendFailure,
   resolveMailboxErrorKey,
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
+import { useMailSignature } from '@/features/mailbox/hooks/use-mail-signature';
+import { useDeleteMailDraft, useSaveMailDraft } from '@/features/mailbox/hooks/use-mail-drafts';
+import {
+  flushPendingSend,
+  markReopenedCompose,
+  scheduleUndoableSend,
+  takeReopenedCompose,
+  undoSendDelayMs,
+  type ReopenedCompose,
+} from '@/features/mailbox/components/undo-send';
+import { mailSignatureBlock } from '@/features/mailbox/signature-schemas';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -86,6 +99,7 @@ export function ComposeDialog({
   draft,
   onClose,
   onStored,
+  onReopen,
 }: {
   /** The sending mailbox, or the initial choice when `fromOptions` lets the user pick. */
   mailbox: Sender;
@@ -96,35 +110,92 @@ export function ComposeDialog({
   onClose: () => void;
   /** The sent folder has a new entry: a delivered message, or one stored as failed. */
   onStored?: () => void;
+  /**
+   * Opens this composer again on the same draft. Given, Send closes the composer and waits a few
+   * seconds with Undo before sending; Undo or a failed send reopens it as written.
+   */
+  onReopen?: () => void;
 }) {
   const t = useT('mailbox');
-  const [fromId, setFromId] = useState(mailbox.id);
-  const from = fromOptions?.find(option => option.id === fromId) ?? mailbox;
   const organizationId = useMailOrganizationId();
+  // A draft kept when the dialog last closed takes the place of the starting text.
+  // Drafts belong to the signed-in user; the composer reads them once as it opens.
+  const userId = useContext(AuthStoreContext)?.getState().user?.id ?? 'anonymous';
+  // A saved draft this browser still keeps as its new message (with its files) continues there.
+  const [draftKey] = useState(() => {
+    const own = composeDraftKey(userId, organizationId, draft);
+    if (draft.savedId === undefined) return own;
+    const fresh = composeDraftKey(userId, organizationId, { ...draft, savedId: undefined });
+    return readComposeDraft(fresh)?.savedId === draft.savedId ? fresh : own;
+  });
+  // A send of this draft still waiting to be undone goes now, and this composer starts afresh.
+  const [flushed] = useState(() => flushPendingSend(draftKey));
+  const [restored] = useState(() => takeReopenedCompose(draftKey));
+  const [fromId, setFromId] = useState(() => {
+    const id = restored?.fromId;
+    return id !== undefined && (fromOptions?.some(option => option.id === id) ?? id === mailbox.id)
+      ? id
+      : mailbox.id;
+  });
+  const from = fromOptions?.find(option => option.id === fromId) ?? mailbox;
   const send = useSendMailMessage(organizationId, from.id);
   // Replies and forwards quote an existing message, so they are always written by hand.
   const isReplyOrForward = draft.reply || draft.mode === 'reply' || draft.mode === 'forward';
   const templates = useMailTemplates(isReplyOrForward ? 0 : organizationId, 'standard');
+  // New messages are also kept by the API as drafts, so they show in the list on every device.
+  const saveDraft = useSaveMailDraft(organizationId);
+  const removeDraft = useDeleteMailDraft(organizationId).mutateAsync;
+  /** A sent message is no longer a draft. */
+  const forgetSaved = () => {
+    const id = knownSavedId;
+    if (id !== undefined) void removeDraft(id).catch(() => undefined);
+  };
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
   const templateHintId = useId();
-  // A draft kept when the dialog last closed takes the place of the starting text.
-  // Drafts belong to the signed-in user; the composer reads them once as it opens.
-  const userId = useContext(AuthStoreContext)?.getState().user?.id ?? 'anonymous';
-  const draftKey = composeDraftKey(userId, organizationId, draft);
-  const [kept] = useState(() => readComposeDraft(draftKey));
-  const [to, setTo] = useState(kept?.to ?? draft.to);
-  const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
-  const [subject, setSubject] = useState(kept?.subject ?? draft.subject);
-  const [body, setBody] = useState(kept?.body ?? draft.body ?? '');
+  const [kept] = useState(() => restored?.draft ?? (flushed ? null : readComposeDraft(draftKey)));
+  const knownSavedId = draft.savedId ?? kept?.savedId;
+  // A draft opened from the list starts from the API's text, which another device may have changed;
+  // this browser's copy still lends it its files.
+  const keptText = draft.savedId !== undefined && !restored ? null : kept;
+  const [to, setTo] = useState(keptText?.to ?? draft.to);
+  const [cc, setCc] = useState(keptText?.cc ?? draft.cc ?? '');
+  const [subject, setSubject] = useState(keptText?.subject ?? draft.subject);
+  const [body, setBody] = useState(keptText?.body ?? draft.body ?? '');
+  // A new message starts with the writer's signature for the sending mailbox; choosing another
+  // mailbox swaps it while the signature is still the last thing written.
+  const startsBlank = !isReplyOrForward && !kept && !draft.body;
+  const signature = useMailSignature(organizationId, from.id, startsBlank);
+  const [signed, setSigned] = useState<{ mailboxId: number; block: string } | null>(null);
+  if (
+    startsBlank &&
+    signature.data &&
+    signature.data.mailbox_id === from.id &&
+    signed?.mailboxId !== from.id
+  ) {
+    const block = mailSignatureBlock(signature.data.body);
+    const previous = signed?.block ?? '';
+    setSigned({ mailboxId: from.id, block });
+    if (body === '' || (previous !== '' && body.endsWith(previous))) {
+      setBody(body.slice(0, body.length - previous.length) + block);
+    }
+  }
+  // A body holding only the signature is as untouched as an empty one.
+  const startingDraft = useMemo(
+    () => (signed?.block ? { ...draft, body: signed.block } : draft),
+    [draft, signed]
+  );
   // What is written is kept as it changes, so leaving the page any way (the global sidebar, the
   // browser's back button, a reload) keeps the draft as closing the dialog does. Sending clears it.
   const sentRef = useRef(false);
-  const [files, setFiles] = useState<File[]>(() => readComposeDraftFiles(draftKey));
+  const [keptFiles] = useState<readonly File[]>(() =>
+    restored ? restored.files : flushed ? [] : readComposeDraftFiles(draftKey)
+  );
+  const [files, setFiles] = useState<File[]>(() => [...keptFiles]);
   // Files named by a draft kept before a reload, which this page no longer holds.
   const [lostFiles, setLostFiles] = useState(() =>
-    readComposeDraftFiles(draftKey).length > 0 ? [] : (kept?.attachments ?? [])
+    keptFiles.length > 0 ? [] : (kept?.attachments ?? [])
   );
   // Until they are attached again, the names of lost files stay with the draft as a reminder.
   const attachments = files.length > 0 ? files.map(file => file.name) : lostFiles;
@@ -137,30 +208,33 @@ export function ComposeDialog({
   });
   useEffect(() => {
     if (sentRef.current) return;
+    const keep = draftToKeep(
+      {
+        to,
+        cc,
+        subject,
+        body,
+        ...(files.length > 0
+          ? { attachments: files.map(file => file.name) }
+          : lostFiles.length > 0
+            ? { attachments: lostFiles }
+            : {}),
+      },
+      startingDraft
+    );
     writeComposeDraft(
       draftKey,
-      draftToKeep(
-        {
-          to,
-          cc,
-          subject,
-          body,
-          ...(files.length > 0
-            ? { attachments: files.map(file => file.name) }
-            : lostFiles.length > 0
-              ? { attachments: lostFiles }
-              : {}),
-        },
-        draft
-      )
+      keep && knownSavedId !== undefined ? { ...keep, savedId: knownSavedId } : keep
     );
     writeComposeDraftFiles(draftKey, files);
-  }, [draftKey, draft, to, cc, subject, body, files, lostFiles]);
+  }, [draftKey, startingDraft, to, cc, subject, body, files, lostFiles, knownSavedId]);
   // The forwarded message's files, carried along unless removed; read only when sending.
   const [carried, setCarried] = useState<readonly MailAttachment[]>(
     () => draft.forwarded?.attachments ?? []
   );
-  const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
+  const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(() =>
+    restored?.failure === undefined ? null : resolveMailboxErrorKey(restored.failure)
+  );
   const fileInput = useRef<HTMLInputElement>(null);
   const toInput = useRef<HTMLTextAreaElement>(null);
   const ccInput = useRef<HTMLTextAreaElement>(null);
@@ -242,9 +316,13 @@ export function ComposeDialog({
     const key = resolveMailboxErrorKey(failure);
     setErrorKey(key);
     if (key === 'errors.sessionEnded') {
-      writeComposeDraft(draftKey, draftToKeep(written(), draft));
+      writeComposeDraft(draftKey, draftToKeep(written(), startingDraft));
     }
-    if (isStoredSendFailure(failure)) onStored?.();
+    if (isStoredSendFailure(failure)) {
+      // The parent may close the composer for its sent folder; the toast still tells the writer.
+      toast.error(t(key));
+      onStored?.();
+    }
   };
 
   /** Sign-in that returns to this page, reopening a new message on its kept draft. */
@@ -285,6 +363,7 @@ export function ComposeDialog({
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       sentRef.current = true;
+      forgetSaved();
       writeComposeDraft(draftKey, null);
       writeComposeDraftFiles(draftKey, null);
       onStored?.();
@@ -292,6 +371,53 @@ export function ComposeDialog({
     } catch (failure) {
       failed(failure);
     }
+  };
+
+  /**
+   * Closes the composer and sends after `delayMs` unless Undo is chosen. What is written is held
+   * in memory, so Undo or a failure reopens the composer as it was even where the browser keeps
+   * no draft; the stored draft stays until the send succeeds, for a reload. `onStored` is not
+   * called: by then the page may show another message or composer.
+   */
+  const sendLater = (input: SendMailMessageInput, delayMs: number, reopen: () => void) => {
+    const sender = from.id;
+    const mutate = send.mutateAsync;
+    const snapshot = { draft: written(), files: [...files] };
+    const reopenWith = (state: Omit<ReopenedCompose, 'draft' | 'files'>) => {
+      markReopenedCompose(draftKey, { ...snapshot, ...state });
+      reopen();
+    };
+    onClose();
+    scheduleUndoableSend(draftKey, {
+      delayMs,
+      sending: t('compose.sending'),
+      undoLabel: t('compose.undo'),
+      undo: () => reopenWith({ fromId: sender }),
+      run: () => {
+        const stored = JSON.stringify(readComposeDraft(draftKey));
+        return mutate(input).then(
+          result => {
+            toast.success(
+              t(result.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent')
+            );
+            forgetSaved();
+            // A composer opened meanwhile may have kept a draft of its own; that one stays.
+            if (JSON.stringify(readComposeDraft(draftKey)) === stored) {
+              writeComposeDraft(draftKey, null);
+              writeComposeDraftFiles(draftKey, null);
+            }
+          },
+          (failure: unknown) => {
+            toast.error(t('compose.notSent'), {
+              action: {
+                label: t('compose.openDraft'),
+                onClick: () => reopenWith({ fromId: sender, failure }),
+              },
+            });
+          }
+        );
+      },
+    });
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -319,17 +445,24 @@ export function ComposeDialog({
     }
     try {
       const attachments = await encodeAttachments();
-      const stored = await send.mutateAsync({
+      const input: SendMailMessageInput = {
         to: normalized.to,
         ...(normalized.cc.length > 0 ? { cc: normalized.cc } : {}),
         subject: normalized.subject,
         text: normalized.text,
         ...(normalized.in_reply_to === '' ? {} : { in_reply_to: normalized.in_reply_to }),
         ...(attachments.length > 0 ? { attachments } : {}),
-      });
+      };
+      const delayMs = undoSendDelayMs();
+      if (onReopen && delayMs > 0 && !isReplyOrForward) {
+        sendLater(input, delayMs, onReopen);
+        return;
+      }
+      const stored = await send.mutateAsync(input);
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       sentRef.current = true;
+      forgetSaved();
       writeComposeDraft(draftKey, null);
       writeComposeDraftFiles(draftKey, null);
       onStored?.();
@@ -341,14 +474,53 @@ export function ComposeDialog({
   };
 
   /**
+   * Saves a closed new message as a draft of the API too. The browser copy remembers the saved
+   * id, so closing again updates that draft rather than adding another one.
+   */
+  const keepOnServer = (keep: StoredComposeDraft) => {
+    saveDraft
+      .mutateAsync({
+        input: {
+          mailbox_id: from.id,
+          to: keep.to,
+          cc: keep.cc,
+          subject: keep.subject,
+          body: keep.body,
+          in_reply_to: draft.inReplyTo,
+        },
+        id: knownSavedId ?? null,
+      })
+      .then(
+        saved => {
+          const current = readComposeDraft(draftKey);
+          const textOf = (value: StoredComposeDraft | null) =>
+            JSON.stringify({ ...value, savedId: undefined });
+          if (textOf(current) === textOf(keep)) {
+            writeComposeDraft(draftKey, { ...keep, savedId: saved.id });
+          }
+        },
+        () => toast.error(t('drafts.saveFailed'))
+      );
+  };
+
+  /**
    * Closing never asks: what was written is kept as this browser's draft and the dialog says so.
    * Nothing written, or only the starting text, keeps no draft.
    */
   const dismiss = () => {
     if (send.isPending) return;
-    const keep = draftToKeep(written(), draft);
+    const found = draftToKeep(written(), startingDraft);
+    const known = knownSavedId;
+    const keep = found && known !== undefined ? { ...found, savedId: known } : found;
     writeComposeDraft(draftKey, keep);
+    const blank =
+      files.length === 0 &&
+      lostFiles.length === 0 &&
+      [to, cc, subject, body].every(value => value.trim() === '');
+    // Clearing a saved draft and closing it discards it everywhere.
+    if (blank && !isReplyOrForward) forgetSaved();
     writeComposeDraftFiles(draftKey, files);
+    if (keep && !isReplyOrForward) keepOnServer(keep);
     if (keep)
       toast.success(t(files.length > 0 ? 'compose.draftSavedWithFiles' : 'compose.draftSaved'));
     onClose();

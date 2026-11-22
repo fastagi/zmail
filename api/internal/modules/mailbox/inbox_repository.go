@@ -223,7 +223,7 @@ func checkInboxQuery(query domain.InboxQuery) error {
 		return fmt.Errorf("%w: inbox triage filter", domain.ErrInvalidInput)
 	}
 	if query.GroupThreads && (inboxDirection(query.View) == "" || query.View == domain.InboxViewToday ||
-		query.Unread != nil || query.Query != "") {
+		query.Unread != nil || query.HasAttachments != nil || query.Query != "" || query.Since != nil || query.Until != nil) {
 		return fmt.Errorf("%w: inbox thread grouping", domain.ErrInvalidInput)
 	}
 	return nil
@@ -261,7 +261,42 @@ func inboxFilters(query domain.InboxQuery, args map[string]any) string {
 	if query.Unread != nil {
 		filters += " AND " + negatedIf(unreadByMember, !*query.Unread)
 	}
-	return filters
+	if query.HasAttachments != nil {
+		filters += " AND " + negatedIf("mail_messages.attachment_count > 0", !*query.HasAttachments)
+	}
+	if query.Since != nil {
+		filters += " AND mail_messages.created_at >= @since_at"
+		args["since_at"] = *query.Since
+	}
+	if query.Until != nil {
+		filters += " AND mail_messages.created_at < @until_at"
+		args["until_at"] = *query.Until
+	}
+	return filters + inboxAssignmentFilter(query, args)
+}
+
+// threadAssignmentWhere matches the assignment row of a message's conversation; a conversation
+// without one is open and unassigned.
+const threadAssignmentWhere = `SELECT 1 FROM mail_thread_assignments
+	WHERE mail_thread_assignments.mailbox_id = mail_messages.mailbox_id
+	  AND mail_thread_assignments.thread_id = mail_messages.thread_id`
+
+// inboxAssignmentFilter keeps the conversations in the query's assignment state, binding its
+// arguments.
+func inboxAssignmentFilter(query domain.InboxQuery, args map[string]any) string {
+	const closed = ` AND mail_thread_assignments.status = 'closed'`
+	switch query.Assignment {
+	case domain.InboxAssignmentMine:
+		args["assignee"] = query.ViewerUserID
+		return " AND EXISTS (" + threadAssignmentWhere + ` AND mail_thread_assignments.assignee_user_id = @assignee
+		  AND mail_thread_assignments.status = 'open')`
+	case domain.InboxAssignmentUnassigned:
+		return " AND NOT EXISTS (" + threadAssignmentWhere + ` AND (mail_thread_assignments.assignee_user_id IS NOT NULL
+		  OR mail_thread_assignments.status = 'closed'))`
+	case domain.InboxAssignmentClosed:
+		return " AND EXISTS (" + threadAssignmentWhere + closed + ")"
+	}
+	return ""
 }
 
 // inboxTriageFilter keeps the messages of box with a visible triage result of one of the query's

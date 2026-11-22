@@ -1169,8 +1169,17 @@ describe('mailbox organize service boundary', () => {
       50
     );
     await mailboxService.listInbox(7, { view: 'all', roleId: 3, q: '  invoice  ', tz: 'UTC' });
+    await mailboxService.listInbox(7, { view: 'all', assignment: 'unassigned', tz: 'UTC' });
+    await mailboxService.listInbox(7, {
+      view: 'all',
+      since: '2026-11-01',
+      until: '2026-11-30',
+      tz: 'UTC',
+    });
 
     expect(getEnvelope.mock.calls.map(call => call[0])).toEqual([
+      '/inbox-messages',
+      '/inbox-messages',
       '/inbox-messages',
       '/inbox-messages',
       '/inbox-messages',
@@ -1190,7 +1199,12 @@ describe('mailbox organize service boundary', () => {
         per_page: 50,
       },
       { view: 'all', role_id: 3, q: 'invoice', tz: 'UTC' },
+      { view: 'all', assignment: 'unassigned', tz: 'UTC' },
+      { view: 'all', since: '2026-11-01', until: '2026-11-30', tz: 'UTC' },
     ]);
+    await expect(
+      mailboxService.listInbox(7, { view: 'all', since: '2026-02-30', tz: 'UTC' })
+    ).rejects.toThrow();
   });
 
   it('inboxCounts sends only tz and parses the counts', async () => {

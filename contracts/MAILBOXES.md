@@ -98,6 +98,12 @@ recorded but has no special rights to it. A removed member loses access on their
 | Read the AI triage setting | `GET /api/mail-triage-setting` | `GET /v1/mail-triage-setting` | `200` envelope |
 | Replace the AI triage setting | `PUT /api/mail-triage-setting` | `PUT /v1/mail-triage-setting` | `200` envelope |
 | Mailbox AI triage switch | `PUT /api/mailboxes/:id/triage-setting` | `PUT /v1/mailboxes/:mailbox_id/triage-setting` | `200` envelope |
+| Read my signature | `GET /api/mailboxes/:id/signature` | `GET /v1/mailboxes/:mailbox_id/signature` | `200` envelope |
+| Replace my signature | `PUT /api/mailboxes/:id/signature` | `PUT /v1/mailboxes/:mailbox_id/signature` | `200` envelope |
+| List my drafts | `GET /api/mail-drafts` | `GET /v1/mail-drafts` | `200` envelope |
+| Save a new draft | `POST /api/mail-drafts` | `POST /v1/mail-drafts` | `201` envelope |
+| Replace a draft | `PUT /api/mail-drafts/:id` | `PUT /v1/mail-drafts/:draft_id` | `200` envelope |
+| Delete a draft | `DELETE /api/mail-drafts/:id` | `DELETE /v1/mail-drafts/:draft_id` | `204` |
 | Set a message's triage | `PUT /api/mailboxes/:id/messages/:messageId/triage` | `PUT /v1/mailboxes/:mailbox_id/messages/:message_id/triage` | `200` envelope |
 | Draft a reply | `POST /api/mailboxes/:id/messages/:messageId/reply-drafts` | `POST /v1/mailboxes/:mailbox_id/messages/:message_id/reply-drafts` | `200` envelope |
 | List platform accounts | `GET /api/platform-accounts` | `GET /v1/platform-accounts` | Paginated envelope |
@@ -1693,6 +1699,55 @@ message detail. It returns at most the latest 100. Sealed messages are left out.
 such message is `404 MAILBOX.MESSAGE_NOT_FOUND`. So a thread opened from the Inbox also shows the
 replies in Sent.
 
+#### Assignment
+
+A conversation of a shared Zmail mailbox can be assigned to one member and marked `open` or
+`closed`, so two members do not answer the same mail. Personal and connected mailboxes do not
+assign threads: their routes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+
+| Action | Route | Needs | Body |
+|---|---|---|---|
+| Read | `GET /v1/mailboxes/:mailbox_id/threads/:thread_id/assignment` | `view` | none |
+| Replace | `PUT /v1/mailboxes/:mailbox_id/threads/:thread_id/assignment` | `send` | `{ assignee_user_id, status }` |
+
+Both return `{ thread_id, assignee_user_id, status, updated_by_user_id, updated_at,
+assignable_user_ids }`.
+
+- A thread nobody assigned is `open`, `assignee_user_id` and `updated_at` are `null`.
+- `assignable_user_ids` lists, ascending, the mailbox's members with `send` or `manage`; the
+  assignee must be one of them or the thread's current assignee (so a thread kept on a member who
+  lost `send` can still change status), else `422 COMMON.VALIDATION_FAILED` on
+  `assignee_user_id`. `assignee_user_id` is required: an explicit `null` unassigns the thread and
+  an omitted field is `422`. `status` is `open` or `closed`.
+- The thread must have a message the caller sees outside the trash, else
+  `404 MAILBOX.MESSAGE_NOT_FOUND`.
+- When the assignee or the last editor is deleted, that field becomes `null`; removing a member
+  from the mailbox keeps the assignment until someone changes it.
+
+### Thread Notes
+
+Members of a shared Zmail mailbox can leave internal notes on a conversation. Notes are never sent
+to the correspondent. Personal and connected mailboxes have no notes:
+`409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+
+| Action | Route | Needs | Body |
+|---|---|---|---|
+| List | `GET /v1/mailboxes/:mailbox_id/threads/:thread_id/notes` | `view` | none |
+| Add | `POST /v1/mailboxes/:mailbox_id/threads/:thread_id/notes` | `send` | `{ body }` |
+| Delete own | `DELETE /v1/mailboxes/:mailbox_id/threads/:thread_id/notes/:note_id` | `view` | none |
+
+A note is `{ id, thread_id, author_user_id, body, created_at }`; the list is
+`{ items: [note...] }`, oldest first.
+
+- `body` is trimmed and `\r\n` becomes `\n`; it must then be 1 to 2000 characters without
+  control characters other than line breaks and tabs, else `422` on `body`.
+- A thread keeps at most 200 notes; one more is `409 MAILBOX.NOTE_LIMIT_REACHED`.
+- Only the author deletes a note; another member's, or a missing one, is
+  `404 MAILBOX.NOTE_NOT_FOUND`. Deleting the author's account keeps the note with
+  `author_user_id: null`.
+- The thread must have a message the caller sees outside the trash, else
+  `404 MAILBOX.MESSAGE_NOT_FOUND`.
+
 ### Listing And Search
 
 `GET /v1/mailboxes/:mailbox_id/messages` takes these filters, combined with AND:
@@ -2245,8 +2300,12 @@ own stars.
 | `role_id` | A positive mail role id, or `none` for mailboxes without a role. A role the caller cannot see matches nothing. |
 | `mailbox_id` | One mailbox. A mailbox the caller may not read, or another organization's, matches nothing. |
 | `unread` | `true` or `false`, as in the single-mailbox list; outbound messages are always read |
+| `has_attachments` | `true` keeps only messages with files, `false` only those without |
 | `q` | Search, only with `view=all`; the same rules, matching, and 2-second limit as the single-mailbox search |
-| `group` | `thread`, only with `view` `all` or `sent`, and never with `unread` or `q` |
+| `since` | A calendar day `YYYY-MM-DD` (1970 or later) in `tz`; keeps messages created on or after its start |
+| `until` | A calendar day `YYYY-MM-DD` in `tz`, not before `since`; keeps messages created before the end of that day |
+| `group` | `thread`, only with `view` `all` or `sent`, and never with `unread`, `has_attachments`, `q`, `since`, or `until` |
+| `assignment` | `mine` keeps open conversations assigned to the caller, `unassigned` open conversations without an assignee, `closed` conversations marked done; see [Assignment](#assignment). Allowed with `group`. A conversation never assigned is open and unassigned, so in a personal mailbox only `unassigned` matches. |
 | `triage` | Comma-separated distinct [triage](#ai-triage) categories, such as `reply,review`; only with `view` `all` or `today`, and never with `group` or `q`. Matches nothing while the organization's AI triage is off. |
 | `tz` | The IANA time zone that defines today, at most 64 characters; defaults to `UTC` |
 | `cursor` | `meta.next_cursor` from the previous page, unchanged |
@@ -2336,6 +2395,37 @@ they may read:
   never counted.
 - `triage` counts the caller's unread inbound messages in `default` by triage category; it is `null`
   while the organization's AI triage is off, and clients hide triage when it is.
+
+### Signatures
+
+Each member keeps their own plain-text signature per mailbox they may send from (`send`);
+another member of a shared mailbox never sees it. `GET /v1/mailboxes/:mailbox_id/signature`
+answers `{ "mailbox_id": 12, "body": "Best,\nAda", "updated_at": "..." }`, with an empty `body`
+and a null `updated_at` until one is saved. `PUT` with `{ "body": "..." }` replaces it: line
+breaks become `\n`, trailing white space is dropped, and an empty result removes it. The body is
+at most 2000 characters and holds no control characters other than line breaks and tabs
+(`422 COMMON.VALIDATION_FAILED`). A viewer without `send` gets `403`; one without any access
+`404 MAILBOX.NOT_FOUND`. Neither response is cached. The API never adds the signature to mail:
+clients place it in what is written, where the writer can still change it.
+
+### Drafts
+
+A draft is a message a member saved without sending; only its writer sees it, and an organization
+member keeps at most 200 (`409 MAILBOX.DRAFT_LIMIT_REACHED` beyond that). `GET /v1/mail-drafts`
+lists the caller's drafts in the organization, the latest change first, as
+`{ "id", "mailbox_id", "to", "cc", "subject", "preview", "in_reply_to", "created_at", "updated_at" }`,
+where `preview` is at most the first 200 characters of the body on one line.
+`GET /v1/mail-drafts/:draft_id` returns one draft with its whole `body` in place of `preview`.
+`POST` saves a new one and `PUT /v1/mail-drafts/:draft_id` replaces all of one with
+`{ "mailbox_id", "to", "cc", "subject", "body", "in_reply_to" }`. `mailbox_id` is the sender and
+needs `send` (`403`; `404 MAILBOX.NOT_FOUND` without any access). `to` and `cc` are kept as
+written, one line each (a line break between addresses becomes `,`), and checked only when the
+message is sent; `body` line breaks become `\n`.
+Limits are 4000 characters for `to` and `cc`, 998 for `subject` and `in_reply_to`, and 100000 for
+`body`, with no control characters other than tabs and body line breaks
+(`422 COMMON.VALIDATION_FAILED`). Another member's draft, or a deleted one, is
+`404 MAILBOX.DRAFT_NOT_FOUND`. Concurrent saves never take a member past 200. Deleting a mailbox deletes its drafts. Attachments stay in the
+browser. Responses are never cached.
 
 ### AI Triage
 

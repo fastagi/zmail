@@ -50,7 +50,7 @@ account token, which fails as `needs_reconnect`. Roll every instance forward bef
 `EXTERNAL_MAIL_TENANTS_ENABLED=true` and assigning mailboxes. Microsoft tenants are accepted only with
 the organization's own application; there is no admin consent redirect.
 
-### Low — Migration `2026_12_09_090000_add_external_mail_tenants` and a new limit
+### Low — Migration `2026_12_13_090000_add_external_mail_tenants` and a new limit
 
 The migration creates `external_mail_tenants` (a tenant identifier is live in one organization of the
 instance) and `external_mail_address_records` (every reader an address had by any binding, with a

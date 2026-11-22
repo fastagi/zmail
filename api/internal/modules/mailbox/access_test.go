@@ -172,6 +172,8 @@ func accessRouter(svc *service, viewer domain.OrganizationContext) *gin.Engine {
 	})
 	router.GET("/mailboxes", handler.ListMailboxes)
 	router.POST("/mailboxes", handler.CreateMailbox)
+	router.GET("/mailboxes/:mailbox_id/signature", handler.GetMailSignature)
+	router.PUT("/mailboxes/:mailbox_id/signature", handler.UpdateMailSignature)
 	router.GET("/mailboxes/:mailbox_id/messages", handler.ListMessages)
 	router.GET("/mailboxes/:mailbox_id/threads/:thread_id", handler.GetThread)
 	router.GET("/mailboxes/:mailbox_id/message-counts", handler.MessageCounts)

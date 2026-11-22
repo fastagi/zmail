@@ -158,13 +158,6 @@ func (s *service) BindExternalMailCredentials(ctx context.Context, viewer domain
 		return nil, false, err
 	}
 	binding.address = account.Address
-	connection, created, err := s.saveExternalBinding(ctx, viewer, connector, token, binding)
-	if err != nil {
-		return nil, false, err
-	}
-	sends := connector.Capabilities.Send && strings.TrimSpace(input.SMTPHost) != ""
-	if err := s.externalMail.SetConnectedMailboxSend(ctx, connection.OrganizationID, connection.MailboxID, sends); err != nil {
-		return nil, false, err
-	}
-	return connection, created, nil
+	binding.sends = connector.Capabilities.Send && strings.TrimSpace(input.SMTPHost) != ""
+	return s.saveExternalBinding(ctx, viewer, connector, token, binding)
 }
