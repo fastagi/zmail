@@ -444,6 +444,7 @@ function MailboxView({
         draft={draft}
         onClose={() => setDraft(null)}
         onStored={() => showView({ kind: 'sent' })}
+        onReopen={() => setDraft(draft)}
       />
     );
   }
@@ -561,6 +562,7 @@ function MailboxView({
           draft={draft}
           onClose={() => setDraft(null)}
           onStored={() => showView({ kind: 'sent' })}
+          onReopen={() => setDraft(draft)}
         />
       ) : null}
       {mailbox.access.organize ? (

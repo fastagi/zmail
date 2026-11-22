@@ -450,6 +450,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     /** The mailboxes a new message may be sent from; replies keep their own. */
     fromOptions?: readonly Mailbox[];
   } | null>(null);
+  // Undo send opens the composer again on what it held.
+  const reopenDraft = (value: NonNullable<typeof draft>) => () => setDraft(value);
   // Quoted dates read in the zone the list shows, as the reader's do.
   const formatter = useDateTimeFormat(timeZone);
   // The page's composer replaces the workspace; closing it gives the focus back.
@@ -946,6 +948,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           fromOptions={sendable}
           draft={draft.draft}
           onClose={() => setDraft(null)}
+          onReopen={reopenDraft(draft)}
         />
       </Suspense>
     );
@@ -1146,6 +1149,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
             draft={draft.draft}
             onClose={() => setDraft(null)}
             onStored={() => setDraft(null)}
+            onReopen={reopenDraft(draft)}
           />
         </Suspense>
       ) : null}

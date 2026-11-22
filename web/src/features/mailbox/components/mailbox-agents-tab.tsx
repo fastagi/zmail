@@ -574,6 +574,7 @@ function DraftsSection({ mailbox, grants }: { mailbox: Mailbox; grants: MailAgen
             draft={composing}
             onClose={() => setComposing(null)}
             onStored={() => setComposing(null)}
+            onReopen={() => setComposing(composing)}
           />
         </Suspense>
       ) : null}

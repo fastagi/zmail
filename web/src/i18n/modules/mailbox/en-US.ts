@@ -422,6 +422,10 @@ const messages = {
     template: 'Template',
     templateNone: 'None, write the message',
     templateHint: 'An empty variable uses the fallback written in the template.',
+    sending: 'Sending…',
+    undo: 'Undo',
+    notSent: 'Not sent. Your message is kept as a draft.',
+    openDraft: 'Open',
     draftSaved: 'Saved as a draft',
     draftSavedWithFiles:
       'Saved as a draft. Attached files stay only while this page is open; after a reload, attach them again.',

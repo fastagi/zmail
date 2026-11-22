@@ -13,6 +13,7 @@ import type { InboxFilters, InboxItem } from '@/features/mailbox/types';
 import { ApiErrorCode } from '@/http/codes';
 import { ApiError } from '@/http/request';
 import { messages } from '@/i18n/modules';
+import { setUndoSendDelayMs } from '@/features/mailbox/components/undo-send';
 
 // The workspace loads its dialogs, reader, and sheet on demand. Load those modules once up front:
 // when the whole suite runs in parallel, a cold dynamic import can outlast findBy's one-second
@@ -34,7 +35,9 @@ beforeAll(async () => {
   ]);
 });
 
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() =>
+  Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() })
+);
 const state = vi.hoisted(() => {
   const query = () => ({
     data: undefined as unknown,
@@ -219,6 +222,7 @@ const originalResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
 describe('unified inbox', () => {
   beforeEach(() => {
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    toast.mockReset();
     toast.success.mockReset();
     toast.error.mockReset();
     navigation.replace.mockClear();
@@ -2112,6 +2116,33 @@ describe('inbox keyboard shortcuts', () => {
     // Fixing the field clears its error.
     fireEvent.change(to, { target: { value: 'ann@example.com' } });
     expect(to).not.toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('Send waits with Undo, and Undo reopens the composer as written', async () => {
+    setUndoSendDelayMs(60_000);
+    renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('To'), {
+      target: { value: 'ann@example.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Second thoughts' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    expect(state.send.mutateAsync).not.toHaveBeenCalled();
+    const [text, options] = toast.mock.calls.at(-1) as unknown as [
+      string,
+      { action: { label: string; onClick: () => void } },
+    ];
+    expect(text).toBe('Sending…');
+    expect(options.action.label).toBe('Undo');
+
+    act(() => options.action.onClick());
+    expect(await screen.findByLabelText('Subject')).toHaveValue('Second thoughts');
+    expect(screen.getByLabelText('To')).toHaveValue('ann@example.com');
+    expect(state.send.mutateAsync).not.toHaveBeenCalled();
   });
 
   // Issue #86: leaving the page with the composer open keeps what was written.

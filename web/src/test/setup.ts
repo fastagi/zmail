@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { vi } from 'vitest'
+import { beforeEach, vi } from 'vitest'
 
 process.env.SESSION_SECRET ??= 'fastbuild-test-session-secret-at-least-32-chars'
 
@@ -31,4 +31,10 @@ Object.defineProperty(window, 'matchMedia', {
         removeEventListener: vi.fn(),
         dispatchEvent: vi.fn(),
     })),
+})
+
+// Sends run at once unless a test opts into the undo window. Imported per test, after its mocks.
+beforeEach(async () => {
+    const { setUndoSendDelayMs } = await import('@/features/mailbox/components/undo-send')
+    setUndoSendDelayMs(0)
 })

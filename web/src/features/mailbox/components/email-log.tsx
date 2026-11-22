@@ -252,6 +252,7 @@ function EmailLogContent({
           draft={composition.draft}
           onClose={() => setComposition(null)}
           onStored={() => setView(current => ({ ...current, page: 1 }))}
+          onReopen={() => setComposition(composition)}
         />
       </Suspense>
     );
@@ -381,6 +382,7 @@ function EmailLogContent({
             draft={composition.draft}
             onClose={() => setComposition(null)}
             onStored={() => setView(current => ({ ...current, page: 1 }))}
+            onReopen={() => setComposition(composition)}
           />
         </Suspense>
       ) : null}

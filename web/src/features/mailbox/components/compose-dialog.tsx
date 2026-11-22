@@ -56,13 +56,21 @@ import {
   normalizeRecipientLists,
   splitRecipients,
 } from '@/features/mailbox/schemas';
-import type { MailAttachment, Mailbox } from '@/features/mailbox/types';
+import type { MailAttachment, Mailbox, SendMailMessageInput } from '@/features/mailbox/types';
 import {
   isStoredSendFailure,
   resolveMailboxErrorKey,
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
 import { useMailSignature } from '@/features/mailbox/hooks/use-mail-signature';
+import {
+  flushPendingSend,
+  markReopenedCompose,
+  scheduleUndoableSend,
+  takeReopenedCompose,
+  undoSendDelayMs,
+  type ReopenedCompose,
+} from '@/features/mailbox/components/undo-send';
 import { mailSignatureBlock } from '@/features/mailbox/signature-schemas';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
@@ -89,6 +97,7 @@ export function ComposeDialog({
   draft,
   onClose,
   onStored,
+  onReopen,
 }: {
   /** The sending mailbox, or the initial choice when `fromOptions` lets the user pick. */
   mailbox: Sender;
@@ -99,11 +108,28 @@ export function ComposeDialog({
   onClose: () => void;
   /** The sent folder has a new entry: a delivered message, or one stored as failed. */
   onStored?: () => void;
+  /**
+   * Opens this composer again on the same draft. Given, Send closes the composer and waits a few
+   * seconds with Undo before sending; Undo or a failed send reopens it as written.
+   */
+  onReopen?: () => void;
 }) {
   const t = useT('mailbox');
-  const [fromId, setFromId] = useState(mailbox.id);
-  const from = fromOptions?.find(option => option.id === fromId) ?? mailbox;
   const organizationId = useMailOrganizationId();
+  // A draft kept when the dialog last closed takes the place of the starting text.
+  // Drafts belong to the signed-in user; the composer reads them once as it opens.
+  const userId = useContext(AuthStoreContext)?.getState().user?.id ?? 'anonymous';
+  const draftKey = composeDraftKey(userId, organizationId, draft);
+  // A send of this draft still waiting to be undone goes now, and this composer starts afresh.
+  const [flushed] = useState(() => flushPendingSend(draftKey));
+  const [restored] = useState(() => takeReopenedCompose(draftKey));
+  const [fromId, setFromId] = useState(() => {
+    const id = restored?.fromId;
+    return id !== undefined && (fromOptions?.some(option => option.id === id) ?? id === mailbox.id)
+      ? id
+      : mailbox.id;
+  });
+  const from = fromOptions?.find(option => option.id === fromId) ?? mailbox;
   const send = useSendMailMessage(organizationId, from.id);
   // Replies and forwards quote an existing message, so they are always written by hand.
   const isReplyOrForward = draft.reply || draft.mode === 'reply' || draft.mode === 'forward';
@@ -112,11 +138,7 @@ export function ComposeDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
   const templateHintId = useId();
-  // A draft kept when the dialog last closed takes the place of the starting text.
-  // Drafts belong to the signed-in user; the composer reads them once as it opens.
-  const userId = useContext(AuthStoreContext)?.getState().user?.id ?? 'anonymous';
-  const draftKey = composeDraftKey(userId, organizationId, draft);
-  const [kept] = useState(() => readComposeDraft(draftKey));
+  const [kept] = useState(() => (flushed ? null : readComposeDraft(draftKey)));
   const [to, setTo] = useState(kept?.to ?? draft.to);
   const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
   const [subject, setSubject] = useState(kept?.subject ?? draft.subject);
@@ -147,10 +169,12 @@ export function ComposeDialog({
   // What is written is kept as it changes, so leaving the page any way (the global sidebar, the
   // browser's back button, a reload) keeps the draft as closing the dialog does. Sending clears it.
   const sentRef = useRef(false);
-  const [files, setFiles] = useState<File[]>(() => readComposeDraftFiles(draftKey));
+  const [files, setFiles] = useState<File[]>(() =>
+    flushed ? [] : readComposeDraftFiles(draftKey)
+  );
   // Files named by a draft kept before a reload, which this page no longer holds.
   const [lostFiles, setLostFiles] = useState(() =>
-    readComposeDraftFiles(draftKey).length > 0 ? [] : (kept?.attachments ?? [])
+    flushed || readComposeDraftFiles(draftKey).length > 0 ? [] : (kept?.attachments ?? [])
   );
   // Until they are attached again, the names of lost files stay with the draft as a reminder.
   const attachments = files.length > 0 ? files.map(file => file.name) : lostFiles;
@@ -186,7 +210,9 @@ export function ComposeDialog({
   const [carried, setCarried] = useState<readonly MailAttachment[]>(
     () => draft.forwarded?.attachments ?? []
   );
-  const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(null);
+  const [errorKey, setErrorKey] = useState<MailboxErrorKey | null>(() =>
+    restored?.failure === undefined ? null : resolveMailboxErrorKey(restored.failure)
+  );
   const fileInput = useRef<HTMLInputElement>(null);
   const toInput = useRef<HTMLTextAreaElement>(null);
   const ccInput = useRef<HTMLTextAreaElement>(null);
@@ -320,6 +346,54 @@ export function ComposeDialog({
     }
   };
 
+  /**
+   * Closes the composer and sends after `delayMs` unless Undo is chosen. The draft stays kept
+   * until the send succeeds, so Undo or a failure reopens the composer as it was. `onStored` is
+   * not called: by then the page may show another message or composer.
+   */
+  const sendLater = (input: SendMailMessageInput, delayMs: number, reopen: () => void) => {
+    const sender = from.id;
+    const mutate = send.mutateAsync;
+    const reopenWith = (state: ReopenedCompose) => {
+      markReopenedCompose(draftKey, state);
+      reopen();
+    };
+    onClose();
+    scheduleUndoableSend(draftKey, {
+      delayMs,
+      sending: t('compose.sending'),
+      undoLabel: t('compose.undo'),
+      undo: () => reopenWith({ fromId: sender }),
+      run: () => {
+        // The send is under way: a composer opened now starts afresh, and a failure puts the
+        // draft back unless that composer has written one of its own.
+        const keptDraft = readComposeDraft(draftKey);
+        const keptFiles = readComposeDraftFiles(draftKey);
+        writeComposeDraft(draftKey, null);
+        writeComposeDraftFiles(draftKey, null);
+        mutate(input).then(
+          stored => {
+            toast.success(
+              t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent')
+            );
+          },
+          (failure: unknown) => {
+            if (readComposeDraft(draftKey) === null) {
+              writeComposeDraft(draftKey, keptDraft);
+              writeComposeDraftFiles(draftKey, keptFiles);
+            }
+            toast.error(t('compose.notSent'), {
+              action: {
+                label: t('compose.openDraft'),
+                onClick: () => reopenWith({ fromId: sender, failure }),
+              },
+            });
+          }
+        );
+      },
+    });
+  };
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorKey(null);
@@ -345,14 +419,20 @@ export function ComposeDialog({
     }
     try {
       const attachments = await encodeAttachments();
-      const stored = await send.mutateAsync({
+      const input: SendMailMessageInput = {
         to: normalized.to,
         ...(normalized.cc.length > 0 ? { cc: normalized.cc } : {}),
         subject: normalized.subject,
         text: normalized.text,
         ...(normalized.in_reply_to === '' ? {} : { in_reply_to: normalized.in_reply_to }),
         ...(attachments.length > 0 ? { attachments } : {}),
-      });
+      };
+      const delayMs = undoSendDelayMs();
+      if (onReopen && delayMs > 0) {
+        sendLater(input, delayMs, onReopen);
+        return;
+      }
+      const stored = await send.mutateAsync(input);
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       sentRef.current = true;
