@@ -181,16 +181,19 @@ type ExternalMailConnection struct {
 	UpdatedAt         time.Time
 }
 
-// ExternalMailPersonalAssignment is the record of the member an organization address was last
-// assigned to as a personal mailbox. It is never deleted.
+// ExternalMailPersonalAssignment is the record of an organization address assigned from a tenant. It
+// is never deleted, and its floor never goes down.
 type ExternalMailPersonalAssignment struct {
-	// UserID is the member; 0 once their user account was deleted.
+	// UserID is the member who holds it as a personal mailbox; 0 for a shared mailbox, after a
+	// handover, or once the user account was deleted.
 	UserID uint
-	// BoundaryAt is when that member left, or when the mailbox was handed over, whichever is later; nil
-	// while they hold it.
-	BoundaryAt *time.Time
-	// Released marks a handover: the address may go to someone else, never with mail from before the
-	// boundary.
+	// FloorAt is the privacy floor: whoever reads the address, unless exempt, gets nothing received
+	// before it. Nil while nobody but the first holder has held it.
+	FloorAt *time.Time
+	// ExemptUserID is the first personal holder, while nobody else has held the address since: the
+	// floor does not apply to them. 0 once anyone else held it.
+	ExemptUserID uint
+	// Released marks a handover: the address may go to someone else.
 	Released bool
 }
 
@@ -279,22 +282,22 @@ type ExternalMailTenantRepository interface {
 	// ListTenantPersonalConnections returns the owner's tenant-assigned personal connections, live
 	// ones first, at most limit.
 	ListTenantPersonalConnections(ctx context.Context, organizationID, ownerUserID uint, limit int) ([]*ExternalMailConnection, error)
-	// RestoreTenantConnection makes a revoked tenant connection active again with an empty cursor and
-	// the privacy boundary notBefore (nil for none).
+	// RestoreTenantConnection makes a revoked tenant connection active again under tenantID, with an
+	// empty cursor, and raises its received_not_before to notBefore (nil keeps it; it never goes down).
+	// Its mailbox moves to tenantID too.
 	RestoreTenantConnection(ctx context.Context, connectionID, tenantID uint, directoryID string, notBefore *time.Time, now time.Time) (*ExternalMailConnection, error)
 	// ShareTenantConnection makes a tenant connection the organization's (shared, no owner), as a
 	// handover of its personal mailbox does, and marks the address's personal record released with
 	// the handover's seal boundary.
 	ShareTenantConnection(ctx context.Context, mailboxID uint, boundary time.Time) error
-	// RecordPersonalAssignment remembers that the organization's address (and directory user) of the
-	// provider was assigned to userID as a personal mailbox, replacing an earlier record and its
-	// boundary.
-	RecordPersonalAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string, userID, tenantID uint, at time.Time) error
+	// RecordTenantAssignment stores who now holds the address (0 for a shared mailbox), raises its
+	// floor to floor (never lowering it; nil keeps it), and sets the exempt member (0 for none).
+	RecordTenantAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string, holderUserID, tenantID uint, floor *time.Time, exemptUserID uint, at time.Time) error
 	// FindPersonalAssignment returns the record of the address, or of the directory user when
 	// directoryID is not empty, ignoring the address's case; nil when none.
 	FindPersonalAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string) (*ExternalMailPersonalAssignment, error)
-	// MarkPersonalBoundary moves the boundary of every address personally assigned to userID to at,
-	// unless it is already later, when the member leaves.
+	// MarkPersonalBoundary raises the floor of every address personally assigned to userID to at when
+	// the member leaves; it never lowers one.
 	MarkPersonalBoundary(ctx context.Context, organizationID, userID uint, at time.Time) error
 }
 

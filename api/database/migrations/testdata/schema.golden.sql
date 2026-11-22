@@ -120,7 +120,8 @@ TABLE external_mail_personal_assignments
   COLUMN user_id bigint
   COLUMN tenant_id bigint NOT NULL
   COLUMN assigned_at timestamp with time zone NOT NULL
-  COLUMN boundary_at timestamp with time zone
+  COLUMN floor_at timestamp with time zone
+  COLUMN exempt_user_id bigint
   COLUMN released boolean NOT NULL DEFAULT false
 
 TABLE external_mail_sync_runs
@@ -892,6 +893,7 @@ CONSTRAINT external_mail_connections.external_mail_connections_pkey PRIMARY KEY 
 CONSTRAINT external_mail_connections.external_mail_connections_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'needs_reconnect'::character varying, 'revoked'::character varying])::text[])))
 CONSTRAINT external_mail_connections.external_mail_connections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)
 CONSTRAINT external_mail_personal_assignments.chk_external_mail_personal_assignments_key CHECK ((((address_key)::text = lower((address_key)::text)) AND ((address_key)::text <> ''::text)))
+CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_exempt_user_id_fkey FOREIGN KEY (exempt_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_pkey PRIMARY KEY (organization_id, provider, address_key)
 CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)

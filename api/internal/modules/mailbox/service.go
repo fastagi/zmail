@@ -707,6 +707,11 @@ func (s *service) DeleteMailbox(ctx context.Context, viewer domain.OrganizationC
 	if err != nil {
 		return err
 	}
+	if mailbox.TenantAssigned() && mailbox.AwaitingHandover() {
+		// A departed member's mailbox at an organization address awaits its handover or the member's
+		// return; deleting it would lose their copies.
+		return fmt.Errorf("%w: the mailbox awaits its handover", ErrMailboxAccessConflict)
+	}
 	if mailbox.Connected() {
 		// No stored grant outlives its mailbox: the connection is revoked, its token erased and
 		// handed back, in the transaction that deletes the mailbox.

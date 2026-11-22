@@ -28,11 +28,10 @@ type addExternalMailTenants struct {
 //   - mailboxes.external_mail_tenant_id marks a connected mailbox assigned from a tenant: its address
 //     is the organization's, so the organization administers it and a personal one awaits handover
 //     when its owner leaves. idx_mailboxes_external_mail_tenant finds a tenant's mailboxes.
-//   - external_mail_personal_assignments remembers the member an address (and its directory user) was
-//     last assigned to as a personal mailbox, and the privacy boundary set when that member left or
-//     the mailbox was handed over. It outlives revocation, purge, departure, and handover: the
-//     address never goes to another reader while that member is in the organization unless handed
-//     over (released), and a later holder never gets mail received before the boundary.
+//   - external_mail_personal_assignments remembers, per address (and directory user), who holds it
+//     now, its privacy floor, which only ever rises, and the one member the floor does not apply to:
+//     the first holder, for as long as nobody else has held it. It outlives revocation, purge,
+//     departure, and handover. A holder only ever reads mail received during their own tenures.
 //   - external_mail_connections.received_not_before is that boundary on a connection: no copy of
 //     mail received before it is ever stored.
 //
@@ -82,7 +81,8 @@ func (m *addExternalMailTenants) Up(db *gorm.DB) error {
 		  user_id bigint REFERENCES users(id) ON DELETE SET NULL,
 		  tenant_id bigint NOT NULL REFERENCES external_mail_tenants(id),
 		  assigned_at timestamptz NOT NULL,
-		  boundary_at timestamptz,
+		  floor_at timestamptz,
+		  exempt_user_id bigint REFERENCES users(id) ON DELETE SET NULL,
 		  released boolean NOT NULL DEFAULT false,
 		  PRIMARY KEY (organization_id, provider, address_key),
 		  CONSTRAINT chk_external_mail_personal_assignments_key CHECK (address_key = lower(address_key) AND address_key <> '')

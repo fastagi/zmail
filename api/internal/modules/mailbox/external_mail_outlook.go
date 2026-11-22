@@ -159,10 +159,11 @@ func (s *outlookMailSource) Exchange(ctx context.Context, exchange ExternalMailC
 		return ExternalMailToken{}, ExternalMailAccount{}, fmt.Errorf("%w: microsoft issued no refresh token", ErrExternalMailAuth)
 	}
 	var profile struct {
+		ID                string `json:"id"`
 		Mail              string `json:"mail"`
 		UserPrincipalName string `json:"userPrincipalName"`
 	}
-	if err = s.graphGet(ctx, grant.AccessToken, s.graphURL("/me?$select=mail,userPrincipalName"), 0, outlookMaxTokenResponse, &profile); err != nil {
+	if err = s.graphGet(ctx, grant.AccessToken, s.graphURL("/me?$select=id,mail,userPrincipalName"), 0, outlookMaxTokenResponse, &profile); err != nil {
 		return ExternalMailToken{}, ExternalMailAccount{}, err
 	}
 	address := strings.TrimSpace(profile.Mail)
@@ -172,7 +173,9 @@ func (s *outlookMailSource) Exchange(ctx context.Context, exchange ExternalMailC
 	if address == "" {
 		return ExternalMailToken{}, ExternalMailAccount{}, errors.New("outlook: the account has no mail address")
 	}
-	return ExternalMailToken{RefreshToken: grant.RefreshToken}, ExternalMailAccount{Address: strings.ToLower(address)}, nil
+	return ExternalMailToken{RefreshToken: grant.RefreshToken}, ExternalMailAccount{
+		Address: strings.ToLower(address), DirectoryID: strings.TrimSpace(profile.ID),
+	}, nil
 }
 
 // Revoke does nothing at Microsoft: the identity platform has no endpoint that revokes a single

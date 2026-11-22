@@ -517,7 +517,7 @@ departure, makes the mailbox `shared` + `connected`, and makes its connection th
 (`shared: true`, no owner). The successor becomes a `send` member, which on a connected mailbox
 reads only: the read-only origin is the one part of the Zmail rule that cannot apply, so nobody sends
 as the address. A rejoin before the handover restores it as for any personal mailbox. Until then the
-assignment cannot be disconnected, purged, or reassigned, and the worker's retention purge leaves it
+assignment cannot be disconnected, purged, deleted, or reassigned, and the worker's retention purge leaves it
 alone. The handover does not check the organization's shared connection limit. Whoever is later
 assigned the address gets nothing received before the departure or the handover (see
 [Tenant Connections](#tenant-connections)).
@@ -1224,24 +1224,36 @@ Each row holds the tenant row shared until it commits, so a revocation waits for
 revokes what they created. Restoring a shared assignment makes its members exactly the posted set:
 the others are removed (`member_removed`).
 
-A personal assignment cannot be redirected, and its history never reaches another reader:
+A personal assignment cannot be redirected, and **a holder only ever reads mail received during their
+own tenures**:
 
-- Zmail keeps a record of the member each address (and each directory user, matched by directory id
-  as well as by address, ignoring case) was last personally assigned to. It survives disconnects,
-  purges, departures, handovers, and tenant revocation.
+- Zmail keeps a record of each address assigned from a tenant (matched by address, ignoring case,
+  and by directory id): who holds it now, its privacy floor, which only ever rises, and the member
+  exempt from the floor. It survives disconnects, purges, deletions, departures, handovers, and tenant
+  revocation.
+- The first personal holder is exempt, with the normal look-back, across departures and returns, for
+  as long as nobody else has held the address. Once anyone else held it (another member, a shared
+  mailbox, or a handover), nobody is exempt any more.
+- Every other assignment, personal or shared, and every restore of one, starts its connection at the
+  later of the floor and the moment of the assignment: the connector is asked for nothing older, and
+  every copy the provider received before it, or without a receive time, is dropped before it is
+  stored, whatever the connector returned. A connection's start never goes down and is never
+  cleared. A member assigned the address again keeps the copies their mailbox still holds from their
+  own earlier tenure, but nothing received while they did not hold it is fetched.
 - While that member is in the organization, the address goes to nobody else, personal or shared
   (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), unless it was handed over. The same member may have it back
   at any time, with the normal look-back.
-- When the member leaves, the assignment awaits handover: it cannot be disconnected or purged
-  (`409 MAILBOX.ACCESS_CONFLICT`), the worker's retention purge skips it, and it is not reassigned
+- When the member leaves, the assignment awaits handover: it cannot be disconnected, purged, or its
+  mailbox deleted (`409 MAILBOX.ACCESS_CONFLICT`), the worker's retention purge skips it, and it is not reassigned
   (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`). The only ways on are the handover, which seals it, or the
   member's return, which finds it intact.
-- The record's privacy boundary is the time the member left, or the time it was handed over while
-  they were a member, whichever is later. Any later mailbox of the address for someone else, personal
-  or shared, starts at that boundary: the connector is asked for nothing older, and every copy the
-  provider received before it is dropped before it is stored, whatever the connector returned.
-- Nobody but the last personal holder binds the address with an own grant, personal or shared
-  (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`): such a binding would have no boundary.
+- A departure or a handover raises the floor to that time; the handover's seal keeps the successor
+  from what came before it.
+- Nobody but the exempt first holder binds the address with an own grant, personal or shared
+  (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; matched by address and by the directory id the provider
+  reports): such a binding has no floor. This strict rule is pending confirmation.
+- After the tenant was revoked and authorized again, assigning the address back to its holder (or the
+  same shared mailbox) restores the existing mailbox under the new tenant, under the same rules.
 
 A personal assignment creates a `personal` + `connected` mailbox owned by the member with
 `created` and `connection_bound` events naming the tenant. It is private to that member exactly like

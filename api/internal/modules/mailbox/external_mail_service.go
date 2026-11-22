@@ -242,13 +242,14 @@ func (s *service) externalCopies(connection *domain.ExternalMailConnection, fetc
 			continue
 		}
 		receivedAt := external.ReceivedAt.UTC()
+		if connection.ReceivedNotBefore != nil && (external.ReceivedAt.IsZero() || receivedAt.Before(*connection.ReceivedNotBefore)) {
+			// Mail received outside this holder's tenure is never stored, whatever the connector
+			// returned; one without a receive time cannot be placed, so it is dropped too. Dropped
+			// copies show as fetched but not stored in the sync run.
+			continue
+		}
 		if external.ReceivedAt.IsZero() {
 			receivedAt = now
-		}
-		if connection.ReceivedNotBefore != nil && receivedAt.Before(*connection.ReceivedNotBefore) {
-			// Mail an earlier personal holder received is never stored for a later reader, whatever
-			// the connector returned.
-			continue
 		}
 		copies = append(copies, &domain.MailMessage{
 			MailboxID: connection.MailboxID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,9 @@ type ExternalMailToken struct {
 // ExternalMailAccount is the outside account an authorization code was exchanged for.
 type ExternalMailAccount struct {
 	Address string
+	// DirectoryID is the provider's stable user id when it reports one (Microsoft does); empty
+	// otherwise.
+	DirectoryID string
 }
 
 // ExternalMessage is one message as the provider returned it.
@@ -386,7 +390,9 @@ func (f *FakeExternalMailSource) Exchange(_ context.Context, exchange ExternalMa
 	token := "fake-" + exchange.Code
 	delete(f.revoked, token)
 	delete(f.authFail, token)
-	return ExternalMailToken{RefreshToken: token}, ExternalMailAccount{Address: exchange.Code + "@external.invalid"}, nil
+	// "<local>#<directory id>" signs in to a user the provider reports a directory id for.
+	local, directoryID, _ := strings.Cut(exchange.Code, "#")
+	return ExternalMailToken{RefreshToken: token}, ExternalMailAccount{Address: local + "@external.invalid", DirectoryID: directoryID}, nil
 }
 
 // RotateOnNextFetch makes the next fetch with token hand out next as the rotated grant; token

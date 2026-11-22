@@ -522,11 +522,15 @@ func (s *service) assignTenantRow(ctx context.Context, viewer domain.Organizatio
 		if holderErr := s.checkPersonalHolder(tx, viewer.OrganizationID, tenant.Provider, address, binding.directoryID, target); holderErr != nil {
 			return holderErr
 		}
-		floor, floorErr := s.privacyFloor(tx, viewer.OrganizationID, tenant.Provider, address, binding.directoryID, target)
+		floor, exempt, floorErr := s.tenantPrivacy(tx, viewer.OrganizationID, tenant.Provider, address, binding.directoryID, target)
 		if floorErr != nil {
 			return floorErr
 		}
 		binding.notBefore = floor
+		record := func() error {
+			return s.externalMail.RecordTenantAssignment(tx, viewer.OrganizationID, tenant.Provider, address, binding.directoryID,
+				target, tenant.ID, floor, exempt, s.now().UTC())
+		}
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, tenant.Provider, address)
 		switch {
 		case errors.Is(findErr, ErrExternalMailConnectionNotFound):
@@ -535,8 +539,14 @@ func (s *service) assignTenantRow(ctx context.Context, viewer domain.Organizatio
 		default:
 			var done bool
 			connection, status, done, findErr = s.assignOverExisting(tx, viewer, tenant, binding, owner, existing)
-			if findErr != nil || done {
+			if findErr != nil {
 				return findErr
+			}
+			if done {
+				if status == TenantAssignmentUnchanged {
+					return nil
+				}
+				return record()
 			}
 			status = TenantAssignmentCreated
 		}
@@ -545,10 +555,13 @@ func (s *service) assignTenantRow(ctx context.Context, viewer domain.Organizatio
 		}
 		if binding.sharing != nil {
 			connection, findErr = s.bindSharedAccount(tx, viewer, binding, "")
+		} else {
+			connection, findErr = s.bindTenantPersonal(tx, viewer, binding, owner, displayName)
+		}
+		if findErr != nil {
 			return findErr
 		}
-		connection, findErr = s.bindTenantPersonal(tx, viewer, binding, owner, displayName)
-		return findErr
+		return record()
 	})
 	if isUniqueViolation(err) {
 		// Another assignment or binding of the address landed in the meantime.
@@ -582,7 +595,9 @@ func (s *service) assignTenantRow(ctx context.Context, viewer domain.Organizatio
 // done means the row is settled (unchanged or restored); otherwise the caller assigns it fresh,
 // after a revoked connection of another kind was purged here.
 func (s *service) assignOverExisting(tx context.Context, viewer domain.OrganizationContext, tenant *domain.ExternalMailTenant, binding externalBinding, owner *domain.OrganizationMembership, existing *domain.ExternalMailConnection) (*domain.ExternalMailConnection, string, bool, error) {
-	ours := existing.TenantID != nil && *existing.TenantID == tenant.ID
+	// A connection of this tenant, or a revoked one of an earlier tenant of the organization, which an
+	// assignment back to the same target restores under this tenant.
+	ours := existing.TenantID != nil && (*existing.TenantID == tenant.ID || existing.Status == domain.ExternalMailStatusRevoked)
 	sameTarget := ours && ((binding.sharing != nil && existing.Shared) ||
 		(binding.sharing == nil && !existing.Shared && owner != nil && existing.OwnerUserID != nil && *existing.OwnerUserID == owner.UserID))
 	if existing.Status != domain.ExternalMailStatusRevoked {
@@ -632,8 +647,6 @@ func (s *service) restoreTenantAssignment(tx context.Context, viewer domain.Orga
 		if err = s.replaceTenantMembers(tx, viewer, existing.MailboxID, binding.sharing.members); err != nil {
 			return nil, err
 		}
-	} else if err = s.recordPersonalHolder(tx, restored); err != nil {
-		return nil, err
 	}
 	return restored, s.recordConnectionEvent(tx, restored, domain.MailboxAccessConnectionReconnected, viewer.UserID)
 }
@@ -682,22 +695,10 @@ func (s *service) bindTenantPersonal(tx context.Context, viewer domain.Organizat
 	if err := s.externalMail.CreateExternalMailConnection(tx, connection); err != nil {
 		return nil, err
 	}
-	if err := s.recordPersonalHolder(tx, connection); err != nil {
-		return nil, err
-	}
 	if err := s.recordConnectionEvent(tx, connection, domain.MailboxAccessConnectionBound, viewer.UserID); err != nil {
 		return nil, err
 	}
 	return connection, nil
-}
-
-// recordPersonalHolder remembers the member a tenant address is personally assigned to.
-func (s *service) recordPersonalHolder(tx context.Context, connection *domain.ExternalMailConnection) error {
-	if connection.OwnerUserID == nil || connection.TenantID == nil {
-		return nil
-	}
-	return s.externalMail.RecordPersonalAssignment(tx, connection.OrganizationID, connection.Provider, connection.AccountAddress,
-		connection.TenantDirectoryID, *connection.OwnerUserID, *connection.TenantID, s.now().UTC())
 }
 
 // checkPersonalHolder keeps a personal assignment from being redirected: an address (or its directory
@@ -719,35 +720,51 @@ func (s *service) checkPersonalHolder(tx context.Context, organizationID uint, p
 	return ErrExternalMailAccountTaken
 }
 
-// checkSelfBinding keeps an address that was ever personally assigned from a tenant out of every
-// binding with an account's own grant, except by its last personal holder: such a binding has no
-// privacy boundary, so it would read the earlier holder's mail. Only a tenant assignment, which
-// applies the boundary, gives the address to someone else. reader is 0 for a shared binding.
-func (s *service) checkSelfBinding(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string, reader uint) error {
-	record, err := s.externalMail.FindPersonalAssignment(tx, organizationID, provider, address, "")
+// checkSelfBinding keeps an address that was ever assigned from a tenant out of every binding with an
+// account's own grant, except by its first personal holder while nobody else has held it: such a
+// binding has no privacy floor, so it would read another holder's mail. Only a tenant assignment,
+// which applies the floor, gives the address to someone else. The record is matched by address,
+// ignoring case, and by the directory id the provider reports, if any. reader is 0 for a shared
+// binding.
+func (s *service) checkSelfBinding(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, reader uint) error {
+	record, err := s.externalMail.FindPersonalAssignment(tx, organizationID, provider, address, directoryID)
 	if err != nil || record == nil {
 		return err
 	}
-	if reader == 0 || record.UserID != reader {
+	if reader == 0 || record.UserID != reader || record.ExemptUserID != reader {
 		return ErrExternalMailAccountTaken
 	}
 	return nil
 }
 
-// privacyFloor is the boundary a new or restored connection for targetUserID (0 for a shared mailbox)
-// starts at: none when nobody held the address personally, or when it is the same member's again;
-// otherwise the time the last holder left or handed it over, or now when that is unknown.
-func (s *service) privacyFloor(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, targetUserID uint) (*time.Time, error) {
+// tenantPrivacy decides the floor of a connection about to read an address for targetUserID (0 for a
+// shared mailbox), and who stays exempt from the address's floor afterwards. A holder only ever reads
+// mail received during their own tenures:
+//
+//   - The first personal holder of an address, for as long as nobody else has held it, is exempt: they
+//     get the normal look-back, across departures and returns.
+//   - Anyone else, the first holder after someone else held it included, starts at the later of the
+//     address's floor and now, so nothing received before this tenure is fetched or stored. Copies a
+//     returning holder's mailbox still holds from their own earlier tenure stay.
+//
+// The record's floor only ever rises; a nil floor means none.
+func (s *service) tenantPrivacy(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, targetUserID uint) (*time.Time, uint, error) {
 	record, err := s.externalMail.FindPersonalAssignment(tx, organizationID, provider, address, directoryID)
-	if err != nil || record == nil || (targetUserID != 0 && record.UserID == targetUserID) {
-		return nil, err
+	if err != nil {
+		return nil, 0, err
 	}
-	if record.BoundaryAt != nil {
-		floor := record.BoundaryAt.UTC()
-		return &floor, nil
+	if record == nil {
+		// Nobody held it: the first personal holder is exempt; a shared first mailbox exempts nobody.
+		return nil, targetUserID, nil
 	}
-	now := s.now().UTC()
-	return &now, nil
+	if targetUserID != 0 && record.ExemptUserID == targetUserID && (record.UserID == targetUserID || record.UserID == 0) {
+		return nil, targetUserID, nil
+	}
+	floor := s.now().UTC()
+	if record.FloorAt != nil && record.FloorAt.After(floor) {
+		floor = record.FloorAt.UTC()
+	}
+	return &floor, 0, nil
 }
 
 // replaceTenantMembers makes the members of a restored shared assignment exactly the posted set:

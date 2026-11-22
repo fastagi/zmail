@@ -39,7 +39,9 @@ and `see_history` (never `view`), it appears in the mailbox directory, and when 
 awaits handover instead of being revoked; the handover makes its connection the organization's.
 Code that checked `Connected() && Type == personal` to mean "a member's own account" should use
 `PrivateConnected()`. The retention purge of revoked copies now skips a mailbox whose owner left and
-that awaits handover.
+that awaits handover, and deleting such a mailbox assigned from a tenant answers
+`409 MAILBOX.ACCESS_CONFLICT`. `ExternalMailAccount` gains `DirectoryID` (the Outlook connector
+reports the Microsoft user id).
 
 ### High — Roll every instance forward before switching tenant connect on
 
@@ -52,7 +54,7 @@ the organization's own application; there is no admin consent redirect.
 
 The migration creates `external_mail_tenants` (a tenant identifier is live in one organization of the
 instance) and `external_mail_personal_assignments` (the member an address was last personally
-assigned to, with its privacy boundary), adds `external_mail_connections.tenant_id`,
+assigned to, with a privacy floor that only rises and the member exempt from it), adds `external_mail_connections.tenant_id`,
 `tenant_directory_id`, and `received_not_before` (copies received before it are never stored) with a
 CHECK that a
 tenant connection stores no account token, and `mailboxes.external_mail_tenant_id` with a CHECK that

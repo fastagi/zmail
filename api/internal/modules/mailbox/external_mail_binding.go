@@ -212,7 +212,7 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 		}
 		return nil, false, err
 	}
-	binding.address = account.Address
+	binding.address, binding.accountDirectoryID = account.Address, account.DirectoryID
 	return s.saveExternalBinding(ctx, viewer, connector, token, binding)
 }
 
@@ -234,6 +234,8 @@ type externalBinding struct {
 	directoryID string
 	// notBefore is the privacy boundary of the new connection: nothing received before it is stored.
 	notBefore *time.Time
+	// accountDirectoryID is the directory id the provider reported for a signed-in account, if any.
+	accountDirectoryID string
 }
 
 // saveExternalBinding stores a fresh grant: a new account gets a private read-only connected
@@ -272,7 +274,7 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 		if binding.sharing != nil {
 			reader = 0
 		}
-		if holderErr := s.checkSelfBinding(tx, viewer.OrganizationID, binding.provider, address, reader); holderErr != nil {
+		if holderErr := s.checkSelfBinding(tx, viewer.OrganizationID, binding.provider, address, binding.accountDirectoryID, reader); holderErr != nil {
 			return holderErr
 		}
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, binding.provider, address)
