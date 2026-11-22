@@ -4126,8 +4126,11 @@ function parseInboxQuery(
   if (mock.group && mock.view !== 'all' && mock.view !== 'sent') {
     return invalid('Grouping needs view all or sent');
   }
-  if (mock.group && (mock.unread !== undefined || mock.q !== undefined)) {
-    return invalid('Grouping cannot be combined with unread or search');
+  if (
+    mock.group &&
+    (mock.unread !== undefined || mock.hasAttachments !== undefined || mock.q !== undefined)
+  ) {
+    return invalid('Grouping cannot be combined with unread, attachments or search');
   }
   if (
     triage &&

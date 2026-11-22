@@ -3343,6 +3343,8 @@ describe('mailbox browser route boundary', () => {
       '?view=pending&group=thread',
       '?group=thread&unread=true',
       '?group=thread&q=invoice',
+      '?group=thread&has_attachments=true',
+      '?group=thread&has_attachments=false',
     ]) {
       await expectError(
         await route.listInboxMessagesRoute(request(`/api/inbox-messages${query}`)),
