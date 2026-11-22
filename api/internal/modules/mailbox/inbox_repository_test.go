@@ -822,6 +822,11 @@ func TestParseInboxRequestDates(t *testing.T) {
 	if !start.Equal(time.Date(2026, 10, 31, 16, 0, 0, 0, time.UTC)) || end.Sub(*start) != 24*time.Hour {
 		t.Fatalf("bounds = %v .. %v", start, end)
 	}
+	santiago, _ := time.LoadLocation("America/Santiago")
+	skipped := time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC)
+	if got := inboxDateBound(&skipped, santiago, 0); !got.Equal(time.Date(2026, 9, 6, 4, 0, 0, 0, time.UTC)) {
+		t.Errorf("a day whose midnight is skipped starts at %v, want 01:00 -03", got)
+	}
 	for name, query := range map[string]url.Values{
 		"not a date":  {"since": {"2026-13-01"}},
 		"with time":   {"until": {"2026-11-01T00:00:00Z"}},

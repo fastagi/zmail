@@ -302,5 +302,11 @@ func inboxDateBound(date *time.Time, location *time.Location, days int) *time.Ti
 		location = time.UTC
 	}
 	bound := time.Date(date.Year(), date.Month(), date.Day()+days, 0, 0, 0, 0, location)
+	if bound.Hour() != 0 {
+		// A clock change skipped midnight: the day starts when the clock jumps forward.
+		_, before := bound.Zone()
+		_, after := bound.Add(24 * time.Hour).Zone()
+		bound = bound.Add(time.Duration(after-before) * time.Second)
+	}
 	return &bound
 }
