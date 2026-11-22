@@ -39,7 +39,8 @@ describe('client i18n message boundaries', () => {
     expect(coreNamespaces).toEqual({
       global: ['common', 'errors'],
       auth: ['auth'],
-      console: ['auth', 'nav', 'console'],
+      // The first-run team setup card renders on the console home and inbox.
+      console: ['auth', 'nav', 'console', 'organization'],
       settings: ['settings'],
       organization: ['organization'],
       permission: ['permission'],
