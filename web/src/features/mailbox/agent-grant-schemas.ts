@@ -25,7 +25,9 @@ export const MAIL_AGENT_GRANT_DEFAULT_DAYS = 30;
 export const MAIL_AGENT_FILTER_MAX_ENTRIES = 20;
 /** The longest sender entry: an address (320) or a domain (253). */
 export const MAIL_AGENT_SENDER_MAX_LENGTH = 320;
-export const MAIL_AGENT_GRANTS_PAGE_SIZE = 50;
+/** The API's largest page; every page of grants is read, at most this many pages. */
+export const MAIL_AGENT_GRANTS_PAGE_SIZE = 100;
+export const MAIL_AGENT_GRANTS_MAX_PAGES = 20;
 export const MAIL_AGENT_DRAFTS_PAGE_SIZE = 20;
 /** The activity route answers the newest 100 rows of a grant. */
 export const MAIL_AGENT_ACTIVITY_MAX_ROWS = 100;
@@ -117,6 +119,13 @@ export type MailAgentDraft = Infer<typeof mailAgentDraftSchema>;
 export interface MailAgentGrantPage {
   items: MailAgentGrant[];
   meta: Infer<typeof pageMetaSchema>;
+}
+
+/** Every grant read; `complete` is false when more pages exist than were read. */
+export interface MailAgentGrantList {
+  items: MailAgentGrant[];
+  total: number;
+  complete: boolean;
 }
 
 export interface MailAgentDraftPage {

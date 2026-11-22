@@ -13,7 +13,7 @@ import { messages } from '@/i18n/modules';
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const service = vi.hoisted(() => ({
-  list: vi.fn(),
+  listAll: vi.fn(),
   issue: vi.fn(),
   revoke: vi.fn(),
   activity: vi.fn(),
@@ -24,7 +24,9 @@ const mail = vi.hoisted(() => ({
   labels: [] as { id: number; name: string }[],
   message: null as unknown,
   send: vi.fn(),
+  members: [] as { user_id: number; permission: string }[],
 }));
+const organization = vi.hoisted(() => ({ resolveContext: vi.fn() }));
 const composer = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
 
 vi.mock('sonner', () => ({ toast }));
@@ -32,6 +34,9 @@ vi.mock('@/features/mailbox/services/agent-grant-service', () => ({
   agentGrantService: service,
 }));
 vi.mock('@/features/api-key/services/api-key-service', () => ({ apiKeyService: keys }));
+vi.mock('@/features/organization/services/organization-service', () => ({
+  organizationService: organization,
+}));
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => ({ data: undefined, isPending: true, error: null }),
   useOrganizationMembers: () => ({ data: undefined, isPending: false, error: null }),
@@ -49,7 +54,7 @@ vi.mock('@/features/mailbox/hooks/use-mailbox', async () => {
   return {
     mailboxKeys: keysModule.mailboxKeys,
     validId: keysModule.validId,
-    useMailboxMembers: () => query([]),
+    useMailboxMembers: () => query(mail.members),
     useMailboxAccessEvents: () => query(undefined),
     useSetMailboxMember: () => mutation,
     useRemoveMailboxMember: () => mutation,
@@ -100,30 +105,92 @@ describe('mailbox Agent tab', () => {
     mail.message = message();
     mail.send.mockReset();
     composer.props = null;
-    service.list.mockResolvedValue(grantPage([]));
+    mail.members = [];
+    organization.resolveContext.mockReset();
+    organization.resolveContext.mockResolvedValue({ user_id: 4 });
+    service.listAll.mockResolvedValue(grantList([]));
     service.drafts.mockResolvedValue(grantPage([]));
     keys.list.mockResolvedValue(keyPage([apiKey(12, 'Support agent', ['mail:agent'])]));
   });
 
-  it('shows the Agent tab only to who may manage the grants', async () => {
+  it('shows grant management only to who the API lets manage grants', async () => {
     const { unmount } = renderPanel(mailbox({ type: 'personal', owner_user_id: 4 }));
     expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
     unmount();
 
-    // An organization admin on a shared mailbox without a manage membership.
-    renderPanel(
+    // An organization admin on a shared mailbox who is only a view member: nothing to show.
+    const { unmount: unmountViewer } = renderPanel(
       mailbox({
-        access: { ...ownerAccess, organize: false, manage_members: true, administer: true },
+        access: {
+          ...ownerAccess,
+          send: false,
+          organize: false,
+          manage_members: true,
+          administer: true,
+        },
       })
     );
     expect(screen.queryByRole('tab', { name: 'Agents' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
-    expect(service.list).not.toHaveBeenCalled();
+    unmountViewer();
+
+    // The same admin as a send member: the drafts, but no grants and no Authorize.
+    await openAgents(
+      mailbox({
+        access: { ...ownerAccess, organize: false, manage_members: true, administer: true },
+      }),
+      'Drafts awaiting review'
+    );
+    expect(screen.queryByRole('heading', { name: 'Authorized agents' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Authorize an agent' })).not.toBeInTheDocument();
+    expect(service.listAll).not.toHaveBeenCalled();
+    await waitFor(() => expect(service.drafts).toHaveBeenCalledWith(1, 3, 1));
+  });
+
+  it('lets a send member of a shared mailbox review drafts', async () => {
+    await openAgents(
+      mailbox({
+        access: {
+          view: true,
+          send: true,
+          manage_members: false,
+          administer: false,
+          see_history: false,
+          organize: false,
+        },
+      }),
+      'Drafts awaiting review'
+    );
+    expect(screen.queryByRole('heading', { name: 'Authorized agents' })).not.toBeInTheDocument();
+    expect(service.listAll).not.toHaveBeenCalled();
+  });
+
+  it('decides a connected shared mailbox by the caller’s own membership', async () => {
+    const connected = mailbox({
+      origin: 'connected',
+      access: {
+        view: true,
+        send: false,
+        manage_members: true,
+        administer: true,
+        see_history: true,
+        organize: false,
+      },
+    });
+    // An admin who is only a view member: the API refuses them, so no Agent tab.
+    mail.members = [{ user_id: 4, permission: 'view' }];
+    const { unmount } = renderPanel(connected);
+    await waitFor(() => expect(organization.resolveContext).toHaveBeenCalledWith(1));
+    expect(screen.queryByRole('tab', { name: 'Agents' })).not.toBeInTheDocument();
+    unmount();
+
+    mail.members = [{ user_id: 4, permission: 'manage' }];
+    renderPanel(connected);
+    expect(await screen.findByRole('tab', { name: 'Agents' })).toBeInTheDocument();
   });
 
   it('lists grants with key, capabilities, filters, expiry, and status', async () => {
-    service.list.mockResolvedValue(
-      grantPage([
+    service.listAll.mockResolvedValue(
+      grantList([
         grant({
           id: 3,
           capabilities: ['read', 'draft'],
@@ -143,9 +210,21 @@ describe('mailbox Agent tab', () => {
     await openAgents(mailbox());
 
     const list = await screen.findByRole('list', { name: 'Authorized agents' });
-    const rows = within(list)
+    const activeRows = within(list)
       .getAllByRole('listitem')
       .filter(row => row.parentElement === list);
+    expect(activeRows).toHaveLength(1);
+    // Ended grants wait behind a toggle.
+    const toggle = screen.getByRole('button', { name: 'Show ended grants (2)' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    const ended = screen.getByRole('list', { name: 'Ended grants' });
+    const rows = [
+      ...activeRows,
+      ...within(ended)
+        .getAllByRole('listitem')
+        .filter(row => row.parentElement === ended),
+    ];
     expect(rows).toHaveLength(3);
     expect(within(rows[0]!).getByText('Support agent · sk_live_ab')).toBeInTheDocument();
     expect(within(rows[0]!).getByText('Active')).toBeInTheDocument();
@@ -192,24 +271,42 @@ describe('mailbox Agent tab', () => {
         .map(option => option.textContent)
     ).toEqual(['Choose a key', 'Support agent · fastbuild_12']);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Authorize' }));
-    expect(await within(dialog).findByText('Choose an agent key.')).toBeInTheDocument();
+    const keyError = await within(dialog).findByText('Choose an agent key.');
+    expect(keyError).toHaveAttribute('role', 'alert');
+    expect(select).toHaveAttribute('aria-invalid', 'true');
+    expect(select.getAttribute('aria-describedby')).toContain(keyError.id);
     expect(service.issue).not.toHaveBeenCalled();
 
     fireEvent.change(select, { target: { value: '12' } });
     fireEvent.click(within(dialog).getByRole('radio', { name: 'Only mail matching filters' }));
     expect(within(dialog).getByText(/they are not authentication/u)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Authorize' }));
+    const filtersError = await within(dialog).findByText(
+      'Add at least one sender or label, or choose all new mail.'
+    );
+    expect(filtersError).toHaveAttribute('role', 'alert');
     expect(
-      await within(dialog).findByText('Add at least one sender or label, or choose all new mail.')
-    ).toBeInTheDocument();
+      within(dialog).getByRole('textbox', { name: 'Senders' }).getAttribute('aria-describedby')
+    ).toContain(filtersError.id);
+    expect(
+      within(dialog).getByRole('group', { name: 'Labels' }).getAttribute('aria-describedby')
+    ).toContain(filtersError.id);
 
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Senders' }), {
       target: { value: 'Example.com, not a domain' },
     });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Authorize' }));
+    const senderError = await within(dialog).findByText('"not" is not an address or a domain.');
+    expect(senderError).toHaveAttribute('role', 'alert');
+    const senders = within(dialog).getByRole('textbox', { name: 'Senders' });
+    expect(senders).toHaveAttribute('aria-invalid', 'true');
+    expect(senders.getAttribute('aria-describedby')).toContain(senderError.id);
+    // The expiry choices are described by their hint, and by an error if one is shown.
     expect(
-      await within(dialog).findByText('"not" is not an address or a domain.')
-    ).toBeInTheDocument();
+      within(dialog)
+        .getByRole('radiogroup', { name: 'Expires after' })
+        .getAttribute('aria-describedby')
+    ).toMatch(/-hint$/u);
 
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Senders' }), {
       target: { value: 'Example.com\nbilling@vendor.test' },
@@ -262,8 +359,8 @@ describe('mailbox Agent tab', () => {
   });
 
   it('blocks a tenth-plus grant and a key that already has one', async () => {
-    service.list.mockResolvedValue(
-      grantPage(
+    service.listAll.mockResolvedValue(
+      grantList(
         Array.from({ length: 10 }, (_, index) => grant({ id: index + 1, api_key_id: 50 + index }))
       )
     );
@@ -303,7 +400,7 @@ describe('mailbox Agent tab', () => {
   });
 
   it('revokes only after the inline confirmation', async () => {
-    service.list.mockResolvedValue(grantPage([grant({ id: 7 })]));
+    service.listAll.mockResolvedValue(grantList([grant({ id: 7 })]));
     service.revoke.mockResolvedValue(undefined);
     await openAgents(mailbox());
     const revoke = await screen.findByRole('button', { name: 'Revoke Support agent' });
@@ -321,21 +418,20 @@ describe('mailbox Agent tab', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Revoke Support agent' }));
     // The list is fetched again after the revoke and shows the grant ended.
-    service.list.mockResolvedValue(
-      grantPage([grant({ id: 7, status: 'revoked', revoked_at: iso(0), revoke_reason: 'revoked' })])
+    service.listAll.mockResolvedValue(
+      grantList([grant({ id: 7, status: 'revoked', revoked_at: iso(0), revoke_reason: 'revoked' })])
     );
     fireEvent.click(screen.getByRole('button', { name: 'Revoke now' }));
     await waitFor(() => expect(service.revoke).toHaveBeenCalledWith(1, 3, 7));
     expect(toast.success).toHaveBeenCalledWith('Agent revoked');
-    expect(await screen.findByText(/Revoked by a manager/u)).toBeInTheDocument();
-    // Revoke is gone, so the row's Activity button takes the focus.
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Recent activity of Support agent' })).toHaveFocus()
-    );
+    // The grant leaves the active list; the ended grants' toggle that now holds it takes the focus.
+    const ended = await screen.findByRole('button', { name: 'Show ended grants (1)' });
+    await waitFor(() => expect(ended).toHaveFocus());
+    expect(screen.getByText('No agent has access to this mailbox.')).toBeInTheDocument();
   });
 
   it('shows a refused revoke with the copy of its error code', async () => {
-    service.list.mockResolvedValue(grantPage([grant({ id: 7 })]));
+    service.listAll.mockResolvedValue(grantList([grant({ id: 7 })]));
     service.revoke.mockRejectedValue(
       new ApiError('gone', ApiErrorCode.MAILBOX_AGENT_GRANT_NOT_FOUND, 404)
     );
@@ -364,7 +460,7 @@ describe('mailbox Agent tab', () => {
   });
 
   it('shows a grant’s recent activity without message content', async () => {
-    service.list.mockResolvedValue(grantPage([grant({ id: 7 })]));
+    service.listAll.mockResolvedValue(grantList([grant({ id: 7 })]));
     service.activity.mockResolvedValue([audit(2, 'read_revealed', 5512), audit(1, 'draft', 5511)]);
     await openAgents(mailbox());
     const toggle = await screen.findByRole('button', { name: 'Recent activity of Support agent' });
@@ -380,7 +476,7 @@ describe('mailbox Agent tab', () => {
   });
 
   it('hands an agent draft to the composer and never sends it', async () => {
-    service.list.mockResolvedValue(grantPage([grant({ id: 7 })]));
+    service.listAll.mockResolvedValue(grantList([grant({ id: 7 })]));
     service.drafts.mockResolvedValue(
       grantPage([
         {
@@ -422,6 +518,57 @@ describe('mailbox Agent tab', () => {
     await waitFor(() => expect(open).toHaveFocus());
     expect(mail.send).not.toHaveBeenCalled();
   });
+
+  it('pages through drafts beyond the newest page', async () => {
+    const draft = (id: number) => ({
+      id,
+      mailbox_id: 3,
+      grant_id: 7,
+      message_id: 11,
+      api_key_id: 12,
+      text: `Draft ${id}`,
+      html: '',
+      status: 'pending',
+      created_at: iso(0),
+      updated_at: iso(0),
+    });
+    service.drafts.mockImplementation(
+      async (_organizationId: number, _mailboxId: number, page: number) =>
+        page === 1
+          ? grantPage([draft(30)], { last_page: 2, total: 21 })
+          : grantPage([draft(9)], { current_page: 2, last_page: 2, total: 21 })
+    );
+    await openAgents(mailbox());
+    expect(await screen.findByText('Draft 30')).toBeInTheDocument();
+    const pages = screen.getByRole('navigation', { name: 'Draft pages' });
+    expect(within(pages).getByText('Page 1 of 2')).toBeInTheDocument();
+    expect(within(pages).getByRole('button', { name: 'Newer' })).toBeDisabled();
+    fireEvent.click(within(pages).getByRole('button', { name: 'Older' }));
+    expect(await screen.findByText('Draft 9')).toBeInTheDocument();
+    expect(service.drafts).toHaveBeenLastCalledWith(1, 3, 2);
+    expect(within(pages).getByText('Page 2 of 2')).toBeInTheDocument();
+  });
+
+  it('counts active grants across every page the API holds', async () => {
+    // Eleven grants, one active one beyond the first API page: listAll reads them all.
+    service.listAll.mockResolvedValue({
+      items: [
+        ...Array.from({ length: 9 }, (_, index) =>
+          grant({ id: 20 - index, api_key_id: 60 + index })
+        ),
+        ...Array.from({ length: 100 }, (_, index) =>
+          grant({ id: 200 + index, status: 'expired', expires_at: iso(-3) })
+        ),
+        grant({ id: 1, api_key_id: 99 }),
+      ],
+      total: 110,
+      complete: true,
+    });
+    await openAgents(mailbox());
+    expect(await screen.findByText('10 of 10 active')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Authorize an agent' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Show ended grants (100)' })).toBeInTheDocument();
+  });
 });
 
 function renderPanel(target: Mailbox) {
@@ -447,12 +594,12 @@ function renderPanel(target: Mailbox) {
   );
 }
 
-async function openAgents(target: Mailbox) {
+async function openAgents(target: Mailbox, heading = 'Authorized agents') {
   renderPanel(target);
-  const tab = screen.getByRole('tab', { name: 'Agents' });
+  const tab = await screen.findByRole('tab', { name: 'Agents' });
   fireEvent.mouseDown(tab);
   fireEvent.click(tab);
-  await screen.findByRole('heading', { name: 'Authorized agents' });
+  await screen.findByRole('heading', { name: heading });
 }
 
 async function openForm() {
@@ -508,16 +655,21 @@ function audit(id: number, action: string, messageId: number) {
   return { id, grant_id: 7, api_key_id: 12, message_id: messageId, action, created_at: iso(0) };
 }
 
-function grantPage(items: unknown[]) {
+function grantList(items: unknown[]) {
+  return { items, total: items.length, complete: true };
+}
+
+function grantPage(items: unknown[], meta: Record<string, number> = {}) {
   return {
     items,
     meta: {
       current_page: 1,
-      per_page: 50,
+      per_page: 20,
       total: items.length,
       last_page: 1,
       from: 1,
       to: items.length,
+      ...meta,
     },
   };
 }

@@ -6,11 +6,13 @@ import {
   mailAgentGrantPageEnvelopeSchema,
   mailAgentGrantSchema,
   MAIL_AGENT_DRAFTS_PAGE_SIZE,
+  MAIL_AGENT_GRANTS_MAX_PAGES,
   MAIL_AGENT_GRANTS_PAGE_SIZE,
   type MailAgentAuditEntry,
   type MailAgentDraftPage,
   type MailAgentGrant,
   type MailAgentGrantInput,
+  type MailAgentGrantList,
   type MailAgentGrantPage,
 } from '@/features/mailbox/agent-grant-schemas';
 import { ClientErrorCode } from '@/http/codes';
@@ -44,6 +46,26 @@ export const agentGrantService = {
       throw invalidResponse();
     }
     return { items: parsed.data.data, meta: parsed.data.meta };
+  },
+
+  /**
+   * Every grant of the mailbox, newest first, read in pages of 100 until the last page (at most
+   * 20 pages). A mailbox has at most 10 working grants; the rest is history.
+   */
+  async listAll(organizationId: number, mailboxId: number): Promise<MailAgentGrantList> {
+    const items: MailAgentGrant[] = [];
+    let page = 1;
+    let lastPage = 1;
+    let total = 0;
+    do {
+      const result = await this.list(organizationId, mailboxId, page);
+      items.push(...result.items);
+      lastPage = result.meta.last_page;
+      total = result.meta.total;
+      page += 1;
+    } while (page <= lastPage && page <= MAIL_AGENT_GRANTS_MAX_PAGES);
+    const unique = new Map(items.map(grant => [grant.id, grant]));
+    return { items: [...unique.values()], total, complete: page > lastPage };
   },
 
   /** Issues a grant and answers it. */

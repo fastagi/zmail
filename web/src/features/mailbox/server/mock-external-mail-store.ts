@@ -254,6 +254,14 @@ export class MockExternalMailStore {
     return true;
   }
 
+  /** The mailbox a connection of the organization fills, or null for an unknown connection. */
+  mailboxIdOf(organizationId: number, connectionId: number): number | null {
+    const connection = this.connections.get(connectionId);
+    return connection && connection.organizationId === organizationId
+      ? connection.mailbox_id
+      : null;
+  }
+
   /** Development aid: the provider refused the grant, as a failed sync records it. */
   markNeedsReconnect(connectionId: number): void {
     const connection = this.connections.get(connectionId);

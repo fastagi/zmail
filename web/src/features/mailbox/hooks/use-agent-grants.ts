@@ -1,27 +1,29 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import type { MailAgentGrantInput } from '@/features/mailbox/agent-grant-schemas';
+import {
+  agentGrantKeys,
+  invalidateAgentGrantQueries,
+} from '@/features/mailbox/hooks/agent-grant-keys';
 import { mailboxKeys, validId } from '@/features/mailbox/hooks/mailbox-keys';
 import { agentGrantService } from '@/features/mailbox/services/agent-grant-service';
 
-/** Cache keys of a mailbox's agent grants, their activity, and its agent drafts. */
-export const agentGrantKeys = {
-  grants: (organizationId: number, mailboxId: number) =>
-    [...mailboxKeys.mailbox(organizationId, mailboxId), 'agent-grants'] as const,
-  activity: (organizationId: number, mailboxId: number, grantId: number) =>
-    [...agentGrantKeys.grants(organizationId, mailboxId), grantId, 'activity'] as const,
-  drafts: (organizationId: number, mailboxId: number) =>
-    [...mailboxKeys.mailbox(organizationId, mailboxId), 'agent-drafts'] as const,
-};
+export {
+  agentGrantKeys,
+  invalidateAgentGrantQueries,
+} from '@/features/mailbox/hooks/agent-grant-keys';
 
-/** The mailbox's grants; only asked for when the caller may manage them. */
+/**
+ * Every grant of the mailbox, newest first, read page by page, so the active count, the limit,
+ * and the "already granted" check see them all. Only asked for when the caller may manage them.
+ */
 export function useAgentGrants(organizationId: number, mailboxId: number, enabled: boolean) {
   return useQuery({
     queryKey: agentGrantKeys.grants(organizationId, mailboxId),
-    queryFn: () => agentGrantService.list(organizationId, mailboxId),
+    queryFn: () => agentGrantService.listAll(organizationId, mailboxId),
     enabled: enabled && validId(organizationId) && validId(mailboxId),
     staleTime: 15_000,
     meta: LOCAL_ERROR_HANDLING_META,
@@ -43,12 +45,18 @@ export function useAgentGrantActivity(
   });
 }
 
-/** The reply drafts agents stored for the mailbox; only asked for with `send`. */
-export function useAgentDrafts(organizationId: number, mailboxId: number, enabled: boolean) {
+/** One page of the reply drafts agents stored for the mailbox; only asked for with `send`. */
+export function useAgentDrafts(
+  organizationId: number,
+  mailboxId: number,
+  page: number,
+  enabled: boolean
+) {
   return useQuery({
-    queryKey: agentGrantKeys.drafts(organizationId, mailboxId),
-    queryFn: () => agentGrantService.drafts(organizationId, mailboxId),
+    queryKey: agentGrantKeys.draftPage(organizationId, mailboxId, page),
+    queryFn: () => agentGrantService.drafts(organizationId, mailboxId, page),
     enabled: enabled && validId(organizationId) && validId(mailboxId),
+    placeholderData: keepPreviousData,
     staleTime: 15_000,
     meta: LOCAL_ERROR_HANDLING_META,
   });
@@ -69,12 +77,7 @@ function useGrantMutation<Variables, Result>(
     meta: LOCAL_ERROR_HANDLING_META,
     onSettled: () =>
       Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: agentGrantKeys.grants(organizationId, mailboxId),
-        }),
-        queryClient.invalidateQueries({
-          queryKey: agentGrantKeys.drafts(organizationId, mailboxId),
-        }),
+        invalidateAgentGrantQueries(queryClient, organizationId, mailboxId),
         queryClient.invalidateQueries({
           queryKey: mailboxKeys.accessEvents(organizationId, mailboxId),
         }),

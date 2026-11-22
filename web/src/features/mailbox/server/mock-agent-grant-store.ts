@@ -8,6 +8,7 @@ import {
   type MailAgentDraft,
   type MailAgentGrant,
   type MailAgentGrantInput,
+  type MailAgentRevokeReason,
 } from '@/features/mailbox/agent-grant-schemas';
 import type { Mailbox, MailMessageSummary } from '@/features/mailbox/types';
 import { isUsableAgentKey } from '@/features/mailbox/utils/agent-grant-access';
@@ -155,6 +156,36 @@ export class MockAgentGrantStore {
     return this.state(organizationId)
       .drafts.filter(draft => draft.mailbox_id === mailboxId && messageExists(draft.message_id))
       .sort((left, right) => right.id - left.id);
+  }
+
+  /**
+   * The connected account behind a mailbox was disconnected: its working grants end with `reason`
+   * and its drafts are deleted, as `contracts/MAILBOXES.md` (Agent Grants) records it.
+   */
+  endMailbox(
+    organizationId: number,
+    mailboxId: number,
+    reason: MailAgentRevokeReason = 'connection_revoked'
+  ): void {
+    const state = this.state(organizationId);
+    const at = this.now().toISOString();
+    for (const grant of state.grants) {
+      if (grant.mailbox_id !== mailboxId || this.withStatus(grant).status !== 'active') continue;
+      grant.revoked_at = at;
+      grant.revoke_reason = reason;
+    }
+    state.drafts = state.drafts.filter(draft => draft.mailbox_id !== mailboxId);
+  }
+
+  /** The mailbox is gone: every grant, audit row, and draft of it is deleted with it. */
+  removeMailbox(organizationId: number, mailboxId: number): void {
+    const state = this.state(organizationId);
+    const gone = new Set(
+      state.grants.filter(grant => grant.mailbox_id === mailboxId).map(grant => grant.id)
+    );
+    state.grants = state.grants.filter(grant => !gone.has(grant.id));
+    state.audits = state.audits.filter(entry => !gone.has(entry.grant_id));
+    state.drafts = state.drafts.filter(draft => draft.mailbox_id !== mailboxId);
   }
 
   reset(): void {

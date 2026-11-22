@@ -94,7 +94,10 @@ import {
   type MockAgentGrantError,
 } from '@/features/mailbox/server/mock-agent-grant-store';
 import { mockApiKeyStore } from '@/features/api-key/server/mock-api-key-store';
-import { canManageAgentGrants } from '@/features/mailbox/utils/agent-grant-access';
+import {
+  canManageAgentGrants,
+  needsOwnMembership,
+} from '@/features/mailbox/utils/agent-grant-access';
 import {
   mockLedgerPage,
   mockPlatformAccountStore,
@@ -980,7 +983,9 @@ export async function deleteMailboxRoute(
   }
   // `administer`: no access at all is a missing mailbox, a member with access is refused.
   const result = mockMailboxStore.delete(target.organizationId, mailboxId.value, viewerOf(target));
-  return result.ok ? apiNoContentResponse(privateMailboxHeaders()) : missing(result.error);
+  if (!result.ok) return missing(result.error);
+  mockAgentGrantStore.removeMailbox(target.organizationId, mailboxId.value);
+  return apiNoContentResponse(privateMailboxHeaders());
 }
 
 export async function listMailMessagesRoute(
@@ -2937,7 +2942,18 @@ function agentManagedMailbox(
     .list(target.organizationId, viewerOf(target))
     .find(item => item.id === mailboxId);
   if (!mailbox) return { ok: false, response: mailboxNotFound() };
-  if (!canManageAgentGrants(mailbox)) return { ok: false, response: accessForbidden() };
+  // On a connected shared mailbox only the caller's own membership tells a manager apart.
+  const members = needsOwnMembership(mailbox)
+    ? mockMailboxStore.members(target.organizationId, mailboxId, viewerOf(target))
+    : null;
+  const ownPermission =
+    members?.ok === true
+      ? (members.value.find(member => member.user_id === target.context.user_id)?.permission ??
+        null)
+      : null;
+  if (!canManageAgentGrants(mailbox, ownPermission)) {
+    return { ok: false, response: accessForbidden() };
+  }
   return { ok: true, value: mailbox };
 }
 
@@ -5115,12 +5131,19 @@ export async function revokeExternalMailConnectionRoute(
       organizationId: String(target.organizationId),
     });
   }
-  const revoked = (await externalMailMock()).revoke(
+  const external = await externalMailMock();
+  const revoked = external.revoke(
     target.organizationId,
     { userId: target.context.user_id, manages: target.context.role !== 'member' },
     connectionId.value
   );
-  return revoked ? apiNoContentResponse(privateMailboxHeaders()) : externalConnectionNotFound();
+  if (!revoked) return externalConnectionNotFound();
+  // A disconnected account ends the agent grants of its mailbox and deletes their drafts.
+  const connectedMailboxId = external.mailboxIdOf(target.organizationId, connectionId.value);
+  if (connectedMailboxId !== null) {
+    mockAgentGrantStore.endMailbox(target.organizationId, connectedMailboxId);
+  }
+  return apiNoContentResponse(privateMailboxHeaders());
 }
 
 function externalConnectionNotFound(): NextResponse {

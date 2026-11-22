@@ -1,30 +1,53 @@
 import type { ApiKey } from '@/features/api-key/types';
-import type { Mailbox } from '@/features/mailbox/types';
+import type { Mailbox, MailboxPermission } from '@/features/mailbox/types';
 
 /** The scope a key needs for a grant; `*` includes it. Kept here so the access panel stays small. */
 export const MAIL_AGENT_SCOPE = 'mail:agent';
 
+type AgentAccessMailbox = Pick<Mailbox, 'type' | 'origin' | 'access' | 'awaiting_handover'>;
+
 /**
- * Whether the caller may issue, list, and revoke the mailbox's agent grants, derived from the
- * `access` the API returns (`contracts/MAILBOXES.md`, Agent Grants):
+ * Whether the caller may issue, list, and revoke the mailbox's agent grants: the rule the API
+ * applies (`contracts/MAILBOXES.md`, Agent Grants), read from the `access` it returns.
  *
  * - Personal, Zmail or connected: its owner alone. Only the owner has `view` on a personal
  *   mailbox; owners and admins never do, and nobody does while it awaits a handover.
  * - Shared Zmail: a `manage` member, the one shared caller with `organize` (an owner or admin who
  *   is not a `manage` member has `manage_members` without it).
- * - Shared connected: nobody has `organize` there, so `view` with `manage_members` is the closest
- *   signal. An owner or admin who is only a `view` or `send` member also has both; the API answers
- *   them `403 PERMISSION.DENIED`, which the tab shows.
+ * - Shared connected: nobody has `organize` there, and an owner or admin who is only a `view` or
+ *   `send` member has `view` and `manage_members` like a `manage` member. So the caller's own
+ *   membership decides: `ownPermission` is the caller's row in the member list, `undefined`
+ *   while it is not known yet, which counts as no.
  *
  * The API stays the authority on every route.
  */
 export function canManageAgentGrants(
-  mailbox: Pick<Mailbox, 'type' | 'origin' | 'access' | 'awaiting_handover'>
+  mailbox: AgentAccessMailbox,
+  ownPermission?: MailboxPermission | null
 ): boolean {
   const { access } = mailbox;
   if (mailbox.type === 'personal') return access.view && !mailbox.awaiting_handover;
-  if (mailbox.origin === 'connected') return access.view && access.manage_members;
+  if (mailbox.origin === 'connected')
+    return needsOwnMembership(mailbox) && ownPermission === 'manage';
   return access.organize && access.manage_members;
+}
+
+/**
+ * A connected shared mailbox where only the caller's own membership can tell whether they may
+ * manage its agent grants (see `canManageAgentGrants`).
+ */
+export function needsOwnMembership(mailbox: AgentAccessMailbox): boolean {
+  return (
+    mailbox.type === 'shared' &&
+    mailbox.origin === 'connected' &&
+    mailbox.access.view &&
+    mailbox.access.manage_members
+  );
+}
+
+/** Whether the caller may review the drafts agents wrote for the mailbox: `send` on it. */
+export function canReviewAgentDrafts(mailbox: Pick<Mailbox, 'access'>): boolean {
+  return mailbox.access.send;
 }
 
 /**

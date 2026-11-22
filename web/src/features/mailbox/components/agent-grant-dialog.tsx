@@ -241,7 +241,7 @@ function GrantForm({
               {t('agents.form.keyHint')}
             </p>
             {keyError ? (
-              <p id={`${ids.key}-error`} className="text-sm text-error">
+              <p id={`${ids.key}-error`} role="alert" className="text-sm text-error">
                 {keyError}
               </p>
             ) : null}
@@ -286,14 +286,14 @@ function GrantForm({
                 aria-invalid={sendersError ? true : undefined}
                 aria-describedby={`${ids.sendersHint} ${ids.sendersWarning}${
                   sendersError ? ` ${ids.senders}-error` : ''
-                }`}
+                }${filtersError ? ` ${ids.scope}-filters-error` : ''}`}
                 onChange={event => set('senders', event.target.value)}
               />
               <p id={ids.sendersHint} className="text-xs text-muted-foreground">
                 {t('agents.form.sendersHint', { max: MAIL_AGENT_FILTER_MAX_ENTRIES })}
               </p>
               {sendersError ? (
-                <p id={`${ids.senders}-error`} className="text-sm text-error">
+                <p id={`${ids.senders}-error`} role="alert" className="text-sm text-error">
                   {sendersError}
                 </p>
               ) : null}
@@ -305,7 +305,18 @@ function GrantForm({
                 <span>{t('agents.form.sendersWarning')}</span>
               </p>
             </div>
-            <fieldset className="space-y-2">
+            <fieldset
+              className="space-y-2"
+              aria-invalid={labelsError ? true : undefined}
+              aria-describedby={
+                [
+                  labelsError ? `${ids.labels}-error` : '',
+                  filtersError ? `${ids.scope}-filters-error` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ') || undefined
+              }
+            >
               <legend id={ids.labels} className="text-sm font-medium">
                 {t('agents.form.labels')}
               </legend>
@@ -342,10 +353,14 @@ function GrantForm({
                   })}
                 </ul>
               )}
-              {labelsError ? <p className="text-sm text-error">{labelsError}</p> : null}
+              {labelsError ? (
+                <p id={`${ids.labels}-error`} role="alert" className="text-sm text-error">
+                  {labelsError}
+                </p>
+              ) : null}
             </fieldset>
             {filtersError ? (
-              <p role="alert" className="text-sm text-error">
+              <p id={`${ids.scope}-filters-error`} role="alert" className="text-sm text-error">
                 {filtersError}
               </p>
             ) : null}
@@ -400,7 +415,13 @@ function GrantForm({
         <legend id={ids.expiry} className="text-sm font-medium">
           {t('agents.form.expiry')}
         </legend>
-        <div role="radiogroup" aria-labelledby={ids.expiry} className="flex flex-wrap gap-4">
+        <div
+          role="radiogroup"
+          aria-labelledby={ids.expiry}
+          aria-invalid={expiryError ? true : undefined}
+          aria-describedby={`${ids.expiry}-hint${expiryError ? ` ${ids.expiry}-error` : ''}`}
+          className="flex flex-wrap gap-4"
+        >
           {MAIL_AGENT_GRANT_EXPIRY_DAYS.map(days => (
             <div key={days} className="flex items-center gap-2 text-sm">
               <input
@@ -418,10 +439,14 @@ function GrantForm({
             </div>
           ))}
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p id={`${ids.expiry}-hint`} className="text-xs text-muted-foreground">
           {t('agents.form.expiryHint', { max: MAIL_AGENT_GRANT_MAX_DAYS })}
         </p>
-        {expiryError ? <p className="text-sm text-error">{expiryError}</p> : null}
+        {expiryError ? (
+          <p id={`${ids.expiry}-error`} role="alert" className="text-sm text-error">
+            {expiryError}
+          </p>
+        ) : null}
       </fieldset>
 
       <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">

@@ -26,6 +26,7 @@ import {
 import { useMailMessage } from '@/features/mailbox/hooks/use-mailbox';
 import type { Mailbox, MailMessage } from '@/features/mailbox/types';
 import { resolveAgentGrantErrorKey } from '@/features/mailbox/utils/agent-grant-error';
+import { canReviewAgentDrafts } from '@/features/mailbox/utils/agent-grant-access';
 import { canComposeFrom } from '@/features/mailbox/utils/connected-mailbox';
 import { useT } from '@/i18n';
 
@@ -44,33 +45,74 @@ const statusVariant: Record<MailAgentGrantStatus, 'default' | 'secondary' | 'out
 };
 
 /**
- * The Agent tab of a mailbox's access panel, shown to who may manage its agent grants: the grants
- * with their capabilities, filters, expiry, and status; revoking one after an inline confirmation;
- * a grant's recent activity; "Authorize an agent"; and, for holders of `send`, the drafts agents
- * wrote, each opened in the composer for a person to edit and send. Nothing here sends mail.
+ * The Agent tab of a mailbox's access panel. Who may manage the mailbox's agent grants
+ * (`canManage`) sees the grants with their capabilities, filters, expiry, and status, revokes one
+ * after an inline confirmation, reads a grant's recent activity, and authorizes agents. Holders of
+ * `send` see the drafts agents wrote, each opened in the composer for a person to edit and send.
+ * Nothing here sends mail.
  */
-export function MailboxAgentsTab({ mailbox }: { mailbox: Mailbox }) {
+export function MailboxAgentsTab({ mailbox, canManage }: { mailbox: Mailbox; canManage: boolean }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
-  const grants = useAgentGrants(organizationId, mailbox.id, true);
-  const [authorizing, setAuthorizing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const titleId = useId();
-
-  const items = grants.data?.items ?? [];
-  const active = items.filter(grant => grant.status === 'active').length;
-  const atLimit = active >= MAIL_AGENT_GRANT_MAX_PER_MAILBOX;
+  const grants = useAgentGrants(organizationId, mailbox.id, canManage);
 
   return (
     <div className="space-y-6">
       <section className="space-y-2 text-sm">
-        <p className="text-muted-foreground">{t('agents.intro')}</p>
+        {canManage ? <p className="text-muted-foreground">{t('agents.intro')}</p> : null}
         <p className="flex items-start gap-2 rounded-md bg-muted p-3 text-xs">
           <ShieldOff className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           <span>{t('agents.neverSends')}</span>
         </p>
       </section>
 
+      {canManage ? <GrantsSection mailbox={mailbox} grants={grants} /> : null}
+
+      {canReviewAgentDrafts(mailbox) ? (
+        <DraftsSection mailbox={mailbox} grants={grants.data?.items ?? []} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The grants: the active ones listed, the ended ones behind a toggle. The active count, the limit,
+ * and the form's checks use every grant the API holds, read page by page.
+ */
+function GrantsSection({
+  mailbox,
+  grants,
+}: {
+  mailbox: Mailbox;
+  grants: ReturnType<typeof useAgentGrants>;
+}) {
+  const t = useT('mailbox');
+  const [authorizing, setAuthorizing] = useState(false);
+  const [showEnded, setShowEnded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const titleId = useId();
+  const endedId = useId();
+  const endedToggle = useRef<HTMLButtonElement>(null);
+  const authorizeButton = useRef<HTMLButtonElement>(null);
+  const [revokedId, setRevokedId] = useState<number | null>(null);
+
+  const items = grants.data?.items ?? [];
+  const activeGrants = items.filter(grant => grant.status === 'active');
+  const endedGrants = items.filter(grant => grant.status !== 'active');
+  const atLimit = activeGrants.length >= MAIL_AGENT_GRANT_MAX_PER_MAILBOX;
+
+  // A revoked grant moves from the active list to the ended ones: once the list shows that, the
+  // focus goes to the ended grants' toggle that now holds it (or to Authorize if it is still open).
+  const revokedEnded = revokedId !== null && endedGrants.some(grant => grant.id === revokedId);
+  useEffect(() => {
+    if (!revokedEnded) return;
+    setRevokedId(null);
+    (endedToggle.current ?? authorizeButton.current)?.focus();
+  }, [revokedEnded]);
+  const revoked = (grantId: number) => setRevokedId(grantId);
+
+  return (
+    <>
       {error ? (
         <Alert variant="destructive" role="alert">
           <AlertCircle className="size-4" aria-hidden="true" />
@@ -86,11 +128,15 @@ export function MailboxAgentsTab({ mailbox }: { mailbox: Mailbox }) {
             </h3>
             {grants.data ? (
               <p className="text-xs text-muted-foreground">
-                {t('agents.grants.count', { count: active, max: MAIL_AGENT_GRANT_MAX_PER_MAILBOX })}
+                {t('agents.grants.count', {
+                  count: activeGrants.length,
+                  max: MAIL_AGENT_GRANT_MAX_PER_MAILBOX,
+                })}
               </p>
             ) : null}
           </div>
           <Button
+            ref={authorizeButton}
             type="button"
             size="sm"
             icon={<Plus className="size-3.5" />}
@@ -116,20 +162,58 @@ export function MailboxAgentsTab({ mailbox }: { mailbox: Mailbox }) {
                 : 'agents.grants.loadFailed'
             )}
           </p>
-        ) : items.length === 0 ? (
+        ) : activeGrants.length === 0 ? (
           <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
             {t('agents.grants.empty')}
           </p>
         ) : (
           <ul aria-labelledby={titleId} className="divide-y rounded-md border">
-            {items.map(grant => (
-              <GrantRow key={grant.id} mailboxId={mailbox.id} grant={grant} onError={setError} />
+            {activeGrants.map(grant => (
+              <GrantRow
+                key={grant.id}
+                mailboxId={mailbox.id}
+                grant={grant}
+                onError={setError}
+                onRevoked={revoked}
+              />
             ))}
           </ul>
         )}
+        {endedGrants.length > 0 ? (
+          <div className="space-y-2">
+            <Button
+              ref={endedToggle}
+              type="button"
+              size="xs"
+              variant="ghost"
+              aria-expanded={showEnded}
+              aria-controls={endedId}
+              onClick={() => setShowEnded(open => !open)}
+            >
+              {t(showEnded ? 'agents.grants.hideEnded' : 'agents.grants.showEnded', {
+                count: endedGrants.length,
+              })}
+            </Button>
+            {showEnded ? (
+              <ul
+                id={endedId}
+                aria-label={t('agents.grants.ended')}
+                className="divide-y rounded-md border"
+              >
+                {endedGrants.map(grant => (
+                  <GrantRow
+                    key={grant.id}
+                    mailboxId={mailbox.id}
+                    grant={grant}
+                    onError={setError}
+                    onRevoked={revoked}
+                  />
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
       </section>
-
-      {mailbox.access.send ? <DraftsSection mailbox={mailbox} grants={items} /> : null}
 
       {authorizing ? (
         <Suspense fallback={null}>
@@ -141,7 +225,7 @@ export function MailboxAgentsTab({ mailbox }: { mailbox: Mailbox }) {
           />
         </Suspense>
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -149,10 +233,12 @@ function GrantRow({
   mailboxId,
   grant,
   onError,
+  onRevoked,
 }: {
   mailboxId: number;
   grant: MailAgentGrant;
   onError: (message: string | null) => void;
+  onRevoked: (grantId: number) => void;
 }) {
   const t = useT('mailbox');
   const formatter = useDateTimeFormat();
@@ -162,43 +248,27 @@ function GrantRow({
   const [showActivity, setShowActivity] = useState(false);
   const revokeRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const activityRef = useRef<HTMLButtonElement>(null);
   const activityId = useId();
   const confirmId = useId();
   const name = grant.api_key_name;
   const { senders, label_ids: labelIds } = grant.filters;
   const date = (iso: string) => formatter.format(new Date(iso));
 
-  // The confirmation takes the focus and cancelling gives it back to Revoke. Once the grant is
-  // revoked, Revoke is gone, so the row's Activity button takes it when the list shows the end.
-  const { status } = grant;
+  // The confirmation takes the focus and cancelling gives it back to Revoke. A revoked grant
+  // leaves the active list, so the section moves the focus on (`onRevoked`).
   const wasConfirming = useRef(false);
-  const revoked = useRef(false);
   useEffect(() => {
     if (confirming) cancelRef.current?.focus();
-    else if (wasConfirming.current && !revoked.current) revokeRef.current?.focus();
-    else if (revoked.current && status !== 'active') {
-      // The list already shows the end: nothing further will change the status.
-      revoked.current = false;
-      activityRef.current?.focus();
-    }
+    else if (wasConfirming.current) revokeRef.current?.focus();
     wasConfirming.current = confirming;
-    // Only a change of `confirming` moves the focus here; the status has its own effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [confirming]);
-  useEffect(() => {
-    if (!revoked.current || status === 'active') return;
-    revoked.current = false;
-    activityRef.current?.focus();
-  }, [status]);
 
   const confirm = async () => {
     onError(null);
     try {
       await revoke.mutateAsync(grant.id);
-      revoked.current = true;
       toast.success(t('agents.revoked'));
-      setConfirming(false);
+      onRevoked(grant.id);
     } catch (error) {
       onError(t(resolveAgentGrantErrorKey(error)));
     }
@@ -264,7 +334,6 @@ function GrantRow({
             variant="ghost"
             icon={<History className="size-3.5" />}
             aria-expanded={showActivity}
-            ref={activityRef}
             aria-controls={activityId}
             aria-label={t('agents.grants.activityLabel', { name })}
             onClick={() => setShowActivity(open => !open)}
@@ -395,7 +464,13 @@ function ActivityList({
 function DraftsSection({ mailbox, grants }: { mailbox: Mailbox; grants: MailAgentGrant[] }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
-  const drafts = useAgentDrafts(organizationId, mailbox.id, mailbox.access.send);
+  const [page, setPage] = useState(1);
+  const drafts = useAgentDrafts(organizationId, mailbox.id, page, canReviewAgentDrafts(mailbox));
+  const lastPage = drafts.data?.meta.last_page ?? 1;
+  // Drafts sent or ended elsewhere can shorten the list under the page being read.
+  useEffect(() => {
+    if (page > lastPage) setPage(lastPage);
+  }, [page, lastPage]);
   const formatter = useDateTimeFormat();
   const titleId = useId();
   const [composing, setComposing] = useState<ComposeDraft | null>(null);
@@ -464,6 +539,34 @@ function DraftsSection({ mailbox, grants }: { mailbox: Mailbox; grants: MailAgen
           ))}
         </ul>
       )}
+      {lastPage > 1 ? (
+        <nav
+          aria-label={t('agents.drafts.pages')}
+          className="flex items-center justify-between gap-3"
+        >
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            disabled={page <= 1}
+            onClick={() => setPage(current => Math.max(1, current - 1))}
+          >
+            {t('agents.grants.newer')}
+          </Button>
+          <span className="text-xs text-muted-foreground" aria-live="polite">
+            {t('list.page', { page, total: lastPage })}
+          </span>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            disabled={page >= lastPage}
+            onClick={() => setPage(current => Math.min(lastPage, current + 1))}
+          >
+            {t('agents.grants.older')}
+          </Button>
+        </nav>
+      ) : null}
       {composing ? (
         <Suspense fallback={null}>
           <ComposeDialog

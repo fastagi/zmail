@@ -206,6 +206,50 @@ describe('agent grant browser routes', () => {
     expect((await issue(valid)).status).toBe(201);
   });
 
+  it('deletes a mailbox’s grants with it and ends them when its account is disconnected', async () => {
+    process.env.MOCK_BFF_ENABLED = 'true';
+    const user = mockUser('demo-admin');
+    getSessionUser.mockResolvedValue(user);
+    const route = await loadRoute();
+    const { mockApiKeyStore } = await import('@/features/api-key/server/mock-api-key-store');
+    const { mockAgentGrantStore } =
+      await import('@/features/mailbox/server/mock-agent-grant-store');
+    const key = mockApiKeyStore.create(user, { name: 'Agent', scopes: ['mail:agent'] });
+    const grantOn = async (mailboxId: number) =>
+      route.issueMailAgentGrantRoute(
+        request(`/api/mailboxes/${mailboxId}/agent-grants`, {
+          method: 'POST',
+          body: JSON.stringify({
+            api_key_id: key.api_key.id,
+            capabilities: ['read', 'draft'],
+            expires_at: new Date(Date.now() + dayMilliseconds).toISOString(),
+          }),
+        }),
+        String(mailboxId)
+      );
+
+    const deleted = await createMailbox(route, 'gone');
+    expect((await grantOn(deleted)).status).toBe(201);
+    expect(mockAgentGrantStore.drafts(1, deleted, () => true)).toHaveLength(1);
+    const removal = await route.deleteMailboxRoute(
+      request(`/api/mailboxes/${deleted}`, { method: 'DELETE' }),
+      String(deleted)
+    );
+    expect(removal.status).toBe(204);
+    expect(mockAgentGrantStore.list(1, deleted)).toEqual([]);
+    expect(mockAgentGrantStore.drafts(1, deleted, () => true)).toEqual([]);
+
+    // A disconnected account: the grants end as `connection_revoked` and the drafts go.
+    const kept = await createMailbox(route, 'kept');
+    expect((await grantOn(kept)).status).toBe(201);
+    mockAgentGrantStore.endMailbox(1, kept);
+    expect(mockAgentGrantStore.list(1, kept)[0]).toMatchObject({
+      status: 'revoked',
+      revoke_reason: 'connection_revoked',
+    });
+    expect(mockAgentGrantStore.drafts(1, kept, () => true)).toEqual([]);
+  });
+
   it('caps a mailbox at ten working grants', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     const user = mockUser('demo-admin');
@@ -360,7 +404,7 @@ describe('agent grant form rules', () => {
 
 describe('agent grant access and errors', () => {
   it('shows the tab to a personal owner and a shared manager only', async () => {
-    const { canManageAgentGrants, isUsableAgentKey } =
+    const { canManageAgentGrants, canReviewAgentDrafts, isUsableAgentKey, needsOwnMembership } =
       await import('@/features/mailbox/utils/agent-grant-access');
     const access = (overrides: Record<string, boolean>) => ({
       view: false,
@@ -401,8 +445,22 @@ describe('agent grant access and errors', () => {
     expect(canManageAgentGrants(box('shared', 'zmail', { view: true, send: true }))).toBe(false);
     expect(
       canManageAgentGrants(box('shared', 'connected', { view: true, manage_members: true }))
-    ).toBe(true);
-    expect(canManageAgentGrants(box('shared', 'connected', { view: true }))).toBe(false);
+    ).toBe(false);
+    // A connected shared mailbox gives `manage` members and admins the same flags: the caller's
+    // own membership decides, and an unknown one counts as no.
+    const connectedShared = box('shared', 'connected', { view: true, manage_members: true });
+    expect(needsOwnMembership(connectedShared)).toBe(true);
+    expect(canManageAgentGrants(connectedShared, 'manage')).toBe(true);
+    expect(canManageAgentGrants(connectedShared, 'view')).toBe(false);
+    expect(canManageAgentGrants(connectedShared, 'send')).toBe(false);
+    expect(canManageAgentGrants(connectedShared, null)).toBe(false);
+    expect(canManageAgentGrants(box('shared', 'connected', { view: true }), 'manage')).toBe(false);
+    expect(needsOwnMembership(box('shared', 'zmail', { view: true, manage_members: true }))).toBe(
+      false
+    );
+    // Drafts are for every holder of send, whoever manages the grants.
+    expect(canReviewAgentDrafts(box('shared', 'zmail', { view: true, send: true }))).toBe(true);
+    expect(canReviewAgentDrafts(box('shared', 'zmail', { view: true }))).toBe(false);
 
     const now = new Date('2026-11-20T00:00:00Z');
     const key = { mode: 'live' as const, scopes: ['mail:agent'] };
@@ -482,7 +540,7 @@ describe('agent grant service', () => {
     await expect(agentGrantService.list(1, 3)).resolves.toMatchObject({ items: [grant] });
     expect(getEnvelope).toHaveBeenLastCalledWith('/mailboxes/3/agent-grants', {
       headers: { 'Organization-Id': '1' },
-      params: { page: 1, per_page: 50 },
+      params: { page: 1, per_page: 100 },
     });
     getEnvelope.mockResolvedValueOnce(envelope([{ ...grant, mailbox_id: 9 }]) as never);
     await expect(agentGrantService.list(1, 3)).rejects.toMatchObject({
@@ -501,6 +559,40 @@ describe('agent grant service', () => {
     await expect(agentGrantService.activity(1, 3, 7)).rejects.toMatchObject({
       errorCode: ClientErrorCode.INVALID_RESPONSE,
     });
+
+    // Every page is read, at the API's largest page size, until the last one.
+    getEnvelope.mockReset();
+    const paged = (data: unknown[], page: number, lastPage: number) => ({
+      ...envelope(data),
+      meta: { current_page: page, per_page: 100, total: 101, last_page: lastPage, from: 1, to: 1 },
+    });
+    getEnvelope
+      .mockResolvedValueOnce(paged([grant], 1, 2) as never)
+      .mockResolvedValueOnce(paged([{ ...grant, id: 8, status: 'expired' }], 2, 2) as never);
+    const all = await agentGrantService.listAll(1, 3);
+    expect(all).toMatchObject({ total: 101, complete: true });
+    expect(all.items.map(item => item.id)).toEqual([7, 8]);
+    expect(getEnvelope.mock.calls.map(call => call[1]?.params)).toEqual([
+      { page: 1, per_page: 100 },
+      { page: 2, per_page: 100 },
+    ]);
+  });
+
+  it('exports the grant cache keys for code that ends grants elsewhere', async () => {
+    const { QueryClient } = await import('@tanstack/react-query');
+    const { agentGrantKeys, invalidateAgentGrantQueries } =
+      await import('@/features/mailbox/hooks/agent-grant-keys');
+    const client = new QueryClient();
+    client.setQueryData(agentGrantKeys.grants(1, 3), { items: [] });
+    client.setQueryData(agentGrantKeys.draftPage(1, 3, 2), { items: [] });
+    client.setQueryData(agentGrantKeys.activity(1, 3, 7), []);
+    client.setQueryData(agentGrantKeys.grants(1, 4), { items: [] });
+    await invalidateAgentGrantQueries(client, 1, 3);
+    const stale = (key: readonly unknown[]) => client.getQueryState(key)?.isInvalidated;
+    expect(stale(agentGrantKeys.grants(1, 3))).toBe(true);
+    expect(stale(agentGrantKeys.draftPage(1, 3, 2))).toBe(true);
+    expect(stale(agentGrantKeys.activity(1, 3, 7))).toBe(true);
+    expect(stale(agentGrantKeys.grants(1, 4))).toBe(false);
   });
 });
 
