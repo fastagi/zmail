@@ -784,6 +784,7 @@ func Load() (*Config, error) {
 				Enabled:                env.GetBool("EXTERNAL_MAIL_PUSH_ENABLED", false),
 				PollInterval:           env.Get("EXTERNAL_MAIL_PUSH_POLL_INTERVAL", ""),
 				CoalesceWindow:         env.Get("EXTERNAL_MAIL_PUSH_COALESCE_WINDOW", ""),
+				QuietLimit:             env.Get("EXTERNAL_MAIL_PUSH_QUIET_LIMIT", ""),
 				MaxPerMinute:           env.Get("EXTERNAL_MAIL_PUSH_MAX_PER_MINUTE", ""),
 				GmailTopic:             env.Get("EXTERNAL_MAIL_GMAIL_PUSH_TOPIC", ""),
 				GmailAudience:          env.Get("EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE", ""),

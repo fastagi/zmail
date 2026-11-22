@@ -21,6 +21,11 @@ const (
 	DefaultExternalMailPushCoalesceWindow = 10 * time.Second
 	MinExternalMailPushCoalesceWindow     = time.Second
 	MaxExternalMailPushCoalesceWindow     = 5 * time.Minute
+	// DefaultExternalMailPushQuietLimit is how long a live subscription may go without any
+	// notification and still count as working; after it the connection polls at the regular interval.
+	DefaultExternalMailPushQuietLimit = 24 * time.Hour
+	MinExternalMailPushQuietLimit     = time.Hour
+	MaxExternalMailPushQuietLimit     = 7 * 24 * time.Hour
 	// DefaultExternalMailPushMaxPerMinute bounds the notification requests of one provider each
 	// replica accepts per minute.
 	DefaultExternalMailPushMaxPerMinute = 6000
@@ -41,7 +46,9 @@ type ExternalMailPushConfig struct {
 	PollInterval time.Duration
 	// CoalesceWindow is the least time between two push-triggered syncs of one connection.
 	CoalesceWindow time.Duration
-	// MaxPerMinute bounds each provider's notification requests per replica and minute.
+	// QuietLimit is how long a subscription without notifications still counts as working.
+	QuietLimit time.Duration
+	// MaxPerMinute bounds each provider's authenticated notification requests per minute.
 	MaxPerMinute int
 	// GmailTopic is the Pub/Sub topic users.watch publishes to; empty leaves Gmail without push.
 	GmailTopic string
@@ -63,6 +70,7 @@ type ExternalMailPushSettings struct {
 	Enabled                bool
 	PollInterval           string
 	CoalesceWindow         string
+	QuietLimit             string
 	MaxPerMinute           string
 	GmailTopic             string
 	GmailAudience          string
@@ -87,6 +95,7 @@ func parseExternalMailPushConfig(raw ExternalMailPushSettings) ExternalMailPushC
 	}{
 		{"EXTERNAL_MAIL_PUSH_POLL_INTERVAL", raw.PollInterval, &c.PollInterval},
 		{"EXTERNAL_MAIL_PUSH_COALESCE_WINDOW", raw.CoalesceWindow, &c.CoalesceWindow},
+		{"EXTERNAL_MAIL_PUSH_QUIET_LIMIT", raw.QuietLimit, &c.QuietLimit},
 	} {
 		value := strings.TrimSpace(field.value)
 		if value == "" {
@@ -126,6 +135,14 @@ func (c ExternalMailPushConfig) Coalesce() time.Duration {
 	return c.CoalesceWindow
 }
 
+// Quiet returns the quiet limit, or its default.
+func (c ExternalMailPushConfig) Quiet() time.Duration {
+	if c.QuietLimit <= 0 {
+		return DefaultExternalMailPushQuietLimit
+	}
+	return c.QuietLimit
+}
+
 // RequestsPerMinute returns the per-provider request bound, or its default.
 func (c ExternalMailPushConfig) RequestsPerMinute() int {
 	if c.MaxPerMinute <= 0 {
@@ -144,7 +161,7 @@ func (c ExternalMailPushConfig) JWKSURL() string {
 
 // GmailConfigured reports whether Gmail push has its topic and audience.
 func (c ExternalMailPushConfig) GmailConfigured() bool {
-	return c.Enabled && c.GmailTopic != "" && c.GmailAudience != ""
+	return c.Enabled && c.GmailTopic != "" && c.GmailAudience != "" && c.GmailServiceAccount != ""
 }
 
 // OutlookConfigured reports whether Outlook push has its notification URL.
@@ -164,6 +181,9 @@ func validateExternalMailPushConfig(c ExternalMailPushConfig, production bool) e
 	if c.CoalesceWindow != 0 && (c.CoalesceWindow < MinExternalMailPushCoalesceWindow || c.CoalesceWindow > MaxExternalMailPushCoalesceWindow) {
 		return fmt.Errorf("EXTERNAL_MAIL_PUSH_COALESCE_WINDOW must be between %s and %s", MinExternalMailPushCoalesceWindow, MaxExternalMailPushCoalesceWindow)
 	}
+	if c.QuietLimit != 0 && (c.QuietLimit < MinExternalMailPushQuietLimit || c.QuietLimit > MaxExternalMailPushQuietLimit) {
+		return fmt.Errorf("EXTERNAL_MAIL_PUSH_QUIET_LIMIT must be between %s and %s", MinExternalMailPushQuietLimit, MaxExternalMailPushQuietLimit)
+	}
 	if c.MaxPerMinute < 0 || c.MaxPerMinute > MaxExternalMailPushMaxPerMinute {
 		return fmt.Errorf("EXTERNAL_MAIL_PUSH_MAX_PER_MINUTE must be between 1 and %d", MaxExternalMailPushMaxPerMinute)
 	}
@@ -175,6 +195,10 @@ func validateExternalMailPushConfig(c ExternalMailPushConfig, production bool) e
 	}
 	if len(c.GmailAudience) > 512 || len(c.GmailServiceAccount) > 320 {
 		return fmt.Errorf("EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE or EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT is too long")
+	}
+	if c.GmailTopic != "" && c.GmailServiceAccount == "" {
+		// Without it any Google-signed token for the audience would be accepted.
+		return fmt.Errorf("EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT is required when EXTERNAL_MAIL_GMAIL_PUSH_TOPIC is set")
 	}
 	if c.GmailServiceAccount != "" && !strings.Contains(c.GmailServiceAccount, "@") {
 		return fmt.Errorf("EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT must be a service account email")

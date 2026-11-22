@@ -58,6 +58,9 @@ type googleOIDCVerifier struct {
 	keys        map[string]*rsa.PublicKey
 	fetchedAt   time.Time
 	lastAttempt time.Time
+	// fetching is closed when the fetch in flight ends; nil while none runs. The lock is never held
+	// across the network.
+	fetching chan struct{}
 }
 
 func newGoogleOIDCVerifier(jwksURL, audience, serviceAccount string) *googleOIDCVerifier {
@@ -140,7 +143,8 @@ func (v *googleOIDCVerifier) Verify(ctx context.Context, token string, now time.
 		(claims.IssuedAt != 0 && time.Unix(claims.IssuedAt, 0).After(now.Add(oidcClockSkew))) {
 		return ErrExternalMailPushUnauthenticated
 	}
-	if v.serviceAccount != "" && (!strings.EqualFold(claims.Email, v.serviceAccount) || !claims.verified()) {
+	// The service account is required: without it any Google-signed token for the audience would pass.
+	if v.serviceAccount == "" || !strings.EqualFold(claims.Email, v.serviceAccount) || !claims.verified() {
 		return ErrExternalMailPushUnauthenticated
 	}
 	return nil
@@ -162,24 +166,41 @@ func decodeJWTPart(part string, into any) bool {
 }
 
 // key returns the signing key with the id, fetching the key set when it is stale or lacks the id,
-// at most once per jwksRefetchSpacing. A key set Google cannot serve is used stale for a while.
+// at most once per jwksRefetchSpacing and by one caller at a time: the others wait for that fetch
+// (within the key set timeout) instead of starting their own. A key set Google cannot serve is used
+// stale for a while.
 func (v *googleOIDCVerifier) key(ctx context.Context, keyID string, now time.Time) *rsa.PublicKey {
 	v.mu.Lock()
-	defer v.mu.Unlock()
-	fresh := v.keys != nil && now.Sub(v.fetchedAt) < jwksTTL
-	if key := v.keys[keyID]; key != nil && fresh {
+	if key := v.keys[keyID]; key != nil && now.Sub(v.fetchedAt) < jwksTTL {
+		v.mu.Unlock()
 		return key
 	}
-	if v.lastAttempt.IsZero() || now.Sub(v.lastAttempt) >= jwksRefetchSpacing {
+	wait := v.fetching
+	if wait == nil && (v.lastAttempt.IsZero() || now.Sub(v.lastAttempt) >= jwksRefetchSpacing) {
 		v.lastAttempt = now
+		done := make(chan struct{})
+		v.fetching = done
+		v.mu.Unlock()
 		// A caller that hangs up must not make the shared fetch fail for everyone else.
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jwksTimeout)
 		keys, err := v.fetch(fetchCtx)
 		cancel()
+		v.mu.Lock()
 		if err == nil {
 			v.keys, v.fetchedAt = keys, now
 		}
+		v.fetching = nil
+		close(done)
+	} else if wait != nil {
+		v.mu.Unlock()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+		case <-time.After(jwksTimeout):
+		}
+		v.mu.Lock()
 	}
+	defer v.mu.Unlock()
 	if v.keys == nil || now.Sub(v.fetchedAt) >= jwksStaleLimit {
 		return nil
 	}

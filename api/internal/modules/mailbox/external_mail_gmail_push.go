@@ -63,15 +63,28 @@ func (g *gmailPushSource) accessToken(ctx context.Context, token ExternalMailTok
 	return tokens.AccessToken, rotated, nil
 }
 
-// Subscribe starts or renews the account's watch on its Inbox; Gmail renews by watching again.
+// Subscribe starts or renews the account's watch on its Inbox; Gmail renews by watching again. The
+// subscription is keyed by the address Gmail's profile reports, which is the one its notifications
+// name, so an alias the connection was bound with still matches.
+//
+// A mailbox assigned from a Workspace tenant is not watched: its tokens come from the customer's own
+// service account in the customer's Cloud project, and users.watch only publishes to a topic of the
+// project the token's client belongs to, never the operator's.
 func (g *gmailPushSource) Subscribe(ctx context.Context, request ExternalMailPushRequest) (ExternalMailPushSubscription, error) {
-	key := normalizedPushKey(request.AccountAddress)
-	if key == "" {
-		return ExternalMailPushSubscription{}, fmt.Errorf("gmail watch: the connection has no address")
+	if request.TenantMailbox {
+		return ExternalMailPushSubscription{}, ErrExternalMailPushUnsupported
 	}
 	accessToken, rotated, err := g.accessToken(ctx, request.Token)
 	if err != nil {
 		return ExternalMailPushSubscription{}, err
+	}
+	profile, err := g.mail.profile(ctx, accessToken)
+	if err != nil {
+		return ExternalMailPushSubscription{RefreshToken: rotated}, err
+	}
+	key := normalizedPushKey(profile.EmailAddress)
+	if key == "" || len(key) > 320 || !strings.Contains(key, "@") {
+		return ExternalMailPushSubscription{RefreshToken: rotated}, fmt.Errorf("gmail watch: the profile carries no address")
 	}
 	var watched struct {
 		HistoryID  string `json:"historyId"`
@@ -90,6 +103,9 @@ func (g *gmailPushSource) Subscribe(ctx context.Context, request ExternalMailPus
 
 // Unsubscribe stops the account's watch.
 func (g *gmailPushSource) Unsubscribe(ctx context.Context, request ExternalMailPushRequest) error {
+	if request.TenantMailbox {
+		return nil
+	}
 	accessToken, _, err := g.accessToken(ctx, request.Token)
 	if err != nil {
 		return err
@@ -111,9 +127,9 @@ func (g *gmailPushSource) ParseNotification(ctx context.Context, delivery Extern
 	}
 	key := gmailPushAddress(delivery.Body)
 	if key == "" {
-		return ExternalMailPushParsed{}, nil
+		return ExternalMailPushParsed{Authenticated: true}, nil
 	}
-	return ExternalMailPushParsed{Hints: []ExternalMailPushHint{{Key: key, Authenticated: true}}}, nil
+	return ExternalMailPushParsed{Hints: []ExternalMailPushHint{{Key: key, Authenticated: true}}, Authenticated: true}, nil
 }
 
 // gmailPushAddress reads the lowercased address of a Pub/Sub push body's Gmail message; empty when

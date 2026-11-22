@@ -179,7 +179,7 @@ func TestGoogleOIDCVerifier(t *testing.T) {
 			return newGoogleOIDCVerifier(keys.server.URL, pushTestAudience, pushTestServiceAccount).Verify(ctx, refused["expired"], pushTestNow.Add(-90*time.Minute))
 		},
 		"other service account": func() error {
-			return newGoogleOIDCVerifier(keys.server.URL, pushTestAudience, "").Verify(ctx, refused["other service account"], pushTestNow)
+			return newGoogleOIDCVerifier(keys.server.URL, pushTestAudience, "someone@attacker.example").Verify(ctx, refused["other service account"], pushTestNow)
 		},
 		"unknown key id": func() error {
 			keys.keys["key-b"] = keyB
@@ -199,6 +199,10 @@ func TestGoogleOIDCVerifier(t *testing.T) {
 			token := signPushToken(t, keyA, "key-a", "RS256", withClaim(goodPushClaims(), "aud", []string{"other", pushTestAudience}))
 			return verifier.Verify(ctx, token, pushTestNow)
 		},
+	}
+	// Without a configured service account nothing is accepted, not even an otherwise valid token.
+	if err := newGoogleOIDCVerifier(keys.server.URL, pushTestAudience, "").Verify(ctx, good, pushTestNow); !errors.Is(err, ErrExternalMailPushUnauthenticated) {
+		t.Errorf("a verifier without a service account accepted a token: %v", err)
 	}
 	for name, check := range satisfied {
 		if err := check(); err != nil {
@@ -295,6 +299,10 @@ func newFakeGmailPushServer(t *testing.T) *fakeGmailPushServer {
 				return
 			}
 			_, _ = w.Write([]byte(`{"access_token":"access-for-` + r.PostForm.Get("refresh_token") + `"}`))
+		case "/gmail/v1/users/me/profile":
+			f.auth = append(f.auth, r.Header.Get("Authorization"))
+			f.calls = append(f.calls, r.URL.Path)
+			_, _ = w.Write([]byte(`{"emailAddress":"Dana.Primary@Gmail.Example","historyId":"1"}`))
 		case "/gmail/v1/users/me/watch", "/gmail/v1/users/me/stop":
 			f.calls = append(f.calls, r.URL.Path)
 			f.auth = append(f.auth, r.Header.Get("Authorization"))
@@ -348,7 +356,9 @@ func TestGmailPushWatchAndStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	if got.LookupKey != "dana@gmail.example" || got.SubscriptionID != "" || !got.ExpiresAt.Equal(pushTestNow.Add(7*24*time.Hour)) {
+	// The key is the address Gmail's notifications name, the profile's primary one, not the alias
+	// the connection was bound with.
+	if got.LookupKey != "dana.primary@gmail.example" || got.SubscriptionID != "" || !got.ExpiresAt.Equal(pushTestNow.Add(7*24*time.Hour)) {
 		t.Fatalf("Subscribe = %+v", got)
 	}
 	body := google.bodies[0]
@@ -356,13 +366,16 @@ func TestGmailPushWatchAndStop(t *testing.T) {
 		google.auth[0] != "Bearer access-for-member-grant" {
 		t.Fatalf("watch body %v auth %q", body, google.auth[0])
 	}
+	// A Workspace tenant's mailbox token belongs to the customer's project: it is never watched.
+	calls := len(google.calls)
 	if _, err = push.Subscribe(ctx, ExternalMailPushRequest{
-		Token: ExternalMailToken{AccessToken: "tenant-mailbox-token", DirectoryID: "u-1"}, AccountAddress: "x@corp.example", Now: pushTestNow,
-	}); err != nil || google.auth[1] != "Bearer tenant-mailbox-token" {
-		t.Fatalf("tenant watch err %v auth %q", err, google.auth[1])
+		Token: ExternalMailToken{AccessToken: "tenant-mailbox-token", DirectoryID: "u-1"}, AccountAddress: "x@corp.example",
+		TenantMailbox: true, Now: pushTestNow,
+	}); !errors.Is(err, ErrExternalMailPushUnsupported) || len(google.calls) != calls {
+		t.Fatalf("tenant watch err %v calls %v", err, google.calls)
 	}
 	if err = push.Unsubscribe(ctx, ExternalMailPushRequest{Token: ExternalMailToken{RefreshToken: "member-grant"}}); err != nil ||
-		google.calls[2] != "/gmail/v1/users/me/stop" {
+		google.calls[len(google.calls)-1] != "/gmail/v1/users/me/stop" {
 		t.Fatalf("Unsubscribe err %v calls %v", err, google.calls)
 	}
 	if _, err = push.Subscribe(ctx, ExternalMailPushRequest{Token: ExternalMailToken{RefreshToken: "refused"}, AccountAddress: "a@b.example", Now: pushTestNow}); !errors.Is(err, ErrExternalMailAuth) {

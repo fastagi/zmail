@@ -45,7 +45,7 @@ func (h *Handler) receivePush(c *gin.Context, provider domain.ExternalMailProvid
 		return
 	}
 	reply, err := h.service.ReceiveExternalMailPush(c.Request.Context(), provider, ExternalMailPushDelivery{
-		Header: c.Request.Header, Query: c.Request.URL.Query(), Body: body,
+		Header: c.Request.Header, Query: c.Request.URL.Query(), Body: body, ClientIP: c.ClientIP(),
 	})
 	if err != nil {
 		var retry *RetryAfterError

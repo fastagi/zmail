@@ -29,8 +29,13 @@ type addExternalMailPush struct {
 //   - idx_external_mail_subscriptions_lookup serves the notification routes;
 //     idx_external_mail_subscriptions_pending the worker's promotion of notifications that arrived
 //     during a fetch.
+//   - live_since is when the subscription last became active; degraded_at marks one that a poll
+//     caught missing new mail, so the connection polls at the regular interval until a notification
+//     arrives again. unsupported marks a connection whose provider cannot deliver push for it (a
+//     Gmail mailbox assigned from a Workspace tenant, whose tokens come from the customer's project).
 //   - external_mail_sync_runs.triggered_by tells a push-triggered sync from a poll. The constant default
-//     is recorded without rewriting the table.
+//     is recorded without rewriting the table; its check is added NOT VALID and validated after, so
+//     the scan holds no lock that blocks writes.
 func (m *addExternalMailPush) Up(db *gorm.DB) error {
 	return execStatements(db,
 		`CREATE TABLE external_mail_subscriptions (
@@ -47,13 +52,15 @@ func (m *addExternalMailPush) Up(db *gorm.DB) error {
 		  last_notified_at timestamptz,
 		  last_push_sync_at timestamptz,
 		  scheduled_sync_at timestamptz,
+		  live_since timestamptz,
+		  degraded_at timestamptz,
 		  consecutive_failures smallint NOT NULL DEFAULT 0,
 		  last_error_code varchar(64),
 		  created_at timestamptz NOT NULL,
 		  updated_at timestamptz NOT NULL,
 		  CONSTRAINT uq_external_mail_subscriptions_connection UNIQUE (connection_id),
 		  CONSTRAINT chk_external_mail_subscriptions_provider CHECK (provider ~ '^[a-z][a-z0-9_]{1,15}$'),
-		  CONSTRAINT chk_external_mail_subscriptions_status CHECK (status IN ('pending','active','stopped')),
+		  CONSTRAINT chk_external_mail_subscriptions_status CHECK (status IN ('pending','active','unsupported','stopped')),
 		  CONSTRAINT chk_external_mail_subscriptions_active CHECK (status <> 'active' OR (lookup_key <> '' AND expires_at IS NOT NULL)),
 		  CONSTRAINT chk_external_mail_subscriptions_stopped CHECK (status <> 'stopped' OR (lookup_key = '' AND secret_hash = '' AND pending_at IS NULL)),
 		  CONSTRAINT chk_external_mail_subscriptions_secret CHECK (secret_hash = '' OR secret_hash ~ '^[0-9a-f]{64}$'),
@@ -65,9 +72,10 @@ func (m *addExternalMailPush) Up(db *gorm.DB) error {
 		  WHERE pending_at IS NOT NULL`,
 		`CREATE INDEX idx_external_mail_subscriptions_open ON external_mail_subscriptions (connection_id)
 		  WHERE status <> 'stopped'`,
+		`ALTER TABLE external_mail_sync_runs ADD COLUMN triggered_by varchar(8) NOT NULL DEFAULT 'poll'`,
 		`ALTER TABLE external_mail_sync_runs
-		  ADD COLUMN triggered_by varchar(8) NOT NULL DEFAULT 'poll',
-		  ADD CONSTRAINT chk_external_mail_sync_runs_trigger CHECK (triggered_by IN ('poll','push'))`,
+		  ADD CONSTRAINT chk_external_mail_sync_runs_trigger CHECK (triggered_by IN ('poll','push')) NOT VALID`,
+		`ALTER TABLE external_mail_sync_runs VALIDATE CONSTRAINT chk_external_mail_sync_runs_trigger`,
 	)
 }
 

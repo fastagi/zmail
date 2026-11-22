@@ -419,8 +419,10 @@ type service struct {
 	agentReads ratelimit.Store
 	// pushStore keeps push subscriptions; nil when repo does not implement it.
 	pushStore domain.ExternalMailPushRepository
-	// pushLimits bounds each provider's notification requests per minute.
+	// pushLimits bounds each provider's authenticated notification requests per minute.
 	pushLimits ratelimit.Store
+	// pushRefusals bounds, per IP and in this process, notification requests that authenticate nothing.
+	pushRefusals ratelimit.Store
 }
 
 var _ Service = (*service)(nil)
@@ -512,8 +514,9 @@ func NewService(
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
 		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),
-		pushStore:  pushStore,
-		pushLimits: newExternalMailPushLimit(limits, settings.ExternalMail.Push.RequestsPerMinute()),
+		pushStore:    pushStore,
+		pushLimits:   newExternalMailPushLimit(limits, settings.ExternalMail.Push.RequestsPerMinute()),
+		pushRefusals: newExternalMailPushRefusals(),
 	}
 }
 
@@ -815,8 +818,8 @@ func (s *service) DeleteMailbox(ctx context.Context, viewer domain.OrganizationC
 		return fmt.Errorf("%w: the mailbox awaits its handover", ErrMailboxAccessConflict)
 	}
 	if mailbox.Connected() {
-		// No stored grant outlives its mailbox: the connection is revoked, its token erased and
-		// handed back, in the transaction that deletes the mailbox.
+		// No stored grant outlives its mailbox: the connection is revoked and its token erased in the
+		// transaction that deletes the mailbox, and handed back once it committed.
 		return s.deleteConnectedMailbox(ctx, viewer, mailbox)
 	}
 	if err := s.repo.DeleteMailbox(ctx, viewer.OrganizationID, mailboxID); err != nil {

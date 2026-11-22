@@ -240,6 +240,10 @@ func (s *service) revokeConnectionsOfLeaver(ctx context.Context, organizationID,
 	if err != nil {
 		return err
 	}
+	// Each connection is revoked in its own transaction; the provider calls of all of them follow,
+	// a few at a time, instead of one connection after another against the network.
+	ctx, releases := withDeferredReleases(ctx)
+	defer releases.run(ctx)
 	for _, connection := range connections {
 		if err := s.revokeConnection(ctx, connection, 0, domain.MailboxAccessConnectionRevokedLeave); err != nil {
 			return err

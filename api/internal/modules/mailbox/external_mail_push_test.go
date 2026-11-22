@@ -154,7 +154,7 @@ func TestExternalMailPushSubscribesAfterFirstSync(t *testing.T) {
 	if err != nil || len(connections) != 1 || connections[0].Push == nil {
 		t.Fatalf("connections = %+v, %v", connections, err)
 	}
-	state := toExternalMailPushState(connections[0].Push, now)
+	state := toExternalMailPushState(connections[0].Push, connections[0].PushStatus)
 	if state.Status != "active" || state.ExpiresAt == nil || state.LastNotifiedAt != nil {
 		t.Fatalf("push state = %+v", state)
 	}
@@ -284,10 +284,11 @@ func TestExternalMailPushDuringAFetchSyncsAgain(t *testing.T) {
 		}
 	}})
 	f.sync(t)
-	now := f.service.now().UTC()
 	if subscription := f.subscription(t, f.connection.ID); subscription.PendingAt == nil {
 		t.Fatal("a notification received during the fetch was answered by it")
 	}
+	// The next sync waits the fetch spacing after this one, and no longer.
+	now := f.advance(f.service.settings.ExternalMail.Sync.Spacing())
 	f.sync(t)
 	runs := f.runs(t)
 	if len(runs) != 3 || runs[0].Trigger != domain.ExternalMailSyncTriggerPush || !runs[0].StartedAt.Equal(now) {
@@ -442,6 +443,7 @@ func TestExternalMailPushRenewsBeforeExpiry(t *testing.T) {
 	if subscription := f.subscription(t, f.connection.ID); subscription.Live(f.service.now()) {
 		t.Fatalf("a removed subscription is still live: %+v", subscription)
 	}
+	f.advance(f.service.settings.ExternalMail.Sync.Spacing())
 	f.sync(t)
 	recreated := f.subscription(t, f.connection.ID)
 	if recreated.ProviderSubscriptionID == renewed.ProviderSubscriptionID || recreated.SecretHash == renewed.SecretHash ||
@@ -718,12 +720,15 @@ func TestExternalMailPushRoutes(t *testing.T) {
 		t.Fatalf("oversized = %d", got.Code)
 	}
 	f.service.pushLimits = ratelimit.NewMemoryStores().New(ratelimit.Rule{Name: ruleExternalMailPush, Max: 1, Window: time.Minute})
-	call("/v1/external-mail-notifications/outlook", string(fakeNotificationBody(id, secret, "")), nil)
-	limited := call("/v1/external-mail-notifications/outlook", string(fakeNotificationBody(id, secret, "")), nil)
+	authenticated := http.Header{"Authorization": {"Bearer good"}}
+	if got := call("/v1/external-mail-notifications/gmail", f.connection.AccountAddress, authenticated); got.Code != http.StatusNoContent {
+		t.Fatalf("authenticated notification within budget = %d", got.Code)
+	}
+	limited := call("/v1/external-mail-notifications/gmail", f.connection.AccountAddress, authenticated)
 	if limited.Code != http.StatusTooManyRequests || limited.Header().Get("Retry-After") == "" {
 		t.Fatalf("over budget = %d %v", limited.Code, limited.Header())
 	}
-	for _, leaked := range []string{secret, id, "dana@gmail.example", "Bearer good", "Validation: Token"} {
+	for _, leaked := range []string{secret, id, "dana@gmail.example", f.connection.AccountAddress, "Bearer good", "Validation: Token"} {
 		if strings.Contains(logs.String(), leaked) {
 			t.Fatalf("the logs carry %q", leaked)
 		}

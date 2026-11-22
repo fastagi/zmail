@@ -22,6 +22,9 @@ const (
 	ExternalMailSubscriptionPending ExternalMailSubscriptionStatus = "pending"
 	// ExternalMailSubscriptionActive has a subscription at the provider until ExpiresAt.
 	ExternalMailSubscriptionActive ExternalMailSubscriptionStatus = "active"
+	// ExternalMailSubscriptionUnsupported means the provider cannot deliver push for this connection
+	// (a Gmail mailbox assigned from a Workspace tenant); it is polled, and checked again daily.
+	ExternalMailSubscriptionUnsupported ExternalMailSubscriptionStatus = "unsupported"
 	// ExternalMailSubscriptionStopped ended with its connection; notifications are ignored.
 	ExternalMailSubscriptionStopped ExternalMailSubscriptionStatus = "stopped"
 )
@@ -59,7 +62,11 @@ type ExternalMailSubscription struct {
 	LastPushSyncAt *time.Time
 	// ScheduledSyncAt is the next_sync_at the latest save of the connection wrote; a notification
 	// lowers next_sync_at only while it is still that value, so a claim lease is never shortened.
-	ScheduledSyncAt     *time.Time
+	ScheduledSyncAt *time.Time
+	// LiveSince is when the subscription last became active.
+	LiveSince *time.Time
+	// DegradedAt marks a subscription a poll caught missing new mail; a notification clears it.
+	DegradedAt          *time.Time
 	ConsecutiveFailures int
 	LastErrorCode       string
 	CreatedAt           time.Time
@@ -71,8 +78,25 @@ func (s *ExternalMailSubscription) Live(now time.Time) bool {
 	return s != nil && s.Status == ExternalMailSubscriptionActive && s.ExpiresAt != nil && s.ExpiresAt.After(now)
 }
 
+// Proven reports whether push is shown to work at now: the subscription is live, no poll caught it
+// missing mail, and a notification arrived (or it became active) within quiet.
+func (s *ExternalMailSubscription) Proven(now time.Time, quiet time.Duration) bool {
+	if !s.Live(now) || s.DegradedAt != nil {
+		return false
+	}
+	var heard time.Time
+	if s.LiveSince != nil {
+		heard = *s.LiveSince
+	}
+	if s.LastNotifiedAt != nil && s.LastNotifiedAt.After(heard) {
+		heard = *s.LastNotifiedAt
+	}
+	return now.Sub(heard) < quiet
+}
+
 // ExternalMailPushHit is a notification matched to subscription rows of active connections.
 type ExternalMailPushHit struct {
+	LookupKey      string
 	SubscriptionID uint
 	ConnectionID   uint
 	SecretHash     string
@@ -84,6 +108,8 @@ type ExternalMailPushMark struct {
 	Now             time.Time
 	// Window is the least time between two push-triggered syncs of one connection.
 	Window time.Duration
+	// Spacing is the least time between two fetches of one connection.
+	Spacing time.Duration
 	// Lifecycle, when set, is the provider's lifecycle event: reauthorization and removal make the
 	// renewal due now, and removal also ends the subscription's life.
 	Lifecycle string
@@ -95,7 +121,9 @@ type ExternalMailSubscriptionSave struct {
 	ConnectionID uint
 	Provider     ExternalMailProvider
 	// Succeeded attempts replace the provider fields; failed ones only record the failure.
-	Succeeded              bool
+	Succeeded bool
+	// Unsupported records that the provider cannot deliver push for the connection.
+	Unsupported            bool
 	LookupKey              string
 	ProviderSubscriptionID string
 	// SecretHash replaces the stored hash when not empty (a newly created Graph subscription).
@@ -123,15 +151,18 @@ type ExternalMailPushRepository interface {
 	FindExternalMailSubscription(ctx context.Context, connectionID uint) (*ExternalMailSubscription, error)
 	// ListExternalMailSubscriptions returns the subscriptions of the connections, keyed by connection.
 	ListExternalMailSubscriptions(ctx context.Context, connectionIDs []uint) (map[uint]*ExternalMailSubscription, error)
-	// MatchExternalMailSubscriptions returns at most limit rows of the provider and key that are
-	// not stopped and whose connection is active.
-	MatchExternalMailSubscriptions(ctx context.Context, provider ExternalMailProvider, lookupKey string, limit int) ([]ExternalMailPushHit, error)
+	// MatchExternalMailSubscriptions returns, in one query, at most limit rows of the provider whose
+	// key is one of keys, that are not stopped and whose connection is active.
+	MatchExternalMailSubscriptions(ctx context.Context, provider ExternalMailProvider, keys []string, limit int) ([]ExternalMailPushHit, error)
+	// MarkExternalMailPushDegraded marks the connection's live subscription degraded and makes its
+	// renewal due; it reports whether it changed anything.
+	MarkExternalMailPushDegraded(ctx context.Context, connectionID uint, now time.Time) (bool, error)
 	// MarkExternalMailPush records a notification on the rows and marks their connections due as
 	// the mark allows; it returns how many connections it made due sooner.
 	MarkExternalMailPush(ctx context.Context, mark ExternalMailPushMark) (int, error)
 	// PromotePendingExternalMailPush marks due up to limit connections whose notification arrived
 	// while they were being fetched.
-	PromotePendingExternalMailPush(ctx context.Context, now time.Time, window time.Duration, limit int) (int, error)
+	PromotePendingExternalMailPush(ctx context.Context, now time.Time, window, spacing time.Duration, limit int) (int, error)
 	// SaveExternalMailSubscription records a subscribe or renewal attempt.
 	SaveExternalMailSubscription(ctx context.Context, save ExternalMailSubscriptionSave) error
 	// RecordExternalMailPushSync records a saved sync on the subscription, when there is one: it

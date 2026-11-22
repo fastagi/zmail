@@ -40,6 +40,13 @@ var (
 		},
 		[]string{"provider"},
 	)
+	externalMailPushDegradedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zmail_external_mail_push_degraded_total",
+			Help: "Push subscriptions a poll caught missing new mail, by provider",
+		},
+		[]string{"provider"},
+	)
 	externalMailCopiesPurgedTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "zmail_external_mail_copies_purged_total",
@@ -72,4 +79,9 @@ func ObserveExternalMailPushDelay(provider string, delay time.Duration) {
 	if delay >= 0 {
 		externalMailPushDelaySeconds.WithLabelValues(provider).Observe(delay.Seconds())
 	}
+}
+
+// RecordExternalMailPushDegraded counts a subscription a poll caught missing new mail.
+func RecordExternalMailPushDegraded(provider string) {
+	externalMailPushDegradedTotal.WithLabelValues(provider).Inc()
 }
