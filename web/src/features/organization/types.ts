@@ -5,6 +5,8 @@ import type {
   createOrganizationInvitationSchema,
   createOrganizationSchema,
   invitationEmailSendStatusSchema,
+  memberFeatureSchema,
+  memberFeaturesSchema,
   organizationContextSchema,
   organizationInvitationRoleSchema,
   organizationInvitationSchema,
@@ -17,11 +19,17 @@ import type {
   paginationLinksSchema,
   paginationMetaSchema,
   transferOrganizationOwnershipSchema,
+  updateOrganizationMemberFeaturesSchema,
   updateOrganizationMemberSchema,
   updateOrganizationSchema,
 } from './schemas';
 
 export type OrganizationRole = Infer<typeof organizationRoleSchema>;
+export type MemberFeature = Infer<typeof memberFeatureSchema>;
+export type MemberFeatures = Infer<typeof memberFeaturesSchema>;
+export type UpdateOrganizationMemberFeaturesInput = Infer<
+  typeof updateOrganizationMemberFeaturesSchema
+>;
 export type Organization = Infer<typeof organizationSchema>;
 export type OrganizationContext = Infer<typeof organizationContextSchema>;
 export type PaginationMeta = Infer<typeof paginationMetaSchema>;

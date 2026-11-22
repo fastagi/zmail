@@ -7,7 +7,9 @@ import {
   acceptOrganizationInvitationSchema,
   createOrganizationInvitationSchema,
   createOrganizationSchema,
+  updateOrganizationMemberFeaturesSchema,
 } from '@/features/organization/schemas';
+import { effectiveMemberFeatures } from '@/features/organization/utils/member-features';
 import {
   parseOrganizationInvitationCreateResponse,
   parseOrganizationInvitationPageResponse,
@@ -265,6 +267,57 @@ describe('organization network contract validation', () => {
     expect(acceptOrganizationInvitationSchema.parse({ token: '  one-time-token  ' })).toEqual({
       token: 'one-time-token',
     });
+  });
+});
+
+describe('member feature grants', () => {
+  const grants = { broadcasts: false, contacts: true, templates: false, api_keys: true };
+
+  it('reads grants from organization, context, and member views', () => {
+    expect(parseOrganizationResponse({ ...organization, role: 'member', features: grants })).toMatchObject({
+      features: grants,
+    });
+    // An API from before grants sends none; the view still parses.
+    expect(parseOrganizationResponse(organization).features).toBeUndefined();
+    expect(() =>
+      parseOrganizationResponse({ ...organization, features: { ...grants, extra: true } })
+    ).toThrow(ApiError);
+  });
+
+  it('gives owners, admins, and pre-grant views every feature', () => {
+    const all = { broadcasts: true, contacts: true, templates: true, api_keys: true };
+    expect(effectiveMemberFeatures('member', grants)).toEqual(grants);
+    expect(effectiveMemberFeatures('admin', grants)).toEqual(all);
+    expect(effectiveMemberFeatures('owner', grants)).toEqual(all);
+    expect(effectiveMemberFeatures('member', undefined)).toEqual(all);
+  });
+
+  it('accepts a change that names at least one known feature', () => {
+    expect(updateOrganizationMemberFeaturesSchema.safeParse({ broadcasts: true }).success).toBe(true);
+    expect(updateOrganizationMemberFeaturesSchema.safeParse({}).success).toBe(false);
+    expect(updateOrganizationMemberFeaturesSchema.safeParse({ billing: true }).success).toBe(false);
+    expect(updateOrganizationMemberFeaturesSchema.safeParse({ contacts: 'yes' }).success).toBe(false);
+  });
+
+  it('lets mock managers change a member and nobody change a manager', () => {
+    const store = new MockOrganizationStore({ now: () => new Date(timestamp) });
+
+    expect(store.listMembers(owner, 1, 1, 15)).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          id: 3,
+          features: { broadcasts: false, contacts: true, templates: true, api_keys: false },
+        }),
+      ]),
+    });
+    expect(store.updateMemberFeatures(owner, 1, 3, { broadcasts: true })).toMatchObject({
+      id: 3,
+      features: { broadcasts: true, contacts: true, templates: true, api_keys: false },
+    });
+    expect(store.resolveContext(member, 1)?.features).toMatchObject({ broadcasts: true });
+    expect(store.updateMemberFeatures(member, 1, 3, { api_keys: true })).toBe('permission_denied');
+    expect(store.updateMemberFeatures(owner, 1, 2, { api_keys: false })).toBe('member_features_fixed');
+    expect(store.updateMemberFeatures(owner, 1, 99, { api_keys: true })).toBe('member_not_found');
   });
 });
 

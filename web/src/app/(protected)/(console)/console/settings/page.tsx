@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { isWebFeatureEnabled } from '@/config/features';
 import { ApiKeyPanel } from '@/features/api-key';
+import { MemberFeatureGate } from '@/features/mailbox/components/member-feature-gate';
 import { getT } from '@/i18n/server';
 
 import { SettingsTabs } from './settings-tabs';
@@ -38,6 +39,14 @@ export default async function SettingsPage() {
   const t = await getT('settings');
   const settingEnabled = isWebFeatureEnabled('setting');
   const tabs = settingsTabs.filter(value => value !== 'preferences' || settingEnabled);
+  // API keys work in an organization only while it grants them to the member.
+  const gateApiKeys = isWebFeatureEnabled('organization') && isWebFeatureEnabled('mailbox');
+  const apiTrigger = (
+    <TabsTrigger value="api">
+      <KeyRound aria-hidden="true" />
+      {t('tabs.api')}
+    </TabsTrigger>
+  );
 
   return (
     <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 lg:py-8">
@@ -59,10 +68,13 @@ export default async function SettingsPage() {
             <ShieldCheck aria-hidden="true" />
             {t('tabs.security')}
           </TabsTrigger>
-          <TabsTrigger value="api">
-            <KeyRound aria-hidden="true" />
-            {t('tabs.api')}
-          </TabsTrigger>
+          {gateApiKeys ? (
+            <MemberFeatureGate feature="api_keys" fallback={null}>
+              {apiTrigger}
+            </MemberFeatureGate>
+          ) : (
+            apiTrigger
+          )}
         </TabsList>
 
         <TabsContent value="profile" className="pt-5">
@@ -87,7 +99,13 @@ export default async function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="api" className="pt-5">
-          <ApiKeyPanel />
+          {gateApiKeys ? (
+            <MemberFeatureGate feature="api_keys">
+              <ApiKeyPanel />
+            </MemberFeatureGate>
+          ) : (
+            <ApiKeyPanel />
+          )}
         </TabsContent>
       </SettingsTabs>
     </div>

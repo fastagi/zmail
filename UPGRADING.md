@@ -11,6 +11,32 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Member feature grants
+
+### High — Deploy the Web before the API
+
+Organization, organization-context, and organization-member views gain `features`
+(`broadcasts`, `contacts`, `templates`, `api_keys`): the effective grants, all `true` for owners and
+admins. A Web console from before this change validates member rows strictly and reports the members
+tab as failed against the new API. Roll the Web forward first; the new Web treats a missing
+`features` as every feature granted, so it works against the old API too.
+
+### High — Members need a grant for broadcasts, contacts, templates, and API keys
+
+Migration `2026_12_18_090000_add_member_feature_grants` (organization starter) adds
+`can_use_broadcasts`, `can_use_contacts`, `can_use_templates`, and `can_use_api_keys` to
+`organization_memberships`. Existing memberships get all four; a new member gets contacts and
+templates only. A member without the grant gets `403 ORGANIZATION.FEATURE_NOT_GRANTED` from the
+gated mailbox routes (see `contracts/MAILBOXES.md`, "Member Feature Grants"), including every API-key
+route in that organization. Owners and admins change grants with
+`PATCH /v1/organizations/{id}/members/{member_id}/features`; their own grants are fixed
+(`409 ORGANIZATION.MEMBER_FEATURES_FIXED`).
+
+A member with the broadcast grant may now send, pause, cancel, and resume broadcasts. Sending and
+resuming still need `send` on the sender mailbox, and a member stops only broadcasts it could send.
+Before, only owners and admins could do this. `domain.OrganizationContext` gains `Features` and
+`CanUse`; the organization repository gains `UpdateMemberFeatures`.
+
 ## Unreleased — Connector acceptance round 3 fixes
 
 ### Low — Provider releases keep their owner

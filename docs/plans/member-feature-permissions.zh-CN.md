@@ -95,7 +95,7 @@
 - `GET /organizations/:id/members` 和 `GET /organization-context` 的响应里新增 `features: {broadcasts, contacts, templates, api_keys}`，值为有效权限。
 - `PATCH /organizations/:id/members/:member_id/features`
   - 请求体：`{"broadcasts": true}`，只改出现的字段，至少要有一个字段，否则返回 422。
-  - 只有 owner/admin 能调用，其他人返回 403 `COMMON.PERMISSION_DENIED`。目标必须是 member 角色，否则返回 409 `ORGANIZATION.MEMBER_FEATURES_FIXED`。成员不存在返回 404。
+  - 只有 owner/admin 能调用，其他人返回 403 `PERMISSION.DENIED`。目标必须是 member 角色，否则返回 409 `ORGANIZATION.MEMBER_FEATURES_FIXED`。成员不存在返回 404。
   - 成功返回更新后的成员，并写一条审计 `organization_members.change_features`，只记录真正变化的功能。
 - 新错误码：`ORGANIZATION.FEATURE_NOT_GRANTED`（403）、`ORGANIZATION.MEMBER_FEATURES_FIXED`（409）。
 

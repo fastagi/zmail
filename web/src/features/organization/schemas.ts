@@ -1,5 +1,6 @@
 import {
   array,
+  boolean,
   email,
   enum as enumSchema,
   int,
@@ -38,6 +39,20 @@ export const invitationEmailSendStatusSchema = enumSchema([
   'failed',
   'not_configured',
 ]);
+
+/** The console features an organization grants each member, in display order. */
+export const memberFeatureSchema = enumSchema(['broadcasts', 'contacts', 'templates', 'api_keys']);
+
+/**
+ * What a membership may use. Owners and admins always report every feature. Optional on the
+ * views below so a console talking to an API from before grants existed keeps working.
+ */
+export const memberFeaturesSchema = strictObject({
+  broadcasts: boolean(),
+  contacts: boolean(),
+  templates: boolean(),
+  api_keys: boolean(),
+});
 
 const safeIdSchema = number().check(
   int(),
@@ -78,6 +93,7 @@ export const organizationSchema = object({
   name: organizationNameSchema,
   slug: organizationSlugSchema,
   role: organizationRoleSchema,
+  features: optional(memberFeaturesSchema),
   created_at: timestampSchema,
   updated_at: timestampSchema,
 });
@@ -89,6 +105,7 @@ export const organizationContextSchema = object({
   membership_id: safeIdSchema,
   user_id: safeIdSchema,
   role: organizationRoleSchema,
+  features: optional(memberFeaturesSchema),
 });
 
 export const paginationMetaSchema = object({
@@ -122,6 +139,7 @@ export const organizationMemberSchema = strictObject({
   nickname: optional(string().check(maxLength(50))),
   avatar: optional(string().check(maxLength(255))),
   role: organizationRoleSchema,
+  features: optional(memberFeaturesSchema),
   joined_at: timestampSchema,
   updated_at: timestampSchema,
 });
@@ -202,6 +220,17 @@ export const acceptOrganizationInvitationSchema = strictObject({
 export const updateOrganizationMemberSchema = strictObject({
   role: organizationInvitationRoleSchema,
 });
+
+export const updateOrganizationMemberFeaturesSchema = strictObject({
+  broadcasts: optional(boolean()),
+  contacts: optional(boolean()),
+  templates: optional(boolean()),
+  api_keys: optional(boolean()),
+}).check(
+  refine((value) => Object.values(value).some((granted) => granted !== undefined), {
+    message: 'Name at least one feature',
+  })
+);
 
 export const transferOrganizationOwnershipSchema = strictObject({
   new_owner_member_id: safeIdSchema,
