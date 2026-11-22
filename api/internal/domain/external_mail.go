@@ -195,6 +195,9 @@ type ExternalMailPersonalAssignment struct {
 	ExemptUserID uint
 	// Released marks a handover: the address may go to someone else.
 	Released bool
+	// TenantHeld marks an address a tenant ever assigned; only then do the personal-holder and
+	// self-binding refusals apply.
+	TenantHeld bool
 }
 
 // ExternalMailTenantStatus is the state of an authorized tenant.
@@ -290,11 +293,13 @@ type ExternalMailTenantRepository interface {
 	// handover of its personal mailbox does, and marks the address's personal record released with
 	// the handover's seal boundary.
 	ShareTenantConnection(ctx context.Context, mailboxID uint, boundary time.Time) error
-	// RecordTenantAssignment stores who now holds the address (0 for a shared mailbox), raises its
-	// floor to floor (never lowering it; nil keeps it), and sets the exempt member (0 for none).
-	RecordTenantAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string, holderUserID, tenantID uint, floor *time.Time, exemptUserID uint, at time.Time) error
-	// FindPersonalAssignment returns the record of the address, or of the directory user when
-	// directoryID is not empty, ignoring the address's case; nil when none.
+	// RecordAddressHolder stores who now reads the address by any binding (0 for a shared mailbox),
+	// raises its floor to floor (never lowering it; nil keeps it), sets the exempt member (0 for none),
+	// and marks a tenant assignment (tenantID not 0), which stays marked.
+	RecordAddressHolder(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string, holderUserID, tenantID uint, floor *time.Time, exemptUserID uint, at time.Time) error
+	// FindPersonalAssignment returns the record of the address under any provider, or of the
+	// provider's directory user when directoryID is not empty, ignoring the address's case; nil when
+	// none.
 	FindPersonalAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string) (*ExternalMailPersonalAssignment, error)
 	// MarkPersonalBoundary raises the floor of every address personally assigned to userID to at when
 	// the member leaves; it never lowers one.

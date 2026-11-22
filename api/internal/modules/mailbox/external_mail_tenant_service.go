@@ -528,7 +528,7 @@ func (s *service) assignTenantRow(ctx context.Context, viewer domain.Organizatio
 		}
 		binding.notBefore = floor
 		record := func() error {
-			return s.externalMail.RecordTenantAssignment(tx, viewer.OrganizationID, tenant.Provider, address, binding.directoryID,
+			return s.externalMail.RecordAddressHolder(tx, viewer.OrganizationID, tenant.Provider, address, binding.directoryID,
 				target, tenant.ID, floor, exempt, s.now().UTC())
 		}
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, tenant.Provider, address)
@@ -708,7 +708,7 @@ func (s *service) bindTenantPersonal(tx context.Context, viewer domain.Organizat
 // for a shared mailbox.
 func (s *service) checkPersonalHolder(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, targetUserID uint) error {
 	record, err := s.externalMail.FindPersonalAssignment(tx, organizationID, provider, address, directoryID)
-	if err != nil || record == nil || record.UserID == 0 || record.UserID == targetUserID || record.Released {
+	if err != nil || record == nil || !record.TenantHeld || record.UserID == 0 || record.UserID == targetUserID || record.Released {
 		return err
 	}
 	if _, err = s.currentMembership(tx, organizationID, record.UserID); errors.Is(err, ErrMailboxAccessInvalid) {
@@ -728,13 +728,34 @@ func (s *service) checkPersonalHolder(tx context.Context, organizationID uint, p
 // binding.
 func (s *service) checkSelfBinding(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, reader uint) error {
 	record, err := s.externalMail.FindPersonalAssignment(tx, organizationID, provider, address, directoryID)
-	if err != nil || record == nil {
+	if err != nil || record == nil || !record.TenantHeld {
+		// Only own-grant bindings so far: whoever proves control of the account may bind it, as before.
 		return err
 	}
 	if reader == 0 || record.UserID != reader || record.ExemptUserID != reader {
 		return ErrExternalMailAccountTaken
 	}
 	return nil
+}
+
+// recordSelfBinding records a binding with the account's own grant as a tenure of the address: reader
+// (0 for a shared mailbox) holds it now, and stays the exempt first holder only if nobody else ever
+// read it. A later tenant assignment to anyone else then starts after it.
+func (s *service) recordSelfBinding(tx context.Context, connection *domain.ExternalMailConnection, directoryID string) error {
+	var reader uint
+	if !connection.Shared && connection.OwnerUserID != nil {
+		reader = *connection.OwnerUserID
+	}
+	record, err := s.externalMail.FindPersonalAssignment(tx, connection.OrganizationID, connection.Provider, connection.AccountAddress, directoryID)
+	if err != nil {
+		return err
+	}
+	exempt := reader
+	if record != nil && (reader == 0 || record.ExemptUserID != reader || (record.UserID != reader && record.UserID != 0)) {
+		exempt = 0
+	}
+	return s.externalMail.RecordAddressHolder(tx, connection.OrganizationID, connection.Provider, connection.AccountAddress,
+		directoryID, reader, 0, nil, exempt, s.now().UTC())
 }
 
 // tenantPrivacy decides the floor of a connection about to read an address for targetUserID (0 for a

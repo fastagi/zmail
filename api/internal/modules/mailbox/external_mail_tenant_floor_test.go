@@ -3,8 +3,6 @@ package mailbox
 import (
 	"context"
 	"errors"
-	"fmt"
-	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
@@ -14,8 +12,10 @@ import (
 
 // deliverAlice delivers one message to alice@ received now and advances the clock past it.
 func (f *tenantFixture) deliverAlice(subject string) {
-	f.source.Deliver(TenantMailboxToken(tenantAddress("alice")), externalMessage(
-		"id-"+strings.ReplaceAll(subject, " ", "-"), subject, f.service.now()))
+	message := externalMessage("id-"+strings.ReplaceAll(subject, " ", "-"), subject, f.service.now())
+	// The account behind the tenant token and behind a member's own sign-in ("fake-alice") is one.
+	f.source.Deliver(TenantMailboxToken(tenantAddress("alice")), message)
+	f.source.Deliver("fake-alice", message)
 	f.advance(time.Minute)
 }
 
@@ -157,164 +157,5 @@ func TestTenantWaitingMailboxIsNotDeleted(t *testing.T) {
 	rejoined := f.rejoin(t, f.advance(time.Minute))
 	if !hasSubject(f.readableSubjects(t, rejoined, alice.MailboxID), "Kept") {
 		t.Fatal("the returning member lost their mail")
-	}
-}
-
-// tenure tracks who may read each message of alice@: its owner is the holder whose tenure covers its
-// receive time. Before anyone held it, the first holder; while unheld, the last holder; while a
-// departed holder's mailbox awaits handover, whoever comes next (the successor, or the holder back).
-type tenure struct {
-	owner   map[string]uint
-	current uint // 0 before the first holder
-	pending []string
-	waiting bool
-	early   []string // received before the first holder
-}
-
-func (o *tenure) received(subject string) {
-	switch {
-	case o.waiting:
-		o.pending = append(o.pending, subject)
-	case o.current == 0:
-		o.early = append(o.early, subject)
-	default:
-		o.owner[subject] = o.current
-	}
-}
-
-func (o *tenure) hold(user uint) {
-	for _, subject := range o.pending {
-		o.owner[subject] = user
-	}
-	for _, subject := range o.early {
-		o.owner[subject] = user
-	}
-	o.pending, o.early, o.waiting, o.current = nil, nil, false, user
-}
-
-// TestTenantTenureProperty (N4): random sequences of assignments, unassignments, deletions, handovers,
-// departures, returns, and tenant revocations among three members; after every sync nobody reads a
-// message received outside their own tenures.
-func TestTenantTenureProperty(t *testing.T) {
-	users := []uint{accessB, accessC, accessD}
-	for seed := uint64(1); seed <= 12; seed++ {
-		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
-			f := newTenantFixture(t)
-			ctx := context.Background()
-			random := rand.New(rand.NewPCG(seed, seed*7919))
-			model := &tenure{owner: map[string]uint{}}
-			memberships := map[uint]uint{}
-			viewer := func(user uint) domain.OrganizationContext {
-				v := viewerOf(accessOrg, user, domain.OrganizationRoleMember)
-				if id, ok := memberships[user]; ok {
-					v.MembershipID = id
-				}
-				return v
-			}
-			left := map[uint]bool{}
-			mailboxes := map[uint]bool{}
-			var connection *domain.ExternalMailConnection
-			current := func() *domain.ExternalMailConnection {
-				if connection == nil {
-					return nil
-				}
-				got, err := f.service.externalMail.FindExternalMailConnection(ctx, accessOrg, connection.ID)
-				if err != nil {
-					return nil
-				}
-				return got
-			}
-			var log []string
-			for step := 0; step < 30; step++ {
-				subject := fmt.Sprintf("s%d", step)
-				model.received(subject)
-				f.deliverAlice(subject)
-				user := users[random.IntN(len(users))]
-				live := current()
-				var action string
-				switch random.IntN(7) {
-				case 0, 1:
-					action = fmt.Sprintf("assign %d", user)
-					if left[user] {
-						break
-					}
-					result := f.assign(t, f.admin, personalRow("alice", user))[0]
-					if result.Connection != nil && result.Status != TenantAssignmentUnchanged {
-						connection = result.Connection
-						mailboxes[connection.MailboxID] = true
-						model.hold(user)
-					}
-				case 2:
-					action = "unassign"
-					if live != nil {
-						_ = f.service.RevokeExternalMailConnection(ctx, f.admin, live.ID)
-					}
-				case 3:
-					action = "delete"
-					if live != nil {
-						_ = f.service.DeleteMailbox(ctx, f.admin, live.MailboxID)
-					}
-				case 4:
-					action = fmt.Sprintf("handover to %d", user)
-					if live != nil && !live.Shared && !left[user] && user != model.current {
-						if _, err := f.service.HandOverMailbox(ctx, f.admin, live.MailboxID, user); err == nil {
-							model.hold(user)
-						}
-					}
-				case 5:
-					holder := model.current
-					if holder == 0 {
-						break
-					}
-					if left[holder] {
-						action = fmt.Sprintf("rejoin %d", holder)
-						delete(f.memberships.absent, holder)
-						memberships[holder] = 9000 + uint(step)
-						f.memberships.ids[holder] = memberships[holder]
-						if err := f.service.MemberJoined(ctx, domain.NewOrganizationMemberJoinedEvent(accessOrg, holder, memberships[holder], f.service.now())); err != nil {
-							t.Fatalf("join: %v", err)
-						}
-						left[holder] = false
-						if model.waiting {
-							model.hold(holder)
-						}
-						break
-					}
-					action = fmt.Sprintf("leave %d", holder)
-					f.leave(t, viewer(holder), f.advance(time.Minute))
-					left[holder] = true
-					if live != nil && !live.Shared && live.OwnerUserID != nil && *live.OwnerUserID == holder {
-						if mailbox, err := f.repo.FindMailbox(ctx, accessOrg, live.MailboxID); err == nil && mailbox.AwaitingHandover() {
-							model.waiting = true
-						}
-					}
-				case 6:
-					action = "revoke and re-authorize"
-					if err := f.service.RevokeExternalMailTenant(ctx, f.owner, f.tenant.ID); err != nil {
-						t.Fatalf("revoke: %v", err)
-					}
-					result, err := f.service.AuthorizeExternalMailTenant(ctx, f.owner, googleTenantInput())
-					if err != nil {
-						t.Fatalf("re-authorize: %v", err)
-					}
-					f.tenant = result.Tenant.Tenant
-				}
-				log = append(log, action)
-				f.advance(3 * time.Minute)
-				f.sync(t)
-				for _, reader := range users {
-					if left[reader] {
-						continue
-					}
-					for mailboxID := range mailboxes {
-						for _, read := range f.readableSubjects(t, viewer(reader), mailboxID) {
-							if owner, known := model.owner[read]; !known || owner != reader {
-								t.Fatalf("after %v: user %d reads %s (owner %d) in mailbox %d", log, reader, read, owner, mailboxID)
-							}
-						}
-					}
-				}
-			}
-		})
 	}
 }

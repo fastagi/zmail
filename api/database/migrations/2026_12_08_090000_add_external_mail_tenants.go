@@ -28,10 +28,12 @@ type addExternalMailTenants struct {
 //   - mailboxes.external_mail_tenant_id marks a connected mailbox assigned from a tenant: its address
 //     is the organization's, so the organization administers it and a personal one awaits handover
 //     when its owner leaves. idx_mailboxes_external_mail_tenant finds a tenant's mailboxes.
-//   - external_mail_personal_assignments remembers, per address (and directory user), who holds it
-//     now, its privacy floor, which only ever rises, and the one member the floor does not apply to:
-//     the first holder, for as long as nobody else has held it. It outlives revocation, purge,
-//     departure, and handover. A holder only ever reads mail received during their own tenures.
+//   - external_mail_address_records remembers, per address (and directory user), every reader it
+//     ever had in the organization, by any kind of binding: who holds it now, its privacy floor,
+//     which only ever rises, the one member the floor does not apply to (the first holder, for as long
+//     as nobody else has held it), and whether a tenant ever assigned it. It outlives revocation,
+//     purge, departure, and handover, so a tenant assignment never gives someone mail from another
+//     reader's tenure. Existing connections are recorded as their first holders.
 //   - external_mail_connections.received_not_before is that boundary on a connection: no copy of
 //     mail received before it is ever stored.
 //
@@ -73,22 +75,27 @@ func (m *addExternalMailTenants) Up(db *gorm.DB) error {
 		  ADD CONSTRAINT chk_mailboxes_tenant_origin CHECK (external_mail_tenant_id IS NULL OR origin = 'connected')`,
 		`CREATE INDEX idx_mailboxes_external_mail_tenant ON mailboxes (external_mail_tenant_id)
 		  WHERE external_mail_tenant_id IS NOT NULL`,
-		`CREATE TABLE external_mail_personal_assignments (
+		`CREATE TABLE external_mail_address_records (
 		  organization_id bigint NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
 		  provider varchar(16) NOT NULL,
 		  address_key varchar(320) NOT NULL,
 		  directory_id varchar(255) NOT NULL DEFAULT '',
 		  user_id bigint REFERENCES users(id) ON DELETE SET NULL,
-		  tenant_id bigint NOT NULL REFERENCES external_mail_tenants(id),
+		  tenant_id bigint REFERENCES external_mail_tenants(id),
+		  tenant_held boolean NOT NULL DEFAULT false,
 		  assigned_at timestamptz NOT NULL,
 		  floor_at timestamptz,
 		  exempt_user_id bigint REFERENCES users(id) ON DELETE SET NULL,
 		  released boolean NOT NULL DEFAULT false,
 		  PRIMARY KEY (organization_id, provider, address_key),
-		  CONSTRAINT chk_external_mail_personal_assignments_key CHECK (address_key = lower(address_key) AND address_key <> '')
+		  CONSTRAINT chk_external_mail_address_records_key CHECK (address_key = lower(address_key) AND address_key <> '')
 		)`,
-		`CREATE INDEX idx_external_mail_personal_assignments_directory ON external_mail_personal_assignments
+		`CREATE INDEX idx_external_mail_address_records_directory ON external_mail_address_records
 		  (organization_id, provider, directory_id) WHERE directory_id <> ''`,
+		`INSERT INTO external_mail_address_records (organization_id, provider, address_key, user_id, exempt_user_id, assigned_at)
+		  SELECT organization_id, provider, lower(account_address), owner_user_id, CASE WHEN shared THEN NULL ELSE owner_user_id END, created_at
+		  FROM external_mail_connections
+		  ON CONFLICT DO NOTHING`,
 	)
 }
 
@@ -104,7 +111,7 @@ func (m *addExternalMailTenants) Down(db *gorm.DB) error {
 		    RAISE EXCEPTION 'a mailbox assigned from an external mail tenant exists; the older schema cannot express it';
 		  END IF;
 		END $$`,
-		`DROP TABLE IF EXISTS external_mail_personal_assignments`,
+		`DROP TABLE IF EXISTS external_mail_address_records`,
 		`DROP INDEX IF EXISTS idx_mailboxes_external_mail_tenant`,
 		`ALTER TABLE mailboxes
 		  DROP CONSTRAINT IF EXISTS chk_mailboxes_tenant_origin,

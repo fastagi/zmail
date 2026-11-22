@@ -1227,10 +1227,13 @@ the others are removed (`member_removed`).
 A personal assignment cannot be redirected, and **a holder only ever reads mail received during their
 own tenures**:
 
-- Zmail keeps a record of each address assigned from a tenant (matched by address, ignoring case,
-  and by directory id): who holds it now, its privacy floor, which only ever rises, and the member
-  exempt from the floor. It survives disconnects, purges, deletions, departures, handovers, and tenant
-  revocation.
+- Zmail keeps a record of every address any connection of the organization ever read, by any kind
+  of binding (a member's own grant, a team account, a tenant assignment), under every connector
+  (matched by address, ignoring case, and by directory id): who holds it now, its privacy floor, which
+  only ever rises, and the member exempt from the floor. It is written when the binding is made, so
+  it survives disconnects, purges, deletions, departures, handovers, and tenant revocation. A member's
+  own binding is a tenure like any other: assigning the address from the tenant to someone else
+  afterwards starts after it.
 - The first personal holder is exempt, with the normal look-back, across departures and returns, for
   as long as nobody else has held the address. Once anyone else held it (another member, a shared
   mailbox, or a handover), nobody is exempt any more.
@@ -1249,9 +1252,11 @@ own tenures**:
   member's return, which finds it intact.
 - A departure or a handover raises the floor to that time; the handover's seal keeps the successor
   from what came before it.
-- Nobody but the exempt first holder binds the address with an own grant, personal or shared
-  (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; matched by address and by the directory id the provider
-  reports): such a binding has no floor. This strict rule is pending confirmation.
+- Once a tenant assigned the address, nobody but the exempt first holder binds it with an own grant,
+  personal or shared (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; matched by address and by the directory id
+  the provider reports): such a binding has no floor. This strict rule is pending confirmation. Before
+  any tenant assignment the earlier rules hold: a member who proves control of the account may bind it
+  once the previous binding is revoked.
 - After the tenant was revoked and authorized again, assigning the address back to its holder (or the
   same shared mailbox) restores the existing mailbox under the new tenant, under the same rules.
 

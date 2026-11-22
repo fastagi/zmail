@@ -28,7 +28,7 @@ func openRepository(t *testing.T) (*repository, *gorm.DB) {
 	db := testplatform.OpenPostgres(
 		t, &gorm.Config{TranslateError: true}, &mailboxOwnerPO{}, &MailboxPO{}, &MailboxMemberPO{}, &MailboxAccessEventPO{}, &MailRolePO{}, &MailFolderPO{}, &MailLabelPO{}, &MailMessagePO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}, &MailMessageEventPO{}, &MailAttachmentPO{}, &MailTemplatePO{}, &MailContactPO{}, &MailContactListPO{}, &MailContactListMemberPO{}, &MailBroadcastPO{}, &MailBroadcastRecipientPO{},
 		// Triage reads a connected mailbox's connection status.
-		&ExternalMailConnectionPO{}, &ExternalMailPersonalAssignmentPO{},
+		&ExternalMailConnectionPO{}, &ExternalMailAddressRecordPO{},
 		&MailAgentGrantPO{}, &MailAgentEventPO{}, &MailAgentAuditPO{}, &MailAgentDraftPO{}, &apikey.APIKeyPO{})
 	return NewRepository(db), db
 }

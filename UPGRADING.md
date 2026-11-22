@@ -53,8 +53,9 @@ the organization's own application; there is no admin consent redirect.
 ### Low — Migration `2026_12_08_090000_add_external_mail_tenants` and a new limit
 
 The migration creates `external_mail_tenants` (a tenant identifier is live in one organization of the
-instance) and `external_mail_personal_assignments` (the member an address was last personally
-assigned to, with a privacy floor that only rises and the member exempt from it), adds `external_mail_connections.tenant_id`,
+instance) and `external_mail_address_records` (every reader an address had by any binding, with a
+privacy floor that only rises and the member exempt from it; existing connections are recorded as
+their first holders, and every binding now writes it), adds `external_mail_connections.tenant_id`,
 `tenant_directory_id`, and `received_not_before` (copies received before it are never stored) with a
 CHECK that a
 tenant connection stores no account token, and `mailboxes.external_mail_tenant_id` with a CHECK that

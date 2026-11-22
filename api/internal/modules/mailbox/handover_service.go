@@ -47,6 +47,13 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 
 	var boundary time.Time
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if mailbox.TenantAssigned() && s.externalMail != nil {
+			// The holder of an organization address changes: in turn with assignments and restores,
+			// which take the same lock, so none of them commits on a stale record.
+			if lockErr := s.externalMail.LockSharedExternalMailBindings(tx, viewer.OrganizationID); lockErr != nil {
+				return lockErr
+			}
+		}
 		// The former owner is read inside the transaction: an owner who rejoined before the
 		// handover is sealed at the handover, never at their earlier departure.
 		var boundaryErr error
@@ -169,7 +176,10 @@ func (s *service) MemberRemoved(ctx context.Context, event domain.OrganizationMe
 		}
 		if s.externalMail != nil {
 			// Addresses personally assigned to the leaver from a tenant: whoever reads them later never
-			// gets mail received before now.
+			// gets mail received before now. In turn with assignments, under the same lock.
+			if err = s.externalMail.LockSharedExternalMailBindings(tx, event.OrganizationID); err != nil {
+				return err
+			}
 			if err = s.externalMail.MarkPersonalBoundary(tx, event.OrganizationID, event.UserID, at); err != nil {
 				return err
 			}

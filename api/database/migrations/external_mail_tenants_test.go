@@ -25,6 +25,20 @@ func TestExternalMailTenantsUpDown(t *testing.T) {
 
 	require.NoError(t, (&addExternalMailTenants{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
+	// An existing connection is recorded as the address's first holder, so a later tenant assignment
+	// to someone else starts after it.
+	var record struct {
+		UserID       *uint
+		ExemptUserID *uint
+		TenantHeld   bool
+	}
+	require.NoError(t, db.Raw(`SELECT user_id, exempt_user_id, tenant_held FROM external_mail_address_records
+		WHERE organization_id = 10 AND provider = 'gmail' AND address_key = 'owner@gmail.example'`).Scan(&record).Error)
+	require.NotNil(t, record.UserID)
+	require.NotNil(t, record.ExemptUserID)
+	assert.EqualValues(t, 901, *record.UserID)
+	assert.EqualValues(t, 901, *record.ExemptUserID)
+	assert.False(t, record.TenantHeld)
 }
 
 // TestExternalMailTenantsConstraints: a tenant connection holds no account token, only a connected
@@ -52,7 +66,7 @@ func TestExternalMailTenantsConstraints(t *testing.T) {
 		VALUES (11, 2, 'gmail', 'alice@acme.example', 901, ?, 7, 'u-1', now(), now(), now())`
 	assert.Error(t, db.Exec(connection, "sealed-token").Error, "a tenant connection with an account token")
 	exec(connection, "")
-	assignee := `INSERT INTO external_mail_personal_assignments (organization_id, provider, address_key, user_id, tenant_id, assigned_at)
+	assignee := `INSERT INTO external_mail_address_records (organization_id, provider, address_key, user_id, tenant_id, assigned_at)
 		VALUES (11, 'gmail', ?, 901, 7, now())`
 	exec(assignee, "alice@acme.example")
 	assert.Error(t, db.Exec(assignee, "alice@acme.example").Error, "one holder per address")

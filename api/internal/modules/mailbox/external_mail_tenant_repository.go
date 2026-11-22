@@ -335,7 +335,7 @@ func (r *repository) ShareTenantConnection(ctx context.Context, mailboxID uint, 
 		// the seal boundary ever reaches a later holder. The record itself is kept.
 		for _, row := range rows {
 			// Someone else now reads the address: the first holder's exemption ends for good.
-			if err := tx.Exec(`UPDATE external_mail_personal_assignments
+			if err := tx.Exec(`UPDATE external_mail_address_records
 				SET released = true, user_id = NULL, exempt_user_id = NULL, floor_at = GREATEST(floor_at, ?::timestamptz)
 				WHERE organization_id = ? AND provider = ? AND address_key = lower(?)`,
 				boundary, row.OrganizationID, row.Provider, row.AccountAddress).Error; err != nil {
@@ -371,23 +371,24 @@ func (r *repository) LockActiveExternalMailTenant(ctx context.Context, tenantID 
 	return nil
 }
 
-// ExternalMailPersonalAssignmentPO is the record of an organization address assigned from a tenant:
+// ExternalMailAddressRecordPO is the record of an organization address assigned from a tenant:
 // its holder, its privacy floor, and the member exempt from the floor.
-type ExternalMailPersonalAssignmentPO struct {
+type ExternalMailAddressRecordPO struct {
 	OrganizationID uint   `gorm:"primaryKey;autoIncrement:false"`
 	Provider       string `gorm:"primaryKey;size:16"`
 	AddressKey     string `gorm:"primaryKey;size:320"`
 	DirectoryID    string `gorm:"size:255;not null;default:''"`
 	UserID         *uint
-	TenantID       uint `gorm:"not null"`
+	TenantID       *uint
+	TenantHeld     bool `gorm:"not null;default:false"`
 	AssignedAt     time.Time
 	FloorAt        *time.Time
 	ExemptUserID   *uint
 	Released       bool `gorm:"not null;default:false"`
 }
 
-func (ExternalMailPersonalAssignmentPO) TableName() string {
-	return "external_mail_personal_assignments"
+func (ExternalMailAddressRecordPO) TableName() string {
+	return "external_mail_address_records"
 }
 
 func optionalUserID(id uint) *uint {
@@ -397,7 +398,7 @@ func optionalUserID(id uint) *uint {
 	return &id
 }
 
-func (r *repository) RecordTenantAssignment(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, holderUserID, tenantID uint, floor *time.Time, exemptUserID uint, at time.Time) error {
+func (r *repository) RecordAddressHolder(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, holderUserID, tenantID uint, floor *time.Time, exemptUserID uint, at time.Time) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
@@ -406,7 +407,7 @@ func (r *repository) RecordTenantAssignment(ctx context.Context, organizationID 
 		// its floor, which the new record takes over, but no longer matches by directory id.
 		var inherited *time.Time
 		if directoryID != "" {
-			var older []ExternalMailPersonalAssignmentPO
+			var older []ExternalMailAddressRecordPO
 			if err := tx.Where("organization_id = ? AND provider = ? AND directory_id = ? AND address_key <> lower(?)",
 				organizationID, string(provider), directoryID, address).Find(&older).Error; err != nil {
 				return err
@@ -414,22 +415,25 @@ func (r *repository) RecordTenantAssignment(ctx context.Context, organizationID 
 			for _, row := range older {
 				inherited = laterTime(inherited, row.FloorAt)
 			}
-			if err := tx.Exec(`UPDATE external_mail_personal_assignments SET directory_id = ''
+			if err := tx.Exec(`UPDATE external_mail_address_records SET directory_id = ''
 				WHERE organization_id = ? AND provider = ? AND directory_id = ? AND address_key <> lower(?)`,
 				organizationID, string(provider), directoryID, address).Error; err != nil {
 				return err
 			}
 		}
 		raised := laterTime(floor, inherited)
-		return tx.Exec(`INSERT INTO external_mail_personal_assignments
-			(organization_id, provider, address_key, directory_id, user_id, tenant_id, assigned_at, floor_at, exempt_user_id, released)
-			VALUES (?, ?, lower(?), ?, ?, ?, ?, ?::timestamptz, ?, false)
+		return tx.Exec(`INSERT INTO external_mail_address_records
+			(organization_id, provider, address_key, directory_id, user_id, tenant_id, tenant_held, assigned_at, floor_at, exempt_user_id, released)
+			VALUES (?, ?, lower(?), ?, ?, ?, ?, ?, ?::timestamptz, ?, false)
 			ON CONFLICT (organization_id, provider, address_key) DO UPDATE SET
-			  directory_id = EXCLUDED.directory_id, user_id = EXCLUDED.user_id, tenant_id = EXCLUDED.tenant_id,
+			  directory_id = CASE WHEN EXCLUDED.directory_id <> '' THEN EXCLUDED.directory_id ELSE external_mail_address_records.directory_id END,
+			  user_id = EXCLUDED.user_id,
+			  tenant_id = COALESCE(EXCLUDED.tenant_id, external_mail_address_records.tenant_id),
+			  tenant_held = external_mail_address_records.tenant_held OR EXCLUDED.tenant_held,
 			  assigned_at = EXCLUDED.assigned_at, released = false, exempt_user_id = EXCLUDED.exempt_user_id,
-			  floor_at = GREATEST(external_mail_personal_assignments.floor_at, EXCLUDED.floor_at)`,
-			organizationID, string(provider), address, directoryID, optionalUserID(holderUserID), tenantID, at, raised,
-			optionalUserID(exemptUserID)).Error
+			  floor_at = GREATEST(external_mail_address_records.floor_at, EXCLUDED.floor_at)`,
+			organizationID, string(provider), address, directoryID, optionalUserID(holderUserID), optionalUserID(tenantID), tenantID != 0,
+			at, raised, optionalUserID(exemptUserID)).Error
 	})
 }
 
@@ -448,16 +452,18 @@ func (r *repository) FindPersonalAssignment(ctx context.Context, organizationID 
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	query := r.conn(ctx).Where("organization_id = ? AND provider = ?", organizationID, string(provider))
+	// The address is one mailbox whichever connector reads it, so its records under every provider
+	// count; a directory id only means something under its own provider.
+	query := r.conn(ctx).Where("organization_id = ?", organizationID)
 	if directoryID != "" {
-		query = query.Where("(address_key = lower(?) OR directory_id = ?)", address, directoryID)
+		query = query.Where("(address_key = lower(?) OR (provider = ? AND directory_id = ?))", address, string(provider), directoryID)
 	} else {
 		query = query.Where("address_key = lower(?)", address)
 	}
-	var rows []ExternalMailPersonalAssignmentPO
-	// The record of the address itself comes first; one found by directory user adds its floor and
+	var rows []ExternalMailAddressRecordPO
+	// The record of the address under this provider comes first; every other one adds its floor and
 	// ends an exemption it does not share.
-	if err := query.Order(clause.Expr{SQL: "(address_key = lower(?)) DESC, assigned_at DESC", Vars: []any{address}}).
+	if err := query.Order(clause.Expr{SQL: "(address_key = lower(?) AND provider = ?) DESC, assigned_at DESC", Vars: []any{address, string(provider)}}).
 		Limit(10).Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -473,6 +479,7 @@ func (r *repository) FindPersonalAssignment(ctx context.Context, organizationID 
 	}
 	for _, row := range rows {
 		record.FloorAt = laterTime(record.FloorAt, row.FloorAt)
+		record.TenantHeld = record.TenantHeld || row.TenantHeld
 		if row.ExemptUserID == nil || *row.ExemptUserID != record.ExemptUserID {
 			record.ExemptUserID = 0
 		}
@@ -484,7 +491,7 @@ func (r *repository) MarkPersonalBoundary(ctx context.Context, organizationID, u
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	return r.conn(ctx).Exec(`UPDATE external_mail_personal_assignments
+	return r.conn(ctx).Exec(`UPDATE external_mail_address_records
 		SET floor_at = GREATEST(floor_at, ?::timestamptz)
 		WHERE organization_id = ? AND user_id = ?`, at, organizationID, userID).Error
 }

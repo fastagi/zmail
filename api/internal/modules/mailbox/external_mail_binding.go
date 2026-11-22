@@ -256,7 +256,7 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 
 	var connection *domain.ExternalMailConnection
 	created := false
-	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+	bind := func(tx context.Context) error {
 		// The viewer's bindings run one at a time, so the limit is counted against committed rows.
 		if lockErr := s.externalMail.LockExternalMailBindings(tx, viewer.OrganizationID, viewer.UserID); lockErr != nil {
 			return lockErr
@@ -358,6 +358,13 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 			return findErr
 		}
 		return s.recordConnectionEvent(tx, connection, domain.MailboxAccessConnectionReconnected, viewer.UserID)
+	}
+	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if bindErr := bind(tx); bindErr != nil {
+			return bindErr
+		}
+		// Every reader of an address is a tenure, whatever the binding.
+		return s.recordSelfBinding(tx, connection, binding.accountDirectoryID)
 	})
 	if errors.Is(err, gorm.ErrDuplicatedKey) {
 		// Another sign-in bound the same account in the meantime.
