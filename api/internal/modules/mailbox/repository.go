@@ -656,6 +656,18 @@ func (r *repository) CountOutboundSince(ctx context.Context, organizationID uint
 	return count, err
 }
 
+func (r *repository) OrganizationCreatedAt(ctx context.Context, organizationID uint) (time.Time, error) {
+	if r.db == nil {
+		return time.Time{}, domain.ErrServiceUnavailable
+	}
+	var createdAt []time.Time
+	err := r.conn(ctx).Table("organizations").Where("id = ?", organizationID).Limit(1).Pluck("created_at", &createdAt).Error
+	if err != nil || len(createdAt) == 0 {
+		return time.Time{}, err
+	}
+	return createdAt[0], nil
+}
+
 // laneAttempts selects the organization's outbound attempts in one lane since the given time.
 func laneAttempts(db *gorm.DB, organizationID uint, lane domain.SendLane, since time.Time) *gorm.DB {
 	return db.Model(&MailMessagePO{}).

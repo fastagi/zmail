@@ -31,9 +31,12 @@ func (s *service) ListSendLanes(ctx context.Context, viewer domain.OrganizationC
 	since := computedAt.Add(-sendLimitWindow)
 	organizationID := viewer.OrganizationID
 
-	transactional := SendLaneUsage{Lane: domain.SendLaneTransactional, Limit: s.settings.laneLimit(domain.SendLaneTransactional)}
+	transactionalLimit, err := s.organizationLaneLimit(ctx, organizationID, domain.SendLaneTransactional)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	transactional := SendLaneUsage{Lane: domain.SendLaneTransactional, Limit: transactionalLimit}
 	if s.transactional != nil {
-		var err error
 		if transactional.Used, err = s.transactional.CountTransactionalAttemptsSince(ctx, organizationID, since); err != nil {
 			return nil, time.Time{}, err
 		}
@@ -42,8 +45,11 @@ func (s *service) ListSendLanes(ctx context.Context, viewer domain.OrganizationC
 		}
 	}
 
-	broadcast := SendLaneUsage{Lane: domain.SendLaneBroadcast, Limit: s.settings.laneLimit(domain.SendLaneBroadcast)}
-	var err error
+	broadcastLimit, err := s.organizationLaneLimit(ctx, organizationID, domain.SendLaneBroadcast)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	broadcast := SendLaneUsage{Lane: domain.SendLaneBroadcast, Limit: broadcastLimit}
 	if broadcast.Used, err = s.repo.CountOutboundSince(ctx, organizationID, domain.SendLaneBroadcast, since); err != nil {
 		return nil, time.Time{}, err
 	}
@@ -53,7 +59,11 @@ func (s *service) ListSendLanes(ctx context.Context, viewer domain.OrganizationC
 		}
 	}
 
-	personal := SendLaneUsage{Lane: domain.SendLanePersonal, Limit: s.settings.laneLimit(domain.SendLanePersonal)}
+	personalLimit, err := s.organizationLaneLimit(ctx, organizationID, domain.SendLanePersonal)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	personal := SendLaneUsage{Lane: domain.SendLanePersonal, Limit: personalLimit}
 	if personal.Used, err = s.repo.CountOutboundSince(ctx, organizationID, domain.SendLanePersonal, since); err != nil {
 		return nil, time.Time{}, err
 	}

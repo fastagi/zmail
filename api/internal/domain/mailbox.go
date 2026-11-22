@@ -963,6 +963,8 @@ type MailboxRepository interface {
 	// CountOutboundSince counts the organization's outbound attempts in one lane since the given
 	// time, failed attempts included.
 	CountOutboundSince(ctx context.Context, organizationID uint, lane SendLane, since time.Time) (int64, error)
+	// OrganizationCreatedAt returns when the organization was created; zero when it is unknown.
+	OrganizationCreatedAt(ctx context.Context, organizationID uint) (time.Time, error)
 	// CountWaitingSends counts the organization's messages waiting for room in the send limit.
 	CountWaitingSends(ctx context.Context, organizationID uint) (int64, error)
 	// WaitingSendOrganizations lists the organizations that have messages waiting for the send limit.

@@ -301,3 +301,35 @@ func TestRemovedAddressCanReceiveTransactionalAgain(t *testing.T) {
 		t.Fatalf("contact status = %s; removal must leave it unchanged", status)
 	}
 }
+
+func TestLaneUsageReportsTheNewOrganizationCap(t *testing.T) {
+	f := newTxHandlerFixture(t, func(settings *Settings) {
+		settings.DailySendLimit = 50
+		settings.NewOrganizationDailySendLimit = 5
+		settings.NewOrganizationPeriod = 7 * 24 * time.Hour
+	})
+	f.exec(t, `UPDATE organizations SET created_at = ? WHERE id = 10`, f.clock.Add(-time.Hour))
+	f.role = domain.OrganizationRoleAdmin
+	limits := func() []float64 {
+		recorder, body := f.request(http.MethodGet, "/v1/mail-send-lanes", "", "", "")
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("GET lanes = %d %s", recorder.Code, recorder.Body.String())
+		}
+		data, _ := body["data"].(map[string]any)
+		lanes, _ := data["lanes"].([]any)
+		out := []float64{}
+		for _, lane := range lanes {
+			entry, _ := lane.(map[string]any)
+			limit, _ := entry["limit"].(float64)
+			out = append(out, limit)
+		}
+		return out
+	}
+	if got := limits(); len(got) != 3 || got[0] != 5 || got[1] != 5 || got[2] != 5 {
+		t.Fatalf("limits of a new organization = %v; want the cap 5 in every lane", got)
+	}
+	f.exec(t, `UPDATE organizations SET created_at = ? WHERE id = 10`, f.clock.Add(-8*24*time.Hour))
+	if got := limits(); len(got) != 3 || got[0] != 50 || got[1] != 50 || got[2] != 50 {
+		t.Fatalf("limits after the new-organization period = %v; want the lane limits", got)
+	}
+}

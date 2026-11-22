@@ -116,7 +116,8 @@ func (f *fakeMemberships) ListMembershipsByUserIDs(ctx context.Context, organiza
 
 // fakeRepository is an in-memory domain.MailboxRepository for service tests.
 type fakeRepository struct {
-	mailboxes map[uint]*domain.Mailbox
+	organizationCreatedAt map[uint]time.Time
+	mailboxes             map[uint]*domain.Mailbox
 	// members is keyed by mailbox id and membership id.
 	members      map[[2]uint]*domain.MailboxMember
 	accessEvents []*domain.MailboxAccessEvent
@@ -767,6 +768,10 @@ func (r *fakeRepository) DeleteMessage(_ context.Context, mailboxID, id uint) er
 	}
 	delete(r.messages, id)
 	return nil
+}
+
+func (r *fakeRepository) OrganizationCreatedAt(_ context.Context, organizationID uint) (time.Time, error) {
+	return r.organizationCreatedAt[organizationID], nil
 }
 
 func (r *fakeRepository) CountOutboundSince(_ context.Context, organizationID uint, lane domain.SendLane, _ time.Time) (int64, error) {
@@ -2161,5 +2166,36 @@ func TestForgedMessageIDDoesNotCaptureReplies(t *testing.T) {
 	}
 	if got := strings.Join(f.transport.sent[before].References, " "); got != sent.RFCMessageID {
 		t.Fatalf("References = %q; want only the original %q, not the forged chain", got, sent.RFCMessageID)
+	}
+}
+
+func TestNewOrganizationSendsWithinTheNewOrganizationCap(t *testing.T) {
+	fixture := newServiceFixture(t)
+	fixture.service.settings.NewOrganizationDailySendLimit = 1
+	fixture.service.settings.NewOrganizationPeriod = 7 * 24 * time.Hour
+	fixture.repo.organizationCreatedAt = map[uint]time.Time{
+		1: fixture.now.Add(-time.Hour),
+		2: fixture.now.Add(-8 * 24 * time.Hour),
+	}
+	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}
+
+	young := fixture.mailbox(t, 1, "young")
+	if _, _, err := fixture.service.SendMessage(context.Background(), as(1), young.ID, input); err != nil {
+		t.Fatalf("first send of the new organization: %v", err)
+	}
+	message, _, err := fixture.service.SendMessage(context.Background(), as(1), young.ID, input)
+	if err != nil || message.QueuedReason != domain.MailQueuedForSendLimit {
+		t.Fatalf("second send = %+v, %v; want it waiting at the new-organization cap", message, err)
+	}
+	if _, _, err := fixture.service.SendMessage(context.Background(), as(1), young.ID, input); !errors.Is(err, ErrMailSendLimitReached) {
+		t.Fatalf("third send error = %v; want ErrMailSendLimitReached, the waiting cap follows the new-organization cap", err)
+	}
+
+	settled := fixture.mailbox(t, 2, "settled")
+	for i := 0; i < 3; i++ {
+		message, _, err := fixture.service.SendMessage(context.Background(), as(2), settled.ID, input)
+		if err != nil || message.QueuedReason != "" {
+			t.Fatalf("send %d of the settled organization = %+v, %v; want it sent under the lane limit", i+1, message, err)
+		}
 	}
 }

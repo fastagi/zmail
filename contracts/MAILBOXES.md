@@ -1579,6 +1579,12 @@ rolling 24 hours by the instants provider calls started, failed attempts count t
 full lane never consumes another lane's room. Every message belongs to exactly one lane, fixed when
 it is stored:
 
+When `MAILBOX_NEW_ORGANIZATION_DAILY_SEND_LIMIT` is set, an organization created less than
+`MAILBOX_NEW_ORGANIZATION_PERIOD` ago gets at most that many attempts in each lane, and at most that
+many personal messages may wait. `GET /v1/mailbox-domains` keeps reporting the instance limits;
+`GET /v1/mail-send-lanes` and the `daily_send_limit` of the mailbox directory report the limit that
+applies to the organization now.
+
 | Lane | Counts | Limit (`GET /v1/mailbox-domains`) | When full |
 |---|---|---|---|
 | Personal | Console sends, replies, `POST /v1/outbound-mail-messages`, and template test sends | `daily_send_limit` | The message waits (below) |

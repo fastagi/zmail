@@ -21,6 +21,8 @@ const (
 // MailboxDirectoryPage is one directory page with the organization-wide figures shown above it.
 type MailboxDirectoryPage struct {
 	Entries []*domain.MailboxDirectoryEntry
+	// DailySendLimit is the organization's personal lane limit, the new-organization cap applied.
+	DailySendLimit int
 	// NextBeforeID is the id the next, older page starts below; 0 on the last page.
 	NextBeforeID uint
 	// MailboxCount counts the organization's live mailboxes of every type.
@@ -68,6 +70,9 @@ func (s *service) MailboxDirectory(ctx context.Context, viewer domain.Organizati
 		return nil, err
 	}
 	if page.SentLast24h, err = s.repo.CountOutboundSince(ctx, viewer.OrganizationID, domain.SendLanePersonal, since); err != nil {
+		return nil, err
+	}
+	if page.DailySendLimit, err = s.organizationLaneLimit(ctx, viewer.OrganizationID, domain.SendLanePersonal); err != nil {
 		return nil, err
 	}
 	return page, nil

@@ -52,6 +52,10 @@ type Settings struct {
 	DailyBroadcastLimit int
 	// DailyTransactionalLimit is the transactional lane limit; 0 takes DailySendLimit.
 	DailyTransactionalLimit int
+	// NewOrganizationDailySendLimit caps every lane of an organization younger than
+	// NewOrganizationPeriod; 0 turns the cap off.
+	NewOrganizationDailySendLimit int
+	NewOrganizationPeriod         time.Duration
 	// PublicURL is the public Web origin unsubscribe links point at; empty disables broadcasts.
 	PublicURL string
 	// CustomDomainsEnabled lets organizations connect their own domains.
@@ -505,6 +509,8 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	}
 	settings.DailyBroadcastLimit = resolved.DailyBroadcastLimit
 	settings.DailyTransactionalLimit = resolved.DailyTransactionalLimit
+	settings.NewOrganizationDailySendLimit = resolved.NewOrganizationDailySendLimit
+	settings.NewOrganizationPeriod = resolved.NewOrganizationPeriod
 	if resolved.MaxZonesPerOrganization > 0 {
 		settings.MaxZonesPerOrganization = resolved.MaxZonesPerOrganization
 	}
@@ -563,6 +569,24 @@ func (settings Settings) laneLimit(lane domain.SendLane) int {
 		return settings.DailyTransactionalLimit
 	}
 	return settings.DailySendLimit
+}
+
+// organizationLaneLimit is laneLimit for one organization: while the organization is younger than
+// the new-organization period, no lane allows more than the new-organization cap.
+func (s *service) organizationLaneLimit(ctx context.Context, organizationID uint, lane domain.SendLane) (int, error) {
+	limit := s.settings.laneLimit(lane)
+	capped := s.settings.NewOrganizationDailySendLimit
+	if capped <= 0 || limit <= capped {
+		return limit, nil
+	}
+	createdAt, err := s.repo.OrganizationCreatedAt(ctx, organizationID)
+	if err != nil {
+		return 0, err
+	}
+	if !createdAt.IsZero() && s.now().Sub(createdAt) < s.settings.NewOrganizationPeriod {
+		return capped, nil
+	}
+	return limit, nil
 }
 
 func (s *service) InboundEnabled() bool {
@@ -886,7 +910,11 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 	if err != nil {
 		return nil, false, err
 	}
-	if sent >= int64(s.settings.laneLimit(message.SendLane)) {
+	laneLimit, err := s.organizationLaneLimit(ctx, mailbox.OrganizationID, message.SendLane)
+	if err != nil {
+		return nil, false, err
+	}
+	if sent >= int64(laneLimit) {
 		if !queueAtLimit {
 			return nil, false, ErrMailSendLimitReached
 		}
@@ -999,7 +1027,11 @@ func (s *service) queueForSendLimit(ctx context.Context, mailbox *domain.Mailbox
 	if err != nil {
 		return nil, false, err
 	}
-	if waiting >= int64(s.settings.laneLimit(domain.SendLanePersonal)) {
+	laneLimit, err := s.organizationLaneLimit(ctx, mailbox.OrganizationID, domain.SendLanePersonal)
+	if err != nil {
+		return nil, false, err
+	}
+	if waiting >= int64(laneLimit) {
 		return nil, false, ErrMailSendLimitReached
 	}
 	message.Status = domain.MailStatusQueued
