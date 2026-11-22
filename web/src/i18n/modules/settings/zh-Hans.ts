@@ -3,14 +3,30 @@ import type { SettingsMessages } from './en-US';
 
 const messages = {
   title: '设置',
+  profile: {
+    title: '个人资料',
+    description: '你的姓名会在控制台和邀请中展示给团队成员。',
+    name: '姓名',
+    email: '登录邮箱',
+    emailHint: '登录邮箱不能在这里修改。',
+    submit: '保存资料',
+    saved: '个人资料已保存',
+    errors: {
+      required: '请输入姓名。',
+      sessionEnded: '会话已结束，请重新登录后再修改个人资料。',
+      failed: '个人资料保存失败，请重试。',
+    },
+  },
   tabs: {
+    profile: '个人资料',
     preferences: '偏好',
     api: 'API',
     security: '安全',
   },
   security: {
     passwordTitle: '修改密码',
-    passwordDescription: '修改密码后，所有设备上的登录都会退出，包括当前设备。之后请用新密码重新登录。',
+    passwordDescription:
+      '修改密码后，所有设备上的登录都会退出，包括当前设备。之后请用新密码重新登录。',
     currentPassword: '当前密码',
     newPassword: '新密码',
     newPasswordHint: '6 到 50 个字符，且不能与当前密码相同。',

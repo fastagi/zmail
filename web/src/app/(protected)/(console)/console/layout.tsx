@@ -273,7 +273,7 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
                 {user?.name || user?.email || t('nav.profile')}
               </div>
               <DropdownMenuItem asChild className="rounded-lg cursor-pointer">
-                <Link href={ROUTES.CONSOLE.SETTINGS}>{t('nav.profile')}</Link>
+                <Link href={`${ROUTES.CONSOLE.SETTINGS}?tab=profile`}>{t('nav.profile')}</Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="rounded-lg cursor-pointer">
                 <Link href={ROUTES.CONSOLE.SETTINGS}>{t('nav.settings')}</Link>

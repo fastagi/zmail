@@ -18,6 +18,7 @@ The Web feature service and development mock BFF use a browser-oriented, same-or
 | Request a registration code | `POST /api/auth/register/email-code` | `{ email }` | `{ success: true }`, whether or not the address has an account |
 | Register | `POST /api/auth/register` | `{ name, email, password, code }` (`code`: 6 digits) | `{ user: { id, email, name } }` |
 | Current session | `GET /api/auth/me` | none | `{ user: { id, email, name } }` |
+| Rename the signed-in user | `PUT /api/auth/me` | `{ name }` (1 to 50 characters after trimming) | `{ user: { id, email, name } }`; calls `PUT /v1/users/profile` with `nickname` and changes nothing else |
 | Logout | `POST /api/auth/logout` | none | `{ success: true }` |
 | Request a password reset | `POST /api/auth/password-reset` | `{ email }` | `{ success: true }`, whether or not the address has an account |
 | Reset the password | `POST /api/auth/password-reset/confirm` | `{ token, password }` (6 to 50 characters) | `{ success: true }`; an unknown or used token is `401 AUTH.PASSWORD_RESET_TOKEN_INVALID`, an expired one `401 AUTH.PASSWORD_RESET_TOKEN_EXPIRED` |

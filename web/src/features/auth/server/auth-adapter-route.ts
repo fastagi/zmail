@@ -139,6 +139,34 @@ export async function changePasswordWithGoApi(
   return privateAuthResponse(apiSuccessResponse({ success: true as const }));
 }
 
+/** Renames the signed-in user and answers with the user as the API now has it. */
+export async function updateProfileWithGoApi(
+  request: Request,
+  input: { name: string }
+): Promise<NextResponse> {
+  const accessToken = await getApiSessionToken();
+  if (!accessToken) {
+    return adapterErrorResponse({
+      status: 401,
+      errorCode: ApiErrorCode.AUTH_UNAUTHORIZED,
+      message: 'Authentication required',
+    });
+  }
+  const result = await configuredAdapter().updateProfile(
+    accessToken,
+    input,
+    request.headers,
+    request.signal
+  );
+  if (!result.ok) {
+    if (result.error.status === 401) {
+      await clearApiSessionCookie();
+    }
+    return adapterErrorResponse(result.error);
+  }
+  return privateAuthResponse(apiSuccessResponse(result.data));
+}
+
 export async function registerWithGoApi(
   request: Request,
   input: RegisterRequest

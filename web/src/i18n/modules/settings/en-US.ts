@@ -1,6 +1,21 @@
 const messages = {
   title: 'Settings',
+  profile: {
+    title: 'Profile',
+    description: 'Your name is shown to teammates in the console and in invitations.',
+    name: 'Name',
+    email: 'Sign-in email',
+    emailHint: 'The email you sign in with cannot be changed here.',
+    submit: 'Save profile',
+    saved: 'Profile saved',
+    errors: {
+      required: 'Enter your name.',
+      sessionEnded: 'Your session has ended. Sign in again to update your profile.',
+      failed: 'The profile could not be saved. Try again.',
+    },
+  },
   tabs: {
+    profile: 'Profile',
     preferences: 'Preferences',
     api: 'API',
     security: 'Security',
@@ -20,7 +35,8 @@ const messages = {
       currentIncorrect: 'The current password is incorrect.',
       newLength: 'Use 6 to 50 characters.',
       newUnchanged: 'Choose a password different from the current one.',
-      newInvalid: 'This password cannot be used. Use 6 to 50 characters that differ from the current password.',
+      newInvalid:
+        'This password cannot be used. Use 6 to 50 characters that differ from the current password.',
       mismatch: 'The passwords do not match.',
       sessionEnded: 'Your session has ended. Sign in again to change your password.',
       rateLimited: 'Too many attempts. Wait a moment and try again.',
