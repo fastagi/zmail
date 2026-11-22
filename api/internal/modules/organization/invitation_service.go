@@ -16,6 +16,16 @@ import (
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
+// audit records one invitation change on the request's audit entry. The metadata never carries
+// a token or an invitation link; link_issued says only whether one was returned.
+func (s *service) audit(ctx context.Context, change auditstarter.Change) {
+	if s.recordAudit != nil {
+		s.recordAudit(ctx, change)
+		return
+	}
+	auditstarter.RecordChange(ctx, change)
+}
+
 func (s *service) invitationManager(ctx context.Context, userID, organizationID uint) (*domain.OrganizationMembership, error) {
 	if s == nil || s.repo == nil {
 		return nil, domain.ErrServiceUnavailable
@@ -78,8 +88,9 @@ func (s *service) Invite(
 	}
 
 	emailStatus := s.sendInvitationEmail(ctx, invitation, manager.Organization.Name, token)
+	link := invitationAcceptURL(s.invitationPolicy.PublicURL, token)
 
-	auditstarter.RecordChange(ctx, auditstarter.Change{
+	s.audit(ctx, auditstarter.Change{
 		Action:     "invite",
 		Resource:   "organization_invitations",
 		TargetType: "organization_invitation",
@@ -89,18 +100,21 @@ func (s *service) Invite(
 			"organization_id":   organizationID,
 			"role":              invitation.Role,
 			"email_send_status": emailStatus,
+			"link_issued":       link != "",
 		},
 	})
 	return &OrganizationInvitationResult{
 		Invitation:      invitation,
 		EmailSendStatus: emailStatus,
+		InvitationURL:   link,
 	}, nil
 }
 
 // ResendInvitation gives a pending invitation a fresh token and expiry and emails the new link.
-// Earlier links stop working, so only the latest email can be accepted. Without a configured
-// mailer nothing would carry a new link, so the token and expiry are kept and the attempt is
-// recorded as not_configured. Resends are limited per invitation and per organization.
+// Earlier links stop working, so only the latest email can be accepted. The new link is also
+// returned once to the calling manager. Without a configured mailer the token and expiry are
+// kept, the attempt is recorded as not_configured, and no link is returned because none was
+// minted. Resends are limited per invitation and per organization.
 func (s *service) ResendInvitation(ctx context.Context, userID, organizationID, invitationID uint) (*OrganizationInvitationResult, error) {
 	if userID == 0 || organizationID == 0 || invitationID == 0 {
 		return nil, domain.ErrInvalidInput
@@ -125,7 +139,7 @@ func (s *service) ResendInvitation(ctx context.Context, userID, organizationID, 
 	rotated := s.invitationMailer != nil && s.invitationMailer.IsConfigured()
 	if !rotated {
 		emailStatus := s.sendInvitationEmail(ctx, invitation, manager.Organization.Name, "")
-		s.recordResend(ctx, invitation, emailStatus, false)
+		s.recordResend(ctx, invitation, emailStatus, false, false)
 		return &OrganizationInvitationResult{Invitation: invitation, EmailSendStatus: emailStatus}, nil
 	}
 
@@ -145,10 +159,12 @@ func (s *service) ResendInvitation(ctx context.Context, userID, organizationID, 
 		return nil, fmt.Errorf("reissue organization invitation: %w", err)
 	}
 	emailStatus := s.sendInvitationEmail(ctx, invitation, manager.Organization.Name, token)
-	s.recordResend(ctx, invitation, emailStatus, true)
+	link := invitationAcceptURL(s.invitationPolicy.PublicURL, token)
+	s.recordResend(ctx, invitation, emailStatus, true, link != "")
 	return &OrganizationInvitationResult{
 		Invitation:      invitation,
 		EmailSendStatus: emailStatus,
+		InvitationURL:   link,
 	}, nil
 }
 
@@ -157,8 +173,9 @@ func (s *service) recordResend(
 	invitation *domain.OrganizationInvitation,
 	emailStatus InvitationEmailSendStatus,
 	tokenRotated bool,
+	linkIssued bool,
 ) {
-	auditstarter.RecordChange(ctx, auditstarter.Change{
+	s.audit(ctx, auditstarter.Change{
 		Action:     "resend",
 		Resource:   "organization_invitations",
 		TargetType: "organization_invitation",
@@ -169,6 +186,7 @@ func (s *service) recordResend(
 			"role":              invitation.Role,
 			"email_send_status": emailStatus,
 			"token_rotated":     tokenRotated,
+			"link_issued":       linkIssued,
 		},
 	})
 }
@@ -284,7 +302,7 @@ func (s *service) RevokeInvitation(ctx context.Context, userID, organizationID, 
 	if err != nil {
 		return err
 	}
-	auditstarter.RecordChange(ctx, auditstarter.Change{
+	s.audit(ctx, auditstarter.Change{
 		Action:     "revoke",
 		Resource:   "organization_invitations",
 		TargetType: "organization_invitation",
@@ -320,7 +338,7 @@ func (s *service) AcceptInvitation(
 		return nil, err
 	}
 
-	auditstarter.RecordChange(ctx, auditstarter.Change{
+	s.audit(ctx, auditstarter.Change{
 		Action:     "accept",
 		Resource:   "organization_invitations",
 		TargetType: "organization_invitation",

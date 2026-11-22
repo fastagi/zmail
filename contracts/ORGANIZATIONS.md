@@ -150,8 +150,11 @@ The browser feature owns these fixed same-origin paths:
   the mock BFF and organization Web feature are enabled. They are replaceable development state,
   not production persistence.
 - Invitation acceptance reads a manually entered bearer token from a password input and sends it
-  only in the same-origin POST body. The Web feature never stores the token, adds it to a URL, or
-  renders it from invitation-management responses.
+  only in the same-origin POST body. The Web feature never stores the token or adds it to a URL.
+  The only invitation secret it renders is the one-time `invitation_url` of a create or resend
+  response, shown to the manager who made that call in its confirmation with a copy action; it is
+  held in component state only, never in the query cache, storage, or a toast, and is gone once
+  the confirmation closes.
 
 ## Member Lifecycle
 
@@ -208,10 +211,10 @@ organization-scoped; acceptance is top-level because the opaque token identifies
 
 | Operation | Endpoint | Request | Successful `data` |
 |---|---|---|---|
-| Invite | `POST /v1/organizations/:id/invitations` | `{ email, role }` | `{ invitation, email_send_status }` |
+| Invite | `POST /v1/organizations/:id/invitations` | `{ email, role }` | `{ invitation, email_send_status, invitation_url? }` |
 | List invitations | `GET /v1/organizations/:id/invitations` | Pagination query | Paginated invitation views |
 | Revoke | `DELETE /v1/organizations/:id/invitations/:invitation_id` | none | `204 No Content` |
-| Resend email | `POST /v1/organizations/:id/invitations/:invitation_id/emails` | none | `201` `{ invitation, email_send_status }` |
+| Resend email | `POST /v1/organizations/:id/invitations/:invitation_id/emails` | none | `201` `{ invitation, email_send_status, invitation_url? }` |
 | Accept | `POST /v1/organization-invitations/accept` | `{ token }` | Organization membership view |
 
 An invitation view contains no plaintext token:
@@ -238,9 +241,19 @@ An invitation view contains no plaintext token:
 - Invitation email is trimmed and lower-cased. An existing member or a second unexpired pending
   invitation for the same organization and email is rejected. Expired invitations remain immutable
   history while releasing the active-invitation uniqueness slot for a replacement.
-- Invitation tokens are high-entropy bearer secrets. FastBuild returns them only to the organization
-  mail adapter in process, stores only their SHA-256 hash, and never places them in URLs, API
-  responses, audit metadata, or logs.
+- Invitation tokens are high-entropy bearer secrets. FastBuild stores only their SHA-256 hash, so a
+  stored invitation's token can never be read back. A token leaves the API only at the moment it is
+  minted: to the organization mail adapter in process, and as the one-time `invitation_url` in the
+  response of the create or resend call that minted it. It is never placed in other URLs, other
+  API responses, audit metadata, or logs.
+- `invitation_url` is the accept link in the same `<console origin>/invite#<token>` shape invitation
+  emails use, built on the server from `MAILBOX_PUBLIC_URL`; the token rides in the fragment. It is
+  returned only to the `owner` or `admin` who invited or resent, and only in that `201` response,
+  which is sent with `Cache-Control: private, no-store`. It is omitted when the call minted no token
+  (a resend without a configured mailer keeps the old token) or no console origin is configured.
+  The invitation list never carries it, members can never obtain it, and accepted, revoked, or
+  expired invitations never yield one. To share a pending invitation again, a manager resends it,
+  which mints and shows a new link and invalidates the previous one.
 - `ORGANIZATION_INVITATION_TTL` defaults to `168h` (7 days) and must be positive. A token is
   one-time use and must belong to the authenticated user's email, compared case-insensitively.
 - Accepting an invitation and creating the membership is one database transaction. Revoked,
@@ -265,7 +278,8 @@ An invitation view contains no plaintext token:
   does not count.
 - Invitation create, revoke, resend, and accept transitions emit audit changes using internal
   invitation, organization, and user IDs. Resend also records the role, `email_send_status`, and
-  whether the token was rotated. Email addresses and tokens are not audit metadata.
+  whether the token was rotated. Invite and resend record `link_issued`, whether an
+  `invitation_url` was returned. Email addresses, tokens, and links are not audit metadata.
 
 ## Stable Errors
 

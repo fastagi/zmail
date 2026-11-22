@@ -6618,6 +6618,11 @@ export interface components {
         OrganizationInvitationCreateResult: {
             email_send_status: components["schemas"]["OrganizationInvitationEmailSendStatus"];
             invitation: components["schemas"]["OrganizationInvitation"];
+            /**
+             * Format: uri
+             * @description One-time copy of the accept link for the token this call minted, in the same `<console origin>/invite#<token>` shape invitation emails use. It is a bearer secret, returned only to the `owner` or `admin` who invited or resent, never listed, logged, or audited. Omitted when no token was minted (a resend without a configured mailer) or no console origin (`MAILBOX_PUBLIC_URL`) is configured.
+             */
+            invitation_url?: string;
         };
         /**
          * @description Outcome of the synchronous provider request only; not a delivery receipt.
@@ -16193,7 +16198,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The persisted invitation and the synchronous email send attempt status. */
+            /** @description The persisted invitation, the synchronous email send attempt status, and, when a console origin is configured, the invitation link shown once to this caller. Sent with `Cache-Control: private, no-store`. */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -16259,7 +16264,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The reissued invitation and the synchronous email send attempt status. */
+            /** @description The reissued invitation, the synchronous email send attempt status, and, when a new token was minted and a console origin is configured, the new invitation link shown once to this caller. Sent with `Cache-Control: private, no-store`. */
             201: {
                 headers: {
                     [name: string]: unknown;

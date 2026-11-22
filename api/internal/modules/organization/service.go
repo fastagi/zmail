@@ -48,7 +48,9 @@ type service struct {
 	events MembershipEventPublisher
 	// administration serves operator tooling; nil when repo does not implement it.
 	administration administrationStore
-	now            func() time.Time
+	// recordAudit enriches the request's audit entry; tests replace it to inspect the metadata.
+	recordAudit func(context.Context, auditstarter.Change)
+	now         func() time.Time
 }
 
 var (
@@ -70,6 +72,7 @@ func NewService(
 		if invitationPolicy.TTL > 0 {
 			fallback.TTL = invitationPolicy.TTL
 		}
+		fallback.PublicURL = invitationPolicy.PublicURL
 		invitationPolicy = fallback
 	}
 	var administration administrationStore
@@ -83,6 +86,7 @@ func NewService(
 		invitationMailer: invitationMailer,
 		invitationPolicy: invitationPolicy,
 		events:           events,
+		recordAudit:      auditstarter.RecordChange,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},

@@ -46,11 +46,17 @@ func newInvitationMailer(sender invitationEmailSender, publicURL string) *invita
 // acceptURL is the page that hands the token to the console accept dialog; empty
 // without a known console origin.
 func (m *invitationMailer) acceptURL(token string) string {
-	if m.publicURL == "" {
+	return invitationAcceptURL(m.publicURL, token)
+}
+
+// invitationAcceptURL builds the one link shape every invitation uses, in email and in the
+// manager's one-time copy: <console origin>/invite#<token>. Empty without a console origin.
+func invitationAcceptURL(publicURL, token string) string {
+	if publicURL == "" || token == "" {
 		return ""
 	}
 	// The token rides in the fragment, which browsers never send to a server or a referrer.
-	return m.publicURL + "/invite#" + url.QueryEscape(token)
+	return publicURL + "/invite#" + url.QueryEscape(token)
 }
 
 func (m *invitationMailer) IsConfigured() bool {

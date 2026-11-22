@@ -22,6 +22,9 @@ const (
 // InvitationPolicy owns replaceable organization invitation timing policy.
 type InvitationPolicy struct {
 	TTL time.Duration
+	// PublicURL is the Web console origin that invitation links point at (MAILBOX_PUBLIC_URL, the
+	// origin invitation emails link to). Empty means no link can be built.
+	PublicURL string
 	// ResendCooldown and ResendDaily are per-invitation quotas; ResendOrganization is shared by
 	// every invitation of one organization.
 	ResendCooldown     ratelimit.Store
@@ -39,8 +42,13 @@ func NewInvitationPolicy(cfg *config.Config, stores *ratelimit.Stores) Invitatio
 	if stores == nil {
 		stores = ratelimit.NewMemoryStores()
 	}
+	publicURL := ""
+	if cfg != nil {
+		publicURL = cfg.Mailbox.PublicURL
+	}
 	return InvitationPolicy{
-		TTL: ttl,
+		TTL:       ttl,
+		PublicURL: publicURL,
 		ResendCooldown: stores.New(ratelimit.Rule{
 			Name: ruleInvitationResendMinute, Max: invitationResendsPerMinute, Window: time.Minute,
 		}),
