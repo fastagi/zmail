@@ -255,6 +255,9 @@ func (r *repository) DeleteMailbox(ctx context.Context, organizationID, id uint)
 				return err
 			}
 		}
+		if err := keepDeletedSends(tx, attached); err != nil {
+			return err
+		}
 		if err := tx.Where("mailbox_id = ?", id).Delete(&MailMessagePO{}).Error; err != nil {
 			return err
 		}
@@ -627,6 +630,10 @@ func (r *repository) DeleteMessage(ctx context.Context, mailboxID, id uint) erro
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		// A message that is not deleted below rolls this record back with the transaction.
+		if err := keepDeletedSends(tx, []uint{id}); err != nil {
+			return err
+		}
 		result := tx.Where("id = ? AND mailbox_id = ?", id, mailboxID).Where(unsealedMessage).Delete(&MailMessagePO{})
 		if result.Error != nil {
 			return result.Error
@@ -651,9 +658,7 @@ func (r *repository) CountOutboundSince(ctx context.Context, organizationID uint
 	if r.db == nil {
 		return 0, domain.ErrServiceUnavailable
 	}
-	var count int64
-	err := laneAttempts(r.conn(ctx), organizationID, lane, since).Count(&count).Error
-	return count, err
+	return countLaneAttempts(r.conn(ctx), organizationID, lane, since)
 }
 
 func (r *repository) CountPersonalOutcomesSince(ctx context.Context, organizationID uint, since time.Time) (int64, int64, int64, error) {
@@ -664,12 +669,19 @@ func (r *repository) CountPersonalOutcomesSince(ctx context.Context, organizatio
 		return fmt.Sprintf(`COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM mail_message_events AS receipt
 			WHERE receipt.message_id = mail_messages.id AND receipt.type = '%s'))`, eventType)
 	}
-	var counts struct{ Attempted, Bounced, Complained int64 }
-	err := laneAttempts(r.conn(ctx), organizationID, domain.SendLanePersonal, since).
+	db := r.conn(ctx)
+	live := laneAttempts(db, organizationID, domain.SendLanePersonal, since).
 		Select(`COUNT(*) AS attempted, ` + receipt(domain.MailEventBounced) + ` AS bounced, ` +
-			receipt(domain.MailEventComplained) + ` AS complained`).
-		Scan(&counts).Error
-	return counts.Attempted, counts.Bounced, counts.Complained, err
+			receipt(domain.MailEventComplained) + ` AS complained`)
+	deleted := deletedSends(db, organizationID, domain.SendLanePersonal, since).
+		Select(`COUNT(*) AS attempted, COUNT(*) FILTER (WHERE bounced) AS bounced, COUNT(*) FILTER (WHERE complained) AS complained`)
+	// One statement reads both tables from one snapshot, so a deletion committing meanwhile is
+	// counted once.
+	var outcome struct{ Attempted, Bounced, Complained int64 }
+	err := db.Raw(`SELECT COALESCE(SUM(attempted), 0) AS attempted, COALESCE(SUM(bounced), 0) AS bounced,
+		COALESCE(SUM(complained), 0) AS complained FROM ((?) UNION ALL (?)) AS outcomes`, live, deleted).
+		Scan(&outcome).Error
+	return outcome.Attempted, outcome.Bounced, outcome.Complained, err
 }
 
 func (r *repository) OrganizationCreatedAt(ctx context.Context, organizationID uint) (time.Time, error) {
@@ -690,6 +702,64 @@ func laneAttempts(db *gorm.DB, organizationID uint, lane domain.SendLane, since 
 		Joins("JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id").
 		Where("mailboxes.organization_id = ? AND mail_messages.direction = ? AND mail_messages.send_lane = ? AND mail_messages.send_attempted_at >= ?",
 			organizationID, string(domain.MailDirectionOutbound), string(lane), since)
+}
+
+// deletedSends selects the attempts in one lane kept from the organization's deleted messages.
+func deletedSends(db *gorm.DB, organizationID uint, lane domain.SendLane, since time.Time) *gorm.DB {
+	return db.Model(&MailDeletedSendPO{}).
+		Where("organization_id = ? AND send_lane = ? AND send_attempted_at >= ?", organizationID, string(lane), since)
+}
+
+// countLaneAttempts counts the organization's attempts in one lane since the given time, those of
+// messages deleted since included.
+func countLaneAttempts(db *gorm.DB, organizationID uint, lane domain.SendLane, since time.Time) (int64, error) {
+	var total int64
+	err := db.Raw(`SELECT (?) + (?)`,
+		laneAttempts(db, organizationID, lane, since).Select("COUNT(*)"),
+		deletedSends(db, organizationID, lane, since).Select("COUNT(*)")).Scan(&total).Error
+	return total, err
+}
+
+// keepDeletedSends records, before the given messages are deleted for good, the send attempts
+// among them still inside the rolling send window, with whether each bounced or drew a
+// complaint, and prunes the records that have left it. messages is a slice of ids or a subquery.
+func keepDeletedSends(tx *gorm.DB, messages any) error {
+	since := time.Now().UTC().Add(-sendLimitWindow)
+	receipt := func(eventType domain.MailEventType) string {
+		return fmt.Sprintf(`EXISTS (SELECT 1 FROM mail_message_events AS receipt
+			WHERE receipt.message_id = mail_messages.id AND receipt.type = '%s')`, eventType)
+	}
+	if err := tx.Exec(`INSERT INTO mail_deleted_sends
+		(organization_id, mailbox_id, message_id, send_lane, send_attempted_at, bounced, complained)
+		SELECT mailboxes.organization_id, mail_messages.mailbox_id, mail_messages.message_id, mail_messages.send_lane,
+			mail_messages.send_attempted_at, `+receipt(domain.MailEventBounced)+`, `+receipt(domain.MailEventComplained)+`
+		FROM mail_messages JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id
+		WHERE mail_messages.id IN (?) AND mail_messages.direction = ? AND mail_messages.send_attempted_at >= ?`,
+		messages, string(domain.MailDirectionOutbound), since).Error; err != nil {
+		return err
+	}
+	return tx.Exec(`DELETE FROM mail_deleted_sends WHERE send_attempted_at < ?`, since).Error
+}
+
+// RecordDeletedSendEvent marks the kept attempt of a deleted message bounced or complained when
+// the provider reports it after the deletion. found is false when no kept attempt has that
+// provider message id; recorded is false when the attempt already carried the event.
+func (r *repository) RecordDeletedSendEvent(ctx context.Context, providerMessageID string, eventType domain.MailEventType) (found, recorded bool, err error) {
+	if r.db == nil {
+		return false, false, domain.ErrServiceUnavailable
+	}
+	column := map[domain.MailEventType]string{domain.MailEventBounced: "bounced", domain.MailEventComplained: "complained"}[eventType]
+	if providerMessageID == "" || column == "" {
+		return false, false, nil
+	}
+	db := r.conn(ctx)
+	result := db.Model(&MailDeletedSendPO{}).Where("message_id = ? AND NOT "+column, providerMessageID).Update(column, true)
+	if result.Error != nil || result.RowsAffected > 0 {
+		return result.RowsAffected > 0, result.RowsAffected > 0, result.Error
+	}
+	var kept int64
+	err = db.Model(&MailDeletedSendPO{}).Where("message_id = ?", providerMessageID).Limit(1).Count(&kept).Error
+	return kept > 0, false, err
 }
 
 // CountWaitingSends counts the organization's messages waiting for room in the send limit.
@@ -740,8 +810,9 @@ func (r *repository) LeaseWaitingSends(
 			return err
 		}
 		// Only direct sends wait, so only the personal lane's attempts take their room.
-		var attempts, held int64
-		if err := laneAttempts(tx, organizationID, domain.SendLanePersonal, windowStart).Count(&attempts).Error; err != nil {
+		var held int64
+		attempts, err := countLaneAttempts(tx, organizationID, domain.SendLanePersonal, windowStart)
+		if err != nil {
 			return err
 		}
 		if err := tx.Model(&MailMessagePO{}).
