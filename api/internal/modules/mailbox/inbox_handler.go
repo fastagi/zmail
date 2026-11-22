@@ -27,7 +27,7 @@ const (
 )
 
 // inboxParameters are the parameters of the unified inbox; each may appear at most once.
-var inboxParameters = []string{"view", "role_id", "mailbox_id", "unread", "q", "group", "tz", "cursor", "per_page", "triage"}
+var inboxParameters = []string{"view", "role_id", "mailbox_id", "unread", "has_attachments", "q", "group", "tz", "cursor", "per_page", "triage"}
 
 // ListInboxMessages returns one cursor page of the caller's mail across every mailbox they read.
 func (h *Handler) ListInboxMessages(c *gin.Context) {
@@ -143,6 +143,16 @@ func parseInboxRequest(query url.Values) (InboxRequest, error) {
 			return invalid("unread")
 		}
 	}
+	if raw, present := value("has_attachments"); present {
+		switch raw {
+		case "true":
+			request.HasAttachments = new(true)
+		case "false":
+			request.HasAttachments = new(false)
+		default:
+			return invalid("has_attachments")
+		}
+	}
 	if raw, present := value("q"); present {
 		// Like the single-mailbox search: the length counts as sent, the rest after trimming.
 		request.Query = strings.TrimSpace(raw)
@@ -199,8 +209,8 @@ func parseInboxRequest(query url.Values) (InboxRequest, error) {
 		return invalid("q is only allowed with view all")
 	case request.GroupThreads && request.View != domain.InboxViewAll && request.View != domain.InboxViewSent:
 		return invalid("group needs view all or sent")
-	case request.GroupThreads && (request.Unread != nil || request.Query != ""):
-		return invalid("group cannot be combined with unread or q")
+	case request.GroupThreads && (request.Unread != nil || request.HasAttachments != nil || request.Query != ""):
+		return invalid("group cannot be combined with unread, has_attachments, or q")
 	case len(request.Triage) > 0 && request.View != domain.InboxViewAll && request.View != domain.InboxViewToday:
 		return invalid("triage needs view all or today")
 	case len(request.Triage) > 0 && (request.GroupThreads || request.Query != ""):

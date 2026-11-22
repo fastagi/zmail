@@ -78,6 +78,8 @@ export function InboxListHeader({
   unread,
   unreadCount,
   onUnreadChange,
+  attachments = false,
+  onAttachmentsChange,
   q,
   onSearch,
   mailboxHref = null,
@@ -95,6 +97,9 @@ export function InboxListHeader({
   unread: boolean;
   unreadCount?: number;
   onUnreadChange: (unread: boolean) => void;
+  /** The With attachments tab, shown when `onAttachmentsChange` is given. */
+  attachments?: boolean;
+  onAttachmentsChange?: (attachments: boolean) => void;
   q: string;
   onSearch: (q: string) => void;
   mailboxHref?: string | null;
@@ -126,18 +131,25 @@ export function InboxListHeader({
     event.preventDefault();
     change('');
   };
-  const tab = (value: boolean, label: string, count?: number) => (
+  const selectTab = (value: 'all' | 'unread' | 'attachments') => {
+    if (value === 'attachments') onAttachmentsChange?.(true);
+    else if (value === 'unread') onUnreadChange(true);
+    else if (attachments) onAttachmentsChange?.(false);
+    else onUnreadChange(false);
+  };
+  const current = attachments ? 'attachments' : unread ? 'unread' : 'all';
+  const tab = (value: 'all' | 'unread' | 'attachments', label: string, count?: number) => (
     <button
       type="button"
       role="tab"
-      aria-selected={unread === value}
+      aria-selected={current === value}
       className={cn(
         '-mb-px border-b-2 pb-2.5 transition-colors focus-ring motion-reduce:transition-none',
-        unread === value
+        current === value
           ? 'border-text-main font-semibold text-text-main'
           : 'border-transparent text-text-muted hover:text-text-main'
       )}
-      onClick={() => onUnreadChange(value)}
+      onClick={() => selectTab(value)}
     >
       {label}
       {count ? (
@@ -244,8 +256,9 @@ export function InboxListHeader({
         aria-label={t('inbox.tabs.label')}
         className="mt-3.5 flex gap-[18px] border-b border-border-subtle"
       >
-        {tab(false, t('inbox.tabs.all'))}
-        {tab(true, t('inbox.tabs.unread'), unreadCount)}
+        {tab('all', t('inbox.tabs.all'))}
+        {tab('unread', t('inbox.tabs.unread'), unreadCount)}
+        {onAttachmentsChange ? tab('attachments', t('inbox.tabs.attachments')) : null}
       </div>
     </div>
   );

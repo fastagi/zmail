@@ -2369,12 +2369,18 @@ interface ViewerDay {
  */
 function inInboxView(
   message: MailMessage,
-  query: Pick<MockInboxQuery, 'view' | 'unread'>,
+  query: Pick<MockInboxQuery, 'view' | 'unread' | 'hasAttachments'>,
   needle?: string,
   day?: ViewerDay
 ): boolean {
   const unread = message.direction === 'inbound' && !message.read;
   if (query.unread !== undefined && unread !== query.unread) return false;
+  if (
+    query.hasAttachments !== undefined &&
+    message.attachment_count > 0 !== query.hasAttachments
+  ) {
+    return false;
+  }
   if (needle !== undefined) {
     return message.placement !== 'trash' && matchesSearch(message, needle);
   }

@@ -87,6 +87,58 @@ export const EXTERNAL_MAIL_CREDENTIALS_UPSTREAM_TIMEOUT_MS = 60_000;
 export const EXTERNAL_MAIL_CREDENTIALS_REQUEST_TIMEOUT_MS = 65_000;
 /** Implicit-TLS IMAP; the contract accepts this port only. */
 export const EXTERNAL_MAIL_IMAP_PORT = 993;
+/**
+ * Well-known IMAP and SMTP servers, offered as one-click presets in the app password form. The
+ * labels are brand names and stay untranslated.
+ */
+export const EXTERNAL_MAIL_SERVER_PRESETS = [
+  { id: 'qq', label: 'QQ', imap: 'imap.qq.com', smtp: 'smtp.qq.com', smtpPort: 465 },
+  { id: 'netease163', label: '163', imap: 'imap.163.com', smtp: 'smtp.163.com', smtpPort: 465 },
+  { id: 'netease126', label: '126', imap: 'imap.126.com', smtp: 'smtp.126.com', smtpPort: 465 },
+  {
+    id: 'exmail',
+    label: 'Tencent Exmail',
+    imap: 'imap.exmail.qq.com',
+    smtp: 'smtp.exmail.qq.com',
+    smtpPort: 465,
+  },
+  {
+    id: 'aliyun',
+    label: 'Aliyun',
+    imap: 'imap.aliyun.com',
+    smtp: 'smtp.aliyun.com',
+    smtpPort: 465,
+  },
+  { id: 'gmail', label: 'Gmail', imap: 'imap.gmail.com', smtp: 'smtp.gmail.com', smtpPort: 465 },
+  {
+    id: 'icloud',
+    label: 'iCloud',
+    imap: 'imap.mail.me.com',
+    smtp: 'smtp.mail.me.com',
+    smtpPort: 587,
+  },
+  {
+    id: 'yahoo',
+    label: 'Yahoo',
+    imap: 'imap.mail.yahoo.com',
+    smtp: 'smtp.mail.yahoo.com',
+    smtpPort: 465,
+  },
+  {
+    id: 'fastmail',
+    label: 'Fastmail',
+    imap: 'imap.fastmail.com',
+    smtp: 'smtp.fastmail.com',
+    smtpPort: 465,
+  },
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  imap: string;
+  smtp: string;
+  smtpPort: 465 | 587;
+}[];
+
 /** SMTP submission: implicit TLS on 465 (the default) or STARTTLS on 587. */
 export const EXTERNAL_MAIL_SMTP_PORTS = [465, 587] as const;
 export type ExternalMailSmtpPort = (typeof EXTERNAL_MAIL_SMTP_PORTS)[number];

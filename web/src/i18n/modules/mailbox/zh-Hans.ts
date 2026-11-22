@@ -167,6 +167,7 @@ const messages = {
       label: '显示',
       all: '全部',
       unread: '未读',
+      attachments: '有附件',
     },
     search: {
       label: '搜索全部邮件',
@@ -1783,6 +1784,7 @@ const messages = {
       hostPlaceholder: '例如 imap.example.com',
       port: '端口',
       portHint: '仅支持 {port} 端口（基于 TLS 的 IMAP）。',
+      presets: '常用邮箱，一键填写服务器：',
       smtpHost: 'SMTP 服务器（可选）',
       smtpHostPlaceholder: '例如 smtp.example.com',
       smtpHint: '填写发信服务器后，可以在 Zmail 里用这个地址回复和发信。留空则只收信。',

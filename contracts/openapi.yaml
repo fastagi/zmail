@@ -8613,6 +8613,13 @@ paths:
             always read and never match. `false` keeps the others. Read state is the caller''s own.'
           schema:
             type: boolean
+        - name: has_attachments
+          in: query
+          required: false
+          description: '`true` keeps only messages with files; `false` keeps those without. Never with
+            `group`.'
+          schema:
+            type: boolean
         - name: q
           in: query
           required: false

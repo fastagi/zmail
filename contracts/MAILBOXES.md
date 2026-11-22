@@ -2020,8 +2020,9 @@ own stars.
 | `role_id` | A positive mail role id, or `none` for mailboxes without a role. A role the caller cannot see matches nothing. |
 | `mailbox_id` | One mailbox. A mailbox the caller may not read, or another organization's, matches nothing. |
 | `unread` | `true` or `false`, as in the single-mailbox list; outbound messages are always read |
+| `has_attachments` | `true` keeps only messages with files, `false` only those without |
 | `q` | Search, only with `view=all`; the same rules, matching, and 2-second limit as the single-mailbox search |
-| `group` | `thread`, only with `view` `all` or `sent`, and never with `unread` or `q` |
+| `group` | `thread`, only with `view` `all` or `sent`, and never with `unread`, `has_attachments`, or `q` |
 | `triage` | Comma-separated distinct [triage](#ai-triage) categories, such as `reply,review`; only with `view` `all` or `today`, and never with `group` or `q`. Matches nothing while the organization's AI triage is off. |
 | `tz` | The IANA time zone that defines today, at most 64 characters; defaults to `UTC` |
 | `cursor` | `meta.next_cursor` from the previous page, unchanged |

@@ -170,6 +170,7 @@ const TeamSetupCard = lazy(async () => {
   return { default: feature.TeamSetupCard };
 });
 const UNREAD_TAB = 'unread';
+const ATTACHMENTS_TAB = 'attachments';
 const NO_ROLE = 'none';
 const filterParams = [
   VIEW_PARAM,
@@ -189,6 +190,8 @@ interface InboxUrlState {
   role: InboxRoleFilter | null;
   q: string;
   unread: boolean;
+  /** The With attachments tab: only messages with files. */
+  attachments: boolean;
   /** The AI triage tab; it applies only to `all` and `today` without a search. */
   triage: InboxTriageTab | null;
 }
@@ -226,6 +229,7 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
     role,
     q,
     unread: params.get(TAB_PARAM) === UNREAD_TAB,
+    attachments: params.get(TAB_PARAM) === ATTACHMENTS_TAB,
     triage,
   };
 }
@@ -236,17 +240,23 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
  * the organization's triage is on.
  */
 function inboxFilters(
-  { view, box, role, q, unread, triage }: InboxUrlState,
+  { view, box, role, q, unread, attachments, triage }: InboxUrlState,
   tz: string,
   triageOn: boolean
 ): InboxFilters {
   const triageTab = triageOn ? triage : null;
-  const grouped = !unread && q === '' && triageTab === null && (view === 'all' || view === 'sent');
+  const grouped =
+    !unread &&
+    !attachments &&
+    q === '' &&
+    triageTab === null &&
+    (view === 'all' || view === 'sent');
   return {
     view,
     ...(role === null ? {} : { roleId: role }),
     ...(box === null ? {} : { mailboxId: box }),
     ...(unread ? { unread: true } : {}),
+    ...(attachments ? { hasAttachments: true } : {}),
     ...(q === '' ? {} : { q }),
     ...(grouped ? { group: 'thread' as const } : {}),
     ...(triageTab === null ? {} : { triage: triageTabCategories(triageTab) }),
@@ -973,6 +983,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           unread={urlState.unread}
           unreadCount={listingUnread(counts.data, urlState)}
           onUnreadChange={unread => setListing({ [TAB_PARAM]: unread ? UNREAD_TAB : null })}
+          attachments={urlState.attachments}
+          onAttachmentsChange={on => setListing({ [TAB_PARAM]: on ? ATTACHMENTS_TAB : null })}
           q={urlState.q}
           onSearch={q => setListing({ [SEARCH_PARAM]: q === '' ? null : q, [VIEW_PARAM]: null })}
           mailboxHref={urlState.box === null ? null : mailboxHref(urlState.box)}

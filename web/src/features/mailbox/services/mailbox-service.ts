@@ -563,7 +563,7 @@ export const mailboxService = {
    */
   async listInbox(
     organizationId: number,
-    { view, roleId, mailboxId, unread, q, group, triage, tz }: InboxFilters,
+    { view, roleId, mailboxId, unread, hasAttachments, q, group, triage, tz }: InboxFilters,
     cursor?: string,
     perPage?: number
   ): Promise<InboxPage> {
@@ -600,6 +600,7 @@ export const mailboxService = {
         ...(roleId === undefined ? {} : { role_id: roleId }),
         ...(mailboxId === undefined ? {} : { mailbox_id: mailboxId }),
         ...(unread === undefined ? {} : { unread }),
+        ...(hasAttachments === undefined ? {} : { has_attachments: hasAttachments }),
         ...(query === undefined ? {} : { q: query }),
         ...(group ? { group } : {}),
         ...(triage === undefined ? {} : { triage: triage.join(',') }),

@@ -172,6 +172,7 @@ const messages = {
       label: 'Show',
       all: 'All',
       unread: 'Unread',
+      attachments: 'With attachments',
     },
     search: {
       label: 'Search all mail',
@@ -1866,6 +1867,7 @@ const messages = {
       hostPlaceholder: 'imap.example.com',
       port: 'Port',
       portHint: 'Only port {port} (IMAP over TLS) is accepted.',
+      presets: 'Fill in the servers of a common provider:',
       smtpHost: 'SMTP server (optional)',
       smtpHostPlaceholder: 'smtp.example.com',
       smtpHint: 'Add the outgoing server to reply and send from this address in Zmail. Leave it empty to only read mail.',

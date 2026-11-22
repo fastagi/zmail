@@ -15,6 +15,7 @@ import {
   EXTERNAL_MAIL_IMAP_PORT,
   EXTERNAL_MAIL_PASSWORD_MAX_LENGTH,
   EXTERNAL_MAIL_SMTP_PORTS,
+  EXTERNAL_MAIL_SERVER_PRESETS,
   EXTERNAL_MAIL_DEFAULT_SMTP_PORT,
   EXTERNAL_MAIL_USERNAME_MAX_LENGTH,
   type ExternalMailBackfillDays,
@@ -208,6 +209,34 @@ export function ExternalPasswordForm({
             ? t('external.password.reconnectIntro', { address: reconnect.address })
             : t('external.password.intro', { provider: providerLabel })}
         </p>
+        {reconnect ? null : (
+          <div className="space-y-2">
+            <p id={`${ids}-presets`} className="text-xs text-text-muted">
+              {t('external.password.presets')}
+            </p>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-labelledby={`${ids}-presets`}>
+              {EXTERNAL_MAIL_SERVER_PRESETS.map(preset => (
+                <Button
+                  key={preset.id}
+                  type="button"
+                  size="sm"
+                  variant={host.trim().toLowerCase() === preset.imap ? 'secondary' : 'outline'}
+                  aria-pressed={host.trim().toLowerCase() === preset.imap}
+                  disabled={bind.isPending}
+                  onClick={() => {
+                    setHost(preset.imap);
+                    setSmtpHost(preset.smtp);
+                    setSmtpPort(preset.smtpPort);
+                    setSmtpEdited(true);
+                    setErrors({});
+                  }}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-[1fr_6rem]">
           <div className="space-y-1.5">
             <Label htmlFor={`${ids}-host`}>{t('external.password.host')}</Label>

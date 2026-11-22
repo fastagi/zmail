@@ -223,7 +223,7 @@ func checkInboxQuery(query domain.InboxQuery) error {
 		return fmt.Errorf("%w: inbox triage filter", domain.ErrInvalidInput)
 	}
 	if query.GroupThreads && (inboxDirection(query.View) == "" || query.View == domain.InboxViewToday ||
-		query.Unread != nil || query.Query != "") {
+		query.Unread != nil || query.HasAttachments != nil || query.Query != "") {
 		return fmt.Errorf("%w: inbox thread grouping", domain.ErrInvalidInput)
 	}
 	return nil
@@ -260,6 +260,9 @@ func inboxFilters(query domain.InboxQuery, args map[string]any) string {
 	}
 	if query.Unread != nil {
 		filters += " AND " + negatedIf(unreadByMember, !*query.Unread)
+	}
+	if query.HasAttachments != nil {
+		filters += " AND " + negatedIf("mail_messages.attachment_count > 0", !*query.HasAttachments)
 	}
 	return filters
 }

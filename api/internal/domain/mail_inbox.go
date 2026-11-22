@@ -52,6 +52,8 @@ type InboxQuery struct {
 	View         InboxView
 	// Unread keeps only messages the viewer has (not) read; nil keeps both.
 	Unread *bool
+	// HasAttachments keeps only messages with (or without) files; nil keeps both.
+	HasAttachments *bool
 	// Query is search text; empty for no search.
 	Query string
 	// GroupThreads lists the newest message of each thread in the view, per mailbox.

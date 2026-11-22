@@ -8915,6 +8915,8 @@ export interface operations {
                 cursor?: components["parameters"]["InboxCursor"];
                 /** @description `thread` lists one item per thread and mailbox. Only with `view` `all` or `sent`, and without `unread` and `q`. */
                 group?: "thread";
+                /** @description `true` keeps only messages with files; `false` keeps those without. Never with `group`. */
+                has_attachments?: boolean;
                 /** @description Keep only one mailbox. A mailbox the caller may not read, or another organization's, matches nothing. */
                 mailbox_id?: components["schemas"]["PositiveID"];
                 /** @description Requested page size, capped by the API. */

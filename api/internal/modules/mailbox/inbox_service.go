@@ -25,10 +25,12 @@ type InboxRequest struct {
 	// Ungrouped keeps only the mailboxes without a role (role_id=none).
 	Ungrouped bool
 	// MailboxID keeps only one mailbox; 0 applies no mailbox filter.
-	MailboxID    uint
-	Unread       *bool
-	Query        string
-	GroupThreads bool
+	MailboxID uint
+	Unread    *bool
+	// HasAttachments keeps only messages with (or without) files; nil keeps both.
+	HasAttachments *bool
+	Query          string
+	GroupThreads   bool
 	// Location defines today for the today view; nil is UTC.
 	Location *time.Location
 	// After is the cursor of the previous page; nil for the newest page.
@@ -127,7 +129,7 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 
 	query := domain.InboxQuery{
 		MailboxIDs: ids, MembershipID: viewer.MembershipID, View: request.View,
-		Unread: request.Unread, Query: request.Query, GroupThreads: request.GroupThreads,
+		Unread: request.Unread, HasAttachments: request.HasAttachments, Query: request.Query, GroupThreads: request.GroupThreads,
 		After: request.After, Limit: request.PerPage + 1, Triage: request.Triage,
 	}
 	if request.View == domain.InboxViewToday {

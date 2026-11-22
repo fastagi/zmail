@@ -247,6 +247,8 @@ export interface InboxFilters {
   roleId?: number | 'none';
   mailboxId?: number;
   unread?: boolean;
+  /** Only messages with files; never with `group`. */
+  hasAttachments?: boolean;
   q?: string;
   group?: 'thread';
   /** AI triage categories; only with `all` or `today`, never with `group` or `q`. */

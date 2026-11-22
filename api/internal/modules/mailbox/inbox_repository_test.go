@@ -725,3 +725,20 @@ func TestInboxCountViews(t *testing.T) {
 		t.Fatalf("CountInboxViews(nil) = %+v, %v; want zero counts", empty, err)
 	}
 }
+
+func TestInboxHasAttachmentsFilter(t *testing.T) {
+	f := newInboxFixture(t)
+	withFiles := f.deliverAt(t, f.team, delivery{subject: "with files", files: true}, minutes(1))
+	plain := f.deliverAt(t, f.team, delivery{subject: "plain"}, minutes(2))
+
+	query := domain.InboxQuery{MailboxIDs: []uint{f.team.ID}, MembershipID: f.c.MembershipID, Limit: 10, View: domain.InboxViewAll}
+	query.HasAttachments = boolPtr(true)
+	// The fixture's team message carries files too.
+	expectIDs(t, "with attachments", idsOf(f.inbox(t, query)), withFiles.ID, f.teamMessage.ID)
+	query.HasAttachments = boolPtr(false)
+	expectIDs(t, "without attachments", idsOf(f.inbox(t, query)), plain.ID)
+	query.GroupThreads = true
+	if _, err := f.inboxRepo().ListInbox(context.Background(), query); !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("grouped with has_attachments = %v; want invalid input", err)
+	}
+}

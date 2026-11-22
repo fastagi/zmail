@@ -4010,6 +4010,7 @@ const inboxParameters = [
   'role_id',
   'mailbox_id',
   'unread',
+  'has_attachments',
   'q',
   'group',
   'triage',
@@ -4063,6 +4064,14 @@ function parseInboxQuery(
     if (unread !== 'true' && unread !== 'false') return invalid('Invalid unread filter');
     mock.unread = unread === 'true';
     forward.set('unread', unread);
+  }
+  const hasAttachments = value('has_attachments');
+  if (hasAttachments !== null) {
+    if (hasAttachments !== 'true' && hasAttachments !== 'false') {
+      return invalid('Invalid attachments filter');
+    }
+    mock.hasAttachments = hasAttachments === 'true';
+    forward.set('has_attachments', hasAttachments);
   }
   const rawSearch = value('q');
   if (rawSearch !== null) {

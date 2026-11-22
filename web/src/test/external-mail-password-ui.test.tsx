@@ -197,6 +197,38 @@ describe('app password connect step', () => {
     expect(service.bindCredentials.mock.calls[0][1]).not.toHaveProperty('smtp_host');
   });
 
+  it('fills the IMAP and SMTP servers of a common provider in one click', async () => {
+    service.bindCredentials.mockResolvedValue({
+      outcome: 'created',
+      connection: connectionOf({ id: 9, provider: 'imap', mailbox_id: 77 }),
+    });
+    renderWith(<ConnectDialog onOpenChange={vi.fn()} />);
+    const form = await openForm();
+    fireEvent.click(within(form).getByRole('button', { name: 'iCloud' }));
+    expect(within(form).getByLabelText('IMAP server')).toHaveValue('imap.mail.me.com');
+    expect(within(form).getByLabelText('SMTP server (optional)')).toHaveValue('smtp.mail.me.com');
+    expect(within(form).getByRole('radio', { name: '587' })).toBeChecked();
+    expect(within(form).getByRole('button', { name: 'iCloud' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    fireEvent.change(within(form).getByLabelText('Username'), {
+      target: { value: 'me@icloud.com' },
+    });
+    fireEvent.change(within(form).getByLabelText('App password'), { target: { value: SECRET } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Connect' }));
+    await waitFor(() =>
+      expect(service.bindCredentials).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          host: 'imap.mail.me.com',
+          smtp_host: 'smtp.mail.me.com',
+          smtp_port: 587,
+        })
+      )
+    );
+  });
+
   it('says it reconnected when the server restores the member’s own account', async () => {
     service.bindCredentials.mockResolvedValue({
       outcome: 'restored',
