@@ -11720,8 +11720,8 @@ components:
           maxLength: 100
         key_prefix:
           type: string
-          description: Issued with the `fastbuild_` prefix (`fastbuild_test_` for a test key); keys created before
-            the rename keep their original lowercase prefix.
+          description: Issued with the `zmail_` prefix (`zmail_test_` for a test key); keys created before
+            the rename keep their original lowercase prefix, such as `fastbuild_`, and keep working.
           pattern: ^[a-z][a-z0-9]*_[a-z0-9_-]+$
         mode:
           $ref: '#/components/schemas/APIKeyMode'
@@ -11760,10 +11760,17 @@ components:
           maxLength: 100
         scopes:
           type: array
+          minItems: 1
           maxItems: 32
+          description: At least one of Zmail's mail scopes, or `*` for all of them.
           items:
             type: string
-            maxLength: 65
+            enum:
+              - mail:send
+              - mail:read
+              - mail:transactional
+              - mail:agent
+              - '*'
         expires_at:
           type: string
           format: date-time
@@ -11771,7 +11778,7 @@ components:
           $ref: '#/components/schemas/APIKeyMode'
     APIKeyMode:
       type: string
-      description: '`live` keys act for real; `test` keys are issued with the `fastbuild_test_` prefix, are
+      description: '`live` keys act for real; `test` keys are issued with the `zmail_test_` prefix, are
         accepted only by routes that declare test support, and there never send mail. Fixed at creation;
         defaults to `live`.'
       enum:

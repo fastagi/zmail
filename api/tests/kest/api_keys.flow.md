@@ -60,7 +60,7 @@ Authorization: Bearer {{token}}
 
 {
   "name": "Automation Key",
-  "scopes": ["models:invoke", "models:read"]
+  "scopes": ["mail:read", "mail:send"]
 }
 
 [Captures]

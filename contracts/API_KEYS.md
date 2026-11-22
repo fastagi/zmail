@@ -26,16 +26,19 @@ Request:
 ```json
 {
   "name": "Deployment automation",
-  "scopes": ["models:invoke", "models:read"],
+  "scopes": ["mail:send", "mail:read"],
   "expires_at": "2027-01-01T00:00:00Z",
   "mode": "live"
 }
 ```
 
 - `name` is trimmed and contains 1 to 100 Unicode code points.
-- `scopes` contains at most 32 input values. Each value is normalized to lowercase, duplicates are
-  removed, and the result uses `namespace:action`, where each segment starts with a letter and
-  contains lowercase ASCII letters, digits, `_`, or `-`. The explicit `*` wildcard is also accepted.
+- `scopes` contains 1 to 32 input values. Each value is normalized to lowercase and duplicates are
+  removed. The result must be non-empty and every value must be one of Zmail's mail scopes
+  (`mail:send`, `mail:read`, `mail:transactional`, `mail:agent`, see
+  [Authentication And Scopes](#authentication-and-scopes)) or the explicit `*` wildcard. An empty
+  list, or any other value, is `422 COMMON.INVALID_INPUT` (a list over 32 values or a value over 65
+  characters is `422 COMMON.VALIDATION_FAILED`), so a key that could reach nothing is never issued.
 - `expires_at` is optional and must be in the future.
 - `mode` is optional, `live` (the default) or `test`; anything else is `422 COMMON.VALIDATION_FAILED`.
   See [Modes](#modes).
@@ -52,13 +55,13 @@ create response:
       "id": 42,
       "user_id": 7,
       "name": "Deployment automation",
-      "key_prefix": "fastbuild_ab12cd34",
+      "key_prefix": "zmail_ab12cd34",
       "mode": "live",
-      "scopes": ["models:invoke", "models:read"],
+      "scopes": ["mail:read", "mail:send"],
       "created_at": "2026-07-15T12:00:00Z",
       "updated_at": "2026-07-15T12:00:00Z"
     },
-    "plaintext_key": "fastbuild_ab12cd34.<secret>"
+    "plaintext_key": "zmail_ab12cd34.<secret>"
   }
 }
 ```
@@ -73,8 +76,11 @@ Every key has a `mode`, fixed when it is created and returned on every key:
 
 | Mode | Prefix | Behavior |
 |---|---|---|
-| `live` | `fastbuild_<short id>` | Acts for real. Every key created before modes existed is `live`. |
-| `test` | `fastbuild_test_<short id>` | Accepted only by routes that declare test support, and there never sends mail or counts in a send limit. |
+| `live` | `zmail_<short id>` | Acts for real. Every key created before modes existed is `live`. |
+| `test` | `zmail_test_<short id>` | Accepted only by routes that declare test support, and there never sends mail or counts in a send limit. |
+
+Keys issued before the Zmail rename carry `fastbuild_` or `fastbuild_test_` and keep working with
+their original prefix: a key is found by the hash of its whole plaintext, never by its prefix.
 
 A route declares test support explicitly; every other route refuses a valid test key with
 `403 PERMISSION.DENIED`, checked together with its scopes, so a route that forgets to declare test
@@ -133,7 +139,8 @@ atomic, and throttled to at most once per minute per active key.
 ## Deliberate Deferrals
 
 - Rotation is create-new, migrate callers, then revoke-old; there is no rotate endpoint.
-- Scope names belong to downstream product resource vocabulary; FastBuild defines grammar, not a catalog.
+- Zmail's mail scopes are the whole catalog a new key may use. Stored keys keep whatever scopes they
+  were issued with; a route checks scopes with the `namespace:action` grammar.
 - Usage metering, quotas, billing, key-level rate plans, and organization-owned keys remain separate
   starter decisions.
 - Organization roles (`owner`, `admin`, `member`) are not API key scopes or generalized RBAC roles.

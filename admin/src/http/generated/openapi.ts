@@ -3935,7 +3935,7 @@ export interface components {
             /** Format: date-time */
             expires_at?: string;
             id: components["schemas"]["PositiveID"];
-            /** @description Issued with the `fastbuild_` prefix (`fastbuild_test_` for a test key); keys created before the rename keep their original lowercase prefix. */
+            /** @description Issued with the `zmail_` prefix (`zmail_test_` for a test key); keys created before the rename keep their original lowercase prefix, such as `fastbuild_`, and keep working. */
             key_prefix: string;
             /** Format: date-time */
             last_used_at?: string;
@@ -3949,7 +3949,7 @@ export interface components {
             user_id: components["schemas"]["PositiveID"];
         };
         /**
-         * @description `live` keys act for real; `test` keys are issued with the `fastbuild_test_` prefix, are accepted only by routes that declare test support, and there never send mail. Fixed at creation; defaults to `live`.
+         * @description `live` keys act for real; `test` keys are issued with the `zmail_test_` prefix, are accepted only by routes that declare test support, and there never send mail. Fixed at creation; defaults to `live`.
          * @enum {string}
          */
         APIKeyMode: "live" | "test";
@@ -4262,7 +4262,8 @@ export interface components {
             expires_at?: string;
             mode?: components["schemas"]["APIKeyMode"];
             name: string;
-            scopes: string[];
+            /** @description At least one of Zmail's mail scopes, or `*` for all of them. */
+            scopes: ("mail:send" | "mail:read" | "mail:transactional" | "mail:agent" | "*")[];
         };
         CreateAPIKeyResponse: {
             /** @constant */

@@ -84,17 +84,17 @@ const messages = {
   },
   api: {
     title: 'API settings',
-    description: 'Create, inspect, and revoke API keys for the current account.',
+    description: 'Keys let your own code send and read mail as you. Each key only does what you allow.',
     create: 'Create key',
     loading: 'Loading API keys...',
     loadErrorTitle: 'Unable to load API keys',
     loadError: 'The API key service is temporarily unavailable.',
     retry: 'Retry',
     emptyTitle: 'No API keys',
-    emptyDescription: 'A new key is shown in plaintext only once.',
+    emptyDescription: 'Create one to send your first email from code. A new key is shown only once.',
     columns: {
       name: 'Name',
-      scopes: 'Scopes',
+      scopes: 'Permissions',
       status: 'Status',
       lastUsed: 'Last used',
       actions: 'Actions',
@@ -104,18 +104,37 @@ const messages = {
       expired: 'Expired',
       revoked: 'Revoked',
     },
-    noScopes: 'No scopes',
+    noScopes: 'No permissions',
     mode: { live: 'Live', test: 'Test' },
     neverUsed: 'Never',
     revoke: 'Revoke',
     createTitle: 'Create API key',
-    createDescription: 'Use namespace:action scopes, one per line.',
+    createDescription: 'Name the key and choose what it can do. The key is shown only once.',
     name: 'Name',
     namePlaceholder: 'For example: deployment automation',
-    scopes: 'Scopes',
-    scopesPlaceholder: 'models:read\nmodels:invoke',
+    scopes: 'Permissions',
+    scopesHint: 'Give each key only what it needs. You can create more keys later.',
+    scopeOptions: {
+      send: {
+        label: 'Send mail',
+        description: 'Send email from mailboxes you are allowed to send from.',
+      },
+      read: {
+        label: 'Read sent mail',
+        description: 'Look up messages sent from your mailboxes and their delivery status.',
+      },
+      transactional: {
+        label: 'Transactional mail',
+        description: 'Send templated system email such as sign-up codes and notifications.',
+      },
+      agent: {
+        label: 'AI agent',
+        description: 'Read new mail and draft replies in mailboxes that grant this key agent access.',
+      },
+    },
+    scopeRequired: 'Choose at least one permission.',
     expiresAt: 'Expiry (optional)',
-    invalidForm: 'Check the name, scope format, and expiry.',
+    invalidForm: 'Check the name and expiry.',
     createError: 'The API key could not be created. Try again.',
     createdSuccess: 'API key created',
     secretTitle: 'Save your API key',
@@ -132,6 +151,34 @@ const messages = {
     revokeDescription: 'Revocation cannot be undone. Create a new key first when rotating.',
     revokedSuccess: 'API key revoked',
     revokeError: 'The API key could not be revoked. Try again.',
+    quickStart: {
+      title: 'Send your first email',
+      description:
+        'Run this with a key that can send mail. Replace {placeholder} with your key; it is filled in for you right after you create one.',
+      secretDescription:
+        'Your new key is already filled in. Copy, run, and the message lands in your inbox.',
+      from: 'Send from',
+      fromHint: '"from" must be a mailbox you may send from: {from}.',
+      organizationHeader:
+        'says which organization the key acts in ({organization}). A key belongs to you, so one key works in every organization you are a member of.',
+      recipientHint: 'The example sends to you. Every message it sends shows up in',
+      emailLog: 'Emails',
+      language: 'Language',
+      samples: 'Code sample',
+      copy: 'Copy',
+      copied: 'Code copied',
+      copyError: 'Copy failed. Select the code manually.',
+      noOrganizationTitle: 'Create an organization first',
+      noOrganizationDescription:
+        'Mail is sent from an organization\'s mailboxes. Create an organization, add a mailbox, then come back for your key.',
+      createOrganization: 'Create organization',
+      noMailboxTitle: 'No mailbox to send from',
+      noMailboxManager:
+        'You have no mailbox in {organization} you can send from yet. Create one, then come back here for a ready-to-run example.',
+      noMailboxMember:
+        'You have no mailbox in {organization} you can send from yet. Ask an owner or admin of {organization} to give you one.',
+      createMailbox: 'Create mailbox',
+    },
   },
 } as const;
 

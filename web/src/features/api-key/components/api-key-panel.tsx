@@ -8,7 +8,14 @@ import { toast } from 'sonner';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import {
   Dialog,
   DialogBody,
@@ -28,13 +35,21 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   useApiKeys,
   useCreateApiKey,
   useRevokeApiKey,
 } from '@/features/api-key/hooks/use-api-keys';
+import { API_KEY_PLACEHOLDER, SendQuickStart } from '@/features/api-key/components/send-quick-start';
+import { useSendReadiness } from '@/features/api-key/hooks/use-send-readiness';
 import { createApiKeySchema } from '@/features/api-key/schemas';
+import {
+  API_KEY_SCOPE_MESSAGE_KEYS,
+  API_KEY_SCOPES,
+  DEFAULT_API_KEY_SCOPES,
+  type ApiKeyScope,
+} from '@/features/api-key/scopes';
 import type { ApiKey, CreateApiKeyResult } from '@/features/api-key/types';
 import { useT } from '@/i18n';
 
@@ -44,10 +59,11 @@ export function ApiKeyPanel() {
   const apiKeys = useApiKeys();
   const createApiKey = useCreateApiKey();
   const revokeApiKey = useRevokeApiKey();
+  const readiness = useSendReadiness();
   const [createOpen, setCreateOpen] = useState(false);
   const [created, setCreated] = useState<CreateApiKeyResult | null>(null);
   const [name, setName] = useState('');
-  const [scopes, setScopes] = useState('');
+  const [scopes, setScopes] = useState<readonly ApiKeyScope[]>(DEFAULT_API_KEY_SCOPES);
   const [expiresAt, setExpiresAt] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null);
@@ -60,7 +76,7 @@ export function ApiKeyPanel() {
     setCreateOpen(false);
     setCreated(null);
     setName('');
-    setScopes('');
+    setScopes(DEFAULT_API_KEY_SCOPES);
     setExpiresAt('');
     setFormError(null);
     createApiKey.reset();
@@ -74,12 +90,14 @@ export function ApiKeyPanel() {
       setFormError(t('invalidForm'));
       return;
     }
+    if (scopes.length === 0) {
+      setFormError(t('scopeRequired'));
+      return;
+    }
     const candidate = {
       name,
-      scopes: scopes
-        .split(/\r?\n/)
-        .map(scope => scope.trim())
-        .filter(Boolean),
+      // In the order the dialog offers them.
+      scopes: API_KEY_SCOPES.filter(scope => scopes.includes(scope)),
       ...(expiry ? { expires_at: expiry.toISOString() } : {}),
     };
     const parsed = createApiKeySchema.safeParse(candidate);
@@ -123,14 +141,14 @@ export function ApiKeyPanel() {
   return (
     <>
       <Card>
-        <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1.5">
-            <CardTitle>{t('title')}</CardTitle>
-            <CardDescription>{t('description')}</CardDescription>
-          </div>
-          <Button size="sm" icon={<Plus className="size-4" />} onClick={() => setCreateOpen(true)}>
-            {t('create')}
-          </Button>
+        <CardHeader>
+          <CardTitle>{t('title')}</CardTitle>
+          <CardDescription>{t('description')}</CardDescription>
+          <CardAction>
+            <Button size="sm" icon={<Plus className="size-4" />} onClick={() => setCreateOpen(true)}>
+              {t('create')}
+            </Button>
+          </CardAction>
         </CardHeader>
         <CardContent>
           {apiKeys.isPending ? (
@@ -231,11 +249,25 @@ export function ApiKeyPanel() {
         </CardContent>
       </Card>
 
+      {readiness.status === 'unavailable' || readiness.status === 'error' ? null : (
+        <Card className="mt-5">
+          <CardHeader>
+            <CardTitle>{t('quickStart.title')}</CardTitle>
+            <CardDescription>
+              {t('quickStart.description', { placeholder: API_KEY_PLACEHOLDER })}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SendQuickStart readiness={readiness} idPrefix="quick-start" />
+          </CardContent>
+        </Card>
+      )}
+
       <Dialog
         open={createOpen}
         onOpenChange={open => (open ? setCreateOpen(true) : closeCreateDialog())}
       >
-        <DialogContent>
+        <DialogContent size={created ? 'lg' : 'default'}>
           <DialogHeader>
             <DialogTitle>{created ? t('secretTitle') : t('createTitle')}</DialogTitle>
             <DialogDescription>
@@ -266,13 +298,28 @@ export function ApiKeyPanel() {
                     </Button>
                   </div>
                 </div>
+                {canSend(created.api_key.scopes) && readiness.status !== 'unavailable' ? (
+                  <section className="space-y-3 border-t pt-4">
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-semibold">{t('quickStart.title')}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        {t('quickStart.secretDescription')}
+                      </p>
+                    </div>
+                    <SendQuickStart
+                      readiness={readiness}
+                      apiKey={created.plaintext_key}
+                      idPrefix="created-key"
+                    />
+                  </section>
+                ) : null}
               </DialogBody>
               <DialogFooter>
                 <Button onClick={closeCreateDialog}>{t('done')}</Button>
               </DialogFooter>
             </>
           ) : (
-            <form onSubmit={submitCreate}>
+            <form onSubmit={submitCreate} className="flex min-h-0 flex-col">
               <DialogBody className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="api-key-name">{t('name')}</Label>
@@ -285,17 +332,45 @@ export function ApiKeyPanel() {
                     onChange={event => setName(event.target.value)}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="api-key-scopes">{t('scopes')}</Label>
-                  <Textarea
-                    id="api-key-scopes"
-                    value={scopes}
-                    rows={4}
-                    spellCheck={false}
-                    placeholder={t('scopesPlaceholder')}
-                    onChange={event => setScopes(event.target.value)}
-                  />
-                </div>
+                <fieldset className="space-y-2">
+                  <legend className="text-sm font-medium">{t('scopes')}</legend>
+                  <p className="text-sm text-muted-foreground">{t('scopesHint')}</p>
+                  <div className="grid gap-2">
+                    {API_KEY_SCOPES.map(scope => {
+                      const key = API_KEY_SCOPE_MESSAGE_KEYS[scope];
+                      const checked = scopes.includes(scope);
+                      return (
+                        <label
+                          key={scope}
+                          className="flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors hover:bg-muted/50 has-[[data-state=checked]]:border-primary/50 has-[[data-state=checked]]:bg-primary/5"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            className="mt-0.5"
+                            onCheckedChange={value =>
+                              setScopes(current =>
+                                value === true
+                                  ? [...current, scope]
+                                  : current.filter(item => item !== scope)
+                              )
+                            }
+                          />
+                          <span className="min-w-0 space-y-0.5">
+                            <span className="flex flex-wrap items-center gap-x-2 text-sm font-medium">
+                              {t(`scopeOptions.${key}.label`)}
+                              <code className="text-xs font-normal text-muted-foreground">
+                                {scope}
+                              </code>
+                            </span>
+                            <span className="block text-sm text-muted-foreground">
+                              {t(`scopeOptions.${key}.description`)}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
                 <div className="space-y-2">
                   <Label htmlFor="api-key-expiry">{t('expiresAt')}</Label>
                   <Input
@@ -342,6 +417,11 @@ export function ApiKeyPanel() {
       </Dialog>
     </>
   );
+}
+
+/** Whether a key can call `POST /v1/outbound-mail-messages`. */
+function canSend(scopes: readonly string[]): boolean {
+  return scopes.includes('mail:send') || scopes.includes('*');
 }
 
 function apiKeyStatus(apiKey: ApiKey): 'active' | 'expired' | 'revoked' {
