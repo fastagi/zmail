@@ -73,8 +73,11 @@ func (s *service) DeliverFakeExternalMail(ctx context.Context, viewer domain.Org
 	if connection.Status == domain.ExternalMailStatusRevoked {
 		return "", ErrExternalMailConnectionNotFound
 	}
-	token, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
-	if err != nil {
+	var token string
+	if connection.TenantID != nil {
+		// A tenant assignment is read with the token the fake tenant mints for its mailbox.
+		token = TenantMailboxToken(connection.AccountAddress)
+	} else if token, err = s.encryptor.DecryptString(connection.EncryptedRefreshToken); err != nil {
 		return "", err
 	}
 	messageID := strings.Trim(strings.TrimSpace(input.MessageID), "<>")
