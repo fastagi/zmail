@@ -60,6 +60,135 @@ describe('external mail service', () => {
   });
 });
 
+describe('external mail service: app passwords, sync runs, purges, directory', () => {
+  const connection = {
+    id: 9,
+    provider: 'imap',
+    account_address: 'me@example.com',
+    mailbox_id: 77,
+    status: 'active',
+    last_synced_at: null,
+    last_error_code: null,
+    created_at: '2026-11-21T10:00:00Z',
+  };
+  const input = {
+    provider: 'imap',
+    host: 'imap.example.com',
+    port: 993,
+    username: 'me@example.com',
+    password: 'app-secret',
+    backfill_days: 30,
+  };
+
+  it.each([
+    [201, 'created'],
+    [200, 'restored'],
+  ] as const)('binds with an app password: %i is %s', async (status, outcome) => {
+    const post = vi
+      .spyOn(request, 'post')
+      .mockResolvedValue({ status, data: { code: 0, message: 'success', data: connection } });
+    const result = await externalMailService.bindCredentials(7, input);
+    expect(result).toEqual({ outcome, connection });
+    expect(post).toHaveBeenCalledWith('/external-mail-credentials', input, {
+      headers: { 'Organization-Id': '7' },
+      fastbuildResponseMode: 'response',
+      // Longer than the API's 45-second sign-in and the BFF's 60-second wait.
+      timeout: 65_000,
+    });
+    // The answer is all that is returned: never the request, which held the password.
+    expect(JSON.stringify(result)).not.toContain('app-secret');
+  });
+
+  it.each([
+    ['another port', { port: 143 }],
+    ['an empty password', { password: '' }],
+    ['a control character', { username: 'me\u0007' }],
+    ['a backfill out of range', { backfill_days: 91 }],
+    ['an invalid connector id', { provider: 'IMAP!' }],
+  ])('refuses %s before any request', async (_name, change) => {
+    const post = vi.spyOn(request, 'post');
+    const failure = await externalMailService
+      .bindCredentials(7, { ...input, ...change })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('reads sync runs and refuses an unexpected shape', async () => {
+    const run = {
+      id: 1,
+      started_at: '2026-11-20T08:00:00Z',
+      finished_at: '2026-11-20T08:00:01Z',
+      outcome: 'ok',
+      fetched_count: 2,
+      stored_count: 2,
+      more: false,
+      error_code: null,
+      timed_out: false,
+      throttled: false,
+    };
+    const get = vi.spyOn(request, 'get').mockResolvedValueOnce([run]);
+    await expect(externalMailService.syncRuns(7, 3)).resolves.toEqual([run]);
+    expect(get).toHaveBeenCalledWith('/external-mail-connections/3/sync-runs', {
+      headers: { 'Organization-Id': '7' },
+    });
+    get.mockResolvedValueOnce([{ ...run, subject: 'leaked' }]);
+    await expect(externalMailService.syncRuns(7, 3)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('purges and reads the directory by cursor', async () => {
+    const post = vi
+      .spyOn(request, 'post')
+      .mockResolvedValue({ deleted_messages: 5000, completed: false });
+    await expect(externalMailService.purge(7, 3)).resolves.toEqual({
+      deleted_messages: 5000,
+      completed: false,
+    });
+    expect(post).toHaveBeenCalledWith('/external-mail-connections/3/purges', undefined, {
+      headers: { 'Organization-Id': '7' },
+    });
+
+    const entry = {
+      id: 3,
+      provider: 'gmail',
+      status: 'active',
+      masked_account_address: 'st***@gmail.com',
+      owner_user_id: 5,
+      owner_display_name: 'stark',
+      last_synced_at: null,
+      created_at: '2026-11-19T08:00:00Z',
+    };
+    const getEnvelope = vi.spyOn(request, 'getEnvelope').mockResolvedValue({
+      code: 0,
+      message: 'success',
+      data: [entry],
+      meta: { per_page: 15, has_more: true, next_cursor: 'abc' },
+    });
+    await expect(externalMailService.directory(7, 'xyz')).resolves.toEqual({
+      items: [entry],
+      meta: { per_page: 15, has_more: true, next_cursor: 'abc' },
+    });
+    expect(getEnvelope).toHaveBeenCalledWith('/external-mail-connection-directory', {
+      headers: { 'Organization-Id': '7' },
+      params: { per_page: 15, cursor: 'xyz' },
+    });
+    // A directory row never carries message data.
+    getEnvelope.mockResolvedValueOnce({
+      code: 0,
+      message: 'success',
+      data: [{ ...entry, message_count: 12 }],
+      meta: { per_page: 15, has_more: false, next_cursor: null },
+    });
+    await expect(externalMailService.directory(7)).rejects.toBeInstanceOf(ApiError);
+
+    const del = vi.spyOn(request, 'delete').mockResolvedValue(undefined);
+    await externalMailService.forceDisconnect(7, 3);
+    expect(del).toHaveBeenCalledWith('/external-mail-connection-directory/3', {
+      headers: { 'Organization-Id': '7' },
+    });
+  });
+});
+
 describe('callback page module graph', () => {
   const root = resolve(process.cwd(), 'src');
   const heavy = [

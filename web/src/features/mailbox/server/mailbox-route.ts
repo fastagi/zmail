@@ -84,9 +84,30 @@ import {
   type PlatformAccountInput,
   type PlatformAccountStatus,
 } from '@/features/mailbox/platform-account-schemas';
-import { EXTERNAL_MAIL_CONNECTOR_ID_PATTERN } from '@/features/mailbox/external-mail-schemas';
+import {
+  EXTERNAL_MAIL_CONNECTOR_ID_PATTERN,
+  EXTERNAL_MAIL_CREDENTIALS_UPSTREAM_TIMEOUT_MS,
+  EXTERNAL_MAIL_DIRECTORY_CURSOR_MAX_LENGTH,
+  EXTERNAL_MAIL_DIRECTORY_MAX_PAGE_SIZE,
+  EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE,
+  EXTERNAL_MAIL_HOST_MAX_LENGTH,
+  EXTERNAL_MAIL_IMAP_PORT,
+  EXTERNAL_MAIL_PASSWORD_MAX_LENGTH,
+  EXTERNAL_MAIL_USERNAME_MAX_LENGTH,
+} from '@/features/mailbox/external-mail-schemas';
 import { decodeInboxCursor, encodeInboxCursor } from '@/features/mailbox/server/inbox-cursor';
 import { mockTriageStore } from '@/features/mailbox/server/mock-triage-store';
+import { mailAgentGrantInput } from '@/features/mailbox/server/agent-grant-input';
+import {
+  mockAgentGrantStore,
+  mockAgentPage,
+  type MockAgentGrantError,
+} from '@/features/mailbox/server/mock-agent-grant-store';
+import { mockApiKeyStore } from '@/features/api-key/server/mock-api-key-store';
+import {
+  canManageAgentGrants,
+  needsOwnMembership,
+} from '@/features/mailbox/utils/agent-grant-access';
 import {
   mockLedgerPage,
   mockPlatformAccountStore,
@@ -131,6 +152,7 @@ import { parseOrganizationId } from '@/features/organization/server/organization
 import type { OrganizationContext } from '@/features/organization/types';
 import type {
   CreateMailboxInput,
+  Mailbox,
   InboxView,
   MailDirection,
   MailLogFilters,
@@ -206,6 +228,8 @@ const maxOrganizeBodyBytes = 4 * 1_024;
 // A 4096-character record content with JSON escaping.
 const maxDnsRecordBodyBytes = 32 * 1_024;
 const maxAccessBodyBytes = 1_024;
+// Twenty filters of each kind at their longest, with JSON escaping.
+const maxAgentGrantBodyBytes = 16 * 1_024;
 // Two 256 KiB bodies and 4 MiB of files as base64; JSON escaping needs headroom.
 const maxSendBodyBytes = 8 * 1_024 * 1_024;
 // The largest download the API can answer, with room for nothing else.
@@ -969,7 +993,9 @@ export async function deleteMailboxRoute(
   }
   // `administer`: no access at all is a missing mailbox, a member with access is refused.
   const result = mockMailboxStore.delete(target.organizationId, mailboxId.value, viewerOf(target));
-  return result.ok ? apiNoContentResponse(privateMailboxHeaders()) : missing(result.error);
+  if (!result.ok) return missing(result.error);
+  mockAgentGrantStore.removeMailbox(target.organizationId, mailboxId.value);
+  return apiNoContentResponse(privateMailboxHeaders());
 }
 
 export async function listMailMessagesRoute(
@@ -2729,6 +2755,237 @@ export async function listMailboxAccessEventsRoute(
   if (!result.ok) return accessFailure(result.error);
   const { items, meta, links } = result.value;
   return apiPaginatedResponse(items, meta, links, privateMailboxHeaders());
+}
+
+/** A mailbox's agent grants, newest first; its personal owner or a shared mailbox's manager. */
+export async function listMailAgentGrantsRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const { page, perPage } = agentPageOf(request);
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${mailboxId.value}/agent-grants`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: new URLSearchParams({ page: String(page), per_page: String(perPage) }),
+    });
+  }
+  const mailbox = agentManagedMailbox(target, mailboxId.value);
+  if (!mailbox.ok) return mailbox.response;
+  const { items, meta, links } = mockAgentPage(
+    mockAgentGrantStore.list(target.organizationId, mailboxId.value),
+    page,
+    perPage,
+    `/api/mailboxes/${mailboxId.value}/agent-grants`
+  );
+  return apiPaginatedResponse(items, meta, links, privateMailboxHeaders());
+}
+
+/** Issues an agent grant; shape-checked here, judged by the API or, in development, the mock. */
+export async function issueMailAgentGrantRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const body = await jsonObject(request, maxAgentGrantBodyBytes);
+  if (!body.ok) return body.response;
+  const input = mailAgentGrantInput(body.value);
+  if (!input.ok) return validationFailed(input.errors);
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `mailboxes/${mailboxId.value}/agent-grants`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input.value,
+      fieldMap: {
+        api_key_id: 'api_key_id',
+        capabilities: 'capabilities',
+        reveal_secrets: 'reveal_secrets',
+        filters: 'filters',
+        'filters.senders': 'filters.senders',
+        'filters.label_ids': 'filters.label_ids',
+        expires_at: 'expires_at',
+      },
+    });
+  }
+  const mailbox = agentManagedMailbox(target, mailboxId.value);
+  if (!mailbox.ok) return mailbox.response;
+  const user = await getSessionUser();
+  if (!user) return unauthenticated();
+  const viewer = viewerOf(target);
+  const labels = mockMailboxStore.labels(target.organizationId, mailboxId.value, viewer);
+  const inbound = mockMailboxStore.listMessages(
+    target.organizationId,
+    mailboxId.value,
+    viewer,
+    { direction: 'inbound' },
+    1,
+    1
+  );
+  const result = mockAgentGrantStore.issue(
+    target.organizationId,
+    mailbox.value,
+    {
+      userId: viewer.userId,
+      keys: mockApiKeyStore.list(user, 1, 100).items,
+      labelIds: new Set(labels.ok ? labels.value.map(label => label.id) : []),
+      newestInbound: inbound.ok ? (inbound.value.items[0] ?? null) : null,
+    },
+    input.value
+  );
+  return result.ok ? success(result.value, 201) : agentGrantFailure(result.error);
+}
+
+/** Revokes an agent grant at once; an ended grant answers `204` again. */
+export async function revokeMailAgentGrantRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawGrantId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const grantId = parseRouteId(rawGrantId);
+  if (!grantId.ok) return grantId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mailboxes/${mailboxId.value}/agent-grants/${grantId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const mailbox = agentManagedMailbox(target, mailboxId.value);
+  if (!mailbox.ok) return mailbox.response;
+  const result = mockAgentGrantStore.revoke(target.organizationId, mailboxId.value, grantId.value);
+  return result.ok ? apiNoContentResponse(privateMailboxHeaders()) : agentGrantFailure(result.error);
+}
+
+/** A grant's newest 100 audit rows, newest first; they hold no subject or body. */
+export async function listMailAgentGrantActivityRoute(
+  request: Request,
+  rawMailboxId: string,
+  rawGrantId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const grantId = parseRouteId(rawGrantId);
+  if (!grantId.ok) return grantId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${mailboxId.value}/agent-grants/${grantId.value}/activity`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const mailbox = agentManagedMailbox(target, mailboxId.value);
+  if (!mailbox.ok) return mailbox.response;
+  const result = mockAgentGrantStore.activity(target.organizationId, mailboxId.value, grantId.value);
+  return result.ok ? success(result.value) : agentGrantFailure(result.error);
+}
+
+/** The reply drafts agents stored for a mailbox, newest first; needs `send`. */
+export async function listMailAgentDraftsRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const { page, perPage } = agentPageOf(request);
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${mailboxId.value}/agent-drafts`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: new URLSearchParams({ page: String(page), per_page: String(perPage) }),
+    });
+  }
+  const viewer = viewerOf(target);
+  const mailbox = mockMailboxStore
+    .list(target.organizationId, viewer)
+    .find(item => item.id === mailboxId.value);
+  if (!mailbox) return mailboxNotFound();
+  if (!mailbox.access.send) return accessForbidden();
+  const drafts = mockAgentGrantStore.drafts(
+    target.organizationId,
+    mailboxId.value,
+    messageId =>
+      mockMailboxStore.getMessage(target.organizationId, mailboxId.value, messageId, viewer).ok
+  );
+  const { items, meta, links } = mockAgentPage(
+    drafts,
+    page,
+    perPage,
+    `/api/mailboxes/${mailboxId.value}/agent-drafts`
+  );
+  return apiPaginatedResponse(items, meta, links, privateMailboxHeaders());
+}
+
+/** A mailbox the mock caller sees and may manage the agent grants of: `404` unseen, `403` else. */
+function agentManagedMailbox(
+  target: MailboxTarget & { available: true; backend: 'mock' },
+  mailboxId: number
+): { ok: true; value: Mailbox } | { ok: false; response: NextResponse } {
+  const mailbox = mockMailboxStore
+    .list(target.organizationId, viewerOf(target))
+    .find(item => item.id === mailboxId);
+  if (!mailbox) return { ok: false, response: mailboxNotFound() };
+  // On a connected shared mailbox only the caller's own membership tells a manager apart.
+  const members = needsOwnMembership(mailbox)
+    ? mockMailboxStore.members(target.organizationId, mailboxId, viewerOf(target))
+    : null;
+  const ownPermission =
+    members?.ok === true
+      ? (members.value.find(member => member.user_id === target.context.user_id)?.permission ??
+        null)
+      : null;
+  if (!canManageAgentGrants(mailbox, ownPermission)) {
+    return { ok: false, response: accessForbidden() };
+  }
+  return { ok: true, value: mailbox };
+}
+
+function agentPageOf(request: Request): { page: number; perPage: number } {
+  const query = new URL(request.url).searchParams;
+  return {
+    page: positiveInteger(query.get('page'), 1),
+    perPage: Math.min(positiveInteger(query.get('per_page'), defaultPerPage), MAIL_PAGE_MAX_SIZE),
+  };
+}
+
+function agentGrantFailure(error: MockAgentGrantError): NextResponse {
+  switch (error) {
+    case 'invalid':
+      return failure(422, ApiErrorCode.MAILBOX_AGENT_GRANT_INVALID, 'Agent grant is invalid');
+    case 'exists':
+      return failure(409, ApiErrorCode.MAILBOX_AGENT_GRANT_EXISTS, 'Agent grant exists');
+    case 'limit':
+      return failure(409, ApiErrorCode.MAILBOX_AGENT_GRANT_LIMIT, 'Agent grant limit reached');
+    case 'not_found':
+      return failure(404, ApiErrorCode.MAILBOX_AGENT_GRANT_NOT_FOUND, 'Agent grant not found');
+  }
 }
 
 /** Turns a personal mailbox into a shared one; owners and admins only. */
@@ -4884,9 +5141,313 @@ export async function revokeExternalMailConnectionRoute(
       organizationId: String(target.organizationId),
     });
   }
-  const revoked = (await externalMailMock()).revoke(
+  const external = await externalMailMock();
+  const revoked = external.revoke(
     target.organizationId,
     { userId: target.context.user_id, manages: target.context.role !== 'member' },
+    connectionId.value
+  );
+  if (!revoked) return externalConnectionNotFound();
+  // A disconnected account ends the agent grants of its mailbox and deletes their drafts.
+  const connectedMailboxId = external.mailboxIdOf(target.organizationId, connectionId.value);
+  if (connectedMailboxId !== null) {
+    mockAgentGrantStore.endMailbox(target.organizationId, connectedMailboxId);
+  }
+  return apiNoContentResponse(privateMailboxHeaders());
+}
+
+/**
+ * Binds an account with an app password. The BFF checks shapes only and never logs, stores, or
+ * echoes the password; the API (or the mock) signs in once before anything is kept.
+ */
+export async function bindExternalMailCredentialsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const body = await jsonObject(request, maxExternalMailBodyBytes);
+  if (!body.ok) return body.response;
+  const {
+    provider,
+    host,
+    port,
+    username,
+    password,
+    backfill_days: backfillDays,
+    connection_id: connectionId,
+  } = body.value;
+  const errors: Record<string, string[]> = {};
+  if (typeof provider !== 'string' || !EXTERNAL_MAIL_CONNECTOR_ID_PATTERN.test(provider)) {
+    errors.provider = ['must be a connector id'];
+  }
+  if (!credentialText(host, EXTERNAL_MAIL_HOST_MAX_LENGTH)) errors.host = ['is required'];
+  if (!credentialText(username, EXTERNAL_MAIL_USERNAME_MAX_LENGTH)) {
+    errors.username = ['is required'];
+  }
+  if (!credentialText(password, EXTERNAL_MAIL_PASSWORD_MAX_LENGTH)) {
+    errors.password = ['is required'];
+  }
+  if (port !== undefined && port !== EXTERNAL_MAIL_IMAP_PORT) {
+    errors.port = [`must be ${EXTERNAL_MAIL_IMAP_PORT}`];
+  }
+  if (
+    backfillDays !== undefined &&
+    (typeof backfillDays !== 'number' ||
+      !Number.isSafeInteger(backfillDays) ||
+      backfillDays < 1 ||
+      backfillDays > 90)
+  ) {
+    errors.backfill_days = ['must be between 1 and 90'];
+  }
+  if (connectionId !== undefined && !positiveId(connectionId)) {
+    errors.connection_id = ['must be a positive id'];
+  }
+  if (Object.keys(errors).length > 0) return validationFailed(errors);
+  const input = {
+    ...(connectionId === undefined ? {} : { connection_id: connectionId as number }),
+    provider: provider as string,
+    host: host as string,
+    port: EXTERNAL_MAIL_IMAP_PORT,
+    username: username as string,
+    password: password as string,
+    ...(backfillDays === undefined ? {} : { backfill_days: backfillDays as number }),
+  };
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: 'external-mail-credentials',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input,
+      // The API's sign-in may take 45 seconds; the shared upstream timeout is far shorter.
+      timeoutMs: EXTERNAL_MAIL_CREDENTIALS_UPSTREAM_TIMEOUT_MS,
+      fieldMap: {
+        provider: 'provider',
+        host: 'host',
+        port: 'port',
+        username: 'username',
+        password: 'password',
+        backfill_days: 'backfill_days',
+        connection_id: 'connection_id',
+      },
+    });
+  }
+  const result = (await externalMailMock()).bindCredentials(
+    target.organizationId,
+    target.context.user_id,
+    input,
+    {
+      create: (organizationId, ownerUserId, address, connector, days) =>
+        mockMailboxStore.createExternal(organizationId, ownerUserId, address, connector, days),
+      sync: (organizationId, mailboxId, connector, days) =>
+        mockMailboxStore.syncExternal(organizationId, mailboxId, connector, days),
+    }
+  );
+  if (result.ok) return success(result.value, result.status);
+  switch (result.error) {
+    case 'rate_limited': {
+      const response = failure(429, ApiErrorCode.COMMON_RATE_LIMITED, 'Too many attempts');
+      response.headers.set('Retry-After', String(result.retryAfterSeconds));
+      return response;
+    }
+    case 'provider_unavailable':
+      return failure(
+        404,
+        ApiErrorCode.MAILBOX_EXTERNAL_PROVIDER_UNAVAILABLE,
+        'External mail provider is unavailable'
+      );
+    case 'connection_not_found':
+      return externalConnectionNotFound();
+    case 'account_mismatch':
+      return failure(
+        409,
+        ApiErrorCode.MAILBOX_EXTERNAL_ACCOUNT_MISMATCH,
+        'Signed in to another account'
+      );
+    case 'server_unreachable':
+      return failure(
+        422,
+        ApiErrorCode.MAILBOX_EXTERNAL_SERVER_UNREACHABLE,
+        'The mail server could not be reached'
+      );
+    case 'authorization_failed':
+      return failure(
+        422,
+        ApiErrorCode.MAILBOX_EXTERNAL_AUTHORIZATION_FAILED,
+        'The mail server refused the sign-in'
+      );
+    case 'account_taken':
+      return failure(
+        409,
+        ApiErrorCode.MAILBOX_EXTERNAL_ACCOUNT_TAKEN,
+        'Account is bound by another member'
+      );
+    case 'connection_limit':
+      return failure(
+        409,
+        ApiErrorCode.MAILBOX_EXTERNAL_CONNECTION_LIMIT,
+        'External connection limit reached'
+      );
+    default:
+      return failure(
+        422,
+        ApiErrorCode.MAILBOX_EXTERNAL_AUTHORIZATION_INVALID,
+        'External mail credentials are invalid'
+      );
+  }
+}
+
+function credentialText(value: unknown, maxLength: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= maxLength &&
+    !/\p{Cc}/u.test(value)
+  );
+}
+
+/** The latest sync runs of the caller's own connection; anyone else gets 404. */
+export async function listExternalMailSyncRunsRoute(
+  request: Request,
+  rawConnectionId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const connectionId = parseRouteId(rawConnectionId);
+  if (!connectionId.ok) return connectionId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `external-mail-connections/${connectionId.value}/sync-runs`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const runs = (await externalMailMock()).syncRuns(
+    target.organizationId,
+    target.context.user_id,
+    connectionId.value
+  );
+  return runs ? success(runs) : externalConnectionNotFound();
+}
+
+/** Deletes the copies of the caller's own revoked connection at once. */
+export async function purgeExternalMailCopiesRoute(
+  request: Request,
+  rawConnectionId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const connectionId = parseRouteId(rawConnectionId);
+  if (!connectionId.ok) return connectionId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `external-mail-connections/${connectionId.value}/purges`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const result = (await externalMailMock()).purge(
+    target.organizationId,
+    target.context.user_id,
+    connectionId.value,
+    (organizationId, mailboxId) => mockMailboxStore.removeExternal(organizationId, mailboxId)
+  );
+  if (result.ok) return success(result.value);
+  return result.error === 'not_revoked'
+    ? failure(
+        409,
+        ApiErrorCode.MAILBOX_EXTERNAL_CONNECTION_NOT_REVOKED,
+        'External mail connection is not revoked'
+      )
+    : externalConnectionNotFound();
+}
+
+/** Owners and admins: a keyset page of every connection, masked; never mail or counts. */
+export async function listExternalMailConnectionDirectoryRoute(
+  request: Request
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const query = new URL(request.url).searchParams;
+  if (query.has('page')) return invalidInput('page is not supported; use cursor');
+  const forward = new URLSearchParams();
+  const errors: Record<string, string[]> = {};
+  let perPage = EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE;
+  const rawPerPage = query.get('per_page');
+  if (rawPerPage !== null && rawPerPage !== '') {
+    const value = /^[1-9]\d{0,8}$/u.test(rawPerPage) ? Number(rawPerPage) : 0;
+    if (value < 1 || value > EXTERNAL_MAIL_DIRECTORY_MAX_PAGE_SIZE) {
+      errors.per_page = ['The per_page field is invalid'];
+    } else {
+      perPage = value;
+      forward.set('per_page', rawPerPage);
+    }
+  }
+  const cursor = query.get('cursor');
+  let beforeId: number | undefined;
+  if (cursor !== null && cursor !== '') {
+    if (cursor.length > EXTERNAL_MAIL_DIRECTORY_CURSOR_MAX_LENGTH) {
+      errors.cursor = ['The cursor field is invalid'];
+    } else {
+      forward.set('cursor', cursor);
+      beforeId = decodeDirectoryCursor(cursor) ?? 0;
+    }
+  }
+  if (Object.keys(errors).length > 0) return validationFailed(errors);
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'external-mail-connection-directory',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      searchParams: forward,
+    });
+  }
+  if (beforeId === 0) return invalidInput('Invalid directory cursor');
+  const names = mockOrganizationStore.memberDisplayNames(target.organizationId);
+  const page = (await externalMailMock()).directory(target.organizationId, {
+    beforeId,
+    perPage,
+    ownerName: userId => names.get(userId) ?? null,
+  });
+  return NextResponse.json(
+    {
+      code: 0,
+      message: 'success',
+      data: page.items,
+      meta: {
+        per_page: perPage,
+        has_more: page.nextBeforeId !== null,
+        next_cursor: page.nextBeforeId === null ? null : encodeDirectoryCursor(page.nextBeforeId),
+      },
+    },
+    { headers: privateMailboxHeaders() }
+  );
+}
+
+/** Owners and admins disconnect any connection of the organization; recorded. */
+export async function forceDisconnectExternalMailConnectionRoute(
+  request: Request,
+  rawConnectionId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  if (!mayManageMailboxes(target)) return forbidden();
+  const connectionId = parseRouteId(rawConnectionId);
+  if (!connectionId.ok) return connectionId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `external-mail-connection-directory/${connectionId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const revoked = (await externalMailMock()).revoke(
+    target.organizationId,
+    { userId: target.context.user_id, manages: true },
     connectionId.value
   );
   return revoked ? apiNoContentResponse(privateMailboxHeaders()) : externalConnectionNotFound();

@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { LOCAL_ERROR_HANDLING_META } from '@/config/query-meta';
 import { liveRefresh, mailboxKeys, validId } from '@/features/mailbox/hooks/mailbox-keys';
@@ -19,6 +19,12 @@ export const externalMailKeys = {
     [...externalMailKeys.all(organizationId), 'connectors'] as const,
   connections: (organizationId: number) =>
     [...externalMailKeys.all(organizationId), 'connections'] as const,
+  syncRuns: (organizationId: number, connectionId: number) =>
+    [...externalMailKeys.all(organizationId), 'sync-runs', connectionId] as const,
+  directories: (organizationId: number) =>
+    [...externalMailKeys.all(organizationId), 'directory'] as const,
+  directory: (organizationId: number, cursor: string | undefined) =>
+    [...externalMailKeys.directories(organizationId), cursor ?? null] as const,
 };
 
 /**
@@ -48,6 +54,37 @@ export function useExternalMailConnections(organizationId: number, { enabled = t
     enabled: enabled && validId(organizationId),
     staleTime: 15_000,
     ...liveRefresh,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+/**
+ * The latest sync runs of one of the caller's own connections, newest first. Read while the
+ * connected-mailboxes dialog shows the connection, and refreshed like the connection list.
+ */
+export function useExternalMailSyncRuns(
+  organizationId: number,
+  connectionId: number,
+  { enabled = true } = {}
+) {
+  return useQuery({
+    queryKey: externalMailKeys.syncRuns(organizationId, connectionId),
+    queryFn: async () => (await service()).syncRuns(organizationId, connectionId),
+    enabled: enabled && validId(organizationId) && validId(connectionId),
+    staleTime: 15_000,
+    ...liveRefresh,
+    meta: LOCAL_ERROR_HANDLING_META,
+  });
+}
+
+/** One page of the owners' and admins' connection directory; the previous page stays shown. */
+export function useExternalMailDirectory(organizationId: number, cursor: string | undefined) {
+  return useQuery({
+    queryKey: externalMailKeys.directory(organizationId, cursor),
+    queryFn: async () => (await service()).directory(organizationId, cursor),
+    enabled: validId(organizationId),
+    placeholderData: keepPreviousData,
+    staleTime: 15_000,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }

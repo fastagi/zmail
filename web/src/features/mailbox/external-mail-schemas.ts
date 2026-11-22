@@ -4,7 +4,9 @@ import {
   enum as zodEnum,
   literal,
   looseObject,
+  nonnegative,
   nullable,
+  number,
   optional,
   regex,
   string,
@@ -75,10 +77,115 @@ export const externalMailAuthorizationEnvelopeSchema = strictObject({
   data: externalMailAuthorizationSchema,
 });
 
+/** Connectors that bind with an app password (`auth_kind: "password"`) and never redirect. */
+export const EXTERNAL_MAIL_PASSWORD_AUTH_KIND = 'password';
+/**
+ * The API signs in to an IMAP server within 45 seconds before it answers, so the BFF waits longer
+ * than that for this one route, and the browser a little longer than the BFF.
+ */
+export const EXTERNAL_MAIL_CREDENTIALS_UPSTREAM_TIMEOUT_MS = 60_000;
+export const EXTERNAL_MAIL_CREDENTIALS_REQUEST_TIMEOUT_MS = 65_000;
+/** Implicit-TLS IMAP; the contract accepts this port only. */
+export const EXTERNAL_MAIL_IMAP_PORT = 993;
+/** Bounds the form checks before sending; the server stays the authority. */
+export const EXTERNAL_MAIL_HOST_MAX_LENGTH = 253;
+export const EXTERNAL_MAIL_USERNAME_MAX_LENGTH = 320;
+export const EXTERNAL_MAIL_PASSWORD_MAX_LENGTH = 1_024;
+
+export const EXTERNAL_MAIL_SYNC_OUTCOMES = [
+  'ok',
+  'auth_failed',
+  'fetch_failed',
+  'cursor_expired',
+  'provider_unavailable',
+  'dropped',
+] as const;
+
+const countSchema = number().check(nonnegative());
+
+/** One fetch of a connection; it never carries message data. */
+export const externalMailSyncRunSchema = strictObject({
+  id: safeIdSchema,
+  started_at: timestampSchema,
+  finished_at: timestampSchema,
+  outcome: zodEnum(EXTERNAL_MAIL_SYNC_OUTCOMES),
+  fetched_count: countSchema,
+  stored_count: countSchema,
+  more: boolean(),
+  error_code: nullable(string()),
+  timed_out: boolean(),
+  throttled: boolean(),
+});
+export const externalMailSyncRunListSchema = array(externalMailSyncRunSchema);
+
+/** What one purge request deleted; `completed` once the mailbox and connection are gone. */
+export const externalMailPurgeSchema = strictObject({
+  deleted_messages: countSchema,
+  completed: boolean(),
+});
+
+/**
+ * One row of the owners' and admins' connection directory: never mail. A member's own account
+ * shows only its masked address; a shared connection is the organization's team account and also
+ * shows its full address and mailbox. The shared fields are optional so an API from before shared
+ * connected mailboxes still parses.
+ */
+export const externalMailDirectoryEntrySchema = strictObject({
+  id: safeIdSchema,
+  provider: externalMailConnectorIdSchema,
+  status: externalMailConnectionStatusSchema,
+  shared: optional(boolean()),
+  account_address: optional(nullable(string())),
+  mailbox_id: optional(nullable(safeIdSchema)),
+  masked_account_address: string(),
+  owner_user_id: nullable(safeIdSchema),
+  owner_display_name: nullable(string()),
+  last_synced_at: nullable(timestampSchema),
+  created_at: timestampSchema,
+});
+
+export const externalMailDirectoryPageEnvelopeSchema = strictObject({
+  code: literal(0),
+  message: string(),
+  data: array(externalMailDirectoryEntrySchema),
+  meta: strictObject({
+    per_page: number(),
+    has_more: boolean(),
+    next_cursor: nullable(string()),
+  }),
+});
+
+export const EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE = 15;
+export const EXTERNAL_MAIL_DIRECTORY_MAX_PAGE_SIZE = 100;
+export const EXTERNAL_MAIL_DIRECTORY_CURSOR_MAX_LENGTH = 512;
+
 export type ExternalMailConnector = Infer<typeof externalMailConnectorSchema>;
 export type ExternalMailConnection = Infer<typeof externalMailConnectionSchema>;
 export type ExternalMailConnectionStatus = Infer<typeof externalMailConnectionStatusSchema>;
 export type ExternalMailAuthorization = Infer<typeof externalMailAuthorizationSchema>;
+export type ExternalMailSyncRun = Infer<typeof externalMailSyncRunSchema>;
+export type ExternalMailSyncOutcome = ExternalMailSyncRun['outcome'];
+export type ExternalMailPurge = Infer<typeof externalMailPurgeSchema>;
+export type ExternalMailDirectoryEntry = Infer<typeof externalMailDirectoryEntrySchema>;
+export interface ExternalMailDirectoryPage {
+  items: ExternalMailDirectoryEntry[];
+  meta: Infer<typeof externalMailDirectoryPageEnvelopeSchema>['meta'];
+}
+
+/**
+ * Binds an account with an app password. The password lives only in this request: it is never
+ * logged, cached, or kept by the browser.
+ */
+export interface BindExternalMailCredentialsInput {
+  provider: string;
+  /** Restores that connection (the caller's own, or a shared one they manage). */
+  connection_id?: number;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  backfill_days?: number;
+}
 
 /** Start a new binding with a connector, or reconnect one of the caller's connections. */
 export type StartExternalMailAuthorizationInput =

@@ -4,13 +4,42 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useT } from '@/i18n';
-import request from '@/http/request';
+import { ApiErrorCode } from '@/http/codes';
+import request, { ApiError } from '@/http/request';
+import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 
 type Checks = { dns: boolean; receiving: boolean; sending: boolean };
 type Connection = { id: string; zone_name: string; worker: string };
 type Zone = { id: string; name: string; account_name: string };
 type Installation = { signing_secret: string; callback_path: string };
 const path = '/mail-cloudflare-connection';
+
+type CloudflareStep = 'list' | 'bind' | 'domain' | 'other';
+
+/**
+ * The message for a failed step of the own-token flow. Every request here runs with the token the
+ * user pasted (or stored), so the copy names it, and each step says what the failure means there:
+ * listing zones fails when Cloudflare does not accept the token (`422` without a specific code),
+ * binding re-reads the zones with it, and setting a domain up reads that domain's DNS records.
+ */
+export function cloudflareErrorKey(failure: unknown, step: CloudflareStep) {
+  if (failure instanceof ApiError) {
+    const code = failure.errorCode;
+    if (step === 'list' && failure.status === 422) return 'domain.cfTokenRefused' as const;
+    if (code === ApiErrorCode.MAILBOX_DOMAIN_PROVIDER_FAILED) {
+      if (step === 'list' || step === 'bind') return 'domain.cfTokenRefused' as const;
+      if (step === 'domain') return 'domain.cfTokenMissingPermission' as const;
+    }
+    if (code === ApiErrorCode.MAILBOX_DOMAIN_ZONE_NOT_FOUND) {
+      if (step === 'bind') return 'domain.cfZoneNotVisible' as const;
+      if (step === 'domain') return 'domain.cfDomainOutsideZone' as const;
+    }
+    if (code === ApiErrorCode.MAILBOX_DOMAIN_TAKEN && step === 'bind') {
+      return 'domain.cfAlreadyConnected' as const;
+    }
+  }
+  return resolveMailboxErrorKey(failure);
+}
 
 export function CloudflareConnectionForm({ organizationId }: { organizationId: number }) {
   const t = useT('mailbox');
@@ -32,21 +61,26 @@ export function CloudflareConnectionForm({ organizationId }: { organizationId: n
   const [checks, setChecks] = useState<Checks | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>, step: CloudflareStep = 'other') {
     setBusy(true);
     setMessage('');
     try {
       await action();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : t('domain.cfFailed'));
+      setMessage(t(cloudflareErrorKey(error, step), { zone: row?.zone_name ?? '' }));
     } finally {
       setBusy(false);
     }
   }
   const row = status.data?.connection;
   return (
-    <section className="space-y-3 rounded-md border p-4" aria-label="Cloudflare">
-      <h3 className="font-semibold">Cloudflare</h3>
+    <section className="space-y-3 rounded-md border p-4" aria-labelledby="mail-cloudflare-title">
+      <div className="space-y-1">
+        <h3 id="mail-cloudflare-title" className="font-semibold">
+          {t('domain.cfTitle')}
+        </h3>
+        <p className="text-xs text-muted-foreground">{t('domain.cfWhen')}</p>
+      </div>
       {status.isPending ? (
         <p>{t('domain.cfLoading')}</p>
       ) : status.isError ? (
@@ -122,7 +156,7 @@ export function CloudflareConnectionForm({ organizationId }: { organizationId: n
                 setName('');
                 setMessage(t('domain.cfStarted'));
                 await cache.invalidateQueries({ queryKey: ['mailbox'] });
-              })
+              }, 'domain')
             }
           >
             {t('domain.cfSetup')}
@@ -186,7 +220,7 @@ export function CloudflareConnectionForm({ organizationId }: { organizationId: n
                 setZones(list);
                 setZone(list[0]?.id ?? '');
                 if (!list.length) setMessage(t('domain.cfEmpty'));
-              })
+              }, 'list')
             }
           >
             {t('domain.cfList')}
@@ -217,7 +251,7 @@ export function CloudflareConnectionForm({ organizationId }: { organizationId: n
                     setZones([]);
                     setInstall(result);
                     await status.refetch();
-                  })
+                  }, 'bind')
                 }
               >
                 {t('domain.cfBind')}
