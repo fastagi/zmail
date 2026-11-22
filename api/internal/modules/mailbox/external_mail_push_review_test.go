@@ -185,11 +185,10 @@ func TestExternalMailPushRespectsFetchSpacing(t *testing.T) {
 	received := f.service.now().UTC()
 	f.source.Deliver(externalTestToken, externalMessage("g-1", "One", received), externalMessage("g-2", "Two", received),
 		externalMessage("g-3", "Three", received))
-	f.advance(time.Minute)
-	f.notifyFake(t)
-	now := f.service.now().UTC()
+	// The page is fetched by the poll, so no coalescing window hides the spacing.
+	now := f.advance(config.DefaultExternalMailPushPollInterval)
 	f.sync(t)
-	if runs := f.runs(t); !runs[0].Throttled {
+	if runs := f.runs(t); !runs[0].Throttled || runs[0].Trigger != domain.ExternalMailSyncTriggerPoll {
 		t.Fatalf("the backfill page was not throttled: %+v", runs[0])
 	}
 	f.notifyFake(t)
