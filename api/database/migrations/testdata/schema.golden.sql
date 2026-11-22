@@ -139,6 +139,8 @@ TABLE external_mail_subscriptions
   COLUMN last_notified_at timestamp with time zone
   COLUMN last_push_sync_at timestamp with time zone
   COLUMN scheduled_sync_at timestamp with time zone
+  COLUMN live_since timestamp with time zone
+  COLUMN degraded_at timestamp with time zone
   COLUMN consecutive_failures smallint NOT NULL DEFAULT 0
   COLUMN last_error_code character varying(64)
   COLUMN created_at timestamp with time zone NOT NULL
@@ -985,7 +987,7 @@ CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_active CH
 CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_failures CHECK ((consecutive_failures >= 0))
 CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
 CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_secret CHECK ((((secret_hash)::text = ''::text) OR ((secret_hash)::text ~ '^[0-9a-f]{64}$'::text)))
-CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'active'::character varying, 'stopped'::character varying])::text[])))
+CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'active'::character varying, 'unsupported'::character varying, 'stopped'::character varying])::text[])))
 CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_stopped CHECK ((((status)::text <> 'stopped'::text) OR (((lookup_key)::text = ''::text) AND ((secret_hash)::text = ''::text) AND (pending_at IS NULL))))
 CONSTRAINT external_mail_subscriptions.external_mail_subscriptions_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES external_mail_connections(id) ON DELETE CASCADE
 CONSTRAINT external_mail_subscriptions.external_mail_subscriptions_pkey PRIMARY KEY (id)
