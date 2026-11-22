@@ -982,7 +982,9 @@ to the connected mailbox's history. A revoked connection answers `204` again and
 another organization's id, and any id while external mail is off, is
 `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. A forced disconnect that changed anything is also
 written to the organization audit log (resource `external_mail_connections`, the connection id,
-`provider`, and `owner_user_id`; never the address), so every owner and admin can see who
+`provider`, and `owner_user_id`; never the address). The record is filed under the acting manager
+and, as a copy with the same actor, under every other owner and admin of the organization, so each
+of them finds it in `GET /v1/audit-logs?resource=external_mail_connections` and sees who
 disconnected which account. The owner may bind the account again afterwards, which restores the
 same mailbox like any rebind of their own; until then another member who proves control of the
 account may bind it instead (see [Binding](#binding)).

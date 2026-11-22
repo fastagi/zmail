@@ -216,3 +216,40 @@ func TestServiceListAuditLogsAfterBoundsTheTimeRange(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInvalidInput)
 	repo.AssertExpectations(t)
 }
+
+// TestRecordRequestFilesCopiesForAlsoVisibleTo: a change's AlsoVisibleTo files the request's
+// record under each other user once, keeping the actor and dropping the actor's IP address and
+// user agent; the record's own user and zero get no copy.
+func TestRecordRequestFilesCopiesForAlsoVisibleTo(t *testing.T) {
+	repo := new(mockRepository)
+	svc := NewService(repo)
+	ctx := withChangeCollector(context.Background())
+	RecordChange(ctx, Change{
+		Action: "delete", Resource: "external_mail_connections", TargetID: "12",
+		Metadata: map[string]any{"provider": "gmail"}, AlsoVisibleTo: []uint{5, 1, 0, 6, 5},
+	})
+	actor := uint(1)
+	var written []*domain.AuditLog
+	repo.On("Create", ctx, mock.Anything).Run(func(args mock.Arguments) {
+		written = append(written, args.Get(1).(*domain.AuditLog))
+	}).Return(nil)
+
+	require.NoError(t, svc.RecordRequest(ctx, &domain.AuditLog{
+		UserID: &actor, Method: "DELETE", Path: "/v1/external-mail-connection-directory/:connection_id",
+		StatusCode: 204, IPAddress: "203.0.113.10", UserAgent: "Browser/1.0",
+	}))
+
+	require.Len(t, written, 3)
+	assert.Equal(t, uint(1), *written[0].UserID)
+	assert.Equal(t, "203.0.113.10", written[0].IPAddress)
+	for index, userID := range []uint{5, 6} {
+		visible := written[index+1]
+		assert.Equal(t, userID, *visible.UserID)
+		assert.Equal(t, uint(1), *visible.ActorID)
+		assert.Equal(t, "external_mail_connections", visible.Resource)
+		assert.Equal(t, "12", visible.TargetID)
+		assert.Equal(t, "gmail", visible.Metadata["provider"])
+		assert.Empty(t, visible.IPAddress)
+		assert.Empty(t, visible.UserAgent)
+	}
+}

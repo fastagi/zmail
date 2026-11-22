@@ -543,6 +543,27 @@ func TestForcedDisconnectIsAudited(t *testing.T) {
 	}
 }
 
+// TestForcedDisconnectReachesEveryManager: the forced disconnect's audit record is also filed
+// under every other owner and admin of the organization, so they see who disconnected which
+// connection; the acting manager and plain members get no copy.
+func TestForcedDisconnectReachesEveryManager(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	ctx := context.Background()
+	f.memberships.managers = []uint{accessAdmin, accessC, accessD}
+	var changes []auditstarter.Change
+	f.service.recordAudit = func(_ context.Context, change auditstarter.Change) { changes = append(changes, change) }
+
+	if err := f.service.ForceDisconnectExternalMailConnection(ctx, f.admin, f.connection.ID); err != nil {
+		t.Fatalf("ForceDisconnectExternalMailConnection: %v", err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("audit changes = %+v; want one forced disconnect", changes)
+	}
+	if got := changes[0].AlsoVisibleTo; !slices.Equal(got, []uint{accessC, accessD}) {
+		t.Fatalf("AlsoVisibleTo = %v; want the other managers %v", got, []uint{accessC, accessD})
+	}
+}
+
 // TestRevokedAccountOfAnotherMemberIsReboundFresh: an account bound by a member stays theirs while
 // live, but once their connection is revoked a member who proves control of the account gets it:
 // the old copies, mailbox, and connection are purged in the binding's transaction and recorded,

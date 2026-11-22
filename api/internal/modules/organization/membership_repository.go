@@ -383,6 +383,21 @@ func (r *repository) ListMembershipsByUserIDs(ctx context.Context, organizationI
 	return found, nil
 }
 
+// ListManagerUserIDs returns the user ids of the organization's owners and admins, ascending.
+func (r *repository) ListManagerUserIDs(ctx context.Context, organizationID uint) ([]uint, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ids []uint
+	err = db.Model(&OrganizationMembershipPO{}).
+		Where("organization_id = ? AND role IN ?", organizationID,
+			[]domain.OrganizationRole{domain.OrganizationRoleOwner, domain.OrganizationRoleAdmin}).
+		Order("user_id ASC").
+		Pluck("user_id", &ids).Error
+	return ids, err
+}
+
 // withEmails converts memberships and keeps each user's account email, which toDomain leaves out.
 func withEmails(rows []*OrganizationMembershipPO) []*domain.OrganizationMembership {
 	memberships := make([]*domain.OrganizationMembership, 0, len(rows))

@@ -262,3 +262,7 @@ func (r *invitationRepositoryStub) FindMembershipsByEmails(context.Context, uint
 func (r *invitationRepositoryStub) ListMembershipsByUserIDs(context.Context, uint, []uint) ([]*domain.OrganizationMembership, error) {
 	return nil, nil
 }
+
+func (r *invitationRepositoryStub) ListManagerUserIDs(context.Context, uint) ([]uint, error) {
+	return nil, nil
+}

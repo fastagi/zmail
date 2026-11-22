@@ -146,6 +146,8 @@ type OrganizationRepository interface {
 	// ListMembershipsByUserIDs returns the organization's memberships of the given users, with User
 	// (and its Email) loaded. Users of other organizations are never returned.
 	ListMembershipsByUserIDs(ctx context.Context, organizationID uint, userIDs []uint) ([]*OrganizationMembership, error)
+	// ListManagerUserIDs returns the user ids of the organization's owners and admins, ascending.
+	ListManagerUserIDs(ctx context.Context, organizationID uint) ([]uint, error)
 }
 
 // OrganizationInvitationRepository owns invitation persistence and atomic acceptance.

@@ -257,3 +257,15 @@ func TestListMembershipsByUserIDs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, none)
 }
+
+func TestListManagerUserIDs(t *testing.T) {
+	_, repo, organizationID, memberships := createOrganizationMembershipFixture(t)
+
+	managers, err := repo.ListManagerUserIDs(context.Background(), organizationID)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []uint{memberships["owner"].UserID, memberships["admin"].UserID}, managers)
+
+	none, err := repo.ListManagerUserIDs(context.Background(), organizationID+1000)
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}

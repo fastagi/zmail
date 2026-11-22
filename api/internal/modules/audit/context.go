@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 
@@ -20,6 +21,11 @@ type Change struct {
 	Result     string
 	Changes    map[string]domain.AuditValueChange
 	Metadata   map[string]any
+	// AlsoVisibleTo files a copy of the request's record under each of these users, so a change
+	// made by one member reaches the history of others who must see it (the organization's other
+	// managers, for example). A copy keeps the actor but leaves out the actor's IP address and user
+	// agent. The record's own user and zero are skipped.
+	AlsoVisibleTo []uint
 }
 
 type changeCollector struct {
@@ -71,6 +77,7 @@ func RecordChange(ctx context.Context, change Change) {
 			current.Changes[field] = value
 		}
 	}
+	current.AlsoVisibleTo = append(current.AlsoVisibleTo, normalized.AlsoVisibleTo...)
 	if len(normalized.Metadata) > 0 {
 		if current.Metadata == nil {
 			current.Metadata = make(map[string]any, len(normalized.Metadata))
@@ -96,6 +103,7 @@ func changeFromContext(ctx context.Context) *Change {
 	cloned := *collector.change
 	cloned.Changes = cloneChanges(collector.change.Changes)
 	cloned.Metadata = cloneMetadata(collector.change.Metadata)
+	cloned.AlsoVisibleTo = slices.Clone(collector.change.AlsoVisibleTo)
 	return &cloned
 }
 
