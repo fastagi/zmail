@@ -437,7 +437,7 @@ export interface paths {
         };
         /**
          * List the caller's connected accounts
-         * @description Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in this organization, at most 10. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty) the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached and never carries a token.
+         * @description Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in this organization, at most 20 - their live connections (at most 10) and then their 10 most recently revoked ones, whose copies they may still purge or rebind. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty) the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached and never carries a token.
          */
         get: operations["listExternalMailConnections"];
         put?: never;
@@ -8353,7 +8353,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The caller's connections, id ascending. */
+            /** @description The caller's live connections id ascending, then their most recently revoked ones. */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -49,7 +49,7 @@ func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnect
 }
 
 // ListExternalMailConnections lists the caller's own connections.
-// fastbuild:bounded-list max=10 reason=one member binds at most MaxExternalMailConnectionsPerUser accounts per organization
+// fastbuild:bounded-list max=20 reason=at most MaxExternalMailConnectionsPerUser live and MaxRevokedExternalMailConnectionsListed revoked connections of one member
 func (h *Handler) ListExternalMailConnections(c *gin.Context) {
 	viewer, ok := organizationScope(c)
 	if !ok {

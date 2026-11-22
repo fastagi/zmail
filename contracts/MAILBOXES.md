@@ -109,7 +109,7 @@ recorded but has no special rights to it. A removed member loses access on their
 | List the connectors accounts can be bound with | none yet | `GET /v1/external-mail-connectors` | `200` envelope, at most 32 items |
 | Start binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations` | `201` |
 | Finish binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations/completions` | `201` new, `200` restored |
-| List the caller's connected accounts | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 10 items |
+| List the caller's connected accounts | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 20 items |
 | Unbind a connected account | none yet | `DELETE /v1/external-mail-connections/:connection_id` | `204` |
 | List a connection's latest sync runs | none yet | `GET /v1/external-mail-connections/:connection_id/sync-runs` | `200` envelope, at most 50 items |
 | Delete a revoked connection's copies at once | none yet | `POST /v1/external-mail-connections/:connection_id/purges` | `200` done, `202` finishing in the background |
@@ -824,9 +824,11 @@ the provider. The route is session only and never cached.
 
 ### Connections
 
-`GET /v1/external-mail-connections` lists the caller's own connections in the organization, live
-ones first and then id ascending, at most 10; it never carries a token. Revoked connections are kept
-so a rebind restores the same mailbox, and do not count toward the limit of 10:
+`GET /v1/external-mail-connections` lists the caller's own connections in the organization, at most
+20; it never carries a token. Their live connections come first, id ascending (at most 10, the
+limit), then their 10 most recently revoked ones, newest revocation first, so a member at the limit
+still sees the revoked ones whose copies they may purge or rebind. Revoked connections are kept so a
+rebind restores the same mailbox, and do not count toward the limit of 10:
 
 ```json
 { "id": 3, "provider": "gmail", "account_address": "me@gmail.com", "mailbox_id": 41,

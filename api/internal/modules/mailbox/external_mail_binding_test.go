@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -196,10 +197,14 @@ func TestExternalMailAccountBelongsToOneMember(t *testing.T) {
 		t.Fatalf("revoke: %v", err)
 	}
 	f.bind(t, f.c, domain.ExternalMailProviderOutlook, "after-unbinding")
+	// The listing shows every live connection first, then the revoked one beside them.
 	owned, _ = f.service.ListExternalMailConnections(ctx, f.c)
-	for _, connection := range owned {
-		if connection.Status == domain.ExternalMailStatusRevoked {
-			t.Fatalf("the listing of %d shows a revoked connection before a live one is cut off", len(owned))
+	if len(owned) != domain.MaxExternalMailConnectionsPerUser+1 {
+		t.Fatalf("the listing has %d connections; want %d live and the revoked one", len(owned), domain.MaxExternalMailConnectionsPerUser)
+	}
+	for index, connection := range owned {
+		if revoked := connection.Status == domain.ExternalMailStatusRevoked; revoked != (index == len(owned)-1) {
+			t.Fatalf("connection %d of the listing is %q; want the live ones first, then the revoked one", index, connection.Status)
 		}
 	}
 }
@@ -623,5 +628,41 @@ func TestExternalMailRegistryBuildsRegisteredConnectors(t *testing.T) {
 	other := newExternalMailRegistry(config.ExternalMailConfig{Providers: []string{config.ExternalMailProviderGmail}})
 	if connectors := other.list(); len(connectors) != 0 {
 		t.Fatalf("connectors = %+v, want none when the provider is not enabled", connectors)
+	}
+}
+
+// TestConnectionListKeepsRecentRevokedBesideTenLive: with the limit of live connections reached,
+// the member still sees their most recently revoked connections, so they can purge or rebind
+// them: up to 10 live ones, id ascending, then up to 10 revoked ones, most recently revoked first.
+func TestConnectionListKeepsRecentRevokedBesideTenLive(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	ctx := context.Background()
+	revoked := make([]uint, 0, 12)
+	for i := range 12 {
+		connection := f.bind(t, f.d, domain.ExternalMailProviderGmail, fmt.Sprintf("old%d", i))
+		if err := f.service.RevokeExternalMailConnection(ctx, f.d, connection.ID); err != nil {
+			t.Fatalf("revoke %d: %v", i, err)
+		}
+		revoked = append(revoked, connection.ID)
+	}
+	live := make([]uint, 0, domain.MaxExternalMailConnectionsPerUser)
+	for i := range domain.MaxExternalMailConnectionsPerUser {
+		live = append(live, f.bind(t, f.d, domain.ExternalMailProviderGmail, fmt.Sprintf("live%d", i)).ID)
+	}
+
+	listed, err := f.service.ListExternalMailConnections(ctx, f.d)
+	if err != nil {
+		t.Fatalf("ListExternalMailConnections: %v", err)
+	}
+	want := slices.Clone(live)
+	for i := len(revoked) - 1; i >= len(revoked)-domain.MaxRevokedExternalMailConnectionsListed; i-- {
+		want = append(want, revoked[i])
+	}
+	got := make([]uint, 0, len(listed))
+	for _, connection := range listed {
+		got = append(got, connection.ID)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("listed ids = %v; want the live ones %v then the latest revoked", got, want)
 	}
 }

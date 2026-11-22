@@ -109,6 +109,10 @@ const DefaultExternalMailBackfillDays = 14
 // MaxExternalMailConnectionsPerUser bounds the connections one member may bind in an organization.
 const MaxExternalMailConnectionsPerUser = 10
 
+// MaxRevokedExternalMailConnectionsListed bounds the revoked connections a member's connection list
+// shows after their live ones: the most recently revoked, whose copies they may still purge.
+const MaxRevokedExternalMailConnectionsListed = 10
+
 // ExternalMailConnection binds one outside account to one connected mailbox.
 type ExternalMailConnection struct {
 	ID             uint

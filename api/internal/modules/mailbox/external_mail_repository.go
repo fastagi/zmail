@@ -256,20 +256,25 @@ func (r *repository) ListExternalMailConnections(ctx context.Context, organizati
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
-	var rows []ExternalMailConnectionPO
-	err := r.conn(ctx).
-		Where("organization_id = ? AND owner_user_id = ?", organizationID, ownerUserID).
-		// Live connections first: they are bounded by the per-member limit, so none is cut off by
-		// revoked rows kept for a later rebind.
-		Order("(status = 'revoked'), id ASC").
-		Limit(domain.MaxExternalMailConnectionsPerUser).
-		Find(&rows).Error
-	if err != nil {
+	// Live connections first, bounded by the per-member limit; then the most recently revoked ones,
+	// which a rebind restores and whose copies the member may purge, bounded on their own so the
+	// live ones never push them out.
+	var live, revoked []ExternalMailConnectionPO
+	owned := r.conn(ctx).Where("organization_id = ? AND owner_user_id = ?", organizationID, ownerUserID)
+	if err := owned.Session(&gorm.Session{}).Where("status <> ?", domain.ExternalMailStatusRevoked).
+		Order("id ASC").Limit(domain.MaxExternalMailConnectionsPerUser).Find(&live).Error; err != nil {
 		return nil, err
 	}
-	connections := make([]*domain.ExternalMailConnection, 0, len(rows))
-	for i := range rows {
-		connections = append(connections, rows[i].toDomain())
+	if err := owned.Session(&gorm.Session{}).Where("status = ?", domain.ExternalMailStatusRevoked).
+		Order("revoked_at DESC NULLS LAST, id DESC").Limit(domain.MaxRevokedExternalMailConnectionsListed).
+		Find(&revoked).Error; err != nil {
+		return nil, err
+	}
+	connections := make([]*domain.ExternalMailConnection, 0, len(live)+len(revoked))
+	for _, rows := range [][]ExternalMailConnectionPO{live, revoked} {
+		for i := range rows {
+			connections = append(connections, rows[i].toDomain())
+		}
 	}
 	return connections, nil
 }
