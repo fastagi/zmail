@@ -106,7 +106,7 @@ func TestAuditLogsCaptureAPIKeyLifecycle(t *testing.T) {
 		WithToken(token).
 		WithJSON(map[string]any{
 			"name":   "Automation Key",
-			"scopes": []string{"models:invoke", "models:read"},
+			"scopes": []string{"mail:read", "mail:send"},
 		}).
 		Call().
 		AssertCreated().
@@ -164,7 +164,7 @@ func TestAuditLogsCaptureAPIKeyLifecycle(t *testing.T) {
 	require.True(t, ok)
 	scopeValues, ok := scopeChange["after"].([]interface{})
 	require.True(t, ok)
-	require.ElementsMatch(t, []interface{}{"models:invoke", "models:read"}, scopeValues)
+	require.ElementsMatch(t, []interface{}{"mail:read", "mail:send"}, scopeValues)
 }
 
 func TestAuditHistoryKeysetPagesFollowTheCursor(t *testing.T) {

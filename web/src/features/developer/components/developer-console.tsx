@@ -1,7 +1,8 @@
 'use client';
 
-import { PlugZap } from 'lucide-react';
+import { ArrowRight, PlugZap } from 'lucide-react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 
 import { Button } from '@/components/ui/button';
 import { isWebFeatureEnabled } from '@/config/features';
@@ -99,6 +100,14 @@ function DeveloperWorkspace({ organization }: { organization: MailOrganization }
         icon={<PlugZap className="size-5" aria-hidden="true" />}
         title={t('disabled.title')}
         description={t('disabled.description')}
+        action={
+          <Button asChild size="sm" variant="outline">
+            <Link href="/console/settings?tab=api">
+              {t('disabled.apiKeyAction')}
+              <ArrowRight className="size-4" aria-hidden="true" />
+            </Link>
+          </Button>
+        }
       />
     );
   }

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/domain"
 )
 
@@ -113,7 +114,7 @@ func TestServiceCreateAndValidate(t *testing.T) {
 
 	created, err := service.CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
 		Name:   "deploy",
-		Scopes: []string{"models:invoke", "models:invoke"},
+		Scopes: []string{"mail:send", "mail:send"},
 	})
 	if err != nil {
 		t.Fatalf("CreateForUser() error = %v", err)
@@ -126,7 +127,7 @@ func TestServiceCreateAndValidate(t *testing.T) {
 		t.Fatal("expected stored hash to differ from plaintext")
 	}
 
-	validated, err := service.Validate(context.Background(), created.PlaintextKey, "models:invoke")
+	validated, err := service.Validate(context.Background(), created.PlaintextKey, "mail:send")
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
@@ -142,11 +143,11 @@ func TestServiceCanonicalizesScopesAndAcceptsWildcard(t *testing.T) {
 	repo := newFakeRepository()
 	created, err := NewService(repo).CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
 		Name:   " deploy ",
-		Scopes: []string{" Models:Read ", "*", "models:read"},
+		Scopes: []string{" Mail:Read ", "*", "mail:read"},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "deploy", created.APIKey.Name)
-	assert.Equal(t, []string{"*", "models:read"}, created.APIKey.Scopes)
+	assert.Equal(t, []string{"*", "mail:read"}, created.APIKey.Scopes)
 
 	_, err = NewService(repo).Validate(context.Background(), created.PlaintextKey, "jobs:write")
 	require.NoError(t, err)
@@ -158,7 +159,7 @@ func TestServiceRejectsExpiredKeyAtCreation(t *testing.T) {
 
 	_, err := NewService(repo).CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
 		Name:      "expired",
-		Scopes:    []string{"models:read"},
+		Scopes:    []string{"mail:read"},
 		ExpiresAt: &expiresAt,
 	})
 
@@ -172,13 +173,13 @@ func TestServiceValidateScopeDenied(t *testing.T) {
 
 	created, err := service.CreateForUser(context.Background(), 7, &APIKeyCreateRequest{
 		Name:   "readonly",
-		Scopes: []string{"models:read"},
+		Scopes: []string{"mail:read"},
 	})
 	if err != nil {
 		t.Fatalf("CreateForUser() error = %v", err)
 	}
 
-	_, err = service.Validate(context.Background(), created.PlaintextKey, "models:write")
+	_, err = service.Validate(context.Background(), created.PlaintextKey, "mail:send")
 	if err != domain.ErrPermissionDenied {
 		t.Fatalf("Validate() error = %v, want %v", err, domain.ErrPermissionDenied)
 	}
@@ -228,7 +229,7 @@ func TestServiceRevocationIsIdempotent(t *testing.T) {
 	created, err := NewService(repo).CreateForUser(
 		context.Background(),
 		7,
-		&APIKeyCreateRequest{Name: "deploy", Scopes: []string{"models:invoke"}},
+		&APIKeyCreateRequest{Name: "deploy", Scopes: []string{"mail:send"}},
 	)
 	if err != nil {
 		t.Fatalf("CreateForUser() error = %v", err)
@@ -279,7 +280,7 @@ func TestCreateTestKeyUsesTestPrefix(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.Regexp(t, `^fastbuild_test_[a-z0-9_-]{8}$`, created.APIKey.KeyPrefix)
+	assert.Regexp(t, `^zmail_test_[a-z0-9_-]{8}$`, created.APIKey.KeyPrefix)
 	assert.Equal(t, domain.APIKeyModeTest, created.APIKey.Mode)
 	assert.True(t, strings.HasPrefix(created.PlaintextKey, created.APIKey.KeyPrefix+"."))
 	assert.Equal(t, domain.APIKeyModeTest, repo.keys[created.APIKey.ID].Mode)
@@ -300,8 +301,8 @@ func TestCreateKeyDefaultsToLive(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		assert.Regexp(t, `^fastbuild_[a-z0-9_-]{8}$`, created.APIKey.KeyPrefix)
-		assert.False(t, strings.HasPrefix(created.APIKey.KeyPrefix, "fastbuild_test_"))
+		assert.Regexp(t, `^zmail_[a-z0-9_-]{8}$`, created.APIKey.KeyPrefix)
+		assert.False(t, strings.HasPrefix(created.APIKey.KeyPrefix, "zmail_test_"))
 		assert.Equal(t, domain.APIKeyModeLive, created.APIKey.Mode)
 		assert.Equal(t, "live", toResponse(created.APIKey).Mode)
 	}
@@ -316,4 +317,60 @@ func TestCreateKeyRejectsUnknownMode(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, domain.ErrInvalidInput)
 	assert.Empty(t, repo.keys)
+}
+
+func TestCreateKeyRequiresAtLeastOneScope(t *testing.T) {
+	for _, scopes := range [][]string{nil, {}} {
+		repo := newFakeRepository()
+		_, err := NewService(repo).CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
+			Name:   "deploy",
+			Scopes: scopes,
+		})
+		assert.ErrorIs(t, err, domain.ErrInvalidInput)
+		assert.Empty(t, repo.keys)
+	}
+}
+
+func TestCreateKeyAcceptsOnlyCatalogScopes(t *testing.T) {
+	for _, scope := range []string{"models:invoke", "mail:write", "jobs:read"} {
+		repo := newFakeRepository()
+		_, err := NewService(repo).CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
+			Name:   "deploy",
+			Scopes: []string{"mail:send", scope},
+		})
+		assert.ErrorIs(t, err, domain.ErrInvalidInput, scope)
+		assert.Empty(t, repo.keys, scope)
+	}
+
+	repo := newFakeRepository()
+	created, err := NewService(repo).CreateForUser(context.Background(), 42, &APIKeyCreateRequest{
+		Name:   "everything",
+		Scopes: []string{"MAIL:TRANSACTIONAL", "mail:agent", "mail:read", "mail:send"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"mail:agent", "mail:read", "mail:send", "mail:transactional"}, created.APIKey.Scopes)
+	assert.Equal(t, []string{"mail:agent", "mail:read", "mail:send", "mail:transactional"}, KnownScopes())
+}
+
+func TestCreateKeyUsesZmailPrefixAndOldPrefixStillValidates(t *testing.T) {
+	repo := newFakeRepository()
+	service := NewService(repo)
+	live, err := service.CreateForUser(context.Background(), 42, &APIKeyCreateRequest{Name: "deploy", Scopes: []string{"mail:send"}})
+	require.NoError(t, err)
+	assert.Regexp(t, `^zmail_[a-z0-9_-]{8}$`, live.APIKey.KeyPrefix)
+	assert.Regexp(t, `^zmail_[a-z0-9_-]{8}\.[0-9a-f]{48}$`, live.PlaintextKey)
+
+	test, err := service.CreateForUser(context.Background(), 42, &APIKeyCreateRequest{Name: "sandbox", Scopes: []string{"mail:transactional"}, Mode: "test"})
+	require.NoError(t, err)
+	assert.Regexp(t, `^zmail_test_[a-z0-9_-]{8}$`, test.APIKey.KeyPrefix)
+
+	// A key issued under the scaffold prefix keeps working: validation is by hash alone.
+	legacy := "fastbuild_ab12cd34." + strings.Repeat("a", 48)
+	require.NoError(t, repo.Create(context.Background(), &domain.APIKey{
+		UserID: 42, Name: "legacy", KeyPrefix: "fastbuild_ab12cd34", KeyHash: crypto.SHA256Hex(legacy),
+		Scopes: []string{"mail:send"}, Mode: domain.APIKeyModeLive,
+	}))
+	validated, err := service.Validate(context.Background(), legacy, "mail:send")
+	require.NoError(t, err)
+	assert.Equal(t, "fastbuild_ab12cd34", validated.KeyPrefix)
 }
