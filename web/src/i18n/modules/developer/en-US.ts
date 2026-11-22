@@ -50,7 +50,7 @@ const messages = {
     language: 'Language',
     keyPlaceholder: 'YOUR_API_KEY',
     originHint:
-      'An operator has not set NEXT_PUBLIC_DEVELOPER_API_ORIGIN yet, so the samples show https://api.example.com.',
+      "The samples use this site's address. If your API is served from another address, replace it.",
     template: 'Template',
     noTemplate:
       'Create a transactional template first; until then the samples use an example template key.',

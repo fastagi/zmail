@@ -410,6 +410,8 @@ const messages = {
     templateNone: '不使用，自己写',
     templateHint: '变量留空时，使用模板中写好的默认值。',
     draftSaved: '已存为草稿',
+    draftSavedWithFiles: '已存为草稿。附件只在当前页面保留，刷新或关闭页面后需要重新添加。',
+    draftFilesLost: '请重新添加附件：{names}。刷新页面后附件不会保留。',
     sessionEndedDraft: '已写的内容保存在此浏览器中，重新登录后会再次打开。',
     signIn: '登录',
     invalidRecipients: '不是有效的邮箱地址：{addresses}',

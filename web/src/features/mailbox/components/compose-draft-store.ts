@@ -1,14 +1,33 @@
 import type { ComposeDraft } from '@/features/mailbox/components/compose-drafts';
 
-/** What a closed compose dialog keeps in this browser; attachments and template values are not. */
+/**
+ * What a closed compose dialog keeps in this browser; template values are not kept. Attached files
+ * themselves stay only in this page (see `readComposeDraftFiles`); their names are kept so a draft
+ * reopened after a reload can say which files to attach again.
+ */
 export interface StoredComposeDraft {
   to: string;
   cc: string;
   subject: string;
   body: string;
+  attachments?: string[];
 }
 
 const composeDraftPrefix = 'zmail.compose-draft';
+
+// Files are too large for localStorage, so a draft's files live only as long as this page does.
+const draftFiles = new Map<string, File[]>();
+
+/** The files attached to the draft at `key` earlier in this page; empty after a reload. */
+export function readComposeDraftFiles(key: string): File[] {
+  return draftFiles.get(key) ?? [];
+}
+
+/** Keeps `files` with the draft at `key` for the rest of this page; empty or null forgets them. */
+export function writeComposeDraftFiles(key: string, files: readonly File[] | null): void {
+  if (files && files.length > 0) draftFiles.set(key, [...files]);
+  else draftFiles.delete(key);
+}
 
 /**
  * Where the draft of `draft` is kept: one per organization for a new message, per answered message
@@ -27,7 +46,7 @@ export function readComposeDraft(key: string): StoredComposeDraft | null {
     if (raw === null) return null;
     const value: unknown = JSON.parse(raw);
     if (typeof value !== 'object' || value === null) return null;
-    const { to, cc, subject, body } = value as Record<string, unknown>;
+    const { to, cc, subject, body, attachments } = value as Record<string, unknown>;
     if (
       typeof to !== 'string' ||
       typeof cc !== 'string' ||
@@ -36,7 +55,11 @@ export function readComposeDraft(key: string): StoredComposeDraft | null {
     ) {
       return null;
     }
-    return { to, cc, subject, body };
+    const names =
+      Array.isArray(attachments) && attachments.every(name => typeof name === 'string')
+        ? (attachments as string[])
+        : [];
+    return { to, cc, subject, body, ...(names.length > 0 ? { attachments: names } : {}) };
   } catch {
     return null;
   }
@@ -60,8 +83,12 @@ export function draftToKeep(
   written: StoredComposeDraft,
   draft: ComposeDraft
 ): StoredComposeDraft | null {
-  const empty = Object.values(written).every(value => value.trim() === '');
+  const hasFiles = (written.attachments?.length ?? 0) > 0;
+  const empty =
+    !hasFiles &&
+    [written.to, written.cc, written.subject, written.body].every(value => value.trim() === '');
   const untouched =
+    !hasFiles &&
     written.to === draft.to &&
     written.cc === (draft.cc ?? '') &&
     written.subject === draft.subject &&

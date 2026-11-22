@@ -422,6 +422,9 @@ const messages = {
     templateNone: 'None, write the message',
     templateHint: 'An empty variable uses the fallback written in the template.',
     draftSaved: 'Saved as a draft',
+    draftSavedWithFiles:
+      'Saved as a draft. Attached files stay only while this page is open; after a reload, attach them again.',
+    draftFilesLost: 'Attach again: {names}. Files are not kept after the page reloads.',
     sessionEndedDraft: 'What you wrote is kept in this browser and opens again after you sign in.',
     signIn: 'Sign in',
     invalidRecipients: 'Not a plain email address: {addresses}',

@@ -1939,6 +1939,37 @@ describe('inbox keyboard shortcuts', () => {
     expect(await screen.findByLabelText('Subject')).toHaveValue('');
   });
 
+  // Issue #142: a draft keeps its attached files while the page stays open, and says so.
+  it('closing compose keeps the attached files with the draft for this page', async () => {
+    renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('Subject'), { target: { value: 'With file' } });
+    const file = new File(['keep me'], 'must-stay.txt', { type: 'text/plain' });
+    fireEvent.change(document.getElementById('mail-compose-files') as HTMLInputElement, {
+      target: { files: [file] },
+    });
+    expect(await screen.findByText('must-stay.txt')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    expect(toast.success).toHaveBeenCalledWith(
+      'Saved as a draft. Attached files stay only while this page is open; after a reload, attach them again.'
+    );
+
+    press('c');
+    expect(await screen.findByLabelText('Subject')).toHaveValue('With file');
+    expect(screen.getByText('must-stay.txt')).toBeInTheDocument();
+
+    // Removing the file and closing forgets it.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove must-stay.txt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    press('c');
+    expect(await screen.findByLabelText('Subject')).toHaveValue('With file');
+    expect(screen.queryByText('must-stay.txt')).toBeNull();
+  });
+
   // Issue #91: opening the composer moves focus into it; closing returns it to the trigger.
   it('opening compose focuses To, and closing returns the focus to the Compose button', async () => {
     renderRoute();

@@ -25,7 +25,9 @@ import {
   composeDraftKey,
   draftToKeep,
   readComposeDraft,
+  readComposeDraftFiles,
   writeComposeDraft,
+  writeComposeDraftFiles,
 } from '@/features/mailbox/components/compose-draft-store';
 import { COMPOSE_PARAM, COMPOSE_RESUME } from '@/features/mailbox/components/mailbox-params';
 import { type ComposeDraft } from '@/features/mailbox/components/compose-drafts';
@@ -108,11 +110,35 @@ export function ComposeDialog({
   // What is written is kept as it changes, so leaving the page any way (the global sidebar, the
   // browser's back button, a reload) keeps the draft as closing the dialog does. Sending clears it.
   const sentRef = useRef(false);
+  const [files, setFiles] = useState<File[]>(() => readComposeDraftFiles(draftKey));
+  // Files named by a draft kept before a reload, which this page no longer holds.
+  const [lostFiles] = useState(() =>
+    readComposeDraftFiles(draftKey).length > 0 ? [] : (kept?.attachments ?? [])
+  );
+  const written = () => ({
+    to,
+    cc,
+    subject,
+    body,
+    ...(files.length > 0 ? { attachments: files.map(file => file.name) } : {}),
+  });
   useEffect(() => {
     if (sentRef.current) return;
-    writeComposeDraft(draftKey, draftToKeep({ to, cc, subject, body }, draft));
-  }, [draftKey, draft, to, cc, subject, body]);
-  const [files, setFiles] = useState<File[]>([]);
+    writeComposeDraft(
+      draftKey,
+      draftToKeep(
+        {
+          to,
+          cc,
+          subject,
+          body,
+          ...(files.length > 0 ? { attachments: files.map(file => file.name) } : {}),
+        },
+        draft
+      )
+    );
+    writeComposeDraftFiles(draftKey, files);
+  }, [draftKey, draft, to, cc, subject, body, files]);
   // The forwarded message's files, carried along unless removed; read only when sending.
   const [carried, setCarried] = useState<readonly MailAttachment[]>(
     () => draft.forwarded?.attachments ?? []
@@ -197,7 +223,7 @@ export function ComposeDialog({
     const key = resolveMailboxErrorKey(failure);
     setErrorKey(key);
     if (key === 'errors.sessionEnded') {
-      writeComposeDraft(draftKey, draftToKeep({ to, cc, subject, body }, draft));
+      writeComposeDraft(draftKey, draftToKeep(written(), draft));
     }
     if (isStoredSendFailure(failure)) onStored?.();
   };
@@ -241,6 +267,7 @@ export function ComposeDialog({
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       sentRef.current = true;
       writeComposeDraft(draftKey, null);
+      writeComposeDraftFiles(draftKey, null);
       onStored?.();
       onClose();
     } catch (failure) {
@@ -285,6 +312,7 @@ export function ComposeDialog({
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       sentRef.current = true;
       writeComposeDraft(draftKey, null);
+      writeComposeDraftFiles(draftKey, null);
       onStored?.();
       onClose();
     } catch (failure) {
@@ -299,9 +327,11 @@ export function ComposeDialog({
    */
   const dismiss = () => {
     if (send.isPending) return;
-    const keep = draftToKeep({ to, cc, subject, body }, draft);
+    const keep = draftToKeep(written(), draft);
     writeComposeDraft(draftKey, keep);
-    if (keep) toast.success(t('compose.draftSaved'));
+    writeComposeDraftFiles(draftKey, files);
+    if (keep)
+      toast.success(t(files.length > 0 ? 'compose.draftSavedWithFiles' : 'compose.draftSaved'));
     onClose();
   };
 
@@ -486,6 +516,11 @@ export function ComposeDialog({
               {t('compose.attachHint')}
             </p>
           </div>
+          {lostFiles.length > 0 && files.length === 0 ? (
+            <p role="status" className="text-xs text-warning">
+              {t('compose.draftFilesLost', { names: lostFiles.join(', ') })}
+            </p>
+          ) : null}
           {files.length + carried.length > 0 ? (
             <ul className="divide-y rounded-md border text-sm">
               {carried.map(attachment => (

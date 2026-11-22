@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Check, Copy, KeyRound, Send } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -95,6 +95,10 @@ function senderDomain(domains: readonly MailboxDomain[]): string | null {
  * samples in plain HTTP, and a test send to the caller's own address that is followed for up to
  * 30 seconds.
  */
+// Without a configured API origin the samples use this site's own origin, read after hydration.
+const subscribeNever = () => () => {};
+const readSiteOrigin = () => window.location.origin;
+
 export function QuickStartTab({
   organization,
   mode,
@@ -142,8 +146,9 @@ export function QuickStartTab({
     );
   }, [template, detail.data]);
 
+  const siteOrigin = useSyncExternalStore(subscribeNever, readSiteOrigin, () => undefined);
   const snippets = buildSnippets({
-    apiOrigin: env.NEXT_PUBLIC_DEVELOPER_API_ORIGIN,
+    apiOrigin: env.NEXT_PUBLIC_DEVELOPER_API_ORIGIN ?? siteOrigin,
     organizationId: organization.id,
     apiKey:
       createdHere?.plaintext && createdHere.revealed
@@ -341,11 +346,7 @@ function KeyPanel({
         </div>
         {created?.plaintext ? (
           revealed ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onSaved}
-            >
+            <Button type="button" variant="outline" onClick={onSaved}>
               {t('start.keySaved')}
             </Button>
           ) : (
