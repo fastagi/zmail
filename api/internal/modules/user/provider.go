@@ -52,6 +52,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_04_27_000003_create_authentication_sessions_table",
 			"2026_10_04_000000_add_audience_to_authentication_sessions",
 			"2026_11_27_090000_create_registration_email_codes",
+			"2026_12_01_090000_create_user_totp",
 			"2025_06_18_000001_seed_default_users",
 		),
 		assembly.WithStarterSeederNames("users"),
