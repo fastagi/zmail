@@ -14,6 +14,10 @@ const httpMethods = new Set(['delete', 'get', 'head', 'options', 'patch', 'post'
 const undocumentedRoutes = new Map([
   ['GET /', 'service banner'],
   ['GET /metrics', 'Prometheus text exposition, not a JSON operation'],
+  [
+    'POST /v1/external-mail-connections/{}/fake-deliveries',
+    'development only: registered only while EXTERNAL_MAIL_PROVIDERS=fake (api/docs/EXTERNAL_MAIL_DEVELOPMENT.md)',
+  ],
 ]);
 
 const schema = parse(await readFile(schemaPath, 'utf8'));
