@@ -123,7 +123,7 @@ export function ComposeDialog({
   const sentRef = useRef(false);
   const [files, setFiles] = useState<File[]>(() => readComposeDraftFiles(draftKey));
   // Files named by a draft kept before a reload, which this page no longer holds.
-  const [lostFiles] = useState(() =>
+  const [lostFiles, setLostFiles] = useState(() =>
     readComposeDraftFiles(draftKey).length > 0 ? [] : (kept?.attachments ?? [])
   );
   // Until they are attached again, the names of lost files stay with the draft as a reminder.
@@ -230,6 +230,8 @@ export function ComposeDialog({
     event.target.value = '';
     setErrorKey(null);
     setFiles(current => [...current, ...chosen]);
+    // Attaching anything settles the reminder; removing files later does not bring it back.
+    setLostFiles([]);
   };
 
   /**

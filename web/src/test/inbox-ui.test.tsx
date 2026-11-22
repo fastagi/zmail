@@ -1997,6 +1997,20 @@ describe('inbox keyboard shortcuts', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
       await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
     }
+
+    // Attaching again settles the reminder, and removing that file later does not revive it.
+    press('c');
+    fireEvent.change(document.getElementById('mail-compose-files') as HTMLInputElement, {
+      target: { files: [new File(['x'], 'lost.pdf')] },
+    });
+    expect(screen.queryByText(reminder)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove lost.pdf' }));
+    expect(screen.queryByText(reminder)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    press('c');
+    await screen.findByLabelText('Subject');
+    expect(screen.queryByText(reminder)).toBeNull();
   });
 
   // Issue #91: opening the composer moves focus into it; closing returns it to the trigger.

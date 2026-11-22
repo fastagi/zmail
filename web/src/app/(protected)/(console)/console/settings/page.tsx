@@ -2,10 +2,12 @@ import { lazy, Suspense } from 'react';
 import { KeyRound, ShieldCheck, SlidersHorizontal, UserRound } from 'lucide-react';
 
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { isWebFeatureEnabled } from '@/config/features';
 import { ApiKeyPanel } from '@/features/api-key';
 import { getT } from '@/i18n/server';
+
+import { SettingsTabs } from './settings-tabs';
 
 const AccountSecurityPanel = lazy(async () => {
   const feature = await import('@/features/auth/components/account-security-panel');
@@ -23,30 +25,20 @@ const UserSettingPanel = lazy(async () => {
 });
 
 const settingsTabs = ['profile', 'preferences', 'security', 'api'] as const;
-type SettingsTab = (typeof settingsTabs)[number];
-
-interface SettingsPageProps {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}
 
 /**
  * Replaceable settings surface for the starter console. `?tab=` opens one tab directly.
  */
-export default async function SettingsPage({ searchParams }: SettingsPageProps) {
+export default async function SettingsPage() {
   const t = await getT('settings');
   const settingEnabled = isWebFeatureEnabled('setting');
-  const requested = (await searchParams).tab;
-  const tab: SettingsTab =
-    settingsTabs.find(
-      value => value === requested && (value !== 'preferences' || settingEnabled)
-    ) ?? 'profile';
+  const tabs = settingsTabs.filter(value => value !== 'preferences' || settingEnabled);
 
   return (
     <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 lg:py-8">
       <h1 className="text-2xl font-semibold">{t('title')}</h1>
 
-      {/* Keyed so following a ?tab= link while already on this page selects that tab. */}
-      <Tabs key={tab} defaultValue={tab} className="mt-5">
+      <SettingsTabs tabs={tabs} className="mt-5">
         <TabsList className="max-w-full overflow-x-auto">
           <TabsTrigger value="profile">
             <UserRound aria-hidden="true" />
@@ -91,7 +83,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         <TabsContent value="api" className="pt-5">
           <ApiKeyPanel />
         </TabsContent>
-      </Tabs>
+      </SettingsTabs>
     </div>
   );
 }
