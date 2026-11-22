@@ -122,7 +122,7 @@ func TestSharedBindingValidatesMembers(t *testing.T) {
 		many.Members = append(many.Members, domain.ExternalMailSharingMember{UserID: uint(1000 + i), Permission: domain.MailboxPermissionView})
 	}
 	for name, sharing := range map[string]*domain.ExternalMailSharing{
-		"no members": {},
+		"no members":  {},
 		"101 members": many,
 		"duplicate": {Members: []domain.ExternalMailSharingMember{
 			{UserID: accessC, Permission: domain.MailboxPermissionView}, {UserID: accessC, Permission: domain.MailboxPermissionSend},

@@ -170,8 +170,8 @@ func (s *service) saveOverShared(tx context.Context, viewer domain.OrganizationC
 			return nil, false, ErrExternalMailConnectionNotFound
 		}
 		if existing.Status == domain.ExternalMailStatusRevoked {
-			if err := s.checkSharedConnectionLimit(tx, viewer.OrganizationID); err != nil {
-				return nil, false, err
+			if limitErr := s.checkSharedConnectionLimit(tx, viewer.OrganizationID); limitErr != nil {
+				return nil, false, limitErr
 			}
 		}
 		connection, err := s.externalMail.RebindExternalMailConnection(tx, domain.ExternalMailRebind{
