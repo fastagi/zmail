@@ -246,17 +246,32 @@ func (s *service) externalCopies(connection *domain.ExternalMailConnection, fetc
 	return copies
 }
 
-// ListExternalMailConnections lists the viewer's own connections. It answers
-// ErrExternalMailConnectionNotFound while the instance enables no source.
+// ListExternalMailConnections lists the viewer's own connections, then the shared connections
+// they manage: every one for owners and admins, those of mailboxes they hold with manage
+// otherwise. It answers ErrExternalMailConnectionNotFound while the instance enables no source.
 func (s *service) ListExternalMailConnections(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.ExternalMailConnection, error) {
 	if !s.externalMailAvailable() {
 		return nil, ErrExternalMailConnectionNotFound
 	}
-	return s.externalMail.ListExternalMailConnections(ctx, viewer.OrganizationID, viewer.UserID)
+	connections, err := s.externalMail.ListExternalMailConnections(ctx, viewer.OrganizationID, viewer.UserID)
+	if err != nil {
+		return nil, err
+	}
+	manager := viewer.Role.CanManageOrganization()
+	if !manager && viewer.MembershipID == 0 {
+		return connections, nil
+	}
+	shared, err := s.externalMail.ListSharedExternalMailConnections(ctx, viewer.OrganizationID, viewer.MembershipID, manager,
+		domain.MaxSharedExternalMailConnectionsCeiling)
+	if err != nil {
+		return nil, err
+	}
+	return append(connections, shared...), nil
 }
 
 // RevokeExternalMailConnection unbinds an account: its owner may, and so may owners and admins for
-// offboarding, which is recorded as a forced disconnect. The provider grant is revoked on a
+// offboarding, which is recorded as a forced disconnect. A shared connection is unbound by whoever
+// manages it. The provider grant is revoked on a
 // best-effort basis, then the connection stops for good and its token is erased. Mail already
 // synced stays in the connected mailbox until the retention ends or the owner purges it.
 func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domain.OrganizationContext, id uint) error {
@@ -266,6 +281,14 @@ func (s *service) RevokeExternalMailConnection(ctx context.Context, viewer domai
 	connection, err := s.externalMail.FindExternalMailConnection(ctx, viewer.OrganizationID, id)
 	if err != nil {
 		return err
+	}
+	if connection.Shared {
+		// An organization's connection is unbound by whoever manages it, as a disconnect of the
+		// team account rather than a forced one.
+		if _, err = s.managedConnection(ctx, viewer, connection.ID); err != nil {
+			return err
+		}
+		return s.disconnectShared(ctx, viewer, connection)
 	}
 	owner := connection.OwnerUserID != nil && viewer.UserID != 0 && *connection.OwnerUserID == viewer.UserID
 	if !owner && !viewer.Role.CanManageOrganization() {

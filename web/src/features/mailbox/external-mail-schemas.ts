@@ -5,6 +5,7 @@ import {
   literal,
   looseObject,
   nullable,
+  optional,
   regex,
   string,
   strictObject,
@@ -45,12 +46,16 @@ export const externalMailConnectorListSchema = array(externalMailConnectorSchema
 export const EXTERNAL_MAIL_CONNECTION_STATUSES = ['active', 'needs_reconnect', 'revoked'] as const;
 export const externalMailConnectionStatusSchema = zodEnum(EXTERNAL_MAIL_CONNECTION_STATUSES);
 
-/** One of the caller's bound accounts; it never carries a token. */
+/**
+ * One of the caller's bound accounts, or a shared connection they manage; it never carries a token.
+ * `shared` is optional so an API from before shared connected mailboxes still parses.
+ */
 export const externalMailConnectionSchema = strictObject({
   id: safeIdSchema,
   provider: externalMailConnectorIdSchema,
   account_address: string(),
   mailbox_id: safeIdSchema,
+  shared: optional(boolean()),
   status: externalMailConnectionStatusSchema,
   last_synced_at: nullable(timestampSchema),
   last_error_code: nullable(string()),

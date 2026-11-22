@@ -13,6 +13,8 @@ import (
 func TestOpenMailConnectorsUpDown(t *testing.T) {
 	db, exec := externalMailFixture(t)
 	migrated := dumpSchema(t, db)
+	// Later migrations that build on these tables roll back first.
+	require.NoError(t, (&addSharedExternalMail{}).Down(db))
 	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
 		VALUES (2, 10, 901, 'owner@gmail.example', 'external', 901, now(), now())`)
@@ -24,6 +26,7 @@ func TestOpenMailConnectorsUpDown(t *testing.T) {
 	assert.NotContains(t, rolledBack, "TABLE external_mail_authorizations")
 	require.NoError(t, (&openMailConnectors{}).Up(db))
 	require.NoError(t, (&addMailboxOrigin{}).Up(db))
+	require.NoError(t, (&addSharedExternalMail{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }
 

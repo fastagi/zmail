@@ -61,3 +61,25 @@ func TestExternalMailSyncConfigParsing(t *testing.T) {
 		}
 	}
 }
+
+// TestExternalMailSharedConnectionLimit: unset takes 20, a set value must be a whole number from 1
+// to 100, and anything else fails startup instead of falling back to the default.
+func TestExternalMailSharedConnectionLimit(t *testing.T) {
+	if limit := (ExternalMailConfig{}).SharedConnectionLimit(); limit != DefaultExternalMailMaxSharedConnections {
+		t.Fatalf("default limit = %d", limit)
+	}
+	for raw, want := range map[string]int{"": 0, " 5 ": 5, "100": 100, "abc": -1, "0": -1, "-3": -1, "2.5": -1} {
+		if got := parseExternalMailMaxSharedConnections(raw); got != want {
+			t.Fatalf("parse(%q) = %d, want %d", raw, got, want)
+		}
+	}
+	for value, valid := range map[int]bool{0: true, 1: true, 100: true, 101: false, -1: false} {
+		err := validateExternalMailConfig(ExternalMailConfig{MaxSharedConnections: value}, "", false)
+		if (err == nil) != valid {
+			t.Fatalf("validate(%d) = %v, want valid %v", value, err, valid)
+		}
+	}
+	if limit := (ExternalMailConfig{MaxSharedConnections: 7}).SharedConnectionLimit(); limit != 7 {
+		t.Fatalf("configured limit = %d", limit)
+	}
+}

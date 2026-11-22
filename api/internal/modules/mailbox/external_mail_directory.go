@@ -122,6 +122,9 @@ func (s *service) ForceDisconnectExternalMailConnection(ctx context.Context, vie
 	if err != nil {
 		return err
 	}
+	if connection.Shared {
+		return s.disconnectShared(ctx, viewer, connection)
+	}
 	return s.forceDisconnect(ctx, viewer, connection)
 }
 
@@ -152,11 +155,15 @@ type ExternalMailConnectionDirectoryRequest struct {
 }
 
 // ExternalMailConnectionDirectoryEntryResponse is one connection as a manager sees it: never the
-// mail, the token, or the full address.
+// mail or the token, and for a member's own account never the full address or the mailbox. A
+// shared connection is the organization's own team account, so it carries both.
 type ExternalMailConnectionDirectoryEntryResponse struct {
 	ID                   uint       `json:"id"`
 	Provider             string     `json:"provider"`
 	Status               string     `json:"status"`
+	Shared               bool       `json:"shared"`
+	AccountAddress       *string    `json:"account_address"`
+	MailboxID            *uint      `json:"mailbox_id"`
 	MaskedAccountAddress string     `json:"masked_account_address"`
 	OwnerUserID          *uint      `json:"owner_user_id"`
 	OwnerDisplayName     *string    `json:"owner_display_name"`
@@ -167,9 +174,12 @@ type ExternalMailConnectionDirectoryEntryResponse struct {
 func toExternalMailConnectionDirectoryEntryResponse(entry ExternalMailConnectionDirectoryEntry) ExternalMailConnectionDirectoryEntryResponse {
 	connection := entry.Connection
 	item := ExternalMailConnectionDirectoryEntryResponse{
-		ID: connection.ID, Provider: string(connection.Provider), Status: string(connection.Status),
+		ID: connection.ID, Provider: string(connection.Provider), Status: string(connection.Status), Shared: connection.Shared,
 		MaskedAccountAddress: maskAccountAddress(connection.AccountAddress), OwnerUserID: connection.OwnerUserID,
 		OwnerDisplayName: optionalText(entry.OwnerDisplayName), CreatedAt: connection.CreatedAt.UTC(),
+	}
+	if connection.Shared {
+		item.AccountAddress, item.MailboxID = new(connection.AccountAddress), new(connection.MailboxID)
 	}
 	if connection.LastSyncedAt != nil {
 		item.LastSyncedAt = new(connection.LastSyncedAt.UTC())
