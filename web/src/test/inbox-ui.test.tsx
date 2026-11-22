@@ -2161,6 +2161,23 @@ describe('inbox keyboard shortcuts', () => {
     expect(toast.mock.calls.slice(toastsBefore).map(call => call[0])).not.toContain('Sending…');
   });
 
+  it('a reply the provider refuses still says so after the composer closes', async () => {
+    state.send.mutateAsync.mockRejectedValueOnce(
+      new ApiError('provider said no', ApiErrorCode.MAILBOX_DELIVERY_FAILED, 502)
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?open=31');
+    renderRoute();
+    await readingPaneLoaded();
+
+    press('r');
+    const dialog = await screen.findByRole('dialog', { name: 'Reply' });
+    fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'Thanks' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Reply' })).toBeNull());
+    expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/NOT delivered/u));
+  });
+
   // Issue #86: leaving the page with the composer open keeps what was written.
   it('navigating away with the composer open keeps the draft for the next compose', async () => {
     const first = renderRoute();

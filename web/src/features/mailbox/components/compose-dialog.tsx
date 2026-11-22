@@ -297,7 +297,11 @@ export function ComposeDialog({
     if (key === 'errors.sessionEnded') {
       writeComposeDraft(draftKey, draftToKeep(written(), startingDraft));
     }
-    if (isStoredSendFailure(failure)) onStored?.();
+    if (isStoredSendFailure(failure)) {
+      // The parent may close the composer for its sent folder; the toast still tells the writer.
+      toast.error(t(key));
+      onStored?.();
+    }
   };
 
   /** Sign-in that returns to this page, reopening a new message on its kept draft. */
