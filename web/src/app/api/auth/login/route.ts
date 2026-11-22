@@ -18,6 +18,7 @@ import { ApiErrorCode } from '@/http/codes';
 const loginSchema = z.object({
   email: z.string().email().max(100),
   password: z.string().min(1).max(50),
+  totpCode: z.string().trim().min(1).max(32).optional(),
 });
 
 export const runtime = 'nodejs';
@@ -51,10 +52,10 @@ async function handleLogin(request: Request) {
     return apiValidationErrorResponse('Invalid login payload', parsed.error);
   }
 
-  const { email, password } = parsed.data;
+  const { email, password, totpCode } = parsed.data;
 
   if (resolution.backend === 'go-api') {
-    return loginWithGoApi(request, { email, password });
+    return loginWithGoApi(request, { email, password, totpCode });
   }
 
   const user = authenticateMockIdentity(email, password);

@@ -115,6 +115,11 @@ const messages = {
   accountDisabled: 'This account is disabled',
   emailAlreadyExists: 'An account with this email already exists',
   invalidCredentials: 'Invalid email or password',
+  totpRequired: 'Enter the 6-digit code from your authenticator app.',
+  totpInvalid: 'That code is wrong or was already used. Try the next code.',
+  totpCode: 'Authenticator code',
+  totpCodeHint: 'Lost your phone? Enter one of your recovery codes instead.',
+  totpBack: 'Use a different account',
 
   // Social login
   signInWithGoogle: 'Sign in with Google',
