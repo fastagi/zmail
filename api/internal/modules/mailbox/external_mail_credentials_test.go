@@ -341,3 +341,58 @@ func TestIMAPCredentialsHTTP(t *testing.T) {
 		}
 	}
 }
+
+// TestIMAPCredentialBindingWithSMTPSendsThroughTheAccount: an account bound with its SMTP server
+// sends from its connected mailbox through that server, never the instance's provider, and a
+// rebind without the server makes the mailbox read-only again.
+func TestIMAPCredentialBindingWithSMTPSendsThroughTheAccount(t *testing.T) {
+	f, imap := newIMAPFixture(t)
+	outgoing := newFakeSMTPServer(t)
+	outgoing.password = fakeIMAPPassword
+	source := imap.source()
+	roots := imap.roots.Clone()
+	roots.AddCert(outgoing.cert)
+	source.policy.RootCAs = roots
+	f.service.externalConnectors = &externalMailRegistry{connectors: []ExternalMailConnector{{
+		ID: ExternalMailProviderIMAP, AuthKind: ExternalMailAuthPassword,
+		Capabilities: ExternalMailCapabilities{Read: true, Send: true}, Source: source,
+	}}}
+	ctx := context.Background()
+	input := imapInput(imap, "carol@imap.test")
+	input.Password = fakeIMAPPassword
+	input.SMTPHost, input.SMTPPort = "127.0.0.1", outgoing.port
+	wrong := input
+	wrong.SMTPPort = closedPort(t)
+	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.c, wrong); !errors.Is(err, ErrExternalMailServerUnreachable) {
+		t.Fatalf("closed SMTP port = %v, want unreachable", err)
+	}
+	connection, _, err := f.service.BindExternalMailCredentials(ctx, f.c, input)
+	if err != nil {
+		t.Fatalf("bind with SMTP: %v", err)
+	}
+	mailbox, err := f.repo.FindMailbox(ctx, accessOrg, connection.MailboxID)
+	if err != nil || !mailbox.ConnectedSend || !domain.MailboxAccessFor(mailbox, f.c, nil).Send {
+		t.Fatalf("mailbox = %+v, err %v; want it to send", mailbox, err)
+	}
+	sent, _, err := f.service.SendMessage(ctx, f.c, connection.MailboxID, SendInput{
+		To: []string{"friend@example.org"}, Subject: "Through my server", Text: "hello",
+	})
+	if err != nil || sent.Status != domain.MailStatusSent || sent.FromAddress != "carol@imap.test" {
+		t.Fatalf("send = %+v, err %v", sent, err)
+	}
+	outgoing.mu.Lock()
+	data := outgoing.data
+	outgoing.mu.Unlock()
+	if !strings.Contains(data, "Subject: Through my server") || len(f.transport.sent) != 0 {
+		t.Fatalf("SMTP data %q, provider sends %d", data, len(f.transport.sent))
+	}
+
+	if _, _, err := f.service.BindExternalMailCredentials(ctx, f.c, imapInput(imap, "carol@imap.test")); err != nil {
+		t.Fatalf("rebind without SMTP: %v", err)
+	}
+	if _, _, err := f.service.SendMessage(ctx, f.c, connection.MailboxID, SendInput{
+		To: []string{"friend@example.org"}, Subject: "Again", Text: "hello",
+	}); err == nil {
+		t.Fatal("a mailbox rebound without SMTP must not send")
+	}
+}

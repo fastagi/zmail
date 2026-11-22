@@ -346,9 +346,10 @@ where its mail comes from:
 
 - `origin` `zmail` mailboxes receive and send at a Zmail address; every mailbox created through
   `POST /v1/mailboxes` is one.
-- `origin` `connected` mailboxes hold read-only copies of an outside account (see
-  [External Mailboxes](#external-mailboxes)). Whatever the type and permission, nobody sends from
-  them or gets `organize`; their address never takes delivery, never blocks a Zmail address, and
+- `origin` `connected` mailboxes hold copies of an outside account (see
+  [External Mailboxes](#external-mailboxes)). Whatever the type and permission, nobody gets
+  `organize`, and nobody sends from them unless the account was bound with its SMTP server (see
+  [Sending From A Connected Mailbox](#sending-from-a-connected-mailbox)); their address never takes delivery, never blocks a Zmail address, and
   does not count toward the organization's mailbox limit. They are never created through
   `POST /v1/mailboxes`. A connected `personal` mailbox is its owner's own account: only the owner
   sees it, with `view` and `see_history`, and the owner and admin roles get nothing on it, so it is
@@ -727,7 +728,7 @@ no platform account.
 
 ## External Mailboxes
 
-A member can bind an outside account read-only through a **connector**: Gmail, Outlook, or any
+A member can bind an outside account through a **connector**: Gmail, Outlook, or any
 provider the instance adds later. Its mail is copied into a `personal` mailbox with `origin`
 `connected` that the member owns alone (see [Access](#access)); every copy is inbound, `received`, carries the connector id as
 `source` (`gmail`, `outlook`, ...), and the provider's receive time as `created_at`. A copy is stored
@@ -736,8 +737,8 @@ one. The first sync looks back 14 days unless the binding asked for 1 to 90.
 
 Connector ids match `^[a-z][a-z0-9_]{1,15}$`; a new connector adds ids without a contract change, so
 clients render an id they do not know generically. A connected mailbox carries the outside account's
-address, but that address is never Zmail's to deliver to: inbound delivery, sending, and the address
-check ignore connected mailboxes. Within one organization and connector an outside account belongs
+address, but that address is never Zmail's to deliver to: inbound delivery, sending through Zmail's
+provider, and the address check ignore connected mailboxes. Within one organization and connector an outside account belongs
 to one member at a time, or to the organization as a [shared connected mailbox](#shared-connected-mailboxes);
 the same address may still exist under another connector or as a Zmail mailbox, which is all the
 relaxed address index allows.
@@ -756,7 +757,9 @@ routes answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, and no account is syn
 ### Binding
 
 `GET /v1/external-mail-connectors` lists the instance's connectors in a stable order:
-`{ "id": "gmail", "auth_kind": "oauth2", "capabilities": { "read": true } }`.
+`{ "id": "gmail", "auth_kind": "oauth2", "capabilities": { "read": true } }`. `capabilities.send`
+is `true` for a connector that can also send through the account's own server (`imap`, when bound
+with `smtp_host`; see [Sending From A Connected Mailbox](#sending-from-a-connected-mailbox)).
 
 `POST /v1/external-mail-authorizations` with `{ "provider": "gmail" }` (optionally
 `"backfill_days"`) starts a sign-in; with `{ "connection_id": 3 }` it reconnects that connection,
@@ -791,7 +794,7 @@ Connectors whose `auth_kind` is `password` never redirect: the generic `imap` co
 passwords, such as iCloud, Yahoo, Fastmail, QQ, 163, or a self-hosted server.
 
 `POST /v1/external-mail-credentials` takes
-`{ "provider": "imap", "host", "port"?, "username", "password", "backfill_days"? }`.
+`{ "provider": "imap", "host", "port"?, "username", "password", "smtp_host"?, "smtp_port"?, "backfill_days"? }`.
 Before anything is stored the server signs in once over implicit TLS on port 993 (the only port
 accepted) with a verified certificate, and opens INBOX read-only, within 45 seconds in all. A host
 that resolves to a loopback, private, shared, benchmarking, reserved, link-local, multicast, or
@@ -822,6 +825,19 @@ are known by their Message-ID, so a mailbox the provider rebuilds (a new UIDVALI
 from the backfill window without second copies. Only a refused login without a transient reason
 moves the connection to `needs_reconnect`; posting the credentials again restores it. Unbinding erases the stored password; revoking the app password itself is done at
 the provider. The route is session only and never cached.
+
+### Sending From A Connected Mailbox
+
+An `imap` binding may name the account's outgoing server: `smtp_host`, and `smtp_port` 465
+(implicit TLS, the default) or 587 (STARTTLS, required). The server then also signs in there with
+the same login and certificate rules, within the same 45 seconds, and a refusal answers as for
+IMAP. The connected mailbox then has `send` access for whoever may send from it (its owner, or a
+shared connected mailbox's members with `send`), and a message written there, a reply included, is
+delivered through that server from the account's address instead of through Zmail's provider. It
+counts against the organization's send limits like any personal send, and a refusal by the server
+fails the message with `failure_code` `smtp_auth_failed`, `smtp_rejected`, `smtp_unavailable`, or
+`smtp_not_connected` (the connection is not active). Binding the account again without
+`smtp_host` makes the mailbox read-only again. Gmail and Outlook connections stay read-only.
 
 ### Shared Connected Mailboxes
 

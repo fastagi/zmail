@@ -78,7 +78,7 @@ func init() {
 		}
 		return ExternalMailConnector{
 			ID: ExternalMailProviderIMAP, AuthKind: ExternalMailAuthPassword,
-			Capabilities: ExternalMailCapabilities{Read: true}, Source: newIMAPSource(),
+			Capabilities: ExternalMailCapabilities{Read: true, Send: true}, Source: newIMAPSource(),
 		}, true
 	})
 }
@@ -89,6 +89,11 @@ type ExternalMailPasswordCredentials struct {
 	Port     int
 	Username string
 	Password string
+	// SMTPHost, when set, is the account's outgoing server: the same login is verified there too, and
+	// the connected mailbox then sends through it. SMTPPort is 465 (implicit TLS, the default) or 587
+	// (STARTTLS).
+	SMTPHost string
+	SMTPPort int
 }
 
 // ExternalMailPasswordVerifier is implemented by sources bound with a password: it signs in once
@@ -111,6 +116,10 @@ type imapCredentials struct {
 	Port     int    `json:"port"`
 	Username string `json:"username"`
 	Password string `json:"password"`
+	// SMTPHost and SMTPPort name the outgoing server verified at binding; empty when the account
+	// only syncs.
+	SMTPHost string `json:"smtp_host,omitempty"`
+	SMTPPort int    `json:"smtp_port,omitempty"`
 }
 
 // imapCursor is the position in INBOX.
@@ -204,6 +213,15 @@ func (s *imapSource) VerifyPassword(ctx context.Context, input ExternalMailPassw
 	if credentials.Port == 0 {
 		credentials.Port = imapPort
 	}
+	if smtpHost := strings.ToLower(strings.TrimSpace(input.SMTPHost)); smtpHost != "" {
+		credentials.SMTPHost, credentials.SMTPPort = smtpHost, input.SMTPPort
+		if credentials.SMTPPort == 0 {
+			credentials.SMTPPort = smtpImplicitTLSPort
+		}
+		if err := credentials.validateSMTP(); err != nil {
+			return ExternalMailToken{}, ExternalMailAccount{}, err
+		}
+	}
 	if err := credentials.validate(); err != nil {
 		return ExternalMailToken{}, ExternalMailAccount{}, err
 	}
@@ -220,6 +238,11 @@ func (s *imapSource) VerifyPassword(ctx context.Context, input ExternalMailPassw
 	defer session.close()
 	if _, err = session.selectInbox(); err != nil {
 		return ExternalMailToken{}, ExternalMailAccount{}, err
+	}
+	if credentials.SMTPHost != "" {
+		if smtpErr := s.verifySMTP(ctx, credentials); smtpErr != nil {
+			return ExternalMailToken{}, ExternalMailAccount{}, smtpErr
+		}
 	}
 	sealed, err := json.Marshal(credentials)
 	if err != nil {
@@ -371,13 +394,29 @@ func (s *imapSource) dial(ctx context.Context, credentials imapCredentials) (*tl
 	if credentials.Port != imapPort && !s.policy.AllowAnyPort {
 		return nil, fmt.Errorf("%w: only port %d (IMAP over TLS) is allowed", ErrExternalMailServerUnreachable, imapPort)
 	}
+	conn, err := s.dialServer(ctx, credentials.Host, credentials.Port, true)
+	if err != nil {
+		return nil, err
+	}
+	tlsConn, ok := conn.(*tls.Conn)
+	if !ok {
+		closeQuietly(conn)
+		return nil, ErrExternalMailServerUnreachable
+	}
+	return tlsConn, nil
+}
+
+// dialServer resolves host, refuses any private address it resolves to, and connects to the
+// address it checked, so a second resolution cannot point elsewhere. With implicitTLS the
+// connection is a verified TLS client; otherwise it is plain TCP for a later STARTTLS.
+func (s *imapSource) dialServer(ctx context.Context, host string, port int, implicitTLS bool) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.dialTimeout)
 	defer cancel()
 	var addresses []netip.Addr
-	if literal, err := netip.ParseAddr(credentials.Host); err == nil {
+	if literal, err := netip.ParseAddr(host); err == nil {
 		addresses = []netip.Addr{literal}
 	} else {
-		resolved, err := s.resolver.LookupNetIP(ctx, "ip", credentials.Host)
+		resolved, err := s.resolver.LookupNetIP(ctx, "ip", host)
 		if err != nil || len(resolved) == 0 {
 			return nil, fmt.Errorf("%w: host does not resolve", ErrExternalMailServerUnreachable)
 		}
@@ -391,14 +430,15 @@ func (s *imapSource) dial(ctx context.Context, credentials imapCredentials) (*tl
 	dialer := &net.Dialer{Timeout: s.dialTimeout}
 	var lastErr error
 	for _, addr := range addresses {
-		raw, err := dialer.DialContext(ctx, "tcp", netip.AddrPortFrom(addr.Unmap(), uint16(credentials.Port)).String())
+		raw, err := dialer.DialContext(ctx, "tcp", netip.AddrPortFrom(addr.Unmap(), uint16(port)).String())
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		conn := tls.Client(raw, &tls.Config{
-			ServerName: credentials.Host, MinVersion: tls.VersionTLS12, RootCAs: s.policy.RootCAs,
-		})
+		if !implicitTLS {
+			return raw, nil
+		}
+		conn := tls.Client(raw, s.tlsConfig(host))
 		if err := conn.HandshakeContext(ctx); err != nil {
 			closeQuietly(raw)
 			lastErr = err

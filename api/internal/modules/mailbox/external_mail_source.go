@@ -143,6 +143,8 @@ func registerExternalMailConnector(builder ExternalMailConnectorBuilder) {
 type ExternalMailCapabilities struct {
 	// Read syncs the account's mail into its external mailbox.
 	Read bool
+	// Send delivers mail written in Zmail through the account's own server, when the binding named it.
+	Send bool
 }
 
 // ExternalMailConnector is one provider the instance can bind: its id, how it authorizes, what it

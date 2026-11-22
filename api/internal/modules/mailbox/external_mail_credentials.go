@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
@@ -37,6 +38,9 @@ type ExternalMailCredentialsInput struct {
 	Port     int
 	Username string
 	Password string
+	// SMTPHost and SMTPPort optionally name the outgoing server; see ExternalMailPasswordCredentials.
+	SMTPHost string
+	SMTPPort int
 	// BackfillDays is how far back a new binding first reads; zero takes the default.
 	BackfillDays int
 	// ConnectionID restricts the binding to restoring that connection: the viewer's own, or a
@@ -133,6 +137,7 @@ func (s *service) BindExternalMailCredentials(ctx context.Context, viewer domain
 
 	token, account, err := verifier.VerifyPassword(ctx, ExternalMailPasswordCredentials{
 		Host: input.Host, Port: input.Port, Username: input.Username, Password: input.Password,
+		SMTPHost: input.SMTPHost, SMTPPort: input.SMTPPort,
 	})
 	if err != nil {
 		outcome := "unreachable"
@@ -153,5 +158,13 @@ func (s *service) BindExternalMailCredentials(ctx context.Context, viewer domain
 		return nil, false, err
 	}
 	binding.address = account.Address
-	return s.saveExternalBinding(ctx, viewer, connector, token, binding)
+	connection, created, err := s.saveExternalBinding(ctx, viewer, connector, token, binding)
+	if err != nil {
+		return nil, false, err
+	}
+	sends := connector.Capabilities.Send && strings.TrimSpace(input.SMTPHost) != ""
+	if err := s.externalMail.SetConnectedMailboxSend(ctx, connection.OrganizationID, connection.MailboxID, sends); err != nil {
+		return nil, false, err
+	}
+	return connection, created, nil
 }

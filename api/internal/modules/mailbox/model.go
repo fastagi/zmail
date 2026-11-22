@@ -21,7 +21,9 @@ type MailboxPO struct {
 	// Type is "personal" or "shared".
 	Type string `gorm:"size:16;not null;default:'shared'"`
 	// Origin is "zmail" or "connected".
-	Origin          string `gorm:"size:16;not null;default:'zmail'"`
+	Origin string `gorm:"size:16;not null;default:'zmail'"`
+	// ConnectedSend lets a connected mailbox send through its account's SMTP server.
+	ConnectedSend   bool `gorm:"not null;default:false"`
 	OwnerUserID     *uint
 	OwnerLeftAt     *time.Time
 	SealedBefore    *time.Time
@@ -60,6 +62,7 @@ func (po *MailboxPO) toDomain() *domain.Mailbox {
 		RoutingRuleID:  po.RoutingRuleID,
 		Type:           domain.MailboxType(po.Type),
 		Origin:         mailboxOriginOf(po.Origin),
+		ConnectedSend:  po.ConnectedSend,
 		OwnerUserID:    po.OwnerUserID,
 		OwnerLeftAt:    po.OwnerLeftAt,
 		SealedBefore:   po.SealedBefore,

@@ -248,6 +248,9 @@ type ExternalMailRepository interface {
 	// RebindExternalMailConnection stores a fresh grant, makes the connection active and due now,
 	// and clears its error, failures, and revoked_at, which cancels a pending purge.
 	RebindExternalMailConnection(ctx context.Context, rebind ExternalMailRebind) (*ExternalMailConnection, error)
+	// SetConnectedMailboxSend records whether a connected mailbox sends through its account's SMTP
+	// server.
+	SetConnectedMailboxSend(ctx context.Context, organizationID, mailboxID uint, enabled bool) error
 	// CreateExternalMailAuthorization stores a pending sign-in and removes expired ones.
 	CreateExternalMailAuthorization(ctx context.Context, authorization *ExternalMailAuthorization) error
 	// TakeExternalMailAuthorization deletes and returns the unexpired sign-in with the state hash,

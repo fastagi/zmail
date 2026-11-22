@@ -34,6 +34,7 @@ func rollBackMailOrganize(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, (&addSharedExternalMail{}).Down(db))
 	require.NoError(t, (&addExternalMailSyncOps{}).Down(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Down(db))
 	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	require.NoError(t, (&openMailConnectors{}).Down(db))
 	require.NoError(t, (&addMailOutboundTimeIndex{}).Down(db))
@@ -56,6 +57,7 @@ func applyMailOrganize(t *testing.T, db *gorm.DB) {
 	require.NoError(t, (&addMailOutboundTimeIndex{}).Up(db))
 	require.NoError(t, (&openMailConnectors{}).Up(db))
 	require.NoError(t, (&addMailboxOrigin{}).Up(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Up(db))
 	require.NoError(t, (&addExternalMailSyncOps{}).Up(db))
 	require.NoError(t, (&addSharedExternalMail{}).Up(db))
 }

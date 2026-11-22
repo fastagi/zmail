@@ -267,6 +267,9 @@ type Mailbox struct {
 	Type        MailboxType
 	// Origin says where the mail comes from; empty reads as zmail.
 	Origin MailboxOrigin
+	// ConnectedSend lets a connected mailbox send through the outside account's SMTP server, which
+	// was verified when the account was bound. Always false for a Zmail mailbox.
+	ConnectedSend bool
 	// OwnerUserID is the owner of a personal mailbox; nil for a shared one, or when the owner's
 	// account was deleted.
 	OwnerUserID *uint

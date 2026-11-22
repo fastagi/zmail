@@ -3936,6 +3936,13 @@ export interface components {
             port: number;
             provider: components["schemas"]["ExternalMailConnectorID"];
             sharing?: components["schemas"]["ExternalMailSharingRequest"];
+            /** @description The account's outgoing server, such as `smtp.mail.me.com`. The same login is verified there before anything is stored; the connected mailbox then sends through it. Omitted, the mailbox only syncs. */
+            smtp_host?: string;
+            /**
+             * @description 465 for implicit TLS (used when omitted) or 587 for a required STARTTLS.
+             * @enum {integer}
+             */
+            smtp_port?: 465 | 587;
             /** @description The login. The bound account is derived from it, never named by the caller; the lowercased username when it contains `@`, otherwise `username@host`. */
             username: string;
         };
@@ -4116,6 +4123,8 @@ export interface components {
             capabilities: {
                 /** @description The connector syncs the account's mail into its connected mailbox. */
                 read: boolean;
+                /** @description The connector can send mail written in Zmail through the account's own server, when the binding names it (`smtp_host` for `imap`). */
+                send?: boolean;
             };
             id: components["schemas"]["ExternalMailConnectorID"];
         };

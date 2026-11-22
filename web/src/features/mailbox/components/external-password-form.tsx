@@ -14,9 +14,12 @@ import {
   EXTERNAL_MAIL_HOST_MAX_LENGTH,
   EXTERNAL_MAIL_IMAP_PORT,
   EXTERNAL_MAIL_PASSWORD_MAX_LENGTH,
+  EXTERNAL_MAIL_SMTP_PORTS,
+  EXTERNAL_MAIL_DEFAULT_SMTP_PORT,
   EXTERNAL_MAIL_USERNAME_MAX_LENGTH,
   type ExternalMailBackfillDays,
   type ExternalMailCompletion,
+  type ExternalMailSmtpPort,
 } from '@/features/mailbox/external-mail-schemas';
 import { useBindExternalMailCredentials } from '@/features/mailbox/hooks/use-external-mail-actions';
 import { ApiErrorCode, ClientErrorCode } from '@/http/codes';
@@ -24,7 +27,7 @@ import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
-type FieldName = 'host' | 'username' | 'password';
+type FieldName = 'host' | 'username' | 'password' | 'smtpHost';
 type FieldErrors = Partial<Record<FieldName, 'required' | 'host'>>;
 
 /** Each refusal of the credentials route, in plain words. */
@@ -85,6 +88,12 @@ const SLOW_SIGN_IN_MS = 8_000;
 /** A server name: letters, digits, dots, and hyphens, without a scheme, path, or port. */
 const HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/iu;
 
+/** The usual outgoing server of an IMAP host: `imap.example.com` sends through `smtp.example.com`. */
+export function suggestedSmtpHost(imapHost: string): string {
+  const host = imapHost.trim().toLowerCase();
+  return host.startsWith('imap.') ? `smtp.${host.slice('imap.'.length)}` : '';
+}
+
 /**
  * The app password step of a `password` connector: server, fixed port, login, app password, and
  * the backfill. The password lives in this component's state only until it is submitted, and is
@@ -111,6 +120,11 @@ export function ExternalPasswordForm({
   const [host, setHost] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [smtpHost, setSmtpHost] = useState('');
+  // Once edited, the SMTP server no longer follows the IMAP server.
+  const [smtpEdited, setSmtpEdited] = useState(false);
+  const [smtpPort, setSmtpPort] = useState<ExternalMailSmtpPort>(EXTERNAL_MAIL_DEFAULT_SMTP_PORT);
+  const smtpPortName = `${useId()}-smtp-port`;
   const [days, setDays] = useState<ExternalMailBackfillDays>(EXTERNAL_MAIL_DEFAULT_BACKFILL_DAYS);
   const [errors, setErrors] = useState<FieldErrors>({});
   // The first invalid field after a refused submit; focused once it has rendered its message.
@@ -140,8 +154,10 @@ export function ExternalPasswordForm({
     else if (!HOST_PATTERN.test(trimmedHost)) next.host = 'host';
     if (trimmedUser === '') next.username = 'required';
     if (password === '') next.password = 'required';
+    const trimmedSmtp = smtpHost.trim();
+    if (trimmedSmtp !== '' && !HOST_PATTERN.test(trimmedSmtp)) next.smtpHost = 'host';
     setErrors(next);
-    const first = (['host', 'username', 'password'] as const).find(name => next[name]);
+    const first = (['host', 'username', 'password', 'smtpHost'] as const).find(name => next[name]);
     if (first) {
       setInvalidField({ name: first });
       return;
@@ -158,6 +174,7 @@ export function ExternalPasswordForm({
         port: EXTERNAL_MAIL_IMAP_PORT,
         username: trimmedUser,
         password: secret,
+        ...(trimmedSmtp === '' ? {} : { smtp_host: trimmedSmtp, smtp_port: smtpPort }),
         backfill_days: days,
       })
       .then(
@@ -177,9 +194,10 @@ export function ExternalPasswordForm({
   const fieldError = (name: FieldName) => {
     const value = errors[name];
     if (!value) return undefined;
+    if (name === 'smtpHost') return t('external.password.errors.smtpHostFormat');
     return value === 'host'
       ? t('external.password.errors.hostFormat')
-      : t(`external.password.errors.${name}Required`);
+      : t(`external.password.errors.${name as 'host' | 'username' | 'password'}Required`);
   };
 
   return (
@@ -206,7 +224,10 @@ export function ExternalPasswordForm({
               disabled={bind.isPending}
               aria-invalid={errors.host ? true : undefined}
               errorText={fieldError('host')}
-              onChange={event => setHost(event.target.value)}
+              onChange={event => {
+                setHost(event.target.value);
+                if (!smtpEdited) setSmtpHost(suggestedSmtpHost(event.target.value));
+              }}
             />
           </div>
           <div className="space-y-1.5">
@@ -261,6 +282,62 @@ export function ExternalPasswordForm({
             {t('external.password.passwordHint')}
           </p>
         </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`${ids}-smtpHost`}>{t('external.password.smtpHost')}</Label>
+          <Input
+            id={`${ids}-smtpHost`}
+            name="smtp-host"
+            inputMode="url"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder={t('external.password.smtpHostPlaceholder')}
+            maxLength={EXTERNAL_MAIL_HOST_MAX_LENGTH}
+            value={smtpHost}
+            disabled={bind.isPending}
+            aria-invalid={errors.smtpHost ? true : undefined}
+            aria-describedby={`${ids}-smtp-hint`}
+            errorText={fieldError('smtpHost')}
+            onChange={event => {
+              setSmtpEdited(true);
+              setSmtpHost(event.target.value);
+            }}
+          />
+          <p id={`${ids}-smtp-hint`} className="text-xs text-text-muted">
+            {t('external.password.smtpHint')}
+          </p>
+        </div>
+        {smtpHost.trim() !== '' ? (
+          <fieldset className="space-y-2">
+            <legend className="mb-2 text-xs text-text-muted">
+              {t('external.password.smtpPort')}
+            </legend>
+            <div className="flex flex-wrap gap-2">
+              {EXTERNAL_MAIL_SMTP_PORTS.map(choice => (
+                <label
+                  key={choice}
+                  className={cn(
+                    'inline-flex h-8 cursor-pointer items-center rounded-md border px-3 text-[13px] transition-colors focus-within:ring-2 motion-reduce:transition-none',
+                    choice === smtpPort
+                      ? 'border-brand bg-nav-selected font-semibold text-text-main'
+                      : 'border-border-main text-text-subtle hover:bg-nav-hover'
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name={smtpPortName}
+                    value={choice}
+                    checked={choice === smtpPort}
+                    disabled={bind.isPending}
+                    className="sr-only"
+                    onChange={() => setSmtpPort(choice)}
+                  />
+                  {t('external.password.smtpPortOption', { port: choice })}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
         <fieldset className="space-y-2">
           <legend className="mb-2 text-xs text-text-muted">{t('external.connect.backfill')}</legend>
           <div className="flex flex-wrap gap-2">

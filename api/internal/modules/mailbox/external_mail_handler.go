@@ -91,6 +91,7 @@ type ExternalMailConnectorResponse struct {
 // ExternalMailCapabilitiesResponse says what a connector does with a bound account.
 type ExternalMailCapabilitiesResponse struct {
 	Read bool `json:"read"`
+	Send bool `json:"send"`
 }
 
 // ListExternalMailConnectors lists the connectors the instance enables, so a client offers one
@@ -105,7 +106,7 @@ func (h *Handler) ListExternalMailConnectors(c *gin.Context) {
 	for _, connector := range connectors {
 		items = append(items, ExternalMailConnectorResponse{
 			ID: string(connector.ID), AuthKind: string(connector.AuthKind),
-			Capabilities: ExternalMailCapabilitiesResponse{Read: connector.Capabilities.Read},
+			Capabilities: ExternalMailCapabilitiesResponse{Read: connector.Capabilities.Read, Send: connector.Capabilities.Send},
 		})
 	}
 	privateResponse(c)

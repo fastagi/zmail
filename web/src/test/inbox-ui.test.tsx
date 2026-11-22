@@ -2076,9 +2076,10 @@ describe('inbox keyboard shortcuts', () => {
     expect(screen.getByLabelText('Message')).toHaveValue('Line one\nLine two');
   });
 
-  it('never offers a connected mailbox as a sender, even with send access', async () => {
+  it('offers a connected mailbox as a sender only when the API grants it send', async () => {
     state.mailboxes.data = [
       { ...externalMailbox(3, 'me@gmail.com'), access: { ...noAccess(), view: true, send: true } },
+      { ...externalMailbox(4, 'read@gmail.com'), access: { ...noAccess(), view: true } },
       mailbox(1, 'hello'),
     ];
     window.history.replaceState(null, '', '/console/mailboxes?box=3');
@@ -2086,8 +2087,9 @@ describe('inbox keyboard shortcuts', () => {
 
     press('c');
     const from = await screen.findByLabelText('From');
-    expect(from).toHaveValue('1');
-    expect(within(from).queryByRole('option', { name: 'me@gmail.com' })).toBeNull();
+    expect(from).toHaveValue('3');
+    expect(within(from).getByRole('option', { name: 'me@gmail.com' })).toBeInTheDocument();
+    expect(within(from).queryByRole('option', { name: 'read@gmail.com' })).toBeNull();
   });
 
   // Issue #117: a send refused because the session ended keeps the draft and offers sign-in.

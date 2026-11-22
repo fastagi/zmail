@@ -472,6 +472,7 @@ TABLE mailboxes
   COLUMN role_id bigint
   COLUMN ai_triage_enabled boolean NOT NULL DEFAULT false
   COLUMN origin character varying(16) NOT NULL DEFAULT 'zmail'::character varying
+  COLUMN connected_send boolean NOT NULL DEFAULT false
 
 TABLE migrations
   COLUMN id integer NOT NULL DEFAULT nextval('migrations_id_seq'::regclass)
