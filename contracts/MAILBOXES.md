@@ -2914,6 +2914,7 @@ as an event. The same five-minute window applies.
 | Event already recorded | `200` with `duplicate: true` | Acknowledge |
 | Missing, stale, or wrong signature | `401 MAILBOX.INBOUND_SIGNATURE_INVALID` | Retry |
 | No outbound or transactional message has the event's message id | `404 MAILBOX.MESSAGE_NOT_FOUND` | Acknowledge |
+| The message was deleted inside the send window | `404 MAILBOX.MESSAGE_NOT_FOUND`; a bounce or complaint still counts toward the personal sending pause of [Send](#send) | Acknowledge |
 | Not a usable Email Sending event | `422 MAILBOX.DELIVERY_EVENT_INVALID` | Acknowledge |
 | No inbound secret configured | `503 MAILBOX.INBOUND_DISABLED` | Retry |
 
