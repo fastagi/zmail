@@ -7529,6 +7529,79 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/threads/{thread_id}/assignment:
+    get:
+      operationId: getMailThreadAssignment
+      summary: Read who works a shared mailbox's thread and whether it is done
+      description: Needs `view`. A thread nobody assigned is `open` and unassigned. Personal and
+        connected mailboxes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+      responses:
+        '200':
+          description: The thread's assignment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThreadAssignmentEnvelope'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailThreadAssignment
+      summary: Assign a shared mailbox's thread and set its status
+      description: Needs `send`. The assignee must be a member with `send` or `manage`; `null`
+        unassigns. Personal and connected mailboxes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+        - $ref: '#/components/parameters/MailThreadID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailThreadAssignmentRequest'
+      responses:
+        '200':
+          description: The saved assignment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailThreadAssignmentEnvelope'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/message-counts:
     get:
       operationId: getMailMessageCounts
@@ -10873,6 +10946,7 @@ components:
         - MAILBOX.TEMPLATE_NOT_FOUND
         - MAILBOX.DRAFT_NOT_FOUND
         - MAILBOX.DRAFT_LIMIT_REACHED
+        - MAILBOX.ASSIGNMENT_UNAVAILABLE
         - MAILBOX.TEMPLATE_INVALID
         - MAILBOX.TEMPLATE_NAME_TAKEN
         - MAILBOX.TEMPLATE_LIMIT_REACHED
@@ -16602,6 +16676,73 @@ components:
         updated_at:
           type: string
           format: date-time
+    UpdateMailThreadAssignmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - assignee_user_id
+        - status
+      properties:
+        assignee_user_id:
+          description: A member with `send` or `manage`; null unassigns the thread.
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        status:
+          $ref: '#/components/schemas/MailThreadStatus'
+    MailThreadStatus:
+      type: string
+      enum:
+        - open
+        - closed
+    MailThreadAssignment:
+      type: object
+      additionalProperties: false
+      required:
+        - thread_id
+        - assignee_user_id
+        - status
+        - updated_by_user_id
+        - updated_at
+        - assignable_user_ids
+      properties:
+        thread_id:
+          $ref: '#/components/schemas/PositiveID'
+        assignee_user_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        status:
+          $ref: '#/components/schemas/MailThreadStatus'
+        updated_by_user_id:
+          oneOf:
+            - $ref: '#/components/schemas/PositiveID'
+            - type: 'null'
+        updated_at:
+          description: Null until someone first assigns the thread or sets its status.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        assignable_user_ids:
+          type: array
+          description: The mailbox's members with `send` or `manage`, ascending.
+          items:
+            $ref: '#/components/schemas/PositiveID'
+    MailThreadAssignmentEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailThreadAssignment'
     MailDraftSummary:
       type: object
       additionalProperties: false

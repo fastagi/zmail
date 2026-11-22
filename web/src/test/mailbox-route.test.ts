@@ -4772,6 +4772,53 @@ describe('mailbox browser route boundary', () => {
     });
   });
 
+  describe('thread assignment', () => {
+    const path = (id: number, thread: number) => `/api/mailboxes/${id}/threads/${thread}/assignment`;
+    const read = (route: MailboxRoute, id: number, thread: number) =>
+      route.getMailThreadAssignmentRoute(request(path(id, thread)), String(id), String(thread));
+    const save = (route: MailboxRoute, id: number, thread: number, body: unknown) =>
+      route.updateMailThreadAssignmentRoute(
+        request(path(id, thread), { method: 'PUT', body: JSON.stringify(body) }),
+        String(id),
+        String(thread)
+      );
+
+    it('validates the body before forwarding it to the API', async () => {
+      process.env.API_ADAPTER_ENABLED = 'true';
+      process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+      cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+      const route = await loadRoute();
+      const data = {
+        thread_id: 9,
+        assignee_user_id: 2,
+        status: 'closed',
+        updated_by_user_id: 2,
+        updated_at: '2026-11-22T00:00:00Z',
+        assignable_user_ids: [2],
+      };
+      fetchMock.mockImplementation(async () => Response.json({ code: 0, message: 'success', data }));
+
+      expect((await save(route, 4, 9, { assignee_user_id: 2, status: 'snoozed' })).status).toBe(422);
+      expect((await save(route, 4, 9, { assignee_user_id: -1, status: 'open' })).status).toBe(422);
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      expect((await read(route, 4, 9)).status).toBe(200);
+      expect((await save(route, 4, 9, { assignee_user_id: 2, status: 'closed' })).status).toBe(200);
+      const calls = fetchMock.mock.calls.map(([url, init]) => {
+        const parsed = new URL(String(url));
+        return `${init?.method} ${parsed.pathname}`;
+      });
+      expect(calls).toEqual([
+        'GET /v1/mailboxes/4/threads/9/assignment',
+        'PUT /v1/mailboxes/4/threads/9/assignment',
+      ]);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+        assignee_user_id: 2,
+        status: 'closed',
+      });
+    });
+  });
+
   describe('mailbox organize in the mock', () => {
     // Seeded organization 1: user 1 demo-admin (owner), 2 demo-operator (admin), 3 demo-member.
     const as = (user: 'demo-admin' | 'demo-operator' | 'demo-member') =>
@@ -5741,6 +5788,8 @@ async function loadRoute(): Promise<MailboxRoute> {
   broadcasts.mockBroadcastStore.reset();
   const signatures = await import('@/features/mailbox/server/mock-signature-store');
   signatures.mockSignatureStore.reset();
+  const assignments = await import('@/features/mailbox/server/mock-assignment-store');
+  assignments.mockAssignmentStore.reset();
   return route;
 }
 

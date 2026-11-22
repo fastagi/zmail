@@ -1474,6 +1474,29 @@ message detail. It returns at most the latest 100. Sealed messages are left out.
 such message is `404 MAILBOX.MESSAGE_NOT_FOUND`. So a thread opened from the Inbox also shows the
 replies in Sent.
 
+#### Assignment
+
+A conversation of a shared Zmail mailbox can be assigned to one member and marked `open` or
+`closed`, so two members do not answer the same mail. Personal and connected mailboxes do not
+assign threads: their routes are `409 MAILBOX.ASSIGNMENT_UNAVAILABLE`.
+
+| Action | Route | Needs | Body |
+|---|---|---|---|
+| Read | `GET /v1/mailboxes/:mailbox_id/threads/:thread_id/assignment` | `view` | none |
+| Replace | `PUT /v1/mailboxes/:mailbox_id/threads/:thread_id/assignment` | `send` | `{ assignee_user_id, status }` |
+
+Both return `{ thread_id, assignee_user_id, status, updated_by_user_id, updated_at,
+assignable_user_ids }`.
+
+- A thread nobody assigned is `open`, `assignee_user_id` and `updated_at` are `null`.
+- `assignable_user_ids` lists, ascending, the mailbox's members with `send` or `manage`; the
+  assignee must be one of them, else `422 COMMON.VALIDATION_FAILED` on `assignee_user_id`. A
+  `null` assignee unassigns the thread. `status` is `open` or `closed`.
+- The thread must have a message the caller sees outside the trash, else
+  `404 MAILBOX.MESSAGE_NOT_FOUND`.
+- When the assignee or the last editor is deleted, that field becomes `null`; removing a member
+  from the mailbox keeps the assignment until someone changes it.
+
 ### Listing And Search
 
 `GET /v1/mailboxes/:mailbox_id/messages` takes these filters, combined with AND:

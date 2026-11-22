@@ -115,6 +115,7 @@ function newestInbound(messages: readonly MailMessage[]): MailMessage | undefine
 export function InboxReadingPane({
   item,
   access,
+  shared = false,
   roleName = null,
   navigation,
   onUnavailable,
@@ -124,6 +125,8 @@ export function InboxReadingPane({
 }: {
   item: InboxItem;
   access: Mailbox['access'] | null;
+  /** The mailbox is shared, so its conversations can be assigned. */
+  shared?: boolean;
   externalProvider?: string | null;
   roleName?: string | null;
   navigation: InboxReaderNavigation;
@@ -287,6 +290,7 @@ export function InboxReadingPane({
       mailboxAddress: item.mailbox_address,
       canSend: canReply,
       canOrganize: access.organize,
+      shared: shared && !external,
     };
     body = item.thread ? (
       <ThreadView

@@ -281,6 +281,16 @@ const messages = {
     results: 'Results for “{q}”',
     clear: 'Clear search',
   },
+  assignment: {
+    label: 'Assignment',
+    assignee: 'Assignee',
+    unassigned: 'Unassigned',
+    member: 'Member #{id}',
+    open: 'Open',
+    closed: 'Done',
+    close: 'Mark as done',
+    reopen: 'Reopen',
+  },
   thread: {
     label: 'Conversation',
     expand: 'Show the message from {sender}',
@@ -1672,6 +1682,7 @@ const messages = {
     templateNotFound: 'This template does not exist or was deleted.',
     draftNotFound: 'This draft was sent or deleted.',
     draftLimitReached: 'You have 200 drafts. Delete one to save another.',
+    assignmentUnavailable: 'Only a shared mailbox assigns its conversations.',
     templateVariablesMissing:
       'Some variables of the template have no value and no fallback. Fill them in and send again.',
     attachmentsInvalid: 'Attach at most 10 non-empty files, 4 MB in total.',
