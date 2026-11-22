@@ -216,3 +216,16 @@
 - 接入邮箱不再一律只读（IMAP 绑定可经自身 SMTP 发信）。租户分配的邮箱（私人、共享、交接后的共享）在权限计算和发信路径两处都强制只读，即使记录被标为可发信，有测试覆盖。
 - N9：员工离职时先取组织绑定锁，再改邮箱行，与交接、分配、恢复的加锁顺序一致。
 
+
+### 2026-11-22 C7 推送订阅（T11 后半，`feat/connector-push`）
+
+计划：[connector-push.plan.md](connector-push.plan.md)。只做 API、工作进程和契约，不做 Web 界面（Web 只把新字段加进响应校验，避免严格校验失败）。
+
+- Gmail：`users.watch` 订阅收件箱到运营方的 Cloud Pub/Sub 主题，由 Pub/Sub 推送订阅调用 `POST /v1/external-mail-notifications/gmail`。每个请求都校验 Google 签发的 OIDC 令牌：RS256、Google 公布的公钥（大小和数量有上限，缓存一小时，未知密钥每分钟最多重取一次）、签发方、配置的受众、有效期，以及（配置时）指定的服务账号。只用标准库。
+- Outlook：Graph 订阅收件箱新邮件（`created`），通知地址和生命周期地址都是 `POST /v1/external-mail-notifications/outlook`；支持验证握手；每个订阅一个随机 `clientState`，只存 SHA-256，常量时间比较；处理 `reauthorizationRequired`、`subscriptionRemoved`、`missed`。
+- 推送只是提示：通知只把连接标为到期，不带邮件，也不被当作邮件来源；同步仍走原有的令牌、游标、回溯窗口、`received_not_before`、退避、租约和按服务商预算。合并窗口内同一连接最多一次推送同步；通知不会缩短正在进行的租约（与上次保存的 `next_sync_at` 比较后才提前）；抓取期间到达的通知在下一轮补一次同步。轮询保留：订阅有效时放慢到 15 分钟，否则仍是 2 分钟。
+- 生命周期：首次完整同步后在该连接的同步中订阅，过半寿命时续期，都在租约内、用本次同步的令牌（Outlook 轮换的令牌同事务保存）；租户分配的邮箱用租户为该邮箱签发的令牌。订阅或续期失败只退避重试、记在订阅上，不改变连接状态、不停同步。成员解绑、强制断开、成员离职、删除邮箱时尽力在服务商处停止订阅并立即在本地停止；撤销租户、需要重新连接、保留期清理由工作进程在本地停止，通知在连接不再有效时即被忽略，服务商侧订阅到期自然失效。
+- 新表 `external_mail_subscriptions`（每连接一行，随连接级联删除），同步记录新增 `trigger`（`poll`/`push`），连接列表新增 `push` 状态；迁移 `2026_12_15_090000_add_external_mail_push`。新增指标 `zmail_external_mail_push_notifications_total` 和推送到同步开始的延迟 `zmail_external_mail_push_delay_seconds`。没有新增错误码。
+- 默认采用、待确认：开关 `EXTERNAL_MAIL_PUSH_ENABLED` 默认关闭；推送时轮询间隔 15 分钟；合并窗口 10 秒；每副本每服务商每分钟 6000 个通知请求；Outlook 订阅申请 70 小时；同一 Gmail 地址在多个连接（含不同组织）时，一条通知让这些连接都到期，各自只用自己的授权同步；`clientState` 只存哈希而非加密保存。
+- 验证：Go 测试（PostgreSQL、`httptest`，不接触真实服务商）覆盖 JWT 校验各失败情形、密钥集上限、Outlook 握手与 `clientState`、突发合并、租约、未知订阅、跨组织隔离、续期与失败回退、各停止路径、租户邮箱、`received_not_before`、开关关闭；对 21 处安全和隔离检查逐一做了"故意改坏"的变异运行，全部被测试发现。
+- blocked: go-live。需要：一个 Google Cloud 项目里的 Pub/Sub 主题、推送订阅和专用服务账号；对外可达的 HTTPS 通知地址；用真实服务商测 P95 延迟（目标 30 秒）和 1 万连接压测。

@@ -11,6 +11,32 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Connector push subscriptions
+
+Gmail (`users.watch` through the operator's Cloud Pub/Sub topic) and Outlook (Microsoft Graph change
+notifications) tell Zmail about new mail, and the `mail:external:sync` worker fetches that connection
+within seconds; polling stays as the safety net. It is off unless `EXTERNAL_MAIL_PUSH_ENABLED=true`
+and a provider's push settings are set. Contract: `contracts/MAILBOXES.md`, Push Subscriptions.
+Operator setup: `api/docs/EXTERNAL_MAIL_PUSH.md`. Plan: `docs/plans/connector-push.plan.md`.
+
+### Medium — New public routes and response fields
+
+`POST /v1/external-mail-notifications/gmail` and `POST /v1/external-mail-notifications/outlook` are
+public (no session or API key; authenticated by a Google-signed OIDC token and a Graph `clientState`)
+and answer `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE` while push is off. A fork that puts the API
+behind an allow list or a WAF must let the providers reach them. `ExternalMailConnection` gains the
+required, nullable `push` object and `ExternalMailSyncRun` the required `trigger` (`poll` or `push`);
+a client with strict response schemas must accept them (the Web schemas accept both as optional). No
+error code was added.
+
+### Low — Migration and connector seam
+
+Migration `2026_12_15_090000_add_external_mail_push` adds `external_mail_subscriptions` (one row per
+connection, deleted with it) and `external_mail_sync_runs.triggered_by` (default `poll`, no table
+rewrite). `ExternalMailConnector` gains the optional `Push ExternalMailPushSource`; a fork's own
+connector compiles unchanged and simply has no push. The repository seam gains
+`domain.ExternalMailPushRepository`, implemented by the mailbox repository.
+
 ## Unreleased — Tenant connect
 
 An organization `owner` authorizes a whole Google Workspace (the organization's service account with
