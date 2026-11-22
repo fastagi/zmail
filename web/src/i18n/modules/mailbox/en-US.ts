@@ -214,6 +214,7 @@ const messages = {
       closedHint: 'Conversations marked done in a shared mailbox show here.',
       filtered: 'No mail matches these filters',
       filteredHint: 'Clear the date or attachment filter to see more mail.',
+      searchFilteredHint: 'Try other words, or clear the date or attachment filter.',
       clearFilters: 'Clear filters',
     },
     unavailable:

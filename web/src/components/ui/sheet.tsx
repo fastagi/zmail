@@ -21,7 +21,14 @@ import * as React from "react"
 import * as SheetPrimitive from "@radix-ui/react-dialog"
 import { XIcon } from "lucide-react"
 
+import { useT } from "@/i18n"
 import { cn } from "@/utils"
+
+/** The close button's default accessible name, in the reader's language. */
+function CloseLabel() {
+  const t = useT("common")
+  return t("close")
+}
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
@@ -71,7 +78,7 @@ function SheetContent({
   children,
   side = "right",
   backdrop = "blur",
-  closeLabel = "Close",
+  closeLabel,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
@@ -101,7 +108,7 @@ function SheetContent({
         {children}
         <SheetPrimitive.Close className="absolute right-4 top-4 flex size-7 cursor-pointer items-center justify-center rounded-full bg-muted/50 text-muted-foreground transition-all hover:bg-muted hover:text-foreground focus-ring disabled:cursor-not-allowed disabled:opacity-50">
           <XIcon className="size-4" />
-          <span className="sr-only">{closeLabel}</span>
+          <span className="sr-only">{closeLabel ?? <CloseLabel />}</span>
         </SheetPrimitive.Close>
       </SheetPrimitive.Content>
     </SheetPortal>

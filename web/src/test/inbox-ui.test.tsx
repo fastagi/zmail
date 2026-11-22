@@ -905,6 +905,20 @@ describe('unified inbox', () => {
     expect(screen.getByText('No mail yet')).toBeInTheDocument();
   });
 
+  it('a search with a date filter and no results offers to clear the filter, keeping the query', async () => {
+    state.inbox.data = listing([[]]);
+    window.history.replaceState(null, '', '/console/mailboxes?q=invoice&date=older');
+    renderRoute();
+
+    expect(screen.getByText('No mail matches this search')).toBeInTheDocument();
+    expect(
+      screen.getByText('Try other words, or clear the date or attachment filter.')
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await waitFor(() => expect(window.location.search).not.toContain('date='));
+    expect(window.location.search).toContain('q=invoice');
+  });
+
   it('a date or attachment filter that hides every row says so and offers to clear it', async () => {
     state.inbox.data = listing([[]]);
     window.history.replaceState(null, '', '/console/mailboxes?date=older');
@@ -2054,6 +2068,25 @@ describe('inbox keyboard shortcuts', () => {
     }
   });
 
+  it('switching From through an unsigned mailbox and back brings the signature back', async () => {
+    state.mailboxes.data = [mailbox(1, 'hello'), mailbox(2, 'sales')];
+    signatures.set(1, 'Best,\nAda');
+    signatures.set(2, '');
+    try {
+      renderRoute();
+      press('c');
+      const message = await screen.findByLabelText('Message');
+      expect(message).toHaveValue('\n\n-- \nBest,\nAda');
+      fireEvent.change(message, { target: { value: 'Hi\n\n-- \nBest,\nAda' } });
+      fireEvent.change(screen.getByLabelText('From'), { target: { value: '2' } });
+      await waitFor(() => expect(message).toHaveValue('Hi'));
+      fireEvent.change(screen.getByLabelText('From'), { target: { value: '1' } });
+      await waitFor(() => expect(message).toHaveValue('Hi\n\n-- \nBest,\nAda'));
+    } finally {
+      signatures.clear();
+    }
+  });
+
   it('closing the compose dialog keeps what was written as a draft, without asking', async () => {
     renderRoute();
 
@@ -2292,7 +2325,9 @@ describe('inbox keyboard shortcuts', () => {
         name: /^Plan/u,
       })
     );
-    fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'Offline edit' } });
+    fireEvent.change(await screen.findByLabelText('Message'), {
+      target: { value: 'Offline edit' },
+    });
     drafts.save.mockClear();
     drafts.save.mockRejectedValueOnce(new Error('offline'));
     toast.success.mockClear();

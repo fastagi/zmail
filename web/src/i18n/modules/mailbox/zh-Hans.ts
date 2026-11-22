@@ -208,6 +208,7 @@ const messages = {
       closedHint: '共享邮箱里标记为已完成的会话会出现在这里。',
       filtered: '没有符合筛选条件的邮件',
       filteredHint: '清除日期或附件筛选，查看更多邮件。',
+      searchFilteredHint: '换个关键词，或清除日期或附件筛选。',
       clearFilters: '清除筛选',
     },
     unavailable: '你已无法查看这封邮件。它所在邮箱的访问权限可能已变更，列表已刷新。',

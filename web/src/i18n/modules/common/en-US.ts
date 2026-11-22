@@ -6,6 +6,7 @@ const messages = {
   retryLater: 'Please try again later',
   save: 'Save',
   cancel: 'Cancel',
+  close: 'Close',
   confirm: 'Confirm',
   delete: 'Delete',
   edit: 'Edit',
