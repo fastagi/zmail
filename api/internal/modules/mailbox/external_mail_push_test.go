@@ -41,7 +41,7 @@ func migratePushTable(t *testing.T, f *externalFixture) {
 		t.Fatalf("migrate subscriptions: %v", err)
 	}
 	for _, statement := range []string{
-		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_status CHECK (status IN ('pending','active','stopped'))`,
+		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_status CHECK (status IN ('pending','active','unsupported','stopped'))`,
 		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_active CHECK (status <> 'active' OR (lookup_key <> '' AND expires_at IS NOT NULL))`,
 		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_stopped CHECK (status <> 'stopped' OR (lookup_key = '' AND secret_hash = '' AND pending_at IS NULL))`,
 		`ALTER TABLE external_mail_subscriptions ADD CONSTRAINT chk_secret CHECK (secret_hash = '' OR secret_hash ~ '^[0-9a-f]{64}$')`,
