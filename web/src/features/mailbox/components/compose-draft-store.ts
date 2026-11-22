@@ -13,6 +13,8 @@ export interface StoredComposeDraft {
   attachments?: string[];
   /** The API draft this browser copy also saved as, so the next close updates it. */
   savedId?: number;
+  /** Closed, but the API has not taken this text yet; it outranks the API's copy on reopen. */
+  pending?: true;
 }
 
 const composeDraftPrefix = 'zmail.compose-draft';
@@ -65,7 +67,7 @@ export function readComposeDraft(key: string): StoredComposeDraft | null {
     if (raw === null) return null;
     const value: unknown = JSON.parse(raw);
     if (typeof value !== 'object' || value === null) return null;
-    const { to, cc, subject, body, attachments, savedId } = value as Record<string, unknown>;
+    const { to, cc, subject, body, attachments, savedId, pending } = value as Record<string, unknown>;
     if (
       typeof to !== 'string' ||
       typeof cc !== 'string' ||
@@ -87,6 +89,7 @@ export function readComposeDraft(key: string): StoredComposeDraft | null {
       ...(typeof savedId === 'number' && Number.isSafeInteger(savedId) && savedId > 0
         ? { savedId }
         : {}),
+      ...(pending === true ? { pending } : {}),
     };
   } catch {
     return null;

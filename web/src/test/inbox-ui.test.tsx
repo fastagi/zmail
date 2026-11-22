@@ -2269,6 +2269,62 @@ describe('inbox keyboard shortcuts', () => {
     drafts.list = [];
   });
 
+  it('an edit of a saved draft closed while offline says once it stays here, and reopens as edited', async () => {
+    setUndoSendDelayMs(0);
+    drafts.list = [
+      {
+        id: 7,
+        mailbox_id: 1,
+        to: 'bob@example.com',
+        cc: '',
+        subject: 'Plan',
+        preview: 'Old body',
+        in_reply_to: '',
+        created_at: '2026-11-22T05:00:00Z',
+        updated_at: '2026-11-22T05:00:00Z',
+      },
+    ];
+    drafts.body = 'Old body';
+    const first = renderRoute();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Drafts: 1' }))[0]!);
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Drafts' })).getByRole('button', {
+        name: /^Plan/u,
+      })
+    );
+    fireEvent.change(await screen.findByLabelText('Message'), { target: { value: 'Offline edit' } });
+    drafts.save.mockClear();
+    drafts.save.mockRejectedValueOnce(new Error('offline'));
+    toast.success.mockClear();
+    toast.error.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledOnce());
+    expect(toast.success).not.toHaveBeenCalled();
+
+    first.unmount();
+    renderRoute();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Drafts: 1' }))[0]!);
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Drafts' })).getByRole('button', {
+        name: /^Plan/u,
+      })
+    );
+    expect(await screen.findByLabelText('Message')).toHaveValue('Offline edit');
+
+    // Once the API takes the close, its text leads again, as another device may change it.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledOnce());
+    drafts.body = 'Edited on another device';
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Drafts: 1' }))[0]!);
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Drafts' })).getByRole('button', {
+        name: /^Plan/u,
+      })
+    );
+    expect(await screen.findByLabelText('Message')).toHaveValue('Edited on another device');
+    drafts.list = [];
+  });
+
   it('a reply sends at once, without the Undo wait', async () => {
     setUndoSendDelayMs(60_000);
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
