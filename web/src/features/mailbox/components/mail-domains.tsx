@@ -658,9 +658,27 @@ function DomainSetupSteps({ current }: { current: number }) {
 function DomainMailboxForm({ domain, onCreated }: { domain: string; onCreated: () => void }) {
   const t = useT('mailbox');
   const domains = useMailboxDomains(useMailOrganizationId());
-  if (domains.isPending) return <Skeleton className="h-48 w-full" aria-hidden="true" />;
   const list = domains.data ?? [];
+  // The domain list is cached for minutes; a domain verified meanwhile is not in it yet, and the
+  // form would quietly fall back to the shared domain.
+  const missing = domains.data !== undefined && !list.some(item => item.domain === domain);
+  const { refetch } = domains;
+  useEffect(() => {
+    if (missing) void refetch();
+  }, [missing, refetch]);
+  if (domains.isPending || (missing && domains.isFetching)) {
+    return <Skeleton className="h-48 w-full" aria-hidden="true" />;
+  }
   const base = list.find(item => item.kind === 'shared') ?? list[0];
+  if (missing) {
+    return (
+      <ErrorAlert
+        message={t('domain.stillPending')}
+        retryLabel={t('actions.retry')}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
   if (domains.error || !base) {
     return (
       <ErrorAlert

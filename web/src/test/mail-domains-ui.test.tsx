@@ -560,6 +560,17 @@ describe('organization mail domains', () => {
     expect(within(dialog).getByRole('combobox', { name: 'Domain' })).toHaveValue('example.org');
   });
 
+  it('reloads the mailbox domains when the verified domain is not among them yet', async () => {
+    state.mailDomains.data = [{ ...verifiedSendOnlyDomain(), capability: 'send_receive' }];
+    state.domains.data = [sharedDomain(true)];
+    state.domains.refetch.mockClear();
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Create a mailbox @example.org' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New mailbox @example.org' });
+    await waitFor(() => expect(state.domains.refetch).toHaveBeenCalled());
+    expect(within(dialog).queryByRole('combobox', { name: 'Domain' })).not.toBeInTheDocument();
+  });
+
   it('receiving dialog lists current MX', async () => {
     state.mailDomains.data = [verifiedSendOnlyDomain()];
     state.preview.mutateAsync.mockResolvedValue({
