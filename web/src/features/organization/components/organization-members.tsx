@@ -51,6 +51,7 @@ import {
 import { ROUTES } from '@/constants/routes';
 import { RoleBadge } from '@/features/organization/components/organization-directory';
 import {
+  useForgetOrganization,
   useOrganizationMembers,
   useRemoveOrganizationMember,
   useTransferOrganizationOwnership,
@@ -79,6 +80,7 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
   const roleMutation = useUpdateOrganizationMember(context.organization_id);
   const removeMutation = useRemoveOrganizationMember(context.organization_id);
   const transferMutation = useTransferOrganizationOwnership(context.organization_id);
+  const forgetOrganization = useForgetOrganization();
   const [pendingAction, setPendingAction] = useState<PendingMemberAction>();
 
   const closeAction = () => {
@@ -109,7 +111,10 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
           t(leaving ? 'leaveOrganizationSuccess' : 'removeMemberSuccess')
         );
         closeAction();
-        if (leaving) router.push(ROUTES.CONSOLE.ORGANIZATIONS);
+        if (leaving) {
+          forgetOrganization(context.organization_id);
+          router.push(ROUTES.CONSOLE.ORGANIZATIONS);
+        }
       },
     });
   };

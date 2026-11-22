@@ -986,12 +986,13 @@ export const mailboxService = {
    * carries the organization header, so a plain link cannot be used. The bytes are never shown
    * in the page: the browser only saves them.
    */
-  async downloadAttachment(
+  /** The bytes of one stored file, checked against its listed size; nothing is opened. */
+  async fetchAttachment(
     organizationId: number,
     mailboxId: number,
     messageId: number,
     attachment: MailAttachment
-  ): Promise<void> {
+  ): Promise<Blob> {
     validId(mailboxId);
     validId(messageId);
     validId(attachment.id);
@@ -1003,6 +1004,16 @@ export const mailboxService = {
       }
     );
     if (!(value instanceof Blob) || value.size !== attachment.size) throw invalidResponse();
+    return value;
+  },
+
+  async downloadAttachment(
+    organizationId: number,
+    mailboxId: number,
+    messageId: number,
+    attachment: MailAttachment
+  ): Promise<void> {
+    const value = await this.fetchAttachment(organizationId, mailboxId, messageId, attachment);
     // A neutral type keeps the browser from opening the file in place.
     const file = new Blob([value], { type: 'application/octet-stream' });
     const objectUrl = URL.createObjectURL(file);

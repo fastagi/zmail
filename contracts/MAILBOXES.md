@@ -1469,7 +1469,12 @@ a mailbox's navigation:
 
 - `to` has 1 to 50 bare addresses; `to` and `cc` together have at most 50 after duplicates are
   removed. Addresses are lowercased. Display-name forms are rejected.
-- `subject` is required, at most 998 characters, with no line breaks.
+- `subject` is required, at most 998 characters, with no line breaks. Characters are Unicode code
+  points counted after trimming and before encoding, so a CJK character and an ASCII letter count one each. RFC 5322's
+  998 is a limit on the octets of a header line, and a non-ASCII subject is sent RFC 2047 encoded
+  and folded over several lines, so it never applies to the subject's text. A template's subject
+  and a rendered one follow the same rule, and a received or synced subject is cut at 998
+  characters, never inside one.
 - At least one of `text` and `html` is required; each is at most 256 KiB.
 - `in_reply_to` is an optional Message-ID. It is sent as the `In-Reply-To` header and ends the
   `References` header; see [Threads](#threads).

@@ -410,6 +410,8 @@ const messages = {
     templateNone: '不使用，自己写',
     templateHint: '变量留空时，使用模板中写好的默认值。',
     draftSaved: '已存为草稿',
+    sessionEndedDraft: '已写的内容保存在此浏览器中，重新登录后会再次打开。',
+    signIn: '登录',
     invalidRecipients: '不是有效的邮箱地址：{addresses}',
   },
   emails: {
@@ -721,6 +723,7 @@ const messages = {
     emptyTitle: '还没有组织',
     empty: '邮箱属于组织。创建或加入一个组织后，即可收发邮件。',
     open: '前往组织',
+    unavailable: '你已无法访问此链接中的组织，现在显示的是 {name}。',
     lostTitle: '无权访问该组织',
     readOnly: '邮箱由该组织的所有者和管理员创建和删除。',
   },
@@ -1410,6 +1413,7 @@ const messages = {
     deliveryFailed:
       '邮件没有送达：邮件服务商没有接受这封邮件。它已保存在“已发送”中并标记为发送失败。再次发送可能导致对方收到重复邮件。',
     generic: '邮箱请求未能完成。',
+    sessionEnded: '你的登录已失效，请重新登录后继续。',
     invalidInput: '请检查各项内容后重试。',
     invalidResponse: '邮箱服务返回了无效数据。',
     limitReached: '该组织已达到邮箱数量上限。删除一个邮箱后才能再创建。',

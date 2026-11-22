@@ -53,7 +53,7 @@ func parseMail(raw []byte) (*parsedMail, error) {
 		return nil, ErrMailInboundUnparseable
 	}
 	parsed := &parsedMail{
-		Subject: truncateText(decodeHeader(message.Header.Get("Subject")), domain.MaxMailSubjectLength),
+		Subject: truncateRunes(decodeHeader(message.Header.Get("Subject")), domain.MaxMailSubjectLength),
 		To:      headerAddresses(message.Header, "To"),
 		Cc:      headerAddresses(message.Header, "Cc"),
 	}

@@ -34,7 +34,12 @@ import {
   type InboxSidebarExternal,
 } from '@/features/mailbox/components/inbox-sidebar';
 import { useComposeFocusReturn } from '@/features/mailbox/components/compose-focus';
-import { MAILBOX_PARAM, readStoredMailboxId } from '@/features/mailbox/components/mailbox-params';
+import {
+  COMPOSE_PARAM,
+  COMPOSE_RESUME,
+  MAILBOX_PARAM,
+  readStoredMailboxId,
+} from '@/features/mailbox/components/mailbox-params';
 import {
   MailOrganizationBoundary,
   MailOrganizationName,
@@ -292,6 +297,23 @@ type ReadyScope = Extract<MailOrganizationScope, { status: 'ready' }>;
  * the mailboxes load, the three panes show as skeletons; without an organization, and when
  * there is nothing to list, the page keeps the console's ordinary header and frame.
  */
+/**
+ * The sender of a new message: the narrowed mailbox when it may send, else the mailbox last
+ * opened, else the first that may (D26). `sendable` is not empty.
+ */
+function newMessageSender(
+  sendable: readonly Mailbox[],
+  box: number | null,
+  organizationId: number
+): Mailbox {
+  const stored = readStoredMailboxId(organizationId);
+  return (
+    sendable.find(mailbox => mailbox.id === box) ??
+    sendable.find(mailbox => mailbox.id === stored) ??
+    sendable[0]
+  );
+}
+
 export function InboxWorkspace() {
   const t = useT('mailbox');
   const scope = useMailOrganization();
@@ -443,6 +465,21 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     () => replaceParams(next => next.delete(NEW_PARAM)),
     [replaceParams]
   );
+  // Back from signing in again after a refused send: the composer opens on the kept draft.
+  const resumeCompose = searchParams.get(COMPOSE_PARAM) === COMPOSE_RESUME;
+  const mailboxList = mailboxes.data;
+  useEffect(() => {
+    if (!resumeCompose || !mailboxList) return;
+    const sendable = mailboxList.filter(canComposeFrom);
+    if (sendable.length > 0) {
+      setDraft({
+        mailbox: newMessageSender(sendable, urlState.box, organizationId),
+        draft: emptyDraft,
+        fromOptions: sendable,
+      });
+    }
+    replaceParams(next => next.delete(COMPOSE_PARAM));
+  }, [resumeCompose, mailboxList, urlState.box, organizationId, replaceParams]);
   const setListing = (changes: Partial<Record<(typeof filterParams)[number], string | null>>) => {
     setAdvanceAfter(null);
     replaceParams(next => {
@@ -679,18 +716,14 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
       : undefined;
   const sendable = mailboxes.data.filter(canComposeFrom);
   const sendableIds = new Set(sendable.map(mailbox => mailbox.id));
-  // A new message starts from the narrowed mailbox when it may send, else the mailbox last
-  // opened, else the first that may (D26).
   const compose =
     sendable.length > 0
-      ? () => {
-          const stored = readStoredMailboxId(organizationId);
-          const from =
-            sendable.find(mailbox => mailbox.id === urlState.box) ??
-            sendable.find(mailbox => mailbox.id === stored) ??
-            sendable[0];
-          setDraft({ mailbox: from, draft: emptyDraft, fromOptions: sendable });
-        }
+      ? () =>
+          setDraft({
+            mailbox: newMessageSender(sendable, urlState.box, organizationId),
+            draft: emptyDraft,
+            fromOptions: sendable,
+          })
       : null;
   // Rows name their mailbox, tinted by its role, unless the list is one mailbox.
   const roleTags = new Map<number, MailRole>(roleList.map(role => [role.id, role]));

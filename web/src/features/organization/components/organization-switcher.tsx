@@ -16,11 +16,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { ROUTES, getOrganizationRoute } from '@/constants/routes';
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
+import { ACTIVE_ORGANIZATION_STORAGE_KEY } from '@/features/organization/utils/active-organization';
 import { useT } from '@/i18n';
 
 const organizationPath = /^\/console\/organizations\/([1-9]\d*)(?:\/|$)/;
 const organizationIdPattern = /^[1-9]\d{0,15}$/u;
-const ACTIVE_ORGANIZATION_STORAGE_KEY = 'zmail.activeOrganizationId';
 
 const queryScopedConsolePaths = new Set<string>([
   ROUTES.CONSOLE.EMAILS,

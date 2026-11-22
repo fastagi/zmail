@@ -1,3 +1,4 @@
+import { onlineManager } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createQueryClient } from '@/config/query-client';
@@ -51,5 +52,30 @@ describe('query client ownership defaults', () => {
 
     expect(mutationFn).toHaveBeenCalledTimes(1);
     expect(handleError).not.toHaveBeenCalled();
+  });
+
+  it('fails a write fast while offline instead of pausing it for replay (#107)', async () => {
+    handleError.mockClear();
+    onlineManager.setOnline(false);
+    try {
+      const client = createQueryClient();
+      const mutationFn = vi.fn().mockRejectedValue(new Error('Network Error'));
+      const mutation = client.getMutationCache().build(client, {
+        mutationFn,
+        meta: LOCAL_ERROR_HANDLING_META,
+      });
+
+      await expect(mutation.execute(undefined)).rejects.toThrow('Network Error');
+      expect(mutationFn).toHaveBeenCalledTimes(1);
+      expect(mutation.state.isPaused).toBe(false);
+      expect(mutation.state.status).toBe('error');
+
+      // Reconnecting must not replay the write.
+      onlineManager.setOnline(true);
+      await client.resumePausedMutations();
+      expect(mutationFn).toHaveBeenCalledTimes(1);
+    } finally {
+      onlineManager.setOnline(true);
+    }
   });
 });

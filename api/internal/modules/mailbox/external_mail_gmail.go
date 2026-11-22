@@ -481,7 +481,7 @@ func (m gmailMessage) external() ExternalMessage {
 		ExternalID: m.ID,
 		To:         headerAddresses(header, "To"),
 		Cc:         headerAddresses(header, "Cc"),
-		Subject:    strings.Join(strings.Fields(truncateText(decodeHeader(header.Get("Subject")), domain.MaxMailSubjectLength)), " "),
+		Subject:    strings.Join(strings.Fields(truncateRunes(decodeHeader(header.Get("Subject")), domain.MaxMailSubjectLength)), " "),
 		References: parseReferences(header.Get("References")),
 	}
 	parser := mail.AddressParser{WordDecoder: headerDecoder}

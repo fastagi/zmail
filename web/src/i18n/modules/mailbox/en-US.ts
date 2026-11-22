@@ -422,6 +422,8 @@ const messages = {
     templateNone: 'None, write the message',
     templateHint: 'An empty variable uses the fallback written in the template.',
     draftSaved: 'Saved as a draft',
+    sessionEndedDraft: 'What you wrote is kept in this browser and opens again after you sign in.',
+    signIn: 'Sign in',
     invalidRecipients: 'Not a plain email address: {addresses}',
   },
   emails: {
@@ -744,6 +746,7 @@ const messages = {
     empty:
       'Mailboxes belong to an organization. Create an organization or join one to send and receive mail.',
     open: 'Go to organizations',
+    unavailable: 'The organization in this link is no longer available to you. Showing {name} instead.',
     lostTitle: 'No access to this organization',
     readOnly: 'Owners and admins of this organization create and delete mailboxes.',
   },
@@ -1467,6 +1470,7 @@ const messages = {
     deliveryFailed:
       'The message was NOT delivered: the mail provider did not accept it. It is kept in Sent as failed. Sending again may deliver a duplicate.',
     generic: 'The mailbox request could not be completed.',
+    sessionEnded: 'Your session ended. Sign in again to continue.',
     invalidInput: 'Check the fields and try again.',
     invalidResponse: 'The mailbox service returned invalid data.',
     limitReached:
