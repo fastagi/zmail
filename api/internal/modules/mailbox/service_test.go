@@ -894,6 +894,10 @@ func (r *fakeRepository) ListMessageEvents(_ context.Context, messageID uint) ([
 	return append([]domain.MailEvent(nil), r.events[messageID]...), nil
 }
 
+func (r *fakeRepository) RecordDeletedSendEvent(context.Context, string, domain.MailEventType) (bool, bool, error) {
+	return false, false, nil
+}
+
 func (r *fakeRepository) FindOutboundMessageByProviderID(_ context.Context, providerMessageID string) (*domain.MailMessage, *domain.Mailbox, error) {
 	for _, message := range r.messages {
 		if message.Direction == domain.MailDirectionOutbound && message.MessageID == providerMessageID && providerMessageID != "" {

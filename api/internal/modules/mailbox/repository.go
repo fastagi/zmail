@@ -669,17 +669,19 @@ func (r *repository) CountPersonalOutcomesSince(ctx context.Context, organizatio
 		return fmt.Sprintf(`COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM mail_message_events AS receipt
 			WHERE receipt.message_id = mail_messages.id AND receipt.type = '%s'))`, eventType)
 	}
-	var live, deleted struct{ Attempted, Bounced, Complained int64 }
-	if err := laneAttempts(r.conn(ctx), organizationID, domain.SendLanePersonal, since).
+	db := r.conn(ctx)
+	live := laneAttempts(db, organizationID, domain.SendLanePersonal, since).
 		Select(`COUNT(*) AS attempted, ` + receipt(domain.MailEventBounced) + ` AS bounced, ` +
-			receipt(domain.MailEventComplained) + ` AS complained`).
-		Scan(&live).Error; err != nil {
-		return 0, 0, 0, err
-	}
-	err := deletedSends(r.conn(ctx), organizationID, domain.SendLanePersonal, since).
-		Select(`COUNT(*) AS attempted, COUNT(*) FILTER (WHERE bounced) AS bounced, COUNT(*) FILTER (WHERE complained) AS complained`).
-		Scan(&deleted).Error
-	return live.Attempted + deleted.Attempted, live.Bounced + deleted.Bounced, live.Complained + deleted.Complained, err
+			receipt(domain.MailEventComplained) + ` AS complained`)
+	deleted := deletedSends(db, organizationID, domain.SendLanePersonal, since).
+		Select(`COUNT(*) AS attempted, COUNT(*) FILTER (WHERE bounced) AS bounced, COUNT(*) FILTER (WHERE complained) AS complained`)
+	// One statement reads both tables from one snapshot, so a deletion committing meanwhile is
+	// counted once.
+	var outcome struct{ Attempted, Bounced, Complained int64 }
+	err := db.Raw(`SELECT COALESCE(SUM(attempted), 0) AS attempted, COALESCE(SUM(bounced), 0) AS bounced,
+		COALESCE(SUM(complained), 0) AS complained FROM ((?) UNION ALL (?)) AS outcomes`, live, deleted).
+		Scan(&outcome).Error
+	return outcome.Attempted, outcome.Bounced, outcome.Complained, err
 }
 
 func (r *repository) OrganizationCreatedAt(ctx context.Context, organizationID uint) (time.Time, error) {
@@ -711,12 +713,11 @@ func deletedSends(db *gorm.DB, organizationID uint, lane domain.SendLane, since 
 // countLaneAttempts counts the organization's attempts in one lane since the given time, those of
 // messages deleted since included.
 func countLaneAttempts(db *gorm.DB, organizationID uint, lane domain.SendLane, since time.Time) (int64, error) {
-	var live, deleted int64
-	if err := laneAttempts(db, organizationID, lane, since).Count(&live).Error; err != nil {
-		return 0, err
-	}
-	err := deletedSends(db, organizationID, lane, since).Count(&deleted).Error
-	return live + deleted, err
+	var total int64
+	err := db.Raw(`SELECT (?) + (?)`,
+		laneAttempts(db, organizationID, lane, since).Select("COUNT(*)"),
+		deletedSends(db, organizationID, lane, since).Select("COUNT(*)")).Scan(&total).Error
+	return total, err
 }
 
 // keepDeletedSends records, before the given messages are deleted for good, the send attempts
@@ -729,8 +730,8 @@ func keepDeletedSends(tx *gorm.DB, messages any) error {
 			WHERE receipt.message_id = mail_messages.id AND receipt.type = '%s')`, eventType)
 	}
 	if err := tx.Exec(`INSERT INTO mail_deleted_sends
-		(organization_id, mailbox_id, send_lane, send_attempted_at, bounced, complained)
-		SELECT mailboxes.organization_id, mail_messages.mailbox_id, mail_messages.send_lane,
+		(organization_id, mailbox_id, message_id, send_lane, send_attempted_at, bounced, complained)
+		SELECT mailboxes.organization_id, mail_messages.mailbox_id, mail_messages.message_id, mail_messages.send_lane,
 			mail_messages.send_attempted_at, `+receipt(domain.MailEventBounced)+`, `+receipt(domain.MailEventComplained)+`
 		FROM mail_messages JOIN mailboxes ON mailboxes.id = mail_messages.mailbox_id
 		WHERE mail_messages.id IN (?) AND mail_messages.direction = ? AND mail_messages.send_attempted_at >= ?`,
@@ -738,6 +739,27 @@ func keepDeletedSends(tx *gorm.DB, messages any) error {
 		return err
 	}
 	return tx.Exec(`DELETE FROM mail_deleted_sends WHERE send_attempted_at < ?`, since).Error
+}
+
+// RecordDeletedSendEvent marks the kept attempt of a deleted message bounced or complained when
+// the provider reports it after the deletion. found is false when no kept attempt has that
+// provider message id; recorded is false when the attempt already carried the event.
+func (r *repository) RecordDeletedSendEvent(ctx context.Context, providerMessageID string, eventType domain.MailEventType) (found, recorded bool, err error) {
+	if r.db == nil {
+		return false, false, domain.ErrServiceUnavailable
+	}
+	column := map[domain.MailEventType]string{domain.MailEventBounced: "bounced", domain.MailEventComplained: "complained"}[eventType]
+	if providerMessageID == "" || column == "" {
+		return false, false, nil
+	}
+	db := r.conn(ctx)
+	result := db.Model(&MailDeletedSendPO{}).Where("message_id = ? AND NOT "+column, providerMessageID).Update(column, true)
+	if result.Error != nil || result.RowsAffected > 0 {
+		return result.RowsAffected > 0, result.RowsAffected > 0, result.Error
+	}
+	var kept int64
+	err = db.Model(&MailDeletedSendPO{}).Where("message_id = ?", providerMessageID).Limit(1).Count(&kept).Error
+	return kept > 0, false, err
 }
 
 // CountWaitingSends counts the organization's messages waiting for room in the send limit.

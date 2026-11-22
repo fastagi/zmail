@@ -25,12 +25,14 @@ func (m *addMailDeletedSends) Up(db *gorm.DB) error {
 		  id bigserial PRIMARY KEY,
 		  organization_id bigint NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
 		  mailbox_id bigint NOT NULL,
+		  message_id varchar(998) NOT NULL DEFAULT '',
 		  send_lane varchar(16) NOT NULL,
 		  send_attempted_at timestamptz NOT NULL,
 		  bounced boolean NOT NULL DEFAULT false,
 		  complained boolean NOT NULL DEFAULT false)`,
 		`CREATE INDEX idx_mail_deleted_sends_lane ON mail_deleted_sends (organization_id, send_lane, send_attempted_at)`,
 		`CREATE INDEX idx_mail_deleted_sends_mailbox ON mail_deleted_sends (mailbox_id, send_attempted_at)`,
+		`CREATE INDEX idx_mail_deleted_sends_message_id ON mail_deleted_sends (message_id)`,
 		`CREATE INDEX idx_mail_deleted_sends_attempted ON mail_deleted_sends (send_attempted_at)`,
 	)
 }

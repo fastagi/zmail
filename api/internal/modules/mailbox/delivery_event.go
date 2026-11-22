@@ -166,6 +166,16 @@ func (s *service) RecordDeliveryEvent(ctx context.Context, delivery DeliveryEven
 		return DeliveryEventResult{}, err
 	}
 	message, mailbox, err := s.repo.FindOutboundMessageByProviderID(ctx, providerMessageID)
+	if errors.Is(err, ErrMailMessageNotFound) && suppressesAddress(event.Type) {
+		// A bounce or complaint for a message deleted since still counts in the sending-health check.
+		found, recorded, keptErr := s.repo.RecordDeletedSendEvent(ctx, providerMessageID, event.Type)
+		if keptErr != nil {
+			return DeliveryEventResult{}, keptErr
+		}
+		if found {
+			return DeliveryEventResult{Kind: DeliveryEventKindMailbox, Event: event, Recorded: recorded}, nil
+		}
+	}
 	if errors.Is(err, ErrMailMessageNotFound) && s.transactional != nil {
 		return s.recordTransactionalDeliveryEvent(ctx, providerMessageID, event)
 	}

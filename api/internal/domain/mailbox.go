@@ -1002,6 +1002,7 @@ type MailboxRepository interface {
 	// FindOutboundMessageByProviderID finds the outbound message a provider event names, sealed or
 	// not, with its mailbox's id, organization, address, type, webhook switch, and seal boundary.
 	FindOutboundMessageByProviderID(ctx context.Context, providerMessageID string) (*MailMessage, *Mailbox, error)
+	RecordDeletedSendEvent(ctx context.Context, providerMessageID string, eventType MailEventType) (found, recorded bool, err error)
 
 	// MarkOwnerLeft records that the user left the organization on each of their live personal
 	// mailboxes there and returns those mailboxes.

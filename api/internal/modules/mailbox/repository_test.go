@@ -1247,6 +1247,9 @@ func TestDeletedSendsStillCountAgainstTheWindow(t *testing.T) {
 	now := time.Now().UTC()
 	bounced := send(mailbox, now.Add(-time.Hour))
 	trashed := send(mailbox, now.Add(-2*time.Hour))
+	if err := db.Model(&MailMessagePO{}).Where("id = ?", trashed.ID).Update("message_id", "prov-trashed@mail.example").Error; err != nil {
+		t.Fatalf("provider id: %v", err)
+	}
 	send(other, now.Add(-3*time.Hour))
 	stale := send(mailbox, now.Add(-25*time.Hour))
 	if _, _, err := repo.AddMessageEvents(ctx, bounced.ID, []domain.MailEvent{
@@ -1300,5 +1303,18 @@ func TestDeletedSendsStillCountAgainstTheWindow(t *testing.T) {
 	}
 	if err := db.Model(&MailDeletedSendPO{}).Count(&kept).Error; err != nil || kept != 3 {
 		t.Fatalf("a delete that found nothing kept a record: %d, %v", kept, err)
+	}
+
+	for _, want := range []bool{true, false} {
+		found, recorded, err := repo.RecordDeletedSendEvent(ctx, "prov-trashed@mail.example", domain.MailEventComplained)
+		if err != nil || !found || recorded != want {
+			t.Fatalf("RecordDeletedSendEvent = %v, %v, %v; want found, recorded %v", found, recorded, err, want)
+		}
+	}
+	if found, _, err := repo.RecordDeletedSendEvent(ctx, "unknown@mail.example", domain.MailEventBounced); err != nil || found {
+		t.Fatalf("unknown provider id: found %v, %v", found, err)
+	}
+	if _, bounces, complaints, err := repo.CountPersonalOutcomesSince(ctx, 1, window); err != nil || bounces != 1 || complaints != 1 {
+		t.Fatalf("after a late complaint: %d bounces, %d complaints, %v; want 1 and 1", bounces, complaints, err)
 	}
 }

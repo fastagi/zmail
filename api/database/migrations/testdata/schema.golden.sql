@@ -268,6 +268,7 @@ TABLE mail_deleted_sends
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_deleted_sends_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
   COLUMN mailbox_id bigint NOT NULL
+  COLUMN message_id character varying(998) NOT NULL DEFAULT ''::character varying
   COLUMN send_lane character varying(16) NOT NULL
   COLUMN send_attempted_at timestamp with time zone NOT NULL
   COLUMN bounced boolean NOT NULL DEFAULT false
@@ -1289,6 +1290,7 @@ INDEX CREATE UNIQUE INDEX mail_content_access_audits_pkey ON mail_content_access
 INDEX CREATE INDEX idx_mail_deleted_sends_attempted ON mail_deleted_sends USING btree (send_attempted_at)
 INDEX CREATE INDEX idx_mail_deleted_sends_lane ON mail_deleted_sends USING btree (organization_id, send_lane, send_attempted_at)
 INDEX CREATE INDEX idx_mail_deleted_sends_mailbox ON mail_deleted_sends USING btree (mailbox_id, send_attempted_at)
+INDEX CREATE INDEX idx_mail_deleted_sends_message_id ON mail_deleted_sends USING btree (message_id)
 INDEX CREATE UNIQUE INDEX mail_deleted_sends_pkey ON mail_deleted_sends USING btree (id)
 INDEX CREATE INDEX idx_mail_domains_mail_zone ON mail_domains USING btree (mail_zone_id)
 INDEX CREATE UNIQUE INDEX idx_mail_domains_name ON mail_domains USING btree (name)
