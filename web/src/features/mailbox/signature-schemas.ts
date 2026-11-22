@@ -1,4 +1,4 @@
-import { maxLength, nullable, strictObject, string, type infer as Infer } from 'zod/mini';
+import { nullable, refine, strictObject, string, type infer as Infer } from 'zod/mini';
 
 import { safeIdSchema, timestampSchema } from '@/features/mailbox/schemas';
 
@@ -8,7 +8,8 @@ export const MAIL_SIGNATURE_MAX_LENGTH = 2000;
 /** The caller's own signature for a mailbox; `updated_at` is null until one is saved. */
 export const mailSignatureSchema = strictObject({
   mailbox_id: safeIdSchema,
-  body: string().check(maxLength(MAIL_SIGNATURE_MAX_LENGTH)),
+  // The limit counts characters as the API does, not UTF-16 units: an emoji is one.
+  body: string().check(refine((body: string) => [...body].length <= MAIL_SIGNATURE_MAX_LENGTH)),
   updated_at: nullable(timestampSchema),
 });
 
