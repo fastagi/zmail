@@ -274,6 +274,16 @@ const messages = {
     results: '“{q}”的搜索结果',
     clear: '清除搜索',
   },
+  assignment: {
+    label: '分派',
+    assignee: '负责人',
+    unassigned: '未分派',
+    member: '成员 #{id}',
+    open: '待处理',
+    closed: '已完成',
+    close: '标记为已完成',
+    reopen: '重新打开',
+  },
   thread: {
     label: '会话',
     expand: '展开 {sender} 的邮件',
@@ -1604,6 +1614,7 @@ const messages = {
     templateNotFound: '这个模板不存在或已被删除。',
     draftNotFound: '这份草稿已发送或已删除。',
     draftLimitReached: '你已有 200 份草稿，删除一份后才能再保存。',
+    assignmentUnavailable: '只有共享邮箱可以分派会话。',
     templateVariablesMissing: '模板中有变量既没有值也没有默认值。请填写后重新发送。',
     attachmentsInvalid: '最多添加 10 个非空文件，合计不超过 4 MB。',
     addressInvalid:

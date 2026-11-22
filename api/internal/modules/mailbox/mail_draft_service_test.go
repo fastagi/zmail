@@ -30,7 +30,7 @@ func TestMailDraftsBelongToTheirWriterAndNeedSend(t *testing.T) {
 	saved, err := f.service.CreateMailDraft(ctx, f.b, MailDraftInput{
 		MailboxID: f.team.ID, To: " ann@example.com,\n bob@example.com ", Subject: "Plan", Body: "Line\r\nTwo",
 	})
-	if err != nil || saved.ID == 0 || saved.To != "ann@example.com, bob@example.com" || saved.Body != "Line\nTwo" {
+	if err != nil || saved.ID == 0 || saved.To != "ann@example.com,bob@example.com" || saved.Body != "Line\nTwo" {
 		t.Fatalf("create = %+v, %v", saved, err)
 	}
 	if _, err = f.service.CreateMailDraft(ctx, f.c, MailDraftInput{MailboxID: f.team.ID}); !errors.Is(err, domain.ErrPermissionDenied) {
@@ -79,7 +79,7 @@ func TestMailDraftRejectsOversizedAndControlCharacters(t *testing.T) {
 func TestMailDraftRecipientLinesStaySeparateAddresses(t *testing.T) {
 	cases := map[string]string{
 		"a@example.com\nb@example.com":      "a@example.com,b@example.com",
-		"a@example.com,\r\n  b@example.com": "a@example.com,,b@example.com",
+		"a@example.com,\r\n  b@example.com": "a@example.com,b@example.com",
 		"  Ann  <a@example.com>  ":          "Ann <a@example.com>",
 		"\n\n":                              "",
 	}

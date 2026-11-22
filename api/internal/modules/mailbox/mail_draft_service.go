@@ -120,7 +120,7 @@ func normalizeDraftLine(value string) string {
 	lines := strings.FieldsFunc(value, func(r rune) bool { return r == '\r' || r == '\n' })
 	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
-		if line = strings.Join(strings.Fields(line), " "); line != "" {
+		if line = strings.Trim(strings.Join(strings.Fields(line), " "), ", "); line != "" {
 			kept = append(kept, line)
 		}
 	}

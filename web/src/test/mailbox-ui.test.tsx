@@ -81,6 +81,10 @@ const navigation = vi.hoisted(() => {
 
 const downloadAttachment = vi.hoisted(() => vi.fn());
 
+vi.mock('@/features/mailbox/hooks/use-thread-assignment', () => ({
+  useThreadAssignment: () => ({ data: undefined, isSuccess: false }),
+  useSaveThreadAssignment: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('@/features/mailbox/services/mailbox-service', async importOriginal => {
   const original =

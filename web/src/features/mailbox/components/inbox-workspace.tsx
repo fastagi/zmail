@@ -1085,6 +1085,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
                 key={openItem.id}
                 item={openItem}
                 access={openMailbox?.access ?? null}
+                shared={openMailbox?.type === 'shared'}
                 externalProvider={externalProvider(openItem.mailbox_id)}
                 roleName={
                   openItem.role_id === null

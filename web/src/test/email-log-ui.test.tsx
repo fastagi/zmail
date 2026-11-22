@@ -61,6 +61,10 @@ const navigation = vi.hoisted(() => {
   };
 });
 
+vi.mock('@/features/mailbox/hooks/use-thread-assignment', () => ({
+  useThreadAssignment: () => ({ data: undefined, isSuccess: false }),
+  useSaveThreadAssignment: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('next/navigation', async () => {
   const { useSyncExternalStore } = await import('react');

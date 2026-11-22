@@ -18,6 +18,7 @@ import {
 import { useMailDateTimeFormat } from '@/features/mailbox/components/mail-time';
 import { MessageActions } from '@/features/mailbox/components/message-actions';
 import { SecretsPanel } from '@/features/mailbox/components/secrets-panel';
+import { ThreadAssignment } from '@/features/mailbox/components/thread-assignment';
 import {
   useMailMessage,
   useMailThread,
@@ -34,6 +35,8 @@ export interface ReaderProps {
   mailboxAddress: string;
   canSend: boolean;
   canOrganize: boolean;
+  /** A shared Zmail mailbox, whose conversations can be assigned and closed. */
+  shared?: boolean;
   onPrevious: (() => void) | null;
   onNext: (() => void) | null;
   onClose: () => void;
@@ -132,6 +135,13 @@ export function ThreadView({
           <article className={variant === 'article' ? articleClassName : 'space-y-4'}>
             {variant === 'article' ? null : <ReaderToolbar reader={reader} />}
             <ReaderSubject subject={(revealed.get(newest.id) ?? newest).subject} layout={layout} />
+            {reader.shared ? (
+              <ThreadAssignment
+                mailboxId={reader.mailboxId}
+                threadId={threadId}
+                canSend={reader.canSend}
+              />
+            ) : null}
             <ol aria-label={t('thread.label')} className="space-y-3">
               {messages.map(message => (
                 <li key={message.id}>
@@ -175,6 +185,13 @@ export function MessageDetail({
         <article className={variant === 'article' ? articleClassName : 'space-y-4'}>
           {variant === 'article' ? null : <ReaderToolbar reader={reader} />}
           <ReaderSubject subject={(revealed.get(message.id) ?? message).subject} layout={layout} />
+          {reader.shared ? (
+            <ThreadAssignment
+              mailboxId={reader.mailboxId}
+              threadId={message.thread_id}
+              canSend={reader.canSend}
+            />
+          ) : null}
           <MessageCard
             key={message.id}
             message={message}

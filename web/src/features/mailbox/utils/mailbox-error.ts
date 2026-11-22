@@ -60,6 +60,7 @@ export type MailboxErrorKey =
   | 'errors.templateNotFound'
   | 'errors.draftNotFound'
   | 'errors.draftLimitReached'
+  | 'errors.assignmentUnavailable'
   | 'errors.templateVariablesMissing'
   | 'errors.tooLarge'
   | 'errors.triageUnavailable'
@@ -124,6 +125,7 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_TEMPLATE_NOT_FOUND]: 'errors.templateNotFound',
   [ApiErrorCode.MAILBOX_DRAFT_NOT_FOUND]: 'errors.draftNotFound',
   [ApiErrorCode.MAILBOX_DRAFT_LIMIT_REACHED]: 'errors.draftLimitReached',
+  [ApiErrorCode.MAILBOX_ASSIGNMENT_UNAVAILABLE]: 'errors.assignmentUnavailable',
   [ApiErrorCode.MAILBOX_TEMPLATE_INVALID]: 'errors.templateInvalid',
   [ApiErrorCode.MAILBOX_TEMPLATE_NAME_TAKEN]: 'errors.templateNameTaken',
   [ApiErrorCode.MAILBOX_TEMPLATE_KEY_TAKEN]: 'errors.templateKeyTaken',

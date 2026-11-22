@@ -394,6 +394,7 @@ function MailboxView({
     mailboxAddress: mailbox.address,
     canSend: canComposeFrom(mailbox),
     canOrganize: mailbox.access.organize,
+    shared: mailbox.type === 'shared' && mailbox.origin !== 'connected',
     onPrevious: openIndex > 0 ? () => openRow(rows[openIndex - 1]) : null,
     onNext:
       openIndex >= 0 && openIndex < rows.length - 1 ? () => openRow(rows[openIndex + 1]) : null,
