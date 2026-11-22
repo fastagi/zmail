@@ -206,6 +206,9 @@ const messages = {
       unassignedHint: '共享邮箱里还没有负责人、尚未完成的会话会出现在这里。',
       closed: '没有已完成的会话',
       closedHint: '共享邮箱里标记为已完成的会话会出现在这里。',
+      filtered: '没有符合筛选条件的邮件',
+      filteredHint: '清除日期或附件筛选，查看更多邮件。',
+      clearFilters: '清除筛选',
     },
     unavailable: '你已无法查看这封邮件。它所在邮箱的访问权限可能已变更，列表已刷新。',
     actions: {
@@ -1068,6 +1071,7 @@ const messages = {
     refresh: '刷新邮件',
     save: '保存',
     undo: '撤销',
+    close: '关闭',
   },
   messages: {
     mailboxCreated: '邮箱已创建',

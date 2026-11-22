@@ -527,6 +527,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpMounted, setHelpMounted] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const returnFocus = useRef<HTMLElement | null>(null);
   const [paletteMounted, setPaletteMounted] = useState(false);
   const [managingMailboxes, setManagingMailboxes] = useState(false);
   const paneActions = useRef<InboxPaneActions | null>(null);
@@ -833,26 +834,32 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   };
   // Rows name their mailbox, tinted by its role, unless the list is one mailbox.
   const roleTags = new Map<number, MailRole>(roleList.map(role => [role.id, role]));
+  // A date or attachment filter that hides every row is not an empty mailbox.
+  const narrowed = urlState.q === '' && (urlState.date !== null || urlState.attachments);
   const emptyTitle =
     urlState.q !== ''
       ? t('inbox.empty.search')
-      : urlState.assignment
-        ? t(`inbox.empty.${urlState.assignment}`)
-        : urlState.unread
-          ? t('inbox.empty.unread')
-          : urlState.view === 'all'
-            ? t('inbox.empty.view')
-            : t(`inbox.empty.${urlState.view}`);
+      : narrowed
+        ? t('inbox.empty.filtered')
+        : urlState.assignment
+          ? t(`inbox.empty.${urlState.assignment}`)
+          : urlState.unread
+            ? t('inbox.empty.unread')
+            : urlState.view === 'all'
+              ? t('inbox.empty.view')
+              : t(`inbox.empty.${urlState.view}`);
   const emptyHint =
     urlState.q !== ''
       ? t('inbox.empty.searchHint')
-      : urlState.assignment
-        ? t(`inbox.empty.${urlState.assignment}Hint`)
-        : urlState.unread
-          ? t('inbox.empty.unreadHint')
-          : urlState.view === 'all'
-            ? t('inbox.empty.viewHint')
-            : t(`inbox.empty.${urlState.view}Hint`);
+      : narrowed
+        ? t('inbox.empty.filteredHint')
+        : urlState.assignment
+          ? t(`inbox.empty.${urlState.assignment}Hint`)
+          : urlState.unread
+            ? t('inbox.empty.unreadHint')
+            : urlState.view === 'all'
+              ? t('inbox.empty.viewHint')
+              : t(`inbox.empty.${urlState.view}Hint`);
 
   /** Moves the open row by `delta`; past the last loaded row, opens the first of the next page. */
   const step = (delta: 1 | -1) => {
@@ -874,7 +881,20 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     }
     paneActions.current?.[action]();
   };
+  // The help dialog and the palette open from a key or a button; closing puts focus back there.
+  const rememberFocus = () => {
+    returnFocus.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  };
+  const restoreFocus = (event: Event) => {
+    const target = returnFocus.current;
+    returnFocus.current = null;
+    if (!target?.isConnected) return;
+    event.preventDefault();
+    target.focus();
+  };
   const showHelp = () => {
+    rememberFocus();
     setHelpMounted(true);
     setHelpOpen(true);
   };
@@ -897,6 +917,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
     search: () => searchRef.current?.focus(),
     help: showHelp,
     palette: () => {
+      if (!paletteOpen) rememberFocus();
       setPaletteMounted(true);
       setPaletteOpen(open => !open);
     },
@@ -938,6 +959,22 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           icon={<Inbox className="size-5" aria-hidden="true" />}
           title={emptyTitle}
           description={emptyHint}
+          action={
+            narrowed ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setListing({
+                    [DATE_PARAM]: null,
+                    ...(urlState.attachments ? { [TAB_PARAM]: null } : {}),
+                  })
+                }
+              >
+                {t('inbox.empty.clearFilters')}
+              </Button>
+            ) : undefined
+          }
         />
       </div>
     );
@@ -1197,6 +1234,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
             <SheetContent
               side="left"
+              closeLabel={t('actions.close')}
               className="w-[280px] gap-0 overflow-y-auto bg-bg-canvas px-3 pt-12 pb-3.5 motion-reduce:data-[state=closed]:animate-none motion-reduce:data-[state=open]:animate-none"
             >
               <SheetTitle className="sr-only">{t('inbox.groups.label')}</SheetTitle>
@@ -1215,7 +1253,11 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
 
       {helpMounted ? (
         <Suspense fallback={null}>
-          <ShortcutHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+          <ShortcutHelpDialog
+            open={helpOpen}
+            onOpenChange={setHelpOpen}
+            onCloseAutoFocus={restoreFocus}
+          />
         </Suspense>
       ) : null}
 
@@ -1224,6 +1266,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           <CommandPalette
             open={paletteOpen}
             onOpenChange={setPaletteOpen}
+            onCloseAutoFocus={restoreFocus}
             organizationId={organizationId}
             timeZone={timeZone}
             mailboxes={mailboxes.data}

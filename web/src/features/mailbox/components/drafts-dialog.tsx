@@ -117,7 +117,7 @@ export default function DraftsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" closeLabel={t('actions.close')}>
         <DialogHeader>
           <DialogTitle>{t('drafts.title')}</DialogTitle>
           <DialogDescription>{t('drafts.description')}</DialogDescription>

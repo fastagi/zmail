@@ -35,14 +35,16 @@ const rows: readonly (readonly [MailShortcut, readonly string[]])[] = [
 export function ShortcutHelpDialog({
   open,
   onOpenChange,
+  onCloseAutoFocus,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 }) {
   const t = useT('mailbox');
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent closeLabel={t('actions.close')} onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{t('inbox.shortcuts.title')}</DialogTitle>
           <DialogDescription>{t('inbox.shortcuts.description')}</DialogDescription>

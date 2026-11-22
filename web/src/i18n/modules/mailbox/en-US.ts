@@ -212,6 +212,9 @@ const messages = {
       unassignedHint: 'Open shared-mailbox conversations nobody owns yet show here.',
       closed: 'Nothing marked done',
       closedHint: 'Conversations marked done in a shared mailbox show here.',
+      filtered: 'No mail matches these filters',
+      filteredHint: 'Clear the date or attachment filter to see more mail.',
+      clearFilters: 'Clear filters',
     },
     unavailable:
       'This mail is no longer available to you. Access to its mailbox may have changed; the list is refreshed.',
@@ -1107,6 +1110,7 @@ const messages = {
     refresh: 'Refresh mailbox',
     save: 'Save',
     undo: 'Undo',
+    close: 'Close',
   },
   messages: {
     mailboxCreated: 'Mailbox created',
