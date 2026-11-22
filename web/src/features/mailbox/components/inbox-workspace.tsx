@@ -552,6 +552,15 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   // Back from signing in again after a refused send: the composer opens on the kept draft.
   const resumeCompose = searchParams.get(COMPOSE_PARAM) === COMPOSE_RESUME;
   const mailboxList = mailboxes.data;
+  // `new=mailbox` from the console home's setup guide: open mailbox creation here too, once the
+  // team has mailboxes (without any, the empty state's own action opens it).
+  const createRequested = searchParams.get(NEW_PARAM) === 'mailbox';
+  const hasReadable = mailboxList?.some(mailbox => mailbox.access.view) ?? false;
+  useEffect(() => {
+    if (!createRequested || !hasReadable) return;
+    if (canManage) setManagingMailboxes(true);
+    dropNewParam();
+  }, [createRequested, hasReadable, canManage, dropNewParam]);
   useEffect(() => {
     if (!resumeCompose || !mailboxList) return;
     const sendable = mailboxList.filter(canComposeFrom);

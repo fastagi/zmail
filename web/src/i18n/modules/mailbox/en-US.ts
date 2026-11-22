@@ -546,48 +546,28 @@ const messages = {
   },
   domain: {
     title: 'Domain',
-    description: 'How mail is sent and received on your mail domain.',
+    description: 'Send and receive on your company domain, and see where each domain stands.',
     emptyTitle: 'No mail domain',
-    empty: 'This server has no mail domain configured.',
+    empty: 'The mail service is not ready yet. Try again later or contact support.',
     sending: 'Sending',
-    providerCloudflare: 'Cloudflare — delivering',
-    providerLog: 'Log — not delivering; development only',
-    providerHintCloudflare: 'Outbound mail is delivered through Cloudflare Email Sending.',
-    providerHintLog: 'Outbound mail is only recorded on the server. Nothing reaches a recipient.',
+    providerCloudflare: 'Delivering',
+    providerLog: 'Not delivering (test environment)',
+    providerHintLog: 'In this environment sent mail is only recorded. Nothing reaches a recipient.',
     inbound: 'Receiving',
-    inboundEnabled: 'Enabled',
-    inboundDisabled: 'Disabled',
-    inboundHintEnabled: 'The API accepts signed deliveries from the mail edge.',
-    inboundHintDisabled: 'The API rejects inbound deliveries until an inbound secret is set.',
+    inboundEnabled: 'Receiving',
+    inboundDisabled: 'Off',
+    inboundHintDisabled: 'This environment cannot receive mail from outside yet.',
     maxMailboxes: 'Mailbox limit',
     maxMailboxesValue: '{count} per organization',
     dailySendLimit: 'Daily send limit',
     dailySendLimitValue: '{count} messages per organization in any 24 hours',
-    checklistTitle: 'Cloudflare setup',
-    checklistDescription:
-      'Steps marked done are confirmed by the API. The others are made in Cloudflare and cannot be checked from here.',
-    stepDone: 'Done',
-    stepPending: 'Not done',
-    stepManual: 'Check manually',
-    routingTitle: 'Enable Email Routing for {domain}',
-    routingBody:
-      'In the Cloudflare dashboard, turn on Email Routing for the zone so Cloudflare accepts mail for the domain.',
-    ruleTitle: 'Route mail to the Email Worker',
-    ruleBody:
-      'Add a routing rule or a catch-all address that sends mail for {domain} to the Email Worker.',
-    sendingTitle: 'Enable Email Sending for {domain}',
-    sendingBody: 'Turn on Email Sending for the domain and set the API to the cloudflare provider.',
-    inboundTitle: 'Accept inbound deliveries',
-    inboundBody: 'Set the same inbound secret on the API and on the Email Worker.',
-    configTitle: 'Configure the API',
-    configBody: 'Set these values on the API and restart it.',
-    apiTitle: 'Send from your backend',
+    apiTitle: 'Send from your own systems',
     apiDescription:
-      "Create an API key with the mail:send scope and call the API with the Organization-Id header. The sender must be one of the organization's mailboxes, and a repeated Idempotency-Key never sends twice.",
-    apiHostNote: 'Replace YOUR_API_HOST with the address of your API.',
-    apiExample: 'Example request',
-    apiKeys: 'Manage API keys',
+      "Create an API key in the developer center to send from your website or backend with the team's addresses.",
     sharedBadge: 'Shared domain',
+    sharedDescription:
+      'Until you connect your own domain, team addresses end in @{domain}. With your own domain connected, you can give each colleague an @your-company.com mailbox.',
+    apiOpen: 'Open developer center',
     cfCheck: 'Check permissions',
     cfCheck_dns: 'DNS records',
     cfCheck_sending: 'Sending domains',
@@ -612,9 +592,10 @@ const messages = {
     cfCancel: 'Cancel',
     cfDisconnect: 'Disconnect',
     cfToken: 'Cloudflare API token',
-    cfTitle: 'Option 1: Use your own Cloudflare account',
+    cfSummary: 'DNS already in your own Cloudflare account? Connect with your account instead',
+    cfTitle: 'DNS already in your own Cloudflare account?',
     cfWhen:
-      "Choose this when the domain's DNS is already in your own Cloudflare account and should stay there. Paste an API token with Zone Read, DNS Edit and Email Routing Rules Edit on the zone, and Email Sending Edit on its account. Zmail stores the token encrypted.",
+      'Connect with your own account so the DNS stays there. Domains registered at Cloudflare need this way. Paste an API token with Zone Read, DNS Edit and Email Routing Rules Edit on the zone, and Email Sending Edit on its account. Zmail stores the token encrypted.',
     cfTokenRefused:
       'Cloudflare did not accept the token you entered. Check that it is copied completely, still active, has Zone Read, and that its IP restrictions allow this server.',
     cfTokenMissingPermission:
@@ -624,23 +605,21 @@ const messages = {
     cfDomainOutsideZone: 'Use {zone} or a subdomain of it, such as mail.{zone}.',
     cfAlreadyConnected:
       'This organization is already connected to a Cloudflare account. Reload the page to see it.',
-    methodsIntro:
-      'There are two ways to connect a domain. Most domains use option 2, which needs no token. Use option 1 only if you manage the DNS in your own Cloudflare account.',
     cfList: 'Find accessible zones',
     cfEmpty: 'No active zones visible to this token.',
     cfZone: 'Cloudflare zone',
     cfBind: 'Connect this zone',
     connectedTitle: 'Your domains',
     connectedDescription:
-      'Send and receive on your own domain. Zmail sets up receiving, sending, and DMARC in Cloudflare and checks every DNS record.',
+      'Send and receive as @your-company.com. Zmail sets up the records for receiving, sending and anti-spoofing (DMARC) and checks each one.',
     connectedDisabled:
-      'Your own domains are not enabled on this server. An operator can turn them on with MAILBOX_CUSTOM_DOMAINS_ENABLED.',
+      "Own domains are not available on this service yet. Your team's addresses use the shared domain below.",
     connectedEmpty: 'No domains connected yet.',
-    connectTitle: 'Option 2: Let Zmail set up DNS (no token needed)',
+    connectTitle: 'Connect your domain',
     connectWhen:
-      "Choose this for a new domain, or when its DNS is elsewhere. Zmail uses this server's Cloudflare account and shows the name servers to set at your registrar if needed.",
+      "Works for most domains and needs no token. If the domain's DNS is not on Cloudflare yet, Zmail gives you two name servers to set once at your registrar.",
     connectProviderFailed:
-      "Cloudflare refused the request Zmail made with this server's Cloudflare account (no token of yours was used). Check that the domain is spelled correctly and registered; reserved names such as .example or .test cannot be used. If it keeps failing, try again later or ask the server operator.",
+      'Cloudflare refused the request Zmail made for this domain (no token of yours was used). Check that the domain is spelled correctly and registered; reserved names such as .example or .test cannot be used. If it keeps failing, try again later or contact support.',
     connectLabel: 'Domain',
     connectPlaceholder: 'example.com',
     connectHint:
@@ -661,7 +640,7 @@ const messages = {
     statusPending: 'Pending',
     statusSettingUp: 'Setting up',
     settingUpHint:
-      'Zmail is setting up receiving, sending, and DMARC in Cloudflare. This takes up to a minute; the records appear here when it is done.',
+      'Zmail is writing the records for receiving, sending and DMARC. This takes about a minute; the records appear here when done, and you can leave this page.',
     settingUpToast: 'Setting up the domain in Cloudflare',
     pendingHint:
       'Mailboxes can use this domain once every record is in place. DNS changes can take a few minutes; check again afterwards.',
@@ -682,6 +661,14 @@ const messages = {
     recordName: 'Name',
     recordValue: 'Value',
     recordStatus: 'Status',
+    recordHelpTitle: 'What these records do',
+    recordHelpReceiving: 'Receiving (MX): mail sent to @{domain} arrives in Zmail.',
+    recordHelpSending:
+      'Sending (SPF, DKIM): proves mail really comes from your domain, so it stays out of spam.',
+    recordHelpDmarc:
+      'DMARC: tells receiving servers what to do with mail that pretends to be from your domain.',
+    recordHelpAuto:
+      "Zmail writes these records itself; you don't need to edit them. A missing record usually shows up within minutes; use Check DNS to look again.",
     purposeReceiving: 'Receiving',
     purposeSending: 'Sending',
     purposeDmarc: 'DMARC',
@@ -705,8 +692,27 @@ const messages = {
     dnsRecords: 'DNS records',
     nameserversTitle: 'Change the name servers of {zone}',
     nameserversDescription:
-      'At your domain registrar, replace the name servers of {zone} with these two. Zmail sets up mail as soon as Cloudflare sees the change, usually within a few hours and at most 48.',
+      'At your domain registrar, replace the name servers of {zone} with these two.',
     nameserversLabel: 'Cloudflare name servers',
+    nameserversNextTitle: 'What happens next',
+    nameserversNext1:
+      'Cloudflare notices the new name servers: usually within minutes to a few hours, at most 48.',
+    nameserversNext2: 'Zmail writes the mail records by itself, in about a minute.',
+    nameserversNext3:
+      'You can create mailboxes on the domain. Zmail checks every 10 minutes, so you can close this page; it shows here once ready.',
+    registrarCloudflare: 'Cloudflare',
+    registrarCloudflareStep1:
+      "If the domain's DNS is already in your own Cloudflare account, you don't change name servers.",
+    registrarCloudflareStep2:
+      'Remove {zone} here, then connect it with "DNS already in your own Cloudflare account?" above.',
+    registrarCloudflareStep3:
+      "Domains registered at Cloudflare can only use that account's name servers, so this is the way for them.",
+    registrarOther: 'Other registrars',
+    registrarOtherStep1: 'Sign in to your registrar and open the domain list.',
+    registrarOtherStep2:
+      'Find {zone} and its "Name servers" or "DNS servers" setting (not the DNS records).',
+    registrarOtherStep3:
+      "Choose custom name servers, enter the two above, and save. Ask your registrar's support if you can't find it.",
     copyNameServer: 'Copy {server}',
     originalNameServers: 'Name servers before Zmail: {servers}',
     registrarsTitle: 'How to change them at your registrar',
@@ -739,6 +745,9 @@ const messages = {
     importedFailed: 'The imported records could not be loaded.',
     reviewRecords: 'Review records',
     checkNow: 'Check now',
+    zoneActive: 'The name servers of {zone} are live. Zmail is setting up mail now.',
+    domainReady: '{domain} is ready. You can create mailboxes on it.',
+    domainReadyAction: 'Create mailbox',
     checkLimited: 'Cloudflare limits re-checks; try again in a few minutes.',
     zoneStillPending: 'Cloudflare does not see the new name servers yet',
     receivingAction: 'Start receiving in Zmail',
