@@ -101,6 +101,9 @@ func RegisterHTTPRoutes(engine *gin.Engine, application *app.Application) *healt
 		engine.GET("/metrics", metrics.Handler())
 	}
 	routes.Setup(engine, application.Starters)
+	engine.NoRoute(func(c *gin.Context) {
+		response.HandleError(c, "route not found", response.ErrNotFound)
+	})
 	return h
 }
 
