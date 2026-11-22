@@ -37,6 +37,7 @@ An organization membership view contains:
   "name": "Acme Europe",
   "slug": "acme-europe",
   "role": "owner",
+  "features": { "broadcasts": true, "contacts": true, "templates": true, "api_keys": true },
   "created_at": "2026-07-14T20:00:00Z",
   "updated_at": "2026-07-14T20:00:00Z"
 }
@@ -81,9 +82,12 @@ The optional starter exposes one verification endpoint:
   "organization_slug": "acme-europe",
   "membership_id": 91,
   "user_id": 17,
-  "role": "admin"
+  "role": "admin",
+  "features": { "broadcasts": true, "contacts": true, "templates": true, "api_keys": true }
 }
 ```
+
+`features` is what this membership may use; see [Member Feature Grants](#member-feature-grants).
 
 - Authentication establishes the user; the header only selects among that user's current
   memberships. A syntactically valid ID for an absent organization or non-member returns the same
@@ -126,6 +130,7 @@ The browser feature owns these fixed same-origin paths:
 | Verify active context | `GET /api/organization-context` plus `Organization-Id` | `GET /v1/organization-context` plus `Organization-Id` |
 | List members | `GET /api/organizations/:id/members` | `GET /v1/organizations/:id/members` |
 | Change member role | `PATCH /api/organizations/:id/members/:member_id` | `PATCH /v1/organizations/:id/members/:member_id` |
+| Change member features | `PATCH /api/organizations/:id/members/:member_id/features` | `PATCH /v1/organizations/:id/members/:member_id/features` |
 | Remove member or leave | `DELETE /api/organizations/:id/members/:member_id` | `DELETE /v1/organizations/:id/members/:member_id` |
 | Transfer ownership | `POST /api/organizations/:id/ownership-transfer` | `POST /v1/organizations/:id/ownership-transfer` |
 | List invitations | `GET /api/organizations/:id/invitations` | `GET /v1/organizations/:id/invitations` |
@@ -169,6 +174,7 @@ one internal organization membership; `member_id` is the membership ID, not the 
 |---|---|---|---|
 | List members | `GET /v1/organizations/:id/members` | Pagination query | Paginated member views |
 | Change role | `PATCH /v1/organizations/:id/members/:member_id` | `{ role }` | Member view |
+| Change features | `PATCH /v1/organizations/:id/members/:member_id/features` | `{ broadcasts?, contacts?, templates?, api_keys? }` | Member view |
 | Remove or leave | `DELETE /v1/organizations/:id/members/:member_id` | none | `204 No Content` |
 | Transfer ownership | `POST /v1/organizations/:id/ownership-transfer` | `{ new_owner_member_id }` | `{ previous_owner, new_owner }` |
 
@@ -182,6 +188,7 @@ A member view contains the relationship ID and a deliberately small public ident
   "nickname": "Alex",
   "avatar": "https://cdn.example.com/alex.png",
   "role": "member",
+  "features": { "broadcasts": false, "contacts": true, "templates": true, "api_keys": false },
   "joined_at": "2026-07-15T20:00:00Z",
   "updated_at": "2026-07-15T20:00:00Z"
 }
@@ -207,6 +214,28 @@ A member view contains the relationship ID and a deliberately small public ident
   membership pointing at a soft-deleted user.
 - Member role changes, removals, leaves, and ownership transfers emit audit changes using member,
   organization, and user IDs plus roles. Member profile fields are not copied into audit metadata.
+
+## Member Feature Grants
+
+An organization decides, per member, which console features the member may use. The catalog is
+fixed and ordered: `broadcasts`, `contacts`, `templates`, `api_keys`.
+
+- `owner` and `admin` always have every feature. Grants are stored on every membership but only
+  take effect for the `member` role, so member views and the context view report the effective
+  value: `true` for every feature of an owner or admin.
+- A new membership starts with `contacts` and `templates`; `broadcasts` and `api_keys`, which send
+  mail at scale, wait for an owner or admin. Memberships that existed before grants were
+  introduced keep all four.
+- `PATCH /v1/organizations/:id/members/:member_id/features` changes only the features the body
+  names; omitted features keep their value. A body naming none returns
+  `422 COMMON.VALIDATION_FAILED`. Only an `owner` or `admin` may call it (`403 PERMISSION.DENIED`
+  otherwise), and only for a `member` target: an owner or admin target returns
+  `409 ORGANIZATION.MEMBER_FEATURES_FIXED`. A change takes effect on the member's next request.
+- A change emits one `organization_members.change_features` audit change listing only the features
+  whose value changed, with member, organization, and user IDs.
+- A route that needs a feature the active membership lacks returns
+  `403 ORGANIZATION.FEATURE_NOT_GRANTED`. The routes each feature opens are listed in
+  [`MAILBOXES.md`](MAILBOXES.md#member-feature-grants).
 
 ## Invitation Lifecycle
 
@@ -310,6 +339,8 @@ An invitation view contains no plaintext token:
 | 429 | `COMMON.RATE_LIMITED` | Invitation resend exceeded its per-invitation or per-organization quota |
 | 403 | `ORGANIZATION.INVITATION.EMAIL_MISMATCH` | The token belongs to a different account email |
 | 403 | `PERMISSION.DENIED` | The caller is a member but the role cannot perform the mutation |
+| 403 | `ORGANIZATION.FEATURE_NOT_GRANTED` | The active membership has not been granted the feature the route needs |
+| 409 | `ORGANIZATION.MEMBER_FEATURES_FIXED` | A feature change targets an owner or admin, who always have every feature |
 | 422 | `COMMON.VALIDATION_FAILED` | A request field fails the documented shape |
 | 503 | `COMMON.SERVICE_UNAVAILABLE` | Organization persistence is unavailable |
 

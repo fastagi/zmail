@@ -27,10 +27,12 @@ func membershipIDOf(organizationID, userID uint) uint {
 }
 
 // viewerOf is a verified membership of userID in organizationID with role.
+// viewerOf is a membership with every feature grant, as every member had before grants existed.
 func viewerOf(organizationID, userID uint, role domain.OrganizationRole) domain.OrganizationContext {
 	return domain.OrganizationContext{
 		OrganizationID: organizationID, OrganizationName: "Org", OrganizationSlug: "org",
 		MembershipID: membershipIDOf(organizationID, userID), UserID: userID, Role: role,
+		Features: domain.AllMemberFeatures(),
 	}
 }
 

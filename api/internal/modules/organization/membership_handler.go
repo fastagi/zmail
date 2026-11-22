@@ -73,6 +73,38 @@ func (h *Handler) ChangeMemberRole(c *gin.Context) {
 	response.Success(c, toMemberResponse(membership))
 }
 
+// UpdateMemberFeatures grants or withdraws console features for one member.
+func (h *Handler) UpdateMemberFeatures(c *gin.Context) {
+	userID, ok := handler.GetUserID(c)
+	if !ok {
+		return
+	}
+	organizationID, ok := handler.ParseID(c, "id")
+	if !ok {
+		return
+	}
+	memberID, ok := handler.ParseID(c, "member_id")
+	if !ok {
+		return
+	}
+
+	var req UpdateOrganizationMemberFeaturesRequest
+	if !handler.BindJSON(c, &req) {
+		return
+	}
+	if errors := req.validationErrors(); len(errors) > 0 {
+		response.ValidationFailed(c, errors)
+		return
+	}
+
+	membership, err := h.service.UpdateMemberFeatures(c.Request.Context(), userID, organizationID, memberID, &req)
+	if err != nil {
+		response.HandleError(c, "Failed to update organization member features", err)
+		return
+	}
+	response.Success(c, toMemberResponse(membership))
+}
+
 // RemoveMember removes another member or lets a non-owner leave.
 func (h *Handler) RemoveMember(c *gin.Context) {
 	userID, ok := handler.GetUserID(c)

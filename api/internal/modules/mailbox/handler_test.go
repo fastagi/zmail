@@ -626,16 +626,14 @@ func TestInboxSearchTooBroadIs422(t *testing.T) {
 	}
 }
 
-func TestOnlyOwnersAndAdminsControlBroadcasts(t *testing.T) {
+// A member with the broadcast grant is no longer stopped by role: sending goes on to the
+// service's own checks (here, broadcasts are not configured). Stopping is covered by
+// TestGrantedMembersStopOnlyBroadcastsTheyCanSend.
+func TestGrantedMembersReachBroadcastSending(t *testing.T) {
 	fixture := newHandlerFixture(t, membership(domain.OrganizationRoleMember))
-	for _, path := range []string{
-		"/mail-broadcasts/3/sends", "/mail-broadcasts/3/cancellations",
-		"/mail-broadcasts/3/pauses", "/mail-broadcasts/3/resumptions",
-	} {
-		recorder, body := fixture.do(http.MethodPost, path, "{}")
-		if recorder.Code != http.StatusForbidden || body["error_code"] != domain.CodePermissionDenied {
-			t.Fatalf("member POST %s = %d %v; want 403", path, recorder.Code, body)
-		}
+	recorder, body := fixture.do(http.MethodPost, "/mail-broadcasts/3/sends", "{}")
+	if recorder.Code != http.StatusServiceUnavailable || body["error_code"] != domain.CodeMailBroadcastDisabled {
+		t.Fatalf("member POST sends = %d %v; want 503 %s", recorder.Code, body, domain.CodeMailBroadcastDisabled)
 	}
 }
 

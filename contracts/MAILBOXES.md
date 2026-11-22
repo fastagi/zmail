@@ -2167,9 +2167,11 @@ their metadata; they cannot download files.
 ### Templates
 
 A template is reusable content of an organization: a `name`, a `subject`, and an `html` and `text`
-body, at least one of which is not empty. Every member reads the organization's templates and
-edits its standard ones (transactional templates below need an owner or admin); an organization
-keeps at most 200, and names are unique within it.
+body, at least one of which is not empty. A member with the `templates` grant edits the
+organization's standard templates (transactional templates below need an owner or admin); reading
+templates needs the `templates`, `broadcasts`, or `api_keys` grant (see
+[Member Feature Grants](#member-feature-grants)). An organization keeps at most 200, and names are
+unique within it.
 
 Placeholders may appear in the subject and both bodies:
 
@@ -2253,7 +2255,8 @@ kept and sends from it are refused.
 
 A contact is one address an organization sends broadcasts to: `email`, `first_name`, `last_name`,
 up to 50 string `properties`, a `status`, and the lists it belongs to. An organization keeps at most
-100000 contacts, one per address. Every member reads and edits them.
+100000 contacts, one per address. A member with the `contacts` grant reads and edits them; the
+`broadcasts` grant alone reads only the list names (`GET /v1/mail-contact-lists`).
 
 | Field | Rule |
 |---|---|
@@ -2325,12 +2328,15 @@ message per contact. Access follows the sender mailbox:
   `404 MAILBOX.BROADCAST_NOT_FOUND`, and with some access but not `view` it is `403`.
 - Creating, editing, and deleting need `send` on the sender mailbox; editing needs it on the stored
   and on the new sender. A new sender without any access is `404 MAILBOX.NOT_FOUND`.
-- Only owners and admins send, cancel, pause, and resume broadcasts; a member who tries is
-  `403 PERMISSION.DENIED`. Sending and resuming also need `send` on the sender mailbox at that
-  call; the worker does not check access again, so a broadcast already sending keeps sending when
-  that access is later removed. Cancelling and pausing need no access to the sender mailbox, so an
-  admin can always stop mail; without `view` on it (or for a sealed broadcast) the answer is
-  `204` with no body, so nothing about the broadcast is revealed.
+- Every broadcast route needs the `broadcasts` grant (owners and admins always have it); without it
+  the answer is `403 ORGANIZATION.FEATURE_NOT_GRANTED`.
+- Owners, admins, and members with the grant send, cancel, pause, and resume broadcasts. Sending
+  and resuming also need `send` on the sender mailbox at that call; the worker does not check
+  access again, so a broadcast already sending keeps sending when that access is later removed.
+  A member cancels or pauses only a broadcast it could send. Owners and admins need no access to
+  the sender mailbox to cancel or pause, so an admin can always stop mail; without `view` on it
+  (or for a sealed broadcast) the answer is `204` with no body, so nothing about the broadcast is
+  revealed.
 
 Broadcasts need unsubscribe links, so they are available only when the API has
 `MAILBOX_INBOUND_SECRET` (the links are signed with a key derived from it) and `MAILBOX_PUBLIC_URL`
@@ -2712,14 +2718,32 @@ message, returns it with nothing masked and `secrets_masked` `false`, answers
 mailbox, and message ids. API keys cannot call it. Anything that hands inbound mail to an AI
 model must use the masked form.
 
+### Member Feature Grants
+
+An organization grants each `member` four features (see
+[`ORGANIZATIONS.md`](ORGANIZATIONS.md#member-feature-grants)); owners and admins always have all of
+them. A route that needs a feature the active membership lacks returns
+`403 ORGANIZATION.FEATURE_NOT_GRANTED` before anything else is checked.
+
+| Feature | Routes |
+|---|---|
+| `broadcasts` | Every `/v1/mail-broadcasts` route |
+| `contacts` | Every `/v1/mail-contacts` route, `POST /v1/mail-contact-imports`, and writes to `/v1/mail-contact-lists` |
+| `contacts` or `broadcasts` | `GET /v1/mail-contact-lists` |
+| `templates` | `POST`, `PUT`, and `DELETE` on `/v1/mail-templates`, and `POST /v1/mail-templates/:template_id/tests` |
+| `templates`, `broadcasts`, or `api_keys` | `GET /v1/mail-templates`, `GET /v1/mail-templates/:template_id`, `POST /v1/mail-template-previews` |
+| `api_keys` | Every route authenticated by `X-API-Key` under [Programmatic Sending](#programmatic-sending), [Agent Grants](#agent-grants), and [Transactional Mail](#transactional-mail) |
+
 ## Programmatic Sending
 
 Backend services send with an API key instead of a browser session. Create the key with
 `POST /v1/api-keys` (see [`API_KEYS.md`](API_KEYS.md)) and pass it as `X-API-Key`, together with
 the `Organization-Id` header. A key belongs to a user, and it acts with that user's current
 membership of the named organization: the same header errors apply, and removing the user from the
-organization stops the key from working there on the next request. Keys owned by an organization
-are not defined.
+organization stops the key from working there on the next request. Every route below also needs
+the membership's `api_keys` grant (owners and admins always have it): a member's key without it is
+`403 ORGANIZATION.FEATURE_NOT_GRANTED` in that organization, though the key itself stays valid.
+Keys owned by an organization are not defined.
 
 | Route | Required scope |
 |---|---|

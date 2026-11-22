@@ -25,14 +25,39 @@ func (OrganizationPO) TableName() string {
 
 // OrganizationMembershipPO is the organization membership persistence model.
 type OrganizationMembershipPO struct {
-	ID             uint      `gorm:"primaryKey"`
-	OrganizationID uint      `gorm:"not null;uniqueIndex:idx_organization_memberships_org_user,priority:1"`
-	UserID         uint      `gorm:"not null;uniqueIndex:idx_organization_memberships_org_user,priority:2;index:idx_organization_memberships_user_created,priority:1;index:idx_organization_memberships_user_role,priority:1"`
-	Role           string    `gorm:"size:16;not null;index:idx_organization_memberships_user_role,priority:2;check:organization_memberships_role_check,role IN ('owner','admin','member')"`
-	CreatedAt      time.Time `gorm:"index:idx_organization_memberships_user_created,priority:2"`
-	UpdatedAt      time.Time
-	Organization   OrganizationPO `gorm:"foreignKey:OrganizationID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	User           user.UserPO    `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	ID             uint   `gorm:"primaryKey"`
+	OrganizationID uint   `gorm:"not null;uniqueIndex:idx_organization_memberships_org_user,priority:1"`
+	UserID         uint   `gorm:"not null;uniqueIndex:idx_organization_memberships_org_user,priority:2;index:idx_organization_memberships_user_created,priority:1;index:idx_organization_memberships_user_role,priority:1"`
+	Role           string `gorm:"size:16;not null;index:idx_organization_memberships_user_role,priority:2;check:organization_memberships_role_check,role IN ('owner','admin','member')"`
+	// Feature grants matter only for the member role. The column defaults are the grants a new
+	// member starts with; updates always write explicit values.
+	CanUseBroadcasts bool      `gorm:"not null;default:false"`
+	CanUseContacts   bool      `gorm:"not null;default:true"`
+	CanUseTemplates  bool      `gorm:"not null;default:true"`
+	CanUseAPIKeys    bool      `gorm:"column:can_use_api_keys;not null;default:false"`
+	CreatedAt        time.Time `gorm:"index:idx_organization_memberships_user_created,priority:2"`
+	UpdatedAt        time.Time
+	Organization     OrganizationPO `gorm:"foreignKey:OrganizationID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	User             user.UserPO    `gorm:"foreignKey:UserID;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+}
+
+func (po *OrganizationMembershipPO) features() domain.MemberFeatures {
+	return domain.MemberFeatures{
+		Broadcasts: po.CanUseBroadcasts,
+		Contacts:   po.CanUseContacts,
+		Templates:  po.CanUseTemplates,
+		APIKeys:    po.CanUseAPIKeys,
+	}
+}
+
+// memberFeatureColumns maps features onto their columns for an explicit update.
+func memberFeatureColumns(features domain.MemberFeatures) map[string]any {
+	return map[string]any{
+		"can_use_broadcasts": features.Broadcasts,
+		"can_use_contacts":   features.Contacts,
+		"can_use_templates":  features.Templates,
+		"can_use_api_keys":   features.APIKeys,
+	}
 }
 
 // TableName returns the stable organization membership table name.
@@ -154,6 +179,7 @@ func (po *OrganizationMembershipPO) toDomain() *domain.OrganizationMembership {
 		OrganizationID: po.OrganizationID,
 		UserID:         po.UserID,
 		Role:           domain.OrganizationRole(po.Role),
+		Features:       po.features(),
 		Organization:   po.Organization.toDomain(),
 		CreatedAt:      po.CreatedAt,
 		UpdatedAt:      po.UpdatedAt,

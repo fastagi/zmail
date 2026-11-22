@@ -52,6 +52,10 @@ func (r *fakeRepository) ChangeMemberRole(context.Context, uint, uint, uint, dom
 	return nil, nil
 }
 
+func (r *fakeRepository) UpdateMemberFeatures(context.Context, uint, uint, uint, domain.MemberFeaturePatch, time.Time) (*domain.OrganizationMembershipFeatureChange, error) {
+	return nil, nil
+}
+
 func (r *fakeRepository) RemoveMember(ctx context.Context, organizationID, userID, memberID uint) (*domain.OrganizationMembership, error) {
 	if r.removeFn == nil {
 		return nil, nil

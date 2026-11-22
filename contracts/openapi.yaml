@@ -1183,6 +1183,53 @@ paths:
             before leaving.'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/organizations/{organization_id}/members/{member_id}/features:
+    patch:
+      operationId: updateOrganizationMemberFeatures
+      summary: Grant or withdraw console features for one member
+      description: Changes only the named features. Owners and admins always have every feature, so
+        only a `member` target is accepted.
+      tags:
+        - Organizations
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationID'
+        - $ref: '#/components/parameters/OrganizationMemberID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrganizationMemberFeaturesUpdateRequest'
+      responses:
+        '200':
+          description: Updated member view.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationMemberResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: '`PERMISSION.DENIED`: only owners and admins may change member features.'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: '`ORGANIZATION.NOT_FOUND` or `ORGANIZATION.MEMBER_NOT_FOUND`.'
+        '409':
+          $ref: '#/components/responses/Conflict'
+          description: '`ORGANIZATION.MEMBER_FEATURES_FIXED` when targeting an owner or admin, or
+            `COMMON.CONFLICT` when the role changed concurrently.'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+          description: '`COMMON.VALIDATION_FAILED`: the body names no feature.'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/organizations/{organization_id}/ownership-transfer:
     post:
       operationId: transferOrganizationOwnership
@@ -11411,6 +11458,8 @@ components:
         - ORGANIZATION.INVITATION.EMAIL_MISMATCH
         - ORGANIZATION.INVITATION.ALREADY_PENDING
         - ORGANIZATION.MEMBER_ALREADY_EXISTS
+        - ORGANIZATION.FEATURE_NOT_GRANTED
+        - ORGANIZATION.MEMBER_FEATURES_FIXED
         - PERMISSION.DENIED
         - PERMISSION.UNKNOWN
         - PERMISSION.ROLE_NOT_FOUND
@@ -12346,6 +12395,7 @@ components:
         - name
         - slug
         - role
+        - features
         - created_at
         - updated_at
       properties:
@@ -12357,6 +12407,8 @@ components:
           $ref: '#/components/schemas/OrganizationSlug'
         role:
           $ref: '#/components/schemas/OrganizationRole'
+        features:
+          $ref: '#/components/schemas/OrganizationMemberFeatures'
         created_at:
           type: string
           format: date-time
@@ -12431,6 +12483,7 @@ components:
         - membership_id
         - user_id
         - role
+        - features
       properties:
         organization_id:
           $ref: '#/components/schemas/PositiveID'
@@ -12444,6 +12497,8 @@ components:
           $ref: '#/components/schemas/PositiveID'
         role:
           $ref: '#/components/schemas/OrganizationRole'
+        features:
+          $ref: '#/components/schemas/OrganizationMemberFeatures'
     OrganizationContextResponse:
       type: object
       additionalProperties: false
@@ -12467,6 +12522,7 @@ components:
         - user_id
         - username
         - role
+        - features
         - joined_at
         - updated_at
       properties:
@@ -12482,6 +12538,8 @@ components:
           type: string
         role:
           $ref: '#/components/schemas/OrganizationRole'
+        features:
+          $ref: '#/components/schemas/OrganizationMemberFeatures'
         joined_at:
           type: string
           format: date-time
@@ -12532,6 +12590,42 @@ components:
       properties:
         role:
           $ref: '#/components/schemas/OrganizationAssignableRole'
+    OrganizationMemberFeatures:
+      type: object
+      description: Features the membership may use. Owners and admins always report every feature.
+      additionalProperties: false
+      required:
+        - broadcasts
+        - contacts
+        - templates
+        - api_keys
+      properties:
+        broadcasts:
+          type: boolean
+          description: Draft, send, and stop marketing broadcasts.
+        contacts:
+          type: boolean
+          description: Read and edit contacts and contact lists.
+        templates:
+          type: boolean
+          description: Create and edit mail templates.
+        api_keys:
+          type: boolean
+          description: Use the member's API keys in this organization.
+    OrganizationMemberFeaturesUpdateRequest:
+      type: object
+      description: Names at least one feature; omitted features keep their value.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        broadcasts:
+          type: boolean
+        contacts:
+          type: boolean
+        templates:
+          type: boolean
+        api_keys:
+          type: boolean
     OrganizationOwnershipTransferRequest:
       type: object
       additionalProperties: false

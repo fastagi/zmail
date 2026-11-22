@@ -1,6 +1,7 @@
 package mailbox
 
 import (
+	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/middleware"
 	"github.com/fastagi/zmail/api/internal/infra/router"
 	"github.com/fastagi/zmail/api/internal/modules/apikey"
@@ -13,6 +14,15 @@ import (
 func (h *Handler) RegisterRoutes(r *router.Router) {
 	r.Group("", func(auth *router.Router) {
 		auth.WithMiddleware("auth", "organization_context")
+		// A member uses broadcasts, contacts, and templates only with the matching grant from an
+		// owner or admin. Composing a broadcast reads templates and list names, so that grant
+		// reads them too; a template read also serves the developer pages an API key grant opens.
+		broadcasts := requireFeature(domain.MemberFeatureBroadcasts)
+		contacts := requireFeature(domain.MemberFeatureContacts)
+		contactLists := requireFeature(domain.MemberFeatureContacts, domain.MemberFeatureBroadcasts)
+		templates := requireFeature(domain.MemberFeatureTemplates)
+		templateReads := requireFeature(
+			domain.MemberFeatureTemplates, domain.MemberFeatureBroadcasts, domain.MemberFeatureAPIKeys)
 
 		auth.GET("/mailbox-domains", h.ListDomains).Name("mailbox_domains.index")
 
@@ -109,41 +119,41 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.DELETE("/mail-suppressions/:suppression_id", h.RemoveSuppression).
 			Name("mail_suppressions.destroy").WhereNumber("suppression_id")
 
-		auth.GET("/mail-templates", h.ListTemplates).Name("mail_templates.index")
-		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store")
-		auth.GET("/mail-templates/:template_id", h.GetTemplate).Name("mail_templates.show").WhereNumber("template_id")
-		auth.PUT("/mail-templates/:template_id", h.UpdateTemplate).Name("mail_templates.update").WhereNumber("template_id")
-		auth.DELETE("/mail-templates/:template_id", h.DeleteTemplate).Name("mail_templates.destroy").WhereNumber("template_id")
+		auth.GET("/mail-templates", h.ListTemplates).Name("mail_templates.index").Middleware(templateReads)
+		auth.POST("/mail-templates", h.CreateTemplate).Name("mail_templates.store").Middleware(templates)
+		auth.GET("/mail-templates/:template_id", h.GetTemplate).Name("mail_templates.show").WhereNumber("template_id").Middleware(templateReads)
+		auth.PUT("/mail-templates/:template_id", h.UpdateTemplate).Name("mail_templates.update").WhereNumber("template_id").Middleware(templates)
+		auth.DELETE("/mail-templates/:template_id", h.DeleteTemplate).Name("mail_templates.destroy").WhereNumber("template_id").Middleware(templates)
 		auth.POST("/mail-templates/:template_id/tests", h.SendTemplateTest).
-			Name("mail_templates.tests.store").WhereNumber("template_id")
-		auth.POST("/mail-template-previews", h.PreviewTemplate).Name("mail_template_previews.store")
+			Name("mail_templates.tests.store").WhereNumber("template_id").Middleware(templates)
+		auth.POST("/mail-template-previews", h.PreviewTemplate).Name("mail_template_previews.store").Middleware(templateReads)
 
-		auth.GET("/mail-broadcasts", h.ListBroadcasts).Name("mail_broadcasts.index")
-		auth.POST("/mail-broadcasts", h.CreateBroadcast).Name("mail_broadcasts.store")
-		auth.GET("/mail-broadcasts/:broadcast_id", h.GetBroadcast).Name("mail_broadcasts.show").WhereNumber("broadcast_id")
-		auth.PUT("/mail-broadcasts/:broadcast_id", h.UpdateBroadcast).Name("mail_broadcasts.update").WhereNumber("broadcast_id")
-		auth.DELETE("/mail-broadcasts/:broadcast_id", h.DeleteBroadcast).Name("mail_broadcasts.destroy").WhereNumber("broadcast_id")
+		auth.GET("/mail-broadcasts", h.ListBroadcasts).Name("mail_broadcasts.index").Middleware(broadcasts)
+		auth.POST("/mail-broadcasts", h.CreateBroadcast).Name("mail_broadcasts.store").Middleware(broadcasts)
+		auth.GET("/mail-broadcasts/:broadcast_id", h.GetBroadcast).Name("mail_broadcasts.show").WhereNumber("broadcast_id").Middleware(broadcasts)
+		auth.PUT("/mail-broadcasts/:broadcast_id", h.UpdateBroadcast).Name("mail_broadcasts.update").WhereNumber("broadcast_id").Middleware(broadcasts)
+		auth.DELETE("/mail-broadcasts/:broadcast_id", h.DeleteBroadcast).Name("mail_broadcasts.destroy").WhereNumber("broadcast_id").Middleware(broadcasts)
 		auth.POST("/mail-broadcasts/:broadcast_id/sends", h.SendBroadcast).
-			Name("mail_broadcasts.sends.store").WhereNumber("broadcast_id")
+			Name("mail_broadcasts.sends.store").WhereNumber("broadcast_id").Middleware(broadcasts)
 		auth.POST("/mail-broadcasts/:broadcast_id/cancellations", h.CancelBroadcast).
-			Name("mail_broadcasts.cancellations.store").WhereNumber("broadcast_id")
+			Name("mail_broadcasts.cancellations.store").WhereNumber("broadcast_id").Middleware(broadcasts)
 		auth.POST("/mail-broadcasts/:broadcast_id/pauses", h.PauseBroadcast).
-			Name("mail_broadcasts.pauses.store").WhereNumber("broadcast_id")
+			Name("mail_broadcasts.pauses.store").WhereNumber("broadcast_id").Middleware(broadcasts)
 		auth.POST("/mail-broadcasts/:broadcast_id/resumptions", h.ResumeBroadcast).
-			Name("mail_broadcasts.resumptions.store").WhereNumber("broadcast_id")
+			Name("mail_broadcasts.resumptions.store").WhereNumber("broadcast_id").Middleware(broadcasts)
 		auth.GET("/mail-broadcasts/:broadcast_id/recipients", h.ListBroadcastRecipients).
-			Name("mail_broadcasts.recipients.index").WhereNumber("broadcast_id")
+			Name("mail_broadcasts.recipients.index").WhereNumber("broadcast_id").Middleware(broadcasts)
 
-		auth.GET("/mail-contacts", h.ListContacts).Name("mail_contacts.index")
-		auth.POST("/mail-contacts", h.CreateContact).Name("mail_contacts.store")
-		auth.GET("/mail-contacts/:contact_id", h.GetContact).Name("mail_contacts.show").WhereNumber("contact_id")
-		auth.PUT("/mail-contacts/:contact_id", h.UpdateContact).Name("mail_contacts.update").WhereNumber("contact_id")
-		auth.DELETE("/mail-contacts/:contact_id", h.DeleteContact).Name("mail_contacts.destroy").WhereNumber("contact_id")
-		auth.POST("/mail-contact-imports", h.ImportContacts).Name("mail_contact_imports.store")
-		auth.GET("/mail-contact-lists", h.ListContactLists).Name("mail_contact_lists.index")
-		auth.POST("/mail-contact-lists", h.CreateContactList).Name("mail_contact_lists.store")
-		auth.PUT("/mail-contact-lists/:list_id", h.RenameContactList).Name("mail_contact_lists.update").WhereNumber("list_id")
-		auth.DELETE("/mail-contact-lists/:list_id", h.DeleteContactList).Name("mail_contact_lists.destroy").WhereNumber("list_id")
+		auth.GET("/mail-contacts", h.ListContacts).Name("mail_contacts.index").Middleware(contacts)
+		auth.POST("/mail-contacts", h.CreateContact).Name("mail_contacts.store").Middleware(contacts)
+		auth.GET("/mail-contacts/:contact_id", h.GetContact).Name("mail_contacts.show").WhereNumber("contact_id").Middleware(contacts)
+		auth.PUT("/mail-contacts/:contact_id", h.UpdateContact).Name("mail_contacts.update").WhereNumber("contact_id").Middleware(contacts)
+		auth.DELETE("/mail-contacts/:contact_id", h.DeleteContact).Name("mail_contacts.destroy").WhereNumber("contact_id").Middleware(contacts)
+		auth.POST("/mail-contact-imports", h.ImportContacts).Name("mail_contact_imports.store").Middleware(contacts)
+		auth.GET("/mail-contact-lists", h.ListContactLists).Name("mail_contact_lists.index").Middleware(contactLists)
+		auth.POST("/mail-contact-lists", h.CreateContactList).Name("mail_contact_lists.store").Middleware(contacts)
+		auth.PUT("/mail-contact-lists/:list_id", h.RenameContactList).Name("mail_contact_lists.update").WhereNumber("list_id").Middleware(contacts)
+		auth.DELETE("/mail-contact-lists/:list_id", h.DeleteContactList).Name("mail_contact_lists.destroy").WhereNumber("list_id").Middleware(contacts)
 
 		auth.GET("/mailboxes", h.ListMailboxes).Name("mailboxes.index")
 		auth.POST("/mailboxes", h.CreateMailbox).Name("mailboxes.store")
@@ -259,6 +269,8 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 	// owner's current membership of the organization named by Organization-Id.
 	r.Group("", func(key *router.Router) {
 		key.WithMiddleware("api_key", "organization_context")
+		// A member's keys work in an organization only while it grants the member API keys.
+		key.Use(requireFeature(domain.MemberFeatureAPIKeys))
 
 		key.POST("/outbound-mail-messages", h.SendOutbound).
 			Name("outbound_mail_messages.store").Middleware(apikey.RequireScopes(ScopeMailSend))
