@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"time"
 
@@ -316,10 +317,24 @@ func (s *service) forceDisconnect(ctx context.Context, viewer domain.Organizatio
 		s.auditChange(ctx, auditstarter.Change{
 			Action: "delete", Resource: "external_mail_connections", TargetType: "external_mail_connection",
 			TargetID: strconv.FormatUint(uint64(connection.ID), 10), Result: domain.AuditResultSuccess,
-			Metadata: metadata,
+			Metadata: metadata, AlsoVisibleTo: s.otherManagers(ctx, connection.OrganizationID, viewer.UserID),
 		})
 	}
 	return nil
+}
+
+// otherManagers returns the organization's owners and admins other than actorUserID, whose audit
+// history also receives a forced disconnect. A failed lookup is logged: the disconnect stands.
+func (s *service) otherManagers(ctx context.Context, organizationID, actorUserID uint) []uint {
+	if s.memberships == nil {
+		return nil
+	}
+	managers, err := s.memberships.ListManagerUserIDs(ctx, organizationID)
+	if err != nil {
+		slog.WarnContext(ctx, "mailbox.external_mail.list_managers_failed", "organization_id", organizationID, "err", err)
+		return nil
+	}
+	return slices.DeleteFunc(managers, func(userID uint) bool { return userID == actorUserID })
 }
 
 // revokeConnection hands a live connection's grant back to its provider, then marks it revoked and

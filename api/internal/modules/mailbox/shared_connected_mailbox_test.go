@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -855,5 +856,55 @@ func TestDisplayNamesCountCharacters(t *testing.T) {
 	stored, _ = f.repo.FindMailbox(ctx, accessOrg, connection.MailboxID)
 	if stored.Address != long+"@external.invalid" || len([]rune(stored.DisplayName)) != maxMailboxDisplayNameLength {
 		t.Fatalf("long address mailbox = %q named %q", stored.Address, stored.DisplayName)
+	}
+}
+
+// TestSharedDisconnectReachesEveryManager: unbinding a shared connection, by a manage member or an
+// admin through the directory, files the audit record under every other owner and admin too.
+func TestSharedDisconnectReachesEveryManager(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	ctx := context.Background()
+	f.memberships.managers = []uint{accessAdmin, accessB}
+	var changes []auditstarter.Change
+	f.service.recordAudit = func(_ context.Context, change auditstarter.Change) { changes = append(changes, change) }
+
+	byMember := f.mustBindShared(t, "team-one", teamMembers())
+	if err := f.service.RevokeExternalMailConnection(ctx, f.c, byMember.ID); err != nil {
+		t.Fatalf("manage member unbinding: %v", err)
+	}
+	byAdmin := f.mustBindShared(t, "team-two", teamMembers())
+	if err := f.service.ForceDisconnectExternalMailConnection(ctx, f.admin, byAdmin.ID); err != nil {
+		t.Fatalf("admin disconnecting: %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("audit changes = %+v; want two shared disconnects", changes)
+	}
+	for index, want := range [][]uint{{accessAdmin, accessB}, {accessB}} {
+		if changes[index].Metadata["reason"] != "shared_disconnect" || !slices.Equal(changes[index].AlsoVisibleTo, want) {
+			t.Fatalf("change %d = %+v; want shared_disconnect visible to %v", index, changes[index], want)
+		}
+	}
+}
+
+// TestFakeDeliveryToSharedConnection: whoever manages a shared connection may deliver to its
+// account; the message is stored once in the shared mailbox. A view member may not.
+func TestFakeDeliveryToSharedConnection(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	ctx := context.Background()
+	shared := f.mustBindShared(t, "team", teamMembers())
+	body := `{"from":"carol@sender.test","subject":"Ticket","text":"Help","message_id":"t-1@sender.test"}`
+
+	for _, viewer := range []domain.OrganizationContext{f.c, f.admin} {
+		if status, response := f.deliverFake(t, viewer, shared.ID, body); status != http.StatusCreated {
+			t.Fatalf("delivery by user %d = %d %v", viewer.UserID, status, response)
+		}
+	}
+	messages, _, err := f.service.ListMessages(ctx, f.c, shared.MailboxID, domain.MailMessageFilter{Page: 1, PerPage: 50})
+	if err != nil || len(messages) != 1 || messages[0].Source != domain.MailSourceGmail || messages[0].Subject != "Ticket" {
+		t.Fatalf("shared mailbox messages = %+v, err %v; want the ticket once from gmail", messages, err)
+	}
+	if status, response := f.deliverFake(t, f.d, shared.ID, body); status != http.StatusNotFound ||
+		response["error_code"] != domain.CodeExternalMailConnectionNotFound {
+		t.Fatalf("view member delivery = %d %v", status, response)
 	}
 }

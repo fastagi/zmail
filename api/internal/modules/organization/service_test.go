@@ -195,3 +195,7 @@ func (r *fakeRepository) FindMembershipsByEmails(context.Context, uint, []string
 func (r *fakeRepository) ListMembershipsByUserIDs(context.Context, uint, []uint) ([]*domain.OrganizationMembership, error) {
 	return nil, nil
 }
+
+func (r *fakeRepository) ListManagerUserIDs(context.Context, uint) ([]uint, error) {
+	return nil, nil
+}

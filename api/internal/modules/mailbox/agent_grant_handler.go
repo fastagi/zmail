@@ -139,7 +139,7 @@ type AgentMailFeedResponse struct {
 // CreateAgentDraftRequest stores an agent's reply draft.
 type CreateAgentDraftRequest struct {
 	MessageID uint   `json:"message_id" binding:"required"`
-	Text      string `json:"text" binding:"required"`
+	Text      string `json:"text"` // blank is MAILBOX.MESSAGE_INVALID, checked by the service
 	HTML      string `json:"html"`
 }
 

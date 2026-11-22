@@ -109,7 +109,7 @@ recorded but has no special rights to it. A removed member loses access on their
 | List the connectors accounts can be bound with | none yet | `GET /v1/external-mail-connectors` | `200` envelope, at most 32 items |
 | Start binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations` | `201` |
 | Finish binding or reconnecting an account | none yet | `POST /v1/external-mail-authorizations/completions` | `201` new, `200` restored |
-| List the caller's connected accounts | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 10 items |
+| List the caller's connected accounts | none yet | `GET /v1/external-mail-connections` | `200` envelope, at most 120 items |
 | Unbind a connected account | none yet | `DELETE /v1/external-mail-connections/:connection_id` | `204` |
 | List a connection's latest sync runs | none yet | `GET /v1/external-mail-connections/:connection_id/sync-runs` | `200` envelope, at most 50 items |
 | Delete a revoked connection's copies at once | none yet | `POST /v1/external-mail-connections/:connection_id/purges` | `200` done, `202` finishing in the background |
@@ -883,16 +883,20 @@ only an `owner` or `admin`, who may delete the mailbox anyway, may do it; a `man
 `403 PERMISSION.DENIED`, and the worker's purge after the retention is unchanged. Everyone else gets
 `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, and so does anyone once the mailbox is deleted. An unbind follows the revoke path below and records
 `connection_revoked` with the caller as actor, plus an organization audit entry with `reason`
-`shared_disconnect`; the mailbox and its members stay until the retention ends, the connection is
+`shared_disconnect`, filed like a forced disconnect under the caller and every other `owner` and
+`admin`; the mailbox and its members stay until the retention ends, the connection is
 reconnected, or the mailbox is deleted.
 
 ### Connections
 
-`GET /v1/external-mail-connections` lists the caller's own connections in the organization, live
-ones first and then id ascending, at most 10, followed by the shared connections the caller manages
-(every one for an `owner` or `admin`, those of mailboxes held with `manage` otherwise), whose mailbox
-still exists, in the same order, at most 100; it never carries a token. Revoked connections are kept
-so a rebind restores the same mailbox, and do not count toward the limits:
+`GET /v1/external-mail-connections` lists the caller's own connections in the organization, then
+the shared connections the caller manages, at most 120 in all; it never carries a token. The
+caller's own live connections come first, id ascending (at most 10, the limit), then their 10 most
+recently revoked ones, newest revocation first, so a member at the limit still sees the revoked ones
+whose copies they may purge or rebind. Then come the shared connections the caller manages (every
+one for an `owner` or `admin`, those of mailboxes held with `manage` otherwise) whose mailbox still
+exists, live ones first and then id ascending, at most 100. Revoked connections are kept so a rebind
+restores the same mailbox, and do not count toward the limits:
 
 ```json
 { "id": 3, "provider": "gmail", "account_address": "me@gmail.com", "mailbox_id": 41, "shared": false,
@@ -1053,7 +1057,9 @@ to the connected mailbox's history; a shared connection is unbound as in
 another organization's id, and any id while external mail is off, is
 `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. A forced disconnect that changed anything is also
 written to the organization audit log (resource `external_mail_connections`, the connection id,
-`provider`, and `owner_user_id`; never the address), so every owner and admin can see who
+`provider`, and `owner_user_id`; never the address). The record is filed under the acting manager
+and, as a copy with the same actor, under every other owner and admin of the organization, so each
+of them finds it in `GET /v1/audit-logs?resource=external_mail_connections` and sees who
 disconnected which account. The owner may bind the account again afterwards, which restores the
 same mailbox like any rebind of their own; until then another member who proves control of the
 account may bind it instead (see [Binding](#binding)).

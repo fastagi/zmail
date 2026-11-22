@@ -276,6 +276,10 @@ func (r *invitationRepositoryStub) ListMembershipsByUserIDs(context.Context, uin
 	return nil, nil
 }
 
+func (r *invitationRepositoryStub) ListManagerUserIDs(context.Context, uint) ([]uint, error) {
+	return nil, nil
+}
+
 func TestServiceInviteRecordsEmailAttempt(t *testing.T) {
 	repo := &invitationRepositoryStub{
 		findFn: func(context.Context, uint, uint) (*domain.OrganizationMembership, error) {
