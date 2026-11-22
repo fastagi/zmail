@@ -318,7 +318,7 @@ func (r *repository) AcceptInvitation(ctx context.Context, tokenHash string, use
 		}
 
 		result := tx.Model(&OrganizationInvitationPO{}).
-			Where("id = ? AND pending_key IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL", invitationPO.ID).
+			Where("id = ? AND token_hash = ? AND pending_key IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL", invitationPO.ID, tokenHash).
 			Updates(map[string]any{
 				"pending_key": nil,
 				"accepted_at": now,
