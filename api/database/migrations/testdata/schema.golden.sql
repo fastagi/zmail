@@ -125,6 +125,25 @@ TABLE external_mail_connections
   COLUMN tenant_directory_id character varying(255) NOT NULL DEFAULT ''::character varying
   COLUMN received_not_before timestamp with time zone
 
+TABLE external_mail_subscriptions
+  COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_subscriptions_id_seq'::regclass)
+  COLUMN connection_id bigint NOT NULL
+  COLUMN provider character varying(16) NOT NULL
+  COLUMN lookup_key character varying(320) NOT NULL DEFAULT ''::character varying
+  COLUMN provider_subscription_id character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN secret_hash character varying(64) NOT NULL DEFAULT ''::character varying
+  COLUMN status character varying(16) NOT NULL DEFAULT 'pending'::character varying
+  COLUMN expires_at timestamp with time zone
+  COLUMN renew_after timestamp with time zone NOT NULL
+  COLUMN pending_at timestamp with time zone
+  COLUMN last_notified_at timestamp with time zone
+  COLUMN last_push_sync_at timestamp with time zone
+  COLUMN scheduled_sync_at timestamp with time zone
+  COLUMN consecutive_failures smallint NOT NULL DEFAULT 0
+  COLUMN last_error_code character varying(64)
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE external_mail_sync_runs
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_sync_runs_id_seq'::regclass)
   COLUMN connection_id bigint NOT NULL
@@ -137,6 +156,7 @@ TABLE external_mail_sync_runs
   COLUMN error_code character varying(64)
   COLUMN timed_out boolean NOT NULL DEFAULT false
   COLUMN throttled boolean NOT NULL DEFAULT false
+  COLUMN triggered_by character varying(8) NOT NULL DEFAULT 'poll'::character varying
 
 TABLE external_mail_tenants
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_tenants_id_seq'::regclass)
@@ -961,6 +981,16 @@ CONSTRAINT external_mail_connections.external_mail_connections_owner_user_id_fke
 CONSTRAINT external_mail_connections.external_mail_connections_pkey PRIMARY KEY (id)
 CONSTRAINT external_mail_connections.external_mail_connections_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'needs_reconnect'::character varying, 'revoked'::character varying])::text[])))
 CONSTRAINT external_mail_connections.external_mail_connections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)
+CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_active CHECK ((((status)::text <> 'active'::text) OR (((lookup_key)::text <> ''::text) AND (expires_at IS NOT NULL))))
+CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_failures CHECK ((consecutive_failures >= 0))
+CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
+CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_secret CHECK ((((secret_hash)::text = ''::text) OR ((secret_hash)::text ~ '^[0-9a-f]{64}$'::text)))
+CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'active'::character varying, 'stopped'::character varying])::text[])))
+CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_stopped CHECK ((((status)::text <> 'stopped'::text) OR (((lookup_key)::text = ''::text) AND ((secret_hash)::text = ''::text) AND (pending_at IS NULL))))
+CONSTRAINT external_mail_subscriptions.external_mail_subscriptions_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES external_mail_connections(id) ON DELETE CASCADE
+CONSTRAINT external_mail_subscriptions.external_mail_subscriptions_pkey PRIMARY KEY (id)
+CONSTRAINT external_mail_subscriptions.uq_external_mail_subscriptions_connection UNIQUE (connection_id)
+CONSTRAINT external_mail_sync_runs.chk_external_mail_sync_runs_trigger CHECK (((triggered_by)::text = ANY ((ARRAY['poll'::character varying, 'push'::character varying])::text[])))
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES external_mail_connections(id) ON DELETE CASCADE
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_fetched_count_check CHECK ((fetched_count >= 0))
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_outcome_check CHECK (((outcome)::text = ANY ((ARRAY['ok'::character varying, 'auth_failed'::character varying, 'fetch_failed'::character varying, 'cursor_expired'::character varying, 'provider_unavailable'::character varying, 'dropped'::character varying])::text[])))
@@ -1298,6 +1328,11 @@ INDEX CREATE INDEX idx_external_mail_connections_owner ON external_mail_connecti
 INDEX CREATE INDEX idx_external_mail_connections_revoked ON external_mail_connections USING btree (revoked_at, id) WHERE ((status)::text = 'revoked'::text)
 INDEX CREATE INDEX idx_external_mail_connections_shared ON external_mail_connections USING btree (organization_id) WHERE shared
 INDEX CREATE INDEX idx_external_mail_connections_tenant ON external_mail_connections USING btree (tenant_id, status) WHERE (tenant_id IS NOT NULL)
+INDEX CREATE UNIQUE INDEX external_mail_subscriptions_pkey ON external_mail_subscriptions USING btree (id)
+INDEX CREATE INDEX idx_external_mail_subscriptions_lookup ON external_mail_subscriptions USING btree (provider, lookup_key) WHERE ((status)::text <> 'stopped'::text)
+INDEX CREATE INDEX idx_external_mail_subscriptions_open ON external_mail_subscriptions USING btree (connection_id) WHERE ((status)::text <> 'stopped'::text)
+INDEX CREATE INDEX idx_external_mail_subscriptions_pending ON external_mail_subscriptions USING btree (pending_at, id) WHERE (pending_at IS NOT NULL)
+INDEX CREATE UNIQUE INDEX uq_external_mail_subscriptions_connection ON external_mail_subscriptions USING btree (connection_id)
 INDEX CREATE UNIQUE INDEX external_mail_sync_runs_pkey ON external_mail_sync_runs USING btree (id)
 INDEX CREATE INDEX idx_external_mail_sync_runs_connection ON external_mail_sync_runs USING btree (connection_id, id DESC)
 INDEX CREATE INDEX idx_external_mail_sync_runs_started ON external_mail_sync_runs USING btree (started_at, id)

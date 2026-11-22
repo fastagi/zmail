@@ -37,6 +37,38 @@ type ExternalMailConnectionResponse struct {
 	LastSyncedAt  *time.Time `json:"last_synced_at"`
 	LastErrorCode *string    `json:"last_error_code"`
 	CreatedAt     time.Time  `json:"created_at"`
+	// Push is the connection's push subscription while push is on; null when it has none.
+	Push *ExternalMailPushStateResponse `json:"push"`
+}
+
+// ExternalMailPushStateResponse is a connection's push subscription. It never carries the
+// provider's subscription id or secret.
+type ExternalMailPushStateResponse struct {
+	// Status is pending (no live subscription yet), active, or stopped.
+	Status         string     `json:"status"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	LastNotifiedAt *time.Time `json:"last_notified_at"`
+	LastErrorCode  *string    `json:"last_error_code"`
+}
+
+// toExternalMailPushState is the public form of a subscription; a live one past its expiry reads
+// as pending.
+func toExternalMailPushState(subscription *domain.ExternalMailSubscription, now time.Time) *ExternalMailPushStateResponse {
+	if subscription == nil {
+		return nil
+	}
+	status := subscription.Status
+	if status == domain.ExternalMailSubscriptionActive && !subscription.Live(now) {
+		status = domain.ExternalMailSubscriptionPending
+	}
+	state := &ExternalMailPushStateResponse{Status: string(status), LastErrorCode: optionalText(subscription.LastErrorCode)}
+	if subscription.ExpiresAt != nil && status != domain.ExternalMailSubscriptionStopped {
+		state.ExpiresAt = new(subscription.ExpiresAt.UTC())
+	}
+	if subscription.LastNotifiedAt != nil {
+		state.LastNotifiedAt = new(subscription.LastNotifiedAt.UTC())
+	}
+	return state
 }
 
 func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnection) []ExternalMailConnectionResponse {
@@ -50,6 +82,7 @@ func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnect
 		if connection.LastSyncedAt != nil {
 			item.LastSyncedAt = new(connection.LastSyncedAt.UTC())
 		}
+		item.Push = toExternalMailPushState(connection.Push, time.Now())
 		responses = append(responses, item)
 	}
 	return responses

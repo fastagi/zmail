@@ -68,6 +68,8 @@ type ExternalMailConfig struct {
 	// zero takes DefaultExternalMailMaxTenantAssignments, and -1 marks a set value that does not
 	// parse, which validation refuses.
 	MaxTenantAssignments int
+	// Push turns push subscriptions on, with each provider's settings.
+	Push ExternalMailPushConfig
 }
 
 // Bounds of the per-tenant assignment ceiling.
@@ -319,6 +321,9 @@ func parseExternalMailProviders(raw string) []string {
 // feature without the key that seals grants.
 func validateExternalMailConfig(c ExternalMailConfig, secretKey string, production bool) error {
 	if err := validateExternalMailSyncConfig(c.Sync); err != nil {
+		return err
+	}
+	if err := validateExternalMailPushConfig(c.Push, production); err != nil {
 		return err
 	}
 	if c.MaxSharedConnections < 0 || c.MaxSharedConnections > MaxExternalMailMaxSharedConnections {

@@ -293,6 +293,7 @@ type Service interface {
 	DeleteMailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint) error
 	// ExternalMailService lists and revokes the caller's connected mailboxes.
 	ExternalMailService
+	ExternalMailPushService
 	// ExternalMailBindingService binds and reconnects outside accounts.
 	ExternalMailBindingService
 	// ExternalMailOpsService shows a connection's sync history and purges revoked copies.
@@ -416,6 +417,10 @@ type service struct {
 	agents domain.MailAgentRepository
 	// agentReads limits the agent route requests of each API key per minute.
 	agentReads ratelimit.Store
+	// pushStore keeps push subscriptions; nil when repo does not implement it.
+	pushStore domain.ExternalMailPushRepository
+	// pushLimits bounds each provider's notification requests per minute.
+	pushLimits ratelimit.Store
 }
 
 var _ Service = (*service)(nil)
@@ -482,6 +487,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailAgentRepository); ok {
 		agents = seam
 	}
+	var pushStore domain.ExternalMailPushRepository
+	if seam, ok := repo.(domain.ExternalMailPushRepository); ok {
+		pushStore = seam
+	}
 	var encryptor *crypto.AESEncryptor
 	var fingerprintKey []byte
 	if settings.SecretEncryptionKey != "" {
@@ -503,6 +512,8 @@ func NewService(
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
 		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),
+		pushStore:                pushStore,
+		pushLimits:               newExternalMailPushLimit(limits, settings.ExternalMail.Push.RequestsPerMinute()),
 	}
 }
 

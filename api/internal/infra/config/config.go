@@ -780,6 +780,17 @@ func Load() (*Config, error) {
 			// The same parser: empty is the default, anything but a positive whole number is refused.
 			MaxTenantAssignments: parseExternalMailMaxSharedConnections(env.Get("EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS", "")),
 			TenantsEnabled:       env.GetBool("EXTERNAL_MAIL_TENANTS_ENABLED", false),
+			Push: parseExternalMailPushConfig(ExternalMailPushSettings{
+				Enabled:                env.GetBool("EXTERNAL_MAIL_PUSH_ENABLED", false),
+				PollInterval:           env.Get("EXTERNAL_MAIL_PUSH_POLL_INTERVAL", ""),
+				CoalesceWindow:         env.Get("EXTERNAL_MAIL_PUSH_COALESCE_WINDOW", ""),
+				MaxPerMinute:           env.Get("EXTERNAL_MAIL_PUSH_MAX_PER_MINUTE", ""),
+				GmailTopic:             env.Get("EXTERNAL_MAIL_GMAIL_PUSH_TOPIC", ""),
+				GmailAudience:          env.Get("EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE", ""),
+				GmailServiceAccount:    env.Get("EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT", ""),
+				GmailJWKSURL:           env.Get("EXTERNAL_MAIL_GMAIL_PUSH_JWKS_URL", ""),
+				OutlookNotificationURL: env.Get("EXTERNAL_MAIL_OUTLOOK_PUSH_NOTIFICATION_URL", ""),
+			}),
 		},
 		Mailbox: MailboxConfig{
 			Domain:              env.Get("MAILBOX_DOMAIN", ""),

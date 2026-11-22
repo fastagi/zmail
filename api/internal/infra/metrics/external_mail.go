@@ -25,6 +25,21 @@ var (
 		},
 		[]string{"provider"},
 	)
+	externalMailPushNotificationsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "zmail_external_mail_push_notifications_total",
+			Help: "Push notification requests of external mail providers, by provider and result",
+		},
+		[]string{"provider", "result"},
+	)
+	externalMailPushDelaySeconds = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "zmail_external_mail_push_delay_seconds",
+			Help:    "Time from a push notification to the start of the sync it triggered, by provider",
+			Buckets: []float64{0.5, 1, 2.5, 5, 10, 20, 30, 60, 120, 300},
+		},
+		[]string{"provider"},
+	)
 	externalMailCopiesPurgedTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "zmail_external_mail_copies_purged_total",
@@ -43,5 +58,18 @@ func RecordExternalMailSync(provider, outcome string, duration time.Duration) {
 func RecordExternalMailCopiesPurged(count int) {
 	if count > 0 {
 		externalMailCopiesPurgedTotal.Add(float64(count))
+	}
+}
+
+// RecordExternalMailPushNotification counts one notification request. result is one of a fixed set
+// (accepted, ignored, validation, unauthenticated, malformed, rate_limited).
+func RecordExternalMailPushNotification(provider, result string) {
+	externalMailPushNotificationsTotal.WithLabelValues(provider, result).Inc()
+}
+
+// ObserveExternalMailPushDelay observes how long a notification waited for its sync to start.
+func ObserveExternalMailPushDelay(provider string, delay time.Duration) {
+	if delay >= 0 {
+		externalMailPushDelaySeconds.WithLabelValues(provider).Observe(delay.Seconds())
 	}
 }
