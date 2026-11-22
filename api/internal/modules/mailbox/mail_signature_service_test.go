@@ -3,6 +3,8 @@ package mailbox
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -59,5 +61,24 @@ func TestMailSignatureIsPerMemberAndNeedsSend(t *testing.T) {
 	again, err := f.service.MailSignature(ctx, f.b, f.team.ID)
 	if err != nil || again.Body != "" {
 		t.Fatalf("after clear = %+v, %v", again, err)
+	}
+}
+
+func TestUpdateMailSignatureAnswersInvalidBodiesWith422(t *testing.T) {
+	f := newSignatureFixture(t)
+	router := accessRouter(f.service, f.b)
+	path := fmt.Sprintf("/mailboxes/%d/signature", f.team.ID)
+	for name, payload := range map[string]string{
+		"control character": `{"body":"a\u0007b"}`,
+		"too long":          `{"body":"` + strings.Repeat("é", 2001) + `"}`,
+	} {
+		recorder, body := serve(router, http.MethodPut, path, payload)
+		if recorder.Code != http.StatusUnprocessableEntity || body["error_code"] != domain.CodeValidationFailed {
+			t.Fatalf("%s = %d %v; want 422 %s", name, recorder.Code, body, domain.CodeValidationFailed)
+		}
+	}
+	recorder, body := serve(router, http.MethodPut, path, `{"body":"Best,\nB"}`)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("valid = %d %v", recorder.Code, body)
 	}
 }

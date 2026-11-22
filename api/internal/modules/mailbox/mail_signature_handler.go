@@ -53,7 +53,7 @@ func (h *Handler) UpdateMailSignature(c *gin.Context) {
 	}
 	signature, err := h.service.SaveMailSignature(c.Request.Context(), viewer, mailboxID, *req.Body)
 	if err != nil {
-		response.HandleError(c, "Failed to save the signature", err)
+		respondOrganizeError(c, "Failed to save the signature", err)
 		return
 	}
 	privateResponse(c)
