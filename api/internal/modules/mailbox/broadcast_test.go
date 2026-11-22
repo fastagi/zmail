@@ -196,9 +196,9 @@ func TestBroadcastSendsToSubscribedListMembers(t *testing.T) {
 	if annNow.Status != domain.MailContactSuppressed || annNow.StatusReason != "complained" {
 		t.Fatalf("ann after a complaint = %+v", annNow)
 	}
-	sent, _, err := fixture.service.ListBroadcastRecipients(ctx, as(1), broadcast.ID, domain.MailRecipientSent, 1, 10)
-	if err != nil {
-		t.Fatalf("ListBroadcastRecipients: %v", err)
+	sent, _, listErr := fixture.service.ListBroadcastRecipients(ctx, as(1), broadcast.ID, domain.MailRecipientSent, 1, 10)
+	if listErr != nil {
+		t.Fatalf("ListBroadcastRecipients: %v", listErr)
 	}
 	for _, recipient := range sent {
 		if recipient.ContactID == ann.ID && (recipient.LastEvent != domain.MailEventComplained || recipient.ContactStatus != domain.MailContactSuppressed) {

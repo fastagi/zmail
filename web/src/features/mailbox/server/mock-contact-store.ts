@@ -21,6 +21,7 @@ import type {
   MailContactInput,
   MailContactList,
   MailContactPage,
+  MailContactStatus,
 } from '@/features/mailbox/types';
 
 /**
@@ -251,6 +252,11 @@ export class MockContactStore {
     return [...this.of(organizationId).contacts.values()]
       .filter(contact => contact.status === 'subscribed' && contact.list_ids.includes(listId))
       .sort((a, b) => a.id - b.id);
+  }
+
+  /** The contact's current status, or null once it is deleted. */
+  statusOf(organizationId: number, contactId: number): MailContactStatus | null {
+    return this.of(organizationId).contacts.get(contactId)?.status ?? null;
   }
 
   /** Applies an unsubscribe link; unknown or non-subscribed contacts are left alone. */

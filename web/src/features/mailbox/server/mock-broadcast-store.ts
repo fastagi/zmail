@@ -46,7 +46,7 @@ export type MockBroadcastResult =
 
 interface StoredBroadcast {
   broadcast: Omit<MailBroadcast, 'counts'>;
-  recipients: (MailBroadcastRecipient & { wave: 1 | 2 })[];
+  recipients: (Omit<MailBroadcastRecipient, 'contact_status'> & { wave: 1 | 2 })[];
 }
 
 export class MockBroadcastStore {
@@ -182,7 +182,6 @@ export class MockBroadcastStore {
       message_id: null,
       failure_code: '',
       last_event: '',
-      contact_status: contact.status,
       updated_at: now.toISOString(),
       wave: index < testSize ? 1 : 2,
     }));
@@ -267,6 +266,7 @@ export class MockBroadcastStore {
       });
       recipient.status = result.ok ? 'sent' : 'failed';
       recipient.message_id = result.ok ? result.message.id : null;
+      recipient.last_event = result.ok ? result.message.last_event : '';
       recipient.failure_code = result.ok
         ? ''
         : result.error === 'variables_missing'
@@ -317,7 +317,7 @@ export class MockBroadcastStore {
     if (!stored) return null;
     const all = stored.recipients
       .filter(recipient => !status || recipient.status === status)
-      .map(publicRecipient);
+      .map(recipient => publicRecipient(organizationId, recipient));
     const start = (page - 1) * perPage;
     const items = all.slice(start, start + perPage);
     return {
@@ -356,7 +356,10 @@ export class MockBroadcastStore {
 export const mockBroadcastStore = new MockBroadcastStore();
 
 /** A recipient as the API shows it: the wave is internal. */
-function publicRecipient(recipient: StoredBroadcast['recipients'][number]): MailBroadcastRecipient {
+function publicRecipient(
+  organizationId: number,
+  recipient: StoredBroadcast['recipients'][number],
+): MailBroadcastRecipient {
   return {
     id: recipient.id,
     contact_id: recipient.contact_id,
@@ -365,7 +368,7 @@ function publicRecipient(recipient: StoredBroadcast['recipients'][number]): Mail
     message_id: recipient.message_id,
     failure_code: recipient.failure_code,
     last_event: recipient.last_event,
-    contact_status: recipient.contact_status,
+    contact_status: mockContactStore.statusOf(organizationId, recipient.contact_id),
     updated_at: recipient.updated_at,
   };
 }
