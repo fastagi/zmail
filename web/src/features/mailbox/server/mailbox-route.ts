@@ -5601,7 +5601,9 @@ export async function listMailDraftsRoute(request: Request): Promise<NextRespons
 
 /** Saves a new draft from a mailbox the caller may send from. */
 export async function createMailDraftRoute(request: Request): Promise<NextResponse> {
-  return saveMailDraftRoute(request, null);
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  return saveMailDraft(request, target, null);
 }
 
 /** Replaces one of the caller's drafts. */
@@ -5609,9 +5611,11 @@ export async function updateMailDraftRoute(
   request: Request,
   rawDraftId: string
 ): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
   const draftId = parseRouteId(rawDraftId);
   if (!draftId.ok) return draftId.response;
-  return saveMailDraftRoute(request, draftId.value);
+  return saveMailDraft(request, target, draftId.value);
 }
 
 /** Deletes one of the caller's drafts. */
@@ -5637,9 +5641,11 @@ export async function deleteMailDraftRoute(
   return new NextResponse(null, { status: 204, headers: privateMailboxHeaders() });
 }
 
-async function saveMailDraftRoute(request: Request, id: number | null): Promise<NextResponse> {
-  const target = await resolveMailboxMutationRoute(request);
-  if (!target.available) return target.response;
+async function saveMailDraft(
+  request: Request,
+  target: Extract<MailboxTarget, { available: true }>,
+  id: number | null
+): Promise<NextResponse> {
   const body = await jsonObject(request, maxDraftBodyBytes);
   if (!body.ok) return body.response;
   const raw = body.value;
