@@ -61,6 +61,9 @@ type ExternalMailPushConfig struct {
 	// OutlookNotificationURL is the public URL of the Outlook notification route; empty leaves
 	// Outlook without push.
 	OutlookNotificationURL string
+	// DirectExposure states that providers reach the API without a proxy, so the request's own peer
+	// address is the sender's. In production push needs it or SERVER_TRUSTED_PROXIES.
+	DirectExposure bool
 	// invalid names keys set to a value that does not parse.
 	invalid []string
 }
@@ -68,6 +71,7 @@ type ExternalMailPushConfig struct {
 // ExternalMailPushSettings are the raw values of the push keys; empty means unset.
 type ExternalMailPushSettings struct {
 	Enabled                bool
+	DirectExposure         bool
 	PollInterval           string
 	CoalesceWindow         string
 	QuietLimit             string
@@ -83,6 +87,7 @@ type ExternalMailPushSettings struct {
 func parseExternalMailPushConfig(raw ExternalMailPushSettings) ExternalMailPushConfig {
 	c := ExternalMailPushConfig{
 		Enabled:                raw.Enabled,
+		DirectExposure:         raw.DirectExposure,
 		GmailTopic:             strings.TrimSpace(raw.GmailTopic),
 		GmailAudience:          strings.TrimSpace(raw.GmailAudience),
 		GmailServiceAccount:    strings.ToLower(strings.TrimSpace(raw.GmailServiceAccount)),
@@ -215,6 +220,22 @@ func validateExternalMailPushConfig(c ExternalMailPushConfig, production bool) e
 			(parsed.Scheme != "https" && (parsed.Scheme != "http" || production)) {
 			return fmt.Errorf("%s must be an absolute https URL (http only outside production)", key)
 		}
+	}
+	return nil
+}
+
+// validateExternalMailPushExposure refuses push in production when the per-sender budgets could not
+// tell senders apart: behind a load balancer without SERVER_TRUSTED_PROXIES every request seems to
+// come from the balancer, so one noisy sender would use up the budget of Graph's handshakes and of
+// every other sender. The operator either names the trusted proxies or states that the API is
+// exposed directly.
+func validateExternalMailPushExposure(c ExternalMailPushConfig, trustedProxies []string, production bool) error {
+	if c.DirectExposure && len(trustedProxies) > 0 {
+		return fmt.Errorf("EXTERNAL_MAIL_PUSH_DIRECT_EXPOSURE=true contradicts SERVER_TRUSTED_PROXIES; set one of them")
+	}
+	if production && c.Enabled && len(trustedProxies) == 0 && !c.DirectExposure {
+		return fmt.Errorf("EXTERNAL_MAIL_PUSH_ENABLED=true in production needs SERVER_TRUSTED_PROXIES (the proxies in front of the API) " +
+			"or EXTERNAL_MAIL_PUSH_DIRECT_EXPOSURE=true (no proxy), so notification senders are told apart")
 	}
 	return nil
 }

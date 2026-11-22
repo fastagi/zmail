@@ -48,6 +48,12 @@ const (
 	// send per minute; the budget is kept in this process only, so junk never writes to the database.
 	maxExternalMailPushRefusalsPerMinute = 120
 	maxExternalMailPushRefusalIPs        = 10000
+	// maxExternalMailPushHandshakesPerMinute is a sender's own budget of Graph validation handshakes,
+	// apart from its junk, so a flood of junk never stops a new subscription from being created.
+	maxExternalMailPushHandshakesPerMinute = 30
+	// externalMailPushRefusalLogEvery is how often a refused-request line is logged per provider and
+	// reason at most; the metric counts every one.
+	externalMailPushRefusalLogEvery = time.Minute
 	// externalMailPushUnsupportedRecheck is how long a connection whose provider cannot push for it
 	// waits before it is asked again.
 	externalMailPushUnsupportedRecheck = 24 * time.Hour
@@ -143,6 +149,34 @@ func newExternalMailPushLimit(stores *ratelimit.Stores, perMinute int) ratelimit
 	return stores.New(ratelimit.Rule{Name: ruleExternalMailPush, Max: perMinute, Window: time.Minute, MaxBuckets: 16})
 }
 
+// newExternalMailPushHandshakes is the per-IP budget of validation handshakes, process-local too.
+func newExternalMailPushHandshakes() ratelimit.Store {
+	return ratelimit.NewMemoryStore(maxExternalMailPushHandshakesPerMinute, time.Minute, ratelimit.WithMaxBuckets(maxExternalMailPushRefusalIPs))
+}
+
+// pushRefusalLog lets through at most one refused-request log line per provider and reason a minute.
+type pushRefusalLog struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+// allow reports whether a line for the key may be logged at now, and records it.
+func (l *pushRefusalLog) allow(key string, now time.Time) bool {
+	if l == nil {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last == nil {
+		l.last = map[string]time.Time{}
+	}
+	if last, seen := l.last[key]; seen && now.Sub(last) < externalMailPushRefusalLogEvery {
+		return false
+	}
+	l.last[key] = now
+	return true
+}
+
 // newExternalMailPushRefusals is the per-IP budget of requests that authenticate nothing. It is
 // always process-local, whatever RATE_LIMIT_STORE says, so junk never writes to the database.
 func newExternalMailPushRefusals() ratelimit.Store {
@@ -204,7 +238,6 @@ func (s *service) ReceiveExternalMailPush(ctx context.Context, provider domain.E
 		if errors.Is(err, ErrExternalMailPushUnauthenticated) {
 			result = "unauthenticated"
 		}
-		slog.WarnContext(ctx, "external_mail.push_refused", slog.String("provider", string(provider)), slog.String("result", result))
 		return ExternalMailPushReply{}, s.refusePush(ctx, provider, delivery.ClientIP, result, err)
 	}
 	if parsed.Validation != "" {
@@ -257,16 +290,26 @@ func (s *service) ReceiveExternalMailPush(ctx context.Context, provider domain.E
 	return ExternalMailPushReply{}, nil
 }
 
-// refusePush spends one unit of the sender's per-IP budget for a request that authenticated nothing.
-// Within the budget it answers err (nil for an answer like any other); past it, 429.
+// refusePush spends one unit of the sender's per-IP budget for a request that authenticated nothing:
+// a validation handshake its own small budget, anything else the junk budget. Within the budget it
+// answers err (nil for an answer like any other); past it, 429, without a log line. Refusals are
+// logged at most once a minute per provider and reason; the metric counts each.
 func (s *service) refusePush(ctx context.Context, provider domain.ExternalMailProvider, clientIP, result string, err error) error {
-	if s.pushRefusals != nil {
-		if allowed, _, resetAt := s.pushRefusals.Take(ctx, "ip:"+clientIP); !allowed {
+	budget := s.pushRefusals
+	if result == "validation" {
+		budget = s.pushHandshakes
+	}
+	if budget != nil {
+		if allowed, _, resetAt := budget.Take(ctx, "ip:"+clientIP); !allowed {
 			metrics.RecordExternalMailPushNotification(string(provider), "rate_limited")
 			return &RetryAfterError{Err: ErrExternalMailPushRateLimited, RetryAfter: time.Until(resetAt)}
 		}
 	}
 	metrics.RecordExternalMailPushNotification(string(provider), result)
+	if result != "validation" && s.pushRefusalLog.allow(string(provider)+":"+result, s.now()) {
+		slog.WarnContext(ctx, "external_mail.push_refused", slog.String("provider", string(provider)), slog.String("result", result),
+			slog.String("note", "logged at most once a minute; see zmail_external_mail_push_notifications_total"))
+	}
 	return err
 }
 

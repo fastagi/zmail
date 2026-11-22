@@ -1,13 +1,19 @@
 package mailbox
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 )
 
 // Tests for the second review of the push subscriptions, which blocks enabling push.
@@ -30,6 +36,40 @@ func (f *externalFixture) notifyAddress(t *testing.T) {
 		Header: http.Header{"Authorization": {"Bearer good"}}, Body: []byte(f.connection.AccountAddress), ClientIP: "66.102.0.1",
 	}); err != nil {
 		t.Fatalf("notify: %v", err)
+	}
+}
+
+// TestExternalMailPushHandshakesSurviveJunk: a sender that used up its junk budget still completes
+// Graph's validation handshake, which has a budget of its own; junk past its budget is answered 429
+// without a log line, and the refusals within it log at most one line a minute.
+func TestExternalMailPushHandshakesSurviveJunk(t *testing.T) {
+	f := newPushFixture(t)
+	f.service.pushRefusals = ratelimit.NewMemoryStore(3, time.Minute)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	ctx := context.Background()
+	limited := 0
+	for range 40 {
+		_, err := f.service.ReceiveExternalMailPush(ctx, domain.ExternalMailProviderOutlook, ExternalMailPushDelivery{
+			Header: http.Header{}, Query: url.Values{}, Body: fakeNotificationBody("fake-sub-404", "guess", ""), ClientIP: "10.1.2.3",
+		})
+		if errors.Is(err, ErrExternalMailPushRateLimited) {
+			limited++
+		}
+	}
+	if limited != 37 {
+		t.Fatalf("junk past its budget answered 429 %d times, want 37", limited)
+	}
+	if lines := strings.Count(logs.String(), "external_mail.push_refused"); lines != 1 {
+		t.Fatalf("40 junk requests logged %d lines, want 1", lines)
+	}
+	reply, err := f.service.ReceiveExternalMailPush(ctx, domain.ExternalMailProviderOutlook, ExternalMailPushDelivery{
+		Header: http.Header{}, Query: url.Values{"validationToken": {"handshake-1"}}, ClientIP: "10.1.2.3",
+	})
+	if err != nil || reply.Validation != "handshake-1" {
+		t.Fatalf("a handshake after the junk = %+v, %v", reply, err)
 	}
 }
 

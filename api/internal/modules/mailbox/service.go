@@ -421,8 +421,12 @@ type service struct {
 	pushStore domain.ExternalMailPushRepository
 	// pushLimits bounds each provider's authenticated notification requests per minute.
 	pushLimits ratelimit.Store
-	// pushRefusals bounds, per IP and in this process, notification requests that authenticate nothing.
-	pushRefusals ratelimit.Store
+	// pushRefusals bounds, per IP and in this process, notification requests that authenticate nothing;
+	// pushHandshakes bounds validation handshakes apart from them.
+	pushRefusals   ratelimit.Store
+	pushHandshakes ratelimit.Store
+	// pushRefusalLog samples the log lines of refused notification requests.
+	pushRefusalLog *pushRefusalLog
 }
 
 var _ Service = (*service)(nil)
@@ -516,7 +520,8 @@ func NewService(
 		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),
 		pushStore:    pushStore,
 		pushLimits:   newExternalMailPushLimit(limits, settings.ExternalMail.Push.RequestsPerMinute()),
-		pushRefusals: newExternalMailPushRefusals(),
+		pushRefusals: newExternalMailPushRefusals(), pushHandshakes: newExternalMailPushHandshakes(),
+		pushRefusalLog: &pushRefusalLog{},
 	}
 }
 

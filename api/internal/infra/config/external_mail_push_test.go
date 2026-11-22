@@ -50,3 +50,30 @@ func TestExternalMailPushConfigBounds(t *testing.T) {
 		}
 	}
 }
+
+// TestExternalMailPushNeedsToTellSendersApart: production refuses push unless the trusted proxies
+// are named or the API is declared directly exposed, and refuses both at once; outside production
+// push starts either way.
+func TestExternalMailPushNeedsToTellSendersApart(t *testing.T) {
+	push := ExternalMailPushConfig{Enabled: true}
+	if err := validateExternalMailPushExposure(push, nil, true); err == nil || !strings.Contains(err.Error(), "SERVER_TRUSTED_PROXIES") {
+		t.Fatalf("production push behind an unnamed proxy = %v", err)
+	}
+	if err := validateExternalMailPushExposure(push, nil, false); err != nil {
+		t.Fatalf("development push = %v", err)
+	}
+	if err := validateExternalMailPushExposure(push, []string{"10.0.0.0/8"}, true); err != nil {
+		t.Fatalf("production push with trusted proxies = %v", err)
+	}
+	direct := push
+	direct.DirectExposure = true
+	if err := validateExternalMailPushExposure(direct, nil, true); err != nil {
+		t.Fatalf("production push declared directly exposed = %v", err)
+	}
+	if err := validateExternalMailPushExposure(direct, []string{"10.0.0.0/8"}, true); err == nil {
+		t.Fatal("direct exposure next to trusted proxies was accepted")
+	}
+	if err := validateExternalMailPushExposure(ExternalMailPushConfig{}, nil, true); err != nil {
+		t.Fatalf("production with push off = %v", err)
+	}
+}
