@@ -154,9 +154,10 @@ type ExternalMailPushRepository interface {
 	// MatchExternalMailSubscriptions returns, in one query, at most limit rows of the provider whose
 	// key is one of keys, that are not stopped and whose connection is active.
 	MatchExternalMailSubscriptions(ctx context.Context, provider ExternalMailProvider, keys []string, limit int) ([]ExternalMailPushHit, error)
-	// MarkExternalMailPushDegraded marks the connection's live subscription degraded and makes its
-	// renewal due; it reports whether it changed anything.
-	MarkExternalMailPushDegraded(ctx context.Context, connectionID uint, now time.Time) (bool, error)
+	// MarkExternalMailPushDegraded marks the connection's live subscription degraded, makes its
+	// renewal due, and brings the connection's next sync no later than pollBy; it reports whether it
+	// changed anything.
+	MarkExternalMailPushDegraded(ctx context.Context, connectionID uint, now, pollBy time.Time) (bool, error)
 	// MarkExternalMailPush records a notification on the rows and marks their connections due as
 	// the mark allows; it returns how many connections it made due sooner.
 	MarkExternalMailPush(ctx context.Context, mark ExternalMailPushMark) (int, error)

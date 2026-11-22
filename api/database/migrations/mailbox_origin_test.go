@@ -17,6 +17,7 @@ func TestMailboxOriginConvertsExternalMailboxes(t *testing.T) {
 	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
 		VALUES (5, 10, 901, 'riley@mail.example', 'personal', 901, now(), now())`)
 
+	require.NoError(t, (&addExternalMailProviderReleases{}).Down(db))
 	require.NoError(t, (&addExternalMailPush{}).Down(db))
 	require.NoError(t, (&addExternalMailTenants{}).Down(db))
 	require.NoError(t, (&addConnectedMailboxSend{}).Down(db))
@@ -32,6 +33,7 @@ func TestMailboxOriginConvertsExternalMailboxes(t *testing.T) {
 	require.NoError(t, (&addConnectedMailboxSend{}).Up(db))
 	require.NoError(t, (&addExternalMailTenants{}).Up(db))
 	require.NoError(t, (&addExternalMailPush{}).Up(db))
+	require.NoError(t, (&addExternalMailProviderReleases{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 
 	var rows []struct {
@@ -47,6 +49,7 @@ func TestMailboxOriginConvertsExternalMailboxes(t *testing.T) {
 		[]string{rows[0].Origin, rows[1].Origin, rows[2].Origin, rows[3].Origin})
 
 	// Down restores the external type for the connected personal mailboxes.
+	require.NoError(t, (&addExternalMailProviderReleases{}).Down(db))
 	require.NoError(t, (&addExternalMailPush{}).Down(db))
 	require.NoError(t, (&addExternalMailTenants{}).Down(db))
 	require.NoError(t, (&addConnectedMailboxSend{}).Down(db))

@@ -10143,8 +10143,8 @@ paths:
         notifications (`reauthorizationRequired`, `subscriptionRemoved`, `missed`) also make the
         subscription's renewal due. Every readable request is answered `202`, whether or not a
         subscription matches. Only a request with at least one matching notification spends the
-        provider's budget; any other (handshakes included) spends only the sender IP's budget and is
-        answered `429` past it."
+        provider's budget; any other spends only the sender IP's budget, and a handshake only the
+        sender's separate handshake budget, and is answered `429` past it."
       tags:
         - Mailboxes
       security: []

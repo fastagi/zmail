@@ -11,6 +11,26 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Push enablement fixes
+
+### Medium — Production push needs to tell senders apart
+
+With `EXTERNAL_MAIL_PUSH_ENABLED=true` in production, startup now requires `SERVER_TRUSTED_PROXIES`
+or `EXTERNAL_MAIL_PUSH_DIRECT_EXPOSURE=true` (not both). Validation handshakes get a per-sender
+budget of their own, and refused notifications are logged at most once a minute.
+
+### Low — Durable provider releases
+
+Migration `2026_12_16_090000_add_external_mail_provider_releases` adds
+`external_mail_provider_releases`: a revocation records there, in its transaction, the push
+subscription to stop and, for Gmail only, a sealed copy of the grant to hand back. The
+`mail:external:sync` worker performs it if the process stops first. The mail worker's purge pass
+deletes it after 24 hours. It outlives the connection's purge and goes with the organization, and is
+never performed for an account that is in use again. Grants are now
+handed back after the revocation commits rather than before. The mailbox repository implements the
+new `domain.ExternalMailReleaseRepository`. A degraded push subscription is now judged only on mail
+a poll inserts.
+
 ## Unreleased — Connector push subscriptions
 
 Gmail (`users.watch` through the operator's Cloud Pub/Sub topic) and Outlook (Microsoft Graph change

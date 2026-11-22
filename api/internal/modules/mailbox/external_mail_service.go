@@ -43,8 +43,10 @@ func (s *service) SyncExternalMail(ctx context.Context, limit int) (int, error) 
 		return 0, nil
 	}
 	now := s.now().UTC()
-	// Subscriptions of ended connections stop, and notifications that arrived during a fetch make
-	// their connection due, before the claim picks due connections.
+	// Provider calls left by revocations are made, subscriptions of ended connections stop, and
+	// notifications that arrived during a fetch make their connection due, before the claim picks
+	// due connections.
+	s.processProviderReleases(ctx, now)
 	s.maintainExternalMailPush(ctx, now)
 	connections, err := s.externalMail.ClaimExternalMailConnections(ctx, domain.ExternalMailClaim{
 		Now: now, LeaseUntil: now.Add(externalMailSyncInterval), Limit: limit,
@@ -143,7 +145,6 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	}
 	latency := time.Since(started)
 	var upkeep pushUpkeep
-	degraded := false
 	if push != nil && err == nil && !fetched.More && subscriptionDue(subscription, now) {
 		// The subscription is started or renewed under the lease, moved past the call's deadline,
 		// with the grant the fetch used; a grant the provider rotates on the way is saved below.
@@ -188,17 +189,6 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		result.Cursor, result.SyncedAt, result.ConsecutiveFailures = fetched.Cursor, &now, 0
 		result.Messages = s.externalCopies(connection, fetched.Messages, now)
 		result.ConsecutiveMore = 0
-		if push != nil && trigger == domain.ExternalMailSyncTriggerPoll &&
-			pushMissedMail(subscription, result.Messages, startedAt, s.settings.ExternalMail.Push.Quiet()) {
-			// The poll found mail the live subscription never announced: push is not working for
-			// this connection, so it polls at the regular interval until a notification arrives.
-			degraded = true
-			if upkeep.after != nil {
-				after := *upkeep.after
-				after.DegradedAt = &now
-				upkeep.after = &after
-			}
-		}
 		if !fetched.More {
 			// A live subscription announces new mail, so the poll is only the safety net.
 			result.NextSyncAt = s.pushPollAt(upkeep, now)
@@ -238,6 +228,12 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		Fetched: len(fetched.Messages), More: err == nil && fetched.More, ErrorCode: result.LastErrorCode,
 		TimedOut: timedOut, Throttled: throttled, Trigger: trigger,
 	}
+	// Only an incremental poll that read a whole round can catch push missing mail: a backfill, a
+	// restart after an expired cursor, and pages in the middle of a round read mail that was never
+	// to be announced. The check itself runs on the copies the save inserts, so a message the
+	// provider returns again (Graph delta reports read or flagged messages too) never counts.
+	checkMissed := push != nil && trigger == domain.ExternalMailSyncTriggerPoll && outcome == domain.ExternalMailSyncOK &&
+		!fetched.More && connection.SyncCursor != "" && connection.ConsecutiveMore == 0
 	var stored []*domain.MailMessage
 	applied := false
 	// New copies go through the same post-store step as Zmail's own inbound mail, in the
@@ -248,6 +244,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		if stored, applied, err = s.externalMail.SaveExternalMailSync(tx, result); err != nil {
 			return nil, err
 		}
+		degraded := checkMissed && pushMissedMail(subscription, stored, startedAt, s.settings.ExternalMail.Push.Quiet())
 		if err = s.savePushUpkeep(tx, connection, applied, result.LastErrorCode == "", upkeep, degraded, trigger, startedAt); err != nil {
 			return nil, err
 		}
@@ -261,12 +258,13 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		return notifications, nil
 	})
 	if saveErr != nil {
+		s.keepRotatedToken(ctx, connection.ID, result.EncryptedRefreshToken)
 		return saveErr
 	}
 	if !applied && push != nil && upkeep.subscribed != nil {
 		// The connection was revoked while the sync subscribed: its revocation found no live
 		// subscription to stop, so this one is stopped here.
-		s.unsubscribeOrphan(ctx, push, connection, *upkeep.subscribed)
+		s.unsubscribeOrphan(ctx, push, connection, upkeep.save.LookupKey, *upkeep.subscribed)
 	}
 	if tenant != nil && result.Run.Outcome == domain.ExternalMailSyncAuthFailed {
 		s.checkTenantAfterRefusal(ctx, connector, tenant, connection.ID, budget.Timeout())
@@ -443,10 +441,15 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 		return nil
 	}
 	// The provider is called only once the revocation committed: it stops the push subscription,
-	// then takes the grant back. The row is stopped in the revocation's transaction either way.
-	release := s.prepareProviderRelease(ctx, connection)
+	// then takes the grant back. What is left to do is recorded in the revocation's transaction, so a
+	// process that stops after the commit leaves it to the worker; the row is stopped either way.
+	release := s.planProviderRelease(ctx, connection)
 	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
-		if err := s.externalMail.RevokeExternalMailConnection(tx, connection.OrganizationID, connection.ID, s.now().UTC()); err != nil {
+		now := s.now().UTC()
+		if err := s.externalMail.RevokeExternalMailConnection(tx, connection.OrganizationID, connection.ID, now); err != nil {
+			return err
+		}
+		if err := s.recordProviderRelease(tx, release, now); err != nil {
 			return err
 		}
 		return s.afterConnectionRevoked(tx, connection, actorUserID, event, nil)
@@ -454,7 +457,10 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 	if err != nil {
 		return err
 	}
-	releaseAfterCommit(ctx, release)
+	if release != nil {
+		sealed := connection.EncryptedRefreshToken
+		releaseAfterCommit(ctx, func(ctx context.Context) { s.releaseNow(ctx, release, sealed) })
+	}
 	slog.InfoContext(ctx, "external_mail.revoked",
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
 		slog.String("event", string(event)))
@@ -546,21 +552,60 @@ func (s *service) recordConnectionEventWith(ctx context.Context, connection *dom
 // provider that is down or no longer enabled leaves the grant to expire there, and the token is
 // erased here either way.
 func (s *service) handBackExternalGrant(ctx context.Context, connection *domain.ExternalMailConnection) {
-	if connection.EncryptedRefreshToken == "" || s.encryptor == nil {
+	if err := s.returnExternalGrant(ctx, connection); err != nil {
+		// Logged by returnExternalGrant; the grant lapses at the provider.
 		return
 	}
-	token, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
-	if err != nil {
-		return
+}
+
+// returnExternalGrant revokes the connection's sealed grant at its provider. It answers an error
+// only when trying again may help: no grant, a grant this instance cannot open, or a connector the
+// instance no longer runs end it.
+func (s *service) returnExternalGrant(ctx context.Context, connection *domain.ExternalMailConnection) error {
+	if connection.EncryptedRefreshToken == "" || s.encryptor == nil {
+		return nil
+	}
+	token, opened := s.openGrant(connection.EncryptedRefreshToken)
+	if !opened {
+		// A grant this instance cannot open cannot be handed back; trying again will not help.
+		return nil
 	}
 	connector, registered := s.externalConnectors.lookup(connection.Provider)
 	if !registered {
 		slog.WarnContext(ctx, "external_mail.provider_revoke_skipped",
 			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
-		return
+		return nil
 	}
 	if err := connector.Source.Revoke(ctx, ExternalMailToken{RefreshToken: token}); err != nil {
 		slog.WarnContext(ctx, "external_mail.provider_revoke_failed",
 			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
+		return err
+	}
+	return nil
+}
+
+// openGrant unseals a stored grant; false when it is empty or this instance cannot open it.
+func (s *service) openGrant(sealed string) (string, bool) {
+	if sealed == "" || s.encryptor == nil {
+		return "", false
+	}
+	token, err := s.encryptor.DecryptString(sealed)
+	return token, err == nil && token != ""
+}
+
+// rotatedTokenKeeper stores a rotated grant on its own; the repository implements it.
+type rotatedTokenKeeper interface {
+	KeepExternalMailRotatedToken(ctx context.Context, connectionID uint, sealed string) error
+}
+
+// keepRotatedToken stores the grant a provider rotated during a sync whose save failed (a lost
+// transaction, a deadlock, a failover), since the grant it replaced may already be spent. Best effort.
+func (s *service) keepRotatedToken(ctx context.Context, connectionID uint, sealed string) {
+	keeper, ok := s.repo.(rotatedTokenKeeper)
+	if sealed == "" || !ok {
+		return
+	}
+	if err := keeper.KeepExternalMailRotatedToken(context.WithoutCancel(ctx), connectionID, sealed); err != nil {
+		slog.ErrorContext(ctx, "external_mail.rotated_token_lost", slog.Uint64("connection_id", uint64(connectionID)))
 	}
 }

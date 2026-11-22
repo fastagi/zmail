@@ -782,6 +782,7 @@ func Load() (*Config, error) {
 			TenantsEnabled:       env.GetBool("EXTERNAL_MAIL_TENANTS_ENABLED", false),
 			Push: parseExternalMailPushConfig(ExternalMailPushSettings{
 				Enabled:                env.GetBool("EXTERNAL_MAIL_PUSH_ENABLED", false),
+				DirectExposure:         env.GetBool("EXTERNAL_MAIL_PUSH_DIRECT_EXPOSURE", false),
 				PollInterval:           env.Get("EXTERNAL_MAIL_PUSH_POLL_INTERVAL", ""),
 				CoalesceWindow:         env.Get("EXTERNAL_MAIL_PUSH_COALESCE_WINDOW", ""),
 				QuietLimit:             env.Get("EXTERNAL_MAIL_PUSH_QUIET_LIMIT", ""),
@@ -1156,6 +1157,9 @@ func validate(cfg *Config) error {
 		return err
 	}
 	if err := validateAITriageConfig(cfg.AITriage, isProd); err != nil {
+		return err
+	}
+	if err := validateExternalMailPushExposure(cfg.ExternalMail.Push, cfg.Server.TrustedProxies, isProd); err != nil {
 		return err
 	}
 	if err := validateExternalMailConfig(cfg.ExternalMail, cfg.Mailbox.SecretEncryptionKey, isProd); err != nil {

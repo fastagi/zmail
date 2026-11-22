@@ -53,6 +53,15 @@ Each item has a test that fails against the code before the fix.
 | R8 | Revocations call the provider only after their transaction committed (mailbox deletion collects the calls until its transaction ends; a departure releases its connections four at a time). The row is stopped inside the transaction. |
 | R9 | The key set fetch is single-flight and never holds the lock across the network; the sync-run check is added `NOT VALID` and then validated; a subscription a sync created while its connection was being revoked is stopped again; an Outlook batch is matched with one query. |
 
+## Enablement Amendments (second review, after PR #178 merged with push off)
+
+| # | Amendment |
+|---|---|
+| E1 | Missed mail is judged only on copies an incremental poll inserts in its save transaction, over a whole round; re-reported, re-backfilled, and mid-round copies never degrade a subscription. |
+| E2 | Production push requires `SERVER_TRUSTED_PROXIES` or `EXTERNAL_MAIL_PUSH_DIRECT_EXPOSURE=true`; validation handshakes have their own per-sender budget; refusals are logged at most once a minute and never past the budget. |
+| E3 | Durable provider releases (`external_mail_provider_releases`): recorded in the revocation's transaction with a sealed grant copy, performed after commit or by the worker with backoff, deleted when done or after 24 hours. |
+| E4 | Orphan cleanup counts watchers by the primary-address key; one notification wakes every connection of an account (up to 1,000, one query); a `missed` event does not clear degraded; the sync-run check is a plain constraint again (NOT VALID + VALIDATE gained nothing inside one transaction; the table is small by design). |
+
 ## Acceptance Criteria And Verification
 
 PostgreSQL and `httptest` tests, never a real provider or credential:

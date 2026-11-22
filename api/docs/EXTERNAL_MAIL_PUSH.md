@@ -24,6 +24,12 @@ with the connection's own grant, so a push setup that is misconfigured or failin
 | `EXTERNAL_MAIL_PUSH_COALESCE_WINDOW` | `10s` | Least time between two notification-triggered syncs of one connection (1s to 5m). |
 | `EXTERNAL_MAIL_PUSH_MAX_PER_MINUTE` | `6000` | Authenticated notification requests per provider and minute. The budget is per replica, or shared by all replicas with `RATE_LIMIT_STORE=postgres`, where each authenticated request then writes one rate-limit row. Requests that authenticate nothing spend only a per-IP budget of 120 a minute, kept in memory. |
 
+In production push also needs `SERVER_TRUSTED_PROXIES` set to the load balancer or proxies in front
+of the API, or `EXTERNAL_MAIL_PUSH_DIRECT_EXPOSURE=true` when the providers reach the API directly;
+startup fails otherwise. Behind an unnamed proxy every request would seem to come from the proxy,
+and one noisy sender would use up the per-sender budgets (120 refused requests and, separately, 30
+Graph validation handshakes a minute) that everyone else shares.
+
 Run the worker with a short idle wait so a due connection is picked up quickly, for example
 `/app/fastbuild mail:external:sync --batch=20 --poll=5s`. The worker also subscribes and renews:
 
@@ -142,6 +148,20 @@ requested for 70 hours and renewed after 35.
 - **Switching push off.** This stops creating and renewing subscriptions at once. Open provider
   subscriptions lapse at their expiry (at most 7 days for Gmail, 70 hours for Outlook), and their
   notifications are answered `404` meanwhile.
+- **Provider releases.** A revocation records in its own transaction what is left to do at the
+  provider (stop the push subscription, hand the grant back), in `external_mail_provider_releases`.
+  - **Grant copy.** The record carries a sealed copy of the grant only for Gmail, whose revocation
+    really revokes a grant.
+  - **Execution.** The call is made right after the commit, by whoever holds the record's lease. If
+    the process stops first, the `mail:external:sync` worker makes it within minutes, retrying with
+    backoff.
+  - **Accounts in use again.** A record is dropped unperformed when the account is in use again:
+    bound again, a connection active again, a shared Gmail watch, or the same account bound with its
+    own grant anywhere else.
+  - **Lifetime.** Records survive the purge of copies and go with the organization. A record still
+    undone after 24 hours is deleted with its sealed grant by the mail worker's purge pass
+    (`external_mail.provider_release_expired`), even with every connector off, and the grant then
+    lapses at the provider.
 - **Revoking.**
   - Every revocation stops the subscription in Zmail in its own transaction.
   - Unbinding by the member, a forced disconnect, a member's departure, and deleting the mailbox also

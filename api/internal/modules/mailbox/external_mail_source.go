@@ -169,6 +169,9 @@ type ExternalMailConnector struct {
 	Capabilities ExternalMailCapabilities
 	Source       ExternalMailSource
 	Tenant       ExternalMailTenantSource
+	// RevokesGrant means Revoke really revokes a provider grant, so a revocation keeps a sealed copy
+	// of the grant until it was handed back (Gmail); false for connectors whose Revoke does nothing.
+	RevokesGrant bool
 	// Push is set when the connector can subscribe to new-mail notifications and the instance
 	// configured its push settings; nil otherwise (IMAP has none).
 	Push ExternalMailPushSource
@@ -293,8 +296,8 @@ func fakeExternalMailRegistry(source ExternalMailSource) *externalMailRegistry {
 		push = serves
 	}
 	return &externalMailRegistry{connectors: []ExternalMailConnector{
-		{ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant, Push: push},
-		{ID: domain.ExternalMailProviderOutlook, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant, Push: push},
+		{ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant, Push: push, RevokesGrant: true},
+		{ID: domain.ExternalMailProviderOutlook, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant, Push: push, RevokesGrant: true},
 	}}
 }
 

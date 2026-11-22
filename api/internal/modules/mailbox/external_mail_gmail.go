@@ -78,7 +78,7 @@ func init() {
 		connector := ExternalMailConnector{
 			ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2,
 			Capabilities: ExternalMailCapabilities{Read: true}, Source: source,
-			Tenant: newGmailTenantSource(),
+			Tenant: newGmailTenantSource(), RevokesGrant: true,
 		}
 		if cfg.Push.GmailConfigured() {
 			connector.Push = newGmailPushSource(source, cfg.Push)

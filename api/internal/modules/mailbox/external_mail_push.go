@@ -29,9 +29,9 @@ const (
 	// maxExternalMailPushHints bounds the notifications one request is read for; the rest are
 	// dropped, and the poll picks up whatever they announced.
 	maxExternalMailPushHints = 20
-	// maxExternalMailPushMatches bounds the connections one notification may name: one Gmail account
-	// bound by several connections.
-	maxExternalMailPushMatches = 10
+	// maxExternalMailPushMatches bounds the subscriptions one request marks, in one bounded query:
+	// every connection of one Gmail account, however many organizations bound it.
+	maxExternalMailPushMatches = 1000
 	// maxExternalMailPushBodyBytes bounds a notification request body.
 	maxExternalMailPushBodyBytes = 64 << 10
 	// externalMailPushReconcileBatch bounds the subscriptions of ended connections stopped per pass,
@@ -48,6 +48,12 @@ const (
 	// send per minute; the budget is kept in this process only, so junk never writes to the database.
 	maxExternalMailPushRefusalsPerMinute = 120
 	maxExternalMailPushRefusalIPs        = 10000
+	// maxExternalMailPushHandshakesPerMinute is a sender's own budget of Graph validation handshakes,
+	// apart from its junk, so a flood of junk never stops a new subscription from being created.
+	maxExternalMailPushHandshakesPerMinute = 30
+	// externalMailPushRefusalLogEvery is how often a refused-request line is logged per provider and
+	// reason at most; the metric counts every one.
+	externalMailPushRefusalLogEvery = time.Minute
 	// externalMailPushUnsupportedRecheck is how long a connection whose provider cannot push for it
 	// waits before it is asked again.
 	externalMailPushUnsupportedRecheck = 24 * time.Hour
@@ -143,6 +149,34 @@ func newExternalMailPushLimit(stores *ratelimit.Stores, perMinute int) ratelimit
 	return stores.New(ratelimit.Rule{Name: ruleExternalMailPush, Max: perMinute, Window: time.Minute, MaxBuckets: 16})
 }
 
+// newExternalMailPushHandshakes is the per-IP budget of validation handshakes, process-local too.
+func newExternalMailPushHandshakes() ratelimit.Store {
+	return ratelimit.NewMemoryStore(maxExternalMailPushHandshakesPerMinute, time.Minute, ratelimit.WithMaxBuckets(maxExternalMailPushRefusalIPs))
+}
+
+// pushRefusalLog lets through at most one refused-request log line per provider and reason a minute.
+type pushRefusalLog struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+// allow reports whether a line for the key may be logged at now, and records it.
+func (l *pushRefusalLog) allow(key string, now time.Time) bool {
+	if l == nil {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last == nil {
+		l.last = map[string]time.Time{}
+	}
+	if last, seen := l.last[key]; seen && now.Sub(last) < externalMailPushRefusalLogEvery {
+		return false
+	}
+	l.last[key] = now
+	return true
+}
+
 // newExternalMailPushRefusals is the per-IP budget of requests that authenticate nothing. It is
 // always process-local, whatever RATE_LIMIT_STORE says, so junk never writes to the database.
 func newExternalMailPushRefusals() ratelimit.Store {
@@ -204,7 +238,6 @@ func (s *service) ReceiveExternalMailPush(ctx context.Context, provider domain.E
 		if errors.Is(err, ErrExternalMailPushUnauthenticated) {
 			result = "unauthenticated"
 		}
-		slog.WarnContext(ctx, "external_mail.push_refused", slog.String("provider", string(provider)), slog.String("result", result))
 		return ExternalMailPushReply{}, s.refusePush(ctx, provider, delivery.ClientIP, result, err)
 	}
 	if parsed.Validation != "" {
@@ -257,16 +290,26 @@ func (s *service) ReceiveExternalMailPush(ctx context.Context, provider domain.E
 	return ExternalMailPushReply{}, nil
 }
 
-// refusePush spends one unit of the sender's per-IP budget for a request that authenticated nothing.
-// Within the budget it answers err (nil for an answer like any other); past it, 429.
+// refusePush spends one unit of the sender's per-IP budget for a request that authenticated nothing:
+// a validation handshake its own small budget, anything else the junk budget. Within the budget it
+// answers err (nil for an answer like any other); past it, 429, without a log line. Refusals are
+// logged at most once a minute per provider and reason; the metric counts each.
 func (s *service) refusePush(ctx context.Context, provider domain.ExternalMailProvider, clientIP, result string, err error) error {
-	if s.pushRefusals != nil {
-		if allowed, _, resetAt := s.pushRefusals.Take(ctx, "ip:"+clientIP); !allowed {
+	budget := s.pushRefusals
+	if result == "validation" {
+		budget = s.pushHandshakes
+	}
+	if budget != nil {
+		if allowed, _, resetAt := budget.Take(ctx, "ip:"+clientIP); !allowed {
 			metrics.RecordExternalMailPushNotification(string(provider), "rate_limited")
 			return &RetryAfterError{Err: ErrExternalMailPushRateLimited, RetryAfter: time.Until(resetAt)}
 		}
 	}
 	metrics.RecordExternalMailPushNotification(string(provider), result)
+	if result != "validation" && s.pushRefusalLog.allow(string(provider)+":"+result, s.now()) {
+		slog.WarnContext(ctx, "external_mail.push_refused", slog.String("provider", string(provider)), slog.String("result", result),
+			slog.String("note", "logged at most once a minute; see zmail_external_mail_push_notifications_total"))
+	}
 	return err
 }
 
@@ -284,15 +327,13 @@ func (s *service) matchPushHints(ctx context.Context, provider domain.ExternalMa
 	for _, hint := range hints {
 		keys = append(keys, hint.Key)
 	}
-	hits, err := s.pushStore.MatchExternalMailSubscriptions(ctx, provider, keys, maxExternalMailPushHints*maxExternalMailPushMatches)
+	hits, err := s.pushStore.MatchExternalMailSubscriptions(ctx, provider, keys, maxExternalMailPushMatches)
 	if err != nil {
 		return nil, err
 	}
 	byKey := map[string][]domain.ExternalMailPushHit{}
 	for _, hit := range hits {
-		if len(byKey[hit.LookupKey]) < maxExternalMailPushMatches {
-			byKey[hit.LookupKey] = append(byKey[hit.LookupKey], hit)
-		}
+		byKey[hit.LookupKey] = append(byKey[hit.LookupKey], hit)
 	}
 	var matched []pushMatch
 	for _, hint := range hints {
@@ -428,8 +469,9 @@ func (s *service) upkeepPush(ctx context.Context, source ExternalMailPushSource,
 	return upkeep, got.RefreshToken
 }
 
-// pushMissedMail reports whether a poll found mail its live, proven subscription never announced:
-// a copy received after the subscription went live and earlier than the grace before the fetch.
+// pushMissedMail reports whether a poll stored mail its live, proven subscription never announced:
+// a newly stored copy received after the subscription went live and earlier than the grace before
+// the fetch.
 // Mail received within the grace may still have its notification on the way.
 func pushMissedMail(subscription *domain.ExternalMailSubscription, copies []*domain.MailMessage, startedAt time.Time, quiet time.Duration) bool {
 	if !subscription.Proven(startedAt, quiet) {
@@ -472,8 +514,22 @@ func minTime(a, b time.Time) time.Time {
 	return b
 }
 
-// providerRelease is what is left to do at the provider once a connection's revocation commits:
-// stop its push subscription with the grant still in hand, then hand the grant back.
+// Provider releases: what is left to do at the provider once a connection's revocation committed.
+const (
+	// externalMailReleaseGrace is how long a fresh release waits for the call made right after its
+	// commit before the worker may take it over.
+	externalMailReleaseGrace = 2 * time.Minute
+	// externalMailReleaseDeadline is how long a release, and the sealed grant it holds, is kept: a
+	// release still undone then is deleted and the grant lapses at the provider.
+	externalMailReleaseDeadline = 24 * time.Hour
+	// externalMailReleaseLease holds a claimed release from other workers while it runs.
+	externalMailReleaseLease = 5 * time.Minute
+	// externalMailReleaseBatch bounds the releases one worker pass performs, and the expired ones it
+	// deletes.
+	externalMailReleaseBatch = 20
+)
+
+// providerRelease is a provider call to make once a revocation committed.
 type providerRelease func(ctx context.Context)
 
 // deferredReleasesKey carries the releases of revocations inside an enclosing transaction.
@@ -524,60 +580,226 @@ func releaseAfterCommit(ctx context.Context, release providerRelease) {
 	release(ctx)
 }
 
-// prepareProviderRelease reads, without calling the provider, what stopping the connection's push
-// subscription needs: the live row and the sealed grant the connection holds now, before the
-// revocation erases it. A Gmail watch other live connections of the same account share is left
-// running. The returned release stops the subscription, best effort, then hands the grant back.
-func (s *service) prepareProviderRelease(ctx context.Context, connection *domain.ExternalMailConnection) providerRelease {
-	var subscription *domain.ExternalMailSubscription
+// planProviderRelease reads, without calling the provider, what the revocation of the connection
+// leaves to do there: stop its live push subscription, and hand back its grant. The sealed grant is
+// kept in the release only for a connector whose revocation really revokes a provider grant, never
+// for a tenant mailbox; the call made right after the commit uses the connection's own copy.
+func (s *service) planProviderRelease(ctx context.Context, connection *domain.ExternalMailConnection) *domain.ExternalMailProviderRelease {
+	release := &domain.ExternalMailProviderRelease{
+		OrganizationID: connection.OrganizationID, ConnectionID: connection.ID, Provider: connection.Provider,
+		AccountAddress: connection.AccountAddress, TenantID: connection.TenantID, TenantDirectoryID: connection.TenantDirectoryID,
+	}
+	if connector, registered := s.externalConnectors.lookup(connection.Provider); registered && connector.RevokesGrant && connection.TenantID == nil {
+		release.EncryptedGrant = connection.EncryptedRefreshToken
+	}
 	if s.pushOn() {
 		found, err := s.pushStore.FindExternalMailSubscription(ctx, connection.ID)
 		if err == nil && found != nil && found.Status == domain.ExternalMailSubscriptionActive {
-			others, countErr := s.pushStore.CountLiveExternalMailWatchers(ctx, connection.Provider, found.LookupKey, connection.ID)
-			if countErr == nil && others == 0 {
-				subscription = found
-			}
+			release.StopPush, release.StopSubscriptionID, release.StopWatchKey = true, found.ProviderSubscriptionID, found.LookupKey
 		}
 	}
-	held := *connection
-	return func(ctx context.Context) {
-		if subscription != nil {
-			s.stopPushAtProvider(ctx, &held, subscription)
+	if !release.StopPush && connection.EncryptedRefreshToken == "" {
+		return nil
+	}
+	return release
+}
+
+// recordProviderRelease stores the release in the revocation's transaction, stamped with the
+// revocation's time, so a process that stops right after the commit leaves it to the worker. A
+// release with nothing the worker could do later is not stored.
+func (s *service) recordProviderRelease(tx context.Context, release *domain.ExternalMailProviderRelease, now time.Time) error {
+	if release == nil {
+		return nil
+	}
+	release.CreatedAt, release.NextAttemptAt, release.ExpiresAt = now, now.Add(externalMailReleaseGrace), now.Add(externalMailReleaseDeadline)
+	if s.releases == nil || (!release.StopPush && release.EncryptedGrant == "") {
+		return nil
+	}
+	return s.releases.CreateExternalMailProviderRelease(tx, release)
+}
+
+// releaseNow makes the release's calls right after the revocation committed, with the connection's
+// own sealed grant, once it holds the stored release's lease, so the worker never runs it too.
+func (s *service) releaseNow(ctx context.Context, release *domain.ExternalMailProviderRelease, sealed string) {
+	if release.ID != 0 {
+		claimed, err := s.releases.ClaimExternalMailProviderRelease(ctx, release.ID, release.NextAttemptAt, s.now().UTC().Add(externalMailReleaseLease))
+		if err != nil || !claimed {
+			return
 		}
-		s.handBackExternalGrant(ctx, &held)
+	}
+	s.performProviderRelease(ctx, release, sealed)
+}
+
+// performProviderRelease makes the release's provider calls: stop the push subscription, then hand
+// the grant back. It calls nothing for a connection that was bound again since (still there, but no
+// longer revoked as of the release), stops no watch another live connection shares, and hands back
+// no grant while any live connection, in any organization, reads the same account with a grant of
+// its own: at Google, revoking one token revokes the user's whole grant. A stored release is deleted
+// once done, retried with backoff otherwise until its deadline. Nothing secret is logged.
+func (s *service) performProviderRelease(ctx context.Context, release *domain.ExternalMailProviderRelease, sealed string) {
+	connection, err := s.externalMail.FindExternalMailConnection(ctx, release.OrganizationID, release.ConnectionID)
+	switch {
+	case errors.Is(err, ErrExternalMailConnectionNotFound):
+		// Purged since: it cannot have been bound again; the account check below still applies.
+	case err != nil:
+		s.deferProviderRelease(ctx, release)
+		return
+	case connection.Status != domain.ExternalMailStatusRevoked || connection.RevokedAt == nil || connection.RevokedAt.After(release.CreatedAt):
+		s.finishProviderRelease(ctx, release, "rebound")
+		return
+	}
+	held := &domain.ExternalMailConnection{
+		ID: release.ConnectionID, OrganizationID: release.OrganizationID, Provider: release.Provider,
+		AccountAddress: release.AccountAddress, TenantID: release.TenantID, TenantDirectoryID: release.TenantDirectoryID,
+		EncryptedRefreshToken: sealed,
+	}
+	var failed error
+	if release.StopPush && (sealed != "" || release.TenantID != nil) {
+		others, countErr := s.liveWatchers(ctx, release)
+		switch {
+		case countErr != nil:
+			failed = countErr
+		case others == 0:
+			failed = s.stopPushAtProvider(ctx, held, release.StopSubscriptionID)
+		}
+	}
+	if sealed != "" {
+		live, countErr := s.liveAccountGrants(ctx, release)
+		switch {
+		case countErr != nil:
+			failed = countErr
+		case live == 0:
+			if err := s.returnExternalGrant(ctx, held); err != nil && failed == nil {
+				failed = err
+			}
+		default:
+			slog.InfoContext(ctx, "external_mail.provider_revoke_skipped", slog.Uint64("connection_id", uint64(release.ConnectionID)),
+				slog.String("provider", string(release.Provider)), slog.String("reason", "account_bound_elsewhere"))
+		}
+	}
+	if errors.Is(failed, ErrExternalMailAuth) {
+		// The provider no longer honors the grant: nothing is left to stop or hand back.
+		failed = nil
+	}
+	if failed != nil {
+		s.deferProviderRelease(ctx, release)
+		return
+	}
+	s.finishProviderRelease(ctx, release, "done")
+}
+
+// liveAccountGrants counts the other live connections that read the release's account with a grant
+// of their own.
+func (s *service) liveAccountGrants(ctx context.Context, release *domain.ExternalMailProviderRelease) (int, error) {
+	if s.releases == nil {
+		return 0, nil
+	}
+	return s.releases.CountLiveExternalMailAccountGrants(ctx, release.Provider, release.AccountAddress, release.ConnectionID)
+}
+
+// liveWatchers counts the other live subscriptions under the release's watch key.
+func (s *service) liveWatchers(ctx context.Context, release *domain.ExternalMailProviderRelease) (int, error) {
+	if s.pushStore == nil || release.StopWatchKey == "" {
+		return 0, nil
+	}
+	return s.pushStore.CountLiveExternalMailWatchers(ctx, release.Provider, release.StopWatchKey, release.ConnectionID)
+}
+
+// finishProviderRelease deletes a stored release, and its sealed grant with it.
+func (s *service) finishProviderRelease(ctx context.Context, release *domain.ExternalMailProviderRelease, reason string) {
+	if s.releases == nil || release.ID == 0 {
+		return
+	}
+	if err := s.releases.DeleteExternalMailProviderRelease(ctx, release.ID); err != nil {
+		slog.WarnContext(ctx, "external_mail.provider_release_failed", slog.Uint64("connection_id", uint64(release.ConnectionID)),
+			slog.String("provider", string(release.Provider)), slog.String("stage", "delete"))
+		return
+	}
+	if reason != "done" {
+		slog.InfoContext(ctx, "external_mail.provider_release_dropped", slog.Uint64("connection_id", uint64(release.ConnectionID)),
+			slog.String("provider", string(release.Provider)), slog.String("reason", reason))
 	}
 }
 
-// stopPushAtProvider stops a subscription at its provider with the connection's grant. It is best
-// effort: a provider that cannot be reached leaves the subscription to lapse at its expiry; the row
-// is already stopped.
-func (s *service) stopPushAtProvider(ctx context.Context, connection *domain.ExternalMailConnection, subscription *domain.ExternalMailSubscription) {
+// deferProviderRelease records a failed attempt of a stored release and backs it off.
+func (s *service) deferProviderRelease(ctx context.Context, release *domain.ExternalMailProviderRelease) {
+	if s.releases == nil || release.ID == 0 {
+		return
+	}
+	attempts := release.Attempts + 1
+	retry := s.now().UTC().Add(externalMailBackoff(attempts, externalMailJitter))
+	if err := s.releases.DeferExternalMailProviderRelease(ctx, release.ID, attempts, retry); err != nil {
+		slog.WarnContext(ctx, "external_mail.provider_release_failed", slog.Uint64("connection_id", uint64(release.ConnectionID)),
+			slog.String("provider", string(release.Provider)), slog.String("stage", "defer"))
+	}
+}
+
+// processProviderReleases runs in each sync pass and performs a bounded batch of the due releases,
+// with the sealed grant each holds. A failure is logged; the pass goes on.
+func (s *service) processProviderReleases(ctx context.Context, now time.Time) {
+	if s.releases == nil {
+		return
+	}
+	due, err := s.releases.ClaimExternalMailProviderReleases(ctx, now, now.Add(externalMailReleaseLease), externalMailReleaseBatch)
+	if err != nil {
+		slog.WarnContext(ctx, "external_mail.provider_release_failed", slog.String("stage", "claim"))
+		return
+	}
+	for _, release := range due {
+		if ctx.Err() != nil {
+			return
+		}
+		s.performProviderRelease(ctx, release, release.EncryptedGrant)
+	}
+}
+
+// expireProviderReleases deletes releases past their deadline, with the sealed grants they hold. It
+// runs in the mail worker's purge pass, which runs whether or not any connector is enabled, so no
+// sealed grant outlives its deadline.
+func (s *service) expireProviderReleases(ctx context.Context, now time.Time) {
+	if s.releases == nil {
+		return
+	}
+	if expired, err := s.releases.DeleteExpiredExternalMailProviderReleases(ctx, now, externalMailReleaseBatch*5); err != nil {
+		slog.WarnContext(ctx, "external_mail.provider_release_failed", slog.String("stage", "expire"))
+	} else if expired > 0 {
+		slog.WarnContext(ctx, "external_mail.provider_release_expired", slog.Int("releases", expired))
+	}
+}
+
+// stopPushAtProvider stops a subscription at its provider with the connection's grant (or its
+// tenant's token). A provider that cannot be reached is retried by the release; the row is already
+// stopped.
+func (s *service) stopPushAtProvider(ctx context.Context, connection *domain.ExternalMailConnection, subscriptionID string) error {
 	connector, registered := s.externalConnectors.lookup(connection.Provider)
 	if !registered || connector.Push == nil || s.encryptor == nil {
-		return
+		return nil
 	}
 	callCtx, cancel := context.WithTimeout(ctx, externalMailPushCallTimeout)
 	defer cancel()
 	token, _, err := s.connectionToken(callCtx, connection, connector)
 	if err == nil {
 		err = connector.Push.Unsubscribe(callCtx, ExternalMailPushRequest{
-			Token: token, AccountAddress: connection.AccountAddress, SubscriptionID: subscription.ProviderSubscriptionID,
+			Token: token, AccountAddress: connection.AccountAddress, SubscriptionID: subscriptionID,
 			TenantMailbox: connection.TenantID != nil, Now: s.now().UTC(),
 		})
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "external_mail.push_unsubscribe_failed", slog.Uint64("connection_id", uint64(connection.ID)),
 			slog.String("provider", string(connection.Provider)))
-		return
+		return err
 	}
 	slog.InfoContext(ctx, "external_mail.push_unsubscribed", slog.Uint64("connection_id", uint64(connection.ID)),
 		slog.String("provider", string(connection.Provider)))
+	return nil
 }
 
 // unsubscribeOrphan stops at the provider a subscription a sync created or renewed for a connection
 // that was revoked while the sync ran, so no watch outlives its connection. Best effort.
-func (s *service) unsubscribeOrphan(ctx context.Context, source ExternalMailPushSource, connection *domain.ExternalMailConnection, request ExternalMailPushRequest) {
-	if others, err := s.pushStore.CountLiveExternalMailWatchers(ctx, connection.Provider, normalizedPushKey(connection.AccountAddress), connection.ID); err != nil || others > 0 {
+// Other live connections are counted by the key the provider names the account by (Gmail's primary
+// address), so a watch another connection shares is left running.
+func (s *service) unsubscribeOrphan(ctx context.Context, source ExternalMailPushSource, connection *domain.ExternalMailConnection, lookupKey string, request ExternalMailPushRequest) {
+	if others, err := s.pushStore.CountLiveExternalMailWatchers(ctx, connection.Provider, lookupKey, connection.ID); err != nil || others > 0 {
 		return
 	}
 	callCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), externalMailPushCallTimeout)
@@ -668,7 +890,9 @@ func (s *service) savePushUpkeep(tx context.Context, connection *domain.External
 		}
 	}
 	if degraded {
-		marked, err := s.pushStore.MarkExternalMailPushDegraded(tx, connection.ID, s.now().UTC())
+		// The connection is polled at the regular interval from now on, whatever the save scheduled.
+		now := s.now().UTC()
+		marked, err := s.pushStore.MarkExternalMailPushDegraded(tx, connection.ID, now, now.Add(externalMailSyncInterval))
 		if err != nil {
 			return err
 		}

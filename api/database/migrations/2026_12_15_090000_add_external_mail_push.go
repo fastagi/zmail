@@ -34,8 +34,10 @@ type addExternalMailPush struct {
 //     arrives again. unsupported marks a connection whose provider cannot deliver push for it (a
 //     Gmail mailbox assigned from a Workspace tenant, whose tokens come from the customer's project).
 //   - external_mail_sync_runs.triggered_by tells a push-triggered sync from a poll. The constant default
-//     is recorded without rewriting the table; its check is added NOT VALID and validated after, so
-//     the scan holds no lock that blocks writes.
+//     is recorded without rewriting the table. Its check is a plain one: NOT VALID followed by
+//     VALIDATE gains nothing inside this migration's single transaction, which holds the lock to
+//     the end either way, and the table is small by design (at most 50 runs per connection, 14
+//     days), so validating it holds the lock only briefly.
 func (m *addExternalMailPush) Up(db *gorm.DB) error {
 	return execStatements(db,
 		`CREATE TABLE external_mail_subscriptions (
@@ -72,10 +74,9 @@ func (m *addExternalMailPush) Up(db *gorm.DB) error {
 		  WHERE pending_at IS NOT NULL`,
 		`CREATE INDEX idx_external_mail_subscriptions_open ON external_mail_subscriptions (connection_id)
 		  WHERE status <> 'stopped'`,
-		`ALTER TABLE external_mail_sync_runs ADD COLUMN triggered_by varchar(8) NOT NULL DEFAULT 'poll'`,
 		`ALTER TABLE external_mail_sync_runs
-		  ADD CONSTRAINT chk_external_mail_sync_runs_trigger CHECK (triggered_by IN ('poll','push')) NOT VALID`,
-		`ALTER TABLE external_mail_sync_runs VALIDATE CONSTRAINT chk_external_mail_sync_runs_trigger`,
+		  ADD COLUMN triggered_by varchar(8) NOT NULL DEFAULT 'poll',
+		  ADD CONSTRAINT chk_external_mail_sync_runs_trigger CHECK (triggered_by IN ('poll','push'))`,
 	)
 }
 
