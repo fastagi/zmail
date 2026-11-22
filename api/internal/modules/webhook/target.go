@@ -52,9 +52,22 @@ func (p *targetPolicy) Normalize(ctx context.Context, value string) (string, str
 		return "", "", err
 	}
 	if _, err := p.resolveAllowed(ctx, parsed.Hostname()); err != nil {
-		return "", "", err
+		return "", "", setupResolveError(err)
 	}
 	return normalized, crypto.SHA256Hex(normalized), nil
+}
+
+// setupResolveError treats a name that does not exist as caller input, while a
+// transient resolver failure stays retryable.
+func setupResolveError(err error) error {
+	var dnsError *net.DNSError
+	switch {
+	case errors.Is(err, errNoWebhookTargetAddress), errors.As(err, &dnsError) && dnsError.IsNotFound:
+		return fmt.Errorf("%w: %w", domain.ErrWebhookInvalidTarget, err)
+	case errors.As(err, &dnsError):
+		return fmt.Errorf("%w: %w", domain.ErrServiceUnavailable, err)
+	}
+	return err
 }
 
 func (p *targetPolicy) normalizeSyntax(value string) (string, *url.URL, error) {
