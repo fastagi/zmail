@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -713,5 +714,63 @@ func TestDeletingASharedConnectedMailboxRevokesItsConnection(t *testing.T) {
 	}
 	if _, err := f.service.StartExternalMailAuthorization(ctx, f.admin, ExternalMailAuthorizationInput{ConnectionID: &connection.ID}); !errors.Is(err, ErrExternalMailConnectionNotFound) {
 		t.Fatalf("reconnecting a deleted mailbox's connection = %v, want not found", err)
+	}
+}
+
+// TestSharedConnectionLimitHoldsUnderConcurrency: two managers completing shared bindings at once
+// each hold only their own member lock, so the organization lock alone keeps them from both passing
+// the organization's limit; a member's own binding at the same time is not held up by it.
+func TestSharedConnectionLimitHoldsUnderConcurrency(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	f.service.settings.ExternalMail.MaxSharedConnections = 2
+	ctx := context.Background()
+	f.mustBindShared(t, "first", teamMembers())
+	owner := viewerOf(accessOrg, accessB, domain.OrganizationRoleOwner)
+	viewers := []domain.OrganizationContext{f.admin, owner}
+	codes := []string{"team-a", "team-b"}
+	states := make([]string, len(viewers))
+	for i, viewer := range viewers {
+		started, err := f.service.StartExternalMailAuthorization(ctx, viewer, ExternalMailAuthorizationInput{
+			Provider: domain.ExternalMailProviderGmail, Sharing: teamMembers(),
+		})
+		if err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		parsed, _ := url.Parse(started.AuthorizationURL)
+		states[i] = parsed.Query().Get("state")
+	}
+	personalState := f.signIn(t, f.d, ExternalMailAuthorizationInput{Provider: domain.ExternalMailProviderGmail})
+	errs := make([]error, len(viewers))
+	var personalErr error
+	var wg sync.WaitGroup
+	for i := range viewers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, errs[i] = f.service.CompleteExternalMailAuthorization(ctx, viewers[i], states[i], codes[i])
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _, personalErr = f.service.CompleteExternalMailAuthorization(ctx, f.d, personalState, "dan")
+	}()
+	wg.Wait()
+	succeeded, limited := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, ErrExternalMailConnectionLimit):
+			limited++
+		default:
+			t.Fatalf("completion: %v", err)
+		}
+	}
+	if succeeded != 1 || limited != 1 || personalErr != nil {
+		t.Fatalf("racing completions: %d succeeded, %d limited, personal %v; want 1, 1, nil", succeeded, limited, personalErr)
+	}
+	if live, _ := f.service.externalMail.CountLiveSharedExternalMailConnections(ctx, accessOrg); live != 2 {
+		t.Fatalf("live shared connections = %d, want 2", live)
 	}
 }
