@@ -1251,6 +1251,7 @@ const messages = {
     statusSent: '已完成',
     statusCanceled: '已取消',
     statusPaused: '已暂停',
+    statusWaitingTestWave: '测试组观察中',
     fromDomain: '发信域名',
     staged: '先发给测试组',
     stagedHint:

@@ -1295,6 +1295,7 @@ const messages = {
     statusSent: 'Finished',
     statusCanceled: 'Canceled',
     statusPaused: 'Paused',
+    statusWaitingTestWave: 'Watching test group',
     fromDomain: 'Sending domain',
     staged: 'Send to a test group first',
     stagedHint:

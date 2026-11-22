@@ -331,6 +331,22 @@ describe('mail broadcasts console', () => {
     expect(toast.success).toHaveBeenCalledWith('Broadcast canceled');
   });
 
+  // Issue #143: a resumed test wave waiting on its window is not shown as paused.
+  it('labels a test wave waiting on its window apart from a manual pause', () => {
+    state.broadcast.data = broadcast({
+      id: 9,
+      name: 'Launch',
+      status: 'paused',
+      stop_reason: 'test_wave_complete',
+      counts: counts({ total: 3, sent: 1 }),
+    });
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Launch' }));
+
+    expect(screen.getAllByText('Watching test group').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Paused')).toBeNull();
+  });
+
   it('saves and sends a brand-new broadcast in one step', async () => {
     state.save.mutateAsync.mockResolvedValue(broadcast({ id: 15, name: 'Flash sale' }));
     state.send.mutateAsync.mockImplementation(async () => {
