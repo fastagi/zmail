@@ -139,14 +139,15 @@ describe('developer console', () => {
     expect(screen.queryByRole('tablist')).toBeNull();
   });
 
-  it('member sees transactional templates read-only', () => {
+  it('member sees transactional templates read-only', async () => {
     state.organizations.data = organizations('member');
     state.search = 'org=1&tab=templates';
     const { container } = renderConsole();
 
+    // The templates tab loads on first open.
+    const list = await screen.findByRole('list', { name: 'Transactional templates' });
     expect(state.templateKinds.every(kind => kind === 'transactional')).toBe(true);
     expect(state.templateKinds.length).toBeGreaterThan(0);
-    const list = screen.getByRole('list', { name: 'Transactional templates' });
     expect(within(list).getByText('Signup code')).toBeInTheDocument();
     expect(within(list).getByText('signup-code')).toBeInTheDocument();
     expect(within(list).getByText('Contains secrets')).toBeInTheDocument();
@@ -171,7 +172,7 @@ describe('developer console', () => {
     state.search = 'org=1&tab=templates';
     state.save.mutateAsync.mockResolvedValue(template({ name: 'Sign-up code' }));
     renderConsole();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     const dialog = screen.getByRole('dialog');
 
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Signup code');
@@ -220,7 +221,7 @@ describe('developer console', () => {
       new ApiError('taken', ApiErrorCode.MAILBOX_TEMPLATE_KEY_TAKEN, 409)
     );
     renderConsole();
-    fireEvent.click(screen.getByRole('button', { name: 'New template' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'New template' }));
     const dialog = screen.getByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Welcome' } });
     fireEvent.change(within(dialog).getByLabelText('Key'), { target: { value: 'signup-code' } });
@@ -255,7 +256,7 @@ describe('developer console', () => {
       new ApiError('invalid', ApiErrorCode.MAILBOX_TEMPLATE_INVALID, 422)
     );
     renderConsole();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
