@@ -25,7 +25,7 @@ var errTOTPCodeRejected = errors.New("the authenticator or recovery code is wron
 type totpStore interface {
 	FindTOTPFactor(ctx context.Context, userID uint) (*totpFactor, error)
 	SavePendingTOTPFactor(ctx context.Context, userID uint, secret string, now time.Time) error
-	ConfirmTOTPFactor(ctx context.Context, userID uint, step int64, codeHashes []string, now time.Time) error
+	ConfirmTOTPFactor(ctx context.Context, userID uint, secret string, step int64, codeHashes []string, now time.Time) error
 	UseTOTPStep(ctx context.Context, userID uint, step int64, now time.Time) (bool, error)
 	UseRecoveryCode(ctx context.Context, userID uint, codeHash string, now time.Time) (bool, error)
 	CountRecoveryCodes(ctx context.Context, userID uint) (int64, error)
@@ -170,6 +170,10 @@ func (s *service) ConfirmTOTP(ctx context.Context, userID uint, code string) (*T
 	if err != nil {
 		return nil, fmt.Errorf("decrypt totp secret: %w", err)
 	}
+	throttleKey, err := s.takeTOTPAttempt(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 	now := s.totp.now()
 	step, ok := matchTOTP(secret, normalizeSecondFactorCode(code), now, factor.LastUsedStep)
 	if !ok {
@@ -179,13 +183,32 @@ func (s *service) ConfirmTOTP(ctx context.Context, userID uint, code string) (*T
 	if err != nil {
 		return nil, err
 	}
-	if err := s.totp.store.ConfirmTOTPFactor(ctx, userID, step, hashes, now); err != nil {
+	if err := s.totp.store.ConfirmTOTPFactor(ctx, userID, factor.Secret, step, hashes, now); err != nil {
 		if errors.Is(err, domain.ErrTOTPInvalid) {
 			return nil, errTOTPCodeRejected
 		}
 		return nil, err
 	}
+	s.resetTOTPAttempts(ctx, throttleKey)
 	return &TOTPRecoveryCodesResponse{RecoveryCodes: codes}, nil
+}
+
+// takeTOTPAttempt spends one of the account's sign-in attempts, so code guesses from a signed-in
+// session share the budget that guards sign-in.
+func (s *service) takeTOTPAttempt(ctx context.Context, userID uint) (string, error) {
+	key := signInThrottleKey(&domain.User{ID: userID}, "")
+	if s.signIns != nil {
+		if allowed, _, _ := s.signIns.Take(ctx, key); !allowed {
+			return key, domain.ErrSignInThrottled
+		}
+	}
+	return key, nil
+}
+
+func (s *service) resetTOTPAttempts(ctx context.Context, key string) {
+	if s.signIns != nil {
+		s.signIns.Reset(ctx, key)
+	}
 }
 
 func (s *service) DisableTOTP(ctx context.Context, userID uint, code string) error {
@@ -199,6 +222,10 @@ func (s *service) DisableTOTP(ctx context.Context, userID uint, code string) err
 	if factor == nil || factor.ConfirmedAt == nil {
 		return domain.ErrTOTPNotEnabled
 	}
+	throttleKey, err := s.takeTOTPAttempt(ctx, userID)
+	if err != nil {
+		return err
+	}
 	ok, err := s.totp.verify(ctx, factor, code)
 	if err != nil {
 		return err
@@ -206,5 +233,9 @@ func (s *service) DisableTOTP(ctx context.Context, userID uint, code string) err
 	if !ok {
 		return errTOTPCodeRejected
 	}
-	return s.totp.store.DeleteTOTPFactor(ctx, userID)
+	if err := s.totp.store.DeleteTOTPFactor(ctx, userID); err != nil {
+		return err
+	}
+	s.resetTOTPAttempts(ctx, throttleKey)
+	return nil
 }
