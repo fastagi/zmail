@@ -7,6 +7,9 @@ export const operatorOrganizationSchema = z.object({
   slug: z.string(),
   created_by: z.number().int().positive(),
   member_count: z.number().int().min(0),
+  suspended_at: z.string().nullable(),
+  suspension_reason: z.string(),
+  daily_send_limit: z.number().int().min(0).nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -35,3 +38,6 @@ export interface OrganizationSearch {
   q?: string | undefined;
   page?: number | undefined;
 }
+
+export const maxSuspensionReasonLength = 500;
+export const maxOrganizationDailySendLimit = 1_000_000;

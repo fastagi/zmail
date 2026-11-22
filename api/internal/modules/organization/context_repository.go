@@ -16,6 +16,7 @@ type organizationContextRow struct {
 	MembershipID     uint   `gorm:"column:membership_id"`
 	UserID           uint   `gorm:"column:user_id"`
 	Role             string `gorm:"column:role"`
+	Suspended        bool   `gorm:"column:suspended"`
 }
 
 func (r *repository) ResolveContext(
@@ -39,7 +40,8 @@ func (r *repository) ResolveContext(
 			organizations.slug AS organization_slug,
 			memberships.id AS membership_id,
 			memberships.user_id,
-			memberships.role
+			memberships.role,
+			organizations.suspended_at IS NOT NULL AS suspended
 		`).
 		Joins("JOIN organizations ON organizations.id = memberships.organization_id").
 		Where("memberships.organization_id = ? AND memberships.user_id = ?", organizationID, userID).
@@ -49,6 +51,9 @@ func (r *repository) ResolveContext(
 	}
 	if err != nil {
 		return nil, err
+	}
+	if row.Suspended {
+		return nil, domain.ErrOrganizationSuspended
 	}
 
 	resolved := &domain.OrganizationContext{

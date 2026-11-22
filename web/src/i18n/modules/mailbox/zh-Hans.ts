@@ -1670,6 +1670,7 @@ const messages = {
     messageInvalid: '请填写 1 到 50 个纯邮箱地址、单行主题，以及不超过 256 KB 的正文。',
     messageNotFound: '这封邮件不存在或已被删除。',
     organizationNotFound: '该组织不存在，或你已不再是其成员。请选择其他组织。',
+    organizationSuspended: '该组织已被停用，无法收发邮件。请联系 Zmail 客服恢复，或选择其他组织。',
     permissionDenied: '你没有此邮箱的相应权限，请刷新查看当前权限。',
     createDenied: '只有组织的所有者和管理员可以创建邮箱。',
     sendLimitReached: '该组织已达到 24 小时发信上限，邮件没有发出。请稍后再试。',

@@ -3133,6 +3133,148 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/organizations/{organization_id}/suspend:
+    post:
+      operationId: suspendOperatorOrganization
+      summary: Suspend an organization
+      description: Requires `operator:manage`. Members and API keys get `403 ORGANIZATION.SUSPENDED` for the organization and nothing more is sent for it. Suspending again replaces the reason and keeps the first `suspended_at`.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: The organization after the change.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrganizationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/organizations/{organization_id}/restore:
+    post:
+      operationId: restoreOperatorOrganization
+      summary: Restore a suspended organization
+      description: Requires `operator:manage`. Restoring an active organization changes nothing.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The organization after the change.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrganizationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /v1/operator/organizations/{organization_id}/send-limit:
+    put:
+      operationId: setOperatorOrganizationSendLimit
+      summary: Set or clear an organization's daily send limit
+      description: Requires `operator:manage`. The limit replaces the instance limit of every send lane and the new-organization cap; `null` returns the organization to them.
+      tags:
+        - Operator
+      security:
+        - operatorSession: []
+      parameters:
+        - $ref: '#/components/parameters/OperatorOrganizationID'
+        - $ref: '#/components/parameters/OperatorOrigin'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - daily_send_limit
+              properties:
+                daily_send_limit:
+                  type:
+                    - integer
+                    - 'null'
+                  minimum: 0
+                  maximum: 1000000
+      responses:
+        '200':
+          description: The organization after the change.
+          headers:
+            Cache-Control:
+              description: Operator responses are never cached.
+              schema:
+                type: string
+                const: private, no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorOrganizationResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/OperatorForbidden'
+        '404':
+          $ref: '#/components/responses/OperatorOrganizationNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/operator/organizations/{organization_id}/webhook-deliveries:
     get:
       operationId: listOperatorWebhookDeliveries
@@ -11380,6 +11522,7 @@ components:
         - ORGANIZATION.NOT_FOUND
         - ORGANIZATION.CONTEXT_REQUIRED
         - ORGANIZATION.CONTEXT_INVALID
+        - ORGANIZATION.SUSPENDED
         - ORGANIZATION.SLUG_ALREADY_EXISTS
         - ORGANIZATION.OWNERSHIP_TRANSFER_REQUIRED
         - ORGANIZATION.OWNERSHIP_TRANSFER_TARGET_INVALID
@@ -14019,6 +14162,9 @@ components:
         - slug
         - created_by
         - member_count
+        - suspended_at
+        - suspension_reason
+        - daily_send_limit
         - created_at
         - updated_at
       properties:
@@ -14035,6 +14181,23 @@ components:
         member_count:
           type: integer
           minimum: 0
+        suspended_at:
+          description: Set while a platform operator has suspended the organization.
+          type:
+            - string
+            - 'null'
+          format: date-time
+        suspension_reason:
+          description: Why the organization is suspended; empty when it is not.
+          type: string
+          maxLength: 500
+        daily_send_limit:
+          description: The operator's daily send limit for every lane; null takes the instance limits.
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+          maximum: 1000000
         created_at:
           type: string
           format: date-time

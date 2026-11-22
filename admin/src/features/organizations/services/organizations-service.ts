@@ -1,5 +1,10 @@
 import type { z } from 'zod';
-import { assertContract, type Accepts, type ContractData, type ContractResponse } from '@/http/contract';
+import {
+  assertContract,
+  type Accepts,
+  type ContractData,
+  type ContractResponse,
+} from '@/http/contract';
 import { http } from '@/http/client';
 import {
   operatorMemberPageSchema,
@@ -37,9 +42,64 @@ export const organizationsService = {
       ...(signal ? { signal } : {}),
     });
   },
+
+  suspend(organizationId: number, reason: string): Promise<OperatorOrganization> {
+    return http.post(
+      `/v1/operator/organizations/${organizationId}/suspend`,
+      { reason },
+      { schema: operatorOrganizationSchema },
+    );
+  },
+
+  restore(organizationId: number): Promise<OperatorOrganization> {
+    return http.post(`/v1/operator/organizations/${organizationId}/restore`, undefined, {
+      schema: operatorOrganizationSchema,
+    });
+  },
+
+  setSendLimit(
+    organizationId: number,
+    dailySendLimit: number | null,
+  ): Promise<OperatorOrganization> {
+    return http.put(
+      `/v1/operator/organizations/${organizationId}/send-limit`,
+      { daily_send_limit: dailySendLimit },
+      { schema: operatorOrganizationSchema },
+    );
+  },
 };
 
 // Fails type-check when contracts/openapi.yaml allows a body these schemas would reject.
-assertContract<Accepts<z.input<typeof operatorOrganizationPageSchema>, ContractResponse<'listOperatorOrganizations', 200>>>();
-assertContract<Accepts<z.input<typeof operatorOrganizationSchema>, ContractData<'getOperatorOrganization', 200>>>();
-assertContract<Accepts<z.input<typeof operatorMemberPageSchema>, ContractResponse<'listOperatorOrganizationMembers', 200>>>();
+assertContract<
+  Accepts<
+    z.input<typeof operatorOrganizationPageSchema>,
+    ContractResponse<'listOperatorOrganizations', 200>
+  >
+>();
+assertContract<
+  Accepts<z.input<typeof operatorOrganizationSchema>, ContractData<'getOperatorOrganization', 200>>
+>();
+assertContract<
+  Accepts<
+    z.input<typeof operatorMemberPageSchema>,
+    ContractResponse<'listOperatorOrganizationMembers', 200>
+  >
+>();
+assertContract<
+  Accepts<
+    z.input<typeof operatorOrganizationSchema>,
+    ContractData<'suspendOperatorOrganization', 200>
+  >
+>();
+assertContract<
+  Accepts<
+    z.input<typeof operatorOrganizationSchema>,
+    ContractData<'restoreOperatorOrganization', 200>
+  >
+>();
+assertContract<
+  Accepts<
+    z.input<typeof operatorOrganizationSchema>,
+    ContractData<'setOperatorOrganizationSendLimit', 200>
+  >
+>();

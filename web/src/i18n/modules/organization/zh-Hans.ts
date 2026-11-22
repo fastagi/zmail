@@ -120,6 +120,7 @@ const messages = {
     forbidden: '你没有执行此操作的权限。',
     notFound: '组织不存在，或你已不再属于该组织。',
     slugConflict: '该组织标识已被使用。',
+    suspended: '该组织已被停用，请联系 Zmail 客服恢复。',
     invitationInvalid: '该邀请无效、已撤销或已被使用。',
     invitationExpired: '该邀请已过期，请联系组织管理员重新邀请。',
     invitationEmailMismatch: '该邀请属于另一个账号邮箱。',

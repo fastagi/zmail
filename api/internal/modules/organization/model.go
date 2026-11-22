@@ -13,9 +13,14 @@ type OrganizationPO struct {
 	Name      string `gorm:"size:100;not null"`
 	Slug      string `gorm:"size:50;not null;uniqueIndex"`
 	CreatedBy uint   `gorm:"not null;index"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Creator   user.UserPO `gorm:"foreignKey:CreatedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
+	// SuspendedAt is set while a platform operator has suspended the organization.
+	SuspendedAt      *time.Time
+	SuspensionReason string `gorm:"size:500;not null;default:''"`
+	// DailySendLimit, when set by a platform operator, replaces the instance limit of every lane.
+	DailySendLimit *int
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	Creator        user.UserPO `gorm:"foreignKey:CreatedBy;references:ID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT"`
 }
 
 // TableName returns the stable organization table name.

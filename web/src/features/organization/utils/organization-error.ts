@@ -17,6 +17,7 @@ export type OrganizationErrorKey =
   | 'errors.ownershipTransferTargetInvalid'
   | 'errors.rateLimited'
   | 'errors.slugConflict'
+  | 'errors.suspended'
   | 'errors.unavailable';
 
 export function resolveOrganizationErrorKey(error: unknown): OrganizationErrorKey {
@@ -44,6 +45,9 @@ export function resolveOrganizationErrorKey(error: unknown): OrganizationErrorKe
   if (error.errorCode === ApiErrorCode.ORGANIZATION_NOT_FOUND) {
     return 'errors.notFound';
   }
+  if (error.errorCode === ApiErrorCode.ORGANIZATION_SUSPENDED) {
+    return 'errors.suspended';
+  }
   if (error.errorCode === ApiErrorCode.ORGANIZATION_SLUG_ALREADY_EXISTS) {
     return 'errors.slugConflict';
   }
@@ -68,15 +72,10 @@ export function resolveOrganizationErrorKey(error: unknown): OrganizationErrorKe
   if (error.errorCode === ApiErrorCode.ORGANIZATION_MEMBER_NOT_FOUND) {
     return 'errors.memberNotFound';
   }
-  if (
-    error.errorCode === ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_REQUIRED
-  ) {
+  if (error.errorCode === ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_REQUIRED) {
     return 'errors.ownershipTransferRequired';
   }
-  if (
-    error.errorCode ===
-    ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_TARGET_INVALID
-  ) {
+  if (error.errorCode === ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_TARGET_INVALID) {
     return 'errors.ownershipTransferTargetInvalid';
   }
   return 'errors.generic';

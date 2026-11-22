@@ -241,9 +241,11 @@ const enUS = {
         actions: 'Actions',
       },
       summaryTitle: 'Summary',
-      summaryDescription: 'Read-only. Members manage the organization from the product.',
+      summaryDescription: 'Members manage the organization from the product.',
       fields: {
         id: 'ID',
+        status: 'Status',
+        sendLimit: 'Daily send limit',
         slug: 'Slug',
         members: 'Members',
         createdBy: 'Created by',
@@ -260,6 +262,56 @@ const enUS = {
       errors: {
         notFound: 'This organization does not exist.',
         unavailable: 'Organizations are unavailable right now. Try again shortly.',
+        reasonRequired: 'Enter a reason of up to 500 characters.',
+        limitInvalid: 'Enter a whole number from 0 to 1,000,000, or leave it empty.',
+        rejected: 'The change was rejected. Check the values and try again.',
+      },
+      status: {
+        active: 'Active',
+        suspended: 'Suspended',
+        suspendedSince: 'Suspended {{date}}',
+      },
+      sendLimit: {
+        instance: 'Instance default',
+        value_one: '{{count}} message a day',
+        value_other: '{{count}} messages a day',
+      },
+      controls: {
+        title: 'Controls',
+        description:
+          'Suspend the organization or change its daily send limit. Every change is audited.',
+        statusLabel: 'Status',
+        suspendHint:
+          'Members and API keys are refused and nothing more is sent. Mail still arrives.',
+        restoreHint: 'Members, API keys and sending work again.',
+        suspend: 'Suspend organization',
+        restore: 'Restore organization',
+        limitLabel: 'Daily send limit',
+        limitHint:
+          'Applies to every send lane and replaces the new-organization cap. Leave empty for the instance default.',
+        limitPlaceholder: 'Instance default',
+        saveLimit: 'Save limit',
+        clearLimit: 'Use instance default',
+        reasonLabel: 'Reason',
+        reasonPlaceholder: 'Spam complaints from recipients',
+        cancel: 'Cancel',
+        confirm: {
+          suspend: {
+            title: 'Suspend {{name}}?',
+            description:
+              'Members can no longer use the organization, its API keys stop working and queued mail stays unsent until you restore it.',
+          },
+          restore: {
+            title: 'Restore {{name}}?',
+            description:
+              'Members, API keys and sending resume at once, including mail that waited.',
+          },
+        },
+        done: {
+          suspend: '{{name}} is suspended.',
+          restore: '{{name}} is restored.',
+          setSendLimit: 'Daily send limit for {{name}} saved.',
+        },
       },
     },
     webhooks: {
@@ -780,9 +832,11 @@ const zhHans = {
         actions: '操作',
       },
       summaryTitle: '概要',
-      summaryDescription: '只读。组织由其成员在产品内管理。',
+      summaryDescription: '组织由其成员在产品内管理。',
       fields: {
         id: 'ID',
+        status: '状态',
+        sendLimit: '每日发信额度',
         slug: '标识',
         members: '成员数',
         createdBy: '创建者',
@@ -799,6 +853,51 @@ const zhHans = {
       errors: {
         notFound: '该组织不存在。',
         unavailable: '暂时无法加载组织，请稍后重试。',
+        reasonRequired: '请填写原因，最多 500 字。',
+        limitInvalid: '请输入 0 到 1,000,000 之间的整数，或留空。',
+        rejected: '修改被拒绝，请检查后重试。',
+      },
+      status: {
+        active: '正常',
+        suspended: '已停用',
+        suspendedSince: '{{date}} 停用',
+      },
+      sendLimit: {
+        instance: '系统默认',
+        value_one: '每天 {{count}} 封',
+        value_other: '每天 {{count}} 封',
+      },
+      controls: {
+        title: '管理',
+        description: '停用组织或调整每日发信额度。所有修改都会记入审计日志。',
+        statusLabel: '状态',
+        suspendHint: '成员和 API 密钥将被拒绝，不再发出任何邮件；仍然正常收信。',
+        restoreHint: '恢复后成员、API 密钥和发信立即可用。',
+        suspend: '停用组织',
+        restore: '恢复组织',
+        limitLabel: '每日发信额度',
+        limitHint: '适用于所有发信通道，并取代新组织限额。留空则使用系统默认。',
+        limitPlaceholder: '系统默认',
+        saveLimit: '保存额度',
+        clearLimit: '恢复系统默认',
+        reasonLabel: '原因',
+        reasonPlaceholder: '收件人大量投诉垃圾邮件',
+        cancel: '取消',
+        confirm: {
+          suspend: {
+            title: '停用 {{name}}？',
+            description: '成员将无法使用该组织，API 密钥失效，排队中的邮件在恢复前都不会发出。',
+          },
+          restore: {
+            title: '恢复 {{name}}？',
+            description: '成员、API 密钥和发信立即恢复，包括排队等待的邮件。',
+          },
+        },
+        done: {
+          suspend: '已停用 {{name}}。',
+          restore: '已恢复 {{name}}。',
+          setSendLimit: '已保存 {{name}} 的每日发信额度。',
+        },
       },
     },
     webhooks: {

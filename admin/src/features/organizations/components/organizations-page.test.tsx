@@ -1,7 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import '@/i18n';
+import { OrganizationControls } from '@/features/organizations/components/organization-controls';
+import { parseSendLimit } from '@/features/organizations/send-limit';
 import { OrganizationDetailPage } from '@/features/organizations/components/organization-detail-page';
 import { OrganizationsPage } from '@/features/organizations/components/organizations-page';
 
@@ -35,6 +37,9 @@ const acme = {
   slug: 'acme',
   created_by: 3,
   member_count: 2,
+  suspended_at: null,
+  suspension_reason: '',
+  daily_send_limit: null,
   created_at: '2026-09-01T00:00:00Z',
   updated_at: '2026-09-02T00:00:00Z',
 };
@@ -168,5 +173,94 @@ describe('OrganizationDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /all organizations/i }));
     expect(onBack).toHaveBeenCalled();
+  });
+});
+
+describe('OrganizationControls', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('parses the send limit field', () => {
+    expect(parseSendLimit('')).toBeNull();
+    expect(parseSendLimit(' 5000 ')).toBe(5000);
+    expect(parseSendLimit('1000000')).toBe(1000000);
+    expect(parseSendLimit('1000001')).toBeUndefined();
+    expect(parseSendLimit('-1')).toBeUndefined();
+    expect(parseSendLimit('1.5')).toBeUndefined();
+    expect(parseSendLimit('abc')).toBeUndefined();
+  });
+
+  it('suspends only with a reason, after confirmation', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        json({
+          code: 0,
+          message: 'success',
+          data: { ...acme, suspended_at: '2026-11-22T00:00:00Z', suspension_reason: 'spam' },
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(withQueryClient(<OrganizationControls organization={acme} />));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suspend organization' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Suspend organization' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Enter a reason');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: '  spam  ' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Suspend organization' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/operator/organizations/7/suspend',
+        expect.objectContaining({ method: 'POST', body: JSON.stringify({ reason: 'spam' }) }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('offers restore for a suspended organization', () => {
+    render(
+      withQueryClient(
+        <OrganizationControls
+          organization={{ ...acme, suspended_at: '2026-11-22T00:00:00Z', suspension_reason: 'x' }}
+        />,
+      ),
+    );
+    expect(screen.getByRole('button', { name: 'Restore organization' })).toBeInTheDocument();
+  });
+
+  it('saves and clears the daily send limit', async () => {
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) =>
+      Promise.resolve(
+        json({
+          code: 0,
+          message: 'success',
+          data: { ...acme, ...(JSON.parse(String(init.body)) as object) },
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(withQueryClient(<OrganizationControls organization={acme} />));
+
+    const field = screen.getByLabelText('Daily send limit');
+    fireEvent.change(field, { target: { value: '12x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save limit' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('whole number');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.change(field, { target: { value: '5000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save limit' }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/v1/operator/organizations/7/send-limit',
+        expect.objectContaining({
+          method: 'PUT',
+          body: JSON.stringify({ daily_send_limit: 5000 }),
+        }),
+      ),
+    );
   });
 });

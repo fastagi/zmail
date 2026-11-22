@@ -117,6 +117,7 @@ func (f *fakeMemberships) ListMembershipsByUserIDs(ctx context.Context, organiza
 // fakeRepository is an in-memory domain.MailboxRepository for service tests.
 type fakeRepository struct {
 	organizationCreatedAt map[uint]time.Time
+	sendPolicies          map[uint]domain.OrganizationSendPolicy
 	mailboxes             map[uint]*domain.Mailbox
 	// members is keyed by mailbox id and membership id.
 	members      map[[2]uint]*domain.MailboxMember
@@ -793,8 +794,10 @@ func (r *fakeRepository) CountPersonalOutcomesSince(_ context.Context, organizat
 	return attempted, bounced, complained, nil
 }
 
-func (r *fakeRepository) OrganizationCreatedAt(_ context.Context, organizationID uint) (time.Time, error) {
-	return r.organizationCreatedAt[organizationID], nil
+func (r *fakeRepository) OrganizationSendPolicy(_ context.Context, organizationID uint) (domain.OrganizationSendPolicy, error) {
+	policy := r.sendPolicies[organizationID]
+	policy.CreatedAt = r.organizationCreatedAt[organizationID]
+	return policy, nil
 }
 
 func (r *fakeRepository) CountOutboundSince(_ context.Context, organizationID uint, lane domain.SendLane, _ time.Time) (int64, error) {
@@ -2253,5 +2256,32 @@ func TestPersonalSendingPausesAtTheBounceRate(t *testing.T) {
 	fixture.repo.events[first.ID] = []domain.MailEvent{{Type: domain.MailEventDelivered}}
 	if _, _, err := fixture.service.SendMessage(context.Background(), as(1), mailbox.ID, input); err != nil {
 		t.Fatalf("send below the bounce rate: %v", err)
+	}
+}
+
+func TestOperatorSendPolicyReplacesTheLaneLimits(t *testing.T) {
+	fixture := newServiceFixture(t)
+	fixture.service.settings.DailySendLimit = 1
+	fixture.service.settings.NewOrganizationDailySendLimit = 1
+	fixture.service.settings.NewOrganizationPeriod = 7 * 24 * time.Hour
+	raised := 3
+	fixture.repo.organizationCreatedAt = map[uint]time.Time{1: fixture.now.Add(-time.Hour)}
+	fixture.repo.sendPolicies = map[uint]domain.OrganizationSendPolicy{
+		1: {DailySendLimit: &raised},
+		2: {Suspended: true, DailySendLimit: &raised},
+	}
+	input := SendInput{To: []string{"x@example.com"}, Subject: "s", Text: "b"}
+
+	young := fixture.mailbox(t, 1, "young")
+	for i := 0; i < raised; i++ {
+		message, _, err := fixture.service.SendMessage(context.Background(), as(1), young.ID, input)
+		if err != nil || message.QueuedReason != "" {
+			t.Fatalf("send %d = %+v, %v; want it sent under the operator's limit, past the new-organization cap", i+1, message, err)
+		}
+	}
+
+	suspended := fixture.mailbox(t, 2, "suspended")
+	if _, _, err := fixture.service.SendMessage(context.Background(), as(2), suspended.ID, input); !errors.Is(err, ErrMailSendLimitReached) {
+		t.Fatalf("send of a suspended organization error = %v; want ErrMailSendLimitReached", err)
 	}
 }

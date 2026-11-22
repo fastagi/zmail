@@ -125,6 +125,7 @@ const messages = {
     forbidden: 'You do not have permission to perform this operation.',
     notFound: 'The organization does not exist, or you are no longer a member.',
     slugConflict: 'That organization slug is already in use.',
+    suspended: 'This organization is suspended. Contact Zmail support to restore it.',
     invitationInvalid: 'This invitation is invalid, revoked, or already used.',
     invitationExpired: 'This invitation expired. Ask an organization administrator for a new one.',
     invitationEmailMismatch: 'This invitation belongs to another account email.',

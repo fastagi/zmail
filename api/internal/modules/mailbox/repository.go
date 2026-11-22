@@ -686,16 +686,24 @@ func (r *repository) CountPersonalOutcomesSince(ctx context.Context, organizatio
 	return outcome.Attempted, outcome.Bounced, outcome.Complained, err
 }
 
-func (r *repository) OrganizationCreatedAt(ctx context.Context, organizationID uint) (time.Time, error) {
+func (r *repository) OrganizationSendPolicy(ctx context.Context, organizationID uint) (domain.OrganizationSendPolicy, error) {
 	if r.db == nil {
-		return time.Time{}, domain.ErrServiceUnavailable
+		return domain.OrganizationSendPolicy{}, domain.ErrServiceUnavailable
 	}
-	var createdAt []time.Time
-	err := r.conn(ctx).Table("organizations").Where("id = ?", organizationID).Limit(1).Pluck("created_at", &createdAt).Error
-	if err != nil || len(createdAt) == 0 {
-		return time.Time{}, err
+	var rows []struct {
+		CreatedAt      time.Time
+		Suspended      bool
+		DailySendLimit *int
 	}
-	return createdAt[0], nil
+	err := r.conn(ctx).Table("organizations").
+		Select("created_at, suspended_at IS NOT NULL AS suspended, daily_send_limit").
+		Where("id = ?", organizationID).Limit(1).Scan(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return domain.OrganizationSendPolicy{}, err
+	}
+	return domain.OrganizationSendPolicy{
+		CreatedAt: rows[0].CreatedAt, Suspended: rows[0].Suspended, DailySendLimit: rows[0].DailySendLimit,
+	}, nil
 }
 
 // laneAttempts selects the organization's outbound attempts in one lane since the given time.
