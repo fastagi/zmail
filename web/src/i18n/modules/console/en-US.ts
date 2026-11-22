@@ -25,7 +25,6 @@ const messages = {
     welcomeDescription:
       "Send and receive your organization's mail, manage contacts and templates, and broadcast product updates.",
     open: 'Open',
-    gettingStartedTitle: 'Getting started',
     quickLinks: {
       emails: {
         title: 'Emails',
@@ -52,44 +51,58 @@ const messages = {
         title: 'API access',
         description: 'Manage user-owned API keys and account settings.',
       },
-      styleguide: {
-        title: 'Styleguide',
-        description: 'Browse the design system and component gallery.',
-      },
-      i18nTest: {
-        title: 'Internationalization test',
-        description: 'Inspect the next-intl translation tree.',
-      },
     },
-    developerStepsTitle: 'Next steps',
-    developerSteps: {
-      apiBefore: 'Point',
-      apiAfter: 'at a contract-compatible production endpoint or adapter.',
-      replaceBefore: 'Replace this page (',
-      replaceAfter: ') with your real business workspace.',
-      featuresBefore: 'Add new features to',
-      featuresBetween: 'and expose them through routes under',
-      featuresAfter: '.',
-    },
-    onboarding: {
+    setup: {
+      title: 'Set up your team mail',
+      titleNoTeam: 'Set up Zmail for your team',
+      description:
+        'From a new account to every colleague with a team mailbox. Each step ticks as it happens.',
+      progress: '{done} of {total} done',
+      state: {
+        done: 'Done',
+        skipped: 'Skipped',
+        waiting: 'In progress',
+      },
       team: {
         title: 'Create your team',
-        hint: 'Done.',
-      },
-      mailbox: {
-        title: 'Create your first mailbox',
-        hint: 'An address such as hello@ that your team sends and receives from.',
-      },
-      invite: {
-        title: 'Invite your colleagues',
-        hint: 'They get an email with a link to join; it ticks once someone accepts.',
+        short: 'Mailboxes, members and domains belong to a team.',
+        created: 'Team {name} created. Carry on with the steps below.',
       },
       domain: {
-        title: 'Use your own domain (optional)',
-        hint: "Send from @your-company.com instead of the shared domain. You'll change your domain's name servers once.",
+        title: 'Connect your company domain',
+        short: 'Mail from @your-company.com, set up by Zmail.',
+        hint: 'Mail from @your-company.com earns more trust than a shared address. Zmail sets up the mail records; you change the name servers at your registrar once, which usually takes effect within a few hours.',
+        action: 'Connect domain',
+        view: 'See progress',
+        skip: 'Just for me — use @{shared}',
+        skipped: 'Using @{shared} for now.',
+        undoSkip: 'Connect a domain instead',
+        pendingZone:
+          'Waiting for the name servers of {zone} to change at your registrar. Zmail checks every 10 minutes and finishes the rest by itself.',
+        settingUp: 'Setting up the mail records for {domain}. This takes about a minute.',
+        pendingRecords: 'Some DNS records for {domain} are not ready yet.',
+        verified: '{domain} is verified.',
       },
-      more: 'Ready for more?',
-      moreLink: 'Send a product update to a contact list',
+      mailbox: {
+        title: 'Create your mailbox',
+        short: 'Your own address, or a shared one like hello@.',
+        hint: 'Start with your own address, or a shared one such as hello@ that several people answer.',
+        action: 'Create a mailbox',
+        actionDomain: 'Create a mailbox on @{domain}',
+        done: '{count, plural, one {# mailbox} other {# mailboxes}} so far.',
+      },
+      invite: {
+        title: 'Invite colleagues and give them mailboxes',
+        short: 'They join by email; then each gets a mailbox.',
+        hint: 'Each colleague gets an email with a join link. Once they join, give each of them a mailbox of their own.',
+        action: 'Invite colleagues',
+        manage: 'See who joined',
+        status: '{joined} joined · {pending} not yet',
+        statusJoined: '{joined} joined',
+        noMailbox:
+          '{count, plural, one {# colleague has} other {# colleagues have}} no mailbox yet',
+        giveMailbox: 'Create their mailboxes',
+      },
     },
   },
 } as const;

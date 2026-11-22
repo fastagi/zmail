@@ -2,7 +2,19 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { Check, Globe, Inbox, ListTree, Plus, RefreshCw, Trash2, Wrench } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import {
+  Check,
+  ChevronRight,
+  Globe,
+  Inbox,
+  ListTree,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Wrench,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -28,11 +40,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { getMailZoneDnsRoute } from '@/constants/routes';
-import { CloudflareConnectionForm } from './cloudflare-connection';
+import { getMailZoneDnsRoute, ROUTES } from '@/constants/routes';
+import { CloudflareConnectionForm, useCloudflareConnection } from './cloudflare-connection';
 import { CreateMailboxForm } from '@/features/mailbox/components/create-mailbox-form';
 import { MailDomainTestChecklist } from '@/features/mailbox/components/mail-domain-test-checklist';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
+import { useDomainReadyNotices } from '@/features/mailbox/hooks/use-domain-ready-notices';
 import { CopyButton, ErrorAlert } from '@/features/mailbox/components/mail-shared';
 import { MailZoneNameservers } from '@/features/mailbox/components/mail-zone-nameservers';
 import {
@@ -81,8 +94,22 @@ const recordStatusKey = {
 export function ConnectedDomains({ enabled, canManage }: { enabled: boolean; canManage: boolean }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
+  const router = useRouter();
   const domains = useMailDomains(organizationId, enabled);
   const zones = useListMailZones(organizationId, enabled);
+  useDomainReadyNotices(domains.data, {
+    onZoneActive: zone => toast.message(t('domain.zoneActive', { zone })),
+    onReady: domain =>
+      toast.success(t('domain.domainReady', { domain }), {
+        action: canManage
+          ? {
+              label: t('domain.domainReadyAction'),
+              onClick: () =>
+                router.push(mailOrganizationHref(ROUTES.CONSOLE.MAILBOXES, organizationId)),
+            }
+          : undefined,
+      }),
+  });
   // A managed zone no domain lives in any more can be edited or removed on its own.
   const unusedZones =
     zones.data && domains.data
@@ -127,9 +154,8 @@ export function ConnectedDomains({ enabled, canManage }: { enabled: boolean; can
           )}
           {canManage ? (
             <>
-              <p className="text-sm text-muted-foreground">{t('domain.methodsIntro')}</p>
-              <CloudflareConnectionForm key={organizationId} organizationId={organizationId} />
               <ConnectDomainForm />
+              <OwnCloudflareAccount key={organizationId} organizationId={organizationId} />
             </>
           ) : (
             <p className="text-xs text-muted-foreground">{t('domain.connectReadOnly')}</p>
@@ -137,6 +163,35 @@ export function ConnectedDomains({ enabled, canManage }: { enabled: boolean; can
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * The way for a domain whose DNS stays in the organization's own Cloudflare account. Few need it,
+ * so it stays folded unless the organization already connected an account.
+ */
+function OwnCloudflareAccount({ organizationId }: { organizationId: number }) {
+  const t = useT('mailbox');
+  const connection = useCloudflareConnection(organizationId);
+  const [open, setOpen] = useState<boolean | null>(null);
+  const connected = Boolean(connection.data?.connection);
+  return (
+    <details
+      open={open ?? connected}
+      onToggle={event => setOpen(event.currentTarget.open)}
+      className="group rounded-md border"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium focus-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
+          aria-hidden="true"
+        />
+        {t('domain.cfSummary')}
+      </summary>
+      <div className="border-t p-3">
+        <CloudflareConnectionForm organizationId={organizationId} />
+      </div>
+    </details>
   );
 }
 
@@ -282,7 +337,7 @@ function ConnectDomainForm() {
 
   return (
     <form
-      className="space-y-3 border-t pt-4"
+      className="space-y-3 rounded-md border bg-muted/20 p-4"
       aria-labelledby="mail-domain-connect-title"
       onSubmit={submit}
     >
@@ -518,8 +573,9 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
           </Button>
         ) : null}
         {settingUp ? (
-          <p className="text-sm text-muted-foreground" role="status">
-            {t('domain.settingUpHint')}
+          <p className="flex items-start gap-2 text-sm text-muted-foreground" role="status">
+            <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
+            <span>{t('domain.settingUpHint')}</span>
           </p>
         ) : !verified && !zonePending ? (
           <p className="text-sm text-muted-foreground">{t('domain.pendingHint')}</p>
@@ -546,7 +602,12 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
             onCheck={() => void run('checks')}
           />
         ) : null}
-        {domain.records.length > 0 ? <RecordTable records={domain.records} /> : null}
+        {domain.records.length > 0 ? (
+          <>
+            <RecordTable records={domain.records} />
+            <RecordHelp domain={domain} />
+          </>
+        ) : null}
         {verified && !settingUp && canManage && domain.capability === 'send_only' ? (
           <div className="flex flex-wrap items-center gap-3">
             <Button
@@ -890,6 +951,31 @@ function ZoneCard({ zone, canManage }: { zone: MailZone; canManage: boolean }) {
         </Dialog>
       ) : null}
     </article>
+  );
+}
+
+/** What each kind of record the domain needs is for, in plain words, for the purposes it has. */
+function RecordHelp({ domain }: { domain: MailDomain }) {
+  const t = useT('mailbox');
+  const purposes = new Set(domain.records.map(record => record.purpose));
+  const titleId = `mail-domain-${domain.id}-records-help`;
+  const lines = [
+    purposes.has('receiving') ? t('domain.recordHelpReceiving', { domain: domain.name }) : null,
+    purposes.has('sending') ? t('domain.recordHelpSending') : null,
+    purposes.has('dmarc') ? t('domain.recordHelpDmarc') : null,
+  ].filter((line): line is string => line !== null);
+  return (
+    <div className="space-y-1.5 rounded-md bg-muted/40 p-3 text-sm">
+      <p id={titleId} className="font-medium">
+        {t('domain.recordHelpTitle')}
+      </p>
+      <ul aria-labelledby={titleId} className="list-disc space-y-1 pl-5 text-muted-foreground">
+        {lines.map(line => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted-foreground">{t('domain.recordHelpAuto')}</p>
+    </div>
   );
 }
 

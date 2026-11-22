@@ -37,6 +37,11 @@ import type {
 export const MAIL_PAGE_SIZE = 20;
 /** How often a domain whose setup runs is read again. */
 const setupRefreshMs = 3_000;
+/**
+ * While a managed zone waits for its registrar's name servers, the API looks at it every few
+ * minutes; reading the list once a minute shows the change soon after without asking Cloudflare.
+ */
+const zoneRefreshMs = 60_000;
 export const MAIL_STATS_DAYS = 7;
 export {
   MAIL_REFRESH_MS,
@@ -100,9 +105,13 @@ export function useMailDomains(organizationId: number, enabled: boolean) {
     queryKey: mailboxKeys.mailDomains(organizationId),
     queryFn: () => mailboxService.mailDomains(organizationId),
     enabled: enabled && validId(organizationId),
-    // A setup runs in the background on the API; follow it until it is done.
+    // A setup runs in the background on the API, and a pending zone activates there; follow both.
     refetchInterval: query =>
-      query.state.data?.some(domain => domain.setting_up) ? setupRefreshMs : false,
+      query.state.data?.some(domain => domain.setting_up)
+        ? setupRefreshMs
+        : query.state.data?.some(domain => domain.zone?.status === 'pending')
+          ? zoneRefreshMs
+          : false,
     meta: LOCAL_ERROR_HANDLING_META,
   });
 }

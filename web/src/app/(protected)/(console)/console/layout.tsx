@@ -10,7 +10,6 @@ import {
   Bell,
   LogOut,
   ArrowUpLeft,
-  Palette,
   Building2,
   FolderOpen,
   Gauge,
@@ -41,7 +40,6 @@ import { useT, type AllTranslationKeys } from '@/i18n';
 import { useLogout } from '@/features/auth/hooks/use-auth';
 import { useAuthStore } from '@/features/auth/store/auth-store';
 import { isWebFeatureEnabled } from '@/config/features';
-import { isDevtoolsEnabled } from '@/config/devtools';
 import { useChosenMemberFeatures } from '@/features/mailbox/hooks/use-mail-organization';
 import type { MemberFeature } from '@/features/organization/types';
 
@@ -182,15 +180,6 @@ export default function ConsoleLayout({ children }: { children: React.ReactNode 
   );
 
   const secondaryNavItems: NavItem[] = [
-    ...(isDevtoolsEnabled()
-      ? [
-          {
-            titleKey: 'nav.styleguide' as const,
-            href: ROUTES.DEVTOOLS.STYLEGUIDE,
-            icon: Palette,
-          },
-        ]
-      : []),
     {
       titleKey: 'nav.settings',
       href: ROUTES.CONSOLE.SETTINGS,

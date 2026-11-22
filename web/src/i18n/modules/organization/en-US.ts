@@ -66,12 +66,12 @@ const messages = {
     'The selected member becomes owner and your role changes to administrator.',
   transferOwnershipSuccess: 'Organization ownership transferred',
   confirm: 'Confirm',
-  invitationsTitle: 'Organization invitations',
+  invitationsTitle: 'Invite colleagues',
   invitationsDescription:
-    'Invite members and review invitation history without exposing one-time tokens.',
+    'Invite colleagues to the team and see who joined and who has not.',
   invite: 'Invite member',
   inviteDescription:
-    'The invitation is bound to the recipient account email and selected organization role.',
+    'They get an email with a join link and join by signing in with this address.',
   email: 'Email',
   emailPlaceholder: 'member@example.com',
   emailInvalid: 'Enter a valid email address',
@@ -79,7 +79,7 @@ const messages = {
   sendInvitation: 'Send invitation',
   invitationCreated: 'Invitation created',
   emailSendStatus: {
-    accepted_by_provider: 'The email provider accepted the message',
+    accepted_by_provider: 'The invitation email was sent.',
     failed: 'The invitation was saved, but email delivery failed',
     not_configured: 'The invitation was saved, but email is not configured',
   },
@@ -104,11 +104,16 @@ const messages = {
     field: 'Invitation link for {email}',
     acceptHint: 'Only someone signed in as {email} can accept it.',
     done: 'Done',
-    rowHint:
-      'Resending replaces the link: the previous one stops working, and the new one is shown once if links can be copied here.',
-    rowHintWithoutEmail:
-      'A link can be copied only right after inviting or resending. Revoking and inviting again always issues a new one.',
+    rowHint: 'Resending makes a new link; the old one stops working.',
+    rowHintWithoutEmail: 'The link can be copied only right after inviting or resending.',
   },
+  summaryLabel: 'Invitation summary',
+  summaryJoined: '{count} joined',
+  summaryWaiting: '{count} not joined yet',
+  summaryExpired: '{count} expired',
+  reinvite: 'Invite again',
+  reinviteLabel: 'Invite {email} again',
+  reinviteSent: 'Invitation sent to {email} again.',
   resendInvitation: 'Resend',
   resendInvitationLabel: 'Resend the invitation to {email}',
   resendInvitationCooldown: 'Resend in {seconds}s',
@@ -124,7 +129,7 @@ const messages = {
   revokeInvitationDescription:
     'The one-time token will stop working immediately. Invitation history is retained.',
   revokeInvitationSuccess: 'Invitation revoked',
-  noInvitations: 'There is no invitation history yet.',
+  noInvitations: 'No colleagues invited yet. Use Invite member to send the first invitation.',
   acceptInvitation: 'Accept invitation',
   acceptInvitationDescription:
     'Join an organization with the one-time token from your invitation email.',

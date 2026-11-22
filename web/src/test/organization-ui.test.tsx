@@ -648,12 +648,12 @@ describe('organization browser workflow', () => {
       // the new link can be copied depends on MAILBOX_PUBLIC_URL, which the Web cannot see.
       expect(
         screen.getByText(
-          'Resending replaces the link: the previous one stops working, and the new one is shown once if links can be copied here.'
+          'Resending makes a new link; the old one stops working.'
         )
       ).toBeInTheDocument();
       expect(
         screen.getByText(
-          'A link can be copied only right after inviting or resending. Revoking and inviting again always issues a new one.'
+          'The link can be copied only right after inviting or resending.'
         )
       ).toBeInTheDocument();
       expect(screen.queryByText(/oinv_/)).not.toBeInTheDocument();
@@ -674,7 +674,7 @@ describe('organization browser workflow', () => {
       renderWithMessages(<OrganizationOverview organizationId={42} />, 'zh-Hans');
       activateTab('邀请');
       expect(
-        screen.getByText('重发会替换链接：之前的链接随即失效；如果这里可以复制链接，新链接会显示一次。')
+        screen.getByText('重发会生成新链接，旧链接随即失效。')
       ).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: '重发给 again@example.com 的邀请' }));
 

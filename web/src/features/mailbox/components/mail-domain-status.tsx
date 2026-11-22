@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, Circle, Globe, KeyRound, TriangleAlert } from 'lucide-react';
+import { Code2, Globe } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,27 +16,16 @@ import {
 } from '@/features/mailbox/components/mail-organization';
 import { ConnectedDomains } from '@/features/mailbox/components/mail-domains';
 import { EmptyState, ErrorAlert } from '@/features/mailbox/components/mail-shared';
-import { useMailboxDomains, useMailboxes } from '@/features/mailbox/hooks/use-mailbox';
+import { useMailboxDomains } from '@/features/mailbox/hooks/use-mailbox';
 import { useMailOrganization } from '@/features/mailbox/hooks/use-mail-organization';
-import type { MailboxDomain } from '@/features/mailbox/types';
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
-/** `true` and `false` come from the API; `null` is a Cloudflare step this page cannot observe. */
-type StepState = boolean | null;
-
-const apiSettings = [
-  'MAILBOX_PROVIDER=cloudflare',
-  'MAILBOX_CLOUDFLARE_ACCOUNT_ID',
-  'MAILBOX_CLOUDFLARE_API_TOKEN',
-  'MAILBOX_INBOUND_SECRET',
-];
-
 /**
- * Domain console: what the API reports about the configured mail domain, a Cloudflare setup
- * checklist, and how to send with an API key. Everything here is read-only; the configuration
- * lives on the API and in Cloudflare. The limits are those of the chosen organization.
+ * Domain console for an organization: connect its own domain and follow it to verified, then the
+ * shared domain its mailboxes use until then, with the organization's limits. Server settings and
+ * Cloudflare account steps belong to the operator and never show here.
  */
 export function MailDomainStatus() {
   const t = useT('mailbox');
@@ -59,7 +48,6 @@ function DomainStatus({ canManage }: { canManage: boolean }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();
   const domains = useMailboxDomains(organizationId);
-  const mailboxes = useMailboxes(organizationId);
 
   if (domains.isPending) {
     return (
@@ -91,24 +79,30 @@ function DomainStatus({ canManage }: { canManage: boolean }) {
   }
 
   const delivering = domain.provider === 'cloudflare';
-  const sender = mailboxes.data?.[0]?.address ?? `hello@${domain.domain}`;
 
   return (
     <div className="space-y-6">
+      <ConnectedDomains enabled={domain.custom_domains_enabled} canManage={canManage} />
+
       <section aria-labelledby="mail-domain-name" className="rounded-md border">
-        <div className="flex flex-wrap items-center gap-3 border-b p-4">
-          <Globe className="size-5 text-muted-foreground" aria-hidden="true" />
-          <h2 id="mail-domain-name" className="text-lg font-semibold break-all">
-            {domain.domain}
-          </h2>
-          <Badge variant="outline" className="font-normal text-muted-foreground">
-            {t('domain.sharedBadge')}
-          </Badge>
+        <div className="space-y-1 border-b p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Globe className="size-5 text-muted-foreground" aria-hidden="true" />
+            <h2 id="mail-domain-name" className="text-base font-semibold break-all">
+              {domain.domain}
+            </h2>
+            <Badge variant="outline" className="font-normal text-muted-foreground">
+              {t('domain.sharedBadge')}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {t('domain.sharedDescription', { domain: domain.domain })}
+          </p>
         </div>
         <dl className="grid gap-px bg-border sm:grid-cols-2">
           <Fact
             label={t('domain.sending')}
-            hint={t(delivering ? 'domain.providerHintCloudflare' : 'domain.providerHintLog')}
+            hint={delivering ? undefined : t('domain.providerHintLog')}
           >
             <StateBadge good={delivering} testId="mail-domain-provider">
               {t(delivering ? 'domain.providerCloudflare' : 'domain.providerLog')}
@@ -116,9 +110,7 @@ function DomainStatus({ canManage }: { canManage: boolean }) {
           </Fact>
           <Fact
             label={t('domain.inbound')}
-            hint={t(
-              domain.inbound_enabled ? 'domain.inboundHintEnabled' : 'domain.inboundHintDisabled'
-            )}
+            hint={domain.inbound_enabled ? undefined : t('domain.inboundHintDisabled')}
           >
             <StateBadge good={domain.inbound_enabled} testId="mail-domain-inbound">
               {t(domain.inbound_enabled ? 'domain.inboundEnabled' : 'domain.inboundDisabled')}
@@ -133,139 +125,24 @@ function DomainStatus({ canManage }: { canManage: boolean }) {
         </dl>
       </section>
 
-      <ConnectedDomains enabled={domain.custom_domains_enabled} canManage={canManage} />
-
-      <SetupChecklist domain={domain} />
-
-      <section aria-labelledby="mail-domain-api" className="space-y-3 rounded-md border p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <h2 id="mail-domain-api" className="text-base font-semibold">
-              {t('domain.apiTitle')}
-            </h2>
-            <p className="max-w-2xl text-sm text-muted-foreground">{t('domain.apiDescription')}</p>
-          </div>
-          <Button asChild size="sm" variant="outline">
-            <Link href={ROUTES.CONSOLE.SETTINGS}>
-              <KeyRound className="size-4" aria-hidden="true" />
-              {t('domain.apiKeys')}
-            </Link>
-          </Button>
+      <section
+        aria-labelledby="mail-domain-api"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-4"
+      >
+        <div className="min-w-0 space-y-1">
+          <h2 id="mail-domain-api" className="text-base font-semibold">
+            {t('domain.apiTitle')}
+          </h2>
+          <p className="max-w-2xl text-sm text-muted-foreground">{t('domain.apiDescription')}</p>
         </div>
-        <pre
-          aria-label={t('domain.apiExample')}
-          tabIndex={0}
-          className="overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-xs focus-ring"
-        >
-          <code>{apiExample(sender, organizationId)}</code>
-        </pre>
-        <p className="text-xs text-muted-foreground">{t('domain.apiHostNote')}</p>
+        <Button asChild size="sm" variant="outline">
+          <Link href={ROUTES.CONSOLE.DEVELOPERS}>
+            <Code2 className="size-4" aria-hidden="true" />
+            {t('domain.apiOpen')}
+          </Link>
+        </Button>
       </section>
     </div>
-  );
-}
-
-function SetupChecklist({ domain }: { domain: MailboxDomain }) {
-  const t = useT('mailbox');
-  const name = { domain: domain.domain };
-  const delivering = domain.provider === 'cloudflare';
-  const steps: { key: string; state: StepState; title: string; body: ReactNode }[] = [
-    {
-      key: 'routing',
-      state: null,
-      title: t('domain.routingTitle', name),
-      body: t('domain.routingBody'),
-    },
-    {
-      key: 'rule',
-      state: null,
-      title: t('domain.ruleTitle'),
-      body: t('domain.ruleBody', name),
-    },
-    {
-      key: 'sending',
-      state: delivering,
-      title: t('domain.sendingTitle', name),
-      body: t('domain.sendingBody'),
-    },
-    {
-      key: 'inbound',
-      state: domain.inbound_enabled,
-      title: t('domain.inboundTitle'),
-      body: t('domain.inboundBody'),
-    },
-    {
-      key: 'config',
-      state: delivering && domain.inbound_enabled ? true : null,
-      title: t('domain.configTitle'),
-      body: (
-        <>
-          {t('domain.configBody')}
-          <span className="mt-1.5 flex flex-wrap gap-1.5">
-            {apiSettings.map(setting => (
-              <code key={setting} className="rounded-sm bg-muted px-1.5 py-0.5 text-xs">
-                {setting}
-              </code>
-            ))}
-          </span>
-        </>
-      ),
-    },
-  ];
-
-  return (
-    <section aria-labelledby="mail-domain-checklist" className="space-y-3 rounded-md border p-4">
-      <div className="space-y-1">
-        <h2 id="mail-domain-checklist" className="text-base font-semibold">
-          {t('domain.checklistTitle')}
-        </h2>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          {t('domain.checklistDescription')}
-        </p>
-      </div>
-      <ol className="divide-y">
-        {steps.map(step => {
-          const Icon =
-            step.state === true ? CheckCircle2 : step.state === false ? TriangleAlert : Circle;
-          const stateLabel = t(
-            step.state === true
-              ? 'domain.stepDone'
-              : step.state === false
-                ? 'domain.stepPending'
-                : 'domain.stepManual'
-          );
-          return (
-            <li
-              key={step.key}
-              data-step={step.key}
-              data-state={step.state === null ? 'manual' : step.state ? 'done' : 'pending'}
-              className="flex gap-3 py-3"
-            >
-              <Icon
-                className={cn(
-                  'mt-0.5 size-4 shrink-0',
-                  step.state === true
-                    ? 'text-success'
-                    : step.state === false
-                      ? 'text-warning'
-                      : 'text-muted-foreground'
-                )}
-                aria-hidden="true"
-              />
-              <div className="min-w-0 flex-1 space-y-0.5">
-                <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                  {step.title}
-                  <Badge variant="outline" className="font-normal text-muted-foreground">
-                    {stateLabel}
-                  </Badge>
-                </p>
-                <div className="text-sm text-muted-foreground">{step.body}</div>
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-    </section>
   );
 }
 
@@ -301,26 +178,4 @@ function StateBadge({
       {children}
     </Badge>
   );
-}
-
-/** A copyable request; the sender is one of the organization's addresses on the real domain. */
-function apiExample(sender: string, organizationId: number): string {
-  const body = JSON.stringify(
-    {
-      from: sender,
-      to: ['bob@example.com'],
-      subject: 'Your receipt',
-      text: 'Thanks for your order.',
-    },
-    null,
-    2
-  );
-  return [
-    'curl -X POST https://YOUR_API_HOST/v1/outbound-mail-messages \\',
-    '  -H "X-API-Key: $FASTBUILD_API_KEY" \\',
-    `  -H "Organization-Id: ${organizationId}" \\`,
-    '  -H "Idempotency-Key: receipt-1042" \\',
-    '  -H "Content-Type: application/json" \\',
-    `  -d '${body}'`,
-  ].join('\n');
 }

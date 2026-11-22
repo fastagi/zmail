@@ -1,38 +1,31 @@
 import Link from 'next/link';
-import {
-  Activity,
-  ArrowUpRight,
-  Code2,
-  FileText,
-  Inbox,
-  KeyRound,
-  Mail,
-  Megaphone,
-  Rocket,
-  Users,
-} from 'lucide-react';
+import { ArrowUpRight, FileText, Inbox, KeyRound, Mail, Megaphone, Users } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { isDevtoolsEnabled } from '@/config/devtools';
 import { ROUTES } from '@/constants/routes';
-import { getSessionUser } from '@/features/auth/server/session';
 import { LazyOnboardingChecklist } from '@/features/mailbox/components/onboarding-checklist-lazy';
 import { getT } from '@/i18n/server';
 
 import { GreetingClock } from './_components/greeting-clock';
 
 /**
- * Console home (RSC): the Zmail areas a member works in, and a getting-started
- * checklist ticked from what the team has done.
+ * Console home (RSC): the setup guide first, until the team is set up, then the Zmail areas a
+ * member works in.
  *
- * Pattern: page is a Server Component; the only client island is
- * `GreetingClock` which re-renders the wall-clock every minute.
+ * Pattern: page is a Server Component; the client islands are `GreetingClock`, which greets the
+ * signed-in user by name and re-renders the wall-clock every minute, and the lazy setup guide.
  */
 export default async function ConsoleHomePage() {
-  const [user, t] = await Promise.all([getSessionUser(), getT('console')]);
+  const t = await getT('console');
 
   const quickLinks = [
+    {
+      title: t('home.quickLinks.mailboxes.title'),
+      description: t('home.quickLinks.mailboxes.description'),
+      href: ROUTES.CONSOLE.MAILBOXES,
+      icon: Mail,
+    },
     {
       title: t('home.quickLinks.emails.title'),
       description: t('home.quickLinks.emails.description'),
@@ -58,49 +51,29 @@ export default async function ConsoleHomePage() {
       icon: FileText,
     },
     {
-      title: t('home.quickLinks.mailboxes.title'),
-      description: t('home.quickLinks.mailboxes.description'),
-      href: ROUTES.CONSOLE.MAILBOXES,
-      icon: Mail,
-    },
-    {
       title: t('home.quickLinks.apiAccess.title'),
       description: t('home.quickLinks.apiAccess.description'),
       href: ROUTES.CONSOLE.SETTINGS,
       icon: KeyRound,
     },
-    ...(isDevtoolsEnabled()
-      ? [
-          {
-            title: t('home.quickLinks.styleguide.title'),
-            description: t('home.quickLinks.styleguide.description'),
-            href: ROUTES.DEVTOOLS.STYLEGUIDE,
-            icon: Code2,
-          },
-          {
-            title: t('home.quickLinks.i18nTest.title'),
-            description: t('home.quickLinks.i18nTest.description'),
-            href: ROUTES.DEVTOOLS.I18N_TEST,
-            icon: Activity,
-          },
-        ]
-      : []),
   ];
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8 md:py-12">
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <GreetingClock name={user?.name ?? user?.email ?? t('home.defaultUser')} />
+          <GreetingClock />
           <p className="mt-1 text-sm text-text-muted">{t('home.welcomeDescription')}</p>
         </div>
-        <Button asChild>
+        <Button asChild variant="ghost" size="sm">
           <Link href={ROUTES.SITE.HOME}>
             {t('returnToSite')}
             <ArrowUpRight className="ml-1.5 h-4 w-4" />
           </Link>
         </Button>
       </header>
+
+      <LazyOnboardingChecklist />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {quickLinks.map(({ title, description, href, icon: Icon }, index) => (
@@ -130,41 +103,6 @@ export default async function ConsoleHomePage() {
         ))}
       </section>
 
-      <LazyOnboardingChecklist />
-
-      {isDevtoolsEnabled() ? (
-        <section className="mt-10 rounded-xl border bg-bg-surface p-6">
-          <div className="flex items-start gap-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Rocket className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold">{t('home.developerStepsTitle')}</h2>
-              <ul className="mt-2 space-y-1 text-sm text-text-muted">
-                <li>
-                  {t('home.developerSteps.apiBefore')}{' '}
-                  <code className="font-mono text-xs">NEXT_PUBLIC_API_URL</code>{' '}
-                  {t('home.developerSteps.apiAfter')}
-                </li>
-                <li>
-                  {t('home.developerSteps.replaceBefore')}
-                  <code className="font-mono text-xs">
-                    src/app/(protected)/(console)/console/page.tsx
-                  </code>
-                  {t('home.developerSteps.replaceAfter')}
-                </li>
-                <li>
-                  {t('home.developerSteps.featuresBefore')}{' '}
-                  <code className="font-mono text-xs">src/features/</code>{' '}
-                  {t('home.developerSteps.featuresBetween')}{' '}
-                  <code className="font-mono text-xs">(protected)/(console)/</code>
-                  {t('home.developerSteps.featuresAfter')}
-                </li>
-              </ul>
-            </div>
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }
