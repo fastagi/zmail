@@ -57,7 +57,16 @@ export interface GoApiRequest {
    */
   responseType?: 'binary' | 'json';
   maxResponseBytes?: number;
+  /**
+   * Replaces the client timeout for this request only, for a route whose upstream work has a longer
+   * documented budget (such as an IMAP sign-in). A whole number of milliseconds from 1 to
+   * `MAX_REQUEST_TIMEOUT_MS`.
+   */
+  timeoutMs?: number;
 }
+
+/** The longest per-request timeout a route may ask for. */
+export const MAX_REQUEST_TIMEOUT_MS = 120_000;
 
 export interface GoApiSuccessEnvelope {
   code: 0;
@@ -160,7 +169,15 @@ export class GoApiClient {
       headers.set('x-forwarded-for', clientIp);
     }
 
-    const timeoutSignal = AbortSignal.timeout(this.config.timeoutMs);
+    if (
+      options.timeoutMs !== undefined &&
+      (!Number.isSafeInteger(options.timeoutMs) ||
+        options.timeoutMs < 1 ||
+        options.timeoutMs > MAX_REQUEST_TIMEOUT_MS)
+    ) {
+      throw new Error('Go API request timeout must be a bounded whole number of milliseconds');
+    }
+    const timeoutSignal = AbortSignal.timeout(options.timeoutMs ?? this.config.timeoutMs);
     const combinedSignal = options.signal
       ? AbortSignal.any([options.signal, timeoutSignal])
       : timeoutSignal;

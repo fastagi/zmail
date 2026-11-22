@@ -249,6 +249,17 @@ export class MockOrganizationStore {
     return emails;
   }
 
+  /** Current members' nicknames, or usernames without one, by user id; for the connection directory mock. */
+  memberDisplayNames(organizationId: number): Map<number, string> {
+    const names = new Map<number, string>();
+    for (const membership of this.memberships) {
+      if (membership.organizationId !== organizationId) continue;
+      const user = this.userRecord(membership.userKey);
+      if (user) names.set(user.id, user.nickname || user.username);
+    }
+    return names;
+  }
+
   /** The membership id of a user in the organization, or null when they are not a member. */
   membershipIdOf(organizationId: number, userId: number): number | null {
     const membership = this.memberships.find(
