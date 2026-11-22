@@ -44,7 +44,7 @@ func (po *ExternalMailSubscriptionPO) toDomain() *domain.ExternalMailSubscriptio
 		PendingAt: po.PendingAt, LastNotifiedAt: po.LastNotifiedAt, LastPushSyncAt: po.LastPushSyncAt,
 		ScheduledSyncAt: po.ScheduledSyncAt, LiveSince: po.LiveSince, DegradedAt: po.DegradedAt,
 		ConsecutiveFailures: po.ConsecutiveFailures,
-		CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
+		CreatedAt:           po.CreatedAt, UpdatedAt: po.UpdatedAt,
 	}
 	if po.LastErrorCode != nil {
 		subscription.LastErrorCode = *po.LastErrorCode
