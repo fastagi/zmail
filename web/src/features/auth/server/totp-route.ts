@@ -7,9 +7,8 @@ import {
   apiJsonBodyErrorResponse,
   apiValidationErrorResponse,
 } from '@/app/api/_shared/error-response';
+import type { AuthRouteBackend } from '@/app/api/_shared/auth-route';
 import { readJsonBody } from '@/app/api/_shared/json-body';
-import { resolveAuthRoute } from '@/app/api/_shared/auth-route';
-import { guardSameOriginMutation } from '@/app/api/_shared/mock-bff';
 import { apiSuccessResponse } from '@/app/api/_shared/success-response';
 import { ApiErrorCode } from '@/http/codes';
 import { forwardAuthenticatedGoApi } from '@/server/api-adapter/authenticated-route';
@@ -18,19 +17,17 @@ const codeSchema = z.object({ code: z.string().trim().min(1).max(32) });
 
 type TotpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
-/** Forwards the signed-in user's two-factor requests; the development mock has no factor store. */
-export async function handleTotpRoute(request: Request, method: TotpMethod, path: string) {
-  const resolution = resolveAuthRoute();
-  if (!resolution.available) {
-    return resolution.response;
-  }
-  if (method !== 'GET') {
-    const sameOriginGuard = guardSameOriginMutation(request);
-    if (sameOriginGuard) {
-      return sameOriginGuard;
-    }
-  }
-  if (resolution.backend === 'mock') {
+/**
+ * Forwards the signed-in user's two-factor requests once the route has resolved its backend and
+ * checked the origin of a mutation; the development mock has no factor store.
+ */
+export async function handleTotpRoute(
+  request: Request,
+  method: TotpMethod,
+  path: string,
+  backend: AuthRouteBackend
+) {
+  if (backend === 'mock') {
     return method === 'GET'
       ? apiSuccessResponse({ available: false, enabled: false, recovery_codes_remaining: 0 })
       : apiErrorResponse({
