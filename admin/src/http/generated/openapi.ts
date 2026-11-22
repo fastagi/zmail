@@ -559,7 +559,7 @@ export interface paths {
         put?: never;
         /**
          * Accept a Gmail new-mail notification from Cloud Pub/Sub
-         * @description Called by the operator's Cloud Pub/Sub push subscription, not by browsers, and only while `EXTERNAL_MAIL_PUSH_ENABLED` is on with `EXTERNAL_MAIL_GMAIL_PUSH_TOPIC` and `EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE` set. No session or API key: the request is authenticated by the push subscription's Google-signed OIDC token (RS256 against Google's published keys, issuer `accounts.google.com`, the configured audience, unexpired, and the configured service account when set). The message only names a Gmail address; it is a hint that marks the connections of that address due, never mail. Every authenticated request is answered `204`, whether or not a connection matches.
+         * @description Called by the operator's Cloud Pub/Sub push subscription, not by browsers, and only while `EXTERNAL_MAIL_PUSH_ENABLED` is on with `EXTERNAL_MAIL_GMAIL_PUSH_TOPIC`, `EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE`, and `EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT` set. No session or API key: the request is authenticated by the push subscription's Google-signed OIDC token (RS256 against Google's published keys, issuer `accounts.google.com`, the configured audience, unexpired, and issued to the configured, verified service account). The message only names a Gmail address; it is a hint that marks the connections of that address due, never mail. Every authenticated request is answered `204`, whether or not a connection matches, and spends the provider's budget; a refused one spends only the sender IP's budget and is answered `429` past it.
          */
         post: operations["receiveGmailPushNotification"];
         delete?: never;
@@ -579,7 +579,7 @@ export interface paths {
         put?: never;
         /**
          * Accept a Microsoft Graph change or lifecycle notification
-         * @description Called by Microsoft Graph, not by browsers, and only while `EXTERNAL_MAIL_PUSH_ENABLED` is on with `EXTERNAL_MAIL_OUTLOOK_PUSH_NOTIFICATION_URL` set. No session or API key. With a `validationToken` query parameter it is Graph's validation handshake: the token is echoed as `text/plain` within the request. Otherwise the body is a Graph notification collection; a notification counts only when its `clientState` matches the subscription's, compared in constant time against the stored hash, and only marks that connection due. Lifecycle notifications (`reauthorizationRequired`, `subscriptionRemoved`, `missed`) also make the subscription's renewal due. Every readable request is answered `202`, whether or not a subscription matches.
+         * @description Called by Microsoft Graph, not by browsers, and only while `EXTERNAL_MAIL_PUSH_ENABLED` is on with `EXTERNAL_MAIL_OUTLOOK_PUSH_NOTIFICATION_URL` set. No session or API key. With a `validationToken` query parameter it is Graph's validation handshake: the token is echoed as `text/plain` within the request. Otherwise the body is a Graph notification collection; a notification counts only when its `clientState` matches the subscription's, compared in constant time against the stored hash, and only marks that connection due. Lifecycle notifications (`reauthorizationRequired`, `subscriptionRemoved`, `missed`) also make the subscription's renewal due. Every readable request is answered `202`, whether or not a subscription matches. Only a request with at least one matching notification spends the provider's budget; any other (handshakes included) spends only the sender IP's budget and is answered `429` past it.
          */
         post: operations["receiveOutlookPushNotification"];
         delete?: never;
@@ -4450,10 +4450,10 @@ export interface components {
             /** @description When the latest authenticated notification for it arrived. */
             last_notified_at: string | null;
             /**
-             * @description `active` has a live subscription, so new mail syncs within seconds and the poll slows to `EXTERNAL_MAIL_PUSH_POLL_INTERVAL`; `pending` has none yet (or it expired, or the provider removed it) and polls every two minutes while the next attempt backs off; `stopped` ended with its connection.
+             * @description `active` is a live subscription shown to work, so new mail syncs within seconds and the poll slows to `EXTERNAL_MAIL_PUSH_POLL_INTERVAL`; `quiet` is live without a notification within `EXTERNAL_MAIL_PUSH_QUIET_LIMIT`; `degraded` is live but a poll found mail no notification announced, until an authenticated notification arrives; `pending` has no live subscription yet (or it expired, or the provider removed it) while the next attempt backs off; `unsupported` means the provider cannot push for this connection (a Gmail mailbox assigned from a Workspace tenant); `stopped` ended with its connection. Every status but `active` polls every two minutes.
              * @enum {string}
              */
-            status: "pending" | "active" | "stopped";
+            status: "active" | "quiet" | "degraded" | "pending" | "unsupported" | "stopped";
         };
         /** @description Binds the account as the organization's team account into a new `shared` mailbox with `origin` `connected`, as `POST /v1/mailboxes` creates a shared mailbox. `owner` and `admin` only; never with `connection_id`. The connection belongs to the organization, not to the caller. */
         ExternalMailSharingRequest: {

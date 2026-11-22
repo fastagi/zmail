@@ -37,6 +37,22 @@ push works, the poll of that connection slows to 15 minutes; when it does not, n
 | P10 | Privacy: a hint only selects connections by its provider and identity; the sync still enforces `received_not_before`; nothing from a body is logged except the provider name and counts; secrets (`clientState`, JWTs, tokens) never appear in logs, errors, audit rows, or responses. |
 | P11 | Observability: sync runs gain `trigger`; the connection list gains `push` (`status`, `expires_at`, `last_notified_at`, `last_error_code`, or `null`); a histogram `zmail_external_mail_push_delay_seconds{provider}` (hint received to fetch start) and a counter `zmail_external_mail_push_notifications_total{provider,result}` use the existing metrics seam. |
 
+## Review Amendments (independent review of PR #178)
+
+Each item has a test that fails against the code before the fix.
+
+| # | Amendment |
+|---|---|
+| R1 | A notification received after a fetch started stays pending, even when an earlier one made that sync a push (`pending_at` becomes the later `last_notified_at`). |
+| R2 | Authentication comes first. Only a request with an authenticated notification (verified token, or a matching `clientState`) spends the provider budget; anything else spends a 120-per-minute per-IP budget kept in process memory, so junk never writes to the database or starves real notifications. The provider budget is per replica, or shared with `RATE_LIMIT_STORE=postgres`. |
+| R3 | Push must be shown to work before the poll slows: the subscription is live, not degraded, and a notification arrived (or it went live) within `EXTERNAL_MAIL_PUSH_QUIET_LIMIT` (24 hours). A poll that stores mail received more than five minutes after the subscription went live and more than five minutes before the poll marks it degraded (renewal due now, two-minute poll, `push.status` `degraded`, `zmail_external_mail_push_degraded_total`) until an authenticated notification arrives. `push.status` gains `quiet`, `degraded`, and `unsupported`. |
+| R4 | `EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT` is required with the Gmail topic in every environment; the verifier refuses every token without it. |
+| R5 | The Web connection and directory schemas accept every field the API returns (the `tenant_id` hotfix merged from `main`, plus `push` and `trigger`). |
+| R6 | Gmail: mailboxes assigned from a Workspace tenant are not watched (`unsupported`, asked again daily, no failure recorded), since their tokens belong to the customer's project; the watch is keyed by the profile's primary address; the topic lives in the project of the Gmail OAuth client. |
+| R7 | A notification never brings the next fetch closer than `EXTERNAL_MAIL_MIN_FETCH_SPACING` after the last one, so a throttled backfill keeps its pace. |
+| R8 | Revocations call the provider only after their transaction committed (mailbox deletion collects the calls until its transaction ends; a departure releases its connections four at a time). The row is stopped inside the transaction. |
+| R9 | The key set fetch is single-flight and never holds the lock across the network; the sync-run check is added `NOT VALID` and then validated; a subscription a sync created while its connection was being revoked is stopped again; an Outlook batch is matched with one query. |
+
 ## Acceptance Criteria And Verification
 
 PostgreSQL and `httptest` tests, never a real provider or credential:

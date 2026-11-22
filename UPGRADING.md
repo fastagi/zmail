@@ -26,8 +26,16 @@ public (no session or API key; authenticated by a Google-signed OIDC token and a
 and answer `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE` while push is off. A fork that puts the API
 behind an allow list or a WAF must let the providers reach them. `ExternalMailConnection` gains the
 required, nullable `push` object and `ExternalMailSyncRun` the required `trigger` (`poll` or `push`);
-a client with strict response schemas must accept them (the Web schemas accept both as optional). No
-error code was added.
+a client with strict response schemas must accept them (the Web schemas accept both as optional).
+`push.status` is one of `active`, `quiet`, `degraded`, `pending`, `unsupported`, `stopped`. No error
+code was added.
+
+### Medium — Gmail push needs its service account
+
+When `EXTERNAL_MAIL_GMAIL_PUSH_TOPIC` is set, `EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE` and
+`EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT` are required too, in every environment; startup fails
+otherwise. The topic must be in the Cloud project of the Gmail OAuth client. Gmail mailboxes assigned
+from a Workspace tenant are polled, not pushed.
 
 ### Low — Migration and connector seam
 

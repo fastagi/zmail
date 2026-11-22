@@ -958,7 +958,7 @@ push is off or the connection has none.
 
 | `status` | Meaning |
 |---|---|
-| `active` | Synced every two minutes, or within seconds of new mail while a [push subscription](#push-subscriptions) is live |
+| `active` | Synced every two minutes, or within seconds of new mail while a [push subscription](#push-subscriptions) is shown to work |
 | `needs_reconnect` | The provider refused the grant (`last_error_code` `external.auth_failed`); syncing stops until the member reconnects |
 | `revoked` | Unbound; never synced again |
 
@@ -1086,64 +1086,118 @@ is handed back, it is revoked, and its run is recorded as `dropped`.
 
 Gmail and Outlook can tell Zmail that a connected mailbox received mail, so it syncs within seconds
 instead of at the next poll. Push is off unless the operator sets `EXTERNAL_MAIL_PUSH_ENABLED=true`
-and a provider's settings (`EXTERNAL_MAIL_GMAIL_PUSH_TOPIC` with `EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE`;
-`EXTERNAL_MAIL_OUTLOOK_PUSH_NOTIFICATION_URL`). IMAP has no push (IMAP IDLE is future work).
+and a provider's settings: for Gmail, `EXTERNAL_MAIL_GMAIL_PUSH_TOPIC`,
+`EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE`, and `EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT`, all three or
+startup fails; for Outlook, `EXTERNAL_MAIL_OUTLOOK_PUSH_NOTIFICATION_URL`. IMAP has no push (IMAP
+IDLE is future work).
 
-A notification is only a hint. It never carries mail and nothing in it is trusted for mail: it marks
-the connections it names due, and the regular sync reads the mail with each connection's own grant,
-cursor, backfill window, and `received_not_before` floor, within its backoff, lease, and the
-per-provider budget. Polling stays the safety net. A notification for a connection a worker is
-fetching waits for that fetch to end and then syncs it again; one for a connection that is backing
-off waits for the backoff; however many notifications arrive, one connection syncs at most once per
-`EXTERNAL_MAIL_PUSH_COALESCE_WINDOW` (10 seconds by default) because of them.
+A notification is only a hint. It never carries mail, and nothing in it is trusted for mail. It
+marks the connections it names due, and the regular sync reads the mail with each connection's own
+grant, cursor, backfill window, and `received_not_before` floor. That sync still keeps the
+connection's backoff, lease, fetch spacing (`EXTERNAL_MAIL_MIN_FETCH_SPACING`, so a throttled
+backfill keeps its pace), and the per-provider budget. Polling stays the safety net.
 
-**Lifecycle.** After a sync that leaves no further page, an `active` connection whose connector
-supports push subscribes, and renews once half of the subscription's life has passed, in the worker,
-with the grant the sync used (a mailbox [assigned from a tenant](#tenant-connections) uses the token
-the tenant credential mints for that one mailbox). While the subscription is live the poll slows to
-`EXTERNAL_MAIL_PUSH_POLL_INTERVAL` (15 minutes by default, 2 minutes to 1 hour), never past the next
-renewal or the expiry. A subscribe or renewal that fails backs off from two minutes to an hour,
-records `external.auth_failed` or `external.fetch_failed` on the subscription only, and never
-changes the connection's status or stops its sync; the poll returns to two minutes once no
-subscription is live. Unbinding by the member, a forced disconnect, a member's departure, and
-deleting the mailbox stop the subscription at the provider on a best-effort basis (a Gmail watch
-another live connection of the same account shares is left running) and stop it in Zmail at once. A
-revoked tenant, a connection that needs reconnecting, and the retention purge stop it in Zmail, where
-its notifications are ignored from the moment the connection stops being `active`; its provider
-subscription then lapses at its expiry (at most 7 days for Gmail, 70 hours for Outlook).
+When a notification arrives:
 
-**Gmail.** The connector calls `users.watch` on the account's `INBOX` with the operator's Cloud
-Pub/Sub topic. Google publishes to the topic, and a Pub/Sub push subscription posts to
-`POST /v1/external-mail-notifications/gmail` with an OIDC token. The request counts only when the
-token is RS256-signed by a key Google publishes at `EXTERNAL_MAIL_GMAIL_PUSH_JWKS_URL` (fetched with
-a bound on size and key count, cached for an hour, refetched for an unknown key at most once a
-minute), its issuer is `accounts.google.com`, its audience is `EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE`, it
-has not expired, and, when `EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT` is set, it was issued to that
-verified service account. Otherwise the answer is `401 AUTH.UNAUTHORIZED` and nothing changes. The
-message names an address; every `active` connection of that address, in any organization, is made
-due, and each is synced with its own grant only. Every authenticated request is answered `204`.
+- If a worker is fetching the connection, the connection syncs again once that fetch ends. This
+  holds even when the fetch was itself answering an earlier notification.
+- If the connection is backing off, the notification waits for the backoff.
+- However many notifications arrive, one connection syncs at most once per
+  `EXTERNAL_MAIL_PUSH_COALESCE_WINDOW` (10 seconds by default) because of them.
 
-**Outlook.** The connector creates a Microsoft Graph subscription on the mailbox's Inbox messages
-(`created`), with `EXTERNAL_MAIL_OUTLOOK_PUSH_NOTIFICATION_URL` as both the notification and the
-lifecycle URL, a fresh random `clientState`, and a 70-hour expiry; it renews with `PATCH` and
-creates a new subscription when Graph no longer knows the old one. Zmail stores only the SHA-256 of
-the `clientState`. `POST /v1/external-mail-notifications/outlook?validationToken=...` is Graph's
-validation handshake: the token (at most 1,024 printable ASCII characters) is echoed as `text/plain`.
-Any other request is a Graph notification collection: each of at most 20 notifications counts only
-when its `clientState` matches the subscription's, compared in constant time, and only marks that
-subscription's connection due. Lifecycle notifications also act: `reauthorizationRequired` makes
-the renewal due now, `subscriptionRemoved` ends the subscription's life so the next sync creates it
-again, and `missed` only marks the connection due. Every readable request is answered `202`; a body
-that is not JSON is `400 COMMON.INVALID_INPUT`.
+**Lifecycle.**
 
-**Both routes** need no session or API key and never say whether a subscription exists: a known and
-an unknown subscription get the same answer, which also tells the provider to stop retrying. Bodies
-are at most 64 KiB (`413 COMMON.REQUEST_TOO_LARGE`), each provider's requests are limited per replica
-to `EXTERNAL_MAIL_PUSH_MAX_PER_MINUTE` a minute (6,000 by default; `429 COMMON.RATE_LIMITED` with
-`Retry-After`), and each request does a bounded amount of work. While push is off, or the provider's
-push settings are not set, both answer `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE` and read nothing.
-Nothing from a body is logged, only the provider and counts; the subscription id and secret never
-appear in a response, a log, or an audit row.
+- **Subscribe and renew.** An `active` connection whose connector supports push subscribes after a
+  sync that leaves no further page, and renews once half of the subscription's life has passed. Both
+  run in the worker, with the grant the sync used. A mailbox [assigned from a tenant](#tenant-connections)
+  uses the token the tenant credential mints for that one mailbox.
+- **Long poll only while push is shown to work.** The poll slows to `EXTERNAL_MAIL_PUSH_POLL_INTERVAL`
+  (15 minutes by default, 2 minutes to 1 hour), never past the next renewal or the expiry, only
+  while the subscription is live and both of these hold:
+  - A notification arrived, or the subscription went live, within `EXTERNAL_MAIL_PUSH_QUIET_LIMIT`
+    (24 hours by default, 1 to 168 hours).
+  - No poll has caught it missing mail.
+- **Missed mail.** A poll that stores mail received more than five minutes after the subscription
+  went live, and more than five minutes before the poll, with no notification for it, marks the
+  subscription degraded. Its renewal then becomes due, and the connection polls every two minutes
+  until an authenticated notification for it arrives again. This catches a deleted Pub/Sub
+  subscription, a misconfigured audience, or a provider that stopped delivering.
+- **Failures.** A subscribe or renewal that fails backs off from two minutes to an hour. It records
+  `external.auth_failed` or `external.fetch_failed` on the subscription only, and never changes the
+  connection's status or stops its sync. The poll returns to two minutes once no subscription is live.
+- **Stopping.** Every path stops the subscription in Zmail in the transaction that ends the
+  connection, and its notifications are ignored from then on:
+  - Unbinding by the member, a forced disconnect, a member's departure, and deleting the mailbox stop
+    it at the provider too, best effort. This happens only after that transaction committed: a
+    departure's connections are released a few at a time, and a Gmail watch that another live
+    connection of the same account shares is left running.
+  - A revoked tenant, a connection that needs reconnecting, and the retention purge stop it in Zmail
+    only. Their provider subscription lapses at its expiry: at most 7 days for Gmail, 70 hours for
+    Outlook.
+  - A subscription a sync created while the connection was being revoked is stopped again at the
+    provider.
+
+**Gmail.**
+
+- **Watch.** The connector calls `users.watch` on the account's `INBOX` with the operator's Cloud
+  Pub/Sub topic. Google publishes to the topic, and a Pub/Sub push subscription posts to
+  `POST /v1/external-mail-notifications/gmail` with an OIDC token.
+- **Authentication.** The request counts only when all of these hold:
+  - The token is RS256-signed by a key Google publishes at `EXTERNAL_MAIL_GMAIL_PUSH_JWKS_URL`. The
+    key set is size- and count-bounded, cached for an hour, and refetched for an unknown key at most
+    once a minute by one request while others wait.
+  - Its issuer is `accounts.google.com` and its audience is `EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE`.
+  - It has not expired.
+  - It was issued to the verified service account `EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT`.
+
+  Otherwise the answer is `401 AUTH.UNAUTHORIZED` and nothing changes.
+- **Matching.** The subscription is keyed by the address Gmail's profile reports when it is created,
+  which is the address notifications name, so a connection bound under an alias still matches. A
+  notification makes every `active` connection of that address due, in any organization, and each is
+  synced with its own grant only. Every authenticated request is answered `204`.
+- **Workspace tenants.** A Gmail mailbox assigned from a Workspace tenant is not pushed: its tokens
+  come from the customer's own service account in the customer's Cloud project, and Gmail only
+  publishes to a topic of the token's own project. Its subscription reads `unsupported`, it is
+  polled every two minutes, and the connector asks again once a day without reporting a failure.
+
+**Outlook.**
+
+- **Subscription.** The connector creates a Microsoft Graph subscription on the mailbox's Inbox
+  messages (`created`), with `EXTERNAL_MAIL_OUTLOOK_PUSH_NOTIFICATION_URL` as both the notification
+  and the lifecycle URL, a fresh random `clientState`, and a 70-hour expiry. It renews with `PATCH`
+  and creates a new subscription when Graph no longer knows the old one. Zmail stores only the
+  SHA-256 of the `clientState`.
+- **Handshake.** `POST /v1/external-mail-notifications/outlook?validationToken=...` is Graph's
+  validation handshake: the token (at most 1,024 printable ASCII characters) is echoed as `text/plain`.
+- **Notifications.** Any other request is a Graph notification collection. Its at most 20
+  notifications are looked up together. Each counts only when its `clientState` matches the
+  subscription's, compared in constant time, and only marks that subscription's connection due.
+- **Lifecycle notifications.** `reauthorizationRequired` makes the renewal due now;
+  `subscriptionRemoved` ends the subscription's life so the next sync creates it again; `missed`
+  only marks the connection due.
+- **Answers.** Every readable request is answered `202`. A body that is not JSON is
+  `400 COMMON.INVALID_INPUT`.
+
+**Both routes.**
+
+- **No disclosure.** They need no session or API key and never say whether a subscription exists:
+  a known and an unknown subscription get the same answer, which also tells the provider to stop
+  retrying.
+- **Limits.** Bodies are at most 64 KiB (`413 COMMON.REQUEST_TOO_LARGE`), and each request does a
+  bounded amount of work. When a budget is used up, the answer is `429 COMMON.RATE_LIMITED` with
+  `Retry-After`:
+  - Only a request that authenticates a notification (a verified token, or a matching
+    `clientState`) spends the provider's budget, `EXTERNAL_MAIL_PUSH_MAX_PER_MINUTE` a minute
+    (6,000 by default). That budget is per replica, or shared across replicas with
+    `RATE_LIMIT_STORE=postgres`.
+  - A request that authenticates nothing (a refused token, a validation handshake, a malformed body,
+    or notifications that match no subscription) spends only its sender IP's budget of 120 a minute.
+    That budget is kept in each replica's memory and never written to the database, so no sender can
+    use up the budget real notifications need.
+- **Push off.** While push is off, or the provider's push settings are not set, both routes answer
+  `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE` and read nothing.
+- **Logging.** Nothing from a body is logged, only the provider and counts. The subscription id and
+  secret never appear in a response, a log, or an audit row.
 
 A connection's `push`, on the [connection list](#connections), is:
 
@@ -1152,11 +1206,19 @@ A connection's `push`, on the [connection list](#connections), is:
   "last_error_code": null }
 ```
 
-| `status` | Meaning |
-|---|---|
-| `active` | A live subscription; new mail syncs within seconds |
-| `pending` | No live subscription yet, or it expired or was removed; polled every two minutes while the next attempt backs off |
-| `stopped` | Ended with its connection |
+| `status` | Meaning | Poll |
+|---|---|---|
+| `active` | A live subscription that is shown to work; new mail syncs within seconds | `EXTERNAL_MAIL_PUSH_POLL_INTERVAL` |
+| `quiet` | Live, but no notification within `EXTERNAL_MAIL_PUSH_QUIET_LIMIT` (normal for a quiet mailbox) | two minutes |
+| `degraded` | Live, but a poll found mail no notification announced; renewal is due, and an authenticated notification clears it | two minutes |
+| `pending` | No live subscription yet, or it expired or was removed; the next attempt backs off | two minutes |
+| `unsupported` | The provider cannot push for this connection (a Gmail mailbox assigned from a Workspace tenant) | two minutes |
+| `stopped` | Ended with its connection | none |
+
+`expires_at` is set while the subscription is live. Operators also see
+`zmail_external_mail_push_notifications_total{provider,result}`,
+`zmail_external_mail_push_degraded_total{provider}`, and
+`zmail_external_mail_push_delay_seconds{provider}` (notification to sync start).
 
 ### Connection Directory
 
