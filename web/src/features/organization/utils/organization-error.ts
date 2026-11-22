@@ -15,6 +15,7 @@ export type OrganizationErrorKey =
   | 'errors.notFound'
   | 'errors.ownershipTransferRequired'
   | 'errors.ownershipTransferTargetInvalid'
+  | 'errors.rateLimited'
   | 'errors.slugConflict'
   | 'errors.unavailable';
 
@@ -36,6 +37,9 @@ export function resolveOrganizationErrorKey(error: unknown): OrganizationErrorKe
     error.errorCode === ApiErrorCode.PERMISSION_DENIED
   ) {
     return 'errors.forbidden';
+  }
+  if (error.errorCode === ApiErrorCode.COMMON_RATE_LIMITED) {
+    return 'errors.rateLimited';
   }
   if (error.errorCode === ApiErrorCode.ORGANIZATION_NOT_FOUND) {
     return 'errors.notFound';

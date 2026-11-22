@@ -22,6 +22,10 @@ import type {
 } from '@/features/organization/types';
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Per-invitation resend quotas, matching the API: one per minute and five per 24 hours.
+const RESEND_COOLDOWN_MS = 60 * 1000;
+const RESEND_DAY_MS = 24 * 60 * 60 * 1000;
+const RESENDS_PER_DAY = 5;
 
 export type MockOrganizationStoreError =
   | 'invitation_already_pending'
@@ -29,6 +33,7 @@ export type MockOrganizationStoreError =
   | 'invitation_expired'
   | 'invitation_invalid'
   | 'invitation_not_found'
+  | 'invitation_resend_rate_limited'
   | 'member_already_exists'
   | 'member_not_found'
   | 'organization_not_found'
@@ -71,6 +76,8 @@ interface MockMembershipRecord {
 
 interface MockInvitationRecord extends OrganizationInvitation {
   token: string;
+  /** Epoch milliseconds of accepted resends, newest last. */
+  resends: number[];
 }
 
 export class MockOrganizationStore {
@@ -387,9 +394,13 @@ export class MockOrganizationStore {
       role: input.role,
       status: 'pending',
       expires_at: new Date(now.getTime() + INVITATION_TTL_MS).toISOString(),
+      // The development mock never sends email.
+      email_send_status: 'not_configured',
+      email_attempted_at: timestamp,
       created_at: timestamp,
       updated_at: timestamp,
       token: this.dependencies.invitationToken(),
+      resends: [],
     };
     this.invitations = [invitation, ...this.invitations];
     return {
@@ -416,6 +427,62 @@ export class MockOrganizationStore {
     invitation.status = 'revoked';
     invitation.updated_at = this.dependencies.now().toISOString();
     return true;
+  }
+
+  /**
+   * Mirrors the API resend: managers only, pending invitations only, per-invitation quotas. The
+   * mock has no mailer, so the token is kept and the attempt is recorded as not_configured.
+   */
+  resendInvitation(
+    actor: AuthUser,
+    organizationId: number,
+    invitationId: number
+  ): OrganizationInvitationCreateResult | MockOrganizationStoreError {
+    const managerError = this.managerError(actor, organizationId);
+    if (managerError) return managerError;
+    const now = this.dependencies.now();
+    const invitation = this.invitations.find(
+      (candidate) =>
+        candidate.organization_id === organizationId &&
+        candidate.id === invitationId
+    );
+    if (!invitation || invitationStatus(invitation, now) !== 'pending') {
+      return 'invitation_not_found';
+    }
+    if (this.resendRetryAfterSeconds(invitation, now.getTime()) > 0) {
+      return 'invitation_resend_rate_limited';
+    }
+    invitation.resends = [...invitation.resends, now.getTime()];
+    invitation.email_send_status = 'not_configured';
+    invitation.email_attempted_at = now.toISOString();
+    return {
+      invitation: publicInvitation(invitation, now),
+      email_send_status: 'not_configured',
+    };
+  }
+
+  /** Seconds until the invitation may be resent; 0 when it may be resent now or is unknown. */
+  invitationResendRetryAfter(organizationId: number, invitationId: number): number {
+    const invitation = this.invitations.find(
+      (candidate) =>
+        candidate.organization_id === organizationId &&
+        candidate.id === invitationId
+    );
+    return invitation
+      ? this.resendRetryAfterSeconds(invitation, this.dependencies.now().getTime())
+      : 0;
+  }
+
+  private resendRetryAfterSeconds(invitation: MockInvitationRecord, now: number): number {
+    const recent = invitation.resends.filter((at) => now - at < RESEND_DAY_MS);
+    let availableAt = 0;
+    const latest = recent.at(-1);
+    if (latest !== undefined) availableAt = latest + RESEND_COOLDOWN_MS;
+    const oldest = recent[0];
+    if (recent.length >= RESENDS_PER_DAY && oldest !== undefined) {
+      availableAt = Math.max(availableAt, oldest + RESEND_DAY_MS);
+    }
+    return Math.max(0, Math.ceil((availableAt - now) / 1000));
   }
 
   acceptInvitation(
@@ -585,6 +652,8 @@ function publicInvitation(
     role: invitation.role,
     status: invitationStatus(invitation, now),
     expires_at: invitation.expires_at,
+    email_send_status: invitation.email_send_status,
+    email_attempted_at: invitation.email_attempted_at,
     created_at: invitation.created_at,
     updated_at: invitation.updated_at,
   };

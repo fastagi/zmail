@@ -100,7 +100,7 @@ function delegatesOrganizationGuard(path: string, handler: RouteHandlerSource): 
     (route === 'organization-context/route.ts' ||
       route.startsWith('organization-invitations/') ||
       route.startsWith('organizations/')) &&
-    /\b(?:accept|create|get|list|remove|resolve|revoke|transfer|update)Organization[A-Za-z]*Route\b/.test(
+    /\b(?:accept|create|get|list|remove|resend|resolve|revoke|transfer|update)Organization[A-Za-z]*Route\b/.test(
       handler.source
     )
   );
@@ -743,6 +743,7 @@ describe('mock BFF route contract', () => {
       'transferOrganizationOwnershipRoute',
       'createOrganizationInvitationRoute',
       'revokeOrganizationInvitationRoute',
+      'resendOrganizationInvitationRoute',
       'acceptOrganizationInvitationRoute',
     ]) {
       const handler = exportedFunction(lifecycleSource, name);

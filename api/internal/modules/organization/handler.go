@@ -1,6 +1,9 @@
 package organization
 
 import (
+	"errors"
+	"math"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -63,8 +66,8 @@ func (h *Handler) Create(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	if errors := req.validationErrors(); len(errors) > 0 {
-		response.ValidationFailed(c, errors)
+	if fieldErrors := req.validationErrors(); len(fieldErrors) > 0 {
+		response.ValidationFailed(c, fieldErrors)
 		return
 	}
 
@@ -133,8 +136,8 @@ func (h *Handler) Update(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	if errors := req.validationErrors(); len(errors) > 0 {
-		response.ValidationFailed(c, errors)
+	if fieldErrors := req.validationErrors(); len(fieldErrors) > 0 {
+		response.ValidationFailed(c, fieldErrors)
 		return
 	}
 
@@ -161,8 +164,8 @@ func (h *Handler) Invite(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	if errors := req.validationErrors(); len(errors) > 0 {
-		response.ValidationFailed(c, errors)
+	if fieldErrors := req.validationErrors(); len(fieldErrors) > 0 {
+		response.ValidationFailed(c, fieldErrors)
 		return
 	}
 
@@ -233,6 +236,36 @@ func (h *Handler) RevokeInvitation(c *gin.Context) {
 	response.NoContent(c)
 }
 
+// ResendInvitation emails a pending invitation again, subject to its per-invitation quota.
+func (h *Handler) ResendInvitation(c *gin.Context) {
+	userID, ok := handler.GetUserID(c)
+	if !ok {
+		return
+	}
+	organizationID, ok := handler.ParseID(c, "id")
+	if !ok {
+		return
+	}
+	invitationID, ok := handler.ParseID(c, "invitation_id")
+	if !ok {
+		return
+	}
+
+	result, err := h.service.ResendInvitation(c.Request.Context(), userID, organizationID, invitationID)
+	if err != nil {
+		var retry *InvitationRetryAfterError
+		if errors.As(err, &retry) {
+			c.Header("Retry-After", strconv.Itoa(max(1, int(math.Ceil(retry.RetryAfter.Seconds())))))
+		}
+		response.HandleError(c, "Failed to resend organization invitation", err)
+		return
+	}
+	response.Success(c, &CreateOrganizationInvitationResponse{
+		Invitation:      toInvitationResponse(result.Invitation, time.Now().UTC()),
+		EmailSendStatus: result.EmailSendStatus,
+	})
+}
+
 // AcceptInvitation creates membership and consumes a one-time invitation token atomically.
 func (h *Handler) AcceptInvitation(c *gin.Context) {
 	userID, ok := handler.GetUserID(c)
@@ -244,8 +277,8 @@ func (h *Handler) AcceptInvitation(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	if errors := req.validationErrors(); len(errors) > 0 {
-		response.ValidationFailed(c, errors)
+	if fieldErrors := req.validationErrors(); len(fieldErrors) > 0 {
+		response.ValidationFailed(c, fieldErrors)
 		return
 	}
 	membership, err := h.service.AcceptInvitation(c.Request.Context(), userID, &req)

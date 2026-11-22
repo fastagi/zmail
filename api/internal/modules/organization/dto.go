@@ -86,6 +86,8 @@ type OrganizationOwnershipTransferResponse struct {
 type InvitationEmailSendStatus string
 
 const (
+	// InvitationEmailSendStatusPending is stored while an attempt has not reported an outcome.
+	InvitationEmailSendStatusPending            InvitationEmailSendStatus = invitationEmailStatusPending
 	InvitationEmailSendStatusAcceptedByProvider InvitationEmailSendStatus = "accepted_by_provider"
 	InvitationEmailSendStatusFailed             InvitationEmailSendStatus = "failed"
 	InvitationEmailSendStatusNotConfigured      InvitationEmailSendStatus = "not_configured"
@@ -99,8 +101,12 @@ type OrganizationInvitationResponse struct {
 	Role           domain.OrganizationRole             `json:"role"`
 	Status         domain.OrganizationInvitationStatus `json:"status"`
 	ExpiresAt      time.Time                           `json:"expires_at"`
-	CreatedAt      time.Time                           `json:"created_at"`
-	UpdatedAt      time.Time                           `json:"updated_at"`
+	// EmailSendStatus is the latest attempt for the current token; null when it predates tracking.
+	EmailSendStatus *InvitationEmailSendStatus `json:"email_send_status"`
+	// EmailAttemptedAt is when that attempt finished; null while pending or untracked.
+	EmailAttemptedAt *time.Time `json:"email_attempted_at"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // CreateOrganizationInvitationResponse keeps resource state separate from the email attempt.
@@ -244,7 +250,7 @@ func toInvitationResponse(invitation *domain.OrganizationInvitation, now time.Ti
 	if invitation == nil {
 		return nil
 	}
-	return &OrganizationInvitationResponse{
+	response := &OrganizationInvitationResponse{
 		ID:             invitation.ID,
 		OrganizationID: invitation.OrganizationID,
 		Email:          invitation.Email,
@@ -254,4 +260,13 @@ func toInvitationResponse(invitation *domain.OrganizationInvitation, now time.Ti
 		CreatedAt:      invitation.CreatedAt,
 		UpdatedAt:      invitation.UpdatedAt,
 	}
+	if invitation.EmailSendStatus != "" {
+		status := InvitationEmailSendStatus(invitation.EmailSendStatus)
+		response.EmailSendStatus = &status
+	}
+	if invitation.EmailAttemptedAt != nil {
+		attempted := invitation.EmailAttemptedAt.UTC()
+		response.EmailAttemptedAt = &attempted
+	}
+	return response
 }

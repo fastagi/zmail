@@ -131,6 +131,7 @@ The browser feature owns these fixed same-origin paths:
 | List invitations | `GET /api/organizations/:id/invitations` | `GET /v1/organizations/:id/invitations` |
 | Create invitation | `POST /api/organizations/:id/invitations` | `POST /v1/organizations/:id/invitations` |
 | Revoke invitation | `DELETE /api/organizations/:id/invitations/:invitation_id` | `DELETE /v1/organizations/:id/invitations/:invitation_id` |
+| Resend invitation | `POST /api/organizations/:id/invitations/:invitation_id/resend` | `POST /v1/organizations/:id/invitations/:invitation_id/resend` |
 | Accept invitation | `POST /api/organization-invitations/accept` | `POST /v1/organization-invitations/accept` |
 
 - The selected organization is represented by `/console/organizations/:id`. It is derived from the
@@ -210,6 +211,7 @@ organization-scoped; acceptance is top-level because the opaque token identifies
 | Invite | `POST /v1/organizations/:id/invitations` | `{ email, role }` | `{ invitation, email_send_status }` |
 | List invitations | `GET /v1/organizations/:id/invitations` | Pagination query | Paginated invitation views |
 | Revoke | `DELETE /v1/organizations/:id/invitations/:invitation_id` | none | `204 No Content` |
+| Resend | `POST /v1/organizations/:id/invitations/:invitation_id/resend` | none | `{ invitation, email_send_status }` |
 | Accept | `POST /v1/organization-invitations/accept` | `{ token }` | Organization membership view |
 
 An invitation view contains no plaintext token:
@@ -222,12 +224,14 @@ An invitation view contains no plaintext token:
   "role": "member",
   "status": "pending",
   "expires_at": "2026-07-22T20:00:00Z",
+  "email_send_status": "accepted_by_provider",
+  "email_attempted_at": "2026-07-15T20:00:01Z",
   "created_at": "2026-07-15T20:00:00Z",
   "updated_at": "2026-07-15T20:00:00Z"
 }
 ```
 
-- `owner` and `admin` may invite, list, and revoke. A non-member gets
+- `owner` and `admin` may invite, list, revoke, and resend. A non-member gets
   `404 ORGANIZATION.NOT_FOUND`; a known `member` gets `403 PERMISSION.DENIED`.
 - Invitation roles are only `admin` and `member`. Ownership is never granted through an
   invitation.
@@ -246,8 +250,23 @@ An invitation view contains no plaintext token:
   when email is unavailable or rejected so retrying the HTTP request cannot accidentally create a
   second business record. `email_send_status` is one of `accepted_by_provider`, `failed`, or
   `not_configured`; it describes only this synchronous send attempt and is not a delivery receipt.
-- Invitation create, revoke, and accept transitions emit audit changes using internal invitation,
-  organization, and user IDs. Email addresses and tokens are not audit metadata.
+- The invitation view keeps the latest attempt for its current token. `email_send_status` is
+  `pending` from persistence until the attempt reports `accepted_by_provider`, `failed`, or
+  `not_configured`, and stays `pending` if the process stops in between. `email_attempted_at` is
+  when that attempt finished. Both are `null` for invitations created before attempts were
+  recorded. Provider responses and error text are never stored.
+- Resend emails a pending, unexpired invitation again and answers `200` with the same
+  `{ invitation, email_send_status }` shape as invite. Only token hashes are stored, so a resend
+  through a configured mailer issues a new token and the earlier emailed token stops working.
+  Without a configured mailer the token is kept and the attempt is recorded as `not_configured`.
+  Resend never changes `expires_at`. An accepted, revoked, expired, or absent invitation answers
+  `404 ORGANIZATION.INVITATION.NOT_FOUND`, as revoke does.
+- Each invitation allows one resend per minute and five per 24 hours, enforced with the shared
+  rate-limit backend. A refusal is `429 COMMON.RATE_LIMITED` with `Retry-After`. Invite itself does
+  not count against these limits.
+- Invitation create, revoke, resend, and accept transitions emit audit changes using internal
+  invitation, organization, and user IDs. Resend also records `email_send_status` and whether the
+  token was rotated. Email addresses and tokens are not audit metadata.
 
 ## Stable Errors
 
@@ -267,6 +286,7 @@ An invitation view contains no plaintext token:
 | 409 | `ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED` | Account deletion would retain one or more non-owner memberships |
 | 404 | `ORGANIZATION.MEMBER_NOT_FOUND` | The member resource, or the ownership-transfer target, does not exist in the visible organization |
 | 409 | `COMMON.CONFLICT` | A role change raced with another change to the same membership; retry after reading it again |
+| 429 | `COMMON.RATE_LIMITED` | The invitation was resent within the last minute or five times in 24 hours |
 | 403 | `ORGANIZATION.INVITATION.EMAIL_MISMATCH` | The token belongs to a different account email |
 | 403 | `PERMISSION.DENIED` | The caller is a member but the role cannot perform the mutation |
 | 422 | `COMMON.VALIDATION_FAILED` | A request field fails the documented shape |
@@ -280,7 +300,8 @@ The optional starter now owns the reusable organization lifecycle across API, fi
 adapter, development mock, UI, contracts, tests, and downstream extraction guidance. It remains
 optional and must be enabled in both deployable halves.
 
-Organization deletion, durable invitation delivery retries, and arbitrary product resources remain
+Organization deletion, automatic durable invitation delivery retries (resend is manual), and
+arbitrary product resources remain
 deliberate follow-up work. Generalized access roles and exact grants are delivered separately by
 [`PERMISSIONS.md`](PERMISSIONS.md); they must not be inferred from the organization-scoped
 `owner`, `admin`, and `member` lifecycle delivered here.

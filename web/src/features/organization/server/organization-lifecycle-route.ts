@@ -296,6 +296,47 @@ export async function revokeOrganizationInvitationRoute(
     : mockOrganizationErrorResponse(result);
 }
 
+export async function resendOrganizationInvitationRoute(
+  request: Request,
+  rawOrganizationId: string,
+  rawInvitationId: string
+): Promise<NextResponse> {
+  const resolution = resolveOrganizationRoute();
+  if (!resolution.available) return resolution.response;
+  const guard = guardSameOriginMutation(request);
+  if (guard) return guard;
+  const authentication = await authenticateOrganizationBackend(resolution.backend);
+  if (!authentication.authenticated) return authentication.response;
+  const organizationId = parseOrganizationId(rawOrganizationId);
+  const invitationId = parseOrganizationId(rawInvitationId);
+  if (!organizationId || !invitationId) {
+    return mockOrganizationErrorResponse('invitation_not_found');
+  }
+
+  if (authentication.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'POST',
+      path: `organizations/${organizationId}/invitations/${invitationId}/resend`,
+      accessToken: authentication.accessToken,
+    });
+  }
+
+  const result = mockOrganizationStore.resendInvitation(
+    authentication.user,
+    organizationId,
+    invitationId
+  );
+  if (typeof result !== 'string') {
+    return apiSuccessResponse(result, { headers: noStoreHeaders() });
+  }
+  return mockOrganizationErrorResponse(
+    result,
+    result === 'invitation_resend_rate_limited'
+      ? mockOrganizationStore.invitationResendRetryAfter(organizationId, invitationId)
+      : undefined
+  );
+}
+
 export async function acceptOrganizationInvitationRoute(
   request: Request
 ): Promise<NextResponse> {

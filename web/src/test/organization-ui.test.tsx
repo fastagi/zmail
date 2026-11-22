@@ -49,6 +49,7 @@ const state = vi.hoisted(() => ({
   invite: mutationState(),
   removeMember: mutationState(),
   revokeInvitation: mutationState(),
+  resendInvitation: mutationState(),
   transferOwnership: mutationState(),
   updateMember: mutationState(),
   forgetOrganization: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useCreateOrganizationInvitation: () => state.invite,
   useRemoveOrganizationMember: () => state.removeMember,
   useRevokeOrganizationInvitation: () => state.revokeInvitation,
+  useResendOrganizationInvitation: () => state.resendInvitation,
   useTransferOrganizationOwnership: () => state.transferOwnership,
   useUpdateOrganization: () => state.update,
   useUpdateOrganizationMember: () => state.updateMember,
@@ -113,6 +115,7 @@ describe('organization browser workflow', () => {
       state.invite,
       state.removeMember,
       state.revokeInvitation,
+      state.resendInvitation,
       state.transferOwnership,
       state.updateMember,
     ]) {
@@ -305,6 +308,8 @@ describe('organization browser workflow', () => {
           role: 'member',
           status: 'pending',
           expires_at: '2026-07-22T10:00:00Z',
+          email_send_status: 'accepted_by_provider',
+          email_attempted_at: '2026-07-15T10:00:01Z',
           created_at: '2026-07-15T10:00:00Z',
           updated_at: '2026-07-15T10:00:00Z',
         },
@@ -321,7 +326,108 @@ describe('organization browser workflow', () => {
     view.rerender(withMessages(<OrganizationOverview organizationId={42} />));
     expect(screen.queryByRole('tab', { name: 'Invitations' })).not.toBeInTheDocument();
   });
+
+  it('keeps the email attempt visible after reload and offers resend only for pending invitations', () => {
+    state.context.data = organizationContext('owner');
+    state.invitations.data = {
+      items: [
+        invitationView({ id: 1, email: 'unsent@example.com', email_send_status: 'not_configured' }),
+        invitationView({ id: 2, email: 'failed@example.com', email_send_status: 'failed' }),
+        invitationView({ id: 3, email: 'stuck@example.com', email_send_status: 'pending', email_attempted_at: null }),
+        invitationView({ id: 4, email: 'legacy@example.com', email_send_status: null, email_attempted_at: null }),
+        invitationView({ id: 5, email: 'joined@example.com', status: 'accepted' }),
+      ],
+      meta: { total: 5 },
+    };
+
+    renderWithMessages(<OrganizationOverview organizationId={42} />);
+    activateTab('Invitations');
+
+    const row = (email: string) => screen.getByText(email).closest('tr') as HTMLElement;
+    expect(within(row('unsent@example.com')).getByText('Not sent: email is not configured')).toBeInTheDocument();
+    expect(within(row('unsent@example.com')).getByText(/^Last attempt /)).toBeInTheDocument();
+    expect(within(row('failed@example.com')).getByText('Sending failed')).toBeInTheDocument();
+    expect(within(row('stuck@example.com')).getByText('Send not confirmed')).toBeInTheDocument();
+    expect(within(row('legacy@example.com')).getByText('Not recorded')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Resend the invitation to unsent@example.com' })
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole('button', { name: 'Resend the invitation to joined@example.com' })
+    ).not.toBeInTheDocument();
+  });
+
+  it('resends an invitation and then waits out the cooldown', () => {
+    vi.useFakeTimers();
+    try {
+      state.context.data = organizationContext('admin');
+      state.invitations.data = {
+        items: [invitationView({ id: 7, email: 'again@example.com', email_send_status: 'failed' })],
+        meta: { total: 1 },
+      };
+      state.resendInvitation.mutate.mockImplementation(
+        (_id: number, options: { onSuccess: (value: unknown) => void }) =>
+          options.onSuccess({
+            invitation: invitationView({ id: 7, email: 'again@example.com' }),
+            email_send_status: 'accepted_by_provider',
+          })
+      );
+
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Invitations');
+      const button = screen.getByRole('button', { name: 'Resend the invitation to again@example.com' });
+      fireEvent.click(button);
+
+      expect(state.resendInvitation.mutate).toHaveBeenCalledWith(7, expect.any(Object));
+      expect(button).toBeDisabled();
+      expect(button).toHaveTextContent('Resend in 60s');
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(button).toBeEnabled();
+      expect(button).toHaveTextContent('Resend');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses Retry-After from a rate-limited resend as the cooldown', () => {
+    state.context.data = organizationContext('owner');
+    state.invitations.data = {
+      items: [invitationView({ id: 8, email: 'limited@example.com' })],
+      meta: { total: 1 },
+    };
+    state.resendInvitation.mutate.mockImplementation(
+      (_id: number, options: { onError: (error: unknown) => void }) =>
+        options.onError(
+          new ApiError('Too many requests', ApiErrorCode.COMMON_RATE_LIMITED, 429, undefined, undefined, 42)
+        )
+    );
+
+    renderWithMessages(<OrganizationOverview organizationId={42} />);
+    activateTab('Invitations');
+    const button = screen.getByRole('button', { name: 'Resend the invitation to limited@example.com' });
+    fireEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent('Resend in 42s');
+  });
 });
+
+function invitationView(overrides: Record<string, unknown>) {
+  return {
+    id: 73,
+    organization_id: 42,
+    email: 'member@example.com',
+    role: 'member',
+    status: 'pending',
+    expires_at: '2026-07-22T10:00:00Z',
+    email_send_status: 'accepted_by_provider',
+    email_attempted_at: '2026-07-15T10:00:01Z',
+    created_at: '2026-07-15T10:00:00Z',
+    updated_at: '2026-07-15T10:00:00Z',
+    ...overrides,
+  };
+}
 
 function mutationState() {
   return {

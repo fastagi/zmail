@@ -61,6 +61,9 @@ func (r *repository) CreateInvitation(ctx context.Context, invitation *domain.Or
 	}
 
 	pendingKey := invitationPendingKey(invitation.OrganizationID, invitation.Email)
+	// The email attempt starts after this commit; until its outcome is recorded it is pending.
+	invitation.EmailSendStatus = invitationEmailStatusPending
+	invitation.EmailAttemptedAt = nil
 	invitationPO := newInvitationPO(invitation)
 	invitationPO.PendingKey = &pendingKey
 	err = db.Transaction(func(tx *gorm.DB) error {
@@ -280,4 +283,104 @@ func (r *repository) AcceptInvitation(ctx context.Context, tokenHash string, use
 		return nil, nil, err
 	}
 	return membershipPO.toDomain(), invitationPO.toDomain(), nil
+}
+
+// invitationEmailStatusPending marks an email attempt that has not reported an outcome.
+const invitationEmailStatusPending = "pending"
+
+func validInvitationEmailStatus(status string) bool {
+	switch status {
+	case "pending", "accepted_by_provider", "failed", "not_configured":
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *repository) PrepareInvitationResend(
+	ctx context.Context,
+	organizationID,
+	invitationID uint,
+	tokenHash string,
+	now time.Time,
+) (*domain.OrganizationInvitation, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if organizationID == 0 || invitationID == 0 || (tokenHash != "" && !validTokenHash(tokenHash)) {
+		return nil, domain.ErrInvalidInput
+	}
+
+	var invitation OrganizationInvitationPO
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if findErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND organization_id = ?", invitationID, organizationID).
+			First(&invitation).Error; findErr != nil {
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return domain.ErrOrganizationInvitationNotFound
+			}
+			return findErr
+		}
+		// Like revoke, only a pending, unexpired invitation is actionable.
+		if invitation.AcceptedAt != nil || invitation.RevokedAt != nil || invitation.PendingKey == nil ||
+			!now.Before(invitation.ExpiresAt) {
+			return domain.ErrOrganizationInvitationNotFound
+		}
+		if tokenHash == "" {
+			return nil
+		}
+		pending := invitationEmailStatusPending
+		result := tx.Model(&OrganizationInvitationPO{}).
+			Where("id = ? AND pending_key IS NOT NULL AND accepted_at IS NULL AND revoked_at IS NULL", invitation.ID).
+			Updates(map[string]any{
+				"token_hash":         tokenHash,
+				"email_send_status":  pending,
+				"email_attempted_at": nil,
+				"updated_at":         now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return domain.ErrOrganizationInvitationNotFound
+		}
+		invitation.TokenHash = tokenHash
+		invitation.EmailSendStatus = &pending
+		invitation.EmailAttemptedAt = nil
+		invitation.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return invitation.toDomain(), nil
+}
+
+func (r *repository) RecordInvitationEmailAttempt(
+	ctx context.Context,
+	invitationID uint,
+	tokenHash string,
+	status string,
+	at time.Time,
+) (bool, error) {
+	db, err := r.withContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	if invitationID == 0 || !validTokenHash(tokenHash) || !validInvitationEmailStatus(status) ||
+		status == invitationEmailStatusPending {
+		return false, domain.ErrInvalidInput
+	}
+	// Matching the token hash drops the outcome of an attempt that a later resend superseded.
+	result := db.Model(&OrganizationInvitationPO{}).
+		Where("id = ? AND token_hash = ?", invitationID, tokenHash).
+		Updates(map[string]any{
+			"email_send_status":  status,
+			"email_attempted_at": at,
+		})
+	if result.Error != nil {
+		return false, fmt.Errorf("record organization invitation email attempt: %w", result.Error)
+	}
+	return result.RowsAffected == 1, nil
 }

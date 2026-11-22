@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocale } from 'next-intl';
-import { AlertCircle, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertCircle, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -30,12 +30,14 @@ import {
 import { CreateOrganizationInvitationDialog } from '@/features/organization/components/create-organization-invitation-dialog';
 import {
   useOrganizationInvitations,
+  useResendOrganizationInvitation,
   useRevokeOrganizationInvitation,
 } from '@/features/organization/hooks/use-organizations';
 import type {
   OrganizationInvitation,
   OrganizationInvitationStatus,
 } from '@/features/organization/types';
+import { ApiError } from '@/http/request';
 import { formatOrganizationDate } from '@/features/organization/utils/format-organization-date';
 import { resolveOrganizationErrorKey } from '@/features/organization/utils/organization-error';
 import { useT } from '@/i18n';
@@ -107,8 +109,9 @@ export function OrganizationInvitations({
                 <TableHead>{t('email')}</TableHead>
                 <TableHead>{t('role')}</TableHead>
                 <TableHead>{t('status')}</TableHead>
+                <TableHead>{t('emailDelivery')}</TableHead>
                 <TableHead className="hidden lg:table-cell">{t('expiresAt')}</TableHead>
-                <TableHead className="w-32 text-right">
+                <TableHead className="w-56 text-right">
                   <span className="sr-only">{t('actions')}</span>
                 </TableHead>
               </TableRow>
@@ -121,10 +124,19 @@ export function OrganizationInvitations({
                   <TableCell>
                     <InvitationStatusBadge status={invitation.status} />
                   </TableCell>
+                  <TableCell>
+                    <InvitationDeliveryState invitation={invitation} />
+                  </TableCell>
                   <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
                     {formatOrganizationDate(invitation.expires_at, locale)}
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="space-x-1 text-right whitespace-nowrap">
+                    {invitation.status === 'pending' ? (
+                      <ResendInvitationButton
+                        organizationId={organizationId}
+                        invitation={invitation}
+                      />
+                    ) : null}
                     {invitation.status === 'pending' ? (
                       <Button
                         type="button"
@@ -200,6 +212,99 @@ function InvitationStatusBadge({
   const t = useT('organization');
   const variant = status === 'pending' ? 'default' : status === 'expired' ? 'outline' : 'secondary';
   return <Badge variant={variant}>{t(`invitationStatus.${status}`)}</Badge>;
+}
+
+// Resends are limited to one per minute per invitation; the API's Retry-After overrides this.
+const RESEND_COOLDOWN_SECONDS = 60;
+
+function InvitationDeliveryState({
+  invitation,
+}: {
+  invitation: OrganizationInvitation;
+}) {
+  const t = useT('organization');
+  const locale = useLocale();
+  const state = invitation.email_send_status ?? 'unknown';
+  const tone =
+    state === 'failed' || state === 'not_configured'
+      ? 'text-error'
+      : 'text-muted-foreground';
+  return (
+    <div className="text-sm">
+      <p className={tone}>{t(`emailDeliveryState.${state}`)}</p>
+      {invitation.email_attempted_at ? (
+        <p className="text-xs text-muted-foreground">
+          {t('emailAttemptedAt', {
+            date: formatOrganizationDate(invitation.email_attempted_at, locale),
+          })}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function ResendInvitationButton({
+  organizationId,
+  invitation,
+}: {
+  organizationId: number;
+  invitation: OrganizationInvitation;
+}) {
+  const t = useT('organization');
+  const mutation = useResendOrganizationInvitation(organizationId);
+  const [availableAt, setAvailableAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const remaining = Math.max(0, Math.ceil((availableAt - now) / 1000));
+
+  useEffect(() => {
+    if (availableAt <= Date.now()) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [availableAt]);
+
+  const startCooldown = (seconds: number) => {
+    const current = Date.now();
+    setNow(current);
+    setAvailableAt(current + seconds * 1000);
+  };
+
+  const resend = () => {
+    mutation.mutate(invitation.id, {
+      onSuccess: ({ email_send_status: status }) => {
+        startCooldown(RESEND_COOLDOWN_SECONDS);
+        if (status === 'accepted_by_provider') {
+          toast.success(t('resendInvitationSent'), {
+            description: t('resendInvitationRotated'),
+          });
+        } else {
+          toast.error(t(`emailSendStatus.${status}`));
+        }
+      },
+      onError: (error) => {
+        if (error instanceof ApiError && error.retryAfterSeconds) {
+          startCooldown(error.retryAfterSeconds);
+        }
+        toast.error(t(resolveOrganizationErrorKey(error)));
+      },
+    });
+  };
+
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      icon={<Send className="size-3.5" />}
+      aria-label={t('resendInvitationLabel', { email: invitation.email })}
+      disabled={remaining > 0}
+      loading={mutation.isPending}
+      onClick={resend}
+    >
+      {remaining > 0
+        ? t('resendInvitationCooldown', { seconds: remaining })
+        : t('resendInvitation')}
+    </Button>
+  );
 }
 
 function InvitationTableSkeleton() {

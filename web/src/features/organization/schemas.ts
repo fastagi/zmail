@@ -37,6 +37,13 @@ export const invitationEmailSendStatusSchema = enumSchema([
   'failed',
   'not_configured',
 ]);
+// The latest attempt recorded on the invitation: `pending` until it reports an outcome.
+export const invitationRecordedEmailStatusSchema = enumSchema([
+  'pending',
+  'accepted_by_provider',
+  'failed',
+  'not_configured',
+]);
 
 const safeIdSchema = number().check(
   int(),
@@ -140,6 +147,8 @@ export const organizationInvitationSchema = strictObject({
   role: organizationInvitationRoleSchema,
   status: organizationInvitationStatusSchema,
   expires_at: timestampSchema,
+  email_send_status: nullable(invitationRecordedEmailStatusSchema),
+  email_attempted_at: nullable(timestampSchema),
   created_at: timestampSchema,
   updated_at: timestampSchema,
 });

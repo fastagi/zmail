@@ -335,6 +335,35 @@ export function useRevokeOrganizationInvitation(organizationId: number) {
   });
 }
 
+export function useResendOrganizationInvitation(organizationId: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (invitationId: number) =>
+      organizationService.resendInvitation(organizationId, invitationId),
+    meta: LOCAL_ERROR_HANDLING_META,
+    onSuccess: ({ invitation }) => {
+      queryClient.setQueryData<OrganizationInvitationPage>(
+        organizationKeys.invitations(organizationId),
+        (current) =>
+          current
+            ? {
+                ...current,
+                items: current.items.map((item) =>
+                  item.id === invitation.id ? invitation : item
+                ),
+              }
+            : current
+      );
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({
+        queryKey: organizationKeys.invitations(organizationId),
+      });
+    },
+  });
+}
+
 export function useAcceptOrganizationInvitation() {
   const queryClient = useQueryClient();
 

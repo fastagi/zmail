@@ -151,6 +151,16 @@ export const organizationService = {
     );
   },
 
+  async resendInvitation(
+    organizationId: number,
+    invitationId: number
+  ): Promise<OrganizationInvitationCreateResult> {
+    const value = await request.post<unknown>(
+      `/organizations/${organizationId}/invitations/${invitationId}/resend`
+    );
+    return parseOrganizationInvitationCreateResponse(value);
+  },
+
   async acceptInvitation(
     input: AcceptOrganizationInvitationInput
   ): Promise<Organization> {
@@ -309,6 +319,12 @@ assertContract<
 >();
 assertContract<
   Sends<CreateOrganizationInvitationInput, ContractRequest<'createOrganizationInvitation'>>
+>();
+assertContract<
+  Accepts<
+    z.input<typeof organizationInvitationCreateResultSchema>,
+    ContractData<'resendOrganizationInvitation', 200>
+  >
 >();
 assertContract<
   Accepts<z.input<typeof organizationSchema>, ContractData<'acceptOrganizationInvitation', 200>>

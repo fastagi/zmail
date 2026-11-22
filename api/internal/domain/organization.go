@@ -109,8 +109,13 @@ type OrganizationInvitation struct {
 	AcceptedBy     *uint            `json:"accepted_by,omitempty"`
 	RevokedAt      *time.Time       `json:"revoked_at,omitempty"`
 	RevokedBy      *uint            `json:"revoked_by,omitempty"`
-	CreatedAt      time.Time        `json:"created_at"`
-	UpdatedAt      time.Time        `json:"updated_at"`
+	// EmailSendStatus is the outcome of the latest email attempt for the current token: pending,
+	// accepted_by_provider, failed, or not_configured. Empty for invitations that predate tracking.
+	EmailSendStatus string `json:"-"`
+	// EmailAttemptedAt is when the latest attempt finished; nil while pending or untracked.
+	EmailAttemptedAt *time.Time `json:"-"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // Status derives expiry without mutating invitation history on read.
@@ -154,6 +159,11 @@ type OrganizationInvitationRepository interface {
 	ListInvitations(ctx context.Context, organizationID uint, page, pageSize int) ([]*OrganizationInvitation, int64, error)
 	RevokeInvitation(ctx context.Context, organizationID, invitationID, revokedBy uint, now time.Time) (*OrganizationInvitation, error)
 	AcceptInvitation(ctx context.Context, tokenHash string, userID uint, now time.Time) (*OrganizationMembership, *OrganizationInvitation, error)
+	// PrepareInvitationResend returns a pending, unexpired invitation for another email attempt.
+	// A non-empty tokenHash replaces the stored token and marks the attempt pending.
+	PrepareInvitationResend(ctx context.Context, organizationID, invitationID uint, tokenHash string, now time.Time) (*OrganizationInvitation, error)
+	// RecordInvitationEmailAttempt stores an attempt outcome only while tokenHash is still current.
+	RecordInvitationEmailAttempt(ctx context.Context, invitationID uint, tokenHash, status string, at time.Time) (bool, error)
 }
 
 // Organization membership events, published after the membership change commits.

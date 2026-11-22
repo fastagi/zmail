@@ -139,6 +139,8 @@ describe('organization network contract validation', () => {
       role: 'member',
       status: 'pending',
       expires_at: timestamp,
+      email_send_status: 'not_configured',
+      email_attempted_at: timestamp,
       created_at: timestamp,
       updated_at: timestamp,
     };
@@ -159,6 +161,47 @@ describe('organization network contract validation', () => {
         invitation: { ...invitation, token: 'must-not-cross-the-contract' },
         email_send_status: 'accepted_by_provider',
       })
+    );
+  });
+
+  it('accepts recorded email attempt states, including untracked history, and rejects unknown ones', () => {
+    const base = {
+      id: 74,
+      organization_id: 42,
+      email: 'member@example.com',
+      role: 'member',
+      status: 'pending',
+      expires_at: timestamp,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    for (const state of ['pending', 'accepted_by_provider', 'failed', 'not_configured']) {
+      const invitation = { ...base, email_send_status: state, email_attempted_at: null };
+      expect(
+        parseOrganizationInvitationPageResponse(
+          pageEnvelope([invitation], '/v1/organizations/42/invitations')
+        ).items[0]?.email_send_status
+      ).toBe(state);
+    }
+    const untracked = { ...base, email_send_status: null, email_attempted_at: null };
+    expect(
+      parseOrganizationInvitationPageResponse(
+        pageEnvelope([untracked], '/v1/organizations/42/invitations')
+      ).items[0]?.email_send_status
+    ).toBeNull();
+
+    expectInvalidResponse(() =>
+      parseOrganizationInvitationPageResponse(
+        pageEnvelope(
+          [{ ...base, email_send_status: 'delivered', email_attempted_at: null }],
+          '/v1/organizations/42/invitations'
+        )
+      )
+    );
+    expectInvalidResponse(() =>
+      parseOrganizationInvitationPageResponse(
+        pageEnvelope([base], '/v1/organizations/42/invitations')
+      )
     );
   });
 

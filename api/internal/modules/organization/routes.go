@@ -38,6 +38,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("organization-invitations.destroy").
 			WhereNumber("id").
 			WhereNumber("invitation_id")
+		auth.POST("/organizations/:id/invitations/:invitation_id/resend", h.ResendInvitation).
+			Name("organization-invitations.resend").
+			WhereNumber("id").
+			WhereNumber("invitation_id")
 		auth.POST("/organization-invitations/accept", h.AcceptInvitation).Name("organization-invitations.accept")
 	})
 }

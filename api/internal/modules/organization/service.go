@@ -28,6 +28,7 @@ type Service interface {
 	TransferOwnership(ctx context.Context, userID, organizationID uint, req *TransferOrganizationOwnershipRequest) (*domain.OrganizationOwnershipTransfer, error)
 	Invite(ctx context.Context, userID, organizationID uint, req *CreateOrganizationInvitationRequest) (*OrganizationInvitationResult, error)
 	ListInvitations(ctx context.Context, userID, organizationID uint, page, pageSize int) ([]*domain.OrganizationInvitation, int64, error)
+	ResendInvitation(ctx context.Context, userID, organizationID, invitationID uint) (*OrganizationInvitationResult, error)
 	RevokeInvitation(ctx context.Context, userID, organizationID, invitationID uint) error
 	AcceptInvitation(ctx context.Context, userID uint, req *AcceptOrganizationInvitationRequest) (*domain.OrganizationMembership, error)
 }
@@ -63,8 +64,12 @@ func NewService(
 	invitationPolicy InvitationPolicy,
 	events MembershipEventPublisher,
 ) *service {
-	if invitationPolicy.TTL <= 0 {
-		invitationPolicy = NewInvitationPolicy(nil)
+	if invitationPolicy.TTL <= 0 || invitationPolicy.ResendCooldown == nil || invitationPolicy.ResendDaily == nil {
+		fallback := NewInvitationPolicy(nil, nil)
+		if invitationPolicy.TTL > 0 {
+			fallback.TTL = invitationPolicy.TTL
+		}
+		invitationPolicy = fallback
 	}
 	var administration administrationStore
 	if seam, ok := repo.(administrationStore); ok {

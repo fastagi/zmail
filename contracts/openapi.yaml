@@ -891,6 +891,45 @@ paths:
             is absent or no longer pending (accepted, revoked, or expired).'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/organizations/{organization_id}/invitations/{invitation_id}/resend:
+    post:
+      operationId: resendOrganizationInvitation
+      summary: Email a pending invitation again
+      description: Only token hashes are stored, so a resend through a configured mailer issues a new
+        token and the earlier emailed token stops working. Without a mailer the token is kept and the
+        attempt is recorded as `not_configured`. The expiry is unchanged. Each invitation allows one
+        resend per minute and five per 24 hours.
+      tags:
+        - Organizations
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationID'
+        - $ref: '#/components/parameters/OrganizationInvitationID'
+      responses:
+        '200':
+          description: The invitation and the status of this synchronous send attempt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationInvitationCreateResponse'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+          description: '`PERMISSION.DENIED`: only `owner` and `admin` manage invitations.'
+        '404':
+          $ref: '#/components/responses/NotFound'
+          description: '`ORGANIZATION.NOT_FOUND`, or `ORGANIZATION.INVITATION.NOT_FOUND` when the invitation
+            is absent or no longer pending (accepted, revoked, or expired).'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+          description: '`COMMON.RATE_LIMITED`: this invitation was resent within the last minute or five
+            times in 24 hours; `Retry-After` gives the seconds to wait.'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/organizations/{organization_id}/members:
     get:
       operationId: listOrganizationMembers
@@ -11387,6 +11426,18 @@ components:
         - accepted_by_provider
         - failed
         - not_configured
+    OrganizationInvitationRecordedEmailStatus:
+      type:
+        - string
+        - 'null'
+      description: Latest email attempt for the current token. `pending` until the attempt reports an
+        outcome; null for invitations created before attempts were recorded. Not a delivery receipt.
+      enum:
+        - pending
+        - accepted_by_provider
+        - failed
+        - not_configured
+        - null
     OrganizationInvitation:
       type: object
       description: Token-free invitation view.
@@ -11398,6 +11449,8 @@ components:
         - role
         - status
         - expires_at
+        - email_send_status
+        - email_attempted_at
         - created_at
         - updated_at
       properties:
@@ -11416,6 +11469,14 @@ components:
         expires_at:
           type: string
           format: date-time
+        email_send_status:
+          $ref: '#/components/schemas/OrganizationInvitationRecordedEmailStatus'
+        email_attempted_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When the latest attempt finished; null while pending or untracked.
         created_at:
           type: string
           format: date-time

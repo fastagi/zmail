@@ -262,3 +262,11 @@ func (r *invitationRepositoryStub) FindMembershipsByEmails(context.Context, uint
 func (r *invitationRepositoryStub) ListMembershipsByUserIDs(context.Context, uint, []uint) ([]*domain.OrganizationMembership, error) {
 	return nil, nil
 }
+
+func (r *invitationRepositoryStub) PrepareInvitationResend(context.Context, uint, uint, string, time.Time) (*domain.OrganizationInvitation, error) {
+	return nil, domain.ErrOrganizationInvitationNotFound
+}
+
+func (r *invitationRepositoryStub) RecordInvitationEmailAttempt(context.Context, uint, string, string, time.Time) (bool, error) {
+	return true, nil
+}

@@ -5,6 +5,7 @@ import type {
   createOrganizationInvitationSchema,
   createOrganizationSchema,
   invitationEmailSendStatusSchema,
+  invitationRecordedEmailStatusSchema,
   organizationContextSchema,
   organizationInvitationRoleSchema,
   organizationInvitationSchema,
@@ -33,6 +34,7 @@ export type OrganizationInvitationRole = Infer<typeof organizationInvitationRole
 export type OrganizationInvitationStatus = Infer<typeof organizationInvitationStatusSchema>;
 export type OrganizationInvitation = Infer<typeof organizationInvitationSchema>;
 export type InvitationEmailSendStatus = Infer<typeof invitationEmailSendStatusSchema>;
+export type InvitationRecordedEmailStatus = Infer<typeof invitationRecordedEmailStatusSchema>;
 export type OrganizationInvitationCreateResult = Infer<
   typeof organizationInvitationCreateResultSchema
 >;

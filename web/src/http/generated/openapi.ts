@@ -2874,6 +2874,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/organizations/{organization_id}/invitations/{invitation_id}/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email a pending invitation again
+         * @description Only token hashes are stored, so a resend through a configured mailer issues a new token and the earlier emailed token stops working. Without a mailer the token is kept and the attempt is recorded as `not_configured`. The expiry is unchanged. Each invitation allows one resend per minute and five per 24 hours.
+         */
+        post: operations["resendOrganizationInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/{organization_id}/members": {
         parameters: {
             query?: never;
@@ -5995,6 +6015,12 @@ export interface components {
             created_at: string;
             /** Format: email */
             email: string;
+            /**
+             * Format: date-time
+             * @description When the latest attempt finished; null while pending or untracked.
+             */
+            email_attempted_at: string | null;
+            email_send_status: components["schemas"]["OrganizationInvitationRecordedEmailStatus"];
             /** Format: date-time */
             expires_at: string;
             id: components["schemas"]["PositiveID"];
@@ -6039,6 +6065,11 @@ export interface components {
             message: string;
             meta: components["schemas"]["PaginationMeta"];
         };
+        /**
+         * @description Latest email attempt for the current token. `pending` until the attempt reports an outcome; null for invitations created before attempts were recorded. Not a delivery receipt.
+         * @enum {string|null}
+         */
+        OrganizationInvitationRecordedEmailStatus: "pending" | "accepted_by_provider" | "failed" | "not_configured" | null;
         /** @enum {string} */
         OrganizationInvitationStatus: "pending" | "accepted" | "revoked" | "expired";
         /** @description PII-minimized member view; `id` is the membership ID. */
@@ -14779,6 +14810,40 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `ORGANIZATION.NOT_FOUND`, or `ORGANIZATION.INVITATION.NOT_FOUND` when the invitation is absent or no longer pending (accepted, revoked, or expired). */
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    resendOrganizationInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization invitation identifier. */
+                invitation_id: components["parameters"]["OrganizationInvitationID"];
+                /** @description Organization identifier; resolved only through the caller's membership. */
+                organization_id: components["parameters"]["OrganizationID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invitation and the status of this synchronous send attempt. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationInvitationCreateResponse"];
+                };
+            };
+            400: components["responses"]["InvalidInput"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `PERMISSION.DENIED`: only `owner` and `admin` manage invitations. */
+            403: components["responses"]["Forbidden"];
+            /** @description `ORGANIZATION.NOT_FOUND`, or `ORGANIZATION.INVITATION.NOT_FOUND` when the invitation is absent or no longer pending (accepted, revoked, or expired). */
+            404: components["responses"]["NotFound"];
+            /** @description `COMMON.RATE_LIMITED`: this invitation was resent within the last minute or five times in 24 hours; `Retry-After` gives the seconds to wait. */
+            429: components["responses"]["RateLimited"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

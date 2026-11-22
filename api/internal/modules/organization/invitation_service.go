@@ -2,14 +2,17 @@ package organization
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fastagi/zmail/api/internal/capabilities/crypto"
 	"github.com/fastagi/zmail/api/internal/capabilities/idgen"
 	"github.com/fastagi/zmail/api/internal/domain"
+	"github.com/fastagi/zmail/api/internal/infra/ratelimit"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 )
 
@@ -74,25 +77,7 @@ func (s *service) Invite(
 		return nil, fmt.Errorf("create organization invitation: %w", err)
 	}
 
-	emailStatus := InvitationEmailSendStatusNotConfigured
-	if s.invitationMailer != nil && s.invitationMailer.IsConfigured() {
-		emailStatus = InvitationEmailSendStatusAcceptedByProvider
-		if sendErr := s.invitationMailer.SendInvitation(
-			ctx,
-			invitation.Email,
-			manager.Organization.Name,
-			invitation.Role,
-			token,
-			invitation.ExpiresAt,
-		); sendErr != nil {
-			emailStatus = InvitationEmailSendStatusFailed
-			slog.WarnContext(ctx, "organization.invitation_email_send_failed",
-				"organization_id", organizationID,
-				"invitation_id", invitation.ID,
-				"error_type", fmt.Sprintf("%T", sendErr),
-			)
-		}
-	}
+	emailStatus := s.sendInvitationEmail(ctx, invitation, manager.Organization.Name, token)
 
 	auditstarter.RecordChange(ctx, auditstarter.Change{
 		Action:     "invite",
@@ -195,4 +180,132 @@ func (s *service) AcceptInvitation(
 	})
 	s.publish(ctx, domain.NewOrganizationMemberJoinedEvent(invitation.OrganizationID, userID, membership.ID, s.now()))
 	return membership, nil
+}
+
+// ErrInvitationResendRateLimited refuses a resend that exceeds the per-invitation quota.
+var ErrInvitationResendRateLimited = errors.New("organization invitation resend is rate limited")
+
+// InvitationRetryAfterError carries when the refused resend may be tried again.
+type InvitationRetryAfterError struct {
+	Err        error
+	RetryAfter time.Duration
+}
+
+func (e *InvitationRetryAfterError) Error() string { return e.Err.Error() }
+
+func (e *InvitationRetryAfterError) Unwrap() error { return e.Err }
+
+// sendInvitationEmail makes one synchronous attempt for the current token and records its outcome
+// on the invitation. A recording failure is logged; the attempt itself already happened.
+func (s *service) sendInvitationEmail(
+	ctx context.Context,
+	invitation *domain.OrganizationInvitation,
+	organizationName string,
+	token string,
+) InvitationEmailSendStatus {
+	status := InvitationEmailSendStatusNotConfigured
+	if s.invitationMailer != nil && s.invitationMailer.IsConfigured() {
+		status = InvitationEmailSendStatusAcceptedByProvider
+		if sendErr := s.invitationMailer.SendInvitation(
+			ctx,
+			invitation.Email,
+			organizationName,
+			invitation.Role,
+			token,
+			invitation.ExpiresAt,
+		); sendErr != nil {
+			status = InvitationEmailSendStatusFailed
+			slog.WarnContext(ctx, "organization.invitation_email_send_failed",
+				"organization_id", invitation.OrganizationID,
+				"invitation_id", invitation.ID,
+				"error_type", fmt.Sprintf("%T", sendErr),
+			)
+		}
+	}
+	attemptedAt := s.now()
+	recorded, err := s.invitationRepo.RecordInvitationEmailAttempt(
+		context.WithoutCancel(ctx), invitation.ID, invitation.TokenHash, string(status), attemptedAt,
+	)
+	switch {
+	case err != nil:
+		slog.ErrorContext(ctx, "organization.invitation_email_status_record_failed",
+			"organization_id", invitation.OrganizationID,
+			"invitation_id", invitation.ID,
+			"error_type", fmt.Sprintf("%T", err),
+		)
+	case recorded:
+		invitation.EmailSendStatus = string(status)
+		invitation.EmailAttemptedAt = &attemptedAt
+	}
+	return status
+}
+
+// takeResendQuota consumes one unit of both per-invitation quotas, or refuses with the longer wait.
+func (s *service) takeResendQuota(ctx context.Context, invitationID uint) error {
+	key := strconv.FormatUint(uint64(invitationID), 10)
+	for _, store := range []ratelimit.Store{s.invitationPolicy.ResendCooldown, s.invitationPolicy.ResendDaily} {
+		allowed, _, resetAt := store.Take(ctx, key)
+		if !allowed {
+			return &InvitationRetryAfterError{Err: ErrInvitationResendRateLimited, RetryAfter: time.Until(resetAt)}
+		}
+	}
+	return nil
+}
+
+// ResendInvitation emails a pending invitation again. Only token hashes are stored, so a resend
+// through a configured mailer issues a new token and the earlier one stops working. Without a
+// mailer the token is kept and the attempt is recorded as not_configured. The expiry is unchanged.
+func (s *service) ResendInvitation(
+	ctx context.Context,
+	userID,
+	organizationID,
+	invitationID uint,
+) (*OrganizationInvitationResult, error) {
+	if userID == 0 || organizationID == 0 || invitationID == 0 {
+		return nil, domain.ErrInvalidInput
+	}
+	if s.invitationRepo == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	manager, err := s.invitationManager(ctx, userID, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	now := s.now()
+	// Validate before spending quota so a stale row does not lock the manager out.
+	if _, err = s.invitationRepo.PrepareInvitationResend(ctx, organizationID, invitationID, "", now); err != nil {
+		return nil, err
+	}
+	if err = s.takeResendQuota(ctx, invitationID); err != nil {
+		return nil, err
+	}
+
+	token := ""
+	tokenHash := ""
+	if s.invitationMailer != nil && s.invitationMailer.IsConfigured() {
+		if token, err = generateOrganizationInvitationToken(); err != nil {
+			return nil, err
+		}
+		tokenHash = crypto.SHA256Hex(token)
+	}
+	invitation, err := s.invitationRepo.PrepareInvitationResend(ctx, organizationID, invitationID, tokenHash, now)
+	if err != nil {
+		return nil, err
+	}
+	emailStatus := s.sendInvitationEmail(ctx, invitation, manager.Organization.Name, token)
+
+	auditstarter.RecordChange(ctx, auditstarter.Change{
+		Action:     "resend",
+		Resource:   "organization_invitations",
+		TargetType: "organization_invitation",
+		TargetID:   strconv.FormatUint(uint64(invitation.ID), 10),
+		Result:     domain.AuditResultSuccess,
+		Metadata: map[string]any{
+			"organization_id":   organizationID,
+			"role":              invitation.Role,
+			"email_send_status": emailStatus,
+			"token_rotated":     tokenHash != "",
+		},
+	})
+	return &OrganizationInvitationResult{Invitation: invitation, EmailSendStatus: emailStatus}, nil
 }
