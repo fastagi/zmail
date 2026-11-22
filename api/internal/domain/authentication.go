@@ -49,6 +49,7 @@ type CredentialSignIn interface {
 		ctx context.Context,
 		identifier string,
 		password string,
+		secondFactor string,
 		audience SessionAudience,
 		authorize func(context.Context, *User) error,
 	) (*IssuedSession, error)

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { AlertCircle } from 'lucide-react';
@@ -50,6 +50,10 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
   ) {
     setNeedsCode(true);
   }
+  const totpInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (needsCode) totpInput.current?.focus();
+  }, [needsCode]);
   const emailError = hasAuthFieldError(error, 'email') ? t.auth('emailInvalid') : undefined;
   const passwordError = hasAuthFieldError(error, 'password')
     ? t.auth('passwordInvalid')
@@ -139,7 +143,7 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
                 name="totp-code"
                 autoComplete="one-time-code"
                 inputMode="numeric"
-                autoFocus
+                ref={totpInput}
                 required
                 maxLength={32}
                 disabled={isPending}

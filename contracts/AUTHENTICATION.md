@@ -129,8 +129,8 @@ An account can add an authenticator app (RFC 6238 TOTP: SHA-1, six digits, 30-se
 - Secrets are AES-GCM encrypted with `AUTH_TOTP_ENCRYPTION_KEY`; recovery codes are stored as
   SHA-256 hashes. Without the key, `available` is false and enrollment is `503`, while existing
   factors stay enforced.
-- Operator sign-in shares the credential path but does not yet send a code, so an operator account
-  with two-factor sign-in cannot open the Admin Console until it does.
+- `POST /v1/operator/session` accepts the same optional `totp_code` with the same failures, so an
+  operator account with two-factor sign-in signs in to the Admin Console with its code.
 
 ### Public Failure Semantics
 

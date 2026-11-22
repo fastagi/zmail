@@ -24,7 +24,10 @@ import { useT, type AllTranslationKeys } from '@/i18n';
 const minPasswordLength = 6;
 const maxPasswordLength = 50;
 
-type SecurityKey = Extract<AllTranslationKeys, `settings.security.${string}`>;
+type SecurityKey = Exclude<
+  Extract<AllTranslationKeys, `settings.security.${string}`>,
+  `settings.security.twoFactor.${string}`
+>;
 
 interface FieldErrors {
   currentPassword?: SecurityKey;
@@ -107,10 +110,7 @@ export function AccountSecurityPanel() {
         signInAgain();
       } else if (hasAuthFieldError(error, 'newPassword')) {
         showFieldErrors({ newPassword: 'settings.security.errors.newInvalid' });
-      } else if (
-        code === ApiErrorCode.COMMON_RATE_LIMITED ||
-        getAuthErrorStatus(error) === 429
-      ) {
+      } else if (code === ApiErrorCode.COMMON_RATE_LIMITED || getAuthErrorStatus(error) === 429) {
         setFormError('settings.security.errors.rateLimited');
       } else {
         setFormError('settings.security.errors.failed');
@@ -138,7 +138,9 @@ export function AccountSecurityPanel() {
 
       <form onSubmit={submit} noValidate className="space-y-4" aria-busy={pending}>
         <div className="space-y-2">
-          <Label htmlFor="security-current-password">{t('settings.security.currentPassword')}</Label>
+          <Label htmlFor="security-current-password">
+            {t('settings.security.currentPassword')}
+          </Label>
           <Input
             ref={currentRef}
             id="security-current-password"
@@ -176,7 +178,9 @@ export function AccountSecurityPanel() {
           )}
         </div>
         <div className="space-y-2">
-          <Label htmlFor="security-confirm-password">{t('settings.security.confirmPassword')}</Label>
+          <Label htmlFor="security-confirm-password">
+            {t('settings.security.confirmPassword')}
+          </Label>
           <Input
             ref={confirmRef}
             id="security-confirm-password"

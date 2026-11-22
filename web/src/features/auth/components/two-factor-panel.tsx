@@ -17,17 +17,22 @@ import { getAuthErrorCode, getAuthErrorStatus } from '@/features/auth/utils/auth
 import { ApiErrorCode } from '@/http/codes';
 import { useT, type AllTranslationKeys } from '@/i18n';
 
-type TwoFactorKey = Extract<AllTranslationKeys, `settings.security.twoFactor.${string}`>;
+type TwoFactorKey = Exclude<
+  Extract<AllTranslationKeys, `settings.security.twoFactor.${string}`>,
+  'settings.security.twoFactor.enabledSince'
+>;
 
 const totpQueryKey = ['auth', 'totp'] as const;
 
 function errorKey(error: unknown): TwoFactorKey {
   const code = getAuthErrorCode(error);
-  if (code === ApiErrorCode.AUTH_TOTP_INVALID) return 'settings.security.twoFactor.errors.codeInvalid';
+  if (code === ApiErrorCode.AUTH_TOTP_INVALID)
+    return 'settings.security.twoFactor.errors.codeInvalid';
   if (code === ApiErrorCode.AUTH_TOTP_ALREADY_ENABLED) {
     return 'settings.security.twoFactor.errors.alreadyEnabled';
   }
-  if (code === ApiErrorCode.AUTH_UNAUTHORIZED) return 'settings.security.twoFactor.errors.sessionEnded';
+  if (code === ApiErrorCode.AUTH_UNAUTHORIZED)
+    return 'settings.security.twoFactor.errors.sessionEnded';
   if (code === ApiErrorCode.COMMON_RATE_LIMITED || getAuthErrorStatus(error) === 429) {
     return 'settings.security.twoFactor.errors.rateLimited';
   }
@@ -134,8 +139,13 @@ export function TwoFactorPanel() {
     body = (
       <div className="space-y-3 rounded-lg border border-border p-4">
         <h3 className="font-medium">{t('settings.security.twoFactor.recoveryTitle')}</h3>
-        <p className="text-sm text-text-muted">{t('settings.security.twoFactor.recoveryDescription')}</p>
-        <ul aria-label={t('settings.security.twoFactor.recoveryTitle')} className="grid grid-cols-2 gap-1 font-mono text-sm">
+        <p className="text-sm text-text-muted">
+          {t('settings.security.twoFactor.recoveryDescription')}
+        </p>
+        <ul
+          aria-label={t('settings.security.twoFactor.recoveryTitle')}
+          className="grid grid-cols-2 gap-1 font-mono text-sm"
+        >
           {recoveryCodes.map(item => (
             <li key={item}>{item}</li>
           ))}
@@ -145,7 +155,9 @@ export function TwoFactorPanel() {
             type="button"
             variant="outline"
             icon={<Copy className="size-4" />}
-            onClick={() => void copy(recoveryCodes.join('\n'), t('settings.security.twoFactor.recoveryCopied'))}
+            onClick={() =>
+              void copy(recoveryCodes.join('\n'), t('settings.security.twoFactor.recoveryCopied'))
+            }
           >
             {t('settings.security.twoFactor.copyRecovery')}
           </Button>
@@ -172,7 +184,12 @@ export function TwoFactorPanel() {
           className="space-y-3"
           aria-label={t('settings.security.twoFactor.disableTitle')}
         >
-          {codeField('two-factor-disable-code', 'settings.security.twoFactor.disableCode', disable.isPending, false)}
+          {codeField(
+            'two-factor-disable-code',
+            'settings.security.twoFactor.disableCode',
+            disable.isPending,
+            false
+          )}
           <Button type="submit" variant="outline" loading={disable.isPending}>
             {t('settings.security.twoFactor.disable')}
           </Button>
@@ -180,13 +197,18 @@ export function TwoFactorPanel() {
       </div>
     );
   } else if (!status.data.available) {
-    body = <p className="text-sm text-text-muted">{t('settings.security.twoFactor.unavailable')}</p>;
+    body = (
+      <p className="text-sm text-text-muted">{t('settings.security.twoFactor.unavailable')}</p>
+    );
   } else if (enrollment) {
     body = (
       <div className="space-y-4">
         <p className="text-sm">{t('settings.security.twoFactor.stepAdd')}</p>
         <div className="space-y-2">
-          <a href={enrollment.otpauth_uri} className="text-sm font-medium text-primary hover:underline">
+          <a
+            href={enrollment.otpauth_uri}
+            className="text-sm font-medium text-primary hover:underline"
+          >
             {t('settings.security.twoFactor.openApp')}
           </a>
           <p className="text-xs text-text-muted">{t('settings.security.twoFactor.secretLabel')}</p>
@@ -205,9 +227,18 @@ export function TwoFactorPanel() {
             </Button>
           </div>
         </div>
-        <form onSubmit={event => submitCode(event, value => confirm.mutate(value))} noValidate className="space-y-3">
+        <form
+          onSubmit={event => submitCode(event, value => confirm.mutate(value))}
+          noValidate
+          className="space-y-3"
+        >
           <p className="text-sm">{t('settings.security.twoFactor.stepConfirm')}</p>
-          {codeField('two-factor-confirm-code', 'settings.security.twoFactor.code', confirm.isPending, true)}
+          {codeField(
+            'two-factor-confirm-code',
+            'settings.security.twoFactor.code',
+            confirm.isPending,
+            true
+          )}
           <div className="flex gap-2">
             <Button type="submit" loading={confirm.isPending}>
               {t('settings.security.twoFactor.confirm')}
@@ -239,13 +270,20 @@ export function TwoFactorPanel() {
         >
           {t('settings.security.twoFactor.start')}
         </Button>
-        {codeError ? <p role="alert" className="text-sm text-destructive">{t(codeError)}</p> : null}
+        {codeError ? (
+          <p role="alert" className="text-sm text-error">
+            {t(codeError)}
+          </p>
+        ) : null}
       </div>
     );
   }
 
   return (
-    <section aria-labelledby="security-two-factor-title" className="max-w-xl space-y-4 border-t border-border py-6">
+    <section
+      aria-labelledby="security-two-factor-title"
+      className="max-w-xl space-y-4 border-t border-border py-6"
+    >
       <div className="space-y-1">
         <div className="flex items-center gap-2">
           <h2 id="security-two-factor-title" className="text-lg font-semibold">
@@ -253,7 +291,11 @@ export function TwoFactorPanel() {
           </h2>
           {status.data?.available || status.data?.enabled ? (
             <Badge variant={status.data.enabled ? 'default' : 'secondary'}>
-              {t(status.data.enabled ? 'settings.security.twoFactor.on' : 'settings.security.twoFactor.off')}
+              {t(
+                status.data.enabled
+                  ? 'settings.security.twoFactor.on'
+                  : 'settings.security.twoFactor.off'
+              )}
             </Badge>
           ) : null}
         </div>

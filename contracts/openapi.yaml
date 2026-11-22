@@ -10471,7 +10471,9 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     OperatorInvalidCredentials:
-      description: '`AUTH.INVALID_CREDENTIALS` for unknown, wrong, or disabled accounts.'
+      description: '`AUTH.INVALID_CREDENTIALS` for unknown, wrong, or disabled accounts; after a correct
+        password on an account with two-factor sign-in, `AUTH.TOTP_REQUIRED` without `totp_code` and
+        `AUTH.TOTP_INVALID` for a wrong or reused code.'
       content:
         application/json:
           schema:
@@ -13005,6 +13007,10 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+        totp_code:
+          type: string
+          maxLength: 32
+          description: Authenticator or recovery code, required once the account has two-factor sign-in.
     OperatorAccount:
       type: object
       additionalProperties: false

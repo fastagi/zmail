@@ -6020,6 +6020,8 @@ export interface components {
             /** @description Username or email. */
             identifier: string;
             password: string;
+            /** @description Authenticator or recovery code, required once the account has two-factor sign-in. */
+            totp_code?: string;
         };
         OperatorSystemResponse: {
             /** @constant */
@@ -7043,7 +7045,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description `AUTH.INVALID_CREDENTIALS` for unknown, wrong, or disabled accounts. */
+        /** @description `AUTH.INVALID_CREDENTIALS` for unknown, wrong, or disabled accounts; after a correct password on an account with two-factor sign-in, `AUTH.TOTP_REQUIRED` without `totp_code` and `AUTH.TOTP_INVALID` for a wrong or reused code. */
         OperatorInvalidCredentials: {
             headers: {
                 [name: string]: unknown;

@@ -279,10 +279,11 @@ func (s *service) SignIn(
 	ctx context.Context,
 	identifier string,
 	password string,
+	secondFactor string,
 	audience domain.SessionAudience,
 	authorize func(context.Context, *domain.User) error,
 ) (*domain.IssuedSession, error) {
-	user, issued, err := s.signIn(ctx, identifier, password, "", audience, authorize)
+	user, issued, err := s.signIn(ctx, identifier, password, secondFactor, audience, authorize)
 	if err != nil {
 		return nil, err
 	}

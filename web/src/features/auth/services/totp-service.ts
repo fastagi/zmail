@@ -18,7 +18,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function expect<T>(value: unknown, valid: (value: Record<string, unknown>) => boolean, name: string): T {
+function expect<T>(
+  value: unknown,
+  valid: (value: Record<string, unknown>) => boolean,
+  name: string
+): T {
   if (!isRecord(value) || !valid(value)) {
     throw new ApiError(`Invalid ${name} response`, ClientErrorCode.INVALID_RESPONSE);
   }

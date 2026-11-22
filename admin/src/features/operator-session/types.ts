@@ -40,4 +40,6 @@ export type OperatorSession = z.infer<typeof operatorSessionSchema>;
 export interface SignInInput {
   identifier: string;
   password: string;
+  /** Authenticator or recovery code for an account with two-factor sign-in. */
+  totp_code?: string;
 }

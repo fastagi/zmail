@@ -87,6 +87,35 @@ describe('auth form error feedback', () => {
     expect(mutations.login.reset).toHaveBeenCalledTimes(1);
   });
 
+  it('asks for the authenticator code after a correct password and resubmits with it', () => {
+    mutations.login.error = new ApiError(
+      'Authenticator code required',
+      ApiErrorCode.AUTH_TOTP_REQUIRED,
+      401
+    );
+    renderWithMessages(<LoginForm />);
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ann@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret-pass' } });
+
+    expect(
+      screen.getByText('Enter the 6-digit code from your authenticator app.')
+    ).toBeInTheDocument();
+    const code = screen.getByLabelText('Authenticator code');
+    expect(code).toHaveAttribute('autocomplete', 'one-time-code');
+    fireEvent.change(code, { target: { value: ' 123456 ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
+
+    expect(mutations.login.mutate).toHaveBeenCalledWith({
+      email: 'ann@example.com',
+      password: 'secret-pass',
+      totpCode: '123456',
+    });
+    expect(screen.getByLabelText('Authenticator code')).toHaveValue('');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use a different account' }));
+    expect(mutations.login.reset).toHaveBeenCalled();
+  });
+
   it('keeps real-backend login blank and free of mock credentials by default', () => {
     renderWithMessages(<LoginForm />);
 
@@ -158,10 +187,7 @@ describe('auth form error feedback', () => {
     expect(email).toHaveAttribute('name', 'email');
     expect(email).toHaveAttribute('autocomplete', 'email');
     expect(email).toBeDisabled();
-    expect(screen.getByLabelText('Password')).toHaveAttribute(
-      'autocomplete',
-      'current-password'
-    );
+    expect(screen.getByLabelText('Password')).toHaveAttribute('autocomplete', 'current-password');
     expect(email.closest('form')).toHaveAttribute('aria-busy', 'true');
   });
 
@@ -175,14 +201,8 @@ describe('auth form error feedback', () => {
     expect(name).toHaveAttribute('name', 'name');
     expect(name).toHaveAttribute('autocomplete', 'name');
     expect(name).toBeDisabled();
-    expect(screen.getByLabelText('Email')).toHaveAttribute(
-      'autocomplete',
-      'email'
-    );
-    expect(screen.getByLabelText('Password')).toHaveAttribute(
-      'autocomplete',
-      'new-password'
-    );
+    expect(screen.getByLabelText('Email')).toHaveAttribute('autocomplete', 'email');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('autocomplete', 'new-password');
     expect(screen.getByRole('checkbox')).toBeDisabled();
     expect(name.closest('form')).toHaveAttribute('aria-busy', 'true');
   });
