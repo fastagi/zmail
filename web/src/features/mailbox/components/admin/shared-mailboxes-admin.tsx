@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Download, Inbox, MoreHorizontal, Pencil, Plus, Trash2, Upload, Users } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -21,10 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { CreateSharedMailboxDialog } from '@/features/mailbox/components/admin/create-shared-mailbox-dialog';
 import { DeleteMailboxDialog } from '@/features/mailbox/components/admin/delete-mailbox-dialog';
-import { ImportMailboxesDialog } from '@/features/mailbox/components/admin/import-mailboxes-dialog';
-import { MailboxMembersDrawer } from '@/features/mailbox/components/admin/mailbox-members-drawer';
 import { RenameMailboxDialog } from '@/features/mailbox/components/admin/rename-mailbox-dialog';
 import {
   MailOrganizationBoundary,
@@ -42,6 +39,20 @@ import type { MailboxDirectoryEntry, MailboxDirectoryFilters } from '@/features/
 import { isOrganizationLost, resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';
 import { useT } from '@/i18n';
 
+// The create, import, and members surfaces load when first opened, not with the table.
+const CreateSharedMailboxDialog = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/admin/create-shared-mailbox-dialog'))
+    .CreateSharedMailboxDialog,
+}));
+const ImportMailboxesDialog = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/admin/import-mailboxes-dialog'))
+    .ImportMailboxesDialog,
+}));
+const MailboxMembersDrawer = lazy(async () => ({
+  default: (await import('@/features/mailbox/components/admin/mailbox-members-drawer'))
+    .MailboxMembersDrawer,
+}));
+
 /** How long typing pauses before the search runs. */
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -50,6 +61,7 @@ type Dialog =
   | { kind: 'import' }
   | { kind: 'rename' | 'members' | 'delete'; mailbox: MailboxDirectoryEntry }
   | null;
+type DialogKind = NonNullable<Dialog>['kind'];
 
 /**
  * Admin page of the organization's shared mailboxes: the 24-hour send total, a searchable,
@@ -85,6 +97,9 @@ function SharedMailboxes() {
   const [cursors, setCursors] = useState<string[]>([]);
   const [searched, setSearched] = useState(query);
   const [dialog, setDialog] = useState<Dialog>(null);
+  // A lazy surface stays mounted once opened, so closing it keeps its exit animation.
+  const [opened, setOpened] = useState<ReadonlySet<DialogKind>>(() => new Set());
+  if (dialog && !opened.has(dialog.kind)) setOpened(new Set(opened).add(dialog.kind));
   const exportMailboxes = useExportMailboxes(organizationId);
 
   // A new search starts again at the first page.
@@ -225,14 +240,29 @@ function SharedMailboxes() {
         </div>
       ) : null}
 
-      <CreateSharedMailboxDialog open={dialog?.kind === 'create'} onClose={() => setDialog(null)} />
-      <ImportMailboxesDialog open={dialog?.kind === 'import'} onClose={() => setDialog(null)} />
+      {opened.has('create') ? (
+        <Suspense fallback={null}>
+          <CreateSharedMailboxDialog
+            open={dialog?.kind === 'create'}
+            onClose={() => setDialog(null)}
+          />
+        </Suspense>
+      ) : null}
+      {opened.has('import') ? (
+        <Suspense fallback={null}>
+          <ImportMailboxesDialog open={dialog?.kind === 'import'} onClose={() => setDialog(null)} />
+        </Suspense>
+      ) : null}
+      {opened.has('members') ? (
+        <Suspense fallback={null}>
+          <MailboxMembersDrawer
+            mailbox={dialog?.kind === 'members' ? dialog.mailbox : null}
+            onClose={() => setDialog(null)}
+          />
+        </Suspense>
+      ) : null}
       <RenameMailboxDialog
         mailbox={dialog?.kind === 'rename' ? dialog.mailbox : null}
-        onClose={() => setDialog(null)}
-      />
-      <MailboxMembersDrawer
-        mailbox={dialog?.kind === 'members' ? dialog.mailbox : null}
         onClose={() => setDialog(null)}
       />
       <DeleteMailboxDialog
