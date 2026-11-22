@@ -793,7 +793,13 @@ export function ComposeDialog({
           </Alert>
         ) : null}
       </DialogBody>
-      <DialogFooter className="mt-4">
+      {/* Inline, the page scrolls the form; Send stays pinned to its bottom, even on a phone. */}
+      <DialogFooter
+        className={cn(
+          'mt-4',
+          inline && 'sticky bottom-0 z-10 -mx-4 border-t bg-background px-4 py-3 sm:-mx-8 sm:px-8'
+        )}
+      >
         <Button type="button" variant="outline" disabled={send.isPending} onClick={dismiss}>
           {t('actions.cancel')}
         </Button>
@@ -807,7 +813,7 @@ export function ComposeDialog({
     return (
       <section
         aria-label={t(titleKey)}
-        className="mx-auto h-full w-full max-w-3xl space-y-5 overflow-y-auto px-4 py-5 sm:px-8"
+        className="mx-auto h-full w-full max-w-3xl space-y-5 overflow-y-auto px-4 pt-5 sm:px-8"
       >
         <header className="border-b pb-4">
           <h1 className="font-serif text-2xl font-semibold">{t(titleKey)}</h1>
