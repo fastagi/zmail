@@ -35,6 +35,10 @@ type ProfileService interface {
 	UpdateProfile(ctx context.Context, userID uint, req *UserUpdateRequest) (*domain.User, error)
 	ChangePassword(ctx context.Context, userID uint, req *UserChangePasswordRequest) error
 	DeleteAccount(ctx context.Context, userID uint) error
+	TOTPStatus(ctx context.Context, userID uint) (*TOTPStatusResponse, error)
+	StartTOTPEnrollment(ctx context.Context, userID uint) (*TOTPEnrollmentResponse, error)
+	ConfirmTOTP(ctx context.Context, userID uint, code string) (*TOTPRecoveryCodesResponse, error)
+	DisableTOTP(ctx context.Context, userID uint, code string) error
 }
 
 // UserQueryService defines read-only user lookup flows.
@@ -100,6 +104,8 @@ type service struct {
 	emailCodeRequired bool
 	// runRegistrationCode starts code delivery; tests replace it with an inline runner.
 	runRegistrationCode func(ctx context.Context, task func(context.Context))
+	// totp enforces and manages two-factor sign-in; nil without a factor store.
+	totp *totpGuard
 }
 
 var (
@@ -161,6 +167,13 @@ func ProvideService(
 	if cfg != nil {
 		svc.registrationOpen = !cfg.Authentication.RegistrationDisabled
 		svc.emailCodeRequired = cfg.Authentication.RegistrationEmailCodeRequired
+	}
+	if store, ok := repo.(totpStore); ok {
+		key := ""
+		if cfg != nil {
+			key = cfg.Authentication.TOTPEncryptionKey
+		}
+		svc.totp = newTOTPGuard(store, key)
 	}
 	if svc.registrationOpen && svc.emailCodeRequired && (mailer == nil || !mailer.IsConfigured()) {
 		slog.Warn("user.registration_email_code_mailer_missing",
@@ -248,7 +261,7 @@ func (s *service) createAccount(ctx context.Context, req *UserRegisterRequest, h
 
 // Login handles user login
 func (s *service) Login(ctx context.Context, req *UserLoginRequest) (*UserLoginResponse, error) {
-	user, issued, err := s.signIn(ctx, req.Username, req.Password, domain.SessionAudienceUser, nil)
+	user, issued, err := s.signIn(ctx, req.Username, req.Password, req.TOTPCode, domain.SessionAudienceUser, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -266,10 +279,11 @@ func (s *service) SignIn(
 	ctx context.Context,
 	identifier string,
 	password string,
+	secondFactor string,
 	audience domain.SessionAudience,
 	authorize func(context.Context, *domain.User) error,
 ) (*domain.IssuedSession, error) {
-	user, issued, err := s.signIn(ctx, identifier, password, audience, authorize)
+	user, issued, err := s.signIn(ctx, identifier, password, secondFactor, audience, authorize)
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +301,7 @@ func (s *service) signIn(
 	ctx context.Context,
 	identifier string,
 	password string,
+	totpCode string,
 	audience domain.SessionAudience,
 	authorize func(context.Context, *domain.User) error,
 ) (*domain.User, *IssuedAuthenticationSession, error) {
@@ -316,7 +331,12 @@ func (s *service) signIn(
 		return nil, nil, domain.ErrInvalidCredentials
 	}
 
-	// The password was right: clear the account's failures before any authorization decision.
+	// A missing or wrong second factor keeps the attempt counted against the account.
+	if factorErr := s.totp.checkSignIn(ctx, user.ID, totpCode); factorErr != nil {
+		return nil, nil, factorErr
+	}
+
+	// Both factors were right: clear the account's failures before any authorization decision.
 	if s.signIns != nil {
 		s.signIns.Reset(ctx, throttleKey)
 	}

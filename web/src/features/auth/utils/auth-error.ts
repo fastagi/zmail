@@ -17,6 +17,8 @@ type AuthErrorKey = Extract<
   | 'auth.registrationCodeExpired'
   | 'auth.registrationCodeInvalid'
   | 'auth.registrationCodeRequired'
+  | 'auth.totpInvalid'
+  | 'auth.totpRequired'
   | 'errors.authUnavailable'
   | 'errors.forbidden'
   | 'errors.networkError'
@@ -33,6 +35,14 @@ const fallbackKeyByAction = {
 export function resolveAuthErrorKey(error: unknown, action: AuthAction): AuthErrorKey {
   const errorCode = getAuthErrorCode(error);
   const status = getAuthErrorStatus(error);
+
+  if (action === 'login' && errorCode === ApiErrorCode.AUTH_TOTP_REQUIRED) {
+    return 'auth.totpRequired';
+  }
+
+  if (action === 'login' && errorCode === ApiErrorCode.AUTH_TOTP_INVALID) {
+    return 'auth.totpInvalid';
+  }
 
   if (
     action === 'login' &&

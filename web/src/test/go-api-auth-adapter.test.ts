@@ -8,9 +8,7 @@ import {
 import { ApiErrorCode } from '@/http/codes';
 
 const randomId = '01234567-89ab-cdef-0123-456789abcdef';
-const opaqueCredential = Buffer.from(
-  '0123456789abcdef0123456789abcdef'
-).toString('base64url');
+const opaqueCredential = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64url');
 const activeApiUser = {
   id: 42,
   username: 'ada',
@@ -55,10 +53,7 @@ describe('GoApiAuthAdapter', () => {
     });
 
     await expect(
-      adapter.login(
-        { email: 'ada@example.com', password: 'secret-123' },
-        incoming
-      )
+      adapter.login({ email: 'ada@example.com', password: 'secret-123' }, incoming)
     ).resolves.toEqual({
       ok: true,
       data: {
@@ -90,17 +85,35 @@ describe('GoApiAuthAdapter', () => {
     expect(headers.get('cookie')).toBeNull();
   });
 
+  it('forwards a second-factor code to the Go login as totp_code', async () => {
+    fetchMock.mockResolvedValueOnce(
+      successResponse({
+        access_token: opaqueCredential,
+        token_type: 'Bearer',
+        expires_in: 600,
+        user: activeApiUser,
+      })
+    );
+
+    await adapter.login(
+      { email: 'ada@example.com', password: 'secret-123', totpCode: '123456' },
+      new Headers()
+    );
+
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({ username: 'ada@example.com', password: 'secret-123', totp_code: '123456' })
+    );
+  });
+
   it('registers with a non-identifying generated username, then logs in by email', async () => {
-    fetchMock
-      .mockResolvedValueOnce(successResponse(activeApiUser, 201))
-      .mockResolvedValueOnce(
-        successResponse({
-          access_token: opaqueCredential,
-          token_type: 'Bearer',
-          expires_in: 900,
-          user: activeApiUser,
-        })
-      );
+    fetchMock.mockResolvedValueOnce(successResponse(activeApiUser, 201)).mockResolvedValueOnce(
+      successResponse({
+        access_token: opaqueCredential,
+        token_type: 'Bearer',
+        expires_in: 900,
+        user: activeApiUser,
+      })
+    );
 
     const result = await adapter.register(
       {
@@ -143,9 +156,7 @@ describe('GoApiAuthAdapter', () => {
     fetchMock.mockResolvedValueOnce(successResponse(activeApiUser));
     const token = opaqueCredential;
 
-    await expect(
-      adapter.profile(token, new Headers({ cookie: 'untrusted=1' }))
-    ).resolves.toEqual({
+    await expect(adapter.profile(token, new Headers({ cookie: 'untrusted=1' }))).resolves.toEqual({
       ok: true,
       data: {
         user: {
@@ -207,13 +218,9 @@ describe('GoApiAuthAdapter', () => {
   });
 
   it('classifies disabled users without inventing a browser role', async () => {
-    fetchMock.mockResolvedValueOnce(
-      successResponse({ ...activeApiUser, status: 0 })
-    );
+    fetchMock.mockResolvedValueOnce(successResponse({ ...activeApiUser, status: 0 }));
 
-    await expect(
-      adapter.profile(opaqueCredential, new Headers())
-    ).resolves.toMatchObject({
+    await expect(adapter.profile(opaqueCredential, new Headers())).resolves.toMatchObject({
       ok: false,
       error: {
         status: 403,
@@ -223,16 +230,14 @@ describe('GoApiAuthAdapter', () => {
   });
 
   it('turns malformed success data and non-opaque credentials into availability failures', async () => {
-    fetchMock
-      .mockResolvedValueOnce(successResponse({ user: activeApiUser }))
-      .mockResolvedValueOnce(
-        successResponse({
-          access_token: compactJwt({ exp: 1_700_000_600 }),
-          token_type: 'Bearer',
-          expires_in: 600,
-          user: activeApiUser,
-        })
-      );
+    fetchMock.mockResolvedValueOnce(successResponse({ user: activeApiUser })).mockResolvedValueOnce(
+      successResponse({
+        access_token: compactJwt({ exp: 1_700_000_600 }),
+        token_type: 'Bearer',
+        expires_in: 600,
+        user: activeApiUser,
+      })
+    );
 
     await expect(
       adapter.login(
@@ -269,9 +274,10 @@ describe('GoApiAuthAdapter', () => {
       'x-request-id': 'req-logout-1',
     });
 
-    await expect(
-      adapter.logout(opaqueCredential, incoming)
-    ).resolves.toEqual({ ok: true, data: { success: true } });
+    await expect(adapter.logout(opaqueCredential, incoming)).resolves.toEqual({
+      ok: true,
+      data: { success: true },
+    });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toBe('https://api.example.com/v1/logout');
@@ -320,9 +326,7 @@ describe('Go API auth mapping helpers', () => {
       email: 'ada@example.com',
       name: 'Ada Lovelace',
     });
-    expect(
-      mapGoApiUser({ ...activeApiUser, nickname: '  ', username: 'ada' })
-    ).toEqual({
+    expect(mapGoApiUser({ ...activeApiUser, nickname: '  ', username: 'ada' })).toEqual({
       id: '42',
       email: 'ada@example.com',
       name: 'ada',

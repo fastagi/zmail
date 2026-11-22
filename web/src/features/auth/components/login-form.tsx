@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { AlertCircle } from 'lucide-react';
@@ -18,6 +18,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { authConfig } from '@/config/auth';
 import { useLogin } from '@/features/auth/hooks/use-auth';
+import { getAuthErrorCode } from '@/features/auth/utils/auth-failure';
+import { ApiErrorCode } from '@/http/codes';
 import { hasAuthFieldError, resolveAuthErrorKey } from '@/features/auth/utils/auth-error';
 import { withReturnUrl } from '@/features/auth/utils/return-url';
 import { useT } from '@/i18n';
@@ -38,6 +40,20 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
   const returnUrl = useSearchParams()?.get('returnUrl') ?? null;
   const [email, setEmail] = useState(demoCredentials?.email ?? '');
   const [password, setPassword] = useState(demoCredentials?.password ?? '');
+  const [totpCode, setTotpCode] = useState('');
+  const errorCode = getAuthErrorCode(error);
+  // The password was right and the account asks for its second factor.
+  const [needsCode, setNeedsCode] = useState(false);
+  if (
+    !needsCode &&
+    (errorCode === ApiErrorCode.AUTH_TOTP_REQUIRED || errorCode === ApiErrorCode.AUTH_TOTP_INVALID)
+  ) {
+    setNeedsCode(true);
+  }
+  const totpInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (needsCode) totpInput.current?.focus();
+  }, [needsCode]);
   const emailError = hasAuthFieldError(error, 'email') ? t.auth('emailInvalid') : undefined;
   const passwordError = hasAuthFieldError(error, 'password')
     ? t.auth('passwordInvalid')
@@ -51,7 +67,8 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    login({ email, password });
+    login(needsCode ? { email, password, totpCode: totpCode.trim() } : { email, password });
+    setTotpCode('');
   };
 
   return (
@@ -84,6 +101,7 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
               errorText={emailError}
               onChange={event => {
                 setEmail(event.target.value);
+                setNeedsCode(false);
                 clearMutationError();
               }}
             />
@@ -118,6 +136,43 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
               }}
             />
           </div>
+          {needsCode ? (
+            <div className="space-y-2">
+              <Label htmlFor="totp-code">{t.auth('totpCode')}</Label>
+              <Input
+                id="totp-code"
+                name="totp-code"
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                ref={totpInput}
+                required
+                maxLength={32}
+                disabled={isPending}
+                className="bg-bg-canvas font-mono"
+                aria-describedby="totp-code-hint"
+                value={totpCode}
+                onChange={event => {
+                  setTotpCode(event.target.value);
+                  if (errorCode !== ApiErrorCode.AUTH_TOTP_REQUIRED) clearMutationError();
+                }}
+              />
+              <p id="totp-code-hint" className="text-xs text-text-muted">
+                {t.auth('totpCodeHint')}
+              </p>
+              <button
+                type="button"
+                className="text-sm font-medium text-primary hover:underline"
+                onClick={() => {
+                  setNeedsCode(false);
+                  setTotpCode('');
+                  setPassword('');
+                  reset();
+                }}
+              >
+                {t.auth('totpBack')}
+              </button>
+            </div>
+          ) : null}
           <Button type="submit" className="w-full font-semibold" loading={isPending}>
             {t.auth('login')}
           </Button>

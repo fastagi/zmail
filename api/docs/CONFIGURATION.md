@@ -137,6 +137,7 @@ restart-scoped; no JWT signing key or browser-readable claim is involved:
 | `AUTH_SESSION_TOUCH_INTERVAL` | `5m` | Activity-write throttle, positive, no more than one hour or the idle timeout |
 | `AUTH_SESSION_RETENTION` | `720h` | Terminal-row retention, zero through 365 days |
 | `AUTH_REGISTRATION_ENABLED` | `true` | Boolean; `false` closes public registration (`POST /v1/register` answers `403 AUTH.FORBIDDEN`) |
+| `AUTH_TOTP_ENCRYPTION_KEY` | empty | Encrypts authenticator secrets for two-factor sign-in (at least 32 characters). Empty turns new enrollment off; existing factors are still enforced and recovery codes still work. Changing it makes existing authenticator codes fail until users sign in with a recovery code and re-enroll |
 
 The API remains authoritative even when a browser cookie has a longer local lifetime: revocation,
 idle expiry, account state, password security events, and persistence availability are checked on

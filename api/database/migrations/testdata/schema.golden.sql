@@ -756,6 +756,21 @@ TABLE usage_quotas
   COLUMN created_at timestamp with time zone
   COLUMN updated_at timestamp with time zone
 
+TABLE user_recovery_codes
+  COLUMN id bigint NOT NULL DEFAULT nextval('user_recovery_codes_id_seq'::regclass)
+  COLUMN user_id bigint NOT NULL
+  COLUMN code_hash character(64) NOT NULL
+  COLUMN used_at timestamp with time zone
+  COLUMN created_at timestamp with time zone NOT NULL
+
+TABLE user_totp_factors
+  COLUMN user_id bigint NOT NULL
+  COLUMN secret text NOT NULL
+  COLUMN confirmed_at timestamp with time zone
+  COLUMN last_used_step bigint NOT NULL DEFAULT 0
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE users
   COLUMN id bigint NOT NULL DEFAULT nextval('users_id_seq'::regclass)
   COLUMN created_at timestamp with time zone
@@ -1135,6 +1150,13 @@ CONSTRAINT usage_quotas.usage_quotas_scope_check CHECK (((scope)::text = ANY ((A
 CONSTRAINT usage_quotas.usage_quotas_state_check CHECK ((((is_overridden = true) AND (limit_value IS NOT NULL)) OR ((is_overridden = false) AND (limit_value IS NULL))))
 CONSTRAINT usage_quotas.usage_quotas_subject_check CHECK (((((scope)::text = 'user'::text) AND (subject_id = user_id) AND (user_id IS NOT NULL) AND (organization_id IS NULL)) OR (((scope)::text = 'organization'::text) AND (subject_id = organization_id) AND (organization_id IS NOT NULL) AND (user_id IS NULL))))
 CONSTRAINT usage_quotas.usage_quotas_version_check CHECK ((version > 0))
+CONSTRAINT user_recovery_codes.user_recovery_codes_code_hash_check CHECK ((code_hash ~ '^[0-9a-f]{64}$'::text))
+CONSTRAINT user_recovery_codes.user_recovery_codes_pkey PRIMARY KEY (id)
+CONSTRAINT user_recovery_codes.user_recovery_codes_user_id_code_hash_key UNIQUE (user_id, code_hash)
+CONSTRAINT user_recovery_codes.user_recovery_codes_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+CONSTRAINT user_totp_factors.user_totp_factors_last_used_step_check CHECK ((last_used_step >= 0))
+CONSTRAINT user_totp_factors.user_totp_factors_pkey PRIMARY KEY (user_id)
+CONSTRAINT user_totp_factors.user_totp_factors_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT users.uni_users_email UNIQUE (email)
 CONSTRAINT users.users_pkey PRIMARY KEY (id)
 CONSTRAINT webhook_deliveries.fk_webhook_deliveries_endpoint FOREIGN KEY (endpoint_id) REFERENCES webhook_endpoints(id) ON UPDATE CASCADE ON DELETE CASCADE
@@ -1403,6 +1425,9 @@ INDEX CREATE UNIQUE INDEX idx_usage_quotas_identity ON usage_quotas USING btree 
 INDEX CREATE INDEX idx_usage_quotas_organization ON usage_quotas USING btree (organization_id)
 INDEX CREATE INDEX idx_usage_quotas_user ON usage_quotas USING btree (user_id)
 INDEX CREATE UNIQUE INDEX usage_quotas_pkey ON usage_quotas USING btree (id)
+INDEX CREATE UNIQUE INDEX user_recovery_codes_pkey ON user_recovery_codes USING btree (id)
+INDEX CREATE UNIQUE INDEX user_recovery_codes_user_id_code_hash_key ON user_recovery_codes USING btree (user_id, code_hash)
+INDEX CREATE UNIQUE INDEX user_totp_factors_pkey ON user_totp_factors USING btree (user_id)
 INDEX CREATE INDEX idx_users_deleted_at ON users USING btree (deleted_at)
 INDEX CREATE UNIQUE INDEX idx_users_username ON users USING btree (username)
 INDEX CREATE UNIQUE INDEX uni_users_email ON users USING btree (email)

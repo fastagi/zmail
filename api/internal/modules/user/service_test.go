@@ -634,14 +634,14 @@ func TestServiceSignInAuthorizesBeforeIssuingSession(t *testing.T) {
 	sessions := &countingSessionIssuer{}
 	svc := NewService(repo, repo, sessions, events.NewEventBus(), &fakeUserMailer{}, NewAccountDeletionPolicy())
 
-	_, err := svc.SignIn(context.Background(), "ops", "password123", domain.SessionAudienceOperator, func(context.Context, *domain.User) error {
+	_, err := svc.SignIn(context.Background(), "ops", "password123", "", domain.SessionAudienceOperator, func(context.Context, *domain.User) error {
 		return domain.ErrOperatorForbidden
 	})
 	require.ErrorIs(t, err, domain.ErrOperatorForbidden)
 	assert.Zero(t, sessions.issued, "a rejected caller must never receive a session")
 
 	var authorized *domain.User
-	issued, err := svc.SignIn(context.Background(), "ops", "password123", domain.SessionAudienceOperator, func(_ context.Context, user *domain.User) error {
+	issued, err := svc.SignIn(context.Background(), "ops", "password123", "", domain.SessionAudienceOperator, func(_ context.Context, user *domain.User) error {
 		authorized = user
 		return nil
 	})
@@ -651,7 +651,7 @@ func TestServiceSignInAuthorizesBeforeIssuingSession(t *testing.T) {
 	assert.Equal(t, uint(7), authorized.ID)
 	assert.True(t, issued.ExpiresAt.After(time.Now()))
 
-	_, err = svc.SignIn(context.Background(), "ops", "wrong-password", domain.SessionAudienceOperator, func(context.Context, *domain.User) error {
+	_, err = svc.SignIn(context.Background(), "ops", "wrong-password", "", domain.SessionAudienceOperator, func(context.Context, *domain.User) error {
 		t.Fatal("authorize must not run for invalid credentials")
 		return nil
 	})

@@ -115,6 +115,11 @@ const messages = {
   accountDisabled: '该账号已被停用',
   emailAlreadyExists: '该邮箱已注册账号',
   invalidCredentials: '邮箱或密码错误',
+  totpRequired: '请输入验证器 App 里的 6 位验证码。',
+  totpInvalid: '验证码错误或已使用过，请输入下一个验证码。',
+  totpCode: '验证码',
+  totpCodeHint: '手机丢了？可以输入一个恢复码。',
+  totpBack: '换个账号登录',
 
   // Social login
   signInWithGoogle: '使用 Google 登录',

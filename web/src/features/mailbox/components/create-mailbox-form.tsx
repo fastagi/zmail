@@ -52,6 +52,7 @@ export function CreateMailboxForm({
   domains,
   mailboxCount,
   fixedType,
+  initialDomain,
   onCreated,
 }: {
   domain: MailboxDomain;
@@ -64,6 +65,8 @@ export function CreateMailboxForm({
   mailboxCount?: number;
   /** Creates only this type and hides the type choice. */
   fixedType?: MailboxType;
+  /** The address domain chosen when the form opens; defaults to `domain`. */
+  initialDomain?: string;
   onCreated: (mailbox: Mailbox) => void;
 }) {
   const t = useT('mailbox');
@@ -73,7 +76,7 @@ export function CreateMailboxForm({
   const ids = { title: useId(), type: useId(), owner: useId() };
   const [localPart, setLocalPart] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [addressDomain, setAddressDomain] = useState(domain.domain);
+  const [addressDomain, setAddressDomain] = useState(initialDomain ?? domain.domain);
   const [chosenType, setType] = useState<MailboxType>('shared');
   const type = fixedType ?? chosenType;
   const [owner, setOwner] = useState('');

@@ -40,6 +40,7 @@ const state = vi.hoisted(() => {
     createRecord: mutation(),
     updateRecord: mutation(),
     deleteRecord: mutation(),
+    createMailbox: mutation(),
   };
 });
 
@@ -52,9 +53,14 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => state.organizations,
 }));
+vi.mock('@/features/mailbox/components/mailbox-people', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/features/mailbox/components/mailbox-people')>()),
+  useOrganizationPeople: () => ({ items: [], status: 'ready', refetch: vi.fn() }),
+}));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useMailboxDomains: () => state.domains,
   useMailboxes: () => state.mailboxes,
+  useCreateMailbox: () => state.createMailbox,
   useMailDomains: (_organizationId: number, enabled: boolean) => {
     state.mailDomainsEnabled.push(enabled);
     return state.mailDomains;
@@ -522,6 +528,47 @@ describe('organization mail domains', () => {
     expect(
       await within(card).findByText('Cloudflare limits re-checks; try again in a few minutes.')
     ).toBeInTheDocument();
+  });
+
+  it('shows where a pending domain stands in its setup', () => {
+    renderPage();
+    const steps = screen.getByRole('list', { name: 'Setup progress' });
+    const current = within(steps).getByText('Verify DNS records').closest('li');
+    expect(current).toHaveAttribute('aria-current', 'step');
+    expect(within(steps).getByText('Connect the domain').closest('li')).toHaveAttribute(
+      'data-state',
+      'done'
+    );
+    expect(screen.queryByRole('button', { name: /Create a mailbox @/ })).not.toBeInTheDocument();
+  });
+
+  it('opens the mailbox form on a verified domain with that domain chosen', async () => {
+    const verified = { ...verifiedSendOnlyDomain(), capability: 'send_receive' };
+    state.mailDomains.data = [verified];
+    state.domains.data = [
+      sharedDomain(true),
+      { ...sharedDomain(true), domain: 'example.org', kind: 'organization' },
+    ];
+    renderPage();
+    const steps = screen.getByRole('list', { name: 'Setup progress' });
+    expect(within(steps).getByText('Create a mailbox').closest('li')).toHaveAttribute(
+      'aria-current',
+      'step'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Create a mailbox @example.org' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New mailbox @example.org' });
+    expect(within(dialog).getByRole('combobox', { name: 'Domain' })).toHaveValue('example.org');
+  });
+
+  it('reloads the mailbox domains when the verified domain is not among them yet', async () => {
+    state.mailDomains.data = [{ ...verifiedSendOnlyDomain(), capability: 'send_receive' }];
+    state.domains.data = [sharedDomain(true)];
+    state.domains.refetch.mockClear();
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Create a mailbox @example.org' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New mailbox @example.org' });
+    await waitFor(() => expect(state.domains.refetch).toHaveBeenCalled());
+    expect(within(dialog).queryByRole('combobox', { name: 'Domain' })).not.toBeInTheDocument();
   });
 
   it('receiving dialog lists current MX', async () => {

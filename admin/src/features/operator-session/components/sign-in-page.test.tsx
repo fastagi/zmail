@@ -82,6 +82,49 @@ describe('SignInPage', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it('asks for the authenticator code after a correct password and sends it as totp_code', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ code: 401, message: 'code required', error_code: 'AUTH.TOTP_REQUIRED' }),
+          { headers: { 'content-type': 'application/json' }, status: 401 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 0,
+            message: 'success',
+            data: {
+              operator: { id: 1, username: 'ops', email: 'ops@example.test', nickname: 'Ops' },
+              csrf_token: 'csrf-token-0123456789',
+            },
+          }),
+          { headers: { 'content-type': 'application/json' }, status: 200 },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    renderPage();
+
+    submit();
+    expect(
+      await screen.findByText('Enter the 6-digit code from your authenticator app.'),
+    ).toBeInTheDocument();
+    const code = screen.getByLabelText('Authenticator code');
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeDisabled();
+    fireEvent.change(code, { target: { value: ' 123456 ' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+    const [, init] = fetchMock.mock.calls[1] as [unknown, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      identifier: 'ops',
+      password: 'secret',
+      totp_code: '123456',
+    });
+  });
+
   it('reveals the password on request and warns while Caps Lock is on', () => {
     renderPage();
     const password = screen.getByLabelText(/^password$/i);

@@ -1,6 +1,6 @@
 import { useNavigate } from '@tanstack/react-router';
 import { Eye, EyeOff, LogIn, ShieldCheck } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SectionCard } from '@/components/layout/section-card';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,16 @@ import { Label } from '@/components/ui/label';
 import { env } from '@/config/env';
 import { useSignIn } from '@/features/operator-session/hooks/use-operator-session';
 import { signInErrorKey } from '@/features/operator-session/sign-in-errors';
+import { ApiErrorCode } from '@/http/codes';
+import { ApiError } from '@/http/client';
+
+function asksForCode(error: unknown) {
+  return (
+    error instanceof ApiError &&
+    (error.errorCode === ApiErrorCode.AUTH_TOTP_REQUIRED ||
+      error.errorCode === ApiErrorCode.AUTH_TOTP_INVALID)
+  );
+}
 
 export function SignInPage({ redirectTo }: { redirectTo: string }) {
   const { t } = useTranslation();
@@ -18,12 +28,27 @@ export function SignInPage({ redirectTo }: { redirectTo: string }) {
   const [password, setPassword] = useState('');
   const [revealed, setRevealed] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
+  // The password was right and the account asks for its second factor.
+  const [needsCode, setNeedsCode] = useState(false);
+  if (!needsCode && asksForCode(signIn.error)) {
+    setNeedsCode(true);
+  }
+  const totpInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (needsCode) totpInput.current?.focus();
+  }, [needsCode]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     signIn.mutate(
-      { identifier: identifier.trim(), password },
       {
+        identifier: identifier.trim(),
+        password,
+        ...(needsCode ? { totp_code: totpCode.trim() } : {}),
+      },
+      {
+        onSettled: () => setTotpCode(''),
         onSuccess: () => {
           setPassword('');
           void navigate({ to: redirectTo, replace: true });
@@ -62,7 +87,11 @@ export function SignInPage({ redirectTo }: { redirectTo: string }) {
               required
               maxLength={100}
               value={identifier}
-              onChange={(event) => setIdentifier(event.target.value)}
+              onChange={(event) => {
+                setIdentifier(event.target.value);
+                setNeedsCode(false);
+                signIn.reset();
+              }}
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -101,6 +130,27 @@ export function SignInPage({ redirectTo }: { redirectTo: string }) {
               </p>
             ) : null}
           </div>
+          {needsCode ? (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="sign-in-totp">{t('auth.totpCode')}</Label>
+              <Input
+                id="sign-in-totp"
+                name="totp-code"
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                ref={totpInput}
+                required
+                maxLength={32}
+                className="font-mono"
+                aria-describedby="sign-in-totp-hint"
+                value={totpCode}
+                onChange={(event) => setTotpCode(event.target.value)}
+              />
+              <p id="sign-in-totp-hint" className="text-xs text-muted-foreground">
+                {t('auth.totpHint')}
+              </p>
+            </div>
+          ) : null}
           {signIn.isError ? (
             <p role="alert" className="text-sm text-destructive">
               {t(signInErrorKey(signIn.error))}
@@ -108,7 +158,12 @@ export function SignInPage({ redirectTo }: { redirectTo: string }) {
           ) : null}
           <Button
             type="submit"
-            disabled={signIn.isPending || identifier.trim() === '' || password === ''}
+            disabled={
+              signIn.isPending ||
+              identifier.trim() === '' ||
+              password === '' ||
+              (needsCode && totpCode.trim() === '')
+            }
           >
             <LogIn aria-hidden="true" />
             {signIn.isPending ? t('auth.submitting') : t('auth.submit')}

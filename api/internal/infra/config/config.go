@@ -382,6 +382,9 @@ type AuthenticationConfig struct {
 	// RegistrationEmailCodeRequired makes POST /v1/register demand a code mailed by
 	// POST /v1/register/email-codes. AUTH_REGISTRATION_EMAIL_CODE_REQUIRED defaults to true.
 	RegistrationEmailCodeRequired bool
+	// TOTPEncryptionKey encrypts authenticator secrets (AUTH_TOTP_ENCRYPTION_KEY); empty turns
+	// two-factor enrollment off.
+	TOTPEncryptionKey string
 }
 
 type LogConfig struct {
@@ -700,6 +703,7 @@ func Load() (*Config, error) {
 			SessionRetention:              env.GetDuration("AUTH_SESSION_RETENTION", DefaultAuthenticationSessionRetention),
 			RegistrationDisabled:          !env.GetBool("AUTH_REGISTRATION_ENABLED", true),
 			RegistrationEmailCodeRequired: env.GetBool("AUTH_REGISTRATION_EMAIL_CODE_REQUIRED", true),
+			TOTPEncryptionKey:             env.Get("AUTH_TOTP_ENCRYPTION_KEY", ""),
 		},
 		Log: LogConfig{
 			Level:       env.Get("LOG_LEVEL", defaultLogLevel(isProd)),
@@ -1258,6 +1262,9 @@ func validateAuthenticationConfig(cfg AuthenticationConfig) error {
 		maxTouch       = time.Hour
 		maxRetention   = 365 * 24 * time.Hour
 	)
+	if key := strings.TrimSpace(cfg.TOTPEncryptionKey); key != "" && len(key) < MinMailboxSecretEncryptionKeyLength {
+		return fmt.Errorf("AUTH_TOTP_ENCRYPTION_KEY must be at least %d characters when set", MinMailboxSecretEncryptionKeyLength)
+	}
 
 	if cfg.SessionTTL < minSessionTTL || cfg.SessionTTL > maxSessionTTL {
 		return fmt.Errorf("AUTH_SESSION_TTL must be between %s and %s", minSessionTTL, maxSessionTTL)

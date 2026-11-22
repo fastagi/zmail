@@ -88,6 +88,7 @@ func (h *Handler) Name() string {
 type signInRequest struct {
 	Identifier string `json:"identifier" binding:"required,max=100"`
 	Password   string `json:"password" binding:"required,max=128"`
+	TOTPCode   string `json:"totp_code" binding:"omitempty,max=32"`
 }
 
 type operatorResponse struct {
@@ -127,7 +128,7 @@ func (h *Handler) SignIn(c *gin.Context) {
 	if !handler.BindJSON(c, &req) {
 		return
 	}
-	issued, access, err := h.service.SignIn(c.Request.Context(), req.Identifier, req.Password)
+	issued, access, err := h.service.SignIn(c.Request.Context(), req.Identifier, req.Password, req.TOTPCode)
 	if err != nil {
 		writeError(c, "Operator sign-in failed", err)
 		return
@@ -249,6 +250,10 @@ func writeError(c *gin.Context, message string, err error) {
 	switch {
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		response.AbortWithCode(c, http.StatusUnauthorized, domain.CodeInvalidCredentials, "Invalid credentials")
+	case errors.Is(err, domain.ErrTOTPRequired):
+		response.AbortWithCode(c, http.StatusUnauthorized, domain.CodeTOTPRequired, "An authenticator code is required")
+	case errors.Is(err, domain.ErrTOTPInvalid):
+		response.AbortWithCode(c, http.StatusUnauthorized, domain.CodeTOTPInvalid, "The authenticator code is wrong or already used")
 	case errors.Is(err, domain.ErrSignInThrottled):
 		response.AbortWithCode(c, http.StatusTooManyRequests, response.ErrorCodeRateLimited, "Too many requests")
 	case errors.Is(err, domain.ErrAuthenticationRequired):

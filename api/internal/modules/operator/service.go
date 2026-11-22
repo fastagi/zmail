@@ -56,12 +56,12 @@ func NewService(
 
 // SignIn verifies credentials and issues a session only for a current operator of any scope. A
 // verified non-operator is rejected before any session exists.
-func (s *service) SignIn(ctx context.Context, identifier, password string) (*domain.IssuedSession, domain.OperatorAccess, error) {
+func (s *service) SignIn(ctx context.Context, identifier, password, secondFactor string) (*domain.IssuedSession, domain.OperatorAccess, error) {
 	if s.signIn == nil {
 		return nil, domain.OperatorAccess{}, domain.ErrServiceUnavailable
 	}
 	var access domain.OperatorAccess
-	issued, err := s.signIn.SignIn(ctx, identifier, password, domain.SessionAudienceOperator, func(ctx context.Context, user *domain.User) error {
+	issued, err := s.signIn.SignIn(ctx, identifier, password, secondFactor, domain.SessionAudienceOperator, func(ctx context.Context, user *domain.User) error {
 		granted, grantErr := s.requireOperator(ctx, user.ID)
 		access = granted
 		return grantErr

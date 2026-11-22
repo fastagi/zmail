@@ -96,6 +96,7 @@ export class GoApiAuthAdapter {
         body: {
           username: input.email,
           password: input.password,
+          ...(input.totpCode ? { totp_code: input.totpCode } : {}),
         },
       },
       incomingHeaders,
@@ -418,7 +419,7 @@ function authFieldMap(operation: AdapterOperation): Readonly<Record<string, stri
     case 'register-email-code':
       return { email: 'email' };
     case 'login':
-      return { username: 'email', password: 'password' };
+      return { username: 'email', password: 'password', totp_code: 'totpCode' };
     case 'password-reset':
       return { email: 'email' };
     case 'password-reset-confirm':

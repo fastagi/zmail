@@ -10,6 +10,10 @@ export function signInErrorKey(error: unknown): string {
     case ApiErrorCode.AUTH_INVALID_CREDENTIALS:
     case ApiErrorCode.COMMON_VALIDATION_FAILED:
       return 'auth.errors.invalidCredentials';
+    case ApiErrorCode.AUTH_TOTP_REQUIRED:
+      return 'auth.errors.totpRequired';
+    case ApiErrorCode.AUTH_TOTP_INVALID:
+      return 'auth.errors.totpInvalid';
     case ApiErrorCode.OPERATOR_FORBIDDEN:
       return 'auth.errors.notOperator';
     case ApiErrorCode.COMMON_RATE_LIMITED:

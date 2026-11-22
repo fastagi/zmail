@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { Globe, Inbox, ListTree, Plus, RefreshCw, Trash2, Wrench } from 'lucide-react';
+import { Check, Globe, Inbox, ListTree, Plus, RefreshCw, Trash2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/table';
 import { getMailZoneDnsRoute } from '@/constants/routes';
 import { CloudflareConnectionForm } from './cloudflare-connection';
+import { CreateMailboxForm } from '@/features/mailbox/components/create-mailbox-form';
 import { MailDomainTestChecklist } from '@/features/mailbox/components/mail-domain-test-checklist';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
 import { CopyButton, ErrorAlert } from '@/features/mailbox/components/mail-shared';
@@ -39,6 +40,7 @@ import {
   useDeleteMailZone,
   useEnableReceiving,
   useListMailZones,
+  useMailboxDomains,
   useMailDomains,
   usePreviewMailDomain,
   useRefreshMailDomain,
@@ -381,6 +383,7 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
   const remove = useRemoveMailDomain(organizationId);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [confirmReceiving, setConfirmReceiving] = useState(false);
+  const [creatingMailbox, setCreatingMailbox] = useState(false);
   // Cloudflare refused the last re-check of the pending zone.
   const [limited, setLimited] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -503,6 +506,17 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
         </div>
       </div>
       <div className="space-y-3 p-3">
+        <DomainSetupSteps current={zonePending ? 1 : verified && !settingUp ? 3 : 2} />
+        {verified && !settingUp && canManage ? (
+          <Button
+            type="button"
+            size="sm"
+            icon={<Plus className="size-4" />}
+            onClick={() => setCreatingMailbox(true)}
+          >
+            {t('domain.createMailboxAction', { domain: domain.name })}
+          </Button>
+        ) : null}
         {settingUp ? (
           <p className="text-sm text-muted-foreground" role="status">
             {t('domain.settingUpHint')}
@@ -551,6 +565,17 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
           <MailDomainTestChecklist domain={domain.name} capability={domain.capability} />
         ) : null}
       </div>
+      <Dialog open={creatingMailbox} onOpenChange={setCreatingMailbox}>
+        <DialogContent size="lg" className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t('domain.createMailboxTitle', { domain: domain.name })}</DialogTitle>
+            <DialogDescription>{t('domain.createMailboxDescription')}</DialogDescription>
+          </DialogHeader>
+          {creatingMailbox ? (
+            <DomainMailboxForm domain={domain.name} onCreated={() => setCreatingMailbox(false)} />
+          ) : null}
+        </DialogContent>
+      </Dialog>
       {confirmReceiving ? (
         <EnableReceivingDialog domain={domain} onClose={() => setConfirmReceiving(false)} />
       ) : null}
@@ -591,6 +616,83 @@ function DomainCard({ domain, canManage }: { domain: MailDomain; canManage: bool
  * Confirms turning a send-only domain into one that receives in Zmail, listing the MX records of
  * the current mail service that Email Routing replaces.
  */
+const setupSteps = ['stepConnect', 'stepNameservers', 'stepRecords', 'stepMailbox'] as const;
+
+/** Where a connected domain stands on the way to its first mailbox; `current` indexes `setupSteps`. */
+function DomainSetupSteps({ current }: { current: number }) {
+  const t = useT('mailbox');
+  return (
+    <ol aria-label={t('domain.stepsLabel')} className="flex flex-wrap gap-x-4 gap-y-2 text-xs">
+      {setupSteps.map((step, index) => {
+        const done = index < current;
+        return (
+          <li
+            key={step}
+            aria-current={index === current ? 'step' : undefined}
+            data-state={done ? 'done' : index === current ? 'current' : 'upcoming'}
+            className={cn(
+              'flex items-center gap-1.5',
+              index === current ? 'font-medium text-foreground' : 'text-muted-foreground'
+            )}
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                'flex size-5 items-center justify-center rounded-full border',
+                done && 'border-transparent bg-success-subtle text-success',
+                index === current && 'border-foreground'
+              )}
+            >
+              {done ? <Check className="size-3" /> : index + 1}
+            </span>
+            {t(`domain.${step}`)}
+            {done ? <span className="sr-only">{t('domain.setupStepDone')}</span> : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** The mailbox form with the verified domain already chosen as the address domain. */
+function DomainMailboxForm({ domain, onCreated }: { domain: string; onCreated: () => void }) {
+  const t = useT('mailbox');
+  const domains = useMailboxDomains(useMailOrganizationId());
+  const list = domains.data ?? [];
+  // The domain list is cached for minutes; a domain verified meanwhile is not in it yet, and the
+  // form would quietly fall back to the shared domain.
+  const missing = domains.data !== undefined && !list.some(item => item.domain === domain);
+  const { refetch } = domains;
+  useEffect(() => {
+    if (missing) void refetch();
+  }, [missing, refetch]);
+  if (domains.isPending || (missing && domains.isFetching)) {
+    return <Skeleton className="h-48 w-full" aria-hidden="true" />;
+  }
+  const base = list.find(item => item.kind === 'shared') ?? list[0];
+  if (missing) {
+    return (
+      <ErrorAlert
+        message={t('domain.stillPending')}
+        retryLabel={t('actions.retry')}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
+  if (domains.error || !base) {
+    return (
+      <ErrorAlert
+        message={t(resolveMailboxErrorKey(domains.error))}
+        retryLabel={t('actions.retry')}
+        onRetry={() => void domains.refetch()}
+      />
+    );
+  }
+  return (
+    <CreateMailboxForm domain={base} domains={list} initialDomain={domain} onCreated={onCreated} />
+  );
+}
+
 function EnableReceivingDialog({ domain, onClose }: { domain: MailDomain; onClose: () => void }) {
   const t = useT('mailbox');
   const organizationId = useMailOrganizationId();

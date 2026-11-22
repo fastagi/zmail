@@ -601,6 +601,16 @@ const messages = {
     pendingHint:
       'Mailboxes can use this domain once every record is in place. DNS changes can take a few minutes; check again afterwards.',
     lastError: 'The last setup step failed: {error}',
+    stepsLabel: 'Setup progress',
+    stepConnect: 'Connect the domain',
+    stepNameservers: 'Point nameservers to Cloudflare',
+    stepRecords: 'Verify DNS records',
+    stepMailbox: 'Create a mailbox',
+    setupStepDone: '(done)',
+    createMailboxAction: 'Create a mailbox @{domain}',
+    createMailboxTitle: 'New mailbox @{domain}',
+    createMailboxDescription:
+      'The domain is verified. Choose an address and who can use the mailbox.',
     zone: 'Cloudflare zone: {zone}',
     recordPurpose: 'Purpose',
     recordType: 'Type',

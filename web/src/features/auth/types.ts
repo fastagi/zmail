@@ -21,6 +21,8 @@ export type AuthStatus =
 export interface LoginRequest {
   email: string;
   password: string;
+  /** Authenticator or recovery code for an account with two-factor sign-in. */
+  totpCode?: string;
 }
 
 export interface RegisterRequest {

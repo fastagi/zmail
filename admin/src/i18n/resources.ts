@@ -336,7 +336,8 @@ const enUS = {
         complained: 'Complained',
       },
       errors: {
-        unavailable: 'Mail metrics could not be loaded. Nothing is shown rather than a wrong number.',
+        unavailable:
+          'Mail metrics could not be loaded. Nothing is shown rather than a wrong number.',
       },
       forbidden: {
         title: 'Not permitted',
@@ -415,8 +416,10 @@ const enUS = {
         notEligible: 'Only organization broadcast messages can be read here.',
         notFound: 'This message is not in that organization.',
         forbidden: 'Your operator grant does not include reading broadcast content.',
-        invalid: 'The reason was not accepted. Use 1 to {{max}} characters without control characters.',
-        unavailable: 'The content could not be shown because the access record could not be stored. Nothing was revealed.',
+        invalid:
+          'The reason was not accepted. Use 1 to {{max}} characters without control characters.',
+        unavailable:
+          'The content could not be shown because the access record could not be stored. Nothing was revealed.',
       },
       access: {
         title: 'Content access records',
@@ -510,8 +513,12 @@ const enUS = {
       capsLock: 'Caps Lock is on.',
       operatorNote:
         'Operator access is granted from the server command line, not from this console.',
+      totpCode: 'Authenticator code',
+      totpHint: 'Lost your phone? Enter one of your recovery codes instead.',
       errors: {
         invalidCredentials: 'The username or password is incorrect.',
+        totpRequired: 'Enter the 6-digit code from your authenticator app.',
+        totpInvalid: 'That code is wrong or was already used. Try the next code.',
         notOperator: 'This account does not have platform-operator access.',
         rateLimited: 'Too many sign-in attempts. Wait a moment and try again.',
         originRejected:
@@ -730,7 +737,8 @@ const zhHans = {
       concurrencyNote: '只有在你加载之后无人修改过该设置时，修改才会生效。',
       source: { default: '默认值', override: '已覆盖' },
       help: {
-        brandingDisplayName: '提供给 API 客户端。Web 和管理后台显示内置名称，因此修改此项不会改变它们的显示。',
+        brandingDisplayName:
+          '提供给 API 客户端。Web 和管理后台显示内置名称，因此修改此项不会改变它们的显示。',
       },
       version: '版本 {{version}}',
       on: '开',
@@ -901,7 +909,8 @@ const zhHans = {
       },
       messages: {
         title: '{{date}} 的发信流水',
-        description: '外发邮件按时间倒序。只有组织广播可以填写原因后查看正文，每次查看都会留下记录。',
+        description:
+          '外发邮件按时间倒序。只有组织广播可以填写原因后查看正文，每次查看都会留下记录。',
         listTitle: '外发邮件',
         total_one: '共 {{count}} 封',
         total_other: '共 {{count}} 封',
@@ -947,7 +956,8 @@ const zhHans = {
       },
       access: {
         title: '正文查阅记录',
-        description: '每次查看广播正文的记录：谁在何时因何原因查看了哪封邮件。这里从不保存正文或邮件地址。',
+        description:
+          '每次查看广播正文的记录：谁在何时因何原因查看了哪封邮件。这里从不保存正文或邮件地址。',
         listTitle: '查阅记录',
         total_one: '共 {{count}} 条记录',
         total_other: '共 {{count}} 条记录',
@@ -1035,7 +1045,11 @@ const zhHans = {
       hidePassword: '隐藏密码',
       capsLock: '大写锁定已开启。',
       operatorNote: '运维权限需在服务器命令行授予，无法在本控制台中申请。',
+      totpCode: '验证码',
+      totpHint: '手机丢了？可以输入一个恢复码。',
       errors: {
+        totpRequired: '请输入验证器 App 里的 6 位验证码。',
+        totpInvalid: '验证码错误或已使用过，请输入下一个验证码。',
         invalidCredentials: '用户名或密码不正确。',
         notOperator: '该账号没有平台运维权限。',
         rateLimited: '登录尝试过于频繁，请稍后再试。',

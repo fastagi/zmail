@@ -115,6 +115,7 @@ func (f *fakeSignIn) SignIn(
 	ctx context.Context,
 	identifier string,
 	password string,
+	_ string,
 	audience domain.SessionAudience,
 	authorize func(context.Context, *domain.User) error,
 ) (*domain.IssuedSession, error) {

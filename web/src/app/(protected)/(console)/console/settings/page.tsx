@@ -14,6 +14,11 @@ const AccountSecurityPanel = lazy(async () => {
   return { default: feature.AccountSecurityPanel };
 });
 
+const TwoFactorPanel = lazy(async () => {
+  const feature = await import('@/features/auth/components/two-factor-panel');
+  return { default: feature.TwoFactorPanel };
+});
+
 const ProfilePanel = lazy(async () => {
   const feature = await import('@/features/auth/components/profile-panel');
   return { default: feature.ProfilePanel };
@@ -77,6 +82,7 @@ export default async function SettingsPage() {
         <TabsContent value="security" className="pt-5">
           <Suspense fallback={<UserSettingPanelFallback />}>
             <AccountSecurityPanel />
+            <TwoFactorPanel />
           </Suspense>
         </TabsContent>
 
