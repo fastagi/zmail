@@ -301,3 +301,66 @@ func TestRemovedAddressCanReceiveTransactionalAgain(t *testing.T) {
 		t.Fatalf("contact status = %s; removal must leave it unchanged", status)
 	}
 }
+
+func TestLaneUsageReportsTheNewOrganizationCap(t *testing.T) {
+	f := newTxHandlerFixture(t, func(settings *Settings) {
+		settings.DailySendLimit = 50
+		settings.NewOrganizationDailySendLimit = 5
+		settings.NewOrganizationPeriod = 7 * 24 * time.Hour
+	})
+	f.exec(t, `UPDATE organizations SET created_at = ? WHERE id = 10`, f.clock.Add(-time.Hour))
+	f.role = domain.OrganizationRoleAdmin
+	limits := func() []float64 {
+		recorder, body := f.request(http.MethodGet, "/v1/mail-send-lanes", "", "", "")
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("GET lanes = %d %s", recorder.Code, recorder.Body.String())
+		}
+		data, _ := body["data"].(map[string]any)
+		lanes, _ := data["lanes"].([]any)
+		out := []float64{}
+		for _, lane := range lanes {
+			entry, _ := lane.(map[string]any)
+			limit, _ := entry["limit"].(float64)
+			out = append(out, limit)
+		}
+		return out
+	}
+	if got := limits(); len(got) != 3 || got[0] != 5 || got[1] != 5 || got[2] != 5 {
+		t.Fatalf("limits of a new organization = %v; want the cap 5 in every lane", got)
+	}
+	f.exec(t, `UPDATE organizations SET created_at = ? WHERE id = 10`, f.clock.Add(-8*24*time.Hour))
+	if got := limits(); len(got) != 3 || got[0] != 50 || got[1] != 50 || got[2] != 50 {
+		t.Fatalf("limits after the new-organization period = %v; want the lane limits", got)
+	}
+}
+
+func TestCountPersonalOutcomesCountsEachMessageOnce(t *testing.T) {
+	f := newTxHandlerFixture(t, nil)
+	inWindow := f.clock.Add(-time.Hour)
+	outOfWindow := f.clock.Add(-25 * time.Hour)
+	f.exec(t, `INSERT INTO mailboxes (id, organization_id, created_by, address, created_at, updated_at)
+		VALUES (501, 10, 901, 'team@mail.example', now(), now())`)
+	message := func(id uint, lane string, attempted time.Time) {
+		f.exec(t, `INSERT INTO mail_messages (id, mailbox_id, direction, status, from_address, send_lane, send_attempted_at, created_at, updated_at)
+			VALUES (?, 501, 'outbound', 'sent', 'team@mail.example', ?, ?, now(), now())`, id, lane, attempted)
+	}
+	event := func(messageID uint, eventType string) {
+		f.exec(t, `INSERT INTO mail_message_events (message_id, type, occurred_at, created_at) VALUES (?, ?, now(), now())`, messageID, eventType)
+	}
+	message(1, "personal", inWindow)
+	message(2, "personal", inWindow)
+	message(3, "personal", inWindow)
+	message(4, "personal", outOfWindow)
+	message(5, "broadcast", inWindow)
+	event(1, "bounced")
+	event(1, "bounced")
+	event(2, "complained")
+	event(3, "delivered")
+	event(4, "bounced")
+	event(5, "bounced")
+
+	attempted, bounced, complained, err := f.repo.CountPersonalOutcomesSince(context.Background(), 10, f.clock.Add(-24*time.Hour))
+	if err != nil || attempted != 3 || bounced != 1 || complained != 1 {
+		t.Fatalf("counts = %d, %d, %d, %v; want 3 attempted, 1 bounced, 1 complained", attempted, bounced, complained, err)
+	}
+}

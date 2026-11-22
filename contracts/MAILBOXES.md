@@ -1791,6 +1791,11 @@ answers:
 | No provider configured | `503 MAILBOX.SENDER_NOT_CONFIGURED` | `failed` |
 | Organization's rolling 24-hour personal lane limit reached | `202` with the message | `queued`, `queued_reason` `send_limit` |
 | Limit reached and as many messages already waiting as the limit | `429 MAILBOX.SEND_LIMIT_REACHED` | nothing stored |
+| At least 20 personal-lane attempts in the rolling 24 hours, and 5% or more of them bounced or 0.3% or more drew a spam complaint | `403 MAILBOX.SENDING_PAUSED` | nothing stored |
+
+The sending pause covers the personal lane only (broadcasts have their own health check) and lifts by
+itself once enough of those attempts leave the 24-hour window. While it holds, messages already
+waiting for the send limit stay queued.
 
 A send is never reported as successful before the provider accepts it.
 
@@ -1798,6 +1803,12 @@ The send limit is split into three lanes. Each lane is counted separately per or
 rolling 24 hours by the instants provider calls started, failed attempts count toward it, and a
 full lane never consumes another lane's room. Every message belongs to exactly one lane, fixed when
 it is stored:
+
+When `MAILBOX_NEW_ORGANIZATION_DAILY_SEND_LIMIT` is set, an organization created less than
+`MAILBOX_NEW_ORGANIZATION_PERIOD` ago gets at most that many attempts in each lane, and at most that
+many personal messages may wait. `GET /v1/mailbox-domains` keeps reporting the instance limits;
+`GET /v1/mail-send-lanes` and the `daily_send_limit` of the mailbox directory report the limit that
+applies to the organization now.
 
 | Lane | Counts | Limit (`GET /v1/mailbox-domains`) | When full |
 |---|---|---|---|
@@ -3075,6 +3086,7 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.SEND_IN_PROGRESS` | 409 |
 | `MAILBOX.IDEMPOTENCY_KEY_INVALID` | 422 |
 | `MAILBOX.SEND_LIMIT_REACHED` | 429 |
+| `MAILBOX.SENDING_PAUSED` | 403 |
 | `MAILBOX.DELIVERY_FAILED` | 502 |
 | `MAILBOX.SENDER_NOT_CONFIGURED` | 503 |
 | `MAILBOX.INBOUND_SIGNATURE_INVALID` | 401 |

@@ -52,6 +52,10 @@ type Settings struct {
 	DailyBroadcastLimit int
 	// DailyTransactionalLimit is the transactional lane limit; 0 takes DailySendLimit.
 	DailyTransactionalLimit int
+	// NewOrganizationDailySendLimit caps every lane of an organization younger than
+	// NewOrganizationPeriod; 0 turns the cap off.
+	NewOrganizationDailySendLimit int
+	NewOrganizationPeriod         time.Duration
 	// PublicURL is the public Web origin unsubscribe links point at; empty disables broadcasts.
 	PublicURL string
 	// CustomDomainsEnabled lets organizations connect their own domains.
@@ -507,6 +511,8 @@ func SettingsFromConfig(cfg *config.Config) Settings {
 	}
 	settings.DailyBroadcastLimit = resolved.DailyBroadcastLimit
 	settings.DailyTransactionalLimit = resolved.DailyTransactionalLimit
+	settings.NewOrganizationDailySendLimit = resolved.NewOrganizationDailySendLimit
+	settings.NewOrganizationPeriod = resolved.NewOrganizationPeriod
 	if resolved.MaxZonesPerOrganization > 0 {
 		settings.MaxZonesPerOrganization = resolved.MaxZonesPerOrganization
 	}
@@ -565,6 +571,41 @@ func (settings Settings) laneLimit(lane domain.SendLane) int {
 		return settings.DailyTransactionalLimit
 	}
 	return settings.DailySendLimit
+}
+
+// organizationLaneLimit is laneLimit for one organization: while the organization is younger than
+// the new-organization period, no lane allows more than the new-organization cap.
+func (s *service) organizationLaneLimit(ctx context.Context, organizationID uint, lane domain.SendLane) (int, error) {
+	limit := s.settings.laneLimit(lane)
+	capped := s.settings.NewOrganizationDailySendLimit
+	if capped <= 0 || limit <= capped {
+		return limit, nil
+	}
+	createdAt, err := s.repo.OrganizationCreatedAt(ctx, organizationID)
+	if err != nil {
+		return 0, err
+	}
+	if !createdAt.IsZero() && s.now().Sub(createdAt) < s.settings.NewOrganizationPeriod {
+		return capped, nil
+	}
+	return limit, nil
+}
+
+// checkSendingHealth returns ErrMailSendingPaused while the organization's personal sends of the
+// rolling window bounced or drew complaints at the rates a broadcast pauses at. The pause lifts by
+// itself once those sends leave the window.
+func (s *service) checkSendingHealth(ctx context.Context, organizationID uint) error {
+	attempted, bounced, complained, err := s.repo.CountPersonalOutcomesSince(ctx, organizationID, s.now().Add(-sendLimitWindow))
+	if err != nil || attempted < minHealthSample {
+		return err
+	}
+	if bounced*1000 < attempted*maxBouncePerMille && complained*1000 < attempted*maxComplaintPerMille {
+		return nil
+	}
+	slog.WarnContext(ctx, "mailbox personal sending paused by its health check",
+		slog.Uint64("organization_id", uint64(organizationID)), slog.Int64("attempted", attempted),
+		slog.Int64("bounced", bounced), slog.Int64("complained", complained))
+	return ErrMailSendingPaused
 }
 
 func (s *service) InboundEnabled() bool {
@@ -889,11 +930,20 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		}
 	}
 
+	if queueAtLimit {
+		if healthErr := s.checkSendingHealth(ctx, mailbox.OrganizationID); healthErr != nil {
+			return nil, false, healthErr
+		}
+	}
 	sent, err := s.repo.CountOutboundSince(ctx, mailbox.OrganizationID, message.SendLane, s.now().Add(-sendLimitWindow))
 	if err != nil {
 		return nil, false, err
 	}
-	if sent >= int64(s.settings.laneLimit(message.SendLane)) {
+	laneLimit, err := s.organizationLaneLimit(ctx, mailbox.OrganizationID, message.SendLane)
+	if err != nil {
+		return nil, false, err
+	}
+	if sent >= int64(laneLimit) {
 		if !queueAtLimit {
 			return nil, false, ErrMailSendLimitReached
 		}
@@ -1006,7 +1056,11 @@ func (s *service) queueForSendLimit(ctx context.Context, mailbox *domain.Mailbox
 	if err != nil {
 		return nil, false, err
 	}
-	if waiting >= int64(s.settings.laneLimit(domain.SendLanePersonal)) {
+	laneLimit, err := s.organizationLaneLimit(ctx, mailbox.OrganizationID, domain.SendLanePersonal)
+	if err != nil {
+		return nil, false, err
+	}
+	if waiting >= int64(laneLimit) {
 		return nil, false, ErrMailSendLimitReached
 	}
 	message.Status = domain.MailStatusQueued

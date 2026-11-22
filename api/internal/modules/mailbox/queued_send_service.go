@@ -40,8 +40,17 @@ func (s *service) DispatchQueuedSends(ctx context.Context, limit int) (int, erro
 
 func (s *service) dispatchOrganizationQueue(ctx context.Context, organizationID uint, limit int) (int, error) {
 	now := s.now().UTC()
+	if err := s.checkSendingHealth(ctx, organizationID); errors.Is(err, ErrMailSendingPaused) {
+		return 0, nil
+	} else if err != nil {
+		return 0, err
+	}
+	laneLimit, err := s.organizationLaneLimit(ctx, organizationID, domain.SendLanePersonal)
+	if err != nil {
+		return 0, err
+	}
 	messages, err := s.repo.LeaseWaitingSends(ctx, organizationID, now, now.Add(queuedSendLease),
-		now.Add(-sendLimitWindow), s.settings.laneLimit(domain.SendLanePersonal), limit)
+		now.Add(-sendLimitWindow), laneLimit, limit)
 	if err != nil {
 		return 0, err
 	}

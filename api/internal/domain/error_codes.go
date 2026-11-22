@@ -105,6 +105,7 @@ const (
 	CodeMailMessageNotFound          = "MAILBOX.MESSAGE_NOT_FOUND"
 	CodeMailMessageInvalid           = "MAILBOX.MESSAGE_INVALID"
 	CodeMailSendLimitReached         = "MAILBOX.SEND_LIMIT_REACHED"
+	CodeMailSendingPaused            = "MAILBOX.SENDING_PAUSED"
 	CodeMailDeliveryFailed           = "MAILBOX.DELIVERY_FAILED"
 	CodeMailIdempotencyConflict      = "MAILBOX.IDEMPOTENCY_CONFLICT"
 	CodeMailIdempotencyKeyInvalid    = "MAILBOX.IDEMPOTENCY_KEY_INVALID"

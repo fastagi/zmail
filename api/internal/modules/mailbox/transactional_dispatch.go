@@ -172,8 +172,12 @@ func (s *service) reportTransactionalQueue(ctx context.Context) {
 // A worker pass passes the now it failed unknown outcomes with, so a lease that runs out between
 // that check and this lease is left for the next pass's check instead of being leased again.
 func (s *service) dispatchTransactionalOrganization(ctx context.Context, organizationID uint, ids []uint, now time.Time, limit int) (int, error) {
+	laneLimit, err := s.organizationLaneLimit(ctx, organizationID, domain.SendLaneTransactional)
+	if err != nil {
+		return 0, err
+	}
 	leased, err := s.transactional.LeaseTransactional(ctx, organizationID, ids, now, now.Add(domain.TransactionalLease),
-		now.Add(-sendLimitWindow), s.settings.laneLimit(domain.SendLaneTransactional), limit)
+		now.Add(-sendLimitWindow), laneLimit, limit)
 	if err != nil {
 		return 0, err
 	}

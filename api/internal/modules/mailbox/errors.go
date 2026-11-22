@@ -25,6 +25,7 @@ var (
 	ErrTransactionalMessageNotFound = errors.New("transactional message not found")
 	ErrMailMessageInvalid           = errors.New("mail message is invalid")
 	ErrMailSendLimitReached         = errors.New("mail send limit reached")
+	ErrMailSendingPaused            = errors.New("mail sending paused by bounce or complaint rate")
 	ErrMailDeliveryFailed           = errors.New("mail delivery failed")
 	ErrMailIdempotencyConflict      = errors.New("idempotency key was used with a different mail message")
 	ErrMailIdempotencyKeyInvalid    = errors.New("idempotency key is invalid")

@@ -1577,6 +1577,8 @@ const messages = {
     permissionDenied: '你没有此邮箱的相应权限，请刷新查看当前权限。',
     createDenied: '只有组织的所有者和管理员可以创建邮箱。',
     sendLimitReached: '该组织已达到 24 小时发信上限，邮件没有发出。请稍后再试。',
+    sendingPaused:
+      '最近 24 小时退信或垃圾邮件投诉过多，该组织已暂停发信，邮件没有发出。请清理无效地址，稍后再试。',
     senderNotConfigured:
       '邮件没有送达：此服务器尚未配置发信功能。它已保存在“已发送”中并标记为发送失败。',
     tooLarge: '邮件太大，无法发送。',

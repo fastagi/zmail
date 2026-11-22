@@ -658,6 +658,34 @@ func (r *repository) CountOutboundSince(ctx context.Context, organizationID uint
 	return count, err
 }
 
+func (r *repository) CountPersonalOutcomesSince(ctx context.Context, organizationID uint, since time.Time) (int64, int64, int64, error) {
+	if r.db == nil {
+		return 0, 0, 0, domain.ErrServiceUnavailable
+	}
+	receipt := func(eventType domain.MailEventType) string {
+		return fmt.Sprintf(`COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM mail_message_events AS receipt
+			WHERE receipt.message_id = mail_messages.id AND receipt.type = '%s'))`, eventType)
+	}
+	var counts struct{ Attempted, Bounced, Complained int64 }
+	err := laneAttempts(r.conn(ctx), organizationID, domain.SendLanePersonal, since).
+		Select(`COUNT(*) AS attempted, ` + receipt(domain.MailEventBounced) + ` AS bounced, ` +
+			receipt(domain.MailEventComplained) + ` AS complained`).
+		Scan(&counts).Error
+	return counts.Attempted, counts.Bounced, counts.Complained, err
+}
+
+func (r *repository) OrganizationCreatedAt(ctx context.Context, organizationID uint) (time.Time, error) {
+	if r.db == nil {
+		return time.Time{}, domain.ErrServiceUnavailable
+	}
+	var createdAt []time.Time
+	err := r.conn(ctx).Table("organizations").Where("id = ?", organizationID).Limit(1).Pluck("created_at", &createdAt).Error
+	if err != nil || len(createdAt) == 0 {
+		return time.Time{}, err
+	}
+	return createdAt[0], nil
+}
+
 // laneAttempts selects the organization's outbound attempts in one lane since the given time.
 func laneAttempts(db *gorm.DB, organizationID uint, lane domain.SendLane, since time.Time) *gorm.DB {
 	return db.Model(&MailMessagePO{}).

@@ -452,6 +452,9 @@ const (
 	DefaultMailboxRequestTimeout = 15 * time.Second
 	// DefaultMailboxDailySendLimit bounds personal outbound messages per organization per 24 hours.
 	DefaultMailboxDailySendLimit = 200
+	// DefaultMailboxNewOrganizationPeriod is how long an organization counts as new for
+	// MAILBOX_NEW_ORGANIZATION_DAILY_SEND_LIMIT.
+	DefaultMailboxNewOrganizationPeriod = 7 * 24 * time.Hour
 	// DefaultMailboxInboundTolerance is the accepted clock skew for a signed inbound delivery.
 	DefaultMailboxInboundTolerance = 5 * time.Minute
 	// DefaultMailboxMaxPerOrganization bounds the mailboxes one organization may own.
@@ -493,6 +496,10 @@ type MailboxConfig struct {
 	// limits; 0 (unset) takes DailySendLimit when resolved.
 	DailyBroadcastLimit     int
 	DailyTransactionalLimit int
+	// NewOrganizationDailySendLimit caps every lane of an organization younger than
+	// NewOrganizationPeriod; 0 turns the cap off.
+	NewOrganizationDailySendLimit int
+	NewOrganizationPeriod         time.Duration
 	// PublicURL is the public origin of the Web console, such as https://app.example.com. Broadcast
 	// unsubscribe links point at it; empty disables broadcasts.
 	PublicURL string
@@ -779,11 +786,13 @@ func Load() (*Config, error) {
 			InboundSecret:       env.Get("MAILBOX_INBOUND_SECRET", ""),
 			DailySendLimit:      env.GetInt("MAILBOX_DAILY_SEND_LIMIT", DefaultMailboxDailySendLimit),
 
-			DailyBroadcastLimit:     env.GetInt("MAILBOX_DAILY_BROADCAST_LIMIT", 0),
-			DailyTransactionalLimit: env.GetInt("MAILBOX_DAILY_TRANSACTIONAL_LIMIT", 0),
-			PublicURL:               env.Get("MAILBOX_PUBLIC_URL", ""),
-			CustomDomainsEnabled:    env.GetBool("MAILBOX_CUSTOM_DOMAINS_ENABLED", false),
-			CloudflareEmailWorker:   env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
+			DailyBroadcastLimit:           env.GetInt("MAILBOX_DAILY_BROADCAST_LIMIT", 0),
+			DailyTransactionalLimit:       env.GetInt("MAILBOX_DAILY_TRANSACTIONAL_LIMIT", 0),
+			NewOrganizationDailySendLimit: env.GetInt("MAILBOX_NEW_ORGANIZATION_DAILY_SEND_LIMIT", 0),
+			NewOrganizationPeriod:         env.GetDuration("MAILBOX_NEW_ORGANIZATION_PERIOD", DefaultMailboxNewOrganizationPeriod),
+			PublicURL:                     env.Get("MAILBOX_PUBLIC_URL", ""),
+			CustomDomainsEnabled:          env.GetBool("MAILBOX_CUSTOM_DOMAINS_ENABLED", false),
+			CloudflareEmailWorker:         env.Get("MAILBOX_CLOUDFLARE_EMAIL_WORKER", ""),
 
 			MaxZonesPerOrganization: env.GetInt("MAILBOX_MAX_ZONES_PER_ORGANIZATION", DefaultMailboxMaxZonesPerOrganization),
 			MaxPerOrganization:      env.GetInt("MAILBOX_MAX_PER_ORGANIZATION", DefaultMailboxMaxPerOrganization),
@@ -1455,6 +1464,12 @@ func validateMailboxConfig(mailbox MailboxConfig, selected, production bool) err
 	}
 	if resolved.DailyTransactionalLimit <= 0 || resolved.DailyTransactionalLimit > 100000 {
 		return fmt.Errorf("MAILBOX_DAILY_TRANSACTIONAL_LIMIT must be between 1 and 100000, or unset to take MAILBOX_DAILY_SEND_LIMIT")
+	}
+	if resolved.NewOrganizationDailySendLimit < 0 || resolved.NewOrganizationDailySendLimit > 100000 {
+		return fmt.Errorf("MAILBOX_NEW_ORGANIZATION_DAILY_SEND_LIMIT must be between 0 and 100000")
+	}
+	if resolved.NewOrganizationDailySendLimit > 0 && (resolved.NewOrganizationPeriod <= 0 || resolved.NewOrganizationPeriod > 366*24*time.Hour) {
+		return fmt.Errorf("MAILBOX_NEW_ORGANIZATION_PERIOD must be greater than 0 and no more than 8784h")
 	}
 	if resolved.MaxPerOrganization < 1 || resolved.MaxPerOrganization > MailboxMaxPerOrganizationCeiling {
 		return fmt.Errorf("MAILBOX_MAX_PER_ORGANIZATION must be between 1 and %d", MailboxMaxPerOrganizationCeiling)

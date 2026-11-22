@@ -564,7 +564,11 @@ func (s *service) sendTransactional(ctx context.Context, send *transactionalSend
 // has room, send_limit when it is full, and ErrMailSendLimitReached when as many messages already
 // wait as the lane allows.
 func (s *service) transactionalLaneReason(ctx context.Context, organizationID uint, now time.Time) (*domain.TransactionalQueuedReason, error) {
-	limit := int64(s.settings.laneLimit(domain.SendLaneTransactional))
+	laneLimit, err := s.organizationLaneLimit(ctx, organizationID, domain.SendLaneTransactional)
+	if err != nil {
+		return nil, err
+	}
+	limit := int64(laneLimit)
 	used, err := s.transactional.CountTransactionalAttemptsSince(ctx, organizationID, now.Add(-sendLimitWindow))
 	if err != nil {
 		return nil, err

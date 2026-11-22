@@ -56,7 +56,7 @@ func (h *Handler) ListMailboxDirectory(c *gin.Context) {
 	}
 	privateResponse(c)
 	response.SuccessCursorPageWithMeta(c, items, filter.Limit, next, map[string]any{
-		"daily_send_limit": h.service.DailySendLimit(),
+		"daily_send_limit": page.DailySendLimit,
 		"sent_last_24h":    page.SentLast24h,
 		"mailbox_count":    page.MailboxCount,
 		"max_mailboxes":    h.service.MaxMailboxes(),
