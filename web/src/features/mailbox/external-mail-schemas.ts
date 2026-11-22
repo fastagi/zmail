@@ -69,6 +69,7 @@ export const externalMailConnectionSchema = strictObject({
   account_address: string(),
   mailbox_id: safeIdSchema,
   shared: optional(boolean()),
+  /** The tenant the mailbox was assigned from; optional so an API from before tenants still parses. */
   tenant_id: optional(nullable(safeIdSchema)),
   status: externalMailConnectionStatusSchema,
   last_synced_at: nullable(timestampSchema),
@@ -206,6 +207,7 @@ export const externalMailDirectoryEntrySchema = strictObject({
   provider: externalMailConnectorIdSchema,
   status: externalMailConnectionStatusSchema,
   shared: optional(boolean()),
+  tenant_id: optional(nullable(safeIdSchema)),
   account_address: optional(nullable(string())),
   mailbox_id: optional(nullable(safeIdSchema)),
   masked_account_address: string(),
