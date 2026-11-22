@@ -563,8 +563,9 @@ func (s *service) returnExternalGrant(ctx context.Context, connection *domain.Ex
 	if connection.EncryptedRefreshToken == "" || s.encryptor == nil {
 		return nil
 	}
-	token, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
-	if err != nil {
+	token, opened := s.openGrant(connection.EncryptedRefreshToken)
+	if !opened {
+		// A grant this instance cannot open cannot be handed back; trying again will not help.
 		return nil
 	}
 	connector, registered := s.externalConnectors.lookup(connection.Provider)
@@ -579,4 +580,13 @@ func (s *service) returnExternalGrant(ctx context.Context, connection *domain.Ex
 		return err
 	}
 	return nil
+}
+
+// openGrant unseals a stored grant; false when it is empty or this instance cannot open it.
+func (s *service) openGrant(sealed string) (string, bool) {
+	if sealed == "" || s.encryptor == nil {
+		return "", false
+	}
+	token, err := s.encryptor.DecryptString(sealed)
+	return token, err == nil && token != ""
 }
