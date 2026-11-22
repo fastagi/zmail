@@ -1,3 +1,4 @@
+import { writeComposeDraftFiles } from '@/features/mailbox/components/compose-draft-store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { NextIntlClientProvider, type AbstractIntlMessages } from 'next-intl';
@@ -316,9 +317,7 @@ describe('unified inbox', () => {
     renderRoute();
 
     expect(screen.queryByRole('navigation', { name: 'Connected by me' })).not.toBeInTheDocument();
-    expect(
-      screen.queryAllByRole('button', { name: 'Add external mailbox' })
-    ).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: 'Add external mailbox' })).toHaveLength(0);
     expect(within(groupsNav()).getByText('Mailboxes')).toBeInTheDocument();
   });
 
@@ -383,9 +382,7 @@ describe('unified inbox', () => {
     const row = within(mine).getByRole('button', { name: /old@outlook\.com/u });
     expect(row.querySelector('[data-status-dot]')).toBeNull();
     expect(within(mine).queryByRole('button', { name: 'Add external mailbox' })).toBeNull();
-    expect(
-      within(mine).queryByRole('button', { name: 'Manage connected mailboxes' })
-    ).toBeNull();
+    expect(within(mine).queryByRole('button', { name: 'Manage connected mailboxes' })).toBeNull();
     expect(within(groupsNav()).queryByText('old@outlook.com')).not.toBeInTheDocument();
     fireEvent.click(row);
     expect(new URLSearchParams(window.location.search).get('box')).toBe('42');
@@ -438,11 +435,7 @@ describe('unified inbox', () => {
     const rows = within(mine)
       .getAllByRole('button')
       .filter(button => button.hasAttribute('data-connected-mailbox'));
-    expect(rows.map(row => row.getAttribute('data-connected-mailbox'))).toEqual([
-      '41',
-      '42',
-      '43',
-    ]);
+    expect(rows.map(row => row.getAttribute('data-connected-mailbox'))).toEqual(['41', '42', '43']);
     const late = within(mine).getByRole('button', {
       name: 'late@gmail.com, Gmail, Needs reconnecting',
     });
@@ -551,7 +544,9 @@ describe('unified inbox', () => {
       fireEvent.click(within(banner).getByRole('button', { name: 'Reconnect' }));
       const form = await screen.findByRole('dialog', { name: 'Connect with an app password' });
       await within(form).findByLabelText('App password');
-      expect(form).toHaveTextContent('Sign in again with the same login to restore me@example.com.');
+      expect(form).toHaveTextContent(
+        'Sign in again with the same login to restore me@example.com.'
+      );
       fireEvent.keyDown(form, { key: 'Escape' });
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     }
@@ -1394,7 +1389,9 @@ describe('unified inbox', () => {
 
     const sales = screen.getByRole('button', { name: 'Filter by mailbox sales@mail.example.com' });
     expect(sales).toHaveTextContent('sales@mail.example.com');
-    expect(screen.getByRole('button', { name: 'Filter by mailbox hello@mail.example.com' })).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Filter by mailbox hello@mail.example.com' })
+    ).toBeVisible();
     fireEvent.click(sales);
     expect(window.location.search).toContain('box=2');
     unmount();
@@ -1402,11 +1399,15 @@ describe('unified inbox', () => {
     // A role still spans its mailboxes; a single mailbox needs no label.
     window.history.replaceState(null, '', '/console/mailboxes?role=3');
     let view = renderRoute();
-    expect(screen.getByRole('button', { name: 'Filter by mailbox sales@mail.example.com' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Filter by mailbox sales@mail.example.com' })
+    ).toBeInTheDocument();
     view.unmount();
     window.history.replaceState(null, '', '/console/mailboxes?box=2');
     view = renderRoute();
-    expect(screen.queryByRole('button', { name: 'Filter by mailbox sales@mail.example.com' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Filter by mailbox sales@mail.example.com' })
+    ).toBeNull();
     view.unmount();
   });
 
@@ -1764,7 +1765,9 @@ describe('inbox keyboard shortcuts', () => {
     expect(state.updateInbox.mutateAsync).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(toast.error).toHaveBeenCalledTimes(5);
-    expect(toast.error).toHaveBeenCalledWith('You don’t have permission to send from this mailbox.');
+    expect(toast.error).toHaveBeenCalledWith(
+      'You don’t have permission to send from this mailbox.'
+    );
   });
 
   it('c needs a mailbox that may send', () => {
@@ -1968,6 +1971,32 @@ describe('inbox keyboard shortcuts', () => {
     press('c');
     expect(await screen.findByLabelText('Subject')).toHaveValue('With file');
     expect(screen.queryByText('must-stay.txt')).toBeNull();
+  });
+
+  it('keeps reminding to attach files again after a reload until they are attached', async () => {
+    renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('Subject'), { target: { value: 'Reload' } });
+    fireEvent.change(document.getElementById('mail-compose-files') as HTMLInputElement, {
+      target: { files: [new File(['x'], 'lost.pdf')] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+
+    // A reload keeps the stored draft but not the files this page held.
+    const key = Object.keys(window.localStorage).find(name =>
+      name.startsWith('zmail.compose-draft.')
+    ) as string;
+    writeComposeDraftFiles(key, null);
+
+    const reminder = 'Attach again: lost.pdf. Files are not kept after the page reloads.';
+    for (let round = 0; round < 2; round += 1) {
+      press('c');
+      expect(await screen.findByText(reminder)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+    }
   });
 
   // Issue #91: opening the composer moves focus into it; closing returns it to the trigger.

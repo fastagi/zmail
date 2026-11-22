@@ -39,13 +39,18 @@ export function writeComposeDraftFiles(key: string, files: readonly File[] | nul
 }
 
 /**
- * Where the draft of `draft` is kept: one per organization for a new message, per answered message
- * for a reply, and per subject for a forward.
+ * Where `userId`'s draft of `draft` is kept: one per organization for a new message, per answered
+ * message for a reply, and per subject for a forward. Another account signed in later in the same
+ * browser never sees it.
  */
-export function composeDraftKey(organizationId: number, draft: ComposeDraft): string {
+export function composeDraftKey(
+  userId: string,
+  organizationId: number,
+  draft: ComposeDraft
+): string {
   const mode = draft.mode ?? (draft.reply ? 'reply' : 'compose');
   const subject = mode === 'forward' ? draft.subject : draft.inReplyTo;
-  return `${composeDraftPrefix}.${String(organizationId)}.${mode}.${subject || 'new'}`;
+  return `${composeDraftPrefix}.${userId}.${String(organizationId)}.${mode}.${subject || 'new'}`;
 }
 
 /** The kept draft, or null when there is none or this browser keeps nothing. */

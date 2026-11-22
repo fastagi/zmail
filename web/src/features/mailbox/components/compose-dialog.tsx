@@ -1,6 +1,14 @@
 'use client';
 
-import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import {
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react';
 import Link from 'next/link';
 import { AlertCircle, Paperclip, Send, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -20,6 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { authConfig } from '@/config/auth';
+import { AuthStoreContext } from '@/features/auth/store/auth-store';
 import { withReturnUrl } from '@/features/auth/utils/return-url';
 import {
   composeDraftKey,
@@ -101,7 +110,9 @@ export function ComposeDialog({
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
   const templateHintId = useId();
   // A draft kept when the dialog last closed takes the place of the starting text.
-  const draftKey = composeDraftKey(organizationId, draft);
+  // Drafts belong to the signed-in user; the composer reads them once as it opens.
+  const userId = useContext(AuthStoreContext)?.getState().user?.id ?? 'anonymous';
+  const draftKey = composeDraftKey(userId, organizationId, draft);
   const [kept] = useState(() => readComposeDraft(draftKey));
   const [to, setTo] = useState(kept?.to ?? draft.to);
   const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
@@ -115,12 +126,14 @@ export function ComposeDialog({
   const [lostFiles] = useState(() =>
     readComposeDraftFiles(draftKey).length > 0 ? [] : (kept?.attachments ?? [])
   );
+  // Until they are attached again, the names of lost files stay with the draft as a reminder.
+  const attachments = files.length > 0 ? files.map(file => file.name) : lostFiles;
   const written = () => ({
     to,
     cc,
     subject,
     body,
-    ...(files.length > 0 ? { attachments: files.map(file => file.name) } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
   });
   useEffect(() => {
     if (sentRef.current) return;
@@ -132,13 +145,17 @@ export function ComposeDialog({
           cc,
           subject,
           body,
-          ...(files.length > 0 ? { attachments: files.map(file => file.name) } : {}),
+          ...(files.length > 0
+            ? { attachments: files.map(file => file.name) }
+            : lostFiles.length > 0
+              ? { attachments: lostFiles }
+              : {}),
         },
         draft
       )
     );
     writeComposeDraftFiles(draftKey, files);
-  }, [draftKey, draft, to, cc, subject, body, files]);
+  }, [draftKey, draft, to, cc, subject, body, files, lostFiles]);
   // The forwarded message's files, carried along unless removed; read only when sending.
   const [carried, setCarried] = useState<readonly MailAttachment[]>(
     () => draft.forwarded?.attachments ?? []
