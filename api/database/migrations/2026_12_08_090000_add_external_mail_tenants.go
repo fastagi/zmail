@@ -27,7 +27,10 @@ type addExternalMailTenants struct {
 //     the stop of every connection when the credential is lost, and the revocation.
 //   - mailboxes.external_mail_tenant_id marks a connected mailbox assigned from a tenant: its address
 //     is the organization's, so the organization administers it and a personal one awaits handover
-//     when its owner leaves.
+//     when its owner leaves. idx_mailboxes_external_mail_tenant finds a tenant's mailboxes.
+//   - external_mail_personal_assignments remembers the member an address was last assigned to as a
+//     personal mailbox. It outlives the connection's revocation and purge, so the address never goes
+//     to another reader while that member is in the organization; only a handover clears it.
 //
 // The new columns are nullable or have constant defaults, which PostgreSQL 11+ records without
 // rewriting the tables.
@@ -64,6 +67,18 @@ func (m *addExternalMailTenants) Up(db *gorm.DB) error {
 		`ALTER TABLE mailboxes
 		  ADD COLUMN external_mail_tenant_id bigint REFERENCES external_mail_tenants(id),
 		  ADD CONSTRAINT chk_mailboxes_tenant_origin CHECK (external_mail_tenant_id IS NULL OR origin = 'connected')`,
+		`CREATE INDEX idx_mailboxes_external_mail_tenant ON mailboxes (external_mail_tenant_id)
+		  WHERE external_mail_tenant_id IS NOT NULL`,
+		`CREATE TABLE external_mail_personal_assignments (
+		  organization_id bigint NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+		  provider varchar(16) NOT NULL,
+		  address_key varchar(320) NOT NULL,
+		  user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		  tenant_id bigint NOT NULL REFERENCES external_mail_tenants(id),
+		  assigned_at timestamptz NOT NULL,
+		  PRIMARY KEY (organization_id, provider, address_key),
+		  CONSTRAINT chk_external_mail_personal_assignments_key CHECK (address_key = lower(address_key) AND address_key <> '')
+		)`,
 	)
 }
 
@@ -79,6 +94,8 @@ func (m *addExternalMailTenants) Down(db *gorm.DB) error {
 		    RAISE EXCEPTION 'a mailbox assigned from an external mail tenant exists; the older schema cannot express it';
 		  END IF;
 		END $$`,
+		`DROP TABLE IF EXISTS external_mail_personal_assignments`,
+		`DROP INDEX IF EXISTS idx_mailboxes_external_mail_tenant`,
 		`ALTER TABLE mailboxes
 		  DROP CONSTRAINT IF EXISTS chk_mailboxes_tenant_origin,
 		  DROP COLUMN IF EXISTS external_mail_tenant_id`,

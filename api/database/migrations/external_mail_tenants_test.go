@@ -52,6 +52,11 @@ func TestExternalMailTenantsConstraints(t *testing.T) {
 		VALUES (11, 2, 'gmail', 'alice@acme.example', 901, ?, 7, 'u-1', now(), now(), now())`
 	assert.Error(t, db.Exec(connection, "sealed-token").Error, "a tenant connection with an account token")
 	exec(connection, "")
+	assignee := `INSERT INTO external_mail_personal_assignments (organization_id, provider, address_key, user_id, tenant_id, assigned_at)
+		VALUES (11, 'gmail', ?, 901, 7, now())`
+	exec(assignee, "alice@acme.example")
+	assert.Error(t, db.Exec(assignee, "alice@acme.example").Error, "one holder per address")
+	assert.Error(t, db.Exec(assignee, "Bob@acme.example").Error, "an address key that is not lowercase")
 	assert.Error(t, db.Transaction(func(tx *gorm.DB) error { return (&addExternalMailTenants{}).Down(tx) }))
 
 	exec(`DELETE FROM external_mail_connections WHERE tenant_id IS NOT NULL`)

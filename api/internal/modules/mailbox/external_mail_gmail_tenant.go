@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 // Google Workspace tenants: the organization's own service account with domain-wide delegation. The
@@ -68,11 +70,6 @@ type gmailTenantCredential struct {
 	PrivateKeyID string `json:"private_key_id,omitempty"`
 	AdminSubject string `json:"admin_subject"`
 	CustomerID   string `json:"customer_id"`
-}
-
-// TenantConsentURL: Workspace has no admin consent redirect for domain-wide delegation.
-func (g *gmailTenantSource) TenantConsentURL(ExternalMailTenantConsent) (string, bool) {
-	return "", false
 }
 
 // AuthorizeTenant reads the service account key, proves both delegated scopes with a token for the
@@ -176,11 +173,23 @@ func (g *gmailTenantSource) ListTenantDirectory(ctx context.Context, credential,
 		"orderBy": {"email"}, "projection": {"basic"}, "viewType": {"admin_view"},
 	}
 	if cursor != "" {
+		if !validPageToken(cursor) {
+			return ExternalMailDirectoryPage{}, fmt.Errorf("%w: malformed directory cursor", domain.ErrInvalidInput)
+		}
 		query.Set("pageToken", cursor)
 	}
 	var listed gmailDirectoryUsers
-	if err = g.directoryGet(ctx, accessToken, "/users", query, &listed); err != nil {
+	err = g.directoryGet(ctx, accessToken, "/users", query, &listed)
+	var status *gmailStatusError
+	if cursor != "" && errors.As(err, &status) && status.Status == http.StatusBadRequest {
+		// Google refused the page token: the caller's cursor, not the credential.
+		return ExternalMailDirectoryPage{}, fmt.Errorf("%w: directory cursor refused", domain.ErrInvalidInput)
+	}
+	if err != nil {
 		return ExternalMailDirectoryPage{}, err
+	}
+	if !validPageToken(listed.NextPageToken) {
+		listed.NextPageToken = ""
 	}
 	page := ExternalMailDirectoryPage{Entries: []ExternalMailDirectoryEntry{}, Next: listed.NextPageToken}
 	for _, user := range listed.Users {
@@ -327,21 +336,51 @@ func decodeGmailTenantCredential(raw string) (gmailTenantCredential, error) {
 	return credential, nil
 }
 
-// parseServiceAccountKey reads the RSA key of a service account key file: PKCS #8, as Google issues
-// it, or PKCS #1.
+// Bounds of a service account's RSA key.
+const (
+	minServiceAccountKeyBits = 2048
+	maxServiceAccountKeyBits = 4096
+	// maxDirectoryPageToken bounds a provider page token carried as a cursor.
+	maxDirectoryPageToken = 2048
+)
+
+// validPageToken reports whether a provider page token is a bounded run of URL-safe characters. It
+// never holds a scheme or a host, so a cursor cannot name another resource.
+func validPageToken(token string) bool {
+	if token == "" || len(token) > maxDirectoryPageToken {
+		return false
+	}
+	for _, char := range token {
+		switch {
+		case 'a' <= char && char <= 'z', 'A' <= char && char <= 'Z', '0' <= char && char <= '9':
+		case strings.ContainsRune("-_.~+/=!*'()", char):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// parseServiceAccountKey reads the RSA key of a service account key file, PKCS #8, as Google issues
+// it, or PKCS #1, of 2048 to 4096 bits.
 func parseServiceAccountKey(raw string) (*rsa.PrivateKey, error) {
 	block, _ := pem.Decode([]byte(raw))
 	if block == nil {
 		return nil, errors.New("service account key: no PEM block")
 	}
+	var rsaKey *rsa.PrivateKey
 	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
-		rsaKey, ok := key.(*rsa.PrivateKey)
-		if !ok {
+		var ok bool
+		if rsaKey, ok = key.(*rsa.PrivateKey); !ok {
 			return nil, errors.New("service account key: not an RSA key")
 		}
-		return rsaKey, nil
+	} else if rsaKey, err = x509.ParsePKCS1PrivateKey(block.Bytes); err != nil {
+		return nil, err
 	}
-	return x509.ParsePKCS1PrivateKey(block.Bytes)
+	if bits := rsaKey.N.BitLen(); bits < minServiceAccountKeyBits || bits > maxServiceAccountKeyBits {
+		return nil, fmt.Errorf("service account key: %d bits, want %d to %d", bits, minServiceAccountKeyBits, maxServiceAccountKeyBits)
+	}
+	return rsaKey, nil
 }
 
 // signServiceAccountJWT signs claims with RS256 (RFC 7515, RFC 7518).

@@ -62,7 +62,10 @@ func normalizedSharing(checked *sharedBinding) *domain.ExternalMailSharing {
 // was deleted is managed by nobody.
 func (s *service) mayManageConnection(ctx context.Context, viewer domain.OrganizationContext, connection *domain.ExternalMailConnection) (bool, error) {
 	if !connection.Shared {
-		return connection.OwnerUserID != nil && viewer.UserID != 0 && *connection.OwnerUserID == viewer.UserID, nil
+		owner := connection.OwnerUserID != nil && viewer.UserID != 0 && *connection.OwnerUserID == viewer.UserID
+		// A personal tenant assignment is at the organization's address: owners and admins manage its
+		// connection too (sync runs, purge), never its mail.
+		return owner || (connection.TenantID != nil && viewer.Role.CanManageOrganization()), nil
 	}
 	mailbox, err := s.repo.FindMailbox(ctx, viewer.OrganizationID, connection.MailboxID)
 	if errors.Is(err, ErrMailboxNotFound) {

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 )
 
@@ -114,6 +115,10 @@ func (g *fakeGoogleTenant) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if r.URL.Query().Get("pageToken") == "page-2" {
 			users = g.users[2:]
+		} else if r.URL.Query().Get("pageToken") != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"errors":[{"reason":"invalid"}]}}`))
+			return
 		}
 		body, _ := json.Marshal(map[string]any{"users": users, "nextPageToken": next})
 		_, _ = w.Write(body)
@@ -135,7 +140,12 @@ func (g *fakeGoogleTenant) serve(w http.ResponseWriter, r *http.Request) {
 
 func testServiceAccountKey(t *testing.T) (*rsa.PrivateKey, string) {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	return testServiceAccountKeyBits(t, 2048)
+}
+
+func testServiceAccountKeyBits(t *testing.T, bits int) (*rsa.PrivateKey, string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, bits)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
@@ -222,8 +232,19 @@ func TestGmailTenantSource(t *testing.T) {
 	if err = source.VerifyTenant(ctx, "{}"); !errors.Is(err, ErrExternalMailAuth) {
 		t.Fatalf("unreadable credential = %v", err)
 	}
-	if _, consents := source.TenantConsentURL(ExternalMailTenantConsent{TenantID: "x"}); consents {
-		t.Fatal("Workspace has no consent page")
+
+	// A cursor is a page token only, never a URL; a malformed or refused one is the caller's input and
+	// never an authorization failure.
+	google.refuseSubs["it@acme.example"] = false
+	for _, cursor := range []string{"https://evil.example/users", "page token", strings.Repeat("a", maxDirectoryPageToken+1), "stale-token"} {
+		if _, err = source.ListTenantDirectory(ctx, authorization.Credential, cursor, 2); !errors.Is(err, domain.ErrInvalidInput) || errors.Is(err, ErrExternalMailAuth) {
+			t.Errorf("cursor %.30q = %v, want invalid input", cursor, err)
+		}
+	}
+	// Keys outside 2048 to 4096 bits are refused.
+	_, weak := testServiceAccountKeyBits(t, 1024)
+	if _, err = source.AuthorizeTenant(ctx, ExternalMailTenantGrant{ServiceAccountKey: weak, AdminSubject: "it@acme.example"}); !errors.Is(err, ErrExternalMailAuthorizationInvalid) {
+		t.Fatalf("1024-bit key = %v, want invalid", err)
 	}
 }
 
@@ -264,12 +285,13 @@ func TestGmailFetchWithTenantToken(t *testing.T) {
 
 // fakeMicrosoftTenant is a client credentials token endpoint and a Graph directory.
 type fakeMicrosoftTenant struct {
-	server   *httptest.Server
-	mu       sync.Mutex
-	forms    []url.Values
-	paths    []string
-	refused  bool
-	tenantID string
+	server      *httptest.Server
+	mu          sync.Mutex
+	forms       []url.Values
+	paths       []string
+	tokenStatus int
+	usersStatus int
+	tenantID    string
 }
 
 func newFakeMicrosoftTenant(t *testing.T) *fakeMicrosoftTenant {
@@ -287,33 +309,52 @@ func (m *fakeMicrosoftTenant) source() *outlookTenantSource {
 	return source
 }
 
+func (m *fakeMicrosoftTenant) tokenRequests() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.forms)
+}
+
 func (m *fakeMicrosoftTenant) serve(w http.ResponseWriter, r *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	m.paths = append(m.paths, r.URL.RequestURI())
+	query := r.URL.Query()
 	switch {
 	case r.URL.Path == "/login/"+m.tenantID+"/oauth2/v2.0/token":
 		_ = r.ParseForm()
 		m.forms = append(m.forms, r.PostForm)
-		if m.refused || r.PostForm.Get("grant_type") != "client_credentials" || r.PostForm.Get("scope") != outlookTenantScope {
+		if m.tokenStatus != 0 {
+			w.WriteHeader(m.tokenStatus)
+			_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
+			return
+		}
+		if r.PostForm.Get("grant_type") != "client_credentials" || r.PostForm.Get("scope") != outlookTenantScope ||
+			r.PostForm.Get("client_id") != "own-app" || r.PostForm.Get("client_secret") != "own-secret" {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"access_token":"app-token","token_type":"Bearer"}`))
-	case r.URL.Path == "/v1.0/users" && r.URL.Query().Get("$filter") != "":
-		if r.URL.Query().Get("$filter") == "mail eq 'bob@m365.example'" {
+		_, _ = w.Write([]byte(`{"access_token":"app-token","token_type":"Bearer","expires_in":3599}`))
+	case r.URL.Path == "/v1.0/users" && m.usersStatus != 0:
+		w.WriteHeader(m.usersStatus)
+		_, _ = w.Write([]byte(`{"error":{"code":"Authorization_RequestDenied"}}`))
+	case r.URL.Path == "/v1.0/users" && query.Get("$filter") != "":
+		if query.Get("$filter") == "mail eq 'bob@m365.example'" {
 			_, _ = w.Write([]byte(`{"value":[{"id":"u-bob","displayName":"Bob","mail":"Bob@m365.example"}]}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"value":[]}`))
-	case r.URL.Path == "/v1.0/users" && r.URL.Query().Get("$skiptoken") == "":
-		next := m.server.URL + "/v1.0/users?$skiptoken=2"
+	case r.URL.Path == "/v1.0/users" && query.Get("$skiptoken") == "":
+		next := m.server.URL + "/v1.0/users?$select=id&$top=2&$skiptoken=RFNwdAIAAQ"
 		_, _ = w.Write([]byte(`{"value":[{"id":"u-alice","displayName":"Alice","mail":"alice@m365.example"},
 			{"id":"u-room","displayName":"No mailbox","mail":null}],"@odata.nextLink":"` + next + `"}`))
-	case r.URL.Path == "/v1.0/users":
+	case r.URL.Path == "/v1.0/users" && query.Get("$skiptoken") == "RFNwdAIAAQ":
 		_, _ = w.Write([]byte(`{"value":[{"id":"u-bob","displayName":"Bob","mail":"bob@m365.example"}]}`))
+	case r.URL.Path == "/v1.0/users":
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":"Request_BadRequest"}}`))
 	case strings.HasPrefix(r.URL.Path, "/v1.0/users/u-bob/mailFolders/inbox/messages/delta"):
 		_, _ = w.Write([]byte(`{"value":[],"@odata.deltaLink":"` + m.server.URL + `/v1.0/users/u-bob/mailFolders/inbox/messages/delta?$deltatoken=1"}`))
 	default:
@@ -321,61 +362,80 @@ func (m *fakeMicrosoftTenant) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// TestOutlookTenantSource: the consent page is pinned to the tenant; the client credentials flow
-// proves the operator's or the organization's application; the directory pages on the Graph host
-// only; an app token fetches /users/{id}, never /me.
+// TestOutlookTenantSource: only the organization's own application is accepted; the client
+// credentials flow proves it with a directory read, at authorization and at every check; the
+// directory pages by skip token on a server-built URL; tokens are cached; an app token fetches
+// /users/{id}, never /me.
 func TestOutlookTenantSource(t *testing.T) {
 	microsoft := newFakeMicrosoftTenant(t)
 	source := microsoft.source()
 	ctx := context.Background()
 
-	consent, ok := source.TenantConsentURL(ExternalMailTenantConsent{TenantID: microsoft.tenantID, State: "s1", RedirectURI: "https://zmail.example/cb"})
-	parsed, _ := url.Parse(consent)
-	if !ok || parsed.Path != "/login/"+microsoft.tenantID+"/v2.0/adminconsent" || parsed.Query().Get("client_id") != "operator-app" ||
-		parsed.Query().Get("state") != "s1" || parsed.Query().Get("scope") != outlookTenantScope {
-		t.Fatalf("consent URL %q", consent)
-	}
-	if _, ok = source.TenantConsentURL(ExternalMailTenantConsent{TenantID: "contoso.example"}); ok {
-		t.Fatal("a domain got a consent page")
-	}
 	for name, grant := range map[string]ExternalMailTenantGrant{
-		"domain":         {TenantID: "contoso.example"},
+		"domain":         {TenantID: "contoso.example", ClientID: "own-app", ClientSecret: "own-secret"},
+		"operator app":   {TenantID: microsoft.tenantID},
 		"id without key": {TenantID: microsoft.tenantID, ClientID: "own-app"},
+		"key without id": {TenantID: microsoft.tenantID, ClientSecret: "own-secret"},
 	} {
 		if _, err := source.AuthorizeTenant(ctx, grant); !errors.Is(err, ErrExternalMailAuthorizationInvalid) {
 			t.Errorf("%s = %v, want invalid", name, err)
 		}
 	}
-	operator, err := source.AuthorizeTenant(ctx, ExternalMailTenantGrant{TenantID: strings.ToUpper(microsoft.tenantID)})
-	if err != nil || operator.TenantIdentifier != microsoft.tenantID || microsoft.forms[0].Get("client_id") != "operator-app" {
-		t.Fatalf("operator app = %+v, err %v", operator, err)
+	if microsoft.tokenRequests() != 0 {
+		t.Fatal("an invalid grant reached Microsoft")
 	}
-	own, err := source.AuthorizeTenant(ctx, ExternalMailTenantGrant{TenantID: microsoft.tenantID, ClientID: "own-app", ClientSecret: "own-secret"})
-	if err != nil || microsoft.forms[1].Get("client_id") != "own-app" || microsoft.forms[1].Get("client_secret") != "own-secret" {
+	own, err := source.AuthorizeTenant(ctx, ExternalMailTenantGrant{TenantID: strings.ToUpper(microsoft.tenantID), ClientID: "own-app", ClientSecret: "own-secret"})
+	if err != nil || own.TenantIdentifier != microsoft.tenantID || microsoft.forms[0].Get("client_id") != "own-app" {
 		t.Fatalf("own app = %+v, err %v", own, err)
 	}
-	if err = source.VerifyTenant(ctx, own.Credential); err != nil || microsoft.forms[2].Get("client_id") != "own-app" {
-		t.Fatalf("verify own app: %v", err)
+	if !strings.Contains(strings.Join(microsoft.paths, " "), "/v1.0/users?$top=1&$select=id") {
+		t.Fatalf("authorization read no directory user: %v", microsoft.paths)
 	}
 
-	page, err := source.ListTenantDirectory(ctx, operator.Credential, "", 2)
-	if err != nil || len(page.Entries) != 1 || page.Entries[0].Address != "alice@m365.example" || page.Next == "" {
+	page, err := source.ListTenantDirectory(ctx, own.Credential, "", 2)
+	if err != nil || len(page.Entries) != 1 || page.Entries[0].Address != "alice@m365.example" || page.Next != "RFNwdAIAAQ" {
 		t.Fatalf("first page = %+v, err %v", page, err)
 	}
-	if page, err = source.ListTenantDirectory(ctx, operator.Credential, page.Next, 2); err != nil || page.Entries[0].DirectoryID != "u-bob" {
+	if page, err = source.ListTenantDirectory(ctx, own.Credential, page.Next, 2); err != nil || page.Entries[0].DirectoryID != "u-bob" {
 		t.Fatalf("second page = %+v, err %v", page, err)
 	}
-	if _, err = source.ListTenantDirectory(ctx, operator.Credential, "https://evil.example/v1.0/users", 2); err == nil {
-		t.Fatal("followed a cursor off the Graph host")
+	// A cursor is a skip token on the fixed /users query, never a link: a URL is malformed before any
+	// request, and a token Graph refuses is the caller's input; neither is an authorization failure.
+	before := len(microsoft.paths)
+	for _, cursor := range []string{"https://evil.example/v1.0/users", microsoft.server.URL + "/v1.0/users/u-bob/messages", "a b"} {
+		if _, err = source.ListTenantDirectory(ctx, own.Credential, cursor, 2); !errors.Is(err, domain.ErrInvalidInput) || errors.Is(err, ErrExternalMailAuth) {
+			t.Errorf("cursor %q = %v, want invalid input", cursor, err)
+		}
 	}
-	if entry, lookupErr := source.LookupTenantMailbox(ctx, operator.Credential, "bob@m365.example"); lookupErr != nil || entry.DirectoryID != "u-bob" {
+	if len(microsoft.paths) != before {
+		t.Fatalf("a malformed cursor reached Microsoft: %v", microsoft.paths[before:])
+	}
+	if _, err = source.ListTenantDirectory(ctx, own.Credential, "stale", 2); !errors.Is(err, domain.ErrInvalidInput) {
+		t.Fatalf("refused skip token = %v, want invalid input", err)
+	}
+	for _, path := range microsoft.paths {
+		if strings.HasPrefix(path, "/v1.0/") && !strings.HasPrefix(path, "/v1.0/users?") {
+			t.Fatalf("directory listing requested %s", path)
+		}
+	}
+	if entry, lookupErr := source.LookupTenantMailbox(ctx, own.Credential, "bob@m365.example"); lookupErr != nil || entry.DirectoryID != "u-bob" {
 		t.Fatalf("lookup = %+v, err %v", entry, lookupErr)
 	}
-	if _, err = source.LookupTenantMailbox(ctx, operator.Credential, "o'hara@m365.example"); !errors.Is(err, ErrExternalMailDirectoryNotFound) {
+	if _, err = source.LookupTenantMailbox(ctx, own.Credential, "o'hara@m365.example"); !errors.Is(err, ErrExternalMailDirectoryNotFound) {
 		t.Fatalf("unknown lookup = %v", err)
 	}
 
-	token, err := source.MailboxToken(ctx, operator.Credential, "bob@m365.example", "u-bob")
+	// The application token is cached for its lifetime: mailbox tokens ask Microsoft once.
+	tokens := microsoft.tokenRequests()
+	for range 3 {
+		if _, err = source.MailboxToken(ctx, own.Credential, "bob@m365.example", "u-bob"); err != nil {
+			t.Fatalf("mailbox token: %v", err)
+		}
+	}
+	if microsoft.tokenRequests() != tokens {
+		t.Fatalf("%d token requests for cached mailbox tokens", microsoft.tokenRequests()-tokens)
+	}
+	token, err := source.MailboxToken(ctx, own.Credential, "bob@m365.example", "u-bob")
 	if err != nil || token.AccessToken != "app-token" || token.DirectoryID != "u-bob" {
 		t.Fatalf("mailbox token = %+v, err %v", token, err)
 	}
@@ -390,11 +450,33 @@ func TestOutlookTenantSource(t *testing.T) {
 		}
 	}
 
-	microsoft.refused = true
-	if err = source.VerifyTenant(ctx, operator.Credential); !errors.Is(err, ErrExternalMailAuth) {
-		t.Fatalf("refused tenant = %v", err)
+	// A check takes a fresh token and reads the directory, so a removed permission is noticed.
+	tokens = microsoft.tokenRequests()
+	if err = source.VerifyTenant(ctx, own.Credential); err != nil || microsoft.tokenRequests() != tokens+1 {
+		t.Fatalf("verify: %v, %d token requests", err, microsoft.tokenRequests()-tokens)
 	}
-	if _, err = source.AuthorizeTenant(ctx, ExternalMailTenantGrant{TenantID: microsoft.tenantID}); !errors.Is(err, ErrExternalMailAuth) {
-		t.Fatalf("refused authorization = %v", err)
+	microsoft.usersStatus = http.StatusForbidden
+	if err = source.VerifyTenant(ctx, own.Credential); !errors.Is(err, ErrExternalMailAuth) {
+		t.Fatalf("permission removed = %v, want an authorization failure", err)
+	}
+	// Throttling and server errors never count as a refused tenant; Microsoft's refusal does.
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		microsoft.usersStatus = status
+		if err = source.VerifyTenant(ctx, own.Credential); err == nil || errors.Is(err, ErrExternalMailAuth) {
+			t.Errorf("directory %d = %v, want a retryable error", status, err)
+		}
+		microsoft.usersStatus = 0
+		microsoft.tokenStatus = status
+		if err = source.VerifyTenant(ctx, own.Credential); err == nil || errors.Is(err, ErrExternalMailAuth) {
+			t.Errorf("token %d = %v, want a retryable error", status, err)
+		}
+		microsoft.tokenStatus = 0
+	}
+	microsoft.tokenStatus = http.StatusUnauthorized
+	if err = source.VerifyTenant(ctx, own.Credential); !errors.Is(err, ErrExternalMailAuth) {
+		t.Fatalf("refused application = %v", err)
+	}
+	if _, err = source.MailboxToken(ctx, own.Credential, "bob@m365.example", "u-bob"); !errors.Is(err, ErrExternalMailAuth) {
+		t.Fatalf("a refused application kept a cached token: %v", err)
 	}
 }

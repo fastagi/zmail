@@ -248,14 +248,16 @@ so run it only once connectors are on, or under a restart policy that does not r
 exit. Copies of revoked connections are deleted by `mail:broadcast:work`, not by this worker, once
 `EXTERNAL_MAIL_REVOKED_RETENTION` has passed, whether or not connectors are on.
 
-The same worker syncs mailboxes assigned from an authorized tenant (`POST /v1/external-mail-tenants`)
-with a short-lived token the tenant credential mints for each mailbox; nothing else is configured
-for it besides the per-tenant ceiling `EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS` (default 1000). It
-reaches Google's token endpoint and `admin.googleapis.com` (Directory API) for Workspace tenants, and
-`login.microsoftonline.com` and `graph.microsoft.com` for Microsoft 365 tenants, so allow those hosts
-in egress. A Microsoft 365 tenant authorized with the operator's application needs that application
-(`EXTERNAL_MAIL_OUTLOOK_CLIENT_ID`) to request the Graph application permissions `Mail.Read` and
-`User.Read.All` and to list `EXTERNAL_MAIL_REDIRECT_URL`, which receives the admin consent as well.
+Tenant connect is off until `EXTERNAL_MAIL_TENANTS_ENABLED=true` (with the `gmail` or `outlook`
+connector enabled). The same worker then syncs mailboxes assigned from an authorized tenant
+(`POST /v1/external-mail-tenants`) with a short-lived token the tenant credential mints for each
+mailbox; turning the switch off again hides the tenant routes but keeps syncing what is assigned
+(owners and admins still disconnect single mailboxes). The per-tenant ceiling is
+`EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS` (default 1000). The worker reaches Google's token endpoint and
+`admin.googleapis.com` (Directory API) for Workspace tenants, and `login.microsoftonline.com` and
+`graph.microsoft.com` for Microsoft 365 tenants, so allow those hosts in egress. Microsoft 365
+tenants use the organization's own application only; the operator's OAuth application is never used
+for them.
 
 ## Transactional Mail
 

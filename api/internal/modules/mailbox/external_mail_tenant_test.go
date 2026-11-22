@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +16,7 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/internal/infra/config"
 	"github.com/fastagi/zmail/api/internal/infra/router"
+	"github.com/fastagi/zmail/api/internal/modules/apikey"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 	"github.com/fastagi/zmail/api/pkg/response"
 )
@@ -38,9 +38,7 @@ func tenantAddress(local string) string { return local + "@" + tenantDomain }
 func newTenantFixture(t *testing.T) *tenantFixture {
 	t.Helper()
 	f := &tenantFixture{externalFixture: newExternalFixture(t, config.ExternalMailSourceFake)}
-	if err := f.repo.(*repository).db.AutoMigrate(&ExternalMailTenantPO{}); err != nil {
-		t.Fatalf("migrate tenants: %v", err)
-	}
+	f.service.settings.ExternalMail.TenantsEnabled = true
 	f.service.recordAudit = func(_ context.Context, change auditstarter.Change) { f.audits = append(f.audits, change) }
 	f.owner = viewerOf(accessOrg, accessAdmin, domain.OrganizationRoleOwner)
 	var directory []ExternalMailDirectoryEntry
@@ -171,59 +169,34 @@ func TestTenantAuthorizationIsForOwners(t *testing.T) {
 	}
 }
 
-// TestTenantMicrosoftAdminConsent: without its own application, an owner gets the consent page
-// pinned to the tenant; the single-use state completes once, for the same owner and tenant, and only
-// with consent given. The personal sign-in completion cannot take a consent state.
-func TestTenantMicrosoftAdminConsent(t *testing.T) {
+// TestTenantMicrosoftOwnApplicationOnly: Microsoft tenants are accepted only with the organization's
+// own application. A tenant id alone, the operator's application, is refused as invalid before the
+// provider is asked, and so is a client id without its secret or the reverse.
+func TestTenantMicrosoftOwnApplicationOnly(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := context.Background()
 	const entra = "0b1e2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 	f.source.AddTenant(entra, ExternalMailDirectoryEntry{Address: "ops@m365.example", DirectoryID: "u-1"})
-	start := func() string {
-		t.Helper()
-		result, err := f.service.AuthorizeExternalMailTenant(ctx, f.owner, ExternalMailTenantInput{
-			Provider: domain.ExternalMailProviderOutlook, Grant: ExternalMailTenantGrant{TenantID: entra},
-		})
-		if err != nil || result.Consent == nil || result.Tenant != nil {
-			t.Fatalf("start consent = %+v, err %v", result, err)
+	for name, grant := range map[string]ExternalMailTenantGrant{
+		"tenant id alone":    {TenantID: entra},
+		"no credential":      {},
+		"client id only":     {TenantID: entra, ClientID: "own-app"},
+		"client secret only": {TenantID: entra, ClientSecret: "secret"},
+	} {
+		if _, err := f.service.AuthorizeExternalMailTenant(ctx, f.owner, ExternalMailTenantInput{
+			Provider: domain.ExternalMailProviderOutlook, Grant: grant,
+		}); !errors.Is(err, ErrExternalMailAuthorizationInvalid) {
+			t.Errorf("%s = %v, want invalid", name, err)
 		}
-		parsed, _ := url.Parse(result.Consent.AuthorizationURL)
-		if parsed.Query().Get("tenant") != entra {
-			t.Fatalf("consent page %q is not pinned to the tenant", result.Consent.AuthorizationURL)
-		}
-		return parsed.Query().Get("state")
 	}
-	complete := func(viewer domain.OrganizationContext, state, tenant, consent string) (ExternalMailTenantAuthorizationResult, error) {
-		return f.service.CompleteExternalMailTenantConsent(ctx, viewer, ExternalMailTenantConsentInput{State: state, Tenant: tenant, AdminConsent: consent})
+	if n := f.count(t, `SELECT COUNT(*) FROM external_mail_authorizations`); n != 0 {
+		t.Fatalf("%d pending sign-ins stored; tenants never use a consent redirect", n)
 	}
-
-	state := start()
-	if _, _, err := f.service.CompleteExternalMailAuthorization(ctx, f.owner, state, "code"); !errors.Is(err, ErrExternalMailAuthorizationNotFound) {
-		t.Fatalf("sign-in completion with a consent state = %v, want not found", err)
-	}
-	state = start()
-	if _, err := complete(f.owner, state, "ffffffff-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "True"); !errors.Is(err, ErrExternalMailAccountMismatch) {
-		t.Fatalf("another tenant = %v, want mismatch", err)
-	}
-	if _, err := complete(f.owner, state, entra, "True"); !errors.Is(err, ErrExternalMailAuthorizationNotFound) {
-		t.Fatalf("replayed state = %v, want not found", err)
-	}
-	if _, err := complete(f.owner, start(), entra, "False"); !errors.Is(err, ErrExternalMailAuthorizationFailed) {
-		t.Fatalf("declined consent = %v, want failed", err)
-	}
-	if _, err := complete(f.admin, start(), entra, "True"); !errors.Is(err, domain.ErrPermissionDenied) {
-		t.Fatalf("admin completing = %v, want permission denied", err)
-	}
-	result, err := complete(f.owner, start(), strings.ToUpper(entra), "True")
-	if err != nil || !result.Created || result.Tenant.Tenant.Provider != domain.ExternalMailProviderOutlook ||
-		result.Tenant.Tenant.TenantIdentifier != entra {
-		t.Fatalf("consent = %+v, err %v", result, err)
-	}
-	// An unparseable tenant id never gets a consent page.
-	if _, err = f.service.AuthorizeExternalMailTenant(ctx, f.owner, ExternalMailTenantInput{
-		Provider: domain.ExternalMailProviderOutlook, Grant: ExternalMailTenantGrant{},
-	}); !errors.Is(err, ErrExternalMailAuthorizationInvalid) {
-		t.Fatalf("no tenant id = %v, want invalid", err)
+	result, err := f.service.AuthorizeExternalMailTenant(ctx, f.owner, ExternalMailTenantInput{
+		Provider: domain.ExternalMailProviderOutlook, Grant: ExternalMailTenantGrant{TenantID: entra, ClientID: "own-app", ClientSecret: "secret"},
+	})
+	if err != nil || !result.Created || result.Tenant.Tenant.TenantIdentifier != entra {
+		t.Fatalf("own application = %+v, err %v", result, err)
 	}
 }
 
@@ -515,10 +488,15 @@ func TestTenantCredentialLoss(t *testing.T) {
 	if f.reloadTenant(t).Status != domain.ExternalMailTenantActive {
 		t.Fatal("tenant not active again")
 	}
-	for _, connection := range connections {
+	for _, connection := range connections[:2] {
 		if got := f.reloadConnection(t, connection.ID); got.Status != domain.ExternalMailStatusActive {
 			t.Fatalf("connection %d = %s after re-authorization, want active", connection.ID, got.Status)
 		}
+	}
+	// bob@ was stopped by its own refusal, not by the tenant credential: it stays stopped.
+	if got := f.reloadConnection(t, connections[2].ID); got.Status != domain.ExternalMailStatusNeedsReconnect ||
+		got.LastErrorCode != domain.ExternalMailErrorAuthFailed {
+		t.Fatalf("bob after re-authorization = %+v, want still needs_reconnect", got)
 	}
 }
 
@@ -564,8 +542,19 @@ func TestTenantRevocation(t *testing.T) {
 	}
 }
 
-// TestTenantRoutes: the HTTP shapes, the owner and member answers, and no tenant route on the API
-// key surface.
+// agentKeys is the API key service of the route test: one live key with every mail scope.
+type agentKeys struct{ apikey.Service }
+
+func (agentKeys) Validate(_ context.Context, plaintext string, _ ...string) (*domain.APIKey, error) {
+	if plaintext != "agent-key" {
+		return nil, domain.ErrAPIKeyInvalid
+	}
+	return &domain.APIKey{ID: 77, UserID: accessB, Scopes: []string{ScopeMailAgent, ScopeMailSend, ScopeMailRead}, Mode: domain.APIKeyModeLive}, nil
+}
+
+// TestTenantRoutes: the HTTP shapes, the owner and member answers, and no tenant route reachable
+// with an API key. The api_key group is the apikey starter's real middleware; the auth group admits
+// only a session bearer, as the user starter's does.
 func TestTenantRoutes(t *testing.T) {
 	f := newTenantFixture(t)
 	call := func(viewer domain.OrganizationContext, method, path, body string) (int, map[string]any) {
@@ -574,20 +563,25 @@ func TestTenantRoutes(t *testing.T) {
 		handler := NewHandler(f.service)
 		response.DefaultErrorMapper.Register(domain.ErrPermissionDenied, http.StatusForbidden, domain.CodePermissionDenied)
 		response.DefaultErrorMapper.Register(domain.ErrInvalidInput, http.StatusBadRequest, domain.CodeInvalidInput)
+		response.DefaultErrorMapper.Register(domain.ErrAPIKeyInvalid, http.StatusUnauthorized, response.ErrorCodeUnauthorized)
 		handler.RegisterErrorMappings(response.DefaultErrorMapper)
 		engine := gin.New()
 		routes := router.New(engine).Prefix("/v1")
-		// A session reaches the tenant routes; an API key never does.
+		apikey.NewHandler(agentKeys{}).RegisterMiddleware(routes)
 		routes.MiddlewareGroup("auth", func(c *gin.Context) {
-			if c.GetHeader("X-API-Key") != "" {
-				response.AbortUnauthorized(c, "session required")
+			if !strings.HasPrefix(c.GetHeader("Authorization"), "Bearer session-") {
+				response.AbortUnauthorized(c, "Authentication required")
 				return
 			}
 			c.Next()
 		})
-		routes.MiddlewareGroup("api_key", func(c *gin.Context) { c.Next() })
 		routes.MiddlewareGroup("organization_context", func(c *gin.Context) {
-			c.Request = c.Request.WithContext(domain.WithOrganizationContext(c.Request.Context(), viewer))
+			current := viewer
+			if c.GetUint("userID") != 0 {
+				// An API key acts as its owner, a member.
+				current = viewerOf(accessOrg, c.GetUint("userID"), domain.OrganizationRoleOwner)
+			}
+			c.Request = c.Request.WithContext(domain.WithOrganizationContext(c.Request.Context(), current))
 			c.Next()
 		})
 		handler.RegisterRoutes(routes)
@@ -596,7 +590,9 @@ func TestTenantRoutes(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 		}
 		if viewer.UserID == 0 {
-			request.Header.Set("X-API-Key", "agent")
+			request.Header.Set("X-API-Key", "agent-key")
+		} else {
+			request.Header.Set("Authorization", "Bearer session-1")
 		}
 		recorder := httptest.NewRecorder()
 		engine.ServeHTTP(recorder, request)
@@ -614,8 +610,11 @@ func TestTenantRoutes(t *testing.T) {
 	}
 	status, body := call(f.owner, http.MethodPost, "/v1/external-mail-tenants",
 		`{"provider":"outlook","tenant_id":"0b1e2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"}`)
-	if status != http.StatusAccepted || !strings.Contains(fmt.Sprint(body["data"]), "authorization_url") {
-		t.Fatalf("consent start = %d %v", status, body)
+	if status != http.StatusUnprocessableEntity || body["error_code"] != domain.CodeExternalMailAuthorizationInvalid {
+		t.Fatalf("operator-app consent = %d %v, want 422", status, body)
+	}
+	if status, _ = call(f.owner, http.MethodPost, "/v1/external-mail-tenants/completions", `{"state":"s","tenant":"t","admin_consent":"True"}`); status != http.StatusNotFound {
+		t.Fatalf("consent completion route = %d, want gone", status)
 	}
 	status, body = call(f.admin, http.MethodGet, "/v1/external-mail-tenants", "")
 	items, _ := body["data"].([]any)
@@ -654,8 +653,12 @@ func TestTenantRoutes(t *testing.T) {
 	if status, _ = call(f.admin, http.MethodPost, base+"/assignments", `{"assignments":[{"address":"bob@external.invalid","assign":"owner","user_id":3}]}`); status != http.StatusUnprocessableEntity && status != http.StatusBadRequest {
 		t.Fatalf("unknown assign = %d", status)
 	}
-	// An API key reaches none of the tenant routes.
+	// The API key is valid: it reaches its own agent route.
 	agent := domain.OrganizationContext{OrganizationID: accessOrg}
+	if status, body = call(agent, http.MethodGet, "/v1/agent-mail-events", ""); status == http.StatusUnauthorized {
+		t.Fatalf("agent route with a valid key = %d %v", status, body)
+	}
+	// It reaches none of the tenant routes.
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/v1/external-mail-tenants"}, {http.MethodPost, "/v1/external-mail-tenants"},
 		{http.MethodGet, base + "/directory"}, {http.MethodPost, base + "/assignments"}, {http.MethodDelete, base},

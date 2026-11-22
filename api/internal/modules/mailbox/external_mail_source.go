@@ -164,8 +164,7 @@ type ExternalMailConnector struct {
 
 // ExternalMailTenantGrant is what an owner hands over to authorize a tenant. Each provider reads
 // the fields it needs: Google a service account key and an admin to read the directory as;
-// Microsoft the tenant id, with an application of the organization's own or, without one, the
-// operator's application after an admin consented.
+// Microsoft the tenant id with the client of the organization's own application.
 type ExternalMailTenantGrant struct {
 	ServiceAccountKey string
 	AdminSubject      string
@@ -185,14 +184,6 @@ type ExternalMailTenantAuthorization struct {
 	Credential string
 }
 
-// ExternalMailTenantConsent is the admin consent page of a provider that grants tenant access by a
-// redirect, with the single-use state and the callback.
-type ExternalMailTenantConsent struct {
-	TenantID    string
-	State       string
-	RedirectURI string
-}
-
 // ExternalMailDirectoryEntry is one mailbox of a tenant's directory.
 type ExternalMailDirectoryEntry struct {
 	Address     string
@@ -201,7 +192,8 @@ type ExternalMailDirectoryEntry struct {
 	DirectoryID string
 }
 
-// ExternalMailDirectoryPage is one page of a tenant's directory and the opaque cursor of the next.
+// ExternalMailDirectoryPage is one page of a tenant's directory and the cursor of the next: the
+// provider's page token only, never a URL, which the source checks and builds its request around.
 type ExternalMailDirectoryPage struct {
 	Entries []ExternalMailDirectoryEntry
 	Next    string
@@ -214,14 +206,12 @@ var ErrExternalMailDirectoryNotFound = errors.New("external mail address is not 
 // tenant credential, one mailbox per token. Every method returns ErrExternalMailAuth when the
 // provider refuses the credential.
 type ExternalMailTenantSource interface {
-	// TenantConsentURL is the admin consent page for the operator's application; false when the
-	// provider takes the credential directly instead.
-	TenantConsentURL(consent ExternalMailTenantConsent) (string, bool)
 	// AuthorizeTenant proves the grant with the provider and returns the credential to store.
 	AuthorizeTenant(ctx context.Context, grant ExternalMailTenantGrant) (ExternalMailTenantAuthorization, error)
 	// VerifyTenant checks that a stored credential still works.
 	VerifyTenant(ctx context.Context, credential string) error
-	// ListTenantDirectory returns at most limit mailboxes after cursor; an empty cursor starts over.
+	// ListTenantDirectory returns at most limit mailboxes after cursor; an empty cursor starts over. A
+	// cursor the source did not issue is domain.ErrInvalidInput and says nothing about the credential.
 	ListTenantDirectory(ctx context.Context, credential, cursor string, limit int) (ExternalMailDirectoryPage, error)
 	// LookupTenantMailbox returns the directory entry of one address, or
 	// ErrExternalMailDirectoryNotFound.

@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"gorm.io/gorm"
-
 	"github.com/fastagi/zmail/api/internal/domain"
 	auditstarter "github.com/fastagi/zmail/api/internal/modules/audit"
 	"github.com/fastagi/zmail/api/pkg/response"
@@ -25,9 +23,6 @@ const (
 	MaxTenantDirectoryPageSize     = 100
 	// MaxTenantAssignmentsPerRequest bounds one assignment batch.
 	MaxTenantAssignmentsPerRequest = 100
-	// tenantVerifierMarker prefixes the sealed tenant id of a pending admin consent. It is not
-	// base64, so neither the sign-in completion nor an instance without tenants can open it.
-	tenantVerifierMarker = "tenant:"
 	// tenantCheckTimeout bounds the check of a tenant credential after a mailbox's token was refused.
 	tenantCheckTimeout = 30 * time.Second
 )
@@ -49,11 +44,9 @@ const (
 // ExternalMailTenantService lets an organization owner authorize a whole tenant once, and owners and
 // admins assign mailboxes from its directory. Members, and API keys, have no part in it.
 type ExternalMailTenantService interface {
-	// AuthorizeExternalMailTenant proves a tenant credential and stores it (owners only). A provider
-	// that grants access by admin consent answers with the consent page instead.
+	// AuthorizeExternalMailTenant proves a tenant credential the organization owns and stores it
+	// (owners only).
 	AuthorizeExternalMailTenant(ctx context.Context, viewer domain.OrganizationContext, input ExternalMailTenantInput) (ExternalMailTenantAuthorizationResult, error)
-	// CompleteExternalMailTenantConsent finishes an admin consent with what the provider returned.
-	CompleteExternalMailTenantConsent(ctx context.Context, viewer domain.OrganizationContext, input ExternalMailTenantConsentInput) (ExternalMailTenantAuthorizationResult, error)
 	// ListExternalMailTenants lists the organization's tenants (owners and admins).
 	ListExternalMailTenants(ctx context.Context, viewer domain.OrganizationContext) ([]ExternalMailTenantView, error)
 	// RevokeExternalMailTenant revokes the tenant and every connection of it (owners only).
@@ -71,20 +64,11 @@ type ExternalMailTenantInput struct {
 	Grant    ExternalMailTenantGrant
 }
 
-// ExternalMailTenantConsentInput is what the provider sent back to the callback after an admin
-// consent.
-type ExternalMailTenantConsentInput struct {
-	State        string
-	Tenant       string
-	AdminConsent string
-}
-
-// ExternalMailTenantAuthorizationResult is a stored tenant (Created when new, otherwise
-// re-authorized), or, when Consent is set, the admin consent page to send the browser to.
+// ExternalMailTenantAuthorizationResult is a stored tenant: Created when new, otherwise
+// re-authorized.
 type ExternalMailTenantAuthorizationResult struct {
 	Tenant  *ExternalMailTenantView
 	Created bool
-	Consent *ExternalMailAuthorizationStart
 }
 
 // ExternalMailTenantView is a tenant with its count of live assignments.
@@ -128,9 +112,14 @@ type ExternalMailTenantAssignmentResult struct {
 
 var _ ExternalMailTenantService = (*service)(nil)
 
+// tenantsAvailable reports whether tenant connect is switched on and external mail can run.
+func (s *service) tenantsAvailable() bool {
+	return s.externalMailAvailable() && s.settings.ExternalMail.TenantsEnabled
+}
+
 // tenantConnector returns the enabled connector of the provider when it serves tenants.
 func (s *service) tenantConnector(provider domain.ExternalMailProvider) (ExternalMailConnector, error) {
-	if !s.externalMailAvailable() {
+	if !s.tenantsAvailable() {
 		return ExternalMailConnector{}, ErrExternalMailProviderUnavailable
 	}
 	connector, registered := s.externalConnectors.lookup(provider)
@@ -154,10 +143,9 @@ func (s *service) AuthorizeExternalMailTenant(ctx context.Context, viewer domain
 	}
 	grant := input.Grant
 	grant.TenantID = strings.TrimSpace(grant.TenantID)
-	if grant.ServiceAccountKey == "" && grant.ClientSecret == "" {
-		// No credential of the organization's own: the operator's application, after an admin
-		// consented on the provider's page.
-		return s.startTenantConsent(ctx, viewer, connector, grant.TenantID)
+	if (grant.ServiceAccountKey == "" && grant.ClientSecret == "") || (grant.ClientID == "") != (grant.ClientSecret == "") {
+		// Only a credential the organization owns is accepted, complete; there is no consent redirect.
+		return ExternalMailTenantAuthorizationResult{}, ErrExternalMailAuthorizationInvalid
 	}
 	authorization, err := connector.Tenant.AuthorizeTenant(ctx, grant)
 	if err != nil {
@@ -172,83 +160,6 @@ func tenantAuthorizationError(err error) error {
 		return ErrExternalMailAuthorizationFailed
 	}
 	return err
-}
-
-// startTenantConsent stores a single-use state, as a sign-in does, with the tenant id sealed behind
-// the tenant marker, and returns the consent page pinned to that tenant.
-func (s *service) startTenantConsent(ctx context.Context, viewer domain.OrganizationContext, connector ExternalMailConnector, tenantID string) (ExternalMailTenantAuthorizationResult, error) {
-	state, err := randomToken()
-	if err != nil {
-		return ExternalMailTenantAuthorizationResult{}, err
-	}
-	consentURL, consents := connector.Tenant.TenantConsentURL(ExternalMailTenantConsent{
-		TenantID: tenantID, State: state, RedirectURI: s.settings.ExternalMail.RedirectURL,
-	})
-	if !consents || tenantID == "" || len(tenantID) > 255 {
-		return ExternalMailTenantAuthorizationResult{}, ErrExternalMailAuthorizationInvalid
-	}
-	sealed, err := s.encryptor.EncryptString(tenantID)
-	if err != nil {
-		return ExternalMailTenantAuthorizationResult{}, err
-	}
-	now := s.now().UTC()
-	authorization := &domain.ExternalMailAuthorization{
-		OrganizationID: viewer.OrganizationID, UserID: viewer.UserID, Provider: connector.ID, StateHash: hashState(state),
-		SealedVerifier: tenantVerifierMarker + sealed, BackfillDays: domain.DefaultExternalMailBackfillDays,
-		ExpiresAt: now.Add(domain.ExternalMailAuthorizationTTL), CreatedAt: now,
-	}
-	if err = s.externalMail.CreateExternalMailAuthorization(ctx, authorization); err != nil {
-		return ExternalMailTenantAuthorizationResult{}, err
-	}
-	slog.InfoContext(ctx, "external_mail.tenant_consent_started",
-		slog.Uint64("organization_id", uint64(viewer.OrganizationID)), slog.Uint64("user_id", uint64(viewer.UserID)),
-		slog.String("provider", string(connector.ID)))
-	return ExternalMailTenantAuthorizationResult{Consent: &ExternalMailAuthorizationStart{
-		AuthorizationURL: consentURL, ExpiresAt: authorization.ExpiresAt,
-	}}, nil
-}
-
-func (s *service) CompleteExternalMailTenantConsent(ctx context.Context, viewer domain.OrganizationContext, input ExternalMailTenantConsentInput) (ExternalMailTenantAuthorizationResult, error) {
-	if !isOrganizationOwner(viewer) {
-		return ExternalMailTenantAuthorizationResult{}, domain.ErrPermissionDenied
-	}
-	if !s.externalMailAvailable() {
-		return ExternalMailTenantAuthorizationResult{}, ErrExternalMailAuthorizationNotFound
-	}
-	state := strings.TrimSpace(input.State)
-	if state == "" {
-		return ExternalMailTenantAuthorizationResult{}, ErrExternalMailAuthorizationNotFound
-	}
-	// Taking the state deletes it, so a consent completes once even when the check then fails.
-	authorization, err := s.externalMail.TakeExternalMailAuthorization(ctx, hashState(state), s.now().UTC())
-	if err != nil {
-		return ExternalMailTenantAuthorizationResult{}, err
-	}
-	sealed, marked := strings.CutPrefix(authorization.SealedVerifier, tenantVerifierMarker)
-	if !marked || authorization.OrganizationID != viewer.OrganizationID || authorization.UserID != viewer.UserID {
-		return ExternalMailTenantAuthorizationResult{}, ErrExternalMailAuthorizationNotFound
-	}
-	pinned, err := s.encryptor.DecryptString(sealed)
-	if err != nil {
-		return ExternalMailTenantAuthorizationResult{}, ErrExternalMailAuthorizationNotFound
-	}
-	if !strings.EqualFold(strings.TrimSpace(input.AdminConsent), "true") {
-		return ExternalMailTenantAuthorizationResult{}, ErrExternalMailAuthorizationFailed
-	}
-	if !strings.EqualFold(strings.TrimSpace(input.Tenant), pinned) {
-		// The administrator consented for another tenant than the owner named.
-		return ExternalMailTenantAuthorizationResult{}, ErrExternalMailAccountMismatch
-	}
-	connector, err := s.tenantConnector(authorization.Provider)
-	if err != nil {
-		return ExternalMailTenantAuthorizationResult{}, err
-	}
-	// The consent is proven by using it, never taken from the redirect alone.
-	tenantAuthorization, err := connector.Tenant.AuthorizeTenant(ctx, ExternalMailTenantGrant{TenantID: pinned})
-	if err != nil {
-		return ExternalMailTenantAuthorizationResult{}, tenantAuthorizationError(err)
-	}
-	return s.saveTenant(ctx, viewer, authorization.Provider, tenantAuthorization)
 }
 
 // saveTenant stores a proven tenant credential: a new tenant, or a fresh credential for one this
@@ -267,9 +178,21 @@ func (s *service) saveTenant(ctx context.Context, viewer domain.OrganizationCont
 	var tenant *domain.ExternalMailTenant
 	created := false
 	err = s.repo.InTransaction(ctx, func(tx context.Context) error {
+		// Authorizations of the organization run one at a time, so its tenant limit is counted against
+		// committed rows.
+		if lockErr := s.externalMail.LockSharedExternalMailBindings(tx, viewer.OrganizationID); lockErr != nil {
+			return lockErr
+		}
 		existing, findErr := s.externalMail.FindLiveExternalMailTenant(tx, provider, identifier)
 		switch {
 		case errors.Is(findErr, ErrExternalMailTenantNotFound):
+			live, countErr := s.externalMail.CountLiveExternalMailTenants(tx, viewer.OrganizationID)
+			if countErr != nil {
+				return countErr
+			}
+			if live >= domain.MaxExternalMailTenantsPerOrganization {
+				return ErrExternalMailConnectionLimit
+			}
 			tenant = &domain.ExternalMailTenant{
 				OrganizationID: viewer.OrganizationID, Provider: provider, TenantIdentifier: identifier, DisplayName: displayName,
 				EncryptedCredential: sealed, AuthorizedByUserID: &viewer.UserID, AuthorizedAt: now,
@@ -286,7 +209,7 @@ func (s *service) saveTenant(ctx context.Context, viewer domain.OrganizationCont
 		tenant, reauthorizeErr = s.externalMail.ReauthorizeExternalMailTenant(tx, existing.ID, sealed, displayName, viewer.UserID, now)
 		return reauthorizeErr
 	})
-	if errors.Is(err, gorm.ErrDuplicatedKey) || isUniqueViolation(err) {
+	if isUniqueViolation(err) {
 		// Another authorization of the same tenant landed in the meantime.
 		err = ErrExternalMailAccountTaken
 	}
@@ -324,7 +247,7 @@ func (s *service) ListExternalMailTenants(ctx context.Context, viewer domain.Org
 	if !viewer.Role.CanManageOrganization() {
 		return nil, domain.ErrPermissionDenied
 	}
-	if s.externalMail == nil || !s.externalMailAvailable() {
+	if s.externalMail == nil || !s.tenantsAvailable() {
 		return []ExternalMailTenantView{}, nil
 	}
 	tenants, err := s.externalMail.ListExternalMailTenants(ctx, viewer.OrganizationID)
@@ -347,7 +270,7 @@ func (s *service) managedTenant(ctx context.Context, viewer domain.OrganizationC
 	if !viewer.Role.CanManageOrganization() {
 		return nil, domain.ErrPermissionDenied
 	}
-	if !s.externalMailAvailable() {
+	if !s.tenantsAvailable() {
 		return nil, ErrExternalMailTenantNotFound
 	}
 	return s.externalMail.FindExternalMailTenant(ctx, viewer.OrganizationID, id)
@@ -377,7 +300,12 @@ func (s *service) activeTenant(ctx context.Context, viewer domain.OrganizationCo
 // tenantLost stops every sync of a tenant whose credential the provider refused or this instance
 // cannot open, until the owner authorizes it again.
 func (s *service) tenantLost(ctx context.Context, tenant *domain.ExternalMailTenant) {
-	lost, err := s.externalMail.MarkExternalMailTenantLost(ctx, tenant.ID, s.now().UTC())
+	s.tenantLostBy(ctx, tenant, 0)
+}
+
+// tenantLostBy is tenantLost when a connection's refused fetch revealed the loss.
+func (s *service) tenantLostBy(ctx context.Context, tenant *domain.ExternalMailTenant, refusedConnectionID uint) {
+	lost, err := s.externalMail.MarkExternalMailTenantLost(ctx, tenant.ID, tenant.AuthorizedAt, s.now().UTC(), refusedConnectionID)
 	if err != nil {
 		slog.ErrorContext(ctx, "external_mail.tenant_lost_failed", slog.Uint64("tenant_id", uint64(tenant.ID)), slog.String("error", err.Error()))
 		return
@@ -393,7 +321,7 @@ func (s *service) RevokeExternalMailTenant(ctx context.Context, viewer domain.Or
 	if !isOrganizationOwner(viewer) {
 		return domain.ErrPermissionDenied
 	}
-	if s.externalMail == nil || s.encryptor == nil {
+	if s.externalMail == nil || !s.tenantsAvailable() {
 		return ErrExternalMailTenantNotFound
 	}
 	tenant, err := s.externalMail.FindExternalMailTenant(ctx, viewer.OrganizationID, id)
@@ -580,6 +508,18 @@ func (s *service) assignTenantRow(ctx context.Context, viewer domain.Organizatio
 		if lockErr := s.externalMail.LockSharedExternalMailBindings(tx, viewer.OrganizationID); lockErr != nil {
 			return lockErr
 		}
+		// The tenant must still be active, and stays so until this row commits: a revocation waits
+		// for it and then revokes what it created.
+		if lockErr := s.externalMail.LockActiveExternalMailTenant(tx, tenant.ID); lockErr != nil {
+			return lockErr
+		}
+		var target uint
+		if owner != nil {
+			target = owner.UserID
+		}
+		if holderErr := s.checkPersonalHolder(tx, viewer.OrganizationID, tenant.Provider, address, target); holderErr != nil {
+			return holderErr
+		}
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, tenant.Provider, address)
 		switch {
 		case errors.Is(findErr, ErrExternalMailConnectionNotFound):
@@ -603,7 +543,8 @@ func (s *service) assignTenantRow(ctx context.Context, viewer domain.Organizatio
 		connection, findErr = s.bindTenantPersonal(tx, viewer, binding, owner, displayName)
 		return findErr
 	})
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
+	if isUniqueViolation(err) {
+		// Another assignment or binding of the address landed in the meantime.
 		err = ErrExternalMailAccountTaken
 	}
 	if err != nil {
@@ -676,15 +617,11 @@ func (s *service) restoreTenantAssignment(tx context.Context, viewer domain.Orga
 		return nil, err
 	}
 	if binding.sharing != nil {
-		mailbox, findErr := s.repo.FindMailbox(tx, viewer.OrganizationID, existing.MailboxID)
-		if findErr != nil {
-			return nil, findErr
+		if err = s.replaceTenantMembers(tx, viewer, existing.MailboxID, binding.sharing.members); err != nil {
+			return nil, err
 		}
-		for _, member := range binding.sharing.members {
-			if _, setErr := s.setMember(tx, viewer, mailbox, member); setErr != nil {
-				return nil, setErr
-			}
-		}
+	} else if err = s.recordPersonalHolder(tx, restored); err != nil {
+		return nil, err
 	}
 	return restored, s.recordConnectionEvent(tx, restored, domain.MailboxAccessConnectionReconnected, viewer.UserID)
 }
@@ -733,10 +670,85 @@ func (s *service) bindTenantPersonal(tx context.Context, viewer domain.Organizat
 	if err := s.externalMail.CreateExternalMailConnection(tx, connection); err != nil {
 		return nil, err
 	}
+	if err := s.recordPersonalHolder(tx, connection); err != nil {
+		return nil, err
+	}
 	if err := s.recordConnectionEvent(tx, connection, domain.MailboxAccessConnectionBound, viewer.UserID); err != nil {
 		return nil, err
 	}
 	return connection, nil
+}
+
+// recordPersonalHolder remembers the member a tenant address is personally assigned to.
+func (s *service) recordPersonalHolder(tx context.Context, connection *domain.ExternalMailConnection) error {
+	if connection.OwnerUserID == nil || connection.TenantID == nil {
+		return nil
+	}
+	return s.externalMail.RecordPersonalAssignment(tx, connection.OrganizationID, connection.Provider, connection.AccountAddress,
+		*connection.OwnerUserID, *connection.TenantID, s.now().UTC())
+}
+
+// checkPersonalHolder keeps a personal assignment from being redirected: an address last assigned to
+// a member as a personal mailbox goes to nobody else, as a personal mailbox, a shared one, or a
+// self-binding, while that member is in the organization, even after the assignment was disconnected
+// and its copies purged. It changes hands only through the member's departure and the handover, which
+// forgets the holder. targetUserID is who would read it next; 0 for a shared mailbox.
+func (s *service) checkPersonalHolder(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string, targetUserID uint) error {
+	holder, err := s.externalMail.FindPersonalAssignee(tx, organizationID, provider, address)
+	if err != nil || holder == 0 || holder == targetUserID {
+		return err
+	}
+	if _, err = s.currentMembership(tx, organizationID, holder); errors.Is(err, ErrMailboxAccessInvalid) {
+		// The member left: the address awaits or went through the handover path.
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return ErrExternalMailAccountTaken
+}
+
+// replaceTenantMembers makes the members of a restored shared assignment exactly the posted set:
+// the posted ones are set, and every other member is removed as RemoveMailboxMember would.
+func (s *service) replaceTenantMembers(tx context.Context, viewer domain.OrganizationContext, mailboxID uint, members []resolvedMember) error {
+	mailbox, err := s.repo.FindMailbox(tx, viewer.OrganizationID, mailboxID)
+	if err != nil {
+		return err
+	}
+	posted := make(map[uint]bool, len(members))
+	for _, member := range members {
+		posted[member.userID] = true
+		if _, err = s.setMember(tx, viewer, mailbox, member); err != nil {
+			return err
+		}
+	}
+	current, err := s.repo.ListMailboxMembers(tx, mailbox.ID)
+	if err != nil {
+		return err
+	}
+	for _, member := range current {
+		if posted[member.UserID] {
+			continue
+		}
+		removed, removeErr := s.repo.DeleteMailboxMember(tx, mailbox.ID, member.UserID)
+		if removeErr != nil {
+			return removeErr
+		}
+		if err = s.repo.DeleteMailboxReads(tx, mailbox.ID, removed.MembershipID); err != nil {
+			return err
+		}
+		if err = s.revokeAgentGrants(tx, domain.MailAgentGrantRevocation{
+			OrganizationID: mailbox.OrganizationID, MailboxID: mailbox.ID, KeyUserID: removed.UserID,
+			Reason: domain.MailAgentRevokedMemberRemoved, RevokedBy: viewer.UserID,
+		}); err != nil {
+			return err
+		}
+		if err = s.recordAccess(tx, mailbox, domain.MailboxAccessMemberRemoved, viewer.UserID, removed.UserID, map[string]any{
+			"membership_id": removed.MembershipID, "permission": string(removed.Permission),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // unassignTenantConnection disconnects one tenant assignment. Only owners and admins may: the address
@@ -786,10 +798,10 @@ func (s *service) connectionToken(ctx context.Context, connection *domain.Extern
 // checkTenantAfterRefusal tells a refused mailbox from a refused tenant: when the tenant credential
 // no longer works either, every connection of the tenant stops at once; otherwise only the refused
 // connection waits, as its sync already recorded.
-func (s *service) checkTenantAfterRefusal(ctx context.Context, connector ExternalMailConnector, tenant *domain.ExternalMailTenant, timeout time.Duration) {
+func (s *service) checkTenantAfterRefusal(ctx context.Context, connector ExternalMailConnector, tenant *domain.ExternalMailTenant, connectionID uint, timeout time.Duration) {
 	credential, err := s.encryptor.DecryptString(tenant.EncryptedCredential)
 	if err != nil {
-		s.tenantLost(ctx, tenant)
+		s.tenantLostBy(ctx, tenant, connectionID)
 		return
 	}
 	if connector.Tenant == nil {
@@ -799,6 +811,6 @@ func (s *service) checkTenantAfterRefusal(ctx context.Context, connector Externa
 	defer cancel()
 	// A provider that could not be asked leaves the tenant as it is; the next refusal asks again.
 	if err = connector.Tenant.VerifyTenant(checkCtx, credential); errors.Is(err, ErrExternalMailAuth) {
-		s.tenantLost(ctx, tenant)
+		s.tenantLostBy(ctx, tenant, connectionID)
 	}
 }

@@ -201,7 +201,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		return saveErr
 	}
 	if tenant != nil && result.Run.Outcome == domain.ExternalMailSyncAuthFailed {
-		s.checkTenantAfterRefusal(ctx, connector, tenant, budget.Timeout())
+		s.checkTenantAfterRefusal(ctx, connector, tenant, connection.ID, budget.Timeout())
 	}
 	metrics.RecordExternalMailSync(string(connection.Provider), string(result.Run.Outcome), latency)
 	attributes := []any{

@@ -236,12 +236,21 @@ type ExternalMailTenantRepository interface {
 	FindLiveExternalMailTenant(ctx context.Context, provider ExternalMailProvider, identifier string) (*ExternalMailTenant, error)
 	// ListExternalMailTenants returns the organization's tenants, live ones first, then id ascending.
 	ListExternalMailTenants(ctx context.Context, organizationID uint) ([]*ExternalMailTenant, error)
+	// CountLiveExternalMailTenants counts the organization's tenants that are not revoked.
+	CountLiveExternalMailTenants(ctx context.Context, organizationID uint) (int, error)
+	// LockActiveExternalMailTenant holds a shared lock on the tenant row until the surrounding
+	// transaction ends and fails with an inactive-tenant error unless it is active, so a revocation,
+	// which locks the row for update, waits for an assignment in progress and then revokes it too.
+	LockActiveExternalMailTenant(ctx context.Context, tenantID uint) error
 	// ReauthorizeExternalMailTenant stores a fresh credential, makes the tenant active, and returns
-	// its connections that lost their authorization with it to active, due now.
+	// to active, due now, only its connections that the lost tenant credential stopped.
 	ReauthorizeExternalMailTenant(ctx context.Context, tenantID uint, encryptedCredential, displayName string, authorizedBy uint, now time.Time) (*ExternalMailTenant, error)
-	// MarkExternalMailTenantLost moves an active tenant to needs_reauthorization and every active
-	// connection of it to needs_reconnect, in one statement each; false when it was not active.
-	MarkExternalMailTenantLost(ctx context.Context, tenantID uint, now time.Time) (bool, error)
+	// MarkExternalMailTenantLost moves the tenant to needs_reauthorization and every active connection
+	// of it to needs_reconnect, in one statement each, but only while it is active and still holds the
+	// credential authorized at authorizedAt; false otherwise, so a sync that used a credential the owner
+	// has since replaced never stops the re-authorized tenant. refusedConnectionID, when not zero, is
+	// the connection whose refused fetch revealed the loss; it is marked as stopped by the tenant too.
+	MarkExternalMailTenantLost(ctx context.Context, tenantID uint, authorizedAt, now time.Time, refusedConnectionID uint) (bool, error)
 	// RevokeExternalMailTenant marks the tenant revoked, erases its credential, revokes every live
 	// connection of it, and returns those connections as they were before.
 	RevokeExternalMailTenant(ctx context.Context, organizationID, tenantID uint, now time.Time) ([]*ExternalMailConnection, error)
@@ -256,8 +265,14 @@ type ExternalMailTenantRepository interface {
 	// RestoreTenantConnection makes a revoked tenant connection active again with an empty cursor.
 	RestoreTenantConnection(ctx context.Context, connectionID, tenantID uint, directoryID string, now time.Time) (*ExternalMailConnection, error)
 	// ShareTenantConnection makes a tenant connection the organization's (shared, no owner), as a
-	// handover of its personal mailbox does.
+	// handover of its personal mailbox does, and forgets the member it was personally assigned to.
 	ShareTenantConnection(ctx context.Context, mailboxID uint) error
+	// RecordPersonalAssignment remembers that the organization's address of the provider was assigned
+	// to userID as a personal mailbox, replacing an earlier record.
+	RecordPersonalAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address string, userID, tenantID uint, at time.Time) error
+	// FindPersonalAssignee returns the member the address was last personally assigned to; 0 when none
+	// is recorded.
+	FindPersonalAssignee(ctx context.Context, organizationID uint, provider ExternalMailProvider, address string) (uint, error)
 }
 
 // ExternalMailSyncResult is the outcome of one fetch of one connection.

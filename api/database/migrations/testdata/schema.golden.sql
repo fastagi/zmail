@@ -111,6 +111,14 @@ TABLE external_mail_connections
   COLUMN tenant_id bigint
   COLUMN tenant_directory_id character varying(255) NOT NULL DEFAULT ''::character varying
 
+TABLE external_mail_personal_assignments
+  COLUMN organization_id bigint NOT NULL
+  COLUMN provider character varying(16) NOT NULL
+  COLUMN address_key character varying(320) NOT NULL
+  COLUMN user_id bigint NOT NULL
+  COLUMN tenant_id bigint NOT NULL
+  COLUMN assigned_at timestamp with time zone NOT NULL
+
 TABLE external_mail_sync_runs
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_sync_runs_id_seq'::regclass)
   COLUMN connection_id bigint NOT NULL
@@ -879,6 +887,11 @@ CONSTRAINT external_mail_connections.external_mail_connections_owner_user_id_fke
 CONSTRAINT external_mail_connections.external_mail_connections_pkey PRIMARY KEY (id)
 CONSTRAINT external_mail_connections.external_mail_connections_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'needs_reconnect'::character varying, 'revoked'::character varying])::text[])))
 CONSTRAINT external_mail_connections.external_mail_connections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)
+CONSTRAINT external_mail_personal_assignments.chk_external_mail_personal_assignments_key CHECK ((((address_key)::text = lower((address_key)::text)) AND ((address_key)::text <> ''::text)))
+CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_pkey PRIMARY KEY (organization_id, provider, address_key)
+CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)
+CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES external_mail_connections(id) ON DELETE CASCADE
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_fetched_count_check CHECK ((fetched_count >= 0))
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_outcome_check CHECK (((outcome)::text = ANY ((ARRAY['ok'::character varying, 'auth_failed'::character varying, 'fetch_failed'::character varying, 'cursor_expired'::character varying, 'provider_unavailable'::character varying, 'dropped'::character varying])::text[])))
@@ -1184,6 +1197,7 @@ INDEX CREATE INDEX idx_external_mail_connections_owner ON external_mail_connecti
 INDEX CREATE INDEX idx_external_mail_connections_revoked ON external_mail_connections USING btree (revoked_at, id) WHERE ((status)::text = 'revoked'::text)
 INDEX CREATE INDEX idx_external_mail_connections_shared ON external_mail_connections USING btree (organization_id) WHERE shared
 INDEX CREATE INDEX idx_external_mail_connections_tenant ON external_mail_connections USING btree (tenant_id, status) WHERE (tenant_id IS NOT NULL)
+INDEX CREATE UNIQUE INDEX external_mail_personal_assignments_pkey ON external_mail_personal_assignments USING btree (organization_id, provider, address_key)
 INDEX CREATE UNIQUE INDEX external_mail_sync_runs_pkey ON external_mail_sync_runs USING btree (id)
 INDEX CREATE INDEX idx_external_mail_sync_runs_connection ON external_mail_sync_runs USING btree (connection_id, id DESC)
 INDEX CREATE INDEX idx_external_mail_sync_runs_started ON external_mail_sync_runs USING btree (started_at, id)
@@ -1289,6 +1303,7 @@ INDEX CREATE UNIQUE INDEX mailbox_access_events_pkey ON mailbox_access_events US
 INDEX CREATE INDEX idx_mailbox_members_membership ON mailbox_members USING btree (membership_id, mailbox_id)
 INDEX CREATE UNIQUE INDEX mailbox_members_pkey ON mailbox_members USING btree (mailbox_id, membership_id)
 INDEX CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes USING btree (address) WHERE ((origin)::text = 'zmail'::text)
+INDEX CREATE INDEX idx_mailboxes_external_mail_tenant ON mailboxes USING btree (external_mail_tenant_id) WHERE (external_mail_tenant_id IS NOT NULL)
 INDEX CREATE INDEX idx_mailboxes_organization ON mailboxes USING btree (organization_id, id) WHERE (deleted_at IS NULL)
 INDEX CREATE INDEX idx_mailboxes_owner ON mailboxes USING btree (organization_id, owner_user_id) WHERE ((deleted_at IS NULL) AND ((type)::text = 'personal'::text))
 INDEX CREATE INDEX idx_mailboxes_role ON mailboxes USING btree (role_id) WHERE (role_id IS NOT NULL)

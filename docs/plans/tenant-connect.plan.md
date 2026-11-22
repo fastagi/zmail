@@ -41,7 +41,18 @@ id are sealed together. Why: Google has no admin-consent redirect for domain-wid
 customer-owned key keeps the trust anchor in the customer's hands, needs no Google app review, and is
 revoked by the customer by deleting the key or the delegation.
 
-**Microsoft 365: application permissions with admin consent.** Two variants of one request:
+**Microsoft 365: the organization's own application with application permissions.** The owner posts
+the Entra tenant id with the client id and secret of an application registered in the customer's own
+tenant (Graph application permissions `Mail.Read` and `User.Read.All`, admin consent granted there);
+Zmail proves them at once with a client credentials token and one `/users` read. A client id without a
+secret, or the reverse, is `422`.
+
+Removed after review (default adopted, pending confirmation): the operator-application variant below
+was implemented first and then withdrawn, because a consent redirect's `state`, `tenant`, and
+`admin_consent` are caller-supplied and an admin consent to a shared operator application cannot be
+tied to the organization claiming the tenant. Future work: bring it back only with an OIDC admin
+sign-in proof in the same flow (an `id_token` whose `tid` is the tenant and whose `wids` show an
+administrator role). The withdrawn design, for the record:
 
 1. *Operator's application* (default): the owner posts the Entra tenant id (a GUID). The answer is
    `202` with an `authorization_url` pinned to that tenant:
@@ -63,10 +74,20 @@ assignment); until then `Mail.Read` reads every mailbox of the tenant at Microso
 reads assigned ones. Why the default: it reuses the redirect URL and the state mechanism; the second
 variant exists because only the customer's own app removes the residual risk below.
 
-Residual risk (operator app): consent lives in Entra, not in Zmail. A tenant id can be live in only one
-Zmail organization at a time (unique index), but an owner of another organization could claim a tenant
-whose admin consented earlier and was later revoked in Zmail only. The contract tells customers to
-remove the enterprise application in Entra when they revoke in Zmail. See open question 2.
+## Review Decisions (default adopted, pending confirmation)
+
+| # | Decision |
+|---|---|
+| A | Microsoft tenants only with the organization's own application; the operator-app consent flow, its completion route, and its pending-state marker are removed. |
+| B | A directory cursor carries only the provider's page token (Graph `$skiptoken`, Google `pageToken`), checked for shape; the server builds every provider URL. A malformed or refused cursor is `400 COMMON.INVALID_INPUT` and never stops the tenant. |
+| C | `EXTERNAL_MAIL_TENANTS_ENABLED` (default false). Off: the tenant list is empty, authorizing is `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`, id routes are `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, no connector advertises `tenant`; assigned mailboxes keep syncing. |
+| D | `external_mail_personal_assignments` remembers the last personal assignee of an address; while that member is in the organization nobody else gets the address (personal, shared, or self-bound): `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`. Only the handover releases it. Owners and admins may purge a disconnected personal assignment; the record survives. |
+| E | Each assignment transaction holds the tenant row `FOR SHARE` and requires `active`; revocation takes it `FOR UPDATE`. |
+| F | Marking a tenant lost matches the `authorized_at` of the credential the check used. |
+| G | With the organization's own application every token-endpoint refusal (400/401/403) is tenant-caused; 429, 5xx, and transport errors never stop the tenant. |
+| H | Checking a Microsoft tenant repeats the `/users?$top=1` read. |
+| I | At most 50 live tenants per organization (`409 MAILBOX.EXTERNAL_CONNECTION_LIMIT`); the listing shows live tenants first. |
+| J | Unique violations go through `isUniqueViolation`; a restored shared assignment's members are replaced by the posted set; Microsoft application tokens are cached in memory for their lifetime (1024 entries, keyed by a hash); service account keys must have 2048 to 4096 bits; `mailboxes.external_mail_tenant_id` is indexed; re-authorization resumes only the connections the tenant credential stopped. |
 
 ## Rulings
 
@@ -74,7 +95,7 @@ remove the enterprise application in Entra when they revoke in Zmail. See open q
 |---|---|
 | R1 | Migration `2026_12_08_090000_add_external_mail_tenants`: table `external_mail_tenants` (organization, provider, tenant_identifier, display_name, status `active`/`needs_reauthorization`/`revoked`, encrypted_credential, authorized_by_user_id, last_error_code, authorized_at, revoked_at, timestamps); CHECKs on provider shape, status, non-empty identifier, and "a live tenant holds a credential"; unique `(provider, lower(tenant_identifier)) WHERE status <> 'revoked'` across the instance. `external_mail_connections` gains `tenant_id` and `tenant_directory_id` with `CHECK (tenant_id IS NULL OR encrypted_refresh_token = '')`; `mailboxes` gains `external_mail_tenant_id` with `CHECK (external_mail_tenant_id IS NULL OR origin = 'connected')`. Down refuses while a tenant exists. |
 | R2 | Seam: `ExternalMailConnector.Tenant` (nil = no tenant support, listed as `capabilities.tenant`) implements `ExternalMailTenantSource`: `TenantConsentURL`, `AuthorizeTenant`, `VerifyTenant`, `ListTenantDirectory` (paged, ≤ 100, opaque cursor), `LookupTenantMailbox`, `MailboxToken`. `ExternalMailToken` gains `AccessToken` and `DirectoryID`: a source given an access token reads that mailbox without refreshing (Gmail `/users/me` as the delegated subject, Graph `/users/{id}`). |
-| R3 | Authorize (owner only). A tenant identifier already live in this organization is re-authorized in place (`200`): new credential, status `active`, and its `needs_reconnect` connections return to `active`. Live in another organization: `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`. A malformed request: `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`; a refused credential: `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`; a provider without tenant support: `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`. Authorizing creates no mailbox and grants nobody any access. |
+| R3 | Authorize (owner only; Microsoft with the organization's own application only, see Review Decisions). A tenant identifier already live in this organization is re-authorized in place (`200`): new credential, status `active`, and its `needs_reconnect` connections return to `active`. Live in another organization: `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`. A malformed request: `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`; a refused credential: `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`; a provider without tenant support: `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`. Authorizing creates no mailbox and grants nobody any access. |
 | R4 | Directory (owner/admin, tenant `active` else `409 MAILBOX.ACCESS_CONFLICT`): one provider page, each row `{address, display_name, directory_id, assigned, assignment, connection_id, mailbox_id, available}`. `assigned` is a live connection of this tenant; `available` is false when any live connection of the organization holds the address. |
 | R5 | Assignments (owner/admin): 1 to 100 rows, each `{address, assign: "personal", user_id}` or `{address, assign: "shared", display_name?, members}`; per-row result `{address, status: created/restored/unchanged/failed, connection_id, mailbox_id, error_code}`, `200` overall. Each row: the address must be in the tenant directory (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), personal needs a current member (`MAILBOX.ACCESS_INVALID`), shared follows `POST /v1/mailboxes` members (`MAILBOX.ACCESS_INVALID`). Idempotent per address: the same live assignment answers `unchanged`. |
 | R6 | Account uniqueness keeps `idx_external_mail_connections_account`. A live connection of the address that is self-bound, shared (C3), another tenant's, or this tenant's with another target: `MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; and a member's self-binding of a live tenant-assigned address is `409 TAKEN`. A revoked tenant assignment with the same target and its mailbox is restored; other revoked connections are freed as in C3 (purge, then assign). |
@@ -89,8 +110,7 @@ remove the enterprise application in Entra when they revoke in Zmail. See open q
 ## Workflows
 
 1. Google: `POST /v1/external-mail-tenants {provider: gmail, service_account_key, admin_subject}` → `201` tenant.
-2. Microsoft: `POST /v1/external-mail-tenants {provider: outlook, tenant_id}` → `202 {authorization_url}` →
-   admin consents → callback → `POST /v1/external-mail-tenants/completions {state, tenant, admin_consent}` → `201`/`200`.
+2. Microsoft: `POST /v1/external-mail-tenants {provider: outlook, tenant_id, client_id, client_secret}` → `201`/`200`.
 3. `GET /v1/external-mail-tenants/{id}/directory?cursor&per_page` → pick rows →
    `POST /v1/external-mail-tenants/{id}/assignments` → per-row results; retry failed rows.
 4. Worker syncs assigned mailboxes; credential loss stops the whole tenant; re-authorize restores it.
@@ -125,8 +145,7 @@ Web/Admin type-check, then the local gate `make check` with `CI=true`.
 
 1. Defaults adopted: per-tenant ceiling 1000 (1 to 10000); a handover of a personal assignment does
    not check the organization's shared limit.
-2. Operator-app Microsoft consent cannot prove that the consenting admin acted in this flow (see
-   residual risk). Should the operator app be disabled for tenants and only the organization's own
-   app be accepted?
+2. Decided after review: only the organization's own Microsoft application. Should the operator
+   application return later with an OIDC admin sign-in proof?
 3. `GET /v1/external-mail-tenants` is open to admins too (they need the ids to assign). Confirm.
 4. Should a scheduled directory reconciliation (roadmap §12) flag deleted or suspended directory users?

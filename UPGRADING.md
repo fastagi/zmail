@@ -13,15 +13,16 @@ entries in order.
 
 ## Unreleased — Tenant connect
 
-An organization `owner` authorizes a whole Google Workspace (service account with domain-wide
-delegation) or Microsoft 365 tenant (application permissions by admin consent, or the organization's
-own application) once; owners and admins assign mailboxes from its directory to members or as shared
-connected mailboxes. Contract: `contracts/MAILBOXES.md`, Tenant Connections. Plan:
+An organization `owner` authorizes a whole Google Workspace (the organization's service account with
+domain-wide delegation) or Microsoft 365 tenant (the organization's own application with application
+permissions) once; owners and admins assign mailboxes from its directory to members or as shared
+connected mailboxes. It is off unless `EXTERNAL_MAIL_TENANTS_ENABLED=true`. Contract: `contracts/MAILBOXES.md`, Tenant Connections. Plan:
 `docs/plans/tenant-connect.plan.md`.
 
 ### Medium — New routes and response fields
 
-Six session-only routes under `/v1/external-mail-tenants`. `ExternalMailConnection` and
+Five session-only routes under `/v1/external-mail-tenants`, answering as an unavailable feature while
+`EXTERNAL_MAIL_TENANTS_ENABLED` is false (the default). `ExternalMailConnection` and
 `ExternalMailConnectionDirectoryEntry` gain the required, nullable `tenant_id`; the connector
 `capabilities` gain the required `tenant` boolean. A client with strict response schemas must accept
 them. `GET /v1/external-mail-connections` also lists the caller's tenant assignments (at most 100)
@@ -39,23 +40,23 @@ awaits handover instead of being revoked; the handover makes its connection the 
 Code that checked `Connected() && Type == personal` to mean "a member's own account" should use
 `PrivateConnected()`.
 
-### High — Roll every API instance forward before an owner starts a Microsoft admin consent
+### High — Roll every instance forward before switching tenant connect on
 
-A pending admin consent is stored like a sign-in, with its tenant id sealed behind a `tenant:` marker
-that an older instance cannot open: completing it there answers
-`404 MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND` and the owner starts again. An older instance would also
-try to sync a tenant connection with an empty account token, which fails as `needs_reconnect`; roll
-every API and `mail:external:sync` instance forward before assigning mailboxes.
+An older API or `mail:external:sync` instance would try to sync a tenant connection with an empty
+account token, which fails as `needs_reconnect`. Roll every instance forward before setting
+`EXTERNAL_MAIL_TENANTS_ENABLED=true` and assigning mailboxes. Microsoft tenants are accepted only with
+the organization's own application; there is no admin consent redirect.
 
 ### Low — Migration `2026_12_08_090000_add_external_mail_tenants` and a new limit
 
 The migration creates `external_mail_tenants` (a tenant identifier is live in one organization of the
-instance), adds `external_mail_connections.tenant_id` and `tenant_directory_id` with a CHECK that a
+instance) and `external_mail_personal_assignments` (the member an address was last personally
+assigned to), adds `external_mail_connections.tenant_id` and `tenant_directory_id` with a CHECK that a
 tenant connection stores no account token, and `mailboxes.external_mail_tenant_id` with a CHECK that
-only a connected mailbox has one; no table is rewritten. Its Down refuses while a connection or mailbox
+only a connected mailbox has one and a partial index; no table is rewritten. Its Down refuses while a connection or mailbox
 comes from a tenant. `EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS` (default 1000, 1 to 10000; a set but
-invalid value stops startup) bounds the live assignments of one tenant. A Microsoft operator
-application used for tenants needs the Graph application permissions `Mail.Read` and `User.Read.All`.
+invalid value stops startup) bounds the live assignments of one tenant; an organization holds at most
+50 live tenants. `EXTERNAL_MAIL_TENANTS_ENABLED` (default false) switches the feature on.
 
 ## Unreleased — Shared connected mailboxes
 

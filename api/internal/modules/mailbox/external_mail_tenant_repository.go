@@ -145,9 +145,11 @@ func (r *repository) ReauthorizeExternalMailTenant(ctx context.Context, tenantID
 			return ErrExternalMailTenantNotFound
 		}
 		tenant = rows[0].toDomain()
-		// The connections the lost credential stopped resume at once; revoked ones stay revoked.
+		// Only the connections the lost tenant credential stopped resume at once; one whose own mailbox
+		// was refused stays stopped, and revoked ones stay revoked.
 		return tx.Model(&ExternalMailConnectionPO{}).
-			Where("tenant_id = ? AND status = ?", tenantID, string(domain.ExternalMailStatusNeedsReconnect)).
+			Where("tenant_id = ? AND status = ? AND last_error_code = ?", tenantID,
+				string(domain.ExternalMailStatusNeedsReconnect), domain.ExternalMailErrorTenantAuthFailed).
 			Updates(map[string]any{
 				"status": string(domain.ExternalMailStatusActive), "last_error_code": nil, "next_sync_at": now,
 				"consecutive_failures": 0, "updated_at": now,
@@ -159,14 +161,14 @@ func (r *repository) ReauthorizeExternalMailTenant(ctx context.Context, tenantID
 	return tenant, nil
 }
 
-func (r *repository) MarkExternalMailTenantLost(ctx context.Context, tenantID uint, now time.Time) (bool, error) {
+func (r *repository) MarkExternalMailTenantLost(ctx context.Context, tenantID uint, authorizedAt, now time.Time, refusedConnectionID uint) (bool, error) {
 	if r.db == nil {
 		return false, domain.ErrServiceUnavailable
 	}
 	lost := false
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&ExternalMailTenantPO{}).
-			Where("id = ? AND status = ?", tenantID, string(domain.ExternalMailTenantActive)).
+			Where("id = ? AND status = ? AND authorized_at = ?", tenantID, string(domain.ExternalMailTenantActive), authorizedAt).
 			Updates(map[string]any{
 				"status":          string(domain.ExternalMailTenantNeedsReauthorization),
 				"last_error_code": domain.ExternalMailErrorTenantAuthFailed, "updated_at": now,
@@ -175,10 +177,14 @@ func (r *repository) MarkExternalMailTenantLost(ctx context.Context, tenantID ui
 			return result.Error
 		}
 		lost = result.RowsAffected > 0
+		if !lost {
+			return nil
+		}
 		// Every connection stops at once, the one being synced included: its save finds it no longer
 		// active and drops the page.
 		return tx.Model(&ExternalMailConnectionPO{}).
-			Where("tenant_id = ? AND status = ?", tenantID, string(domain.ExternalMailStatusActive)).
+			Where("tenant_id = ? AND (status = ? OR (id = ? AND status = ?))", tenantID, string(domain.ExternalMailStatusActive),
+				refusedConnectionID, string(domain.ExternalMailStatusNeedsReconnect)).
 			Updates(map[string]any{
 				"status":          string(domain.ExternalMailStatusNeedsReconnect),
 				"last_error_code": domain.ExternalMailErrorTenantAuthFailed, "updated_at": now,
@@ -193,6 +199,13 @@ func (r *repository) RevokeExternalMailTenant(ctx context.Context, organizationI
 	}
 	var revoked []*domain.ExternalMailConnection
 	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		// The row lock waits for every assignment in progress, which holds it shared, so the
+		// connections it creates are revoked below too.
+		var locked []ExternalMailTenantPO
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("organization_id = ? AND id = ?", organizationID, tenantID).Find(&locked).Error; err != nil {
+			return err
+		}
 		result := tx.Model(&ExternalMailTenantPO{}).
 			Where("organization_id = ? AND id = ? AND status <> ?", organizationID, tenantID, string(domain.ExternalMailTenantRevoked)).
 			Updates(map[string]any{
@@ -305,7 +318,89 @@ func (r *repository) ShareTenantConnection(ctx context.Context, mailboxID uint) 
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	return r.conn(ctx).Model(&ExternalMailConnectionPO{}).
-		Where("mailbox_id = ? AND tenant_id IS NOT NULL", mailboxID).
-		Updates(map[string]any{"shared": true, "owner_user_id": nil, "updated_at": time.Now().UTC()}).Error
+	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		var rows []ExternalMailConnectionPO
+		if err := tx.Model(&rows).Clauses(clause.Returning{}).
+			Where("mailbox_id = ? AND tenant_id IS NOT NULL", mailboxID).
+			Updates(map[string]any{"shared": true, "owner_user_id": nil, "updated_at": time.Now().UTC()}).Error; err != nil {
+			return err
+		}
+		// The address changed hands through the handover: it is no longer any member's.
+		for _, row := range rows {
+			if err := tx.Exec(`DELETE FROM external_mail_personal_assignments
+				WHERE organization_id = ? AND provider = ? AND address_key = lower(?)`,
+				row.OrganizationID, row.Provider, row.AccountAddress).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (r *repository) CountLiveExternalMailTenants(ctx context.Context, organizationID uint) (int, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	var count int64
+	err := r.conn(ctx).Model(&ExternalMailTenantPO{}).
+		Where("organization_id = ? AND status <> ?", organizationID, string(domain.ExternalMailTenantRevoked)).Count(&count).Error
+	return int(count), err
+}
+
+func (r *repository) LockActiveExternalMailTenant(ctx context.Context, tenantID uint) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	var rows []ExternalMailTenantPO
+	if err := r.conn(ctx).Clauses(clause.Locking{Strength: "SHARE"}).
+		Where("id = ?", tenantID).Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) == 0 || rows[0].Status != string(domain.ExternalMailTenantActive) {
+		return ErrExternalMailTenantInactive
+	}
+	return nil
+}
+
+// ExternalMailPersonalAssignmentPO remembers the member an organization address was last personally
+// assigned to.
+type ExternalMailPersonalAssignmentPO struct {
+	OrganizationID uint   `gorm:"primaryKey;autoIncrement:false"`
+	Provider       string `gorm:"primaryKey;size:16"`
+	AddressKey     string `gorm:"primaryKey;size:320"`
+	UserID         uint   `gorm:"not null"`
+	TenantID       uint   `gorm:"not null"`
+	AssignedAt     time.Time
+}
+
+func (ExternalMailPersonalAssignmentPO) TableName() string {
+	return "external_mail_personal_assignments"
+}
+
+func (r *repository) RecordPersonalAssignment(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string, userID, tenantID uint, at time.Time) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "organization_id"}, {Name: "provider"}, {Name: "address_key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"user_id", "tenant_id", "assigned_at"}),
+	}).Create(&ExternalMailPersonalAssignmentPO{
+		OrganizationID: organizationID, Provider: string(provider), AddressKey: strings.ToLower(address),
+		UserID: userID, TenantID: tenantID, AssignedAt: at,
+	}).Error
+}
+
+func (r *repository) FindPersonalAssignee(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string) (uint, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	var rows []ExternalMailPersonalAssignmentPO
+	if err := r.conn(ctx).Where("organization_id = ? AND provider = ? AND address_key = ?", organizationID,
+		string(provider), strings.ToLower(address)).Limit(1).Find(&rows).Error; err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	return rows[0].UserID, nil
 }

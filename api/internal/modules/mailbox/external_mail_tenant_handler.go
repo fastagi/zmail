@@ -23,9 +23,10 @@ const (
 	maxTenantDirectoryCursorLength = 4096
 )
 
-// authorizeExternalMailTenantRequest authorizes a tenant. Google takes service_account_key (the JSON
-// key file, as an object or as a string) and admin_subject; Microsoft takes tenant_id and, for the
-// organization's own application, client_id and client_secret.
+// authorizeExternalMailTenantRequest authorizes a tenant with a credential the organization owns.
+// Google takes service_account_key (the JSON key file, as an object or as a string) and
+// admin_subject; Microsoft takes tenant_id, client_id, and client_secret of the organization's own
+// application.
 type authorizeExternalMailTenantRequest struct {
 	Provider          string          `json:"provider" binding:"required,max=16"`
 	ServiceAccountKey json.RawMessage `json:"service_account_key"`
@@ -84,20 +85,15 @@ func toExternalMailTenantResponse(view ExternalMailTenantView) ExternalMailTenan
 	return item
 }
 
-// writeTenantAuthorization answers an authorization: 202 with the consent page, 201 with a new
-// tenant, or 200 with a re-authorized one.
+// writeTenantAuthorization answers an authorization: 201 with a new tenant, or 200 with a
+// re-authorized one.
 func writeTenantAuthorization(c *gin.Context, result ExternalMailTenantAuthorizationResult) {
 	privateResponse(c)
-	switch {
-	case result.Consent != nil:
-		response.Accepted(c, ExternalMailAuthorizationResponse{
-			AuthorizationURL: result.Consent.AuthorizationURL, ExpiresAt: result.Consent.ExpiresAt.UTC(),
-		})
-	case result.Created:
+	if result.Created {
 		response.Created(c, toExternalMailTenantResponse(*result.Tenant))
-	default:
-		response.Success(c, toExternalMailTenantResponse(*result.Tenant))
+		return
 	}
+	response.Success(c, toExternalMailTenantResponse(*result.Tenant))
 }
 
 // AuthorizeExternalMailTenant authorizes a whole tenant for the organization (owners only).
@@ -124,32 +120,6 @@ func (h *Handler) AuthorizeExternalMailTenant(c *gin.Context) {
 	})
 	if err != nil {
 		response.HandleError(c, "Failed to authorize external mail tenant", err)
-		return
-	}
-	writeTenantAuthorization(c, result)
-}
-
-// completeExternalMailTenantConsentRequest carries what Microsoft returned to the callback after an
-// admin consent.
-type completeExternalMailTenantConsentRequest struct {
-	State        string `json:"state" binding:"required,max=128"`
-	Tenant       string `json:"tenant" binding:"required,max=255"`
-	AdminConsent string `json:"admin_consent" binding:"required,max=16"`
-}
-
-// CompleteExternalMailTenantConsent finishes an admin consent (owners only).
-func (h *Handler) CompleteExternalMailTenantConsent(c *gin.Context) {
-	viewer, ok := organizationScope(c)
-	if !ok {
-		return
-	}
-	var req completeExternalMailTenantConsentRequest
-	if !httphandler.BindJSON(c, &req) {
-		return
-	}
-	result, err := h.service.CompleteExternalMailTenantConsent(c.Request.Context(), viewer, ExternalMailTenantConsentInput(req))
-	if err != nil {
-		response.HandleError(c, "Failed to complete external mail tenant consent", err)
 		return
 	}
 	writeTenantAuthorization(c, result)

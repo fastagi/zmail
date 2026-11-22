@@ -2,10 +2,11 @@ package mailbox
 
 import (
 	"context"
-	"errors"
-	"net/url"
+	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/fastagi/zmail/api/internal/domain"
 )
 
 var _ ExternalMailTenantSource = (*FakeExternalMailSource)(nil)
@@ -40,12 +41,6 @@ func (f *FakeExternalMailSource) RefuseTenantMailbox(address string) {
 // TenantMailboxToken is the access token the fake mints for a tenant mailbox; Deliver mail to it.
 func TenantMailboxToken(address string) string {
 	return "tenant:" + strings.ToLower(address)
-}
-
-// TenantConsentURL serves an admin consent page for any tenant.
-func (f *FakeExternalMailSource) TenantConsentURL(consent ExternalMailTenantConsent) (string, bool) {
-	query := url.Values{"tenant": {consent.TenantID}, "state": {consent.State}, "redirect_uri": {consent.RedirectURI}}
-	return "https://external-mail.invalid/adminconsent?" + query.Encode(), true
 }
 
 // AuthorizeTenant accepts a known tenant named by TenantID, or by the domain of AdminSubject; the
@@ -99,7 +94,7 @@ func (f *FakeExternalMailSource) ListTenantDirectory(_ context.Context, credenti
 	start := 0
 	if cursor != "" {
 		if start, err = strconv.Atoi(cursor); err != nil || start < 0 {
-			return ExternalMailDirectoryPage{}, errors.New("fake external mail: invalid directory cursor")
+			return ExternalMailDirectoryPage{}, fmt.Errorf("%w: invalid directory cursor", domain.ErrInvalidInput)
 		}
 	}
 	start = min(start, len(tenant.directory))

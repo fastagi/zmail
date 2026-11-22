@@ -62,7 +62,14 @@ func (s *service) ListExternalMailConnectors(context.Context) []ExternalMailConn
 	if !s.externalMailAvailable() {
 		return nil
 	}
-	return s.externalConnectors.list()
+	connectors := s.externalConnectors.list()
+	if !s.settings.ExternalMail.TenantsEnabled {
+		// Tenant connect is switched off: no connector offers it.
+		for i := range connectors {
+			connectors[i].Tenant = nil
+		}
+	}
+	return connectors
 }
 
 func (s *service) StartExternalMailAuthorization(ctx context.Context, viewer domain.OrganizationContext, input ExternalMailAuthorizationInput) (ExternalMailAuthorizationStart, error) {
@@ -256,6 +263,15 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 			if lockErr := s.externalMail.LockSharedExternalMailBindings(tx, viewer.OrganizationID); lockErr != nil {
 				return lockErr
 			}
+		}
+		// An organization address personally assigned to a member is never bound by anyone else while
+		// that member is in the organization.
+		reader := viewer.UserID
+		if binding.sharing != nil {
+			reader = 0
+		}
+		if holderErr := s.checkPersonalHolder(tx, viewer.OrganizationID, binding.provider, address, reader); holderErr != nil {
+			return holderErr
 		}
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, binding.provider, address)
 		switch {

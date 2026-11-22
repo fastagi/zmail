@@ -90,8 +90,6 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 		auth.GET("/external-mail-tenants", h.ListExternalMailTenants).Name("external_mail_tenants.index")
 		auth.POST("/external-mail-tenants", h.AuthorizeExternalMailTenant).
 			Name("external_mail_tenants.store").Middleware(middleware.BodyLimit(maxExternalMailTenantBodyBytes))
-		auth.POST("/external-mail-tenants/completions", h.CompleteExternalMailTenantConsent).
-			Name("external_mail_tenants.completions.store")
 		auth.DELETE("/external-mail-tenants/:tenant_id", h.RevokeExternalMailTenant).
 			Name("external_mail_tenants.destroy").WhereNumber("tenant_id")
 		auth.GET("/external-mail-tenants/:tenant_id/directory", h.ListExternalMailTenantDirectory).

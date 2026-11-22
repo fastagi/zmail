@@ -60,6 +60,10 @@ type ExternalMailConfig struct {
 	// admins) of one organization; zero takes DefaultExternalMailMaxSharedConnections, and -1 marks
 	// a set value that does not parse, which validation refuses.
 	MaxSharedConnections int
+	// TenantsEnabled turns tenant connect on: owners authorize whole tenants and assign mailboxes from
+	// them. Off by default; while off every tenant route answers as an unavailable feature, and the
+	// worker keeps syncing the mailboxes already assigned.
+	TenantsEnabled bool
 	// MaxTenantAssignments bounds the live connections (assigned mailboxes) of one authorized tenant;
 	// zero takes DefaultExternalMailMaxTenantAssignments, and -1 marks a set value that does not
 	// parse, which validation refuses.

@@ -9539,14 +9539,15 @@ paths:
     post:
       operationId: authorizeExternalMailTenant
       summary: Authorize a whole tenant
-      description: Needs the `owner` organization role. Google Workspace takes the organization's service
-        account key with domain-wide delegation (`gmail.readonly` and `admin.directory.user.readonly`)
-        and an administrator to read the directory as; Microsoft 365 takes the Entra tenant id and either
-        the organization's own application (`client_id`, `client_secret`) or, without one, answers `202`
-        with the admin consent page of the operator's application, completed by
-        `POST /v1/external-mail-tenants/completions`. The credential is proven with the provider, then
-        sealed. Authorizing creates no mailbox and lets nobody read anything. A tenant this organization
-        already holds is re-authorized in place (`200`) and its `needs_reconnect` assignments resume.
+      description: Needs the `owner` organization role and `EXTERNAL_MAIL_TENANTS_ENABLED`. Only a credential
+        the organization owns is accepted. Google Workspace takes the organization's service account key
+        with domain-wide delegation (`gmail.readonly` and `admin.directory.user.readonly`) and an
+        administrator to read the directory as; Microsoft 365 takes the Entra tenant id with the client id
+        and secret of the organization's own application (Graph application permissions `Mail.Read` and
+        `User.Read.All`). The credential is proven with the provider, then sealed. Authorizing creates no
+        mailbox and grants no read access by itself. A tenant this organization already holds is
+        re-authorized in place (`200`) and the assignments its lost credential stopped resume. An
+        organization holds at most 50 live tenants.
       tags:
         - Mailboxes
       security:
@@ -9572,12 +9573,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExternalMailTenantResponse'
-        '202':
-          description: Send the browser to the admin consent page; it expires after 10 minutes.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExternalMailAuthorizationResponse'
         '400':
           $ref: '#/components/responses/OrganizationContextInvalid'
         '401':
@@ -9589,14 +9584,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '404':
-          description: The organization is not found (`ORGANIZATION.NOT_FOUND`), or no enabled connector
-            serves tenants of the provider (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`).
+          description: The organization is not found (`ORGANIZATION.NOT_FOUND`), or tenant connect is off or
+            no enabled connector serves tenants of the provider (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: The tenant is authorized by another organization (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`).
+          description: The tenant is authorized by another organization (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), or
+            the organization holds 50 live tenants (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`).
           content:
             application/json:
               schema:
@@ -9604,76 +9600,10 @@ paths:
         '413':
           $ref: '#/components/responses/RequestTooLarge'
         '422':
-          description: The body is malformed (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`, or
-            `COMMON.VALIDATION_FAILED`), or the provider refused the credential
+          description: The body is malformed or carries no complete credential of the organization's own
+            (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`, or `COMMON.VALIDATION_FAILED`), or the provider refused
+            the credential
             (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailable'
-  /v1/external-mail-tenants/completions:
-    post:
-      operationId: completeExternalMailTenantConsent
-      summary: Complete a Microsoft 365 admin consent
-      description: Needs the `owner` organization role, and must be the owner who started the consent.
-        Posts what Microsoft sent the callback after an admin consent (`admin_consent`, `tenant`,
-        `state`). The single-use state is spent by the attempt. The consent must be given for the tenant
-        that was started, and is proven with a client credentials token and one directory read before
-        anything is stored.
-      tags:
-        - Mailboxes
-      security:
-        - bearerSession: []
-      parameters:
-        - $ref: '#/components/parameters/OrganizationContext'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CompleteExternalMailTenantConsentRequest'
-      responses:
-        '200':
-          description: The tenant was already authorized by this organization and is re-authorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExternalMailTenantResponse'
-        '201':
-          description: The tenant is authorized.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ExternalMailTenantResponse'
-        '400':
-          $ref: '#/components/responses/OrganizationContextInvalid'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          description: The caller is not the organization's `owner` (`PERMISSION.DENIED`).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: The state is unknown, used, expired, or another user's
-            (`MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`), or the organization is not found.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '409':
-          description: The consent was given for another tenant (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), or the
-            tenant is authorized by another organization (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '422':
-          description: The consent was declined or the provider refused the application
-            (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`), or the body is invalid (`COMMON.VALIDATION_FAILED`).
           content:
             application/json:
               schema:
@@ -9725,7 +9655,8 @@ paths:
         the provider, each marked as assigned (a live connection of this tenant) and as available (no live
         connection of the organization holds the address). Suspended and archived Google users and
         Microsoft users without a mail address are left out. Pass `meta.next_cursor` as `cursor` for the
-        next page. Never cached.
+        next page; the cursor carries only the provider's page token, and Zmail builds every provider
+        request itself. Never cached.
       tags:
         - Mailboxes
       security:
@@ -9754,8 +9685,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/ExternalMailTenantDirectoryPageResponse'
         '400':
-          description: The cursor is malformed (`COMMON.INVALID_INPUT`), or the organization header is missing
-            or malformed.
+          description: The cursor is malformed or the provider refused it (`COMMON.INVALID_INPUT`), or the
+            organization header is missing or malformed.
           content:
             application/json:
               schema:
@@ -16184,16 +16115,17 @@ components:
     AuthorizeExternalMailTenantRequest:
       type: object
       additionalProperties: false
-      description: Google takes `service_account_key` and `admin_subject`; Microsoft takes `tenant_id`, and
-        `client_id` with `client_secret` for the organization's own application.
+      description: Google takes `service_account_key` and `admin_subject`; Microsoft takes `tenant_id`,
+        `client_id`, and `client_secret` of the organization's own application. A `client_id` without
+        `client_secret`, or the reverse, is refused.
       required:
         - provider
       properties:
         provider:
           $ref: '#/components/schemas/ExternalMailConnectorID'
         service_account_key:
-          description: The service account's JSON key file, as an object or as a string; at most 16 KiB.
-            Its `token_uri` is ignored.
+          description: The service account's JSON key file, as an object or as a string; at most 16 KiB. Its
+            RSA key has 2048 to 4096 bits. Its `token_uri` is ignored.
           oneOf:
             - type: object
               additionalProperties: true
@@ -16214,25 +16146,6 @@ components:
           type: string
           maxLength: 1024
           writeOnly: true
-    CompleteExternalMailTenantConsentRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - state
-        - tenant
-        - admin_consent
-      properties:
-        state:
-          type: string
-          maxLength: 128
-        tenant:
-          type: string
-          description: The `tenant` query parameter Microsoft returned.
-          maxLength: 255
-        admin_consent:
-          type: string
-          description: The `admin_consent` query parameter Microsoft returned; `True` when consent was given.
-          maxLength: 16
     ExternalMailTenant:
       type: object
       additionalProperties: false
