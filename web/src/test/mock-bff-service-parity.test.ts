@@ -181,7 +181,7 @@ describe('mock BFF and browser service parity', () => {
   it('api keys', async () => {
     const { apiKeyService } = await import('@/features/api-key/services/api-key-service');
 
-    const created = await apiKeyService.create({ name: 'parity', scopes: ['fastbuild:read'] });
+    const created = await apiKeyService.create({ name: 'parity', scopes: ['mail:read'] });
     const page = await apiKeyService.list();
     expect(page.items.map(item => item.id)).toContain(created.api_key.id);
     await apiKeyService.revoke(created.api_key.id);

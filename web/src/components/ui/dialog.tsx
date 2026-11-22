@@ -58,17 +58,19 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
+// At least 1rem of backdrop shows on every side at any viewport size, so a dialog never touches
+// the window edge; content taller than the viewport scrolls inside DialogBody.
 const dialogContentVariants = cva(
-  "fixed left-[50%] top-[50%] z-50 flex w-[calc(100%-2rem)] max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-4rem)] translate-x-[-50%] translate-y-[-50%] flex-col gap-4 border border-border/60 bg-background p-6 shadow-premium duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-xl",
+  "fixed left-[50%] top-[50%] z-50 flex w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-4rem)] translate-x-[-50%] translate-y-[-50%] flex-col gap-4 border border-border/60 bg-background p-6 shadow-premium duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] rounded-xl",
   {
     variants: {
-      // Explicit widths: the app theme redefines the `--container-*` scale that `max-w-sm`…`max-w-2xl`
-      // read, which made every dialog two to three times wider than intended.
       size: {
-        sm: "max-w-[24rem]",
-        default: "max-w-[32rem]",
-        lg: "max-w-[42rem]",
-        xl: "max-w-[56rem]",
+        // Explicit widths: the theme maps `--container-*` to breakpoint widths (`max-w-lg` is
+        // 1024px), far too wide for a dialog.
+        sm: "max-w-[28rem]",
+        default: "max-w-[36rem]",
+        lg: "max-w-[48rem]",
+        xl: "max-w-[64rem]",
         full: "max-w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-4rem)]",
       },
     },
