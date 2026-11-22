@@ -8,8 +8,6 @@ import { isWebFeatureEnabled } from '@/config/features';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { QuickStartTab } from '@/features/developer/components/quick-start-tab';
-import { SendLogTab } from '@/features/developer/components/send-log-tab';
-import { TransactionalTemplatesTab } from '@/features/developer/components/transactional-templates-tab';
 import { useDeveloperTab } from '@/features/developer/hooks/use-developer-tab';
 import { DEVELOPER_MODES, developerTabs, type DeveloperTab } from '@/features/developer/types';
 import {
@@ -31,7 +29,18 @@ function TabLoading() {
   return <Skeleton className="h-72 w-full" aria-hidden="true" />;
 }
 
-// The limits and webhook tabs load on first open, keeping the console's first load small.
+// Every tab but the quick start loads on first open, keeping the console's first load small.
+const TransactionalTemplatesTab = dynamic(
+  () =>
+    import('@/features/developer/components/transactional-templates-tab').then(
+      module => module.TransactionalTemplatesTab
+    ),
+  { loading: TabLoading }
+);
+const SendLogTab = dynamic(
+  () => import('@/features/developer/components/send-log-tab').then(module => module.SendLogTab),
+  { loading: TabLoading }
+);
 const LimitsTab = dynamic(
   () => import('@/features/developer/components/limits-tab').then(module => module.LimitsTab),
   { loading: TabLoading }

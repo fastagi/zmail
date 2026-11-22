@@ -27,8 +27,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Skeleton } from '@/components/ui/skeleton';
 import { AttachmentIndicator } from '@/features/mailbox/components/mail-attachments';
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
+import { ConfirmDialog } from '@/features/mailbox/components/confirm-dialog';
 import {
-  ConfirmDialog,
   EmptyState,
   ErrorAlert,
   MailStatusBadge,
