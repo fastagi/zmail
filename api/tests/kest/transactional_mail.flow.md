@@ -180,7 +180,7 @@ test_key = data.plaintext_key
 [Asserts]
 status == 201
 body.data.api_key.mode == "test"
-body.data.plaintext_key matches "^fastbuild_test_"
+body.data.plaintext_key matches "^zmail_test_"
 ```
 
 ## Scenario 8: Test mode and simulator addresses

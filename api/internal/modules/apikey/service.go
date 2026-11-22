@@ -23,11 +23,28 @@ import (
 // is not useful and the write amplification on hot keys is real.
 const lastUsedAtThrottle = time.Minute
 
-// Issued key prefixes. A test key's prefix tells it apart at a glance.
+// Issued key prefixes. A test key's prefix tells it apart at a glance. Keys issued earlier under
+// the scaffold's `fastbuild_` prefixes keep working: validation looks a key up by its hash alone.
 const (
-	liveKeyPrefix = "fastbuild_"
-	testKeyPrefix = "fastbuild_test_"
+	liveKeyPrefix = "zmail_"
+	testKeyPrefix = "zmail_test_"
 )
+
+// The scopes a new key may carry: Zmail's mail scopes, or the `*` wildcard.
+const (
+	ScopeMailAgent         = "mail:agent"
+	ScopeMailRead          = "mail:read"
+	ScopeMailSend          = "mail:send"
+	ScopeMailTransactional = "mail:transactional"
+	ScopeAll               = "*"
+)
+
+var knownScopes = []string{ScopeMailAgent, ScopeMailRead, ScopeMailSend, ScopeMailTransactional}
+
+// KnownScopes lists the named scopes a new key may carry, sorted.
+func KnownScopes() []string {
+	return slices.Clone(knownScopes)
+}
 
 const (
 	MaxAPIKeyScopes      = 32
@@ -71,6 +88,15 @@ func (s *service) CreateForUser(ctx context.Context, userID uint, req *APIKeyCre
 	scopes, err := normalizeAPIKeyScopes(req.Scopes)
 	if err != nil {
 		return nil, err
+	}
+	// A key with no scope reaches nothing, and a scope no route checks is a typo.
+	if len(scopes) == 0 {
+		return nil, domain.ErrInvalidInput
+	}
+	for _, scope := range scopes {
+		if scope != ScopeAll && !slices.Contains(knownScopes, scope) {
+			return nil, domain.ErrInvalidInput
+		}
 	}
 	if req.ExpiresAt != nil && !req.ExpiresAt.After(time.Now()) {
 		return nil, domain.ErrInvalidInput
