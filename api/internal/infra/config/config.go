@@ -1259,6 +1259,9 @@ func validateAuthenticationConfig(cfg AuthenticationConfig) error {
 		maxTouch       = time.Hour
 		maxRetention   = 365 * 24 * time.Hour
 	)
+	if key := strings.TrimSpace(cfg.TOTPEncryptionKey); key != "" && len(key) < MinMailboxSecretEncryptionKeyLength {
+		return fmt.Errorf("AUTH_TOTP_ENCRYPTION_KEY must be at least %d characters when set", MinMailboxSecretEncryptionKeyLength)
+	}
 
 	if cfg.SessionTTL < minSessionTTL || cfg.SessionTTL > maxSessionTTL {
 		return fmt.Errorf("AUTH_SESSION_TTL must be between %s and %s", minSessionTTL, maxSessionTTL)
