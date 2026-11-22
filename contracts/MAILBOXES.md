@@ -1137,9 +1137,18 @@ When a notification arrives:
     another live connection of the same account shares is left running.
   - What is left to do at the provider is recorded in that same transaction, so a process that stops
     right after the commit loses nothing: the `mail:external:sync` worker performs it, retrying with
-    backoff. The record keeps a sealed copy of the grant to hand back, never readable through the API
-    and never logged, only until the release succeeds or for at most 24 hours; then it is deleted and
-    the grant lapses at the provider.
+    backoff. The record outlives the purge of the connection's copies and is deleted with the
+    organization. It keeps a sealed copy of the grant only for a connector whose revocation really
+    revokes a provider grant (Gmail), never for a tenant mailbox, an app password, or a release that
+    only stops a push subscription. The copy is never readable through the API and never logged, and
+    is kept only until the release succeeds or for at most 24 hours; the mail worker's purge pass,
+    which runs whether or not a connector is enabled, deletes it then, and the grant lapses at the
+    provider.
+  - A recorded release never touches an account that is in use again: binding the same account again
+    in the organization deletes it; a release whose connection is active again is dropped unperformed;
+    a watch is stopped only while no live connection watches the same Gmail address; and a grant is
+    handed back only while no live connection, in any organization, reads the same account with a
+    grant of its own, since at Google revoking one token revokes the user's whole grant.
   - A revoked tenant, a connection that needs reconnecting, and the retention purge stop it in Zmail
     only. Their provider subscription lapses at its expiry: at most 7 days for Gmail, 70 hours for
     Outlook.

@@ -148,12 +148,20 @@ requested for 70 hours and renewed after 35.
 - **Switching push off.** This stops creating and renewing subscriptions at once. Open provider
   subscriptions lapse at their expiry (at most 7 days for Gmail, 70 hours for Outlook), and their
   notifications are answered `404` meanwhile.
-- **Provider releases.** A revocation records what is left to do at the provider (stop the push
-  subscription, hand the grant back) in its own transaction, in `external_mail_provider_releases`,
-  with a sealed copy of the grant. The call is made right after the commit; if the process stops
-  first, the worker makes it within minutes, retrying with backoff. A release still undone after 24
-  hours is deleted with its sealed grant (`external_mail.provider_release_expired`), and the grant
-  then lapses at the provider.
+- **Provider releases.** A revocation records in its own transaction what is left to do at the
+  provider (stop the push subscription, hand the grant back), in `external_mail_provider_releases`.
+  - **Grant copy.** The record carries a sealed copy of the grant only for Gmail, whose revocation
+    really revokes a grant.
+  - **Execution.** The call is made right after the commit, by whoever holds the record's lease. If
+    the process stops first, the `mail:external:sync` worker makes it within minutes, retrying with
+    backoff.
+  - **Accounts in use again.** A record is dropped unperformed when the account is in use again:
+    bound again, a connection active again, a shared Gmail watch, or the same account bound with its
+    own grant anywhere else.
+  - **Lifetime.** Records survive the purge of copies and go with the organization. A record still
+    undone after 24 hours is deleted with its sealed grant by the mail worker's purge pass
+    (`external_mail.provider_release_expired`), even with every connector off, and the grant then
+    lapses at the provider.
 - **Revoking.**
   - Every revocation stops the subscription in Zmail in its own transaction.
   - Unbinding by the member, a forced disconnect, a member's departure, and deleting the mailbox also
