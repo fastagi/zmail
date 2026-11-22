@@ -527,6 +527,61 @@ describe('unified inbox', () => {
     expect(screen.queryByText('Your Gmail account needs reconnecting')).not.toBeInTheDocument();
   });
 
+  it('reconnects an app password account on its form, every time, from the notice', async () => {
+    state.connectors.data = [
+      { id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } },
+      { id: 'imap', auth_kind: 'password', capabilities: { read: true } },
+    ];
+    state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@example.com')];
+    state.connections.data = [
+      connection({
+        id: 5,
+        provider: 'imap',
+        mailbox_id: 41,
+        account_address: 'me@example.com',
+        status: 'needs_reconnect',
+        last_error_code: 'external.auth_failed',
+      }),
+    ];
+    renderRoute();
+
+    const notice = await screen.findByText('Your IMAP account needs reconnecting');
+    const banner = notice.closest('[role="status"]') as HTMLElement;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      fireEvent.click(within(banner).getByRole('button', { name: 'Reconnect' }));
+      const form = await screen.findByRole('dialog', { name: 'Connect with an app password' });
+      await within(form).findByLabelText('App password');
+      expect(form).toHaveTextContent('Sign in again with the same login to restore me@example.com.');
+      fireEvent.keyDown(form, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    }
+    // Never an OAuth redirect for a password account.
+    expect(state.begin.begin).not.toHaveBeenCalled();
+  });
+
+  it('says a connection cannot be reconnected once its connector is off', async () => {
+    state.connectors.data = [];
+    state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@example.com')];
+    state.connections.data = [
+      connection({
+        id: 5,
+        provider: 'imap',
+        mailbox_id: 41,
+        account_address: 'me@example.com',
+        status: 'needs_reconnect',
+        last_error_code: 'external.auth_failed',
+      }),
+    ];
+    renderRoute();
+    const notice = await screen.findByText('Your IMAP account needs reconnecting');
+    const banner = notice.closest('[role="status"]') as HTMLElement;
+    expect(banner).toHaveTextContent(
+      'This provider is no longer enabled in your organization, so it cannot be reconnected.'
+    );
+    expect(within(banner).queryByRole('button', { name: 'Reconnect' })).toBeNull();
+    expect(state.begin.begin).not.toHaveBeenCalled();
+  });
+
   it('reads mail of an external mailbox without Reply, Forward, or Archive', async () => {
     state.connectors.data = [{ id: 'gmail', auth_kind: 'oauth2', capabilities: { read: true } }];
     state.mailboxes.data = [mailbox(1, 'hello'), externalMailbox(41, 'me@gmail.com')];

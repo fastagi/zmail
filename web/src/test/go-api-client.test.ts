@@ -25,6 +25,31 @@ describe('GoApiClient', () => {
     );
   });
 
+  it('waits a route its own timeout instead of the client one, within bounds', async () => {
+    const short = new GoApiClient(
+      { apiUrl: 'https://api.example.com/v1', maxResponseBytes: 1_024, timeoutMs: 20 },
+      {
+        // Answers after 80 ms unless the request is aborted first.
+        fetch: (_url, init) =>
+          new Promise<Response>((resolve, reject) => {
+            const timer = setTimeout(() => resolve(successResponse({})), 80);
+            init?.signal?.addEventListener('abort', () => {
+              clearTimeout(timer);
+              reject(new DOMException('aborted', 'TimeoutError'));
+            });
+          }),
+        randomUUID: () => randomId,
+      }
+    );
+    const base = { method: 'POST' as const, path: 'external-mail-credentials', incomingHeaders: new Headers() };
+    const timedOut = await short.request(base);
+    expect(timedOut).toMatchObject({ ok: false, error: { errorCode: ApiErrorCode.COMMON_TIMEOUT } });
+    expect(await short.request({ ...base, timeoutMs: 1_000 })).toMatchObject({ ok: true });
+    for (const timeoutMs of [0, 1.5, 120_001]) {
+      await expect(short.request({ ...base, timeoutMs })).rejects.toThrow(/timeout/u);
+    }
+  });
+
   it('forwards only server-owned credentials and explicit organization context', async () => {
     fetchMock.mockResolvedValueOnce(successResponse({ organization_id: 42 }));
     const token = 'header.payload.signature';

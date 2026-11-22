@@ -573,6 +573,18 @@ export class MockMailboxStore {
     }
   }
 
+  /**
+   * Deletes a connected mailbox and its synced copies for good, as a purge of a revoked connection
+   * does; answers how many copies went, or null when there is no such connected mailbox.
+   */
+  removeExternal(organizationId: number, mailboxId: number): number | null {
+    const mailboxes = this.mailboxesOf(organizationId);
+    const state = mailboxes.get(mailboxId);
+    if (!state || state.access.origin !== 'connected') return null;
+    mailboxes.delete(mailboxId);
+    return state.messages.size;
+  }
+
   /** One page of the administration directory, newest first; owners and admins only. */
   directory(
     organizationId: number,

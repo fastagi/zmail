@@ -70,6 +70,7 @@ describe('external mail browser routes', () => {
     expect((await connectors.json()).data.map((item: { id: string }) => item.id)).toEqual([
       'gmail',
       'outlook',
+      'imap',
     ]);
 
     const started = await start(route, { provider: 'gmail', backfill_days: 30 });
