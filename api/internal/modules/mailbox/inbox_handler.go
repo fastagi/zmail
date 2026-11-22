@@ -27,7 +27,7 @@ const (
 )
 
 // inboxParameters are the parameters of the unified inbox; each may appear at most once.
-var inboxParameters = []string{"view", "role_id", "mailbox_id", "unread", "has_attachments", "q", "group", "tz", "cursor", "per_page", "triage", "assignment"}
+var inboxParameters = []string{"view", "role_id", "mailbox_id", "unread", "has_attachments", "q", "group", "tz", "cursor", "per_page", "triage", "assignment", "since", "until"}
 
 // ListInboxMessages returns one cursor page of the caller's mail across every mailbox they read.
 func (h *Handler) ListInboxMessages(c *gin.Context) {
@@ -194,6 +194,18 @@ func parseInboxRequest(query url.Values) (InboxRequest, error) {
 			return invalid("assignment")
 		}
 	}
+	for _, bound := range []struct {
+		name   string
+		target **time.Time
+	}{{"since", &request.SinceDate}, {"until", &request.UntilDate}} {
+		if raw, present := value(bound.name); present {
+			date, err := time.Parse(time.DateOnly, raw)
+			if err != nil || date.Year() < 1970 || date.Year() > 9999 {
+				return invalid(bound.name)
+			}
+			*bound.target = &date
+		}
+	}
 	if raw, present := value("per_page"); present {
 		perPage, err := strconv.Atoi(raw)
 		if errors.Is(err, strconv.ErrRange) {
@@ -215,8 +227,11 @@ func parseInboxRequest(query url.Values) (InboxRequest, error) {
 		return invalid("q is only allowed with view all")
 	case request.GroupThreads && request.View != domain.InboxViewAll && request.View != domain.InboxViewSent:
 		return invalid("group needs view all or sent")
-	case request.GroupThreads && (request.Unread != nil || request.HasAttachments != nil || request.Query != ""):
-		return invalid("group cannot be combined with unread, has_attachments, or q")
+	case request.GroupThreads && (request.Unread != nil || request.HasAttachments != nil || request.Query != "" ||
+		request.SinceDate != nil || request.UntilDate != nil):
+		return invalid("group cannot be combined with unread, has_attachments, q, since, or until")
+	case request.SinceDate != nil && request.UntilDate != nil && request.UntilDate.Before(*request.SinceDate):
+		return invalid("until is before since")
 	case len(request.Triage) > 0 && request.View != domain.InboxViewAll && request.View != domain.InboxViewToday:
 		return invalid("triage needs view all or today")
 	case len(request.Triage) > 0 && (request.GroupThreads || request.Query != ""):

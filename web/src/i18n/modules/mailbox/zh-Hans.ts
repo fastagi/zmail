@@ -171,6 +171,14 @@ const messages = {
       unassigned: '未分派',
       closed: '已完成',
     },
+    date: {
+      label: '日期',
+      any: '任何时间',
+      week: '最近一周',
+      month: '最近一个月',
+      year: '最近一年',
+      older: '一年以前',
+    },
     search: {
       label: '搜索全部邮件',
       placeholder: '搜索全部邮件…',

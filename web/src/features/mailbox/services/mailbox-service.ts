@@ -56,6 +56,7 @@ import {
   mailMessageUpdatesResultSchema,
   mailThreadSchema,
   mailTrashPurgeSchema,
+  isInboxDay,
 } from '@/features/mailbox/schemas';
 import type {
   CreateMailboxInput,
@@ -574,6 +575,8 @@ export const mailboxService = {
       group,
       triage,
       assignment,
+      since,
+      until,
       tz,
     }: InboxFilters,
     cursor?: string,
@@ -589,6 +592,7 @@ export const mailboxService = {
     }
     if (roleId !== undefined && roleId !== 'none') validId(roleId);
     if (mailboxId !== undefined) validId(mailboxId);
+    if ([since, until].some(day => day !== undefined && !isInboxDay(day))) throw invalidResponse();
     if (
       triage?.some(category => !(MAIL_TRIAGE_CATEGORIES as readonly string[]).includes(category))
     ) {
@@ -623,6 +627,8 @@ export const mailboxService = {
         ...(group ? { group } : {}),
         ...(triage === undefined ? {} : { triage: triage.join(',') }),
         ...(assignment === undefined ? {} : { assignment }),
+        ...(since === undefined ? {} : { since }),
+        ...(until === undefined ? {} : { until }),
         tz,
         ...(cursor === undefined ? {} : { cursor }),
         ...(perPage === undefined ? {} : { per_page: perPage }),

@@ -71,6 +71,7 @@ import {
   MAIL_TEMPLATE_VALUE_MAX_LENGTH,
   MAIL_TEMPLATE_VARIABLE_PATTERN,
   MAIL_TRIAGE_CATEGORIES,
+  isInboxDay,
 } from '@/features/mailbox/schemas';
 import {
   MAIL_TRIAGE_DAILY_CAP_MAX,
@@ -4048,6 +4049,8 @@ const inboxParameters = [
   'group',
   'triage',
   'assignment',
+  'since',
+  'until',
   'tz',
   'cursor',
   'per_page',
@@ -4146,6 +4149,13 @@ function parseInboxQuery(query: URLSearchParams): Parsed<{
     }
     forward.set('assignment', assignment);
   }
+  for (const name of ['since', 'until'] as const) {
+    const day = value(name);
+    if (day === null) continue;
+    if (!isInboxDay(day)) return invalid('Invalid date filter');
+    mock[name] = day;
+    forward.set(name, day);
+  }
   const tz = value('tz');
   if (tz !== null) {
     if (!isTimeZone(tz)) return invalid('Invalid time zone');
@@ -4172,9 +4182,16 @@ function parseInboxQuery(query: URLSearchParams): Parsed<{
   }
   if (
     mock.group &&
-    (mock.unread !== undefined || mock.hasAttachments !== undefined || mock.q !== undefined)
+    (mock.unread !== undefined ||
+      mock.hasAttachments !== undefined ||
+      mock.q !== undefined ||
+      mock.since !== undefined ||
+      mock.until !== undefined)
   ) {
-    return invalid('Grouping cannot be combined with unread, attachments or search');
+    return invalid('Grouping cannot be combined with unread, attachments, search or dates');
+  }
+  if (mock.since !== undefined && mock.until !== undefined && mock.until < mock.since) {
+    return invalid('The end date is before the start date');
   }
   if (
     triage &&

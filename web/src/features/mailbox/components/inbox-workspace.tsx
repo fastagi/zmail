@@ -75,7 +75,12 @@ import {
   useMailOrganization,
   type MailOrganizationScope,
 } from '@/features/mailbox/hooks/use-mail-organization';
-import { INBOX_ASSIGNMENTS, INBOX_VIEWS, MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
+import {
+  INBOX_ASSIGNMENTS,
+  INBOX_DATE_RANGES,
+  INBOX_VIEWS,
+  MAIL_SEARCH_MAX_LENGTH,
+} from '@/features/mailbox/schemas';
 import {
   INBOX_TRIAGE_TABS,
   triageTabCategories,
@@ -165,6 +170,7 @@ const ROLE_PARAM = 'role';
 const SEARCH_PARAM = 'q';
 const TAB_PARAM = 'tab';
 const TRIAGE_PARAM = 'triage';
+const DATE_PARAM = 'date';
 /** `new=mailbox`: the team was just created, so mailbox creation opens at once. */
 const NEW_PARAM = 'new';
 
@@ -183,6 +189,7 @@ const filterParams = [
   SEARCH_PARAM,
   TAB_PARAM,
   TRIAGE_PARAM,
+  DATE_PARAM,
 ] as const;
 const rowIdPattern = /^[1-9]\d{0,15}$/u;
 const fallbackTimeZone = 'UTC';
@@ -200,6 +207,38 @@ interface InboxUrlState {
   triage: InboxTriageTab | null;
   /** The assignment tab of shared conversations. */
   assignment: InboxAssignment | null;
+  /** How far back the list reaches, in the inbox's zone. */
+  date: InboxDateRange | null;
+}
+
+export type InboxDateRange = (typeof INBOX_DATE_RANGES)[number];
+
+/** The calendar day `YYYY-MM-DD` that is `days` before today in `tz`. */
+function daysAgo(tz: string, days: number): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    timeZone: tz,
+  }).formatToParts(new Date());
+  const part = (type: 'year' | 'month' | 'day') =>
+    Number(parts.find(item => item.type === type)?.value);
+  const [year, month, day] = [part('year'), part('month'), part('day')];
+  return new Date(Date.UTC(year, month - 1, day - days)).toISOString().slice(0, 10);
+}
+
+/** The `since` or `until` day of a date range; the past week includes today and six days back. */
+function dateBounds(range: InboxDateRange, tz: string): Pick<InboxFilters, 'since' | 'until'> {
+  switch (range) {
+    case 'week':
+      return { since: daysAgo(tz, 6) };
+    case 'month':
+      return { since: daysAgo(tz, 29) };
+    case 'year':
+      return { since: daysAgo(tz, 364) };
+    case 'older':
+      return { until: daysAgo(tz, 365) };
+  }
 }
 
 /**
@@ -240,6 +279,9 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
     assignment: (INBOX_ASSIGNMENTS as readonly string[]).includes(params.get(TAB_PARAM) ?? '')
       ? (params.get(TAB_PARAM) as InboxAssignment)
       : null,
+    date: (INBOX_DATE_RANGES as readonly string[]).includes(params.get(DATE_PARAM) ?? '')
+      ? (params.get(DATE_PARAM) as InboxDateRange)
+      : null,
   };
 }
 
@@ -249,7 +291,7 @@ function readInboxUrl(params: URLSearchParams): InboxUrlState {
  * the organization's triage is on.
  */
 function inboxFilters(
-  { view, box, role, q, unread, attachments, triage, assignment }: InboxUrlState,
+  { view, box, role, q, unread, attachments, triage, assignment, date }: InboxUrlState,
   tz: string,
   triageOn: boolean
 ): InboxFilters {
@@ -257,6 +299,7 @@ function inboxFilters(
   const grouped =
     !unread &&
     !attachments &&
+    date === null &&
     q === '' &&
     triageTab === null &&
     (view === 'all' || view === 'sent');
@@ -270,6 +313,7 @@ function inboxFilters(
     ...(grouped ? { group: 'thread' as const } : {}),
     ...(triageTab === null ? {} : { triage: triageTabCategories(triageTab) }),
     ...(assignment === null ? {} : { assignment }),
+    ...(date === null ? {} : dateBounds(date, tz)),
     tz,
   };
 }
@@ -1048,6 +1092,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           onUnreadChange={unread => setListing({ [TAB_PARAM]: unread ? UNREAD_TAB : null })}
           attachments={urlState.attachments}
           onAttachmentsChange={on => setListing({ [TAB_PARAM]: on ? ATTACHMENTS_TAB : null })}
+          dateRange={urlState.date}
+          onDateRangeChange={date => setListing({ [DATE_PARAM]: date })}
           assignment={urlState.assignment}
           onAssignmentChange={
             assignmentTabs ? assignment => setListing({ [TAB_PARAM]: assignment }) : undefined

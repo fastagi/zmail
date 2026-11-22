@@ -1112,6 +1112,24 @@ describe('unified inbox', () => {
     expect(state.inboxCalls.at(-1)).not.toHaveProperty('assignment');
   });
 
+  it('the date menu narrows the list by calendar days in the inbox zone, ungrouped', () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-11-22T10:00:00Z') });
+    try {
+      renderRoute();
+      const menu = screen.getByRole('combobox', { name: 'Date' });
+      fireEvent.change(menu, { target: { value: 'week' } });
+      expect(new URLSearchParams(window.location.search).get('date')).toBe('week');
+      expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', since: '2026-11-16', tz: 'UTC' });
+      fireEvent.change(menu, { target: { value: 'older' } });
+      expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', until: '2025-11-22', tz: 'UTC' });
+      fireEvent.change(menu, { target: { value: '' } });
+      expect(new URLSearchParams(window.location.search).get('date')).toBeNull();
+      expect(state.inboxCalls.at(-1)).toEqual({ view: 'all', group: 'thread', tz: 'UTC' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('search requests view=all with q and shows the too-broad notice on 422', () => {
     window.history.replaceState(null, '', '/console/mailboxes?view=today');
     state.reject = filters =>

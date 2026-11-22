@@ -9021,6 +9021,22 @@ paths:
             `group`.'
           schema:
             type: boolean
+        - name: since
+          in: query
+          required: false
+          description: A calendar day in `tz`, 1970 or later; keeps messages created on or after its
+            start. Never with `group`.
+          schema:
+            type: string
+            format: date
+        - name: until
+          in: query
+          required: false
+          description: A calendar day in `tz`, not before `since`; keeps messages created before the
+            end of that day. Never with `group`.
+          schema:
+            type: string
+            format: date
         - name: assignment
           in: query
           required: false

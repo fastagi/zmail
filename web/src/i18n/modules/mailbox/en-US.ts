@@ -177,6 +177,14 @@ const messages = {
       unassigned: 'Unassigned',
       closed: 'Done',
     },
+    date: {
+      label: 'Date',
+      any: 'Any time',
+      week: 'Past week',
+      month: 'Past month',
+      year: 'Past year',
+      older: 'Older than a year',
+    },
     search: {
       label: 'Search all mail',
       placeholder: 'Search all mail…',
