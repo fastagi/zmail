@@ -122,14 +122,19 @@ func (r *repository) MatchExternalMailSubscriptions(ctx context.Context, provide
 	return hits, err
 }
 
-func (r *repository) MarkExternalMailPushDegraded(ctx context.Context, connectionID uint, now time.Time) (bool, error) {
+func (r *repository) MarkExternalMailPushDegraded(ctx context.Context, connectionID uint, now, pollBy time.Time) (bool, error) {
 	if r.db == nil {
 		return false, domain.ErrServiceUnavailable
 	}
 	result := r.conn(ctx).Exec(`UPDATE external_mail_subscriptions
 		SET degraded_at = ?, renew_after = LEAST(renew_after, ?), updated_at = ?
 		WHERE connection_id = ? AND status = 'active' AND degraded_at IS NULL`, now, now, now, connectionID)
-	return result.RowsAffected > 0, result.Error
+	if result.Error != nil || result.RowsAffected == 0 {
+		return false, result.Error
+	}
+	err := r.conn(ctx).Exec(`UPDATE external_mail_connections SET next_sync_at = LEAST(next_sync_at, ?)
+		WHERE id = ? AND status = 'active'`, pollBy, connectionID).Error
+	return err == nil, err
 }
 
 func (r *repository) MarkExternalMailPush(ctx context.Context, mark domain.ExternalMailPushMark) (int, error) {

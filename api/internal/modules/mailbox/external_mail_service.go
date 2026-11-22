@@ -143,7 +143,6 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	}
 	latency := time.Since(started)
 	var upkeep pushUpkeep
-	degraded := false
 	if push != nil && err == nil && !fetched.More && subscriptionDue(subscription, now) {
 		// The subscription is started or renewed under the lease, moved past the call's deadline,
 		// with the grant the fetch used; a grant the provider rotates on the way is saved below.
@@ -188,17 +187,6 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		result.Cursor, result.SyncedAt, result.ConsecutiveFailures = fetched.Cursor, &now, 0
 		result.Messages = s.externalCopies(connection, fetched.Messages, now)
 		result.ConsecutiveMore = 0
-		if push != nil && trigger == domain.ExternalMailSyncTriggerPoll &&
-			pushMissedMail(subscription, result.Messages, startedAt, s.settings.ExternalMail.Push.Quiet()) {
-			// The poll found mail the live subscription never announced: push is not working for
-			// this connection, so it polls at the regular interval until a notification arrives.
-			degraded = true
-			if upkeep.after != nil {
-				after := *upkeep.after
-				after.DegradedAt = &now
-				upkeep.after = &after
-			}
-		}
 		if !fetched.More {
 			// A live subscription announces new mail, so the poll is only the safety net.
 			result.NextSyncAt = s.pushPollAt(upkeep, now)
@@ -238,6 +226,12 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		Fetched: len(fetched.Messages), More: err == nil && fetched.More, ErrorCode: result.LastErrorCode,
 		TimedOut: timedOut, Throttled: throttled, Trigger: trigger,
 	}
+	// Only an incremental poll that read a whole round can catch push missing mail: a backfill, a
+	// restart after an expired cursor, and pages in the middle of a round read mail that was never
+	// to be announced. The check itself runs on the copies the save inserts, so a message the
+	// provider returns again (Graph delta reports read or flagged messages too) never counts.
+	checkMissed := push != nil && trigger == domain.ExternalMailSyncTriggerPoll && outcome == domain.ExternalMailSyncOK &&
+		!fetched.More && connection.SyncCursor != "" && connection.ConsecutiveMore == 0
 	var stored []*domain.MailMessage
 	applied := false
 	// New copies go through the same post-store step as Zmail's own inbound mail, in the
@@ -248,6 +242,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		if stored, applied, err = s.externalMail.SaveExternalMailSync(tx, result); err != nil {
 			return nil, err
 		}
+		degraded := checkMissed && pushMissedMail(subscription, stored, startedAt, s.settings.ExternalMail.Push.Quiet())
 		if err = s.savePushUpkeep(tx, connection, applied, result.LastErrorCode == "", upkeep, degraded, trigger, startedAt); err != nil {
 			return nil, err
 		}

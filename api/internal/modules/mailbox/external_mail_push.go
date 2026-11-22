@@ -428,8 +428,9 @@ func (s *service) upkeepPush(ctx context.Context, source ExternalMailPushSource,
 	return upkeep, got.RefreshToken
 }
 
-// pushMissedMail reports whether a poll found mail its live, proven subscription never announced:
-// a copy received after the subscription went live and earlier than the grace before the fetch.
+// pushMissedMail reports whether a poll stored mail its live, proven subscription never announced:
+// a newly stored copy received after the subscription went live and earlier than the grace before
+// the fetch.
 // Mail received within the grace may still have its notification on the way.
 func pushMissedMail(subscription *domain.ExternalMailSubscription, copies []*domain.MailMessage, startedAt time.Time, quiet time.Duration) bool {
 	if !subscription.Proven(startedAt, quiet) {
@@ -668,7 +669,9 @@ func (s *service) savePushUpkeep(tx context.Context, connection *domain.External
 		}
 	}
 	if degraded {
-		marked, err := s.pushStore.MarkExternalMailPushDegraded(tx, connection.ID, s.now().UTC())
+		// The connection is polled at the regular interval from now on, whatever the save scheduled.
+		now := s.now().UTC()
+		marked, err := s.pushStore.MarkExternalMailPushDegraded(tx, connection.ID, now, now.Add(externalMailSyncInterval))
 		if err != nil {
 			return err
 		}
