@@ -8,14 +8,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import type { MailEventSummary, MailEventType, MailStatus } from '@/features/mailbox/types';
 import { cn } from '@/utils';
 
@@ -289,54 +281,6 @@ export function MailEventBadge({ type, label }: { type: MailEventType; label: st
     >
       {label}
     </Badge>
-  );
-}
-
-/** Confirms an action that cannot be undone; stays open while it runs. */
-export function ConfirmDialog({
-  open,
-  title,
-  description,
-  confirmLabel,
-  cancelLabel,
-  pending,
-  icon,
-  onConfirm,
-  onCancel,
-}: {
-  open: boolean;
-  title: string;
-  description: string;
-  confirmLabel: string;
-  cancelLabel: string;
-  pending: boolean;
-  icon?: ReactNode;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={next => !next && !pending && onCancel()}>
-      <DialogContent size="sm" role="alertdialog">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>
-            {cancelLabel}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            loading={pending}
-            icon={icon}
-            onClick={onConfirm}
-          >
-            {confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 

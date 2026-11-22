@@ -4,7 +4,7 @@ import { Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useMailOrganizationId } from '@/features/mailbox/components/mail-organization';
-import { ConfirmDialog } from '@/features/mailbox/components/mail-shared';
+import { ConfirmDialog } from '@/features/mailbox/components/confirm-dialog';
 import { useDeleteMailbox } from '@/features/mailbox/hooks/use-mailbox';
 import type { MailboxDirectoryEntry } from '@/features/mailbox/types';
 import { resolveMailboxErrorKey } from '@/features/mailbox/utils/mailbox-error';

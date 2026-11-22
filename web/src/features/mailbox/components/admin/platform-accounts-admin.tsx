@@ -35,8 +35,8 @@ import {
   useMailOrganizationId,
 } from '@/features/mailbox/components/mail-organization';
 import { memberName } from '@/features/mailbox/components/mailbox-people';
+import { ConfirmDialog } from '@/features/mailbox/components/confirm-dialog';
 import {
-  ConfirmDialog,
   EmptyState,
   ErrorAlert,
   nativeSelectClassName,
