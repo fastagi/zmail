@@ -155,7 +155,20 @@ func (r *repository) MarkExternalMailPush(ctx context.Context, mark domain.Exter
 			status = CASE WHEN s.status = 'active' THEN 'pending' ELSE s.status END`
 	}
 	window := mark.Window.Seconds()
-	result := r.conn(ctx).Exec(`WITH m AS (
+	made := 0
+	// Locks are taken in one order everywhere: connection, then subscription, as a sync's save does.
+	// The connections are locked first, in id order, waiting (bounded by lock_timeout) for a save in
+	// progress rather than skipping it, so the notification is kept pending, never lost.
+	err := r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`SET LOCAL lock_timeout = '5s'`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`SELECT c.id FROM external_mail_connections c
+		  JOIN external_mail_subscriptions s ON s.connection_id = c.id
+		  WHERE s.id IN ? ORDER BY c.id FOR UPDATE OF c`, mark.SubscriptionIDs).Error; err != nil {
+			return err
+		}
+		result := tx.Exec(`WITH m AS (
 		  UPDATE external_mail_subscriptions s
 		  SET last_notified_at = @now, pending_at = COALESCE(s.pending_at, @now),
 		    -- Only a change notification shows delivery works; a lifecycle event does not.
@@ -167,8 +180,22 @@ func (r *repository) MarkExternalMailPush(ctx context.Context, mark domain.Exter
 		SET next_sync_at = `+pushTargetSQL+`
 		FROM m
 		WHERE c.id = m.connection_id AND `+pushPromotableSQL,
-		map[string]any{"now": mark.Now, "ids": mark.SubscriptionIDs, "window": window, "spacing": mark.Spacing.Seconds(), "lifecycle": mark.Lifecycle})
-	return int(result.RowsAffected), result.Error
+			map[string]any{"now": mark.Now, "ids": mark.SubscriptionIDs, "window": window, "spacing": mark.Spacing.Seconds(), "lifecycle": mark.Lifecycle})
+		made = int(result.RowsAffected)
+		return result.Error
+	})
+	return made, err
+}
+
+// KeepExternalMailRotatedToken stores a grant the provider rotated during a sync whose save failed,
+// so the spent grant is never used again. A revoked connection, or one without a grant of its own,
+// is left as it is.
+func (r *repository) KeepExternalMailRotatedToken(ctx context.Context, connectionID uint, sealed string) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Exec(`UPDATE external_mail_connections SET encrypted_refresh_token = ?
+		WHERE id = ? AND status <> 'revoked' AND tenant_id IS NULL AND encrypted_refresh_token <> ''`, sealed, connectionID).Error
 }
 
 func (r *repository) PromotePendingExternalMailPush(ctx context.Context, now time.Time, window, spacing time.Duration, limit int) (int, error) {

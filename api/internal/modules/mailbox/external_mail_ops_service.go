@@ -186,6 +186,8 @@ func (s *service) PurgeRevokedExternalMail(ctx context.Context, now time.Time, l
 		return 0, nil
 	}
 	now = now.UTC()
+	// Sealed grants of provider releases never outlive their deadline, connectors on or off.
+	s.expireProviderReleases(ctx, now)
 	step := domain.ExternalMailPurgeStep{
 		RevokedBefore: now.Add(-s.settings.ExternalMail.Sync.Retention()), Now: now, Messages: externalMailPurgeBatch,
 	}

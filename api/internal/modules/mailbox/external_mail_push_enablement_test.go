@@ -189,6 +189,7 @@ func TestExternalMailProviderReleaseRetriesThenExpires(t *testing.T) {
 	}
 	f.advance(externalMailReleaseDeadline)
 	f.sync(t)
+	f.purge(t)
 	if rows = f.releaseRows(t, f.connection.ID); len(rows) != 0 {
 		t.Fatalf("a release past its deadline kept its sealed grant: %+v", rows)
 	}

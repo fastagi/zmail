@@ -16,33 +16,45 @@ type addExternalMailProviderReleases struct {
 	migration.BaseMigration
 }
 
-// Up adds external_mail_provider_releases: what is left to do at the provider after a connection
-// was revoked (stop its push subscription, hand its grant back), written in the revocation's
-// transaction so it survives a process that dies after the commit. The worker performs and deletes
-// each row, retrying with backoff; a row past expires_at is deleted undone. encrypted_grant is the
-// connection's sealed refresh token, copied before the revocation erased it, and lives only as long
-// as its row (at most a day). A row goes with its connection.
+// Up adds external_mail_provider_releases: what is left to do at the provider after a connection was
+// revoked (stop its push subscription, hand its grant back), written in the revocation's transaction
+// so it survives a process that stops right after the commit. The worker performs and deletes each
+// row, retrying with backoff; a row past expires_at is deleted undone.
+//
+// A row stands on its own: it outlives the purge of its connection (connection_id is a plain
+// reference) and goes only with its organization. It holds what the calls need: the provider, the
+// account address (to skip the calls while any live connection uses the same account), the tenant
+// mailbox to mint a token for, the watch key, and encrypted_grant, the connection's sealed refresh
+// token, kept only for a connector whose revocation really revokes a provider grant and only as long
+// as its row (at most a day).
 func (m *addExternalMailProviderReleases) Up(db *gorm.DB) error {
 	return execStatements(db,
 		`CREATE TABLE external_mail_provider_releases (
 		  id bigserial PRIMARY KEY,
-		  connection_id bigint NOT NULL REFERENCES external_mail_connections(id) ON DELETE CASCADE,
-		  organization_id bigint NOT NULL,
+		  organization_id bigint NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+		  connection_id bigint NOT NULL,
 		  provider varchar(16) NOT NULL,
+		  account_address varchar(320) NOT NULL,
+		  tenant_id bigint,
+		  tenant_directory_id varchar(255) NOT NULL DEFAULT '',
 		  encrypted_grant text NOT NULL DEFAULT '',
 		  stop_push boolean NOT NULL DEFAULT false,
 		  stop_subscription_id varchar(255) NOT NULL DEFAULT '',
+		  stop_watch_key varchar(320) NOT NULL DEFAULT '',
 		  attempts smallint NOT NULL DEFAULT 0,
 		  next_attempt_at timestamptz NOT NULL,
 		  expires_at timestamptz NOT NULL,
 		  created_at timestamptz NOT NULL,
 		  CONSTRAINT chk_external_mail_provider_releases_provider CHECK (provider ~ '^[a-z][a-z0-9_]{1,15}$'),
 		  CONSTRAINT chk_external_mail_provider_releases_work CHECK (stop_push OR encrypted_grant <> ''),
+		  CONSTRAINT chk_external_mail_provider_releases_tenant_grant CHECK (tenant_id IS NULL OR encrypted_grant = ''),
 		  CONSTRAINT chk_external_mail_provider_releases_attempts CHECK (attempts >= 0),
 		  CONSTRAINT chk_external_mail_provider_releases_deadline CHECK (expires_at > created_at)
 		)`,
 		`CREATE INDEX idx_external_mail_provider_releases_due ON external_mail_provider_releases (next_attempt_at, id)`,
-		`CREATE INDEX idx_external_mail_provider_releases_connection ON external_mail_provider_releases (connection_id)`,
+		`CREATE INDEX idx_external_mail_provider_releases_account ON external_mail_provider_releases
+		  (organization_id, provider, lower(account_address))`,
+		`CREATE INDEX idx_external_mail_provider_releases_expiry ON external_mail_provider_releases (expires_at, id)`,
 	)
 }
 

@@ -110,7 +110,9 @@ func (r *repository) CreateExternalMailConnection(ctx context.Context, connectio
 		return err
 	}
 	*connection = *po.toDomain()
-	return nil
+	// The account is bound again: what an earlier revocation left to do at the provider would now
+	// revoke this binding's grant or watch.
+	return r.DeleteExternalMailProviderReleasesForAccount(ctx, connection.OrganizationID, connection.Provider, connection.AccountAddress)
 }
 
 func (r *repository) ClaimExternalMailConnections(ctx context.Context, claim domain.ExternalMailClaim) ([]*domain.ExternalMailConnection, error) {
@@ -399,7 +401,12 @@ func (r *repository) RebindExternalMailConnection(ctx context.Context, rebind do
 	if len(rows) == 0 {
 		return nil, ErrExternalMailConnectionNotFound
 	}
-	return rows[0].toDomain(), nil
+	rebound := rows[0].toDomain()
+	// Bound again: the releases an earlier revocation left would revoke this grant or watch.
+	if err = r.DeleteExternalMailProviderReleasesForAccount(ctx, rebound.OrganizationID, rebound.Provider, rebound.AccountAddress); err != nil {
+		return nil, err
+	}
+	return rebound, nil
 }
 
 // SetConnectedMailboxSend records whether a connected mailbox sends through its account's SMTP
