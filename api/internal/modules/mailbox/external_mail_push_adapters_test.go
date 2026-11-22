@@ -537,12 +537,12 @@ func TestOutlookPushParseNotification(t *testing.T) {
 	for name, token := range map[string]string{
 		"empty": "", "control character": "a\nb", "oversized": strings.Repeat("v", outlookMaxValidationToken+1), "non-ASCII": "tökén",
 	} {
-		if _, err := parse(url.Values{"validationToken": {token}}, ""); !errors.Is(err, domain.ErrInvalidInput) {
-			t.Errorf("%s handshake: %v, want invalid input", name, err)
+		if _, refused := parse(url.Values{"validationToken": {token}}, ""); !errors.Is(refused, domain.ErrInvalidInput) {
+			t.Errorf("%s handshake: %v, want invalid input", name, refused)
 		}
 	}
-	if _, err := parse(url.Values{}, "not json"); !errors.Is(err, domain.ErrInvalidInput) {
-		t.Fatalf("malformed body: %v", err)
+	if _, refused := parse(url.Values{}, "not json"); !errors.Is(refused, domain.ErrInvalidInput) {
+		t.Fatalf("malformed body: %v", refused)
 	}
 	items := []map[string]string{
 		{"subscriptionId": "sub-1", "clientState": "s1", "lifecycleEvent": "reauthorizationRequired"},

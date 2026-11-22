@@ -109,31 +109,39 @@ func (g *gmailPushSource) ParseNotification(ctx context.Context, delivery Extern
 	if err := g.verifier.Verify(ctx, strings.TrimSpace(token), delivery.Now); err != nil {
 		return ExternalMailPushParsed{}, ErrExternalMailPushUnauthenticated
 	}
+	key := gmailPushAddress(delivery.Body)
+	if key == "" {
+		return ExternalMailPushParsed{}, nil
+	}
+	return ExternalMailPushParsed{Hints: []ExternalMailPushHint{{Key: key, Authenticated: true}}}, nil
+}
+
+// gmailPushAddress reads the lowercased address of a Pub/Sub push body's Gmail message; empty when
+// the body cannot be read.
+func gmailPushAddress(body []byte) string {
 	var envelope struct {
 		Message struct {
 			Data string `json:"data"`
 		} `json:"message"`
 	}
-	if json.Unmarshal(delivery.Body, &envelope) != nil || len(envelope.Message.Data) > base64.StdEncoding.EncodedLen(gmailMaxPushDataBytes) {
-		return ExternalMailPushParsed{}, nil
+	if json.Unmarshal(body, &envelope) != nil || len(envelope.Message.Data) > base64.StdEncoding.EncodedLen(gmailMaxPushDataBytes) {
+		return ""
 	}
 	data, err := base64.StdEncoding.DecodeString(envelope.Message.Data)
 	if err != nil {
-		if data, err = base64.URLEncoding.DecodeString(envelope.Message.Data); err != nil {
-			return ExternalMailPushParsed{}, nil
-		}
+		data, err = base64.URLEncoding.DecodeString(envelope.Message.Data)
 	}
 	var message struct {
 		EmailAddress string `json:"emailAddress"`
 	}
-	if json.Unmarshal(data, &message) != nil {
-		return ExternalMailPushParsed{}, nil
+	if err != nil || json.Unmarshal(data, &message) != nil {
+		return ""
 	}
 	key := normalizedPushKey(message.EmailAddress)
-	if key == "" || len(key) > 320 || !strings.Contains(key, "@") {
-		return ExternalMailPushParsed{}, nil
+	if len(key) > 320 || !strings.Contains(key, "@") {
+		return ""
 	}
-	return ExternalMailPushParsed{Hints: []ExternalMailPushHint{{Key: key, Authenticated: true}}}, nil
+	return key
 }
 
 // postJSON posts to the Gmail API and decodes a bounded answer into target, when given. It maps

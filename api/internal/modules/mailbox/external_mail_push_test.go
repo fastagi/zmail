@@ -51,9 +51,9 @@ func (f *externalFixture) subscription(t *testing.T, connectionID uint) *domain.
 	return subscription
 }
 
-func (f *externalFixture) notify(t *testing.T, provider domain.ExternalMailProvider, body []byte) {
+func (f *externalFixture) notify(t *testing.T, body []byte) {
 	t.Helper()
-	reply, err := f.service.ReceiveExternalMailPush(context.Background(), provider, ExternalMailPushDelivery{
+	reply, err := f.service.ReceiveExternalMailPush(context.Background(), domain.ExternalMailProviderGmail, ExternalMailPushDelivery{
 		Header: http.Header{}, Query: url.Values{}, Body: body,
 	})
 	if err != nil || reply.Validation != "" {
@@ -62,13 +62,13 @@ func (f *externalFixture) notify(t *testing.T, provider domain.ExternalMailProvi
 }
 
 // notifyFake notifies the fixture connection's live fake subscription with its secret.
-func (f *externalFixture) notifyFake(t *testing.T, token string) {
+func (f *externalFixture) notifyFake(t *testing.T) {
 	t.Helper()
-	id, secret, ok := f.source.PushSubscription(token)
+	id, secret, ok := f.source.PushSubscription(externalTestToken)
 	if !ok {
-		t.Fatalf("no fake subscription for %s", token)
+		t.Fatal("no fake subscription for the fixture connection")
 	}
-	f.notify(t, domain.ExternalMailProviderGmail, fakeNotificationBody(id, secret, ""))
+	f.notify(t, fakeNotificationBody(id, secret, ""))
 }
 
 func (f *externalFixture) nextSyncAt(t *testing.T, connectionID uint) time.Time {
@@ -151,7 +151,7 @@ func TestExternalMailPushNotificationSyncsAtOnce(t *testing.T) {
 	f.sync(t)
 	now := f.advance(time.Minute)
 	f.source.Deliver(externalTestToken, externalMessage("g-2", "Fresh", now))
-	f.notifyFake(t, externalTestToken)
+	f.notifyFake(t)
 	if next := f.nextSyncAt(t, f.connection.ID); !next.Equal(now) {
 		t.Fatalf("after a notification next sync at %v, want now %v", next, now)
 	}
@@ -188,7 +188,7 @@ func TestExternalMailPushCoalescesABurst(t *testing.T) {
 	body := fakeNotificationBody(id, secret, "")
 	for second := 0; second < 30; second++ {
 		for range 20 {
-			f.notify(t, domain.ExternalMailProviderGmail, body)
+			f.notify(t, body)
 		}
 		f.sync(t)
 		f.advance(time.Second)
@@ -218,7 +218,7 @@ func TestExternalMailPushNeverShortensALease(t *testing.T) {
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claim = %d, %v", len(claimed), err)
 	}
-	f.notifyFake(t, externalTestToken)
+	f.notifyFake(t)
 	if next := f.nextSyncAt(t, f.connection.ID); !next.Equal(lease) {
 		t.Fatalf("a notification moved the lease to %v, want %v", next, lease)
 	}
@@ -260,7 +260,7 @@ func TestExternalMailPushDuringAFetchSyncsAgain(t *testing.T) {
 		if !notified {
 			notified = true
 			f.advance(time.Second)
-			f.notifyFake(t, externalTestToken)
+			f.notifyFake(t)
 		}
 	}})
 	f.sync(t)
@@ -290,7 +290,7 @@ func TestExternalMailPushRejectsWrongSecretsAndUnknownSubscriptions(t *testing.T
 		"no subscription":      fakeNotificationBody("", secret, ""),
 		"lifecycle, wrong key": fakeNotificationBody(id, "guess", domain.ExternalMailPushRemoved),
 	} {
-		f.notify(t, domain.ExternalMailProviderGmail, body)
+		f.notify(t, body)
 		if next := f.nextSyncAt(t, f.connection.ID); !next.Equal(before) {
 			t.Fatalf("%s: next sync moved to %v", name, next)
 		}
@@ -318,14 +318,14 @@ func TestExternalMailPushIsolatesMailboxes(t *testing.T) {
 	for _, id := range []uint{f.connection.ID, sibling.ID, foreign.ID} {
 		before[id] = f.nextSyncAt(t, id)
 	}
-	f.notify(t, domain.ExternalMailProviderGmail, fakeNotificationBody(idA, secretB, ""))
-	f.notify(t, domain.ExternalMailProviderGmail, fakeNotificationBody(idB, secretA, ""))
+	f.notify(t, fakeNotificationBody(idA, secretB, ""))
+	f.notify(t, fakeNotificationBody(idB, secretA, ""))
 	for id, at := range before {
 		if next := f.nextSyncAt(t, id); !next.Equal(at) {
 			t.Fatalf("a crossed secret moved connection %d", id)
 		}
 	}
-	f.notify(t, domain.ExternalMailProviderGmail, fakeNotificationBody(idA, secretA, ""))
+	f.notify(t, fakeNotificationBody(idA, secretA, ""))
 	if next := f.nextSyncAt(t, f.connection.ID); !next.Equal(f.service.now().UTC()) {
 		t.Fatalf("the named connection is not due: %v", next)
 	}
@@ -418,7 +418,7 @@ func TestExternalMailPushRenewsBeforeExpiry(t *testing.T) {
 	// A subscription the provider removed is created again with a new secret.
 	_, secret, _ := f.source.PushSubscription(externalTestToken)
 	f.source.DropPushSubscription(renewed.ProviderSubscriptionID)
-	f.notify(t, domain.ExternalMailProviderGmail, fakeNotificationBody(renewed.ProviderSubscriptionID, secret, domain.ExternalMailPushRemoved))
+	f.notify(t, fakeNotificationBody(renewed.ProviderSubscriptionID, secret, domain.ExternalMailPushRemoved))
 	if subscription := f.subscription(t, f.connection.ID); subscription.Live(f.service.now()) {
 		t.Fatalf("a removed subscription is still live: %+v", subscription)
 	}
@@ -494,7 +494,7 @@ func TestExternalMailPushStopsWithItsConnection(t *testing.T) {
 		t.Helper()
 		before, notified := f.nextSyncAt(t, connectionID), f.subscription(t, connectionID).LastNotifiedAt
 		f.advance(time.Second)
-		f.notify(t, domain.ExternalMailProviderGmail, fakeNotificationBody(id, secret, ""))
+		f.notify(t, fakeNotificationBody(id, secret, ""))
 		if next := f.nextSyncAt(t, connectionID); !next.Equal(before) {
 			t.Fatalf("a stopped connection's notification moved it")
 		}
@@ -585,7 +585,7 @@ func TestExternalMailPushTenantMailbox(t *testing.T) {
 		t.Fatalf("tenant revocation left %+v", subscription)
 	}
 	before := tf.nextSyncAt(t, assigned.ID)
-	tf.notify(t, domain.ExternalMailProviderGmail, fakeNotificationBody(id, secret, ""))
+	tf.notify(t, fakeNotificationBody(id, secret, ""))
 	if next := tf.nextSyncAt(t, assigned.ID); !next.Equal(before) {
 		t.Fatal("a revoked tenant's notification moved its connection")
 	}
@@ -602,7 +602,7 @@ func TestExternalMailPushKeepsTheReceiveFloor(t *testing.T) {
 	}
 	f.source.Deliver(externalTestToken, externalMessage("g-old", "Before the floor", now.Add(-time.Hour)),
 		externalMessage("g-new", "After the floor", now.Add(time.Second)))
-	f.notifyFake(t, externalTestToken)
+	f.notifyFake(t)
 	f.sync(t)
 	stored := f.storedExternal(t)
 	if len(stored) != 1 || stored[0].Subject != "After the floor" || f.runs(t)[0].Trigger != domain.ExternalMailSyncTriggerPush {
