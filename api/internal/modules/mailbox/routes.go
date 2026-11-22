@@ -161,6 +161,10 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 			Name("mailboxes.role_assignment.update").WhereNumber("mailbox_id")
 		auth.PUT("/mailboxes/:mailbox_id/triage-setting", h.SetMailboxTriageSetting).
 			Name("mailboxes.triage_setting.update").WhereNumber("mailbox_id")
+		auth.GET("/mailboxes/:mailbox_id/signature", h.GetMailSignature).
+			Name("mailboxes.signature.show").WhereNumber("mailbox_id")
+		auth.PUT("/mailboxes/:mailbox_id/signature", h.UpdateMailSignature).
+			Name("mailboxes.signature.update").WhereNumber("mailbox_id")
 		auth.GET("/mailboxes/:mailbox_id/agent-grants", h.ListAgentGrants).
 			Name("mailboxes.agent_grants.index").WhereNumber("mailbox_id")
 		auth.POST("/mailboxes/:mailbox_id/agent-grants", h.IssueAgentGrant).

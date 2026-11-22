@@ -32,6 +32,7 @@ import {
   useUserNames,
   type MailboxPerson,
 } from '@/features/mailbox/components/mailbox-people';
+import { MailboxSignatureEditor } from '@/features/mailbox/components/mailbox-signature-editor';
 import { MailboxTriageSwitch } from '@/features/mailbox/components/mailbox-triage-switch';
 import {
   useDeleteMailboxSealedHistory,
@@ -329,6 +330,10 @@ function PanelBody({ mailbox, onRefresh }: { mailbox: Mailbox; onRefresh: () => 
       ) : null}
 
       {shared && access.manage_members ? <WebhookSwitch mailbox={mailbox} run={run} /> : null}
+
+      {access.send ? (
+        <MailboxSignatureEditor organizationId={organizationId} mailboxId={mailbox.id} run={run} />
+      ) : null}
 
       <MailboxTriageSwitch organizationId={organizationId} mailbox={mailbox} run={run} />
 

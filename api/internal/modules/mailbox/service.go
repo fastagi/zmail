@@ -267,6 +267,11 @@ type Service interface {
 	PlatformAccountService
 	// TriageService serves the AI triage switches, overrides, and reply drafts.
 	TriageService
+	// MailSignature reads the viewer's own signature for a mailbox they may send from.
+	MailSignature(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint) (domain.MailSignature, error)
+	// SaveMailSignature replaces the viewer's own signature for a mailbox they may send from; an
+	// empty body removes it.
+	SaveMailSignature(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, body string) (domain.MailSignature, error)
 	// ExternalMailService lists and revokes the caller's connected mailboxes.
 	ExternalMailService
 	// ExternalMailBindingService binds and reconnects outside accounts.
@@ -369,6 +374,8 @@ type service struct {
 	fingerprintKey []byte
 	// triage stores AI triage rows and settings; nil when repo does not implement it.
 	triage domain.MailTriageRepository
+	// signatures stores members' signatures; nil when repo does not implement it.
+	signatures domain.MailSignatureRepository
 	// triageModel classifies and drafts; settings.Triage selects it.
 	triageModel TriageModel
 	// externalMail stores external mail connections; nil when repo does not implement it.
@@ -424,6 +431,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailTriageRepository); ok {
 		triage = seam
 	}
+	var signatures domain.MailSignatureRepository
+	if seam, ok := repo.(domain.MailSignatureRepository); ok {
+		signatures = seam
+	}
 	var externalMail domain.ExternalMailRepository
 	if seam, ok := repo.(domain.ExternalMailRepository); ok {
 		externalMail = seam
@@ -447,7 +458,7 @@ func NewService(
 		background: func(run func()) { go run() },
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
 		recordAudit: auditstarter.RecordChange,
-		triage:      triage, triageModel: newTriageModel(settings.Triage),
+		triage:      triage, triageModel: newTriageModel(settings.Triage), signatures: signatures,
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
 		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),

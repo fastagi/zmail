@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -61,6 +62,8 @@ import {
   resolveMailboxErrorKey,
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
+import { useMailSignature } from '@/features/mailbox/hooks/use-mail-signature';
+import { mailSignatureBlock } from '@/features/mailbox/signature-schemas';
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -118,6 +121,29 @@ export function ComposeDialog({
   const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
   const [subject, setSubject] = useState(kept?.subject ?? draft.subject);
   const [body, setBody] = useState(kept?.body ?? draft.body ?? '');
+  // A new message starts with the writer's signature for the sending mailbox; choosing another
+  // mailbox swaps it while the signature is still the last thing written.
+  const startsBlank = !isReplyOrForward && !kept && !draft.body;
+  const signature = useMailSignature(organizationId, from.id, startsBlank);
+  const [signed, setSigned] = useState<{ mailboxId: number; block: string } | null>(null);
+  if (
+    startsBlank &&
+    signature.data &&
+    signature.data.mailbox_id === from.id &&
+    signed?.mailboxId !== from.id
+  ) {
+    const block = mailSignatureBlock(signature.data.body);
+    const previous = signed?.block ?? '';
+    setSigned({ mailboxId: from.id, block });
+    if (body === '' || (previous !== '' && body.endsWith(previous))) {
+      setBody(body.slice(0, body.length - previous.length) + block);
+    }
+  }
+  // A body holding only the signature is as untouched as an empty one.
+  const startingDraft = useMemo(
+    () => (signed?.block ? { ...draft, body: signed.block } : draft),
+    [draft, signed]
+  );
   // What is written is kept as it changes, so leaving the page any way (the global sidebar, the
   // browser's back button, a reload) keeps the draft as closing the dialog does. Sending clears it.
   const sentRef = useRef(false);
@@ -151,11 +177,11 @@ export function ComposeDialog({
               ? { attachments: lostFiles }
               : {}),
         },
-        draft
+        startingDraft
       )
     );
     writeComposeDraftFiles(draftKey, files);
-  }, [draftKey, draft, to, cc, subject, body, files, lostFiles]);
+  }, [draftKey, startingDraft, to, cc, subject, body, files, lostFiles]);
   // The forwarded message's files, carried along unless removed; read only when sending.
   const [carried, setCarried] = useState<readonly MailAttachment[]>(
     () => draft.forwarded?.attachments ?? []
@@ -242,7 +268,7 @@ export function ComposeDialog({
     const key = resolveMailboxErrorKey(failure);
     setErrorKey(key);
     if (key === 'errors.sessionEnded') {
-      writeComposeDraft(draftKey, draftToKeep(written(), draft));
+      writeComposeDraft(draftKey, draftToKeep(written(), startingDraft));
     }
     if (isStoredSendFailure(failure)) onStored?.();
   };
@@ -346,7 +372,7 @@ export function ComposeDialog({
    */
   const dismiss = () => {
     if (send.isPending) return;
-    const keep = draftToKeep(written(), draft);
+    const keep = draftToKeep(written(), startingDraft);
     writeComposeDraft(draftKey, keep);
     writeComposeDraftFiles(draftKey, files);
     if (keep)

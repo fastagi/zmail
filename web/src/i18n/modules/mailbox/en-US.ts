@@ -815,6 +815,14 @@ const messages = {
       label: 'Push to organization webhooks',
       hint: 'Sends the mail events of this mailbox (received, sent, delivered, bounced) to the webhooks of the organization. Off by default, because those endpoints see subjects and addresses.',
     },
+    signature: {
+      label: 'My signature',
+      hint: 'Added below new messages you write from this mailbox. Only you see it; you can still edit it in each message.',
+      placeholder: 'For example: Ada Lovelace, Analytical Engines Ltd.',
+      count: '{count} / {max}',
+      save: 'Save signature',
+      loadFailed: 'Your signature could not be loaded. Try again later.',
+    },
     triage: {
       label: 'AI triage for this mailbox',
       hint: 'Sorts new incoming mail of this mailbox into needs your reply, has a deadline, and just so you know. Incoming mail, with codes and secrets masked, is sent to the AI provider. Mail received before you turn it on is not sorted.',
@@ -1057,6 +1065,8 @@ const messages = {
     webhooksOff: 'Organization webhooks turned off',
     triageOn: 'AI triage turned on for this mailbox',
     triageOff: 'AI triage turned off for this mailbox',
+    signatureSaved: 'Signature saved',
+    signatureRemoved: 'Signature removed',
   },
   templates: {
     title: 'Templates',

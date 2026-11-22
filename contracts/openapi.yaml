@@ -6691,6 +6691,76 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/mailboxes/{mailbox_id}/signature:
+    get:
+      operationId: getMailSignature
+      summary: Read the caller's signature for a mailbox
+      description: Each member keeps their own plain-text signature per mailbox they may send from
+        (`send`). `body` is empty and `updated_at` null until one is saved. Never cached.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      responses:
+        '200':
+          description: The caller's signature.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailSignatureResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    put:
+      operationId: updateMailSignature
+      summary: Replace the caller's signature for a mailbox
+      description: Needs `send`. Line breaks become `\n` and trailing white space is dropped; an
+        empty result removes the signature. At most 2000 characters, without control characters
+        other than line breaks and tabs.
+      tags:
+        - Mailboxes
+      security:
+        - bearerSession: []
+      parameters:
+        - $ref: '#/components/parameters/OrganizationContext'
+        - $ref: '#/components/parameters/MailboxID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMailSignatureRequest'
+      responses:
+        '200':
+          description: The caller's signature after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MailSignatureResponse'
+        '400':
+          $ref: '#/components/responses/OrganizationContextInvalid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /v1/mailboxes/{mailbox_id}/role-assignment:
     put:
       operationId: setMailboxRoleAssignment
@@ -16312,6 +16382,48 @@ components:
       properties:
         enabled:
           type: boolean
+    UpdateMailSignatureRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - body
+      properties:
+        body:
+          type: string
+          maxLength: 2000
+    MailSignature:
+      type: object
+      additionalProperties: false
+      required:
+        - mailbox_id
+        - body
+        - updated_at
+      properties:
+        mailbox_id:
+          type: integer
+          minimum: 1
+        body:
+          type: string
+          maxLength: 2000
+        updated_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    MailSignatureResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          const: 0
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/MailSignature'
     UpdateMailTriageRequest:
       type: object
       additionalProperties: false

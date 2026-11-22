@@ -102,6 +102,7 @@ const navigation = vi.hoisted(() => {
   };
 });
 
+const signatures = vi.hoisted(() => new Map<number, string>());
 vi.mock('sonner', () => ({ toast }));
 vi.mock('next/navigation', async () => {
   const { useSyncExternalStore } = await import('react');
@@ -139,6 +140,14 @@ vi.mock('@/features/mailbox/components/mailbox-workspace', async importOriginal 
 }));
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
   useMailTemplates: () => ({ data: [] }),
+}));
+vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
+  useMailSignature: (_organizationId: number, mailboxId: number, enabled: boolean) => ({
+    data:
+      enabled && signatures.has(mailboxId)
+        ? { mailbox_id: mailboxId, body: signatures.get(mailboxId), updated_at: null }
+        : undefined,
+  }),
 }));
 vi.mock('@/features/mailbox/hooks/use-mailbox', async importOriginal => ({
   ...(await importOriginal<typeof import('@/features/mailbox/hooks/use-mailbox')>()),
@@ -1943,6 +1952,22 @@ describe('inbox keyboard shortcuts', () => {
 
     expect(openParam()).toBe('40');
     expect(rowButton('Renewal')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('a new message starts with the signature, and an untouched one keeps no draft', async () => {
+    const mailboxes = state.mailboxes.data as ReturnType<typeof mailbox>[];
+    signatures.set(mailboxes[0]!.id, 'Best,\nAda');
+    try {
+      renderRoute();
+      press('c');
+      expect(await screen.findByLabelText('Message')).toHaveValue('\n\n-- \nBest,\nAda');
+      toast.success.mockReset();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByLabelText('Subject')).toBeNull());
+      expect(toast.success).not.toHaveBeenCalled();
+    } finally {
+      signatures.clear();
+    }
   });
 
   it('closing the compose dialog keeps what was written as a draft, without asking', async () => {

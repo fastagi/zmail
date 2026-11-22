@@ -4694,6 +4694,84 @@ describe('mailbox browser route boundary', () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  describe('mail signatures in the mock', () => {
+    const as = (user: 'demo-admin' | 'demo-operator' | 'demo-member') =>
+      getSessionUser.mockResolvedValue(mockUser(user));
+    const read = (route: MailboxRoute, id: number) =>
+      route.getMailSignatureRoute(request(`/api/mailboxes/${id}/signature`), String(id));
+    const save = (route: MailboxRoute, id: number, body: unknown) =>
+      route.updateMailSignatureRoute(
+        request(`/api/mailboxes/${id}/signature`, {
+          method: 'PUT',
+          body: JSON.stringify({ body }),
+        }),
+        String(id)
+      );
+
+    beforeEach(() => {
+      process.env.MOCK_BFF_ENABLED = 'true';
+    });
+
+    it('keeps one normalized signature per member and needs send', async () => {
+      const route = await loadRoute();
+      as('demo-admin');
+      const created = await create(route, {
+        local_part: 'signed',
+        type: 'shared',
+        members: [
+          { user_id: 1, permission: 'manage' },
+          { user_id: 2, permission: 'send' },
+          { user_id: 3, permission: 'view' },
+        ],
+      });
+      const { id } = (await created.json()).data as { id: number };
+
+      const empty = await (await read(route, id)).json();
+      expect(empty.data).toEqual({ mailbox_id: id, body: '', updated_at: null });
+
+      const saved = await (await save(route, id, 'Best,\r\nAda  \n\n')).json();
+      expect(saved.data.body).toBe('Best,\nAda');
+      expect(saved.data.updated_at).toEqual(expect.any(String));
+
+      as('demo-operator');
+      expect((await (await read(route, id)).json()).data.body).toBe('');
+
+      as('demo-member');
+      expect((await read(route, id)).status).toBe(403);
+      expect((await save(route, id, 'x')).status).toBe(403);
+
+      as('demo-admin');
+      expect((await save(route, id, 'é'.repeat(2001))).status).toBe(422);
+      expect((await save(route, id, 'a\u0000b')).status).toBe(422);
+      expect((await save(route, id, 42)).status).toBe(422);
+      const cleared = await (await save(route, id, ' \n')).json();
+      expect(cleared.data).toEqual({ mailbox_id: id, body: '', updated_at: null });
+    });
+
+    it('forwards reads and writes to the API', async () => {
+      delete process.env.MOCK_BFF_ENABLED;
+      process.env.API_ADAPTER_ENABLED = 'true';
+      process.env.API_UPSTREAM_URL = 'https://api.example.com/v1';
+      cookieStore.get.mockReturnValue({ value: 'A'.repeat(43) });
+      const route = await loadRoute();
+      fetchMock.mockImplementation(async () =>
+        Response.json({
+          code: 0,
+          message: 'success',
+          data: { mailbox_id: 4, body: 'Hi', updated_at: null },
+        })
+      );
+      expect((await read(route, 4)).status).toBe(200);
+      expect((await save(route, 4, 'Hi')).status).toBe(200);
+      const calls = fetchMock.mock.calls.map(([url, init]) => {
+        const parsed = new URL(String(url));
+        return `${init?.method} ${parsed.pathname}`;
+      });
+      expect(calls).toEqual(['GET /v1/mailboxes/4/signature', 'PUT /v1/mailboxes/4/signature']);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ body: 'Hi' });
+    });
+  });
+
   describe('mailbox organize in the mock', () => {
     // Seeded organization 1: user 1 demo-admin (owner), 2 demo-operator (admin), 3 demo-member.
     const as = (user: 'demo-admin' | 'demo-operator' | 'demo-member') =>
@@ -5661,6 +5739,8 @@ async function loadRoute(): Promise<MailboxRoute> {
   contacts.mockContactStore.reset();
   const broadcasts = await import('@/features/mailbox/server/mock-broadcast-store');
   broadcasts.mockBroadcastStore.reset();
+  const signatures = await import('@/features/mailbox/server/mock-signature-store');
+  signatures.mockSignatureStore.reset();
   return route;
 }
 

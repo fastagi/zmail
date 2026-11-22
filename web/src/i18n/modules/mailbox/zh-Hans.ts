@@ -787,6 +787,14 @@ const messages = {
       label: '推送到组织 webhook',
       hint: '把这个邮箱的信件事件（收信、发出、送达、退信）推送到组织的 webhook。默认关闭，因为这些地址能看到主题和收发件人。',
     },
+    signature: {
+      label: '我的签名',
+      hint: '用这个邮箱写新邮件时会自动加在末尾。只有你自己能看到，每封邮件里仍可修改。',
+      placeholder: '例如：张三，某某科技有限公司',
+      count: '{count} / {max}',
+      save: '保存签名',
+      loadFailed: '签名加载失败，请稍后再试。',
+    },
     triage: {
       label: '这个邮箱的 AI 分流',
       hint: '把这个邮箱新收到的信分成“需要回复、有期限、只需知道”。来信会在遮罩验证码等机密后发送给 AI 服务商。开启前收到的信不会分流。',
@@ -1021,6 +1029,8 @@ const messages = {
     webhooksOff: '已关闭推送到组织 webhook',
     triageOn: '已为这个邮箱开启 AI 分流',
     triageOff: '已为这个邮箱关闭 AI 分流',
+    signatureSaved: '签名已保存',
+    signatureRemoved: '签名已删除',
   },
   templates: {
     title: '模板',

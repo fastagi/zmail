@@ -98,6 +98,8 @@ recorded but has no special rights to it. A removed member loses access on their
 | Read the AI triage setting | `GET /api/mail-triage-setting` | `GET /v1/mail-triage-setting` | `200` envelope |
 | Replace the AI triage setting | `PUT /api/mail-triage-setting` | `PUT /v1/mail-triage-setting` | `200` envelope |
 | Mailbox AI triage switch | `PUT /api/mailboxes/:id/triage-setting` | `PUT /v1/mailboxes/:mailbox_id/triage-setting` | `200` envelope |
+| Read my signature | `GET /api/mailboxes/:id/signature` | `GET /v1/mailboxes/:mailbox_id/signature` | `200` envelope |
+| Replace my signature | `PUT /api/mailboxes/:id/signature` | `PUT /v1/mailboxes/:mailbox_id/signature` | `200` envelope |
 | Set a message's triage | `PUT /api/mailboxes/:id/messages/:messageId/triage` | `PUT /v1/mailboxes/:mailbox_id/messages/:message_id/triage` | `200` envelope |
 | Draft a reply | `POST /api/mailboxes/:id/messages/:messageId/reply-drafts` | `POST /v1/mailboxes/:mailbox_id/messages/:message_id/reply-drafts` | `200` envelope |
 | List platform accounts | `GET /api/platform-accounts` | `GET /v1/platform-accounts` | Paginated envelope |
@@ -2112,6 +2114,18 @@ they may read:
   never counted.
 - `triage` counts the caller's unread inbound messages in `default` by triage category; it is `null`
   while the organization's AI triage is off, and clients hide triage when it is.
+
+### Signatures
+
+Each member keeps their own plain-text signature per mailbox they may send from (`send`);
+another member of a shared mailbox never sees it. `GET /v1/mailboxes/:mailbox_id/signature`
+answers `{ "mailbox_id": 12, "body": "Best,\nAda", "updated_at": "..." }`, with an empty `body`
+and a null `updated_at` until one is saved. `PUT` with `{ "body": "..." }` replaces it: line
+breaks become `\n`, trailing white space is dropped, and an empty result removes it. The body is
+at most 2000 characters and holds no control characters other than line breaks and tabs
+(`422 COMMON.VALIDATION_FAILED`). A viewer without `send` gets `403`; one without any access
+`404 MAILBOX.NOT_FOUND`. Neither response is cached. The API never adds the signature to mail:
+clients place it in what is written, where the writer can still change it.
 
 ### AI Triage
 

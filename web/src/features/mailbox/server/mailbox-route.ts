@@ -98,6 +98,11 @@ import {
   EXTERNAL_MAIL_USERNAME_MAX_LENGTH,
 } from '@/features/mailbox/external-mail-schemas';
 import { decodeInboxCursor, encodeInboxCursor } from '@/features/mailbox/server/inbox-cursor';
+import {
+  MAIL_SIGNATURE_MAX_LENGTH,
+  normalizeMailSignature,
+} from '@/features/mailbox/signature-schemas';
+import { mockSignatureStore } from '@/features/mailbox/server/mock-signature-store';
 import { mockTriageStore } from '@/features/mailbox/server/mock-triage-store';
 import { mailAgentGrantInput } from '@/features/mailbox/server/agent-grant-input';
 import {
@@ -230,6 +235,8 @@ const maxOrganizeBodyBytes = 4 * 1_024;
 // A 4096-character record content with JSON escaping.
 const maxDnsRecordBodyBytes = 32 * 1_024;
 const maxAccessBodyBytes = 1_024;
+/** 2000 characters of up to four UTF-8 bytes, JSON-escaped, with room for the envelope. */
+const maxSignatureBodyBytes = 16_384;
 // Twenty filters of each kind at their longest, with JSON escaping.
 const maxAgentGrantBodyBytes = 16 * 1_024;
 // Two 256 KiB bodies and 4 MiB of files as base64; JSON escaping needs headroom.
@@ -2874,7 +2881,9 @@ export async function revokeMailAgentGrantRoute(
   const mailbox = agentManagedMailbox(target, mailboxId.value);
   if (!mailbox.ok) return mailbox.response;
   const result = mockAgentGrantStore.revoke(target.organizationId, mailboxId.value, grantId.value);
-  return result.ok ? apiNoContentResponse(privateMailboxHeaders()) : agentGrantFailure(result.error);
+  return result.ok
+    ? apiNoContentResponse(privateMailboxHeaders())
+    : agentGrantFailure(result.error);
 }
 
 /** A grant's newest 100 audit rows, newest first; they hold no subject or body. */
@@ -2900,7 +2909,11 @@ export async function listMailAgentGrantActivityRoute(
   }
   const mailbox = agentManagedMailbox(target, mailboxId.value);
   if (!mailbox.ok) return mailbox.response;
-  const result = mockAgentGrantStore.activity(target.organizationId, mailboxId.value, grantId.value);
+  const result = mockAgentGrantStore.activity(
+    target.organizationId,
+    mailboxId.value,
+    grantId.value
+  );
   return result.ok ? success(result.value) : agentGrantFailure(result.error);
 }
 
@@ -4974,9 +4987,7 @@ export async function listExternalMailConnectionsRoute(request: Request): Promis
 }
 
 /** Starts a sign-in with `provider`, or reconnects the caller's `connection_id`. */
-export async function startExternalMailAuthorizationRoute(
-  request: Request
-): Promise<NextResponse> {
+export async function startExternalMailAuthorizationRoute(request: Request): Promise<NextResponse> {
   const target = await resolveMailboxMutationRoute(request);
   if (!target.available) return target.response;
   const body = await jsonObject(request, maxExternalMailBodyBytes);
@@ -5207,7 +5218,10 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
   if (smtpHost !== undefined && !credentialText(smtpHost, EXTERNAL_MAIL_HOST_MAX_LENGTH)) {
     errors.smtp_host = ['must be a server name'];
   }
-  if (smtpPort !== undefined && !(EXTERNAL_MAIL_SMTP_PORTS as readonly unknown[]).includes(smtpPort)) {
+  if (
+    smtpPort !== undefined &&
+    !(EXTERNAL_MAIL_SMTP_PORTS as readonly unknown[]).includes(smtpPort)
+  ) {
     errors.smtp_port = ['must be 465 or 587'];
   }
   if (
@@ -5490,5 +5504,76 @@ function externalConnectionNotFound(): NextResponse {
     404,
     ApiErrorCode.MAILBOX_EXTERNAL_CONNECTION_NOT_FOUND,
     'External mail connection not found'
+  );
+}
+
+/** Reads the caller's signature for a mailbox they may send from (`contracts/MAILBOXES.md`). */
+export async function getMailSignatureRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mailboxes/${mailboxId.value}/signature`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const viewer = viewerOf(target);
+  const mailbox = mockMailboxStore
+    .list(target.organizationId, viewer)
+    .find(item => item.id === mailboxId.value);
+  if (!mailbox) return mailboxNotFound();
+  if (!mailbox.access.send) return forbidden();
+  return success(mockSignatureStore.read(target.organizationId, mailbox.id, viewer.userId));
+}
+
+/** Replaces the caller's signature; an empty body removes it. */
+export async function updateMailSignatureRoute(
+  request: Request,
+  rawMailboxId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const mailboxId = parseRouteId(rawMailboxId);
+  if (!mailboxId.ok) return mailboxId.response;
+  const body = await jsonObject(request, maxSignatureBodyBytes);
+  if (!body.ok) return body.response;
+  const { body: raw } = body.value;
+  if (typeof raw !== 'string') {
+    return validationFailed({ body: ['The body field is required'] });
+  }
+  const signature = normalizeMailSignature(raw);
+  if ([...signature].length > MAIL_SIGNATURE_MAX_LENGTH) {
+    return validationFailed({ body: ['must be at most 2000 characters'] });
+  }
+  if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(signature)) {
+    return validationFailed({ body: ['must not contain control characters'] });
+  }
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'PUT',
+      path: `mailboxes/${mailboxId.value}/signature`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: { body: raw },
+      fieldMap: { body: 'body' },
+    });
+  }
+  const viewer = viewerOf(target);
+  const mailbox = mockMailboxStore
+    .list(target.organizationId, viewer)
+    .find(item => item.id === mailboxId.value);
+  if (!mailbox) return mailboxNotFound();
+  if (!mailbox.access.send) return forbidden();
+  return success(
+    mockSignatureStore.save(target.organizationId, mailbox.id, viewer.userId, signature)
   );
 }

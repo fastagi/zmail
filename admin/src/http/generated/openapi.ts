@@ -2061,6 +2061,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mailboxes/{mailbox_id}/signature": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the caller's signature for a mailbox
+         * @description Each member keeps their own plain-text signature per mailbox they may send from (`send`). `body` is empty and `updated_at` null until one is saved. Never cached.
+         */
+        get: operations["getMailSignature"];
+        /**
+         * Replace the caller's signature for a mailbox
+         * @description Needs `send`. Line breaks become `\n` and trailing white space is dropped; an empty result removes the signature. At most 2000 characters, without control characters other than line breaks and tabs.
+         */
+        put: operations["updateMailSignature"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/mailboxes/{mailbox_id}/threads/{thread_id}": {
         parameters: {
             query?: never;
@@ -5450,6 +5474,18 @@ export interface components {
             data: components["schemas"]["MailSendLaneUsageList"];
             message: string;
         };
+        MailSignature: {
+            body: string;
+            mailbox_id: number;
+            /** Format: date-time */
+            updated_at: string | null;
+        };
+        MailSignatureResponse: {
+            /** @constant */
+            code: 0;
+            data: components["schemas"]["MailSignature"];
+            message: string;
+        };
         /** @description Where the message came from. `zmail` is mail Zmail itself received or sent; any other value is the id of the connector that synced a read-only copy from a bound outside account into a connected mailbox, such as `gmail` or `outlook`. New connectors add values without a contract change, so clients render an unknown value generically. */
         MailSource: string;
         /**
@@ -6671,6 +6707,9 @@ export interface components {
             remove_label_ids?: components["schemas"]["PositiveID"][];
             /** @description The caller's own star; needs `view`. */
             starred?: boolean;
+        };
+        UpdateMailSignatureRequest: {
+            body: string;
         };
         UpdateMailTriageRequest: {
             /** @enum {string} */
@@ -13231,6 +13270,74 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationErrorResponse"] | components["schemas"]["ErrorResponse"];
                 };
             };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getMailSignature: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's signature. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSignatureResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateMailSignature: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Active organization for organization-scoped routes; verified against membership. */
+                "Organization-Id": components["parameters"]["OrganizationContext"];
+            };
+            path: {
+                /** @description Positive mailbox identifier. */
+                mailbox_id: components["parameters"]["MailboxID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMailSignatureRequest"];
+            };
+        };
+        responses: {
+            /** @description The caller's signature after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSignatureResponse"];
+                };
+            };
+            400: components["responses"]["OrganizationContextInvalid"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["RequestTooLarge"];
+            422: components["responses"]["ValidationFailed"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

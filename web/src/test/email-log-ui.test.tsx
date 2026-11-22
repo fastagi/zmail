@@ -83,6 +83,9 @@ const templateState = vi.hoisted(() => ({ data: [] as unknown[] }));
 vi.mock('@/features/mailbox/hooks/use-mail-templates', () => ({
   useMailTemplates: () => templateState,
 }));
+vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
+  useMailSignature: () => ({ data: undefined }),
+}));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
   const scoped = <T,>(organizationId: number, result: T): T => {
     state.organizationIds.push(organizationId);

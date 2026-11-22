@@ -368,6 +368,13 @@ TABLE mail_roles
   COLUMN created_at timestamp with time zone NOT NULL
   COLUMN updated_at timestamp with time zone NOT NULL
 
+TABLE mail_signatures
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN user_id bigint NOT NULL
+  COLUMN body text NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_suppressions
   COLUMN id bigint NOT NULL DEFAULT nextval('mail_suppressions_id_seq'::regclass)
   COLUMN organization_id bigint NOT NULL
@@ -959,6 +966,10 @@ CONSTRAINT mail_roles.mail_roles_name_check CHECK (((char_length(btrim((name)::t
 CONSTRAINT mail_roles.mail_roles_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT mail_roles.mail_roles_owner_user_id_fkey FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mail_roles.mail_roles_pkey PRIMARY KEY (id)
+CONSTRAINT mail_signatures.mail_signatures_body_check CHECK (((char_length(body) >= 1) AND (char_length(body) <= 2000)))
+CONSTRAINT mail_signatures.mail_signatures_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_signatures.mail_signatures_pkey PRIMARY KEY (mailbox_id, user_id)
+CONSTRAINT mail_signatures.mail_signatures_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT mail_suppressions.chk_mail_suppressions_reason CHECK (((reason)::text = ANY ((ARRAY['bounced'::character varying, 'complained'::character varying])::text[])))
 CONSTRAINT mail_suppressions.chk_mail_suppressions_source CHECK (((source)::text = ANY ((ARRAY['broadcast'::character varying, 'transactional'::character varying, 'backfill'::character varying])::text[])))
 CONSTRAINT mail_suppressions.fk_mail_suppressions_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
@@ -1259,6 +1270,8 @@ INDEX CREATE UNIQUE INDEX mail_messages_pkey ON mail_messages USING btree (id)
 INDEX CREATE UNIQUE INDEX idx_mail_roles_name ON mail_roles USING btree (organization_id, lower((name)::text))
 INDEX CREATE INDEX idx_mail_roles_owner ON mail_roles USING btree (owner_user_id) WHERE (owner_user_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_roles_pkey ON mail_roles USING btree (id)
+INDEX CREATE INDEX idx_mail_signatures_user ON mail_signatures USING btree (user_id)
+INDEX CREATE UNIQUE INDEX mail_signatures_pkey ON mail_signatures USING btree (mailbox_id, user_id)
 INDEX CREATE UNIQUE INDEX mail_suppressions_email_idx ON mail_suppressions USING btree (organization_id, email)
 INDEX CREATE INDEX mail_suppressions_list_idx ON mail_suppressions USING btree (organization_id, created_at DESC, id DESC)
 INDEX CREATE UNIQUE INDEX mail_suppressions_pkey ON mail_suppressions USING btree (id)
