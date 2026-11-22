@@ -181,6 +181,9 @@ func (r *repository) DeleteSealedHistory(ctx context.Context, mailboxID uint, be
 			Update("message_id", nil).Error; err != nil {
 			return err
 		}
+		if err := keepDeletedSends(tx, sealedMessages); err != nil {
+			return err
+		}
 		for _, dependant := range []any{&MailAttachmentPO{}, &MailMessageEventPO{}, &MailMessageReadPO{}, &MailMessageStarPO{}, &MailMessageLabelPO{}} {
 			if err := tx.Where("message_id IN (?)", sealedMessages).Delete(dependant).Error; err != nil {
 				return err

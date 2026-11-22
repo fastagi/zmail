@@ -444,6 +444,23 @@ func organizationIDOf(po *MailboxPO) uint {
 	return *po.OrganizationID
 }
 
+// MailDeletedSendPO keeps the send attempt of a message deleted for good while the attempt still
+// counts against its organization's rolling send window.
+type MailDeletedSendPO struct {
+	ID              uint      `gorm:"primaryKey"`
+	OrganizationID  uint      `gorm:"not null;index:idx_mail_deleted_sends_lane,priority:1"`
+	MailboxID       uint      `gorm:"not null;index:idx_mail_deleted_sends_mailbox,priority:1"`
+	MessageID       string    `gorm:"size:998;not null;default:'';index:idx_mail_deleted_sends_message_id"`
+	SendLane        string    `gorm:"size:16;not null;index:idx_mail_deleted_sends_lane,priority:2"`
+	SendAttemptedAt time.Time `gorm:"not null;index:idx_mail_deleted_sends_lane,priority:3;index:idx_mail_deleted_sends_mailbox,priority:2;index:idx_mail_deleted_sends_attempted"`
+	Bounced         bool      `gorm:"not null;default:false"`
+	Complained      bool      `gorm:"not null;default:false"`
+}
+
+func (MailDeletedSendPO) TableName() string {
+	return "mail_deleted_sends"
+}
+
 // MailMessageEventPO is the persistent object for one delivery event.
 type MailMessageEventPO struct {
 	ID              uint      `gorm:"primaryKey"`

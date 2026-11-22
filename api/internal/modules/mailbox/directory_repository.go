@@ -68,6 +68,17 @@ func (r *repository) ListMailboxDirectory(ctx context.Context, organizationID ui
 		Scan(&sentCounts).Error; err != nil {
 		return nil, err
 	}
+	var deletedCounts []struct {
+		MailboxID uint
+		Count     int64
+	}
+	if err := r.conn(ctx).Model(&MailDeletedSendPO{}).
+		Select("mailbox_id, COUNT(*) AS count").
+		Where("mailbox_id IN ? AND send_lane = ? AND send_attempted_at >= ?", ids, string(domain.SendLanePersonal), sentSince).
+		Group("mailbox_id").
+		Scan(&deletedCounts).Error; err != nil {
+		return nil, err
+	}
 	byID := make(map[uint]*domain.MailboxDirectoryEntry, len(entries))
 	for _, entry := range entries {
 		byID[entry.Mailbox.ID] = entry
@@ -75,8 +86,8 @@ func (r *repository) ListMailboxDirectory(ctx context.Context, organizationID ui
 	for _, count := range memberCounts {
 		byID[count.MailboxID].MemberCount = count.Count
 	}
-	for _, count := range sentCounts {
-		byID[count.MailboxID].SentLast24h = count.Count
+	for _, count := range append(sentCounts, deletedCounts...) {
+		byID[count.MailboxID].SentLast24h += count.Count
 	}
 	return entries, nil
 }

@@ -270,8 +270,11 @@ as before for the workspace.
 mailbox's personal-lane send attempts whose provider call started in the rolling 24 hours, failed ones
 included: the same predicate as the personal lane of [Lane Usage](#lane-usage). In `meta`,
 `daily_send_limit` is that lane's limit and `sent_last_24h` the organization's attempts in it, the
-figure the limit is checked against. Deleting a mailbox deletes its mail, so its attempts leave both
-figures; the rows of every page together add up to `sent_last_24h`. `mailbox_count` counts the
+figure the limit is checked against. Deleting sent mail for good, one message, the trash, sealed
+history, or a whole mailbox, frees no room: its attempts still count in both figures until they
+leave the window, and so do the bounces and complaints they drew in the sending-health check. A
+deleted mailbox has no row, so the rows of every page together add up to `sent_last_24h` less the
+attempts of mailboxes deleted in the window. `mailbox_count` counts the
 organization's live mailboxes and `max_mailboxes` is `MAILBOX_MAX_PER_ORGANIZATION`. Entries carry no
 message content, unread count, or access.
 
@@ -1924,8 +1927,8 @@ every request and never cached:
 ```
 
 `lanes` always has the three lanes in this order. `used` counts the lane's provider calls that
-started in the 24 hours before `computed_at`, failed attempts included, exactly as the limit counts
-them, and may exceed `limit` by the requests that were in flight. `waiting` is the messages waiting
+started in the 24 hours before `computed_at`, failed attempts and those of messages deleted since
+included, exactly as the limit counts them, and may exceed `limit` by the requests that were in flight. `waiting` is the messages waiting
 for room in the transactional or personal lane, and for the broadcast lane the pending recipients
 of broadcasts paused because the lane was full.
 
@@ -3136,6 +3139,7 @@ as an event. The same five-minute window applies.
 | Event already recorded | `200` with `duplicate: true` | Acknowledge |
 | Missing, stale, or wrong signature | `401 MAILBOX.INBOUND_SIGNATURE_INVALID` | Retry |
 | No outbound or transactional message has the event's message id | `404 MAILBOX.MESSAGE_NOT_FOUND` | Acknowledge |
+| The message was deleted inside the send window | `404 MAILBOX.MESSAGE_NOT_FOUND`; a bounce or complaint still counts toward the personal sending pause of [Send](#send) | Acknowledge |
 | Not a usable Email Sending event | `422 MAILBOX.DELIVERY_EVENT_INVALID` | Acknowledge |
 | No inbound secret configured | `503 MAILBOX.INBOUND_DISABLED` | Retry |
 
