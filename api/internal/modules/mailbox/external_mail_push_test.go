@@ -492,10 +492,14 @@ func TestExternalMailPushStopsWithItsConnection(t *testing.T) {
 	ctx := context.Background()
 	stoppedAndInert := func(t *testing.T, f *externalFixture, connectionID uint, id, secret string) {
 		t.Helper()
-		before := f.nextSyncAt(t, connectionID)
+		before, notified := f.nextSyncAt(t, connectionID), f.subscription(t, connectionID).LastNotifiedAt
+		f.advance(time.Second)
 		f.notify(t, domain.ExternalMailProviderGmail, fakeNotificationBody(id, secret, ""))
 		if next := f.nextSyncAt(t, connectionID); !next.Equal(before) {
 			t.Fatalf("a stopped connection's notification moved it")
+		}
+		if after := f.subscription(t, connectionID).LastNotifiedAt; (after == nil) != (notified == nil) || (after != nil && !after.Equal(*notified)) {
+			t.Fatalf("a stopped connection's notification was recorded at %v", after)
 		}
 		f.sync(t)
 		subscription := f.subscription(t, connectionID)

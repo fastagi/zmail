@@ -225,6 +225,7 @@ func TestGoogleOIDCVerifierKeySetBounds(t *testing.T) {
 	many["key-a"] = keyA
 	oversized := jwksOf(map[string]*rsa.PrivateKey{"key-a": keyA})
 	oversized = append(oversized[:len(oversized)-1], []byte(`,"padding":"`+strings.Repeat("p", jwksMaxBytes)+`"}`)...)
+	weakToken := signPushToken(t, weak, "key-a", "RS256", goodPushClaims())
 	for name, body := range map[string][]byte{
 		"oversized":     oversized,
 		"too many keys": jwksOf(many),
@@ -235,7 +236,12 @@ func TestGoogleOIDCVerifierKeySetBounds(t *testing.T) {
 		keys := newPushTestKeys(t)
 		keys.body = body
 		verifier := newGoogleOIDCVerifier(keys.server.URL, pushTestAudience, pushTestServiceAccount)
-		if err := verifier.Verify(ctx, token, pushTestNow); !errors.Is(err, ErrExternalMailPushUnauthenticated) {
+		signed := token
+		if name == "weak key" {
+			// Signed by the weak key itself, so only the key size bound refuses it.
+			signed = weakToken
+		}
+		if err := verifier.Verify(ctx, signed, pushTestNow); !errors.Is(err, ErrExternalMailPushUnauthenticated) {
 			t.Errorf("%s: Verify = %v, want unauthenticated", name, err)
 		}
 	}
