@@ -96,21 +96,15 @@ type ExternalMailPurgeResult struct {
 	Completed       bool
 }
 
-// ownExternalMailConnection returns a connection of the viewer's own. Anyone else, managers
-// included, is answered not found. withSync also requires the feature to be on; deleting one's
-// own revoked copies does not, so turning the providers off never strands them.
+// ownExternalMailConnection returns a connection the viewer manages: their own account, or a
+// shared connection of a mailbox whose members they manage. Anyone else, managers of another member's
+// account included, is answered not found. withSync also requires the feature to be on; deleting
+// revoked copies does not, so turning the providers off never strands them.
 func (s *service) ownExternalMailConnection(ctx context.Context, viewer domain.OrganizationContext, id uint, withSync bool) (*domain.ExternalMailConnection, error) {
 	if s.externalMail == nil || (withSync && !s.externalMailAvailable()) {
 		return nil, ErrExternalMailConnectionNotFound
 	}
-	connection, err := s.externalMail.FindExternalMailConnection(ctx, viewer.OrganizationID, id)
-	if err != nil {
-		return nil, err
-	}
-	if connection.OwnerUserID == nil || viewer.UserID == 0 || *connection.OwnerUserID != viewer.UserID {
-		return nil, ErrExternalMailConnectionNotFound
-	}
-	return connection, nil
+	return s.managedConnection(ctx, viewer, id)
 }
 
 func (s *service) ListExternalMailSyncRuns(ctx context.Context, viewer domain.OrganizationContext, id uint) ([]*domain.ExternalMailSyncRun, error) {

@@ -39,6 +39,11 @@ type ExternalMailCredentialsInput struct {
 	Password string
 	// BackfillDays is how far back a new binding first reads; zero takes the default.
 	BackfillDays int
+	// ConnectionID restricts the binding to restoring that connection: the viewer's own, or a
+	// shared one they manage. Nil binds a new account or restores the viewer's own by address.
+	ConnectionID *uint
+	// Sharing binds a team account into a new shared connected mailbox, as for a sign-in.
+	Sharing *domain.ExternalMailSharing
 }
 
 // externalCredentialLimits bound password bindings per member and per organization.
@@ -101,6 +106,27 @@ func (s *service) BindExternalMailCredentials(ctx context.Context, viewer domain
 	if backfill < 1 || backfill > domain.MaxExternalMailBackfillDays {
 		return nil, false, ErrExternalMailAuthorizationInvalid
 	}
+	if input.Sharing != nil && input.ConnectionID != nil {
+		return nil, false, ErrExternalMailAuthorizationInvalid
+	}
+	// Who may bind what is settled before an attempt is counted or the server is contacted.
+	binding := externalBinding{provider: input.Provider, backfillDays: backfill, connectionID: input.ConnectionID}
+	if input.Sharing != nil {
+		var err error
+		if binding.sharing, err = s.checkSharing(ctx, viewer, input.Sharing); err != nil {
+			return nil, false, err
+		}
+	}
+	if input.ConnectionID != nil {
+		target, err := s.managedConnection(ctx, viewer, *input.ConnectionID)
+		if err != nil {
+			return nil, false, err
+		}
+		if target.Provider != input.Provider {
+			return nil, false, ErrExternalMailAuthorizationInvalid
+		}
+		binding.reconnectShared = target.Shared
+	}
 	if err := s.externalCredentialLimits.take(ctx, viewer); err != nil {
 		return nil, false, err
 	}
@@ -126,7 +152,6 @@ func (s *service) BindExternalMailCredentials(ctx context.Context, viewer domain
 			slog.String("provider", string(input.Provider)), slog.String("outcome", outcome))
 		return nil, false, err
 	}
-	return s.saveExternalBinding(ctx, viewer, connector, token, externalBinding{
-		provider: input.Provider, address: account.Address, backfillDays: backfill,
-	})
+	binding.address = account.Address
+	return s.saveExternalBinding(ctx, viewer, connector, token, binding)
 }

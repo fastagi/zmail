@@ -7,6 +7,7 @@ import {
   nonnegative,
   nullable,
   number,
+  optional,
   regex,
   string,
   strictObject,
@@ -47,12 +48,16 @@ export const externalMailConnectorListSchema = array(externalMailConnectorSchema
 export const EXTERNAL_MAIL_CONNECTION_STATUSES = ['active', 'needs_reconnect', 'revoked'] as const;
 export const externalMailConnectionStatusSchema = zodEnum(EXTERNAL_MAIL_CONNECTION_STATUSES);
 
-/** One of the caller's bound accounts; it never carries a token. */
+/**
+ * One of the caller's bound accounts, or a shared connection they manage; it never carries a token.
+ * `shared` is optional so an API from before shared connected mailboxes still parses.
+ */
 export const externalMailConnectionSchema = strictObject({
   id: safeIdSchema,
   provider: externalMailConnectorIdSchema,
   account_address: string(),
   mailbox_id: safeIdSchema,
+  shared: optional(boolean()),
   status: externalMailConnectionStatusSchema,
   last_synced_at: nullable(timestampSchema),
   last_error_code: nullable(string()),
@@ -113,11 +118,19 @@ export const externalMailPurgeSchema = strictObject({
   completed: boolean(),
 });
 
-/** One row of the owners' and admins' connection directory: never the full address or mail. */
+/**
+ * One row of the owners' and admins' connection directory: never mail. A member's own account
+ * shows only its masked address; a shared connection is the organization's team account and also
+ * shows its full address and mailbox. The shared fields are optional so an API from before shared
+ * connected mailboxes still parses.
+ */
 export const externalMailDirectoryEntrySchema = strictObject({
   id: safeIdSchema,
   provider: externalMailConnectorIdSchema,
   status: externalMailConnectionStatusSchema,
+  shared: optional(boolean()),
+  account_address: optional(nullable(string())),
+  mailbox_id: optional(nullable(safeIdSchema)),
   masked_account_address: string(),
   owner_user_id: nullable(safeIdSchema),
   owner_display_name: nullable(string()),
@@ -159,6 +172,8 @@ export interface ExternalMailDirectoryPage {
  */
 export interface BindExternalMailCredentialsInput {
   provider: string;
+  /** Restores that connection (the caller's own, or a shared one they manage). */
+  connection_id?: number;
   host: string;
   port: number;
   username: string;

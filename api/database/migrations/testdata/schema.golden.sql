@@ -84,6 +84,7 @@ TABLE external_mail_authorizations
   COLUMN backfill_days smallint NOT NULL DEFAULT 14
   COLUMN expires_at timestamp with time zone NOT NULL
   COLUMN created_at timestamp with time zone NOT NULL
+  COLUMN sharing jsonb
 
 TABLE external_mail_connections
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_connections_id_seq'::regclass)
@@ -105,6 +106,8 @@ TABLE external_mail_connections
   COLUMN consecutive_more smallint NOT NULL DEFAULT 0
   COLUMN revoked_at timestamp with time zone
   COLUMN purge_retry_at timestamp with time zone
+  COLUMN shared boolean NOT NULL DEFAULT false
+  COLUMN bound_by_user_id bigint
 
 TABLE external_mail_sync_runs
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_sync_runs_id_seq'::regclass)
@@ -843,7 +846,9 @@ CONSTRAINT external_mail_authorizations.external_mail_authorizations_provider_ch
 CONSTRAINT external_mail_authorizations.external_mail_authorizations_state_hash_key UNIQUE (state_hash)
 CONSTRAINT external_mail_authorizations.external_mail_authorizations_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 CONSTRAINT external_mail_connections.chk_external_mail_connections_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
+CONSTRAINT external_mail_connections.chk_external_mail_connections_shared CHECK (((NOT shared) OR (owner_user_id IS NULL)))
 CONSTRAINT external_mail_connections.external_mail_connections_backfill_days_check CHECK (((backfill_days >= 1) AND (backfill_days <= 90)))
+CONSTRAINT external_mail_connections.external_mail_connections_bound_by_user_id_fkey FOREIGN KEY (bound_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT external_mail_connections.external_mail_connections_consecutive_failures_check CHECK ((consecutive_failures >= 0))
 CONSTRAINT external_mail_connections.external_mail_connections_consecutive_more_check CHECK ((consecutive_more >= 0))
 CONSTRAINT external_mail_connections.external_mail_connections_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
@@ -1145,6 +1150,7 @@ INDEX CREATE UNIQUE INDEX idx_external_mail_connections_account ON external_mail
 INDEX CREATE INDEX idx_external_mail_connections_due ON external_mail_connections USING btree (provider, next_sync_at, id) WHERE ((status)::text = 'active'::text)
 INDEX CREATE INDEX idx_external_mail_connections_owner ON external_mail_connections USING btree (organization_id, owner_user_id)
 INDEX CREATE INDEX idx_external_mail_connections_revoked ON external_mail_connections USING btree (revoked_at, id) WHERE ((status)::text = 'revoked'::text)
+INDEX CREATE INDEX idx_external_mail_connections_shared ON external_mail_connections USING btree (organization_id) WHERE shared
 INDEX CREATE UNIQUE INDEX external_mail_sync_runs_pkey ON external_mail_sync_runs USING btree (id)
 INDEX CREATE INDEX idx_external_mail_sync_runs_connection ON external_mail_sync_runs USING btree (connection_id, id DESC)
 INDEX CREATE INDEX idx_external_mail_sync_runs_started ON external_mail_sync_runs USING btree (started_at, id)

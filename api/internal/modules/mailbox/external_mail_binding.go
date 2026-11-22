@@ -41,6 +41,9 @@ type ExternalMailAuthorizationInput struct {
 	ConnectionID *uint
 	// BackfillDays is how far back a new binding first reads; zero takes the default.
 	BackfillDays int
+	// Sharing binds a team account into a new shared connected mailbox; nil binds the viewer's own.
+	// Only owners and admins may, and never together with ConnectionID.
+	Sharing *domain.ExternalMailSharing
 }
 
 // ExternalMailAuthorizationStart is where to send the member's browser.
@@ -69,15 +72,24 @@ func (s *service) StartExternalMailAuthorization(ctx context.Context, viewer dom
 	if backfill < 1 || backfill > domain.MaxExternalMailBackfillDays {
 		return ExternalMailAuthorizationStart{}, ErrExternalMailAuthorizationInvalid
 	}
-	provider := input.Provider
-	if input.ConnectionID != nil {
-		connection, err := s.externalMail.FindExternalMailConnection(ctx, viewer.OrganizationID, *input.ConnectionID)
+	if input.Sharing != nil && input.ConnectionID != nil {
+		return ExternalMailAuthorizationStart{}, ErrExternalMailAuthorizationInvalid
+	}
+	var sharing *domain.ExternalMailSharing
+	if input.Sharing != nil {
+		checked, err := s.checkSharing(ctx, viewer, input.Sharing)
 		if err != nil {
 			return ExternalMailAuthorizationStart{}, err
 		}
-		// Only the member who bound an account signs in to it again.
-		if connection.OwnerUserID == nil || *connection.OwnerUserID != viewer.UserID {
-			return ExternalMailAuthorizationStart{}, ErrExternalMailConnectionNotFound
+		sharing = normalizedSharing(checked)
+	}
+	provider := input.Provider
+	if input.ConnectionID != nil {
+		// Only the member whose own account it is, or whoever manages a shared connection, signs
+		// in to it again.
+		connection, err := s.managedConnection(ctx, viewer, *input.ConnectionID)
+		if err != nil {
+			return ExternalMailAuthorizationStart{}, err
 		}
 		if provider != "" && provider != connection.Provider {
 			return ExternalMailAuthorizationStart{}, ErrExternalMailAuthorizationInvalid
@@ -104,7 +116,7 @@ func (s *service) StartExternalMailAuthorization(ctx context.Context, viewer dom
 	now := s.now().UTC()
 	authorization := &domain.ExternalMailAuthorization{
 		OrganizationID: viewer.OrganizationID, UserID: viewer.UserID, Provider: provider,
-		StateHash: hashState(state), SealedVerifier: sealedVerifier, ConnectionID: input.ConnectionID,
+		StateHash: hashState(state), SealedVerifier: sealedVerifier, ConnectionID: input.ConnectionID, Sharing: sharing,
 		BackfillDays: backfill, ExpiresAt: now.Add(domain.ExternalMailAuthorizationTTL), CreatedAt: now,
 	}
 	if err := s.externalMail.CreateExternalMailAuthorization(ctx, authorization); err != nil {
@@ -112,7 +124,8 @@ func (s *service) StartExternalMailAuthorization(ctx context.Context, viewer dom
 	}
 	slog.InfoContext(ctx, "external_mail.authorization_started",
 		slog.Uint64("organization_id", uint64(viewer.OrganizationID)), slog.Uint64("user_id", uint64(viewer.UserID)),
-		slog.String("provider", string(provider)), slog.Bool("reconnect", input.ConnectionID != nil))
+		slog.String("provider", string(provider)), slog.Bool("reconnect", input.ConnectionID != nil),
+		slog.Bool("shared", sharing != nil))
 	return ExternalMailAuthorizationStart{
 		AuthorizationURL: connector.Source.AuthURL(ExternalMailAuthRequest{
 			State: state, CodeChallenge: pkceChallenge(verifier), RedirectURI: s.settings.ExternalMail.RedirectURL,
@@ -141,6 +154,26 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 	if !registered {
 		return nil, false, ErrExternalMailProviderUnavailable
 	}
+	// The role and the members are checked again before the code is exchanged, so a refusal never
+	// leaves a grant behind.
+	binding := externalBinding{
+		provider: authorization.Provider, backfillDays: authorization.BackfillDays, connectionID: authorization.ConnectionID,
+	}
+	if authorization.Sharing != nil {
+		if binding.sharing, err = s.checkSharing(ctx, viewer, authorization.Sharing); err != nil {
+			return nil, false, err
+		}
+	}
+	if authorization.ConnectionID != nil {
+		target, findErr := s.externalMail.FindExternalMailConnection(ctx, viewer.OrganizationID, *authorization.ConnectionID)
+		if findErr == nil && target.Shared {
+			// Whoever reconnects a shared connection must still manage it.
+			if _, err = s.managedConnection(ctx, viewer, target.ID); err != nil {
+				return nil, false, err
+			}
+			binding.reconnectShared = true
+		}
+	}
 	verifier, err := s.encryptor.DecryptString(authorization.SealedVerifier)
 	if err != nil {
 		return nil, false, ErrExternalMailAuthorizationNotFound
@@ -154,10 +187,8 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 		}
 		return nil, false, err
 	}
-	return s.saveExternalBinding(ctx, viewer, connector, token, externalBinding{
-		provider: authorization.Provider, address: account.Address, backfillDays: authorization.BackfillDays,
-		connectionID: authorization.ConnectionID,
-	})
+	binding.address = account.Address
+	return s.saveExternalBinding(ctx, viewer, connector, token, binding)
 }
 
 // externalBinding is a grant a provider just issued, to be stored for the viewer.
@@ -165,8 +196,13 @@ type externalBinding struct {
 	provider     domain.ExternalMailProvider
 	address      string
 	backfillDays int
-	// connectionID restricts the binding to restoring that connection of the viewer.
+	// connectionID restricts the binding to restoring that connection, the viewer's own or a
+	// shared one they manage.
 	connectionID *uint
+	// reconnectShared marks a reconnect of a shared connection.
+	reconnectShared bool
+	// sharing binds a new account into a shared connected mailbox; nil binds the viewer's own.
+	sharing *sharedBinding
 }
 
 // saveExternalBinding stores a fresh grant: a new account gets a private read-only connected
@@ -192,17 +228,45 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 		if lockErr := s.externalMail.LockExternalMailBindings(tx, viewer.OrganizationID, viewer.UserID); lockErr != nil {
 			return lockErr
 		}
+		// Shared bindings and reconnects of the organization run one at a time too, always after
+		// the member's own lock, so its limit is counted against committed rows as well.
+		if binding.sharing != nil || binding.connectionID != nil {
+			if lockErr := s.externalMail.LockSharedExternalMailBindings(tx, viewer.OrganizationID); lockErr != nil {
+				return lockErr
+			}
+		}
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, binding.provider, address)
 		switch {
 		case errors.Is(findErr, ErrExternalMailConnectionNotFound):
 			if binding.connectionID != nil {
 				return ErrExternalMailAccountMismatch
 			}
-			connection, findErr = s.bindExternalAccount(tx, viewer, binding, sealed)
+			connection, findErr = s.bindAccount(tx, viewer, binding, sealed)
 			created = findErr == nil
 			return findErr
 		case findErr != nil:
 			return findErr
+		}
+		if existing.Shared {
+			connection, created, findErr = s.saveOverShared(tx, viewer, connector, token, binding, existing, sealed)
+			return findErr
+		}
+		if binding.sharing != nil {
+			// A member's own account is never captured as the team's while it is live; once revoked
+			// it is freed as for any other binder.
+			if existing.Status != domain.ExternalMailStatusRevoked {
+				return ErrExternalMailAccountTaken
+			}
+			if purgeErr := s.purgeForRebind(tx, viewer, existing); purgeErr != nil {
+				return purgeErr
+			}
+			connection, findErr = s.bindSharedAccount(tx, viewer, binding, sealed)
+			created = findErr == nil
+			return findErr
+		}
+		if binding.connectionID != nil && binding.reconnectShared {
+			// A shared connection's reconnect signed in to a member's own account.
+			return ErrExternalMailAccountMismatch
 		}
 		if existing.OwnerUserID == nil || *existing.OwnerUserID != viewer.UserID {
 			if existing.Status != domain.ExternalMailStatusRevoked || binding.connectionID != nil {
@@ -244,7 +308,7 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 	}
 	if err != nil {
 		if errors.Is(err, ErrExternalMailAccountMismatch) || errors.Is(err, ErrExternalMailAccountTaken) ||
-			errors.Is(err, ErrExternalMailConnectionLimit) {
+			errors.Is(err, ErrExternalMailConnectionLimit) || errors.Is(err, ErrExternalMailConnectionNotFound) {
 			// The grant is not kept, so it is handed back to the provider.
 			if revokeErr := connector.Source.Revoke(ctx, token); revokeErr != nil {
 				slog.WarnContext(ctx, "external_mail.provider_revoke_failed", slog.String("provider", string(binding.provider)))
@@ -258,7 +322,8 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 	}
 	slog.InfoContext(ctx, event,
 		slog.Uint64("organization_id", uint64(viewer.OrganizationID)), slog.Uint64("user_id", uint64(viewer.UserID)),
-		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
+		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
+		slog.Bool("shared", connection.Shared))
 	return connection, created, nil
 }
 
@@ -315,7 +380,7 @@ func (s *service) bindExternalAccount(tx context.Context, viewer domain.Organiza
 	}
 	connection := &domain.ExternalMailConnection{
 		OrganizationID: viewer.OrganizationID, MailboxID: mailbox.ID, Provider: binding.provider,
-		AccountAddress: binding.address, OwnerUserID: &owner, EncryptedRefreshToken: sealed,
+		AccountAddress: binding.address, OwnerUserID: &owner, BoundByUserID: &owner, EncryptedRefreshToken: sealed,
 		BackfillDays: binding.backfillDays, NextSyncAt: s.now().UTC(),
 	}
 	if err := s.externalMail.CreateExternalMailConnection(tx, connection); err != nil {
