@@ -1169,8 +1169,10 @@ describe('mailbox organize service boundary', () => {
       50
     );
     await mailboxService.listInbox(7, { view: 'all', roleId: 3, q: '  invoice  ', tz: 'UTC' });
+    await mailboxService.listInbox(7, { view: 'all', assignment: 'unassigned', tz: 'UTC' });
 
     expect(getEnvelope.mock.calls.map(call => call[0])).toEqual([
+      '/inbox-messages',
       '/inbox-messages',
       '/inbox-messages',
       '/inbox-messages',
@@ -1190,6 +1192,7 @@ describe('mailbox organize service boundary', () => {
         per_page: 50,
       },
       { view: 'all', role_id: 3, q: 'invoice', tz: 'UTC' },
+      { view: 'all', assignment: 'unassigned', tz: 'UTC' },
     ]);
   });
 

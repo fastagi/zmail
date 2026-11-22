@@ -1090,6 +1090,28 @@ describe('unified inbox', () => {
     expect(screen.getByRole('tab', { name: /^Unread/u })).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('assignment tabs request shared conversations by owner and state', () => {
+    renderRoute();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Assigned to me' }));
+    expect(new URLSearchParams(window.location.search).get('tab')).toBe('mine');
+    expect(state.inboxCalls.at(-1)).toEqual({
+      view: 'all',
+      group: 'thread',
+      assignment: 'mine',
+      tz: 'UTC',
+    });
+    expect(screen.getByRole('tab', { name: 'Assigned to me' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    fireEvent.click(screen.getByRole('tab', { name: 'Done' }));
+    expect(state.inboxCalls.at(-1)).toMatchObject({ assignment: 'closed' });
+    fireEvent.click(screen.getByRole('tab', { name: /^All/u }));
+    expect(new URLSearchParams(window.location.search).get('tab')).toBeNull();
+    expect(state.inboxCalls.at(-1)).not.toHaveProperty('assignment');
+  });
+
   it('search requests view=all with q and shows the too-broad notice on 422', () => {
     window.history.replaceState(null, '', '/console/mailboxes?view=today');
     state.reject = filters =>

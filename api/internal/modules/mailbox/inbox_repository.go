@@ -264,7 +264,31 @@ func inboxFilters(query domain.InboxQuery, args map[string]any) string {
 	if query.HasAttachments != nil {
 		filters += " AND " + negatedIf("mail_messages.attachment_count > 0", !*query.HasAttachments)
 	}
-	return filters
+	return filters + inboxAssignmentFilter(query, args)
+}
+
+// threadAssignmentWhere matches the assignment row of a message's conversation; a conversation
+// without one is open and unassigned.
+const threadAssignmentWhere = `SELECT 1 FROM mail_thread_assignments
+	WHERE mail_thread_assignments.mailbox_id = mail_messages.mailbox_id
+	  AND mail_thread_assignments.thread_id = mail_messages.thread_id`
+
+// inboxAssignmentFilter keeps the conversations in the query's assignment state, binding its
+// arguments.
+func inboxAssignmentFilter(query domain.InboxQuery, args map[string]any) string {
+	const closed = ` AND mail_thread_assignments.status = 'closed'`
+	switch query.Assignment {
+	case domain.InboxAssignmentMine:
+		args["assignee"] = query.ViewerUserID
+		return " AND EXISTS (" + threadAssignmentWhere + ` AND mail_thread_assignments.assignee_user_id = @assignee
+		  AND mail_thread_assignments.status = 'open')`
+	case domain.InboxAssignmentUnassigned:
+		return " AND NOT EXISTS (" + threadAssignmentWhere + ` AND (mail_thread_assignments.assignee_user_id IS NOT NULL
+		  OR mail_thread_assignments.status = 'closed'))`
+	case domain.InboxAssignmentClosed:
+		return " AND EXISTS (" + threadAssignmentWhere + closed + ")"
+	}
+	return ""
 }
 
 // inboxTriageFilter keeps the messages of box with a visible triage result of one of the query's

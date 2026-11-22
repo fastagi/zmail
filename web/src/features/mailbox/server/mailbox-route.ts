@@ -20,6 +20,7 @@ import { getSessionUser } from '@/features/auth/server/session';
 import type { AuthUser } from '@/features/auth/types';
 import {
   INBOX_TIME_ZONE_MAX_LENGTH,
+  INBOX_ASSIGNMENTS,
   INBOX_VIEWS,
   MAILBOX_DISPLAY_NAME_MAX_LENGTH,
   MAILBOX_LOCAL_PART_MAX_LENGTH,
@@ -164,6 +165,7 @@ import type { OrganizationContext } from '@/features/organization/types';
 import type {
   CreateMailboxInput,
   Mailbox,
+  InboxAssignment,
   InboxView,
   MailDirection,
   MailLogFilters,
@@ -1112,8 +1114,8 @@ export async function listInboxMessagesRoute(request: Request): Promise<NextResp
       searchParams: query.value.forward,
     });
   }
-  const { triage } = query.value;
-  if (!triage) {
+  const { triage, assignment } = query.value;
+  if (!triage && !assignment) {
     const page = mockMailboxStore.listInbox(
       target.organizationId,
       viewerOf(target),
@@ -1126,16 +1128,30 @@ export async function listInboxMessagesRoute(request: Request): Promise<NextResp
       privateMailboxHeaders()
     );
   }
-  // The triage filter applies before paging: every row after the cursor, then the page of matches.
+  // The triage and assignment filters apply before paging: every row after the cursor, then the
+  // page of matches. A conversation never assigned is open and unassigned.
   const { perPage } = query.value.mock;
   const all = mockMailboxStore.listInbox(target.organizationId, viewerOf(target), {
     ...query.value.mock,
     perPage: Number.MAX_SAFE_INTEGER - 1,
   });
   if (!all.ok) return organizeFailure(all);
-  const matching = all.value.items.filter(item =>
-    mockTriageStore.matches(target.organizationId, item, triage)
-  );
+  const userId = target.context.user_id;
+  const matching = all.value.items.filter(item => {
+    if (triage && !mockTriageStore.matches(target.organizationId, item, triage)) return false;
+    if (!assignment) return true;
+    const state = mockAssignmentStore.read(
+      target.organizationId,
+      item.mailbox_id,
+      item.thread_id,
+      []
+    );
+    if (assignment === 'closed') return state.status === 'closed';
+    if (state.status !== 'open') return false;
+    return assignment === 'mine'
+      ? state.assignee_user_id === userId
+      : state.assignee_user_id === null;
+  });
   const items = mockTriageStore.decorate(target.organizationId, matching.slice(0, perPage));
   const hasMore = matching.length > perPage;
   const last = items.at(-1);
@@ -4031,6 +4047,7 @@ const inboxParameters = [
   'q',
   'group',
   'triage',
+  'assignment',
   'tz',
   'cursor',
   'per_page',
@@ -4044,9 +4061,12 @@ const integerPattern = /^[+-]?\d+$/u;
  * combination outside the rules is invalid input; an integer `per_page` out of range is clamped.
  * Unknown parameters are dropped. Answers the query to forward and the query for the mock.
  */
-function parseInboxQuery(
-  query: URLSearchParams
-): Parsed<{ forward: URLSearchParams; mock: MockInboxQuery; triage?: MailTriageCategory[] }> {
+function parseInboxQuery(query: URLSearchParams): Parsed<{
+  forward: URLSearchParams;
+  mock: MockInboxQuery;
+  triage?: MailTriageCategory[];
+  assignment?: InboxAssignment;
+}> {
   const invalid = (message: string) => ({ ok: false as const, response: invalidInput(message) });
   if (query.has('page')) return invalid('Use cursor instead of page');
   for (const name of inboxParameters) {
@@ -4119,6 +4139,13 @@ function parseInboxQuery(
     triage = categories as MailTriageCategory[];
     forward.set('triage', rawTriage);
   }
+  const assignment = value('assignment');
+  if (assignment !== null) {
+    if (!isOneOf<InboxAssignment>(INBOX_ASSIGNMENTS, assignment)) {
+      return invalid('Invalid assignment filter');
+    }
+    forward.set('assignment', assignment);
+  }
   const tz = value('tz');
   if (tz !== null) {
     if (!isTimeZone(tz)) return invalid('Invalid time zone');
@@ -4155,7 +4182,15 @@ function parseInboxQuery(
   ) {
     return invalid('Triage needs view all or today, without grouping or search');
   }
-  return { ok: true, value: { forward, mock, ...(triage ? { triage } : {}) } };
+  return {
+    ok: true,
+    value: {
+      forward,
+      mock,
+      ...(triage ? { triage } : {}),
+      ...(assignment === null ? {} : { assignment }),
+    },
+  };
 }
 
 /** An IANA zone name; `Local` and the empty name are never a viewer's zone. */
@@ -5633,7 +5668,10 @@ export async function updateMailThreadAssignmentRoute(
     fields.assignee_user_id = ['must be a user id or null'];
   }
   if (Object.keys(fields).length > 0) return validationFailed(fields);
-  const input = { assignee_user_id: assignee as number | null, status: status as 'open' | 'closed' };
+  const input = {
+    assignee_user_id: assignee as number | null,
+    status: status as 'open' | 'closed',
+  };
 
   if (target.backend === 'go-api') {
     return forwardAuthenticatedGoApi(request, {
@@ -5677,12 +5715,8 @@ function mockAssignableThread(
   mailboxId: number,
   threadId: number,
   viewer: MailboxViewer
-):
-  | { ok: true; canSend: boolean; assignable: number[] }
-  | { ok: false; response: NextResponse } {
-  const mailbox = mockMailboxStore
-    .list(organizationId, viewer)
-    .find(item => item.id === mailboxId);
+): { ok: true; canSend: boolean; assignable: number[] } | { ok: false; response: NextResponse } {
+  const mailbox = mockMailboxStore.list(organizationId, viewer).find(item => item.id === mailboxId);
   if (!mailbox) return { ok: false, response: mailboxNotFound() };
   if (mailbox.type !== 'shared' || mailbox.origin === 'connected') {
     return {
@@ -5746,11 +5780,7 @@ export async function createMailThreadNoteRoute(
   if (!parsed.ok) return parsed.response;
   const raw = parsed.value.body;
   const body = typeof raw === 'string' ? raw.replace(/\r\n/g, '\n').trim() : '';
-  if (
-    !body ||
-    [...body].length > 2000 ||
-    /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(body)
-  ) {
+  if (!body || [...body].length > 2000 || /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/.test(body)) {
     return validationFailed({ body: ['must be 1 to 2000 characters without control characters'] });
   }
   if (target.backend === 'go-api') {

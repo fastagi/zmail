@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -21,8 +22,10 @@ import { TriageReasonLine } from '@/features/mailbox/components/inbox-triage-rea
 import { LabelDot } from '@/features/mailbox/components/mailbox-sidebar';
 import { knownTimeZone } from '@/features/mailbox/components/mail-shared';
 import { rowUnread } from '@/features/mailbox/components/message-rows';
-import { MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
-import type { InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
+import { INBOX_ASSIGNMENTS, MAIL_SEARCH_MAX_LENGTH } from '@/features/mailbox/schemas';
+import type { InboxAssignment, InboxItem, InboxPage, MailRole } from '@/features/mailbox/types';
+
+type ListTab = 'all' | 'unread' | 'attachments' | InboxAssignment;
 import { useT } from '@/i18n';
 import { cn } from '@/utils';
 
@@ -80,6 +83,8 @@ export function InboxListHeader({
   onUnreadChange,
   attachments = false,
   onAttachmentsChange,
+  assignment = null,
+  onAssignmentChange,
   q,
   onSearch,
   mailboxHref = null,
@@ -100,6 +105,9 @@ export function InboxListHeader({
   /** The With attachments tab, shown when `onAttachmentsChange` is given. */
   attachments?: boolean;
   onAttachmentsChange?: (attachments: boolean) => void;
+  /** The assignment tabs of shared conversations, shown when `onAssignmentChange` is given. */
+  assignment?: InboxAssignment | null;
+  onAssignmentChange?: (assignment: InboxAssignment | null) => void;
   q: string;
   onSearch: (q: string) => void;
   mailboxHref?: string | null;
@@ -131,20 +139,22 @@ export function InboxListHeader({
     event.preventDefault();
     change('');
   };
-  const selectTab = (value: 'all' | 'unread' | 'attachments') => {
+  const selectTab = (value: ListTab) => {
     if (value === 'attachments') onAttachmentsChange?.(true);
     else if (value === 'unread') onUnreadChange(true);
+    else if (value !== 'all') onAssignmentChange?.(value);
+    else if (assignment) onAssignmentChange?.(null);
     else if (attachments) onAttachmentsChange?.(false);
     else onUnreadChange(false);
   };
-  const current = attachments ? 'attachments' : unread ? 'unread' : 'all';
-  const tab = (value: 'all' | 'unread' | 'attachments', label: string, count?: number) => (
+  const current: ListTab = assignment ?? (attachments ? 'attachments' : unread ? 'unread' : 'all');
+  const tab = (value: ListTab, label: string, count?: number) => (
     <button
       type="button"
       role="tab"
       aria-selected={current === value}
       className={cn(
-        '-mb-px border-b-2 pb-2.5 transition-colors focus-ring motion-reduce:transition-none',
+        '-mb-px shrink-0 border-b-2 pb-2.5 whitespace-nowrap transition-colors focus-ring motion-reduce:transition-none',
         current === value
           ? 'border-text-main font-semibold text-text-main'
           : 'border-transparent text-text-muted hover:text-text-main'
@@ -254,11 +264,16 @@ export function InboxListHeader({
       <div
         role="tablist"
         aria-label={t('inbox.tabs.label')}
-        className="mt-3.5 flex gap-[18px] border-b border-border-subtle"
+        className="mt-3.5 flex gap-[18px] overflow-x-auto border-b border-border-subtle [scrollbar-width:none]"
       >
         {tab('all', t('inbox.tabs.all'))}
         {tab('unread', t('inbox.tabs.unread'), unreadCount)}
         {onAttachmentsChange ? tab('attachments', t('inbox.tabs.attachments')) : null}
+        {onAssignmentChange
+          ? INBOX_ASSIGNMENTS.map(value => (
+              <Fragment key={value}>{tab(value, t(`inbox.tabs.${value}`))}</Fragment>
+            ))
+          : null}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import type { z } from 'zod/mini';
 import {
   INBOX_CURSOR_MAX_LENGTH,
   INBOX_TIME_ZONE_MAX_LENGTH,
+  INBOX_ASSIGNMENTS,
   INBOX_VIEWS,
   inboxCountsSchema,
   inboxPageEnvelopeSchema,
@@ -563,12 +564,29 @@ export const mailboxService = {
    */
   async listInbox(
     organizationId: number,
-    { view, roleId, mailboxId, unread, hasAttachments, q, group, triage, tz }: InboxFilters,
+    {
+      view,
+      roleId,
+      mailboxId,
+      unread,
+      hasAttachments,
+      q,
+      group,
+      triage,
+      assignment,
+      tz,
+    }: InboxFilters,
     cursor?: string,
     perPage?: number
   ): Promise<InboxPage> {
     const headers = organizationHeaders(organizationId);
     if (!(INBOX_VIEWS as readonly string[]).includes(view)) throw invalidResponse();
+    if (
+      assignment !== undefined &&
+      !(INBOX_ASSIGNMENTS as readonly string[]).includes(assignment)
+    ) {
+      throw invalidResponse();
+    }
     if (roleId !== undefined && roleId !== 'none') validId(roleId);
     if (mailboxId !== undefined) validId(mailboxId);
     if (
@@ -604,6 +622,7 @@ export const mailboxService = {
         ...(query === undefined ? {} : { q: query }),
         ...(group ? { group } : {}),
         ...(triage === undefined ? {} : { triage: triage.join(',') }),
+        ...(assignment === undefined ? {} : { assignment }),
         tz,
         ...(cursor === undefined ? {} : { cursor }),
         ...(perPage === undefined ? {} : { per_page: perPage }),

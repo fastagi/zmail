@@ -38,6 +38,8 @@ type InboxRequest struct {
 	PerPage int
 	// Triage keeps only messages triaged into one of these categories; empty applies no filter.
 	Triage []domain.MailTriageCategory
+	// Assignment keeps only conversations in one assignment state; empty applies no filter.
+	Assignment domain.InboxAssignment
 }
 
 // InboxItem is one row of the unified inbox: a message summary without bodies, the mail role of
@@ -131,6 +133,7 @@ func (s *service) ListInbox(ctx context.Context, viewer domain.OrganizationConte
 		MailboxIDs: ids, MembershipID: viewer.MembershipID, View: request.View,
 		Unread: request.Unread, HasAttachments: request.HasAttachments, Query: request.Query, GroupThreads: request.GroupThreads,
 		After: request.After, Limit: request.PerPage + 1, Triage: request.Triage,
+		Assignment: request.Assignment, ViewerUserID: viewer.UserID,
 	}
 	if request.View == domain.InboxViewToday {
 		query.DayStart, query.DayEnd = inboxDay(s.now(), request.Location)

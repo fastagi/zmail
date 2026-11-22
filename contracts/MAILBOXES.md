@@ -2078,6 +2078,7 @@ own stars.
 | `has_attachments` | `true` keeps only messages with files, `false` only those without |
 | `q` | Search, only with `view=all`; the same rules, matching, and 2-second limit as the single-mailbox search |
 | `group` | `thread`, only with `view` `all` or `sent`, and never with `unread`, `has_attachments`, or `q` |
+| `assignment` | `mine` keeps open conversations assigned to the caller, `unassigned` open conversations without an assignee, `closed` conversations marked done; see [Assignment](#assignment). Allowed with `group`. A conversation never assigned is open and unassigned, so in a personal mailbox only `unassigned` matches. |
 | `triage` | Comma-separated distinct [triage](#ai-triage) categories, such as `reply,review`; only with `view` `all` or `today`, and never with `group` or `q`. Matches nothing while the organization's AI triage is off. |
 | `tz` | The IANA time zone that defines today, at most 64 characters; defaults to `UTC` |
 | `cursor` | `meta.next_cursor` from the previous page, unchanged |
