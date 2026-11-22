@@ -43,7 +43,8 @@ type AdapterOperation =
   | 'register-email-code'
   | 'session'
   | 'password-reset'
-  | 'password-reset-confirm';
+  | 'password-reset-confirm'
+  | 'password-change';
 
 interface GoApiUser {
   id: number;
@@ -249,6 +250,30 @@ export class GoApiAuthAdapter {
     return result.ok ? { ok: true, data: { success: true } } : result;
   }
 
+  /** Changes the signed-in user's password; the API then revokes every session of the account. */
+  async changePassword(
+    accessToken: string,
+    input: { currentPassword: string; newPassword: string },
+    incomingHeaders: Headers,
+    signal?: AbortSignal
+  ): Promise<AdapterResult<{ success: true }>> {
+    if (!isOpaqueAuthenticationCredential(accessToken)) {
+      return adapterUnavailable(this.dependencies.randomUUID());
+    }
+    const result = await this.request(
+      'password-change',
+      'users/password',
+      {
+        method: 'PUT',
+        accessToken,
+        body: { old_password: input.currentPassword, new_password: input.newPassword },
+      },
+      incomingHeaders,
+      signal
+    );
+    return result.ok ? { ok: true, data: { success: true } } : result;
+  }
+
   private sessionFromLoginData(value: unknown, requestId: string): AdapterResult<AdapterSession> {
     if (!isRecord(value)) {
       return adapterUnavailable(requestId);
@@ -283,7 +308,7 @@ export class GoApiAuthAdapter {
     operation: AdapterOperation,
     path: string,
     options: {
-      method: 'GET' | 'POST';
+      method: 'GET' | 'POST' | 'PUT';
       body?: Record<string, string>;
       accessToken?: string;
     },
@@ -373,6 +398,8 @@ function authFieldMap(operation: AdapterOperation): Readonly<Record<string, stri
       return { email: 'email' };
     case 'password-reset-confirm':
       return { token: 'token', new_password: 'password' };
+    case 'password-change':
+      return { old_password: 'currentPassword', new_password: 'newPassword' };
     default:
       return {};
   }
