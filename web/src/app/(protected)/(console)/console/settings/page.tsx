@@ -45,7 +45,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
     <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 lg:py-8">
       <h1 className="text-2xl font-semibold">{t('title')}</h1>
 
-      <Tabs defaultValue={tab} className="mt-5">
+      {/* Keyed so following a ?tab= link while already on this page selects that tab. */}
+      <Tabs key={tab} defaultValue={tab} className="mt-5">
         <TabsList className="max-w-full overflow-x-auto">
           <TabsTrigger value="profile">
             <UserRound aria-hidden="true" />
