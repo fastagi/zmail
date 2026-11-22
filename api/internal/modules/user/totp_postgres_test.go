@@ -64,6 +64,10 @@ func TestPostgresTOTPEnrollmentSignInAndRecovery(t *testing.T) {
 	if !errors.Is(login(""), domain.ErrServiceUnavailable) {
 		t.Fatal("a pending factor must not be asked for at sign-in")
 	}
+	// A confirmation checked against a secret that was replaced meanwhile must not confirm the new one.
+	if staleErr := profile.repository.ConfirmTOTPFactor(ctx, user.ID, "replaced-secret", 1, nil, now); !errors.Is(staleErr, domain.ErrTOTPInvalid) {
+		t.Fatalf("ConfirmTOTPFactor(stale secret) error = %v, want ErrTOTPInvalid", staleErr)
+	}
 	if _, confirmErr := svc.ConfirmTOTP(ctx, user.ID, codeAt(first.Secret, now)); !errors.Is(confirmErr, errTOTPCodeRejected) {
 		t.Fatalf("replaced secret confirmed: %v", confirmErr)
 	}

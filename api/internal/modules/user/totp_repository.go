@@ -77,13 +77,13 @@ func (r *repository) SavePendingTOTPFactor(ctx context.Context, userID uint, sec
 
 // ConfirmTOTPFactor confirms a pending factor at step and replaces the recovery codes, in one
 // transaction; ErrTOTPInvalid when the factor changed or the step was used meanwhile.
-func (r *repository) ConfirmTOTPFactor(ctx context.Context, userID uint, step int64, codeHashes []string, now time.Time) error {
+func (r *repository) ConfirmTOTPFactor(ctx context.Context, userID uint, secret string, step int64, codeHashes []string, now time.Time) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&totpFactorPO{}).
-			Where("user_id = ? AND confirmed_at IS NULL AND last_used_step < ?", userID, step).
+			Where("user_id = ? AND secret = ? AND confirmed_at IS NULL AND last_used_step < ?", userID, secret, step).
 			Updates(map[string]any{"confirmed_at": now, "last_used_step": step, "updated_at": now})
 		if result.Error != nil {
 			return result.Error
