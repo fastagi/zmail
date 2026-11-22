@@ -3,6 +3,7 @@ package organization
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ type invitationRepositoryStub struct {
 	revokeInvitationFn func(context.Context, uint, uint, uint, time.Time) (*domain.OrganizationInvitation, error)
 	acceptInvitationFn func(context.Context, string, uint, time.Time) (*domain.OrganizationMembership, *domain.OrganizationInvitation, error)
 	reissueFn          func(context.Context, uint, uint, string, time.Time, time.Time) (*domain.OrganizationInvitation, error)
+	findPendingFn      func(uint, uint) (*domain.OrganizationInvitation, error)
 	recordedStatuses   []string
 }
 
@@ -83,7 +85,7 @@ func (r *invitationRepositoryStub) ReissueInvitation(ctx context.Context, organi
 	return r.reissueFn(ctx, organizationID, invitationID, tokenHash, expiresAt, now)
 }
 
-func (r *invitationRepositoryStub) RecordInvitationEmailAttempt(_ context.Context, _, _ uint, status string, _ time.Time) error {
+func (r *invitationRepositoryStub) RecordInvitationEmailAttempt(_ context.Context, _, _ uint, _, status string, _ time.Time) error {
 	r.recordedStatuses = append(r.recordedStatuses, status)
 	return nil
 }
@@ -348,4 +350,14 @@ func TestServiceResendInvitationRequiresManager(t *testing.T) {
 
 	_, err := svc.ResendInvitation(context.Background(), 17, 42, 73)
 	require.ErrorIs(t, err, domain.ErrPermissionDenied)
+}
+
+func (r *invitationRepositoryStub) FindPendingInvitation(_ context.Context, organizationID, invitationID uint, _ time.Time) (*domain.OrganizationInvitation, error) {
+	if r.findPendingFn != nil {
+		return r.findPendingFn(organizationID, invitationID)
+	}
+	return &domain.OrganizationInvitation{
+		ID: invitationID, OrganizationID: organizationID, Role: domain.OrganizationRoleMember,
+		Email: "member@example.com", TokenHash: strings.Repeat("a", 64),
+	}, nil
 }

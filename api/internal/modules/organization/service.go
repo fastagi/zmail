@@ -64,8 +64,13 @@ func NewService(
 	invitationPolicy InvitationPolicy,
 	events MembershipEventPublisher,
 ) *service {
-	if invitationPolicy.TTL <= 0 {
-		invitationPolicy = NewInvitationPolicy(nil)
+	if invitationPolicy.TTL <= 0 || invitationPolicy.ResendCooldown == nil ||
+		invitationPolicy.ResendDaily == nil || invitationPolicy.ResendOrganization == nil {
+		fallback := NewInvitationPolicy(nil, nil)
+		if invitationPolicy.TTL > 0 {
+			fallback.TTL = invitationPolicy.TTL
+		}
+		invitationPolicy = fallback
 	}
 	var administration administrationStore
 	if seam, ok := repo.(administrationStore); ok {

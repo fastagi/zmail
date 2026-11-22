@@ -131,6 +131,7 @@ The browser feature owns these fixed same-origin paths:
 | List invitations | `GET /api/organizations/:id/invitations` | `GET /v1/organizations/:id/invitations` |
 | Create invitation | `POST /api/organizations/:id/invitations` | `POST /v1/organizations/:id/invitations` |
 | Revoke invitation | `DELETE /api/organizations/:id/invitations/:invitation_id` | `DELETE /v1/organizations/:id/invitations/:invitation_id` |
+| Resend invitation email | `POST /api/organizations/:id/invitations/:invitation_id/emails` | `POST /v1/organizations/:id/invitations/:invitation_id/emails` |
 | Accept invitation | `POST /api/organization-invitations/accept` | `POST /v1/organization-invitations/accept` |
 
 - The selected organization is represented by `/console/organizations/:id`. It is derived from the
@@ -255,8 +256,16 @@ An invitation view contains no plaintext token:
   new token and a new `ORGANIZATION_INVITATION_TTL` expiry, so earlier links stop working, then
   makes one send attempt and returns `201` with the invitation and that attempt's status.
   An accepted, revoked, expired, or absent invitation gets `404 ORGANIZATION.INVITATION.NOT_FOUND`.
-- Invitation create, revoke, and accept transitions emit audit changes using internal invitation,
-  organization, and user IDs. Email addresses and tokens are not audit metadata.
+  Without a configured mailer nothing would carry a new link, so the token and expiry are kept and
+  the attempt is recorded as `not_configured`. An attempt's outcome is recorded only while its
+  token is still current, so a slow earlier attempt cannot overwrite a newer one.
+- Resend is rate limited with the shared rate-limit backend: one resend per invitation per minute,
+  five per invitation per 24 hours, and 30 per organization per hour. The invitation is checked
+  before quota is spent. A refusal is `429 COMMON.RATE_LIMITED` with `Retry-After`; invite itself
+  does not count.
+- Invitation create, revoke, resend, and accept transitions emit audit changes using internal
+  invitation, organization, and user IDs. Resend also records the role, `email_send_status`, and
+  whether the token was rotated. Email addresses and tokens are not audit metadata.
 
 ## Stable Errors
 
@@ -276,6 +285,7 @@ An invitation view contains no plaintext token:
 | 409 | `ORGANIZATION.MEMBERSHIP_EXIT_REQUIRED` | Account deletion would retain one or more non-owner memberships |
 | 404 | `ORGANIZATION.MEMBER_NOT_FOUND` | The member resource, or the ownership-transfer target, does not exist in the visible organization |
 | 409 | `COMMON.CONFLICT` | A role change raced with another change to the same membership; retry after reading it again |
+| 429 | `COMMON.RATE_LIMITED` | Invitation resend exceeded its per-invitation or per-organization quota |
 | 403 | `ORGANIZATION.INVITATION.EMAIL_MISMATCH` | The token belongs to a different account email |
 | 403 | `PERMISSION.DENIED` | The caller is a member but the role cannot perform the mutation |
 | 422 | `COMMON.VALIDATION_FAILED` | A request field fails the documented shape |

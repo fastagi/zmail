@@ -22,6 +22,13 @@ import type {
 } from '@/features/organization/types';
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Resend quotas, matching the API: per invitation one per minute and five per 24 hours, and 30 per
+// organization per hour.
+const RESEND_COOLDOWN_MS = 60 * 1000;
+const RESEND_DAY_MS = 24 * 60 * 60 * 1000;
+const RESENDS_PER_DAY = 5;
+const ORGANIZATION_RESEND_WINDOW_MS = 60 * 60 * 1000;
+const ORGANIZATION_RESENDS_PER_WINDOW = 30;
 
 export type MockOrganizationStoreError =
   | 'invitation_already_pending'
@@ -29,6 +36,7 @@ export type MockOrganizationStoreError =
   | 'invitation_expired'
   | 'invitation_invalid'
   | 'invitation_not_found'
+  | 'invitation_resend_rate_limited'
   | 'member_already_exists'
   | 'member_not_found'
   | 'organization_not_found'
@@ -71,6 +79,8 @@ interface MockMembershipRecord {
 
 interface MockInvitationRecord extends OrganizationInvitation {
   token: string;
+  /** Epoch milliseconds of accepted resends, oldest first. */
+  resends?: number[];
 }
 
 export class MockOrganizationStore {
@@ -416,9 +426,12 @@ export class MockOrganizationStore {
     if (!invitation || invitationStatus(invitation, now) !== 'pending') {
       return 'invitation_not_found';
     }
+    if (this.resendRetryAfterSeconds(invitation, now.getTime()) > 0) {
+      return 'invitation_resend_rate_limited';
+    }
+    invitation.resends = [...(invitation.resends ?? []), now.getTime()];
+    // The mock has no mailer: like the API without one, it keeps the token and expiry.
     const timestamp = now.toISOString();
-    invitation.token = this.dependencies.invitationToken();
-    invitation.expires_at = new Date(now.getTime() + INVITATION_TTL_MS).toISOString();
     invitation.email_send_status = 'not_configured';
     invitation.email_attempted_at = timestamp;
     invitation.updated_at = timestamp;
@@ -426,6 +439,41 @@ export class MockOrganizationStore {
       invitation: publicInvitation(invitation, now),
       email_send_status: 'not_configured',
     };
+  }
+
+  /** Seconds until the invitation may be resent; 0 when it may be resent now or is unknown. */
+  invitationResendRetryAfter(organizationId: number, invitationId: number): number {
+    const invitation = this.invitations.find(
+      (candidate) =>
+        candidate.organization_id === organizationId &&
+        candidate.id === invitationId
+    );
+    return invitation
+      ? this.resendRetryAfterSeconds(invitation, this.dependencies.now().getTime())
+      : 0;
+  }
+
+  private resendRetryAfterSeconds(invitation: MockInvitationRecord, now: number): number {
+    const own = (invitation.resends ?? []).filter((at) => now - at < RESEND_DAY_MS);
+    let availableAt = 0;
+    const latest = own.at(-1);
+    if (latest !== undefined) availableAt = latest + RESEND_COOLDOWN_MS;
+    const oldest = own[0];
+    if (own.length >= RESENDS_PER_DAY && oldest !== undefined) {
+      availableAt = Math.max(availableAt, oldest + RESEND_DAY_MS);
+    }
+    const organization = this.invitations
+      .filter((candidate) => candidate.organization_id === invitation.organization_id)
+      .flatMap((candidate) => candidate.resends ?? [])
+      .filter((at) => now - at < ORGANIZATION_RESEND_WINDOW_MS)
+      .sort((a, b) => a - b);
+    if (organization.length >= ORGANIZATION_RESENDS_PER_WINDOW) {
+      const first = organization[organization.length - ORGANIZATION_RESENDS_PER_WINDOW];
+      if (first !== undefined) {
+        availableAt = Math.max(availableAt, first + ORGANIZATION_RESEND_WINDOW_MS);
+      }
+    }
+    return Math.max(0, Math.ceil((availableAt - now) / 1000));
   }
 
   revokeInvitation(

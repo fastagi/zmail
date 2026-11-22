@@ -91,6 +91,7 @@ const messages = {
   },
   resendInvitation: '重发',
   resendInvitationLabel: '重发给 {email} 的邀请',
+  resendInvitationCooldown: '{seconds} 秒后可重发',
   invitationStatus: {
     pending: '待接受',
     accepted: '已接受',
@@ -124,6 +125,7 @@ const messages = {
     invitationEmailMismatch: '该邀请属于另一个账号邮箱。',
     invitationAlreadyPending: '该邮箱已有一个尚未到期的邀请。',
     invitationNotFound: '该邀请不存在或已无法管理。',
+    rateLimited: '该邀请刚刚重发过，请稍后再试。',
     memberAlreadyExists: '该邮箱已经是组织成员。',
     memberNotFound: '该组织成员不存在。',
     ownershipTransferRequired: '所有者必须先转移所有权。',
