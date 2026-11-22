@@ -1571,6 +1571,11 @@ answers:
 | No provider configured | `503 MAILBOX.SENDER_NOT_CONFIGURED` | `failed` |
 | Organization's rolling 24-hour personal lane limit reached | `202` with the message | `queued`, `queued_reason` `send_limit` |
 | Limit reached and as many messages already waiting as the limit | `429 MAILBOX.SEND_LIMIT_REACHED` | nothing stored |
+| At least 20 personal-lane attempts in the rolling 24 hours, and 5% or more of them bounced or 0.3% or more drew a spam complaint | `403 MAILBOX.SENDING_PAUSED` | nothing stored |
+
+The sending pause covers the personal lane only (broadcasts have their own health check) and lifts by
+itself once enough of those attempts leave the 24-hour window. While it holds, messages already
+waiting for the send limit stay queued.
 
 A send is never reported as successful before the provider accepts it.
 
@@ -2861,6 +2866,7 @@ truncated to 256 KiB each. Attachments are not stored.
 | `MAILBOX.SEND_IN_PROGRESS` | 409 |
 | `MAILBOX.IDEMPOTENCY_KEY_INVALID` | 422 |
 | `MAILBOX.SEND_LIMIT_REACHED` | 429 |
+| `MAILBOX.SENDING_PAUSED` | 403 |
 | `MAILBOX.DELIVERY_FAILED` | 502 |
 | `MAILBOX.SENDER_NOT_CONFIGURED` | 503 |
 | `MAILBOX.INBOUND_SIGNATURE_INVALID` | 401 |

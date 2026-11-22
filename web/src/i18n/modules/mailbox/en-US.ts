@@ -1647,6 +1647,8 @@ const messages = {
     createDenied: 'Only owners and admins of the organization can create mailboxes.',
     sendLimitReached:
       'This organization has reached the 24-hour sending limit. Nothing was sent. Try again later.',
+    sendingPaused:
+      'Sending is paused: too many recent messages bounced or were reported as spam. Nothing was sent. Remove invalid addresses and try again later.',
     senderNotConfigured:
       'The message was NOT delivered: sending mail is not set up on this server. It is kept in Sent as failed.',
     tooLarge: 'The message is too large to send.',

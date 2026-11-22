@@ -589,6 +589,23 @@ func (s *service) organizationLaneLimit(ctx context.Context, organizationID uint
 	return limit, nil
 }
 
+// checkSendingHealth returns ErrMailSendingPaused while the organization's personal sends of the
+// rolling window bounced or drew complaints at the rates a broadcast pauses at. The pause lifts by
+// itself once those sends leave the window.
+func (s *service) checkSendingHealth(ctx context.Context, organizationID uint) error {
+	attempted, bounced, complained, err := s.repo.CountPersonalOutcomesSince(ctx, organizationID, s.now().Add(-sendLimitWindow))
+	if err != nil || attempted < minHealthSample {
+		return err
+	}
+	if bounced*1000 < attempted*maxBouncePerMille && complained*1000 < attempted*maxComplaintPerMille {
+		return nil
+	}
+	slog.WarnContext(ctx, "mailbox personal sending paused by its health check",
+		slog.Uint64("organization_id", uint64(organizationID)), slog.Int64("attempted", attempted),
+		slog.Int64("bounced", bounced), slog.Int64("complained", complained))
+	return ErrMailSendingPaused
+}
+
 func (s *service) InboundEnabled() bool {
 	return s.settings.InboundSecret != ""
 }
@@ -906,6 +923,11 @@ func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendI
 		}
 	}
 
+	if queueAtLimit {
+		if healthErr := s.checkSendingHealth(ctx, mailbox.OrganizationID); healthErr != nil {
+			return nil, false, healthErr
+		}
+	}
 	sent, err := s.repo.CountOutboundSince(ctx, mailbox.OrganizationID, message.SendLane, s.now().Add(-sendLimitWindow))
 	if err != nil {
 		return nil, false, err

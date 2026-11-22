@@ -25,6 +25,7 @@ var mailboxErrorCodes = []struct {
 	{ErrMailMessageNotFound, http.StatusNotFound, domain.CodeMailMessageNotFound},
 	{ErrMailMessageInvalid, http.StatusUnprocessableEntity, domain.CodeMailMessageInvalid},
 	{ErrMailSendLimitReached, http.StatusTooManyRequests, domain.CodeMailSendLimitReached},
+	{ErrMailSendingPaused, http.StatusForbidden, domain.CodeMailSendingPaused},
 	{ErrMailDeliveryFailed, http.StatusBadGateway, domain.CodeMailDeliveryFailed},
 	{ErrMailIdempotencyConflict, http.StatusConflict, domain.CodeMailIdempotencyConflict},
 	{ErrMailIdempotencyKeyInvalid, http.StatusUnprocessableEntity, domain.CodeMailIdempotencyKeyInvalid},

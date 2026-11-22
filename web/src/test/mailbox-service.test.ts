@@ -517,6 +517,9 @@ describe('mailbox service boundary', () => {
     expect(resolveMailboxErrorKey(error(ApiErrorCode.MAILBOX_SEND_LIMIT_REACHED))).toBe(
       'errors.sendLimitReached'
     );
+    expect(resolveMailboxErrorKey(error(ApiErrorCode.MAILBOX_SENDING_PAUSED))).toBe(
+      'errors.sendingPaused'
+    );
     expect(resolveMailboxErrorKey(error(ApiErrorCode.MAILBOX_DELIVERY_FAILED))).toBe(
       'errors.deliveryFailed'
     );

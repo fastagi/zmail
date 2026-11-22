@@ -49,6 +49,7 @@ export type MailboxErrorKey =
   | 'errors.platformAccountNotFound'
   | 'errors.platformAccountTaken'
   | 'errors.sendLimitReached'
+  | 'errors.sendingPaused'
   | 'errors.senderNotConfigured'
   | 'errors.templateInvalid'
   | 'errors.templateKeyTaken'
@@ -102,6 +103,7 @@ const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ApiErrorCode.MAILBOX_IMPORT_DUPLICATE_ROW]: 'errors.importDuplicateRow',
   [ApiErrorCode.MAILBOX_MESSAGE_INVALID]: 'errors.messageInvalid',
   [ApiErrorCode.MAILBOX_SEND_LIMIT_REACHED]: 'errors.sendLimitReached',
+  [ApiErrorCode.MAILBOX_SENDING_PAUSED]: 'errors.sendingPaused',
   [ApiErrorCode.MAILBOX_DELIVERY_FAILED]: 'errors.deliveryFailed',
   [ApiErrorCode.MAILBOX_SENDER_NOT_CONFIGURED]: 'errors.senderNotConfigured',
   [ApiErrorCode.MAILBOX_BROADCAST_NOT_FOUND]: 'errors.broadcastNotFound',
