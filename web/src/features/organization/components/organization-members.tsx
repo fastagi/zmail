@@ -175,7 +175,7 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
                 <TableHead>{t('member')}</TableHead>
                 <TableHead>{t('role')}</TableHead>
                 <TableHead className="hidden sm:table-cell">{t('featuresColumn')}</TableHead>
-                <TableHead className="hidden lg:table-cell">{t('joinedAt')}</TableHead>
+                <TableHead className="hidden 2xl:table-cell">{t('joinedAt')}</TableHead>
                 <TableHead className="w-14 text-right">
                   <span className="sr-only">{t('actions')}</span>
                 </TableHead>
@@ -259,7 +259,7 @@ export function OrganizationMembers({ context }: { context: OrganizationContext 
                       className="min-w-56"
                     />
                   </TableCell>
-                  <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
+                  <TableCell className="hidden text-sm text-muted-foreground 2xl:table-cell">
                     {formatOrganizationDate(member.joined_at, locale)}
                   </TableCell>
                   <TableCell className="text-right">
