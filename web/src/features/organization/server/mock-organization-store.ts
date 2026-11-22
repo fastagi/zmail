@@ -378,10 +378,15 @@ export class MockOrganizationStore {
     );
   }
 
+  /**
+   * Like the API, returns the new token's accept link once to the inviting manager when a console
+   * origin is known; the mock BFF passes the request origin.
+   */
   invite(
     actor: AuthUser,
     organizationId: number,
-    input: CreateOrganizationInvitationInput
+    input: CreateOrganizationInvitationInput,
+    consoleOrigin?: string
   ): OrganizationInvitationCreateResult | MockOrganizationStoreError {
     const managerError = this.managerError(actor, organizationId);
     if (managerError) return managerError;
@@ -418,6 +423,9 @@ export class MockOrganizationStore {
     return {
       invitation: publicInvitation(invitation, now),
       email_send_status: 'not_configured',
+      ...(consoleOrigin
+        ? { invitation_url: `${consoleOrigin}/invite#${encodeURIComponent(invitation.token)}` }
+        : {}),
     };
   }
 
@@ -441,7 +449,8 @@ export class MockOrganizationStore {
       return 'invitation_resend_rate_limited';
     }
     invitation.resends = [...(invitation.resends ?? []), now.getTime()];
-    // The mock has no mailer: like the API without one, it keeps the token and expiry.
+    // The mock has no mailer: like the API without one, it keeps the token and expiry, so no new
+    // link is minted or returned.
     const timestamp = now.toISOString();
     invitation.email_send_status = 'not_configured';
     invitation.email_attempted_at = timestamp;

@@ -44,9 +44,15 @@ from the console shell.
 - Every member can view the PII-minimized member directory. Owners can change `admin`/`member`
   roles and transfer ownership; owners and administrators can remove roles permitted by the API,
   while non-owners can leave through their own member resource.
-- Owners and administrators can create, list, and revoke invitations. Authenticated users accept a
-  token through a password input and same-origin POST body; the token is never put in a URL,
-  browser storage, invitation response, or rendered history.
+- Owners and administrators can create, list, resend, and revoke invitations. Authenticated users
+  accept a token through a password input and same-origin POST body; the token is never put in
+  browser storage, the query cache, or rendered history.
+- When a create or resend response carries the one-time `invitation_url`, the confirmation dialog
+  offers **Copy invitation link** to the manager who made that call. The link stays in component
+  state only and is dropped when the dialog closes. If the Clipboard API is missing or refuses,
+  the link appears in a read-only, selected field to copy by hand. Pending rows explain that a
+  resend shows a new link and invalidates the previous one, or, where email is not configured (a
+  resend then mints no token), that a new link needs revoking and inviting again.
 - Successful payloads are validated before entering TanStack Query. Paginated organization,
   member, and invitation lists preserve `meta` and `links` through the explicit `getEnvelope()`
   HTTP mode. Strict member and invitation objects reject accidental PII or token fields.
@@ -76,9 +82,9 @@ invitation, and acceptance transitions with the production role matrix. It is de
 only and resets with the Web process.
 
 The mock and production route shapes are tested together. Invitation token generation is injectable
-only at the store test seam; the singleton route store never returns or logs bearer tokens. Local
-acceptance therefore still requires a token delivered out of band, matching the production trust
-boundary instead of adding a mock-only secret response.
+only at the store test seam. Like the API, the mock returns a new invitation's link once in the
+create response, built from the request origin as the console origin, and never lists or logs it;
+like the API without a mailer, its resend keeps the token and returns no link.
 
 ## Downstream Replacement
 

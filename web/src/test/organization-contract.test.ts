@@ -164,6 +164,49 @@ describe('organization network contract validation', () => {
     );
   });
 
+  it('accepts only the invitation link shape emails use as the one-time invitation_url', () => {
+    const invitation = {
+      id: 73,
+      organization_id: 42,
+      email: 'member@example.com',
+      role: 'member',
+      status: 'pending',
+      expires_at: timestamp,
+      email_send_status: 'accepted_by_provider',
+      email_attempted_at: timestamp,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    const invitationUrl = 'https://app.example.com/invite#oinv_abc.0123456789abcdef';
+    expect(
+      parseOrganizationInvitationCreateResponse({
+        invitation,
+        email_send_status: 'accepted_by_provider',
+        invitation_url: invitationUrl,
+      })
+    ).toEqual({ invitation, email_send_status: 'accepted_by_provider', invitation_url: invitationUrl });
+
+    for (const malformed of [
+      null,
+      '',
+      'javascript:alert(1)//invite#x',
+      'https://app.example.com/invite',
+      'https://app.example.com/invite#',
+      'https://app.example.com/other#oinv_abc.01',
+      'https://app.example.com/invite?token=oinv_abc.01#oinv_abc.01',
+      'https://user:pass@app.example.com/invite#oinv_abc.01',
+      `https://app.example.com/invite#${'a'.repeat(2048)}`,
+    ]) {
+      expectInvalidResponse(() =>
+        parseOrganizationInvitationCreateResponse({
+          invitation,
+          email_send_status: 'accepted_by_provider',
+          invitation_url: malformed,
+        })
+      );
+    }
+  });
+
   it('validates ownership transfer and normalizes invitation inputs', () => {
     const previousOwner = memberView({ id: 91, user_id: 17, role: 'admin' });
     const newOwner = memberView({ id: 92, user_id: 18, role: 'owner' });

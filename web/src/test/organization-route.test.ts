@@ -244,7 +244,7 @@ describe('organization browser route boundary', () => {
   it('creates a token-free mock invitation after same-origin and auth guards', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';
     getSessionUser.mockResolvedValue(mockOwner());
-    const { createOrganizationInvitationRoute } = await import(
+    const { createOrganizationInvitationRoute, listOrganizationInvitationsRoute } = await import(
       '@/features/organization/server/organization-lifecycle-route'
     );
 
@@ -264,7 +264,19 @@ describe('organization browser route boundary', () => {
         email_send_status: 'not_configured',
       },
     });
-    expect(JSON.stringify(body)).not.toContain('oinv_');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    // The one-time link is the only place the new token appears.
+    expect(body.data.invitation_url).toMatch(/^https:\/\/app\.example\.com\/invite#oinv_mock\./);
+    expect(JSON.stringify(body.data.invitation)).not.toContain('oinv_');
+
+    const listed = await listOrganizationInvitationsRoute(
+      request('/api/organizations/1/invitations'),
+      '1'
+    );
+    const listedText = JSON.stringify(await listed.json());
+    expect(listedText).toContain('route.member@example.com');
+    expect(listedText).not.toContain('oinv_');
+    expect(listedText).not.toContain('invitation_url');
   });
 
   it('rejects cross-origin invitation acceptance before reading the bearer token', async () => {
@@ -378,6 +390,8 @@ describe('organization browser route boundary', () => {
       invitation: { expires_at: invitation.expires_at, email_send_status: 'not_configured' },
       email_send_status: 'not_configured',
     });
+    // Without a mailer a resend mints no token, so there is no new link to return.
+    expect(firstBody.data).not.toHaveProperty('invitation_url');
     expect(JSON.stringify(firstBody)).not.toContain('oinv_');
 
     const second = await resend();

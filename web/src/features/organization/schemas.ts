@@ -154,9 +154,19 @@ export const organizationInvitationPageEnvelopeSchema = strictObject({
   links: paginationLinksSchema,
 });
 
+/**
+ * The one-time accept link of a token minted by a create or resend call, in the shape invitation
+ * emails use: `<console origin>/invite#<token>`. A bearer secret: keep it out of caches and logs.
+ */
+const invitationUrlSchema = string().check(
+  maxLength(2048),
+  refine(isInvitationUrl)
+);
+
 export const organizationInvitationCreateResultSchema = strictObject({
   invitation: organizationInvitationSchema,
   email_send_status: invitationEmailSendStatusSchema,
+  invitation_url: optional(invitationUrlSchema),
 });
 
 export const organizationOwnershipTransferSchema = strictObject({
@@ -201,4 +211,21 @@ export const organizationRouteIdSchema = pipe(
 function hasValidOrganizationNameLength(value: string): boolean {
   const length = Array.from(value).length;
   return length >= 2 && length <= 100;
+}
+
+function isInvitationUrl(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === 'https:' || url.protocol === 'http:') &&
+    url.username === '' &&
+    url.password === '' &&
+    url.search === '' &&
+    url.pathname === '/invite' &&
+    url.hash.length > 1
+  );
 }

@@ -250,7 +250,8 @@ export async function createOrganizationInvitationRoute(
   const result = mockOrganizationStore.invite(
     authentication.user,
     organizationId,
-    parsed.data
+    parsed.data,
+    new URL(request.url).origin
   );
   return typeof result === 'string'
     ? mockOrganizationErrorResponse(result)
