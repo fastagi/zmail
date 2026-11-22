@@ -90,6 +90,7 @@ export function SignInPage({ redirectTo }: { redirectTo: string }) {
               onChange={(event) => {
                 setIdentifier(event.target.value);
                 setNeedsCode(false);
+                signIn.reset();
               }}
             />
           </div>

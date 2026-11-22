@@ -101,6 +101,7 @@ export function LoginForm({ demoCredentials, registrationEnabled = true }: Login
               errorText={emailError}
               onChange={event => {
                 setEmail(event.target.value);
+                setNeedsCode(false);
                 clearMutationError();
               }}
             />
