@@ -124,6 +124,10 @@ vi.mock('@/features/mailbox/hooks/use-inbox', () => ({
   useMailRoles: () => ({ data: [], isPending: false, error: null }),
   useAssignMailboxRole: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));
+vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
+  useMailSignature: () => ({ data: undefined, isPending: false, isError: false }),
+  useSaveMailSignature: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => {
   const scoped = <T,>(organizationId: number, result: T): T => {
     state.organizationIds.push(organizationId);
@@ -891,9 +895,7 @@ describe('mailbox workspace', () => {
     // The last row has no next one: archiving it goes back to the list.
     fireEvent.click(reader().getByRole('button', { name: 'Archive' }));
     await waitFor(() => expect(state.update.mutateAsync).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Back to list' })).toBeNull()
-    );
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Back to list' })).toBeNull());
   });
 
   it('Esc closes the reader, but not while typing in a field', () => {

@@ -70,6 +70,14 @@ vi.mock('@/features/mailbox/hooks/use-mail-triage', () => ({
   useMailTriageSetting: () => triage.setting,
   useSetMailboxTriage: () => triage.setMailbox,
 }));
+vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
+  useMailSignature: () => ({
+    data: { mailbox_id: 1, body: '', updated_at: null },
+    isPending: false,
+    isError: false,
+  }),
+  useSaveMailSignature: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
 vi.mock('@/features/mailbox/hooks/use-mailbox', () => ({
   useMailboxDomains: () => state.domains,
   useMailboxes: () => state.mailboxes,
