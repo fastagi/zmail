@@ -39,10 +39,8 @@ func newDevTenantFixture(t *testing.T) (*externalFixture, domain.OrganizationCon
 }
 
 // otherProcess swaps the service's fake for a fresh one, as the separate sync worker process has.
-func (f *externalFixture) otherProcess() *FakeExternalMailSource {
-	source := NewFakeExternalMailSource()
-	f.service.externalConnectors = fakeExternalMailRegistry(source)
-	return source
+func (f *externalFixture) otherProcess() {
+	f.service.externalConnectors = fakeExternalMailRegistry(NewFakeExternalMailSource())
 }
 
 // TestFakeDevTenantAuthorization: the fake accepts only its synthetic credential with a reserved
