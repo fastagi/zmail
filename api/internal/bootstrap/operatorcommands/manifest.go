@@ -33,5 +33,6 @@ func Manifest() infracommands.Manifest {
 		infracommands.Registration{Command: NewOperatorGrantCommand()},
 		infracommands.Registration{Command: NewOperatorRevokeCommand()},
 		infracommands.Registration{Command: NewOperatorListCommand()},
+		infracommands.Registration{Command: NewUserProvisionCommand()},
 	)
 }

@@ -43,6 +43,8 @@ type Application struct {
 	OperatorGrants         domain.OperatorGrantStore
 	// UserAdministration finds accounts for operator console commands.
 	UserAdministration domain.UserAdministrator
+	// UserProvisioning creates or resets accounts for the user:provision console command.
+	UserProvisioning domain.UserProvisioner
 	// OrganizationAdministration reads managers and grants admin for operator console commands.
 	OrganizationAdministration domain.OrganizationAdministrator
 	// MailBroadcasts sends broadcast recipients; nil when the mailbox starter is not selected.
