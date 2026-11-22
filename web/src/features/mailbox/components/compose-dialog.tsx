@@ -156,10 +156,13 @@ export function ComposeDialog({
   const templateHintId = useId();
   const [kept] = useState(() => restored?.draft ?? (flushed ? null : readComposeDraft(draftKey)));
   const knownSavedId = draft.savedId ?? kept?.savedId;
-  const [to, setTo] = useState(kept?.to ?? draft.to);
-  const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
-  const [subject, setSubject] = useState(kept?.subject ?? draft.subject);
-  const [body, setBody] = useState(kept?.body ?? draft.body ?? '');
+  // A draft opened from the list starts from the API's text, which another device may have changed;
+  // this browser's copy still lends it its files.
+  const keptText = draft.savedId !== undefined && !restored ? null : kept;
+  const [to, setTo] = useState(keptText?.to ?? draft.to);
+  const [cc, setCc] = useState(keptText?.cc ?? draft.cc ?? '');
+  const [subject, setSubject] = useState(keptText?.subject ?? draft.subject);
+  const [body, setBody] = useState(keptText?.body ?? draft.body ?? '');
   // A new message starts with the writer's signature for the sending mailbox; choosing another
   // mailbox swaps it while the signature is still the last thing written.
   const startsBlank = !isReplyOrForward && !kept && !draft.body;
@@ -510,7 +513,10 @@ export function ComposeDialog({
     const known = knownSavedId;
     const keep = found && known !== undefined ? { ...found, savedId: known } : found;
     writeComposeDraft(draftKey, keep);
-    const blank = files.length === 0 && [to, cc, subject, body].every(value => value.trim() === '');
+    const blank =
+      files.length === 0 &&
+      lostFiles.length === 0 &&
+      [to, cc, subject, body].every(value => value.trim() === '');
     // Clearing a saved draft and closing it discards it everywhere.
     if (blank && !isReplyOrForward) forgetSaved();
     writeComposeDraftFiles(draftKey, files);
