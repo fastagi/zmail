@@ -227,7 +227,7 @@ export function ExternalPasswordForm({
                     setHost(preset.imap);
                     setSmtpHost(preset.smtp);
                     setSmtpPort(preset.smtpPort);
-                    setSmtpEdited(true);
+                    setSmtpEdited(false);
                     setErrors({});
                   }}
                 >
@@ -255,7 +255,10 @@ export function ExternalPasswordForm({
               errorText={fieldError('host')}
               onChange={event => {
                 setHost(event.target.value);
-                if (!smtpEdited) setSmtpHost(suggestedSmtpHost(event.target.value));
+                if (!smtpEdited) {
+                  setSmtpHost(suggestedSmtpHost(event.target.value));
+                  setSmtpPort(EXTERNAL_MAIL_DEFAULT_SMTP_PORT);
+                }
               }}
             />
           </div>

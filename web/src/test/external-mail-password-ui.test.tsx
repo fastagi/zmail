@@ -197,6 +197,17 @@ describe('app password connect step', () => {
     expect(service.bindCredentials.mock.calls[0][1]).not.toHaveProperty('smtp_host');
   });
 
+  it('re-derives the SMTP server when the IMAP server changes after a preset', async () => {
+    renderWith(<ConnectDialog onOpenChange={vi.fn()} />);
+    const form = await openForm();
+    fireEvent.click(within(form).getByRole('button', { name: 'iCloud' }));
+    fireEvent.change(within(form).getByLabelText('IMAP server'), {
+      target: { value: 'imap.example.org' },
+    });
+    expect(within(form).getByLabelText('SMTP server (optional)')).toHaveValue('smtp.example.org');
+    expect(within(form).getByRole('radio', { name: '465' })).toBeChecked();
+  });
+
   it('fills the IMAP and SMTP servers of a common provider in one click', async () => {
     service.bindCredentials.mockResolvedValue({
       outcome: 'created',
