@@ -2885,7 +2885,7 @@ export interface paths {
         put?: never;
         /**
          * Email a pending invitation again with a fresh one-time link
-         * @description Issues a new token and expiry, so earlier links stop working, then makes one send attempt.
+         * @description Issues a new token and expiry, so earlier links stop working, then makes one send attempt. Without a configured mailer the token and expiry are kept and the attempt is recorded as `not_configured`. Each invitation allows one resend per minute and five per 24 hours, and each organization 30 resends per hour.
          */
         post: operations["resendOrganizationInvitationEmail"];
         delete?: never;
@@ -14890,6 +14890,8 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `ORGANIZATION.NOT_FOUND`, or `ORGANIZATION.INVITATION.NOT_FOUND` when the invitation is absent or no longer pending (accepted, revoked, or expired). */
             404: components["responses"]["NotFound"];
+            /** @description `COMMON.RATE_LIMITED`: the invitation was resent within the last minute or five times in 24 hours, or the organization reached 30 resends in an hour; `Retry-After` gives the seconds to wait. */
+            429: components["responses"]["RateLimited"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

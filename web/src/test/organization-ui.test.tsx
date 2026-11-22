@@ -55,6 +55,15 @@ const state = vi.hoisted(() => ({
   forgetOrganization: vi.fn(),
 }));
 
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock('sonner', async (importOriginal) => {
+  const original = await importOriginal<typeof import('sonner')>();
+  return {
+    ...original,
+    toast: Object.assign(vi.fn(), original.toast, { error: toastError }),
+  };
+});
+
 vi.mock('@/features/organization/hooks/use-organizations', () => ({
   useOrganizations: () => state.organizations,
   useOrganizationContext: () => state.context,
@@ -357,7 +366,72 @@ describe('organization browser workflow', () => {
     expect(state.resendInvitation.mutate).toHaveBeenCalledWith(73, expect.any(Object));
   });
 
+  it('waits out the resend cooldown after a successful resend', () => {
+    vi.useFakeTimers();
+    try {
+      state.context.data = organizationContext('owner');
+      state.invitations.data = { items: [pendingInvitation(74, 'again@example.com')], meta: { total: 1 } };
+      state.resendInvitation.mutate.mockImplementation(
+        (_id: number, options: { onSuccess: (value: unknown) => void }) =>
+          options.onSuccess({
+            invitation: pendingInvitation(74, 'again@example.com'),
+            email_send_status: 'accepted_by_provider',
+          })
+      );
+
+      renderWithMessages(<OrganizationOverview organizationId={42} />);
+      activateTab('Invitations');
+      const button = screen.getByRole('button', { name: 'Resend the invitation to again@example.com' });
+      fireEvent.click(button);
+      expect(button).toBeDisabled();
+      expect(button).toHaveTextContent('Resend in 60s');
+
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(button).toBeEnabled();
+      expect(button).toHaveTextContent('Resend');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows a rate-limited resend and uses its Retry-After as the cooldown', () => {
+    state.context.data = organizationContext('owner');
+    state.invitations.data = { items: [pendingInvitation(75, 'limited@example.com')], meta: { total: 1 } };
+    state.resendInvitation.mutate.mockImplementation(
+      (_id: number, options: { onError: (error: unknown) => void }) =>
+        options.onError(
+          new ApiError('Too many requests', ApiErrorCode.COMMON_RATE_LIMITED, 429, undefined, undefined, 42)
+        )
+    );
+
+    renderWithMessages(<OrganizationOverview organizationId={42} />);
+    activateTab('Invitations');
+    const button = screen.getByRole('button', { name: 'Resend the invitation to limited@example.com' });
+    fireEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent('Resend in 42s');
+    expect(toastError).toHaveBeenCalledWith(
+      'This invitation was resent recently. Try again in a moment.'
+    );
+  });
 });
+
+function pendingInvitation(id: number, email: string) {
+  return {
+    id,
+    organization_id: 42,
+    email,
+    role: 'member',
+    status: 'pending',
+    expires_at: '2026-07-22T10:00:00Z',
+    email_send_status: 'accepted_by_provider',
+    email_attempted_at: '2026-07-15T10:00:01Z',
+    created_at: '2026-07-15T10:00:00Z',
+    updated_at: '2026-07-15T10:00:00Z',
+  };
+}
 
 function mutationState() {
   return {

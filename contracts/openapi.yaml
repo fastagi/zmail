@@ -896,6 +896,9 @@ paths:
       operationId: resendOrganizationInvitationEmail
       summary: Email a pending invitation again with a fresh one-time link
       description: Issues a new token and expiry, so earlier links stop working, then makes one send attempt.
+        Without a configured mailer the token and expiry are kept and the attempt is recorded as
+        `not_configured`. Each invitation allows one resend per minute and five per 24 hours, and each
+        organization 30 resends per hour.
       tags:
         - Organizations
       security:
@@ -921,6 +924,11 @@ paths:
           $ref: '#/components/responses/NotFound'
           description: '`ORGANIZATION.NOT_FOUND`, or `ORGANIZATION.INVITATION.NOT_FOUND` when the invitation
             is absent or no longer pending (accepted, revoked, or expired).'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+          description: '`COMMON.RATE_LIMITED`: the invitation was resent within the last minute or five times
+            in 24 hours, or the organization reached 30 resends in an hour; `Retry-After` gives the seconds
+            to wait.'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /v1/organizations/{organization_id}/members:

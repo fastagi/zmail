@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocale } from 'next-intl';
 import { AlertCircle, RefreshCw, Send, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -39,6 +39,7 @@ import type {
 } from '@/features/organization/types';
 import { formatOrganizationDate } from '@/features/organization/utils/format-organization-date';
 import { resolveOrganizationErrorKey } from '@/features/organization/utils/organization-error';
+import { ApiError } from '@/http/request';
 import { useT } from '@/i18n';
 
 export function OrganizationInvitations({ organizationId }: { organizationId: number }) {
@@ -48,14 +49,19 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
   const query = useOrganizationInvitations(organizationId);
   const mutation = useRevokeOrganizationInvitation(organizationId);
   const resend = useResendOrganizationInvitation(organizationId);
+  const cooldown = useResendCooldowns();
 
   const resendInvitation = (invitation: OrganizationInvitation) => {
     resend.mutate(invitation.id, {
       onSuccess: ({ email_send_status: status }) => {
+        cooldown.start(invitation.id, RESEND_COOLDOWN_SECONDS);
         const notify = status === 'accepted_by_provider' ? toast.success : toast.warning;
         notify(t(`emailSendStatus.${status}`));
       },
       onError: error => {
+        if (error instanceof ApiError && error.retryAfterSeconds) {
+          cooldown.start(invitation.id, error.retryAfterSeconds);
+        }
         toast.error(t(resolveOrganizationErrorKey(error)));
       },
     });
@@ -145,10 +151,14 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
                           icon={<Send className="size-3.5" />}
                           aria-label={t('resendInvitationLabel', { email: invitation.email })}
                           loading={resend.isPending && resend.variables === invitation.id}
-                          disabled={resend.isPending}
+                          disabled={resend.isPending || cooldown.remaining(invitation.id) > 0}
                           onClick={() => resendInvitation(invitation)}
                         >
-                          {t('resendInvitation')}
+                          {cooldown.remaining(invitation.id) > 0
+                            ? t('resendInvitationCooldown', {
+                                seconds: cooldown.remaining(invitation.id),
+                              })
+                            : t('resendInvitation')}
                         </Button>
                         <Button
                           type="button"
@@ -250,4 +260,31 @@ function InvitationTableSkeleton() {
       <Skeleton className="h-10 w-full" />
     </div>
   );
+}
+
+// Each invitation may be resent once a minute; a 429's Retry-After replaces this wait.
+const RESEND_COOLDOWN_SECONDS = 60;
+
+/** Per-invitation resend cooldowns that count down once a second while any is active. */
+function useResendCooldowns() {
+  const [availableAt, setAvailableAt] = useState<Record<number, number>>({});
+  const [now, setNow] = useState(() => Date.now());
+  const latest = Math.max(0, ...Object.values(availableAt));
+
+  useEffect(() => {
+    if (latest <= Date.now()) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [latest]);
+
+  return {
+    start(invitationId: number, seconds: number) {
+      const current = Date.now();
+      setNow(current);
+      setAvailableAt(previous => ({ ...previous, [invitationId]: current + seconds * 1000 }));
+    },
+    remaining(invitationId: number): number {
+      return Math.max(0, Math.ceil(((availableAt[invitationId] ?? 0) - now) / 1000));
+    },
+  };
 }

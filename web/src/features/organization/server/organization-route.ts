@@ -338,10 +338,15 @@ function contextHeaders(): Headers {
 }
 
 export function mockOrganizationErrorResponse(
-  error: MockOrganizationStoreError
+  error: MockOrganizationStoreError,
+  retryAfterSeconds?: number
 ): NextResponse {
   const response = mockOrganizationError(error);
-  return apiErrorResponse({ ...response, headers: noStoreHeaders() });
+  const headers = noStoreHeaders();
+  if (retryAfterSeconds && retryAfterSeconds > 0) {
+    headers.set('Retry-After', String(retryAfterSeconds));
+  }
+  return apiErrorResponse({ ...response, headers });
 }
 
 function mockOrganizationError(error: MockOrganizationStoreError): {
@@ -415,6 +420,12 @@ function mockOrganizationError(error: MockOrganizationStoreError): {
         status: 409,
         errorCode: ApiErrorCode.ORGANIZATION_OWNERSHIP_TRANSFER_REQUIRED,
         message: 'Organization ownership transfer is required',
+      };
+    case 'invitation_resend_rate_limited':
+      return {
+        status: 429,
+        errorCode: ApiErrorCode.COMMON_RATE_LIMITED,
+        message: 'Too many requests',
       };
     case 'ownership_transfer_target_invalid':
       return {

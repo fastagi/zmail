@@ -326,6 +326,12 @@ export async function resendOrganizationInvitationRoute(
     organizationId,
     invitationId
   );
+  if (result === 'invitation_resend_rate_limited') {
+    return mockOrganizationErrorResponse(
+      result,
+      mockOrganizationStore.invitationResendRetryAfter(organizationId, invitationId)
+    );
+  }
   return typeof result === 'string'
     ? mockOrganizationErrorResponse(result)
     : apiSuccessResponse(result, {
