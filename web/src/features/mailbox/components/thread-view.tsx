@@ -185,6 +185,13 @@ export function MessageDetail({
         <article className={variant === 'article' ? articleClassName : 'space-y-4'}>
           {variant === 'article' ? null : <ReaderToolbar reader={reader} />}
           <ReaderSubject subject={(revealed.get(message.id) ?? message).subject} layout={layout} />
+          {reader.shared ? (
+            <ThreadAssignment
+              mailboxId={reader.mailboxId}
+              threadId={message.thread_id}
+              canSend={reader.canSend}
+            />
+          ) : null}
           <MessageCard
             key={message.id}
             message={message}
