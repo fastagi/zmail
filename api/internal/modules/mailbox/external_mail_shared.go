@@ -118,7 +118,7 @@ func (s *service) bindSharedAccount(tx context.Context, viewer domain.Organizati
 	}
 	displayName := binding.sharing.displayName
 	if displayName == "" {
-		displayName = binding.address
+		displayName = truncateDisplayName(binding.address)
 	}
 	mailbox := &domain.Mailbox{
 		OrganizationID: viewer.OrganizationID, CreatedBy: viewer.UserID, Address: binding.address, DisplayName: displayName,

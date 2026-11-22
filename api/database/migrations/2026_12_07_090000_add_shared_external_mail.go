@@ -41,7 +41,8 @@ func (m *addSharedExternalMail) Up(db *gorm.DB) error {
 }
 
 // Down drops organization connections. It fails while one exists, which the older schema would
-// read as a member's connection without an owner; disconnect and purge them first.
+// read as a member's connection without an owner; disconnect and purge them first. Pending shared
+// sign-ins are deleted, so none completes on the older code as a member's own binding.
 func (m *addSharedExternalMail) Down(db *gorm.DB) error {
 	return execStatements(db,
 		`DO $$
@@ -50,6 +51,7 @@ func (m *addSharedExternalMail) Down(db *gorm.DB) error {
 		    RAISE EXCEPTION 'a shared external mail connection exists; the older schema cannot express it';
 		  END IF;
 		END $$`,
+		`DELETE FROM external_mail_authorizations WHERE sharing IS NOT NULL`,
 		`ALTER TABLE external_mail_authorizations DROP COLUMN IF EXISTS sharing`,
 		`DROP INDEX IF EXISTS idx_external_mail_connections_shared`,
 		`ALTER TABLE external_mail_connections

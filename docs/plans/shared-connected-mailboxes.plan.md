@@ -23,8 +23,8 @@ tenant-wide binding (C4); any Web or Admin screen.
 
 | Actor | May |
 |---|---|
-| Organization `owner` / `admin` | Start a shared binding; reconnect, disconnect, list, see sync runs of, and purge every shared connection; manage members, webhooks, triage, agent grants (existing matrix); delete the mailbox. Never reads mail without being a member (adding oneself is recorded, as today). |
-| Member with `manage` on the shared connected mailbox | Reconnect, disconnect, list, see sync runs, purge that connection; manage members, webhooks, triage, agent grants (existing matrix). Reads it. |
+| Organization `owner` / `admin` | Start a shared binding; reconnect, disconnect, list, see sync runs of, and purge every shared connection (purging deletes the mailbox, so it is theirs alone); manage members, webhooks, triage, agent grants (existing matrix); delete the mailbox. Never reads mail without being a member (adding oneself is recorded, as today). |
+| Member with `manage` on the shared connected mailbox | Reconnect, disconnect, list, see sync runs of that connection, but not purge it (`403`: a purge deletes the mailbox, which only owners and admins may); the worker's retention purge is unchanged; manage members, webhooks, triage, agent grants (existing matrix). Reads it. |
 | Member with `view` / `send` | Reads it with their own read state. `send` grants nothing more: the origin is read-only. |
 | Other members | Nothing; the mailbox and connection are invisible (`404`). Starting a shared binding is `403 PERMISSION.DENIED`. |
 | Person who bound it | Recorded as `bound_by_user_id` only. Leaving the organization does not revoke the connection and it never counts against their 10 personal connections. |
@@ -67,7 +67,7 @@ no owner who could "post the password again" to restore it). `sharing` with `con
 | R4 | Start: `sharing` requires `owner`/`admin` (`403 PERMISSION.DENIED`), validates the members as `POST /v1/mailboxes` does (`422 MAILBOX.ACCESS_INVALID`), and stores them on the pending sign-in. Completion re-checks the role and re-resolves the members (membership may change within the 10 minutes) before anything is stored; a refusal hands the grant back. |
 | R5 | Completion with `sharing` and a new account: one transaction creates the `shared` + `connected` mailbox (address = account, outside the organization's mailbox limit like every connected mailbox), the `created` event, one `member_set` per member, the connection, and `connection_bound`. `201`. |
 | R6 | Account uniqueness stays the existing index (organization, provider, lower(address)): a live connection of the other kind is `409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN` in both directions. A revoked **personal** connection is freed for a shared binding as for any other binder (purge `rebound`, then bind). A revoked **shared** connection whose mailbox still exists is never taken over (`409 TAKEN`): it is restored by a reconnect or released by deleting the mailbox; once its mailbox is deleted it is freed like a revoked personal one. A shared binding that finds a live shared connection of the account is `409 TAKEN` (reconnect it instead). |
-| R7 | May manage a connection (`mayManageConnection`): personal: its owner; shared: an `owner`/`admin`, or a `manage` member of its mailbox, and the mailbox must exist. Used by reconnect start and completion, `GET /v1/external-mail-connections` (extended), sync runs, purges, and `DELETE /v1/external-mail-connections/:id`. Anyone else: `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. |
+| R7 | May manage a connection (`mayManageConnection`): personal: its owner; shared: an `owner`/`admin`, or a `manage` member of its mailbox, and the mailbox must exist. Used by reconnect start and completion, `GET /v1/external-mail-connections` (extended), sync runs, purges (a shared purge further needs `owner`/`admin`, else `403`), and `DELETE /v1/external-mail-connections/:id`. Anyone else: `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. |
 | R8 | Reconnect of a shared connection: same account or `409 MISMATCH`; restores the same connection and mailbox (`connection_reconnected`, actor = caller); a `revoked` one needs a free organization place (R3). |
 | R9 | Disconnect of a shared connection by anyone allowed by R7, or through the connection directory by an `owner`/`admin`: the existing revoke path (`revoked_at`, grant handed back, triage off, agent grants ended, retention purge), recorded as `connection_revoked` with the caller as actor, plus an organization audit entry (`reason` `shared_disconnect`). |
 | R10 | `GET /v1/external-mail-connections` lists the caller's own personal connections, then the shared connections they may manage (all of them for `owner`/`admin`), each with `shared`. Bounded by 10 + 100. |
@@ -85,6 +85,13 @@ no owner who could "post the password again" to restore it). `sharing` with `con
 4. Reconnect: start with `connection_id` (R7), complete (R7 again, R8). IMAP: credentials with
    `connection_id`.
 5. Disconnect (R9), delete the mailbox (revokes), retention purge (unchanged).
+
+## Rollout
+
+A shared sign-in seals its PKCE verifier behind the non-base64 marker `shared:`. An API instance from
+before this change ignores the `sharing` column, cannot open the verifier, and answers `404` before it
+exchanges the code, so it never binds a team account as the admin's own. The migration's Down deletes
+pending shared sign-ins and refuses while a shared connection exists.
 
 ## Failure Behavior
 

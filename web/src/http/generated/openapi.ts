@@ -479,7 +479,7 @@ export interface paths {
         put?: never;
         /**
          * Delete a revoked connection's copies at once
-         * @description Deletes for good the synced copies of the caller's own revoked connection instead of waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then deletes the connected mailbox and the connection with its sync runs, storing a `copies_purged` audit event with reason `owner` on the deleted mailbox. When more copies are left than one request deletes, the rest is due at once and the worker deletes it in its next passes. Only the member who bound the account may purge their own; a revoked shared connection is purged by whoever manages its mailbox's members. Anyone else, an `owner` or `admin` included for a member's own account, gets `404`. The route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never strands copies.
+         * @description Deletes for good the synced copies of the caller's own revoked connection instead of waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then deletes the connected mailbox and the connection with its sync runs, storing a `copies_purged` audit event with reason `owner` on the deleted mailbox. When more copies are left than one request deletes, the rest is due at once and the worker deletes it in its next passes. Only the member who bound the account may purge their own. A revoked shared connection, whose purge deletes its mailbox with every copy and member, is purged by an `owner` or `admin` only, the people who may delete the mailbox; a `manage` member who can see it gets `403`. Anyone else, an `owner` or `admin` included for a member's own account, gets `404`. The route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never strands copies.
          */
         post: operations["purgeExternalMailCopies"];
         delete?: never;
@@ -4073,7 +4073,7 @@ export interface components {
         };
         /** @description Binds the account as the organization's team account into a new `shared` mailbox with `origin` `connected`, as `POST /v1/mailboxes` creates a shared mailbox. `owner` and `admin` only; never with `connection_id`. The connection belongs to the organization, not to the caller. */
         ExternalMailSharingRequest: {
-            /** @description The mailbox's display name; the account address when empty or absent. */
+            /** @description The mailbox's display name, at most 120 characters (not bytes) after whitespace is collapsed; the account address, cut to 120 characters, when empty or absent. */
             display_name?: string;
             /** @description The first members, 1 to 100 distinct current members of the organization. */
             members: components["schemas"]["MailboxMemberRequest"][];
@@ -8261,7 +8261,16 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
-            /** @description The sign-in is unknown, expired, used, or another member's (`MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`), or the connector is no longer enabled (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`). */
+            /** @description A shared sign-in whose starter is no longer an `owner` or `admin` (`PERMISSION.DENIED`); nothing is exchanged or stored. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The sign-in is unknown, expired, used, or another member's (`MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`), the connector is no longer enabled (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`), or a shared connection's reconnect whose starter no longer manages its mailbox's members (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8270,7 +8279,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), another member holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked one is purged and the account bound fresh instead), or the caller already holds the most live connections allowed, 10, and the account is new or the caller's revoked connection (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to the provider. */
+            /** @description A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), another member or the organization holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked personal one is purged and the account bound fresh instead), or the caller already holds the most live connections allowed, 10, and the account is new or the caller's revoked connection, or the organization holds its limit of live shared connections (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to the provider. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8279,7 +8288,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The provider refused the code (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`), or a malformed body (`VALIDATION.FAILED`). */
+            /** @description The provider refused the code (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`), a member named in a shared sign-in's `sharing` is no longer a member of the organization (`MAILBOX.ACCESS_INVALID`; nothing is exchanged or stored), or a malformed body (`VALIDATION.FAILED`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8475,6 +8484,15 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            /** @description A `manage` member asked to purge a shared connection; only an `owner` or `admin` may (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the caller's connection (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found. */
             404: {
                 headers: {

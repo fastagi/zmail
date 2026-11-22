@@ -46,6 +46,10 @@ type ExternalMailAuthorizationInput struct {
 	Sharing *domain.ExternalMailSharing
 }
 
+// sharedVerifierMarker prefixes the sealed verifier of a shared sign-in. It is not base64, so an
+// instance that does not know shared bindings cannot open the verifier and refuses the completion.
+const sharedVerifierMarker = "shared:"
+
 // ExternalMailAuthorizationStart is where to send the member's browser.
 type ExternalMailAuthorizationStart struct {
 	AuthorizationURL string
@@ -113,6 +117,12 @@ func (s *service) StartExternalMailAuthorization(ctx context.Context, viewer dom
 	if err != nil {
 		return ExternalMailAuthorizationStart{}, err
 	}
+	if sharing != nil {
+		// An API instance from before shared bindings ignores the sharing column; the marker makes
+		// its completion fail to open the verifier, before any code is exchanged, instead of binding
+		// the team account as the caller's own.
+		sealedVerifier = sharedVerifierMarker + sealedVerifier
+	}
 	now := s.now().UTC()
 	authorization := &domain.ExternalMailAuthorization{
 		OrganizationID: viewer.OrganizationID, UserID: viewer.UserID, Provider: provider,
@@ -174,7 +184,11 @@ func (s *service) CompleteExternalMailAuthorization(ctx context.Context, viewer 
 			binding.reconnectShared = true
 		}
 	}
-	verifier, err := s.encryptor.DecryptString(authorization.SealedVerifier)
+	sealedVerifier, marked := strings.CutPrefix(authorization.SealedVerifier, sharedVerifierMarker)
+	if marked != (authorization.Sharing != nil) {
+		return nil, false, ErrExternalMailAuthorizationNotFound
+	}
+	verifier, err := s.encryptor.DecryptString(sealedVerifier)
 	if err != nil {
 		return nil, false, ErrExternalMailAuthorizationNotFound
 	}
@@ -370,7 +384,7 @@ func (s *service) bindExternalAccount(tx context.Context, viewer domain.Organiza
 	}
 	owner := viewer.UserID
 	mailbox := &domain.Mailbox{
-		OrganizationID: viewer.OrganizationID, CreatedBy: viewer.UserID, Address: binding.address, DisplayName: binding.address,
+		OrganizationID: viewer.OrganizationID, CreatedBy: viewer.UserID, Address: binding.address, DisplayName: truncateDisplayName(binding.address),
 		Type: domain.MailboxTypePersonal, Origin: domain.MailboxOriginConnected, OwnerUserID: &owner,
 	}
 	// Connected mailboxes are a member's own accounts; the per-user limit above bounds them, and

@@ -32,6 +32,23 @@ and the sync-runs, purge, and unbind routes accept a shared connection from whoe
 mailbox's members. No error code was added. The credentials route's body limit rises from 4 KiB
 to 16 KiB to carry 100 members.
 
+### High — Roll every API instance forward before anyone binds a team account
+
+A sign-in started as shared on this version must be completed by this version. An older instance
+would ignore the stored `sharing`, so a shared sign-in seals its verifier behind a marker the older
+code cannot open: such a completion answers `404 MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND` before the
+code is exchanged, and the admin signs in again once every instance runs this version. Nothing is
+misbound, but shared binding is unreliable until the rollout completes. Rolling back the migration
+deletes pending shared sign-ins and refuses while a shared connection exists.
+
+### Medium — Display names count characters; shared purges need an owner or admin
+
+Every mailbox display name (`POST /v1/mailboxes`, renames, `sharing.display_name`) is now limited to
+120 characters, not 120 bytes, matching the column and the contract: multi-byte names up to 120
+characters that were refused before are accepted. Purging a revoked shared connection's copies at
+once (`POST /v1/external-mail-connections/{connection_id}/purges`) deletes its mailbox, so it is
+reserved to owners and admins; a `manage` member gets `403 PERMISSION.DENIED`.
+
 ### Low — Migration `2026_12_07_090000_add_shared_external_mail` and a new limit
 
 The migration adds `external_mail_connections.shared` and `bound_by_user_id` (backfilled from the

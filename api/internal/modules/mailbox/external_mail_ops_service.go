@@ -120,6 +120,12 @@ func (s *service) PurgeExternalMailCopies(ctx context.Context, viewer domain.Org
 	if err != nil {
 		return ExternalMailPurgeResult{}, err
 	}
+	// Purging a shared connection deletes its mailbox with every copy and member, so only those who
+	// may delete the mailbox may: owners and admins. A manage member reconnects and unbinds it, and
+	// the worker purges it once the retention ends.
+	if connection.Shared && !viewer.Role.CanManageOrganization() {
+		return ExternalMailPurgeResult{}, domain.ErrPermissionDenied
+	}
 	if connection.Status != domain.ExternalMailStatusRevoked {
 		return ExternalMailPurgeResult{}, ErrExternalMailConnectionNotRevoked
 	}

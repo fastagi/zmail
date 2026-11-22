@@ -544,9 +544,19 @@ func TestSharedReconnectAndDisconnectRules(t *testing.T) {
 	if _, err = f.service.PurgeExternalMailCopies(ctx, f.d, connection.ID); !errors.Is(err, ErrExternalMailConnectionNotFound) {
 		t.Fatalf("view member purging = %v, want not found", err)
 	}
-	purge, err := f.service.PurgeExternalMailCopies(ctx, f.c, connection.ID)
+	// Purging deletes the mailbox, so it is for those who may delete it: not a manage member.
+	if _, err = f.service.PurgeExternalMailCopies(ctx, f.c, connection.ID); !errors.Is(err, domain.ErrPermissionDenied) {
+		t.Fatalf("manage member purging = %v, want permission denied", err)
+	}
+	if status, body := f.opsCall(t, f.c, http.MethodPost, fmt.Sprintf("/external-mail-connections/%d/purges", connection.ID)); status != http.StatusForbidden {
+		t.Fatalf("manage member purging over HTTP = %d %v", status, body)
+	}
+	if _, err = f.repo.FindMailbox(ctx, accessOrg, connection.MailboxID); err != nil {
+		t.Fatalf("a refused purge touched the mailbox: %v", err)
+	}
+	purge, err := f.service.PurgeExternalMailCopies(ctx, f.admin, connection.ID)
 	if err != nil || !purge.Completed {
-		t.Fatalf("manage member purging = %+v, err %v", purge, err)
+		t.Fatalf("admin purging = %+v, err %v", purge, err)
 	}
 	if _, err = f.repo.FindMailbox(ctx, accessOrg, connection.MailboxID); !errors.Is(err, ErrMailboxNotFound) {
 		t.Fatalf("the purged mailbox survived: %v", err)
@@ -772,5 +782,78 @@ func TestSharedConnectionLimitHoldsUnderConcurrency(t *testing.T) {
 	}
 	if live, _ := f.service.externalMail.CountLiveSharedExternalMailConnections(ctx, accessOrg); live != 2 {
 		t.Fatalf("live shared connections = %d, want 2", live)
+	}
+}
+
+// TestSharedSignInFailsOnAnInstanceWithoutSharing: a shared sign-in seals its verifier with a marker,
+// so an instance that ignores the sharing column (an older API during a rollout, simulated here by
+// clearing it) refuses the completion before exchanging the code, instead of binding the team
+// account as the caller's own.
+func TestSharedSignInFailsOnAnInstanceWithoutSharing(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	ctx := context.Background()
+	started, err := f.service.StartExternalMailAuthorization(ctx, f.admin, ExternalMailAuthorizationInput{
+		Provider: domain.ExternalMailProviderGmail, Sharing: teamMembers(),
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	var sealed string
+	db := f.repo.(*repository).db
+	if err = db.Raw(`SELECT sealed_verifier FROM external_mail_authorizations`).Scan(&sealed).Error; err != nil {
+		t.Fatalf("read sign-in: %v", err)
+	}
+	if !strings.HasPrefix(sealed, sharedVerifierMarker) {
+		t.Fatalf("a shared sign-in is not marked: %q", sealed)
+	}
+	if _, err = f.service.encryptor.DecryptString(sealed); err == nil {
+		t.Fatal("a marked verifier opens without knowing the marker")
+	}
+	if err = db.Exec(`UPDATE external_mail_authorizations SET sharing = NULL`).Error; err != nil {
+		t.Fatalf("clear sharing: %v", err)
+	}
+	parsed, _ := url.Parse(started.AuthorizationURL)
+	if _, _, err = f.service.CompleteExternalMailAuthorization(ctx, f.admin, parsed.Query().Get("state"), "support"); !errors.Is(err, ErrExternalMailAuthorizationNotFound) {
+		t.Fatalf("completion without the sharing column = %v, want not found", err)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM external_mail_connections WHERE lower(account_address) = 'support@external.invalid'`); n != 0 {
+		t.Fatalf("the team account was bound %d times", n)
+	}
+}
+
+// TestDisplayNamesCountCharacters: the 120-character display-name limit counts characters, as the
+// column and the contract do, for every mailbox creation; a long account address used as the
+// default name is cut to fit.
+func TestDisplayNamesCountCharacters(t *testing.T) {
+	f := newExternalFixture(t, config.ExternalMailSourceFake)
+	ctx := context.Background()
+	full := strings.Repeat("客", 120)
+	mailbox, err := f.service.CreateMailbox(ctx, f.admin, CreateMailboxInput{
+		LocalPart: "wide", DisplayName: full, Type: domain.MailboxTypeShared,
+		Members: []MailboxMemberInput{{UserID: accessC, Permission: domain.MailboxPermissionView}},
+	})
+	if err != nil || mailbox.DisplayName != full {
+		t.Fatalf("120 multi-byte characters = %+v, err %v", mailbox, err)
+	}
+	if _, err = f.service.CreateMailbox(ctx, f.admin, CreateMailboxInput{
+		LocalPart: "wider", DisplayName: full + "客", Type: domain.MailboxTypeShared,
+		Members: []MailboxMemberInput{{UserID: accessC, Permission: domain.MailboxPermissionView}},
+	}); !errors.Is(err, ErrMailboxAddressInvalid) {
+		t.Fatalf("121 characters = %v, want address invalid", err)
+	}
+	named := teamMembers()
+	named.DisplayName = full
+	connection := f.mustBindShared(t, "support", named)
+	stored, _ := f.repo.FindMailbox(ctx, accessOrg, connection.MailboxID)
+	if stored.DisplayName != full {
+		t.Fatalf("shared display name = %q", stored.DisplayName)
+	}
+	unnamed := teamMembers()
+	unnamed.DisplayName = ""
+	long := strings.Repeat("l", 150)
+	connection = f.mustBindShared(t, long, unnamed)
+	stored, _ = f.repo.FindMailbox(ctx, accessOrg, connection.MailboxID)
+	if stored.Address != long+"@external.invalid" || len([]rune(stored.DisplayName)) != maxMailboxDisplayNameLength {
+		t.Fatalf("long address mailbox = %q named %q", stored.Address, stored.DisplayName)
 	}
 }

@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,5 +50,15 @@ func TestSharedExternalMailConstraints(t *testing.T) {
 		VALUES (10, 2, 'gmail', 'support@gmail.example', true, 901, now(), now(), now())`)
 	exec(`INSERT INTO external_mail_authorizations (organization_id, user_id, provider, state_hash, sealed_verifier, sharing, expires_at, created_at)
 		VALUES (10, 901, 'gmail', repeat('a', 64), 'sealed', '{"members":[{"user_id":901,"permission":"manage"}]}', now(), now())`)
+	exec(`INSERT INTO external_mail_authorizations (organization_id, user_id, provider, state_hash, sealed_verifier, expires_at, created_at)
+		VALUES (10, 901, 'gmail', repeat('b', 64), 'sealed', now(), now())`)
 	assert.Error(t, db.Transaction(func(tx *gorm.DB) error { return (&addSharedExternalMail{}).Down(tx) }))
+
+	// Once no shared connection is left, a rollback deletes the pending shared sign-ins and keeps
+	// the members' own.
+	exec(`DELETE FROM external_mail_connections WHERE shared`)
+	require.NoError(t, db.Transaction(func(tx *gorm.DB) error { return (&addSharedExternalMail{}).Down(tx) }))
+	var pending []string
+	require.NoError(t, db.Raw(`SELECT state_hash FROM external_mail_authorizations ORDER BY state_hash`).Scan(&pending).Error)
+	assert.Equal(t, []string{strings.Repeat("b", 64)}, pending)
 }

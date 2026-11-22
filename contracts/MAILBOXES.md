@@ -839,12 +839,15 @@ optional object; without it the personal flow above is unchanged:
 `POST /v1/external-mail-authorizations` stores `sharing` with the pending sign-in;
 `POST /v1/external-mail-credentials` takes it next to the credentials. `members` follows the shared
 mailbox rules: 1 to 100 distinct current members, each `view`, `send`, or `manage`
-(`422 MAILBOX.ACCESS_INVALID`). `display_name` is optional and defaults to the account address
+(`422 MAILBOX.ACCESS_INVALID`). `display_name` is optional, at most 120 characters (not bytes, as
+for every mailbox), and defaults to the account address cut to 120 characters
 (`422 MAILBOX.ADDRESS_INVALID` when invalid). A caller who is not an `owner` or `admin` gets
 `403 PERMISSION.DENIED`, checked before any attempt is counted or any server contacted; `sharing`
 with `connection_id` is `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`. The role and the members are
 checked again when the sign-in completes, before the code is exchanged, so a member who left or a
-role that changed in between refuses the completion and nothing is stored.
+role that changed in between refuses the completion (`422 MAILBOX.ACCESS_INVALID` or
+`403 PERMISSION.DENIED`) and nothing is stored. A shared sign-in is completed only by an API version
+that knows shared bindings; an older one answers `404 MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`.
 
 A new account creates, in one transaction, the mailbox, its `created` and `member_set` access
 events, the connection, and `connection_bound`, and answers `201` with `"shared": true`. The
@@ -874,9 +877,11 @@ does not apply, and deleting the mailbox revokes its connection in the same tran
 
 Whoever manages the mailbox's members (a `manage` member, an `owner`, or an `admin`) manages the
 connection: they reconnect it with `connection_id` on either binding route (the same account, or
-`409 MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`; checked again at completion), unbind it, read its sync runs,
-and purge a revoked one. Everyone else gets `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, and so does
-anyone once the mailbox is deleted. An unbind follows the revoke path below and records
+`409 MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`; checked again at completion), unbind it, and read its sync
+runs. Purging a revoked shared connection at once deletes the mailbox with every copy and member, so
+only an `owner` or `admin`, who may delete the mailbox anyway, may do it; a `manage` member gets
+`403 PERMISSION.DENIED`, and the worker's purge after the retention is unchanged. Everyone else gets
+`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`, and so does anyone once the mailbox is deleted. An unbind follows the revoke path below and records
 `connection_revoked` with the caller as actor, plus an organization audit entry with `reason`
 `shared_disconnect`; the mailbox and its members stay until the retention ends, the connection is
 reconnected, or the mailbox is deleted.
@@ -1003,7 +1008,7 @@ of a deleted mailbox answers `404`, so it is never listed. Binding the account a
 new mailbox.
 
 `POST /v1/external-mail-connections/:connection_id/purges` deletes the copies of the caller's own
-revoked connection, or of a revoked shared connection they manage, at once, the same way, with `reason` `owner` and the caller as the actor:
+revoked connection, or, for an `owner` or `admin`, of a revoked shared connection, at once, the same way, with `reason` `owner` and the caller as the actor:
 
 | Case | Answer |
 |---|---|
