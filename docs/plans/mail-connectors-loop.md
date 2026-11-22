@@ -70,6 +70,11 @@ or poll remote CI. The gate is `make check` from the repository root with:
 - `golangci-lint` v2.14.0 on PATH (the version pinned in `.github/workflows/ci.yml`).
 - `CI=true` and `FASTBUILD_TEST_POSTGRES_DSN` set, so no database test is skipped.
 
+Run the gate in a clean worktree OUTSIDE the repository folder: one governance script walks every
+file under the repository root, and the main checkout holds many session worktrees. Under heavy
+machine load from parallel gates, tests may fail only with a 5 second timeout: rerun with a longer
+timeout to confirm, and never edit a test for that reason.
+
 Run it on the exact tree that will land on `main`: stacked work is merged into one integration
 branch, gated once, and then merged in dependency order.
 
