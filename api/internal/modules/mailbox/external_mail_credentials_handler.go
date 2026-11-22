@@ -12,8 +12,9 @@ import (
 	"github.com/fastagi/zmail/api/pkg/response"
 )
 
-// maxExternalMailCredentialsBodyBytes bounds a credential binding request.
-const maxExternalMailCredentialsBodyBytes = 4096
+// maxExternalMailCredentialsBodyBytes bounds a credential binding request, a shared target with
+// 100 members included.
+const maxExternalMailCredentialsBodyBytes = 16384
 
 // bindExternalMailCredentialsRequest binds an account of a password connector. It is never
 // logged or echoed back.
@@ -26,6 +27,10 @@ type bindExternalMailCredentialsRequest struct {
 	// BackfillDays is checked by the service, which answers MAILBOX.EXTERNAL_AUTHORIZATION_INVALID
 	// out of range, as the OAuth start route does.
 	BackfillDays int `json:"backfill_days"`
+	// ConnectionID restores that connection; it cannot be combined with sharing.
+	ConnectionID *uint `json:"connection_id" binding:"omitempty,min=1"`
+	// Sharing binds a team account into a new shared connected mailbox (owners and admins).
+	Sharing *externalMailSharingRequest `json:"sharing"`
 }
 
 // BindExternalMailCredentials binds an outside account with an app password: 201 with a new
@@ -42,6 +47,7 @@ func (h *Handler) BindExternalMailCredentials(c *gin.Context) {
 	connection, created, err := h.service.BindExternalMailCredentials(c.Request.Context(), viewer, ExternalMailCredentialsInput{
 		Provider: domain.ExternalMailProvider(req.Provider), Host: req.Host, Port: req.Port,
 		Username: req.Username, Password: req.Password, BackfillDays: req.BackfillDays,
+		ConnectionID: req.ConnectionID, Sharing: req.Sharing.input(),
 	})
 	if err != nil {
 		var retry *RetryAfterError

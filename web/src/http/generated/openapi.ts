@@ -359,7 +359,7 @@ export interface paths {
         put?: never;
         /**
          * Start binding or reconnecting an outside account
-         * @description Stores a pending sign-in for the caller, single use and valid for 10 minutes, and answers the provider page to send the browser to. With `connection_id` it reconnects that connection, which must be the caller's own. Session only; never cached.
+         * @description Stores a pending sign-in for the caller, single use and valid for 10 minutes, and answers the provider page to send the browser to. With `connection_id` it reconnects that connection, which must be the caller's own or a shared one whose mailbox members the caller manages (a `manage` member, an `owner`, or an `admin`). With `sharing` an `owner` or `admin` binds a team account into a new shared connected mailbox with those members; members get `403`. Session only; never cached.
          */
         post: operations["startExternalMailAuthorization"];
         delete?: never;
@@ -420,7 +420,7 @@ export interface paths {
         post?: never;
         /**
          * Force-disconnect a member's connected account
-         * @description Needs the `owner` or `admin` organization role. Has the effect of the owner's unbind on any connection of the organization; the grant is revoked at the provider on a best-effort basis, the token is erased, mail already synced stays in the owner's connected mailbox, and a `connection_force_disconnected` access event and an organization audit entry (connection id, provider, owner; never the address) are written. The owner may bind the account again afterwards. A revoked connection answers `204` again and writes nothing. Another organization's id, and any id while external mail is off, answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+         * @description Needs the `owner` or `admin` organization role. Has the effect of the owner's unbind on any connection of the organization; the grant is revoked at the provider on a best-effort basis, the token is erased, mail already synced stays in the owner's connected mailbox, and a `connection_force_disconnected` access event and an organization audit entry (connection id, provider, owner; never the address) are written. The owner may bind the account again afterwards. A shared connection is disconnected the same way but recorded as `connection_revoked` with the caller as actor (audit reason `shared_disconnect`); its mailbox and members stay until the retention ends, the mailbox is deleted, or it is reconnected. A revoked connection answers `204` again and writes nothing. Another organization's id, and any id while external mail is off, answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
          */
         delete: operations["forceDisconnectExternalMailConnection"];
         options?: never;
@@ -437,7 +437,7 @@ export interface paths {
         };
         /**
          * List the caller's connected accounts
-         * @description Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in this organization, at most 20 - their live connections (at most 10) and then their 10 most recently revoked ones, whose copies they may still purge or rebind. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty) the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached and never carries a token.
+         * @description Lists the outside accounts (Gmail, Outlook, or any other connector) the caller bound in this organization, at most 120 - their live connections (at most 10, id ascending) and their 10 most recently revoked ones, whose copies they may still purge or rebind, then the shared connections the caller manages (every one for an `owner` or `admin`; those of mailboxes the caller holds with `manage` otherwise), at most 100, whose mailbox still exists. While the instance enables no external mail source (`EXTERNAL_MAIL_PROVIDERS` empty) the route answers `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached and never carries a token.
          */
         get: operations["listExternalMailConnections"];
         put?: never;
@@ -460,7 +460,7 @@ export interface paths {
         post?: never;
         /**
          * Unbind a connected account
-         * @description The member who bound the account, or an `owner` or `admin` (recorded as a forced disconnect), may unbind it. The grant is revoked at the provider on a best-effort basis, the stored token is erased, and the connection is never synced again; mail already synced stays in the connected mailbox until the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) ends, when the worker deletes it with the mailbox, unless the account is bound again before. Unbinding a revoked connection succeeds again. Another member's connection, another organization's id, and any id while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+         * @description The member who bound the account, or an `owner` or `admin` (recorded as a forced disconnect), may unbind it. A shared connection is unbound by whoever manages its mailbox's members (recorded as `connection_revoked` and in the organization audit log). The grant is revoked at the provider on a best-effort basis, the stored token is erased, and the connection is never synced again; mail already synced stays in the connected mailbox until the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) ends, when the worker deletes it with the mailbox, unless the account is bound again before. Unbinding a revoked connection succeeds again. Another member's connection, another organization's id, and any id while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
          */
         delete: operations["revokeExternalMailConnection"];
         options?: never;
@@ -479,7 +479,7 @@ export interface paths {
         put?: never;
         /**
          * Delete a revoked connection's copies at once
-         * @description Deletes for good the synced copies of the caller's own revoked connection instead of waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then deletes the connected mailbox and the connection with its sync runs, storing a `copies_purged` audit event with reason `owner` on the deleted mailbox. When more copies are left than one request deletes, the rest is due at once and the worker deletes it in its next passes. Only the member who bound the account may purge; anyone else, an `owner` or `admin` included, gets `404`. The route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never strands copies.
+         * @description Deletes for good the synced copies of the caller's own revoked connection instead of waiting for the retention (`EXTERNAL_MAIL_REVOKED_RETENTION`, 30 days by default) to end, then deletes the connected mailbox and the connection with its sync runs, storing a `copies_purged` audit event with reason `owner` on the deleted mailbox. When more copies are left than one request deletes, the rest is due at once and the worker deletes it in its next passes. Only the member who bound the account may purge their own. A revoked shared connection, whose purge deletes its mailbox with every copy and member, is purged by an `owner` or `admin` only, the people who may delete the mailbox; a `manage` member who can see it gets `403`. Anyone else, an `owner` or `admin` included for a member's own account, gets `404`. The route works while `EXTERNAL_MAIL_PROVIDERS` is empty, so switching the feature off never strands copies.
          */
         post: operations["purgeExternalMailCopies"];
         delete?: never;
@@ -497,7 +497,7 @@ export interface paths {
         };
         /**
          * List a connection's latest sync runs
-         * @description Lists the latest fetches of the caller's own connection, newest first, at most 50. Each fetch records one run with its times, outcome, counts, and error code, never message data; the worker keeps a connection's latest 50 runs and none older than 14 days. Another member's connection, an `owner` or `admin` included, another organization's id, and any id while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached.
+         * @description Lists the latest fetches of the caller's own connection, or of a shared connection whose mailbox members the caller manages, newest first, at most 50. Each fetch records one run with its times, outcome, counts, and error code, never message data; the worker keeps a connection's latest 50 runs and none older than 14 days. Another member's connection, an `owner` or `admin` included, another organization's id, and any id while external mail is off answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. The response is never cached.
          */
         get: operations["listExternalMailSyncRuns"];
         put?: never;
@@ -539,7 +539,7 @@ export interface paths {
         put?: never;
         /**
          * Bind or reconnect an outside account with an app password
-         * @description For connectors whose `auth_kind` is `password` (the generic `imap` connector for iCloud, Yahoo, Fastmail, QQ, 163, or a self-hosted server). The server signs in to `host` over implicit TLS on port 993 with a verified certificate and opens INBOX once before anything is stored; hosts that resolve to loopback, private, link-local, or unspecified addresses are refused. The outcomes follow `completeExternalMailAuthorization`. A new account creates a private, read-only connected personal mailbox and its connection (`201`); the caller's own account in any state is restored with the new password and the same mailbox (`200`), and a restore that names another host starts the backfill over. The account is derived from the login, never named by the caller. The password is sealed at rest, never logged, never returned, and never written to audit metadata. Attempts are limited to 10 per member per 15 minutes and 30 per organization per hour. Session only; never cached.
+         * @description For connectors whose `auth_kind` is `password` (the generic `imap` connector for iCloud, Yahoo, Fastmail, QQ, 163, or a self-hosted server). The server signs in to `host` over implicit TLS on port 993 with a verified certificate and opens INBOX once before anything is stored; hosts that resolve to loopback, private, link-local, or unspecified addresses are refused. The outcomes follow `completeExternalMailAuthorization`. A new account creates a private, read-only connected personal mailbox and its connection (`201`), or, with `sharing` (`owner` and `admin` only), a shared connected mailbox with those members owned by the organization; the caller's own account in any state is restored with the new password and the same mailbox (`200`), and so is the shared connection named by `connection_id` for whoever manages its mailbox's members. A restore that names another host starts the backfill over. The account is derived from the login, never named by the caller. The password is sealed at rest, never logged, never returned, and never written to audit metadata. Attempts are limited to 10 per member per 15 minutes and 30 per organization per hour. Session only; never cached.
          */
         post: operations["bindExternalMailCredentials"];
         delete?: never;
@@ -3873,6 +3873,8 @@ export interface components {
         BindExternalMailCredentialsRequest: {
             /** @description How far back the first sync reads INBOX; 14 when omitted. */
             backfill_days?: number;
+            /** @description Restores that connection, the caller's own or a shared one they manage; the login must be the same account. Never with `sharing`. */
+            connection_id?: components["schemas"]["PositiveID"];
             /** @description The IMAP server, such as `imap.mail.me.com`. */
             host: string;
             /**
@@ -3886,6 +3888,7 @@ export interface components {
              */
             port: number;
             provider: components["schemas"]["ExternalMailConnectorID"];
+            sharing?: components["schemas"]["ExternalMailSharingRequest"];
             /** @description The login. The bound account is derived from it, never named by the caller; the lowercased username when it contains `@`, otherwise `username@host`. */
             username: string;
         };
@@ -4007,26 +4010,34 @@ export interface components {
             /** @description The connected mailbox synced mail is stored in. */
             mailbox_id: components["schemas"]["PositiveID"];
             provider: components["schemas"]["ExternalMailConnectorID"];
+            /** @description True for the organization's connection of a shared connected mailbox, false for a member's own account. */
+            shared: boolean;
             /**
              * @description `active` connections are synced every two minutes; `needs_reconnect` lost the provider grant and waits for the owner to bind again; `revoked` was unbound and is never synced again.
              * @enum {string}
              */
             status: "active" | "needs_reconnect" | "revoked";
         };
-        /** @description One connection as an owner or admin sees it; never the token, the full address, the mailbox, or mail. */
+        /** @description One connection as an owner or admin sees it; never the token or mail. A member's own account never shows its full address or mailbox; a shared connection is the organization's team account and shows both. */
         ExternalMailConnectionDirectoryEntry: {
+            /** @description The full address of a shared connection; null for a member's own account. */
+            account_address: string | null;
             /** Format: date-time */
             created_at: string;
             id: components["schemas"]["PositiveID"];
             /** @description When a sync last succeeded; null before the first. */
             last_synced_at: string | null;
+            /** @description The shared connected mailbox of a shared connection; null for a member's own account. */
+            mailbox_id: components["schemas"]["PositiveID"] | null;
             /** @description The first two characters of the local part (one when it is that short), `***`, and the domain, such as `st***@gmail.com`. */
             masked_account_address: string;
             /** @description The owner's nickname, or username without one, while they are a member; null otherwise. */
             owner_display_name: string | null;
-            /** @description The member who bound the account; null once that account was deleted. */
+            /** @description The member whose own account this is; null for a shared connection and once that user account was deleted. */
             owner_user_id: components["schemas"]["PositiveID"] | null;
             provider: components["schemas"]["ExternalMailConnectorID"];
+            /** @description True for the organization's connection of a shared connected mailbox. */
+            shared: boolean;
             /** @enum {string} */
             status: "active" | "needs_reconnect" | "revoked";
         };
@@ -4079,6 +4090,13 @@ export interface components {
                 deleted_messages: number;
             };
             message: string;
+        };
+        /** @description Binds the account as the organization's team account into a new `shared` mailbox with `origin` `connected`, as `POST /v1/mailboxes` creates a shared mailbox. `owner` and `admin` only; never with `connection_id`. The connection belongs to the organization, not to the caller. */
+        ExternalMailSharingRequest: {
+            /** @description The mailbox's display name, at most 120 characters (not bytes) after whitespace is collapsed; the account address, cut to 120 characters, when empty or absent. */
+            display_name?: string;
+            /** @description The first members, 1 to 100 distinct current members of the organization. */
+            members: components["schemas"]["MailboxMemberRequest"][];
         };
         /** @description One fetch of a connection. It never carries message data. */
         ExternalMailSyncRun: {
@@ -6401,12 +6419,13 @@ export interface components {
         };
         /** @enum {string} */
         SettingVisibility: "public" | "private";
-        /** @description Give `provider` to bind a new account, or `connection_id` to reconnect one of the caller's own connections (its provider is then implied; a different `provider` is refused). */
+        /** @description Give `provider` to bind a new account, or `connection_id` to reconnect one of the caller's own connections or a shared one they manage (its provider is then implied; a different `provider` is refused). Add `sharing` to bind a team account into a new shared connected mailbox. */
         StartExternalMailAuthorizationRequest: {
             /** @description How far back a new binding first reads; 14 when omitted. */
             backfill_days?: number;
             connection_id?: components["schemas"]["PositiveID"];
             provider?: components["schemas"]["ExternalMailConnectorID"];
+            sharing?: components["schemas"]["ExternalMailSharingRequest"];
         };
         /**
          * @description The most severe delivery event recorded for the message (see MAILBOXES.md, Delivery Events); null when none was recorded.
@@ -8200,7 +8219,16 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
-            /** @description The organization is not found (`ORGANIZATION.NOT_FOUND`), the instance does not run the connector or external mail is off (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`), or the connection is not the caller's (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`). */
+            /** @description A member who is not an `owner` or `admin` asked for `sharing` (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The organization is not found (`ORGANIZATION.NOT_FOUND`), the instance does not run the connector or external mail is off (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`), or the connection is not one the caller may reconnect (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8209,7 +8237,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Neither `provider` nor `connection_id`, a `provider` other than the connection's, or a `backfill_days` outside 1 to 90 (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`), or a malformed body (`COMMON.VALIDATION_FAILED`). */
+            /** @description Neither `provider` nor `connection_id`, both `sharing` and `connection_id`, a `provider` other than the connection's, or a `backfill_days` outside 1 to 90 (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); `sharing` members that `POST /v1/mailboxes` would refuse (`MAILBOX.ACCESS_INVALID`) or an invalid `display_name` (`MAILBOX.ADDRESS_INVALID`); or a malformed body (`COMMON.VALIDATION_FAILED`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8257,7 +8285,16 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
-            /** @description The sign-in is unknown, expired, used, or another member's (`MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`), or the connector is no longer enabled (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`). */
+            /** @description A shared sign-in whose starter is no longer an `owner` or `admin` (`PERMISSION.DENIED`); nothing is exchanged or stored. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The sign-in is unknown, expired, used, or another member's (`MAILBOX.EXTERNAL_AUTHORIZATION_NOT_FOUND`), the connector is no longer enabled (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`), or a shared connection's reconnect whose starter no longer manages its mailbox's members (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8266,7 +8303,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), another member holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked one is purged and the account bound fresh instead), or the caller already holds the most live connections allowed, 10, and the account is new or the caller's revoked connection (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to the provider. */
+            /** @description A reconnect signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), another member or the organization holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked personal one is purged and the account bound fresh instead), or the caller already holds the most live connections allowed, 10, and the account is new or the caller's revoked connection, or the organization holds its limit of live shared connections (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). The grant is handed back to the provider. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8275,7 +8312,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description The provider refused the code (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`), or a malformed body (`VALIDATION.FAILED`). */
+            /** @description The provider refused the code (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`), a member named in a shared sign-in's `sharing` is no longer a member of the organization (`MAILBOX.ACCESS_INVALID`; nothing is exchanged or stored), or a malformed body (`VALIDATION.FAILED`). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8377,7 +8414,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The caller's live connections id ascending, then their most recently revoked ones. */
+            /** @description The caller's live connections id ascending and their most recently revoked ones, then the shared ones they manage, live first, then id ascending. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8471,6 +8508,15 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
+            /** @description A `manage` member asked to purge a shared connection; only an `owner` or `admin` may (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description The organization (`ORGANIZATION.NOT_FOUND`) or the caller's connection (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`) is not found. */
             404: {
                 headers: {
@@ -8593,7 +8639,16 @@ export interface operations {
             };
             400: components["responses"]["OrganizationContextInvalid"];
             401: components["responses"]["Unauthorized"];
-            /** @description The organization is not found (`ORGANIZATION.NOT_FOUND`), or the instance does not run the connector, the connector does not bind with a password, or external mail is off (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`). */
+            /** @description A member who is not an `owner` or `admin` asked for `sharing` (`PERMISSION.DENIED`). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The organization is not found (`ORGANIZATION.NOT_FOUND`); the instance does not run the connector, the connector does not bind with a password, or external mail is off (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`); or `connection_id` is not one the caller may restore (`MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`). */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -8602,7 +8657,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description Another member holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked one is purged and the account bound fresh instead), or the caller already holds the most live connections allowed, 10, and the account is new or the caller's revoked connection (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). */
+            /** @description Another member, or the organization as a shared connection, holds a live connection to the account (`MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; a revoked personal one is purged and the account bound fresh instead), a restore signed in to another account (`MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`), or the caller already holds the most live connections allowed, 10, or the organization its limit of live shared connections (`EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS`, 20 by default) (`MAILBOX.EXTERNAL_CONNECTION_LIMIT`). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8612,7 +8667,7 @@ export interface operations {
                 };
             };
             413: components["responses"]["RequestTooLarge"];
-            /** @description The server refused the username or password (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`); the server could not be reached over TLS, its certificate did not verify, or the host is not allowed, or refused the login for a transient reason (`MAILBOX.EXTERNAL_SERVER_UNREACHABLE`); a value carries a control character or the backfill is out of range (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); or a malformed body (`COMMON.VALIDATION_FAILED`). */
+            /** @description The server refused the username or password (`MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`); the server could not be reached over TLS, its certificate did not verify, or the host is not allowed, or refused the login for a transient reason (`MAILBOX.EXTERNAL_SERVER_UNREACHABLE`); a value carries a control character, the backfill is out of range, both `sharing` and `connection_id` are given, or `provider` is not the connection's (`MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); `sharing` members that `POST /v1/mailboxes` would refuse (`MAILBOX.ACCESS_INVALID`) or an invalid `display_name` (`MAILBOX.ADDRESS_INVALID`); or a malformed body (`COMMON.VALIDATION_FAILED`). */
             422: {
                 headers: {
                     [name: string]: unknown;

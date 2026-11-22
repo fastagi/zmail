@@ -2,6 +2,7 @@ package mailbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -45,6 +46,8 @@ type ExternalMailConnectionPO struct {
 	Provider              string `gorm:"size:16;not null"`
 	AccountAddress        string `gorm:"size:320;not null"`
 	OwnerUserID           *uint
+	Shared                bool `gorm:"not null;default:false"`
+	BoundByUserID         *uint
 	Status                string `gorm:"size:16;not null;default:'active'"`
 	LastSyncedAt          *time.Time
 	LastErrorCode         *string `gorm:"size:64"`
@@ -68,7 +71,8 @@ func (po *ExternalMailConnectionPO) toDomain() *domain.ExternalMailConnection {
 	connection := &domain.ExternalMailConnection{
 		ID: po.ID, OrganizationID: po.OrganizationID, MailboxID: po.MailboxID,
 		Provider: domain.ExternalMailProvider(po.Provider), AccountAddress: po.AccountAddress,
-		OwnerUserID: po.OwnerUserID, Status: domain.ExternalMailStatus(po.Status), LastSyncedAt: po.LastSyncedAt,
+		OwnerUserID: po.OwnerUserID, Shared: po.Shared, BoundByUserID: po.BoundByUserID,
+		Status: domain.ExternalMailStatus(po.Status), LastSyncedAt: po.LastSyncedAt,
 		EncryptedRefreshToken: po.EncryptedRefreshToken, SyncCursor: po.SyncCursor, BackfillDays: po.BackfillDays,
 		NextSyncAt: po.NextSyncAt, ConsecutiveFailures: po.ConsecutiveFailures, ConsecutiveMore: po.ConsecutiveMore, RevokedAt: po.RevokedAt,
 		CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
@@ -88,7 +92,8 @@ func (r *repository) CreateExternalMailConnection(ctx context.Context, connectio
 	po := &ExternalMailConnectionPO{
 		OrganizationID: connection.OrganizationID, MailboxID: connection.MailboxID,
 		Provider: string(connection.Provider), AccountAddress: connection.AccountAddress,
-		OwnerUserID: connection.OwnerUserID, Status: string(domain.ExternalMailStatusActive),
+		OwnerUserID: connection.OwnerUserID, Shared: connection.Shared, BoundByUserID: connection.BoundByUserID,
+		Status:                string(domain.ExternalMailStatusActive),
 		EncryptedRefreshToken: connection.EncryptedRefreshToken, SyncCursor: connection.SyncCursor,
 		BackfillDays: connection.BackfillDays, NextSyncAt: connection.NextSyncAt,
 	}
@@ -260,7 +265,7 @@ func (r *repository) ListExternalMailConnections(ctx context.Context, organizati
 	// which a rebind restores and whose copies the member may purge, bounded on their own so the
 	// live ones never push them out.
 	var live, revoked []ExternalMailConnectionPO
-	owned := r.conn(ctx).Where("organization_id = ? AND owner_user_id = ?", organizationID, ownerUserID)
+	owned := r.conn(ctx).Where("organization_id = ? AND owner_user_id = ? AND NOT shared", organizationID, ownerUserID)
 	if err := owned.Session(&gorm.Session{}).Where("status <> ?", domain.ExternalMailStatusRevoked).
 		Order("id ASC").Limit(domain.MaxExternalMailConnectionsPerUser).Find(&live).Error; err != nil {
 		return nil, err
@@ -398,9 +403,11 @@ type ExternalMailAuthorizationPO struct {
 	StateHash      string `gorm:"type:char(64);not null;uniqueIndex"`
 	SealedVerifier string `gorm:"type:text;not null"`
 	ConnectionID   *uint
-	BackfillDays   int `gorm:"type:smallint;not null;default:14"`
-	ExpiresAt      time.Time
-	CreatedAt      time.Time
+	// Sharing is the JSON of domain.ExternalMailSharing; NULL for a member's own binding.
+	Sharing      *string `gorm:"type:jsonb"`
+	BackfillDays int     `gorm:"type:smallint;not null;default:14"`
+	ExpiresAt    time.Time
+	CreatedAt    time.Time
 }
 
 func (ExternalMailAuthorizationPO) TableName() string {
@@ -416,6 +423,13 @@ func (r *repository) CreateExternalMailAuthorization(ctx context.Context, author
 		Provider: string(authorization.Provider), StateHash: authorization.StateHash,
 		SealedVerifier: authorization.SealedVerifier, ConnectionID: authorization.ConnectionID,
 		BackfillDays: authorization.BackfillDays, ExpiresAt: authorization.ExpiresAt, CreatedAt: authorization.CreatedAt,
+	}
+	if authorization.Sharing != nil {
+		encoded, err := json.Marshal(authorization.Sharing)
+		if err != nil {
+			return err
+		}
+		po.Sharing = new(string(encoded))
 	}
 	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
 		// Abandoned sign-ins expire within minutes; each start sweeps a bounded batch of them.
@@ -446,12 +460,19 @@ func (r *repository) TakeExternalMailAuthorization(ctx context.Context, stateHas
 		return nil, ErrExternalMailAuthorizationNotFound
 	}
 	po := rows[0]
-	return &domain.ExternalMailAuthorization{
+	authorization := &domain.ExternalMailAuthorization{
 		ID: po.ID, OrganizationID: po.OrganizationID, UserID: po.UserID,
 		Provider: domain.ExternalMailProvider(po.Provider), StateHash: po.StateHash,
 		SealedVerifier: po.SealedVerifier, ConnectionID: po.ConnectionID, BackfillDays: po.BackfillDays,
 		ExpiresAt: po.ExpiresAt, CreatedAt: po.CreatedAt,
-	}, nil
+	}
+	if po.Sharing != nil {
+		authorization.Sharing = &domain.ExternalMailSharing{}
+		if err := json.Unmarshal([]byte(*po.Sharing), authorization.Sharing); err != nil {
+			return nil, fmt.Errorf("decode external mail sharing: %w", err)
+		}
+	}
+	return authorization, nil
 }
 
 func (r *repository) LockExternalMailBindings(ctx context.Context, organizationID, ownerUserID uint) error {
@@ -468,7 +489,50 @@ func (r *repository) CountLiveExternalMailConnections(ctx context.Context, organ
 	}
 	var count int64
 	err := r.conn(ctx).Model(&ExternalMailConnectionPO{}).
-		Where("organization_id = ? AND owner_user_id = ? AND status <> ?", organizationID, ownerUserID, string(domain.ExternalMailStatusRevoked)).
+		Where("organization_id = ? AND owner_user_id = ? AND NOT shared AND status <> ?", organizationID, ownerUserID, string(domain.ExternalMailStatusRevoked)).
 		Count(&count).Error
 	return int(count), err
+}
+
+func (r *repository) LockSharedExternalMailBindings(ctx context.Context, organizationID uint) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	key := fmt.Sprintf("zmail.external_mail_shared_binding:%d", organizationID)
+	return r.conn(ctx).Exec(`SELECT pg_advisory_xact_lock(hashtextextended(?, 0))`, key).Error
+}
+
+func (r *repository) CountLiveSharedExternalMailConnections(ctx context.Context, organizationID uint) (int, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	var count int64
+	err := r.conn(ctx).Model(&ExternalMailConnectionPO{}).
+		Where("organization_id = ? AND shared AND status <> ?", organizationID, string(domain.ExternalMailStatusRevoked)).
+		Count(&count).Error
+	return int(count), err
+}
+
+func (r *repository) ListSharedExternalMailConnections(ctx context.Context, organizationID, membershipID uint, all bool, limit int) ([]*domain.ExternalMailConnection, error) {
+	if r.db == nil {
+		return nil, domain.ErrServiceUnavailable
+	}
+	query := r.conn(ctx).Model(&ExternalMailConnectionPO{}).
+		Where("external_mail_connections.organization_id = ? AND external_mail_connections.shared", organizationID).
+		// A connection whose mailbox was deleted is revoked and waits for its purge; nobody manages it.
+		Where(`EXISTS (SELECT 1 FROM mailboxes WHERE mailboxes.id = external_mail_connections.mailbox_id
+			AND mailboxes.deleted_at IS NULL)`)
+	if !all {
+		query = query.Where(`EXISTS (SELECT 1 FROM mailbox_members WHERE mailbox_members.mailbox_id = external_mail_connections.mailbox_id
+			AND mailbox_members.membership_id = ? AND mailbox_members.permission = ?)`, membershipID, string(domain.MailboxPermissionManage))
+	}
+	var rows []ExternalMailConnectionPO
+	if err := query.Order("(status = 'revoked'), id ASC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	connections := make([]*domain.ExternalMailConnection, 0, len(rows))
+	for i := range rows {
+		connections = append(connections, rows[i].toDomain())
+	}
+	return connections, nil
 }

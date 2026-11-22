@@ -56,6 +56,40 @@ type ExternalMailConfig struct {
 	OAuth map[string]ExternalMailOAuthClient
 	// Sync bounds how hard the sync worker reads providers and how long revoked copies stay.
 	Sync ExternalMailSyncConfig
+	// MaxSharedConnections bounds the live shared connections (team accounts bound by owners and
+	// admins) of one organization; zero takes DefaultExternalMailMaxSharedConnections, and -1 marks
+	// a set value that does not parse, which validation refuses.
+	MaxSharedConnections int
+}
+
+// Bounds of the per-organization limit of live shared connections.
+const (
+	DefaultExternalMailMaxSharedConnections = 20
+	// MaxExternalMailMaxSharedConnections matches domain.MaxSharedExternalMailConnectionsCeiling.
+	MaxExternalMailMaxSharedConnections = 100
+)
+
+// SharedConnectionLimit returns the per-organization limit of live shared connections, or its
+// default.
+func (c ExternalMailConfig) SharedConnectionLimit() int {
+	if c.MaxSharedConnections <= 0 {
+		return DefaultExternalMailMaxSharedConnections
+	}
+	return c.MaxSharedConnections
+}
+
+// parseExternalMailMaxSharedConnections reads EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS: empty takes the
+// default (0), a value that is not a positive whole number is -1 and refused by validation.
+func parseExternalMailMaxSharedConnections(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed <= 0 {
+		return -1
+	}
+	return parsed
 }
 
 // Defaults of the sync budget and the retention of revoked copies.
@@ -263,6 +297,9 @@ func parseExternalMailProviders(raw string) []string {
 func validateExternalMailConfig(c ExternalMailConfig, secretKey string, production bool) error {
 	if err := validateExternalMailSyncConfig(c.Sync); err != nil {
 		return err
+	}
+	if c.MaxSharedConnections < 0 || c.MaxSharedConnections > MaxExternalMailMaxSharedConnections {
+		return fmt.Errorf("EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS must be a whole number between 1 and %d", MaxExternalMailMaxSharedConnections)
 	}
 	for _, provider := range c.Providers {
 		switch provider {

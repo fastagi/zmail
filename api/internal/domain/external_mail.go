@@ -89,9 +89,26 @@ type ExternalMailAuthorization struct {
 	SealedVerifier string
 	// ConnectionID is the connection a reconnect restores; nil for a new binding.
 	ConnectionID *uint
+	// Sharing makes a new binding the organization's shared connected mailbox; nil binds the
+	// member's own account.
+	Sharing      *ExternalMailSharing
 	BackfillDays int
 	ExpiresAt    time.Time
 	CreatedAt    time.Time
+}
+
+// ExternalMailSharing is the shared connected mailbox an owner or admin binds a team account into:
+// its display name (empty takes the account address) and its first members, as a shared mailbox
+// is created with.
+type ExternalMailSharing struct {
+	DisplayName string                      `json:"display_name,omitempty"`
+	Members     []ExternalMailSharingMember `json:"members"`
+}
+
+// ExternalMailSharingMember is one first member of a shared connected mailbox.
+type ExternalMailSharingMember struct {
+	UserID     uint              `json:"user_id"`
+	Permission MailboxPermission `json:"permission"`
 }
 
 // ExternalMailRebind restores a connection with a fresh grant.
@@ -113,6 +130,10 @@ const MaxExternalMailConnectionsPerUser = 10
 // shows after their live ones: the most recently revoked, whose copies they may still purge.
 const MaxRevokedExternalMailConnectionsListed = 10
 
+// MaxSharedExternalMailConnectionsCeiling is the highest per-organization limit of live shared
+// connections an instance may configure; it also bounds the shared connections one listing returns.
+const MaxSharedExternalMailConnectionsCeiling = 100
+
 // ExternalMailConnection binds one outside account to one connected mailbox.
 type ExternalMailConnection struct {
 	ID             uint
@@ -121,9 +142,15 @@ type ExternalMailConnection struct {
 	MailboxID      uint
 	Provider       ExternalMailProvider
 	AccountAddress string
-	// OwnerUserID is the member who bound the account; nil once that account was deleted.
+	// OwnerUserID is the member whose own account this is; nil for a shared connection, and once
+	// the owner's user account was deleted.
 	OwnerUserID *uint
-	Status      ExternalMailStatus
+	// Shared marks the organization's connection of a shared connected mailbox: it has no owner,
+	// counts against the organization's limit, and outlives whoever bound it.
+	Shared bool
+	// BoundByUserID records who bound the account; nil once that user account was deleted.
+	BoundByUserID *uint
+	Status        ExternalMailStatus
 	// LastSyncedAt is when a fetch last succeeded; nil before the first one.
 	LastSyncedAt *time.Time
 	// LastErrorCode is the code of the latest failed sync; empty after a success.
@@ -192,6 +219,16 @@ type ExternalMailRepository interface {
 	// CountLiveExternalMailConnections counts the owner's connections that are not revoked; the
 	// per-member limit bounds these.
 	CountLiveExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) (int, error)
+	// LockSharedExternalMailBindings holds the organization's shared binding lock until the
+	// surrounding transaction ends, so two shared bindings count the live shared connections in turn.
+	LockSharedExternalMailBindings(ctx context.Context, organizationID uint) error
+	// CountLiveSharedExternalMailConnections counts the organization's shared connections that are
+	// not revoked; the per-organization limit bounds these.
+	CountLiveSharedExternalMailConnections(ctx context.Context, organizationID uint) (int, error)
+	// ListSharedExternalMailConnections returns the organization's shared connections whose mailbox
+	// is not deleted, live ones first, then id ascending, at most limit: every one when all is set,
+	// otherwise those whose mailbox the membership holds with the manage permission.
+	ListSharedExternalMailConnections(ctx context.Context, organizationID, membershipID uint, all bool, limit int) ([]*ExternalMailConnection, error)
 	// ListExternalMailConnections returns the owner's connections in the organization, live ones
 	// first, then id ascending, at most MaxExternalMailConnectionsPerUser.
 	ListExternalMailConnections(ctx context.Context, organizationID, ownerUserID uint) ([]*ExternalMailConnection, error)

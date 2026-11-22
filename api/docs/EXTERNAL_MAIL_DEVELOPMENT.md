@@ -22,7 +22,7 @@ While `fake` is the active source, and only then, the API registers one more rou
 
 ```http
 POST /v1/external-mail-connections/:connection_id/fake-deliveries
-Authorization: Bearer <session of the connection's owner>
+Authorization: Bearer <session of the connection's owner, or of a manager of a shared connection>
 Organization-Id: <organization>
 Content-Type: application/json
 
@@ -30,7 +30,8 @@ Content-Type: application/json
   "html": "<p>Body</p>", "message_id": "inv-1@sender.test" }
 ```
 
-It appends the message to the connection's account in the API process's fake source and syncs that
+It accepts the caller's own connection, or a shared connection they manage (every one for an
+`owner` or `admin`, those of mailboxes held with `manage` otherwise). It appends the message to the connection's account in the API process's fake source and syncs that
 connection at once in the API process, through the same code as the worker, so the message is stored
 once in the connected mailbox with the connection's provider as its `source`, and goes through the
 same post-store steps (triage queue, agent feed, webhooks) as synced mail.
@@ -47,7 +48,7 @@ same post-store steps (triage queue, agent feed, webhooks) as synced mail.
 |---|---|
 | Delivered and synced | `201` `{ "message_id": "inv-1@sender.test" }` |
 | Missing or invalid field | `422 COMMON.VALIDATION_FAILED` |
-| Another member's connection, a revoked one, or an unknown id | `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` |
+| A connection the caller may not manage (another member's own one, or a shared one they do not manage), a revoked one, or an unknown id | `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND` |
 | Real connectors, or external mail off | `404`: the route does not exist |
 
 The route is not in `contracts/openapi.yaml`: the route contract check assembles the routes without

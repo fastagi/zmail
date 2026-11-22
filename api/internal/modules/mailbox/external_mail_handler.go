@@ -14,22 +14,26 @@ import (
 // ExternalMailService lists and revokes the caller's external mailbox connections. Both answer
 // ErrExternalMailConnectionNotFound while the instance enables no source.
 type ExternalMailService interface {
-	// ListExternalMailConnections lists the viewer's own connections.
+	// ListExternalMailConnections lists the viewer's own connections, then the shared ones they
+	// manage.
 	ListExternalMailConnections(ctx context.Context, viewer domain.OrganizationContext) ([]*domain.ExternalMailConnection, error)
-	// RevokeExternalMailConnection unbinds a connection: its owner, or an owner or admin.
+	// RevokeExternalMailConnection unbinds a connection: its owner, or an owner or admin; a shared
+	// one, whoever manages it.
 	RevokeExternalMailConnection(ctx context.Context, viewer domain.OrganizationContext, id uint) error
 }
 
 // ExternalMailConnectionResponse is one bound outside account. It never carries the token.
 type ExternalMailConnectionResponse struct {
-	ID             uint       `json:"id"`
-	Provider       string     `json:"provider"`
-	AccountAddress string     `json:"account_address"`
-	MailboxID      uint       `json:"mailbox_id"`
-	Status         string     `json:"status"`
-	LastSyncedAt   *time.Time `json:"last_synced_at"`
-	LastErrorCode  *string    `json:"last_error_code"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             uint   `json:"id"`
+	Provider       string `json:"provider"`
+	AccountAddress string `json:"account_address"`
+	MailboxID      uint   `json:"mailbox_id"`
+	// Shared marks an organization's connection of a shared connected mailbox.
+	Shared        bool       `json:"shared"`
+	Status        string     `json:"status"`
+	LastSyncedAt  *time.Time `json:"last_synced_at"`
+	LastErrorCode *string    `json:"last_error_code"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnection) []ExternalMailConnectionResponse {
@@ -37,7 +41,7 @@ func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnect
 	for _, connection := range connections {
 		item := ExternalMailConnectionResponse{
 			ID: connection.ID, Provider: string(connection.Provider), AccountAddress: connection.AccountAddress,
-			MailboxID: connection.MailboxID, Status: string(connection.Status),
+			MailboxID: connection.MailboxID, Shared: connection.Shared, Status: string(connection.Status),
 			LastErrorCode: optionalText(connection.LastErrorCode), CreatedAt: connection.CreatedAt.UTC(),
 		}
 		if connection.LastSyncedAt != nil {
@@ -48,8 +52,8 @@ func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnect
 	return responses
 }
 
-// ListExternalMailConnections lists the caller's own connections.
-// fastbuild:bounded-list max=20 reason=at most MaxExternalMailConnectionsPerUser live and MaxRevokedExternalMailConnectionsListed revoked connections of one member
+// ListExternalMailConnections lists the caller's own connections, then the shared ones they manage.
+// fastbuild:bounded-list max=120 reason=at most MaxExternalMailConnectionsPerUser live and MaxRevokedExternalMailConnectionsListed revoked own connections, then at most MaxSharedExternalMailConnectionsCeiling shared ones
 func (h *Handler) ListExternalMailConnections(c *gin.Context) {
 	viewer, ok := organizationScope(c)
 	if !ok {
@@ -115,6 +119,31 @@ type startExternalMailAuthorizationRequest struct {
 	// BackfillDays is checked by the service, which answers MAILBOX.EXTERNAL_AUTHORIZATION_INVALID
 	// out of range, as the credentials route does.
 	BackfillDays int `json:"backfill_days"`
+	// Sharing binds a team account into a new shared connected mailbox (owners and admins); it
+	// cannot be combined with connection_id.
+	Sharing *externalMailSharingRequest `json:"sharing"`
+}
+
+// externalMailSharingRequest is the shared connected mailbox a team account is bound into. The
+// members are checked by the service with the rules of POST /v1/mailboxes, which answers
+// MAILBOX.ACCESS_INVALID, as that route does.
+type externalMailSharingRequest struct {
+	DisplayName string                 `json:"display_name" binding:"max=255"`
+	Members     []MailboxMemberRequest `json:"members" binding:"omitempty,dive"`
+}
+
+// input is the domain form of the shared target; nil stays nil.
+func (r *externalMailSharingRequest) input() *domain.ExternalMailSharing {
+	if r == nil {
+		return nil
+	}
+	sharing := &domain.ExternalMailSharing{DisplayName: r.DisplayName, Members: []domain.ExternalMailSharingMember{}}
+	for _, member := range r.Members {
+		sharing.Members = append(sharing.Members, domain.ExternalMailSharingMember{
+			UserID: member.UserID, Permission: domain.MailboxPermission(member.Permission),
+		})
+	}
+	return sharing
 }
 
 // ExternalMailAuthorizationResponse is where to send the browser.
@@ -139,6 +168,7 @@ func (h *Handler) StartExternalMailAuthorization(c *gin.Context) {
 	}
 	started, err := h.service.StartExternalMailAuthorization(c.Request.Context(), viewer, ExternalMailAuthorizationInput{
 		Provider: domain.ExternalMailProvider(req.Provider), ConnectionID: req.ConnectionID, BackfillDays: req.BackfillDays,
+		Sharing: req.Sharing.input(),
 	})
 	if err != nil {
 		response.HandleError(c, "Failed to start external mail authorization", err)

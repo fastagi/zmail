@@ -55,8 +55,8 @@ func (s *service) fakeExternalMailSource() *FakeExternalMailSource {
 	return nil
 }
 
-// DeliverFakeExternalMail appends a message to the account of the caller's own live connection in
-// the fake source and syncs that connection at once in this process: the mail:external:sync
+// DeliverFakeExternalMail appends a message to the account of a live connection the caller may
+// manage (their own, or a shared one they manage) in the fake source and syncs that connection at once in this process: the mail:external:sync
 // worker runs in another process with its own, empty fake source, so it never sees the message.
 // The sync is the worker's own, so the message is stored once, with the connection's provider as
 // its source. It answers the provider message id.
@@ -65,7 +65,8 @@ func (s *service) DeliverFakeExternalMail(ctx context.Context, viewer domain.Org
 	if fake == nil {
 		return "", ErrExternalMailConnectionNotFound
 	}
-	connection, err := s.ownExternalMailConnection(ctx, viewer, id, true)
+	// The caller's own connection, or a shared one they manage.
+	connection, err := s.managedConnection(ctx, viewer, id)
 	if err != nil {
 		return "", err
 	}

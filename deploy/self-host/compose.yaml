@@ -79,6 +79,8 @@ x-api-environment: &api-environment
   EXTERNAL_MAIL_OUTLOOK_TENANT: ${EXTERNAL_MAIL_OUTLOOK_TENANT:-common}
   # Revoked copies are deleted by broadcast-worker after this, whether or not connectors are on.
   EXTERNAL_MAIL_REVOKED_RETENTION: ${EXTERNAL_MAIL_REVOKED_RETENTION:-720h}
+  # Live shared connections (team accounts bound by owners and admins) per organization, 1-100.
+  EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS: ${EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS:-20}
   # Seals the connectors' grants; at least 32 characters when EXTERNAL_MAIL_PROVIDERS is set.
   MAILBOX_SECRET_ENCRYPTION_KEY: ${MAILBOX_SECRET_ENCRYPTION_KEY:-}
   AI_ENABLED: "false"
