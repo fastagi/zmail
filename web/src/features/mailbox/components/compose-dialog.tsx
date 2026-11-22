@@ -157,9 +157,9 @@ export function ComposeDialog({
   const [kept] = useState(() => restored?.draft ?? (flushed ? null : readComposeDraft(draftKey)));
   const knownSavedId = draft.savedId ?? kept?.savedId;
   // A draft opened from the list starts from the API's text, which another device may have changed,
-  // unless this browser holds edits the API never received (a close while offline); this browser's
-  // copy still lends it its files.
-  const keptText = draft.savedId !== undefined && !restored && (!kept || kept.synced) ? null : kept;
+  // unless this browser holds a close the API never took (made offline); this browser's copy still
+  // lends it its files.
+  const keptText = draft.savedId !== undefined && !restored && !kept?.pending ? null : kept;
   const [to, setTo] = useState(keptText?.to ?? draft.to);
   const [cc, setCc] = useState(keptText?.cc ?? draft.cc ?? '');
   const [subject, setSubject] = useState(keptText?.subject ?? draft.subject);
@@ -223,9 +223,14 @@ export function ComposeDialog({
       },
       startingDraft
     );
+    const pending = readComposeDraft(draftKey)?.pending;
     writeComposeDraft(
       draftKey,
-      keep && knownSavedId !== undefined ? { ...keep, savedId: knownSavedId } : keep
+      keep && {
+        ...keep,
+        ...(knownSavedId !== undefined && { savedId: knownSavedId }),
+        ...(pending && { pending }),
+      }
     );
     writeComposeDraftFiles(draftKey, files);
   }, [draftKey, startingDraft, to, cc, subject, body, files, lostFiles, knownSavedId]);
@@ -495,9 +500,9 @@ export function ComposeDialog({
         saved => {
           const current = readComposeDraft(draftKey);
           const textOf = (value: StoredComposeDraft | null) =>
-            JSON.stringify({ ...value, savedId: undefined, synced: undefined });
+            JSON.stringify({ ...value, savedId: undefined, pending: undefined });
           if (textOf(current) === textOf(keep)) {
-            writeComposeDraft(draftKey, { ...keep, savedId: saved.id, synced: true });
+            writeComposeDraft(draftKey, { ...keep, savedId: saved.id });
           }
           toast.success(t(withFiles ? 'compose.draftSavedWithFiles' : 'compose.draftSaved'));
         },
@@ -514,7 +519,7 @@ export function ComposeDialog({
     const found = draftToKeep(written(), startingDraft);
     const known = knownSavedId;
     const keep = found && known !== undefined ? { ...found, savedId: known } : found;
-    writeComposeDraft(draftKey, keep);
+    writeComposeDraft(draftKey, keep && !isReplyOrForward ? { ...keep, pending: true } : keep);
     const blank =
       files.length === 0 &&
       lostFiles.length === 0 &&

@@ -2299,6 +2299,18 @@ describe('inbox keyboard shortcuts', () => {
       })
     );
     expect(await screen.findByLabelText('Message')).toHaveValue('Offline edit');
+
+    // Once the API takes the close, its text leads again, as another device may change it.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledOnce());
+    drafts.body = 'Edited on another device';
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Drafts: 1' }))[0]!);
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Drafts' })).getByRole('button', {
+        name: /^Plan/u,
+      })
+    );
+    expect(await screen.findByLabelText('Message')).toHaveValue('Edited on another device');
     drafts.list = [];
   });
 
