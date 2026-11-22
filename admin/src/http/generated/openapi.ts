@@ -557,7 +557,7 @@ export interface paths {
         };
         /**
          * List the organization's authorized tenants
-         * @description Needs the `owner` or `admin` organization role. Lists the Google Workspace and Microsoft 365 tenants the organization authorized, live ones first, then id ascending, at most 50, each with its count of live assignments. Never the credential. Empty while external mail is off. Never cached. Session only; no API key reaches any tenant route.
+         * @description Needs the `owner` or `admin` organization role. Lists the Google Workspace and Microsoft 365 tenants the organization authorized, live ones first, then id ascending, at most 50, each with its count of live assignments. Never the credential. Works even while tenant connect or external mail is off, so a stored credential is always visible. Never cached. Session only; no API key reaches any tenant route.
          */
         get: operations["listExternalMailTenants"];
         put?: never;
@@ -584,7 +584,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke a tenant and every assignment of it
-         * @description Needs the `owner` organization role. Marks the tenant `revoked`, erases its credential, and in the same transaction revokes every connection of it, each recorded as `connection_revoked` with `detail.reason` `tenant_revoked`; every sync stops at once. Revoking a revoked tenant answers `204` again. The customer should also remove the application or key at the provider.
+         * @description Needs the `owner` organization role. Works even while tenant connect or external mail is off. Marks the tenant `revoked`, erases its credential, and in the same transaction revokes every connection of it, each recorded as `connection_revoked` with `detail.reason` `tenant_revoked`; every sync stops at once. Revoking a revoked tenant answers `204` again. The customer should also remove the application or key at the provider.
          */
         delete: operations["revokeExternalMailTenant"];
         options?: never;

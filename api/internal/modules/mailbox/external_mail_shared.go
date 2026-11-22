@@ -147,7 +147,7 @@ func (s *service) bindSharedAccount(tx context.Context, viewer domain.Organizati
 		OrganizationID: viewer.OrganizationID, MailboxID: mailbox.ID, Provider: binding.provider,
 		AccountAddress: binding.address, Shared: true, BoundByUserID: &binder, EncryptedRefreshToken: sealed,
 		BackfillDays: binding.backfillDays, NextSyncAt: s.now().UTC(),
-		TenantID: binding.tenantID, TenantDirectoryID: binding.directoryID,
+		TenantID: binding.tenantID, TenantDirectoryID: binding.directoryID, ReceivedNotBefore: binding.notBefore,
 	}
 	if err := s.externalMail.CreateExternalMailConnection(tx, connection); err != nil {
 		return nil, err

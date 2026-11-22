@@ -87,6 +87,9 @@ variant exists because only the customer's own app removes the residual risk bel
 | G | With the organization's own application every token-endpoint refusal (400/401/403) is tenant-caused; 429, 5xx, and transport errors never stop the tenant. |
 | H | Checking a Microsoft tenant repeats the `/users?$top=1` read. |
 | I | At most 50 live tenants per organization (`409 MAILBOX.EXTERNAL_CONNECTION_LIMIT`); the listing shows live tenants first. |
+| N1 | Second review: the personal-assignment record survives departure, handover, purge, and tenant revocation, and stores a privacy boundary (the departure time, or the handover time when handed over while still a member, whichever is later). A mailbox created or restored for someone other than the last personal holder (or as shared) starts at that boundary: the fetch asks for nothing older and every older copy is dropped at ingest. An assignment awaiting handover cannot be disconnected, purged (manually or by the retention worker), or reassigned. Self-binding by anyone but the last personal holder stays refused (the simpler safe choice). |
+| N2 | Listing and revoking tenants work while tenant connect or external mail is off; authorize, directory, and assignments stay unavailable. |
+| N3 | Owner/admin views of a personal assignment's connection (sync runs, purge result, dev delivery) carry no message content or headers (tested); the holder record matches the address case-insensitively and the directory id. |
 | J | Unique violations go through `isUniqueViolation`; a restored shared assignment's members are replaced by the posted set; Microsoft application tokens are cached in memory for their lifetime (1024 entries, keyed by a hash); service account keys must have 2048 to 4096 bits; `mailboxes.external_mail_tenant_id` is indexed; re-authorization resumes only the connections the tenant credential stopped. |
 
 ## Rulings

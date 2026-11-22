@@ -173,8 +173,25 @@ type ExternalMailConnection struct {
 	TenantID *uint
 	// TenantDirectoryID is the mailbox's stable id in the tenant's directory; empty without a tenant.
 	TenantDirectoryID string
+	// ReceivedNotBefore is the privacy boundary of a connection that reads an address another member
+	// held as a personal mailbox: no copy of mail the provider received before it is ever stored. Nil
+	// for no boundary.
+	ReceivedNotBefore *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+// ExternalMailPersonalAssignment is the record of the member an organization address was last
+// assigned to as a personal mailbox. It is never deleted.
+type ExternalMailPersonalAssignment struct {
+	// UserID is the member; 0 once their user account was deleted.
+	UserID uint
+	// BoundaryAt is when that member left, or when the mailbox was handed over, whichever is later; nil
+	// while they hold it.
+	BoundaryAt *time.Time
+	// Released marks a handover: the address may go to someone else, never with mail from before the
+	// boundary.
+	Released bool
 }
 
 // ExternalMailTenantStatus is the state of an authorized tenant.
@@ -262,17 +279,23 @@ type ExternalMailTenantRepository interface {
 	// ListTenantPersonalConnections returns the owner's tenant-assigned personal connections, live
 	// ones first, at most limit.
 	ListTenantPersonalConnections(ctx context.Context, organizationID, ownerUserID uint, limit int) ([]*ExternalMailConnection, error)
-	// RestoreTenantConnection makes a revoked tenant connection active again with an empty cursor.
-	RestoreTenantConnection(ctx context.Context, connectionID, tenantID uint, directoryID string, now time.Time) (*ExternalMailConnection, error)
+	// RestoreTenantConnection makes a revoked tenant connection active again with an empty cursor and
+	// the privacy boundary notBefore (nil for none).
+	RestoreTenantConnection(ctx context.Context, connectionID, tenantID uint, directoryID string, notBefore *time.Time, now time.Time) (*ExternalMailConnection, error)
 	// ShareTenantConnection makes a tenant connection the organization's (shared, no owner), as a
-	// handover of its personal mailbox does, and forgets the member it was personally assigned to.
-	ShareTenantConnection(ctx context.Context, mailboxID uint) error
-	// RecordPersonalAssignment remembers that the organization's address of the provider was assigned
-	// to userID as a personal mailbox, replacing an earlier record.
-	RecordPersonalAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address string, userID, tenantID uint, at time.Time) error
-	// FindPersonalAssignee returns the member the address was last personally assigned to; 0 when none
-	// is recorded.
-	FindPersonalAssignee(ctx context.Context, organizationID uint, provider ExternalMailProvider, address string) (uint, error)
+	// handover of its personal mailbox does, and marks the address's personal record released with
+	// the handover's seal boundary.
+	ShareTenantConnection(ctx context.Context, mailboxID uint, boundary time.Time) error
+	// RecordPersonalAssignment remembers that the organization's address (and directory user) of the
+	// provider was assigned to userID as a personal mailbox, replacing an earlier record and its
+	// boundary.
+	RecordPersonalAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string, userID, tenantID uint, at time.Time) error
+	// FindPersonalAssignment returns the record of the address, or of the directory user when
+	// directoryID is not empty, ignoring the address's case; nil when none.
+	FindPersonalAssignment(ctx context.Context, organizationID uint, provider ExternalMailProvider, address, directoryID string) (*ExternalMailPersonalAssignment, error)
+	// MarkPersonalBoundary moves the boundary of every address personally assigned to userID to at,
+	// unless it is already later, when the member leaves.
+	MarkPersonalBoundary(ctx context.Context, organizationID, userID uint, at time.Time) error
 }
 
 // ExternalMailSyncResult is the outcome of one fetch of one connection.

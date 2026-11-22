@@ -232,6 +232,8 @@ type externalBinding struct {
 	// account grant.
 	tenantID    *uint
 	directoryID string
+	// notBefore is the privacy boundary of the new connection: nothing received before it is stored.
+	notBefore *time.Time
 }
 
 // saveExternalBinding stores a fresh grant: a new account gets a private read-only connected
@@ -264,13 +266,13 @@ func (s *service) saveExternalBinding(ctx context.Context, viewer domain.Organiz
 				return lockErr
 			}
 		}
-		// An organization address personally assigned to a member is never bound by anyone else while
-		// that member is in the organization.
+		// An address ever personally assigned from a tenant is bound with an own grant only by its last
+		// personal holder.
 		reader := viewer.UserID
 		if binding.sharing != nil {
 			reader = 0
 		}
-		if holderErr := s.checkPersonalHolder(tx, viewer.OrganizationID, binding.provider, address, reader); holderErr != nil {
+		if holderErr := s.checkSelfBinding(tx, viewer.OrganizationID, binding.provider, address, reader); holderErr != nil {
 			return holderErr
 		}
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, binding.provider, address)

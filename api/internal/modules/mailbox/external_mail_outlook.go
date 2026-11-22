@@ -304,7 +304,11 @@ func (s *outlookMailSource) initialDeltaURL(root, folder string, request Externa
 	if now.IsZero() {
 		now = time.Now()
 	}
-	since := now.UTC().AddDate(0, 0, -days).Format(time.RFC3339)
+	start := now.UTC().AddDate(0, 0, -days)
+	if request.NotBefore.After(start) {
+		start = request.NotBefore.UTC()
+	}
+	since := start.Format(time.RFC3339)
 	query := url.Values{
 		"$select": {outlookMessageFields},
 		"$filter": {"receivedDateTime ge " + since},

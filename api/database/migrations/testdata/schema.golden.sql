@@ -110,14 +110,18 @@ TABLE external_mail_connections
   COLUMN bound_by_user_id bigint
   COLUMN tenant_id bigint
   COLUMN tenant_directory_id character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN received_not_before timestamp with time zone
 
 TABLE external_mail_personal_assignments
   COLUMN organization_id bigint NOT NULL
   COLUMN provider character varying(16) NOT NULL
   COLUMN address_key character varying(320) NOT NULL
-  COLUMN user_id bigint NOT NULL
+  COLUMN directory_id character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN user_id bigint
   COLUMN tenant_id bigint NOT NULL
   COLUMN assigned_at timestamp with time zone NOT NULL
+  COLUMN boundary_at timestamp with time zone
+  COLUMN released boolean NOT NULL DEFAULT false
 
 TABLE external_mail_sync_runs
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_sync_runs_id_seq'::regclass)
@@ -891,7 +895,7 @@ CONSTRAINT external_mail_personal_assignments.chk_external_mail_personal_assignm
 CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
 CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_pkey PRIMARY KEY (organization_id, provider, address_key)
 CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)
-CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+CONSTRAINT external_mail_personal_assignments.external_mail_personal_assignments_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES external_mail_connections(id) ON DELETE CASCADE
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_fetched_count_check CHECK ((fetched_count >= 0))
 CONSTRAINT external_mail_sync_runs.external_mail_sync_runs_outcome_check CHECK (((outcome)::text = ANY ((ARRAY['ok'::character varying, 'auth_failed'::character varying, 'fetch_failed'::character varying, 'cursor_expired'::character varying, 'provider_unavailable'::character varying, 'dropped'::character varying])::text[])))
@@ -1198,6 +1202,7 @@ INDEX CREATE INDEX idx_external_mail_connections_revoked ON external_mail_connec
 INDEX CREATE INDEX idx_external_mail_connections_shared ON external_mail_connections USING btree (organization_id) WHERE shared
 INDEX CREATE INDEX idx_external_mail_connections_tenant ON external_mail_connections USING btree (tenant_id, status) WHERE (tenant_id IS NOT NULL)
 INDEX CREATE UNIQUE INDEX external_mail_personal_assignments_pkey ON external_mail_personal_assignments USING btree (organization_id, provider, address_key)
+INDEX CREATE INDEX idx_external_mail_personal_assignments_directory ON external_mail_personal_assignments USING btree (organization_id, provider, directory_id) WHERE ((directory_id)::text <> ''::text)
 INDEX CREATE UNIQUE INDEX external_mail_sync_runs_pkey ON external_mail_sync_runs USING btree (id)
 INDEX CREATE INDEX idx_external_mail_sync_runs_connection ON external_mail_sync_runs USING btree (connection_id, id DESC)
 INDEX CREATE INDEX idx_external_mail_sync_runs_started ON external_mail_sync_runs USING btree (started_at, id)

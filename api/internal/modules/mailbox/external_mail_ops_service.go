@@ -130,6 +130,9 @@ func (s *service) PurgeExternalMailCopies(ctx context.Context, viewer domain.Org
 	if connection.Status != domain.ExternalMailStatusRevoked {
 		return ExternalMailPurgeResult{}, ErrExternalMailConnectionNotRevoked
 	}
+	if err = s.refuseAwaitingHandover(ctx, connection); err != nil {
+		return ExternalMailPurgeResult{}, err
+	}
 	var result ExternalMailPurgeResult
 	for range externalMailImmediatePurgeSteps {
 		purge, stepErr := s.purgeExternalMailStep(ctx, domain.ExternalMailPurgeStep{

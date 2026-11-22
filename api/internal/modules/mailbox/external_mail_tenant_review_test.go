@@ -10,17 +10,15 @@ import (
 	"github.com/fastagi/zmail/api/internal/domain"
 )
 
-// TestTenantSwitchedOff: while EXTERNAL_MAIL_TENANTS_ENABLED is off every tenant route answers as an
-// unavailable feature and no connector offers tenants, but mailboxes already assigned keep syncing.
+// TestTenantSwitchedOff: while EXTERNAL_MAIL_TENANTS_ENABLED is off authorizing, the directory, and
+// assignments answer as an unavailable feature and no connector offers tenants, but mailboxes already
+// assigned keep syncing (listing and revoking: TestTenantRoutesWhileSwitchedOff).
 func TestTenantSwitchedOff(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := context.Background()
 	alice := f.mustAssign(t, personalRow("alice", accessB))[0]
 	f.service.settings.ExternalMail.TenantsEnabled = false
 
-	if views, err := f.service.ListExternalMailTenants(ctx, f.admin); err != nil || len(views) != 0 {
-		t.Fatalf("list while off = %+v, err %v", views, err)
-	}
 	if _, err := f.service.AuthorizeExternalMailTenant(ctx, f.owner, googleTenantInput()); !errors.Is(err, ErrExternalMailProviderUnavailable) {
 		t.Fatalf("authorize while off = %v", err)
 	}
@@ -29,9 +27,6 @@ func TestTenantSwitchedOff(t *testing.T) {
 	}
 	if _, err := f.service.AssignExternalMailTenantMailboxes(ctx, f.admin, f.tenant.ID, []ExternalMailTenantAssignmentInput{personalRow("bob", accessB)}); !errors.Is(err, ErrExternalMailTenantNotFound) {
 		t.Fatalf("assign while off = %v", err)
-	}
-	if err := f.service.RevokeExternalMailTenant(ctx, f.owner, f.tenant.ID); !errors.Is(err, ErrExternalMailTenantNotFound) {
-		t.Fatalf("revoke while off = %v", err)
 	}
 	for _, connector := range f.service.ListExternalMailConnectors(ctx) {
 		if connector.Tenant != nil {
@@ -114,9 +109,11 @@ func TestTenantPersonalAssignmentIsNotRedirected(t *testing.T) {
 	if err := f.service.ForceDisconnectExternalMailConnection(ctx, f.admin, again.ID); err != nil {
 		t.Fatalf("force disconnect: %v", err)
 	}
+	// Once B left, the disconnected assignment awaits handover: it is not reassigned either; only the
+	// handover moves it on (see TestTenantDepartedHolderIsNotReassigned).
 	f.leave(t, f.b, f.advance(time.Minute))
-	if result := f.assign(t, f.admin, personalRow("alice", accessC))[0]; result.Status != TenantAssignmentCreated {
-		t.Fatalf("to C after B left = %+v", result)
+	if result := f.assign(t, f.admin, personalRow("alice", accessC))[0]; result.ErrorCode != domain.CodeExternalMailAccountTaken {
+		t.Fatalf("to C after B left = %+v, want taken", result)
 	}
 }
 

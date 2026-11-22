@@ -122,6 +122,9 @@ func (s *service) ForceDisconnectExternalMailConnection(ctx context.Context, vie
 	if err != nil {
 		return err
 	}
+	if connection.TenantID != nil {
+		return s.unassignTenantConnection(ctx, viewer, connection)
+	}
 	if connection.Shared {
 		return s.disconnectShared(ctx, viewer, connection)
 	}

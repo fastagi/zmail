@@ -64,7 +64,7 @@ func (s *service) HandOverMailbox(ctx context.Context, viewer domain.Organizatio
 		if mailbox.TenantAssigned() && s.externalMail != nil {
 			// The connection follows its mailbox: the organization's, with no owner, as a shared
 			// assignment's is. It keeps syncing; the successor reads it, and nobody sends from it.
-			if shareErr := s.externalMail.ShareTenantConnection(tx, mailbox.ID); shareErr != nil {
+			if shareErr := s.externalMail.ShareTenantConnection(tx, mailbox.ID, boundary); shareErr != nil {
 				return shareErr
 			}
 		}
@@ -166,6 +166,13 @@ func (s *service) MemberRemoved(ctx context.Context, event domain.OrganizationMe
 		owned, err := s.repo.MarkOwnerLeft(tx, event.OrganizationID, event.UserID, at)
 		if err != nil {
 			return err
+		}
+		if s.externalMail != nil {
+			// Addresses personally assigned to the leaver from a tenant: whoever reads them later never
+			// gets mail received before now.
+			if err = s.externalMail.MarkPersonalBoundary(tx, event.OrganizationID, event.UserID, at); err != nil {
+				return err
+			}
 		}
 		for _, mailbox := range owned {
 			if recordErr := s.recordAccess(tx, mailbox, domain.MailboxAccessOwnerLeft, 0, event.UserID,

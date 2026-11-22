@@ -247,7 +247,8 @@ func (s *service) ListExternalMailTenants(ctx context.Context, viewer domain.Org
 	if !viewer.Role.CanManageOrganization() {
 		return nil, domain.ErrPermissionDenied
 	}
-	if s.externalMail == nil || !s.tenantsAvailable() {
+	// An owner always sees a stored credential, even with tenant connect or external mail off.
+	if s.externalMail == nil {
 		return []ExternalMailTenantView{}, nil
 	}
 	tenants, err := s.externalMail.ListExternalMailTenants(ctx, viewer.OrganizationID)
@@ -321,7 +322,8 @@ func (s *service) RevokeExternalMailTenant(ctx context.Context, viewer domain.Or
 	if !isOrganizationOwner(viewer) {
 		return domain.ErrPermissionDenied
 	}
-	if s.externalMail == nil || !s.tenantsAvailable() {
+	// Revoking a stored credential always works, even with tenant connect or external mail off.
+	if s.externalMail == nil {
 		return ErrExternalMailTenantNotFound
 	}
 	tenant, err := s.externalMail.FindExternalMailTenant(ctx, viewer.OrganizationID, id)
@@ -517,9 +519,14 @@ func (s *service) assignTenantRow(ctx context.Context, viewer domain.Organizatio
 		if owner != nil {
 			target = owner.UserID
 		}
-		if holderErr := s.checkPersonalHolder(tx, viewer.OrganizationID, tenant.Provider, address, target); holderErr != nil {
+		if holderErr := s.checkPersonalHolder(tx, viewer.OrganizationID, tenant.Provider, address, binding.directoryID, target); holderErr != nil {
 			return holderErr
 		}
+		floor, floorErr := s.privacyFloor(tx, viewer.OrganizationID, tenant.Provider, address, binding.directoryID, target)
+		if floorErr != nil {
+			return floorErr
+		}
+		binding.notBefore = floor
 		existing, findErr := s.externalMail.FindExternalMailConnectionByAccount(tx, viewer.OrganizationID, tenant.Provider, address)
 		switch {
 		case errors.Is(findErr, ErrExternalMailConnectionNotFound):
@@ -599,6 +606,11 @@ func (s *service) assignOverExisting(tx context.Context, viewer domain.Organizat
 		// A team mailbox is restored by its own reconnect or released by deleting it, never captured.
 		return nil, "", false, ErrExternalMailAccountTaken
 	}
+	if mailboxKept && existing.TenantID != nil && !existing.Shared {
+		// A personal assignment's mailbox is never purged for someone else while it stands: when its
+		// member left it awaits the handover, which seals it; it moves on only through that handover.
+		return nil, "", false, ErrExternalMailAccountTaken
+	}
 	return nil, "", false, s.purgeForRebind(tx, viewer, existing)
 }
 
@@ -612,7 +624,7 @@ func (s *service) restoreTenantAssignment(tx context.Context, viewer domain.Orga
 			return nil, err
 		}
 	}
-	restored, err := s.externalMail.RestoreTenantConnection(tx, existing.ID, tenant.ID, binding.directoryID, s.now().UTC())
+	restored, err := s.externalMail.RestoreTenantConnection(tx, existing.ID, tenant.ID, binding.directoryID, binding.notBefore, s.now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -665,7 +677,7 @@ func (s *service) bindTenantPersonal(tx context.Context, viewer domain.Organizat
 		OrganizationID: viewer.OrganizationID, MailboxID: mailbox.ID, Provider: binding.provider,
 		AccountAddress: binding.address, OwnerUserID: &ownerID, BoundByUserID: &binder,
 		BackfillDays: binding.backfillDays, NextSyncAt: s.now().UTC(),
-		TenantID: binding.tenantID, TenantDirectoryID: binding.directoryID,
+		TenantID: binding.tenantID, TenantDirectoryID: binding.directoryID, ReceivedNotBefore: binding.notBefore,
 	}
 	if err := s.externalMail.CreateExternalMailConnection(tx, connection); err != nil {
 		return nil, err
@@ -685,26 +697,57 @@ func (s *service) recordPersonalHolder(tx context.Context, connection *domain.Ex
 		return nil
 	}
 	return s.externalMail.RecordPersonalAssignment(tx, connection.OrganizationID, connection.Provider, connection.AccountAddress,
-		*connection.OwnerUserID, *connection.TenantID, s.now().UTC())
+		connection.TenantDirectoryID, *connection.OwnerUserID, *connection.TenantID, s.now().UTC())
 }
 
-// checkPersonalHolder keeps a personal assignment from being redirected: an address last assigned to
-// a member as a personal mailbox goes to nobody else, as a personal mailbox, a shared one, or a
-// self-binding, while that member is in the organization, even after the assignment was disconnected
-// and its copies purged. It changes hands only through the member's departure and the handover, which
-// forgets the holder. targetUserID is who would read it next; 0 for a shared mailbox.
-func (s *service) checkPersonalHolder(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string, targetUserID uint) error {
-	holder, err := s.externalMail.FindPersonalAssignee(tx, organizationID, provider, address)
-	if err != nil || holder == 0 || holder == targetUserID {
+// checkPersonalHolder keeps a personal assignment from being redirected: an address (or its directory
+// user) last assigned to a member as a personal mailbox goes to nobody else, as a personal mailbox or
+// a shared one, while that member is in the organization, even after the assignment was disconnected
+// and its copies purged. Only the handover releases it. targetUserID is who would read it next; 0
+// for a shared mailbox.
+func (s *service) checkPersonalHolder(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, targetUserID uint) error {
+	record, err := s.externalMail.FindPersonalAssignment(tx, organizationID, provider, address, directoryID)
+	if err != nil || record == nil || record.UserID == 0 || record.UserID == targetUserID || record.Released {
 		return err
 	}
-	if _, err = s.currentMembership(tx, organizationID, holder); errors.Is(err, ErrMailboxAccessInvalid) {
-		// The member left: the address awaits or went through the handover path.
+	if _, err = s.currentMembership(tx, organizationID, record.UserID); errors.Is(err, ErrMailboxAccessInvalid) {
+		// The member left: their mailbox awaits the handover, which assignOverExisting enforces.
 		return nil
 	} else if err != nil {
 		return err
 	}
 	return ErrExternalMailAccountTaken
+}
+
+// checkSelfBinding keeps an address that was ever personally assigned from a tenant out of every
+// binding with an account's own grant, except by its last personal holder: such a binding has no
+// privacy boundary, so it would read the earlier holder's mail. Only a tenant assignment, which
+// applies the boundary, gives the address to someone else. reader is 0 for a shared binding.
+func (s *service) checkSelfBinding(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string, reader uint) error {
+	record, err := s.externalMail.FindPersonalAssignment(tx, organizationID, provider, address, "")
+	if err != nil || record == nil {
+		return err
+	}
+	if reader == 0 || record.UserID != reader {
+		return ErrExternalMailAccountTaken
+	}
+	return nil
+}
+
+// privacyFloor is the boundary a new or restored connection for targetUserID (0 for a shared mailbox)
+// starts at: none when nobody held the address personally, or when it is the same member's again;
+// otherwise the time the last holder left or handed it over, or now when that is unknown.
+func (s *service) privacyFloor(tx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, targetUserID uint) (*time.Time, error) {
+	record, err := s.externalMail.FindPersonalAssignment(tx, organizationID, provider, address, directoryID)
+	if err != nil || record == nil || (targetUserID != 0 && record.UserID == targetUserID) {
+		return nil, err
+	}
+	if record.BoundaryAt != nil {
+		floor := record.BoundaryAt.UTC()
+		return &floor, nil
+	}
+	now := s.now().UTC()
+	return &now, nil
 }
 
 // replaceTenantMembers makes the members of a restored shared assignment exactly the posted set:
@@ -764,7 +807,29 @@ func (s *service) unassignTenantConnection(ctx context.Context, viewer domain.Or
 	if connection.Shared {
 		return s.disconnectShared(ctx, viewer, connection)
 	}
+	if err := s.refuseAwaitingHandover(ctx, connection); err != nil {
+		return err
+	}
 	return s.forceDisconnect(ctx, viewer, connection)
+}
+
+// refuseAwaitingHandover refuses to disconnect or purge a personal assignment whose member left:
+// its mailbox awaits the handover, which seals it, or the member's return.
+func (s *service) refuseAwaitingHandover(ctx context.Context, connection *domain.ExternalMailConnection) error {
+	if connection.TenantID == nil || connection.Shared {
+		return nil
+	}
+	mailbox, err := s.repo.FindMailbox(ctx, connection.OrganizationID, connection.MailboxID)
+	if errors.Is(err, ErrMailboxNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if mailbox.AwaitingHandover() {
+		return fmt.Errorf("%w: the mailbox awaits its handover", ErrMailboxAccessConflict)
+	}
+	return nil
 }
 
 // connectionToken is the token a connection is fetched with: its own sealed grant, or one its active

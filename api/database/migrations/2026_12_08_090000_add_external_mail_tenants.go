@@ -28,9 +28,13 @@ type addExternalMailTenants struct {
 //   - mailboxes.external_mail_tenant_id marks a connected mailbox assigned from a tenant: its address
 //     is the organization's, so the organization administers it and a personal one awaits handover
 //     when its owner leaves. idx_mailboxes_external_mail_tenant finds a tenant's mailboxes.
-//   - external_mail_personal_assignments remembers the member an address was last assigned to as a
-//     personal mailbox. It outlives the connection's revocation and purge, so the address never goes
-//     to another reader while that member is in the organization; only a handover clears it.
+//   - external_mail_personal_assignments remembers the member an address (and its directory user) was
+//     last assigned to as a personal mailbox, and the privacy boundary set when that member left or
+//     the mailbox was handed over. It outlives revocation, purge, departure, and handover: the
+//     address never goes to another reader while that member is in the organization unless handed
+//     over (released), and a later holder never gets mail received before the boundary.
+//   - external_mail_connections.received_not_before is that boundary on a connection: no copy of
+//     mail received before it is ever stored.
 //
 // The new columns are nullable or have constant defaults, which PostgreSQL 11+ records without
 // rewriting the tables.
@@ -61,6 +65,7 @@ func (m *addExternalMailTenants) Up(db *gorm.DB) error {
 		`ALTER TABLE external_mail_connections
 		  ADD COLUMN tenant_id bigint REFERENCES external_mail_tenants(id),
 		  ADD COLUMN tenant_directory_id varchar(255) NOT NULL DEFAULT '',
+		  ADD COLUMN received_not_before timestamptz,
 		  ADD CONSTRAINT chk_external_mail_connections_tenant_token CHECK (tenant_id IS NULL OR encrypted_refresh_token = '')`,
 		`CREATE INDEX idx_external_mail_connections_tenant ON external_mail_connections (tenant_id, status)
 		  WHERE tenant_id IS NOT NULL`,
@@ -73,12 +78,17 @@ func (m *addExternalMailTenants) Up(db *gorm.DB) error {
 		  organization_id bigint NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
 		  provider varchar(16) NOT NULL,
 		  address_key varchar(320) NOT NULL,
-		  user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		  directory_id varchar(255) NOT NULL DEFAULT '',
+		  user_id bigint REFERENCES users(id) ON DELETE SET NULL,
 		  tenant_id bigint NOT NULL REFERENCES external_mail_tenants(id),
 		  assigned_at timestamptz NOT NULL,
+		  boundary_at timestamptz,
+		  released boolean NOT NULL DEFAULT false,
 		  PRIMARY KEY (organization_id, provider, address_key),
 		  CONSTRAINT chk_external_mail_personal_assignments_key CHECK (address_key = lower(address_key) AND address_key <> '')
 		)`,
+		`CREATE INDEX idx_external_mail_personal_assignments_directory ON external_mail_personal_assignments
+		  (organization_id, provider, directory_id) WHERE directory_id <> ''`,
 	)
 }
 
@@ -102,6 +112,7 @@ func (m *addExternalMailTenants) Down(db *gorm.DB) error {
 		`DROP INDEX IF EXISTS idx_external_mail_connections_tenant`,
 		`ALTER TABLE external_mail_connections
 		  DROP CONSTRAINT IF EXISTS chk_external_mail_connections_tenant_token,
+		  DROP COLUMN IF EXISTS received_not_before,
 		  DROP COLUMN IF EXISTS tenant_directory_id,
 		  DROP COLUMN IF EXISTS tenant_id`,
 		`DROP TABLE IF EXISTS external_mail_tenants`,

@@ -38,7 +38,8 @@ mailbox assigned from a tenant is at the organization's address: owners and admi
 and `see_history` (never `view`), it appears in the mailbox directory, and when its owner leaves it
 awaits handover instead of being revoked; the handover makes its connection the organization's.
 Code that checked `Connected() && Type == personal` to mean "a member's own account" should use
-`PrivateConnected()`.
+`PrivateConnected()`. The retention purge of revoked copies now skips a mailbox whose owner left and
+that awaits handover.
 
 ### High — Roll every instance forward before switching tenant connect on
 
@@ -51,7 +52,9 @@ the organization's own application; there is no admin consent redirect.
 
 The migration creates `external_mail_tenants` (a tenant identifier is live in one organization of the
 instance) and `external_mail_personal_assignments` (the member an address was last personally
-assigned to), adds `external_mail_connections.tenant_id` and `tenant_directory_id` with a CHECK that a
+assigned to, with its privacy boundary), adds `external_mail_connections.tenant_id`,
+`tenant_directory_id`, and `received_not_before` (copies received before it are never stored) with a
+CHECK that a
 tenant connection stores no account token, and `mailboxes.external_mail_tenant_id` with a CHECK that
 only a connected mailbox has one and a partial index; no table is rewritten. Its Down refuses while a connection or mailbox
 comes from a tenant. `EXTERNAL_MAIL_MAX_TENANT_ASSIGNMENTS` (default 1000, 1 to 10000; a set but

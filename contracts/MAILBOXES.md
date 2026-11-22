@@ -516,8 +516,11 @@ that arrives meanwhile is waiting for the successor. The handover seals what arr
 departure, makes the mailbox `shared` + `connected`, and makes its connection the organization's
 (`shared: true`, no owner). The successor becomes a `send` member, which on a connected mailbox
 reads only: the read-only origin is the one part of the Zmail rule that cannot apply, so nobody sends
-as the address. A rejoin before the handover restores it as for any personal mailbox. The handover
-does not check the organization's shared connection limit.
+as the address. A rejoin before the handover restores it as for any personal mailbox. Until then the
+assignment cannot be disconnected, purged, or reassigned, and the worker's retention purge leaves it
+alone. The handover does not check the organization's shared connection limit. Whoever is later
+assigned the address gets nothing received before the departure or the handover (see
+[Tenant Connections](#tenant-connections)).
 
 ### Sealed History
 
@@ -1102,10 +1105,11 @@ issued as for any mailbox. Members get `403 PERMISSION.DENIED` on every tenant r
 
 Tenant connect is off unless the instance sets `EXTERNAL_MAIL_TENANTS_ENABLED=true` (and enables the
 `gmail` or `outlook` connector). While it is off, as while external mail is off, no connector lists
-`capabilities.tenant`, `GET /v1/external-mail-tenants` is empty, authorizing answers
-`404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`, and the routes that take a tenant id answer
-`404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. Mailboxes already assigned keep syncing, and owners and
-admins still disconnect them one by one with the connection routes.
+`capabilities.tenant`, authorizing answers `404 MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`, and the
+directory and assignment routes answer `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`. Listing
+(`GET /v1/external-mail-tenants`) and revoking (`DELETE /v1/external-mail-tenants/:tenant_id`) keep
+working, so an owner can always see and revoke a stored credential. Mailboxes already assigned keep
+syncing, and owners and admins still disconnect them one by one with the connection routes.
 
 `POST /v1/external-mail-tenants` (owner only; `admin` is `403 PERMISSION.DENIED`):
 
@@ -1217,13 +1221,27 @@ sending it again alone. Row failures:
 | `MAILBOX.EXTERNAL_SERVER_UNREACHABLE` | The provider could not be asked; retry the row |
 
 Each row holds the tenant row shared until it commits, so a revocation waits for rows in progress and
-revokes what they created. A personal assignment cannot be redirected: once an address was assigned
-as personal to a member, it is assigned to nobody else (personal or shared) and nobody else may bind
-it with an own grant (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`) while that member is in the organization,
-even after its connection was disconnected and its copies purged. It changes hands only when the
-member leaves, through the handover in [Departure And Handover](#departure-and-handover), which
-releases it. The same member may have it back at any time. Restoring a shared assignment makes its
-members exactly the posted set: the others are removed (`member_removed`).
+revokes what they created. Restoring a shared assignment makes its members exactly the posted set:
+the others are removed (`member_removed`).
+
+A personal assignment cannot be redirected, and its history never reaches another reader:
+
+- Zmail keeps a record of the member each address (and each directory user, matched by directory id
+  as well as by address, ignoring case) was last personally assigned to. It survives disconnects,
+  purges, departures, handovers, and tenant revocation.
+- While that member is in the organization, the address goes to nobody else, personal or shared
+  (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`), unless it was handed over. The same member may have it back
+  at any time, with the normal look-back.
+- When the member leaves, the assignment awaits handover: it cannot be disconnected or purged
+  (`409 MAILBOX.ACCESS_CONFLICT`), the worker's retention purge skips it, and it is not reassigned
+  (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`). The only ways on are the handover, which seals it, or the
+  member's return, which finds it intact.
+- The record's privacy boundary is the time the member left, or the time it was handed over while
+  they were a member, whichever is later. Any later mailbox of the address for someone else, personal
+  or shared, starts at that boundary: the connector is asked for nothing older, and every copy the
+  provider received before it is dropped before it is stored, whatever the connector returned.
+- Nobody but the last personal holder binds the address with an own grant, personal or shared
+  (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`): such a binding would have no boundary.
 
 A personal assignment creates a `personal` + `connected` mailbox owned by the member with
 `created` and `connection_bound` events naming the tenant. It is private to that member exactly like
@@ -1231,7 +1249,8 @@ a self-bound one, never counts toward their 10 own connections, and follows the 
 [Departure And Handover](#departure-and-handover). The member cannot unbind, reconnect, or purge it
 (`403 PERMISSION.DENIED`; a reconnect with its `connection_id` is
 `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`); the member and owners and admins read its sync runs,
-and owners and admins purge it once disconnected, and cannot self-bind an assigned address
+which carry counts and codes only, never message content or headers, and owners and admins purge it
+once disconnected, unless it awaits handover, and cannot self-bind an assigned address
 (`409 MAILBOX.EXTERNAL_ACCOUNT_TAKEN`). A shared assignment follows
 [Shared Connected Mailboxes](#shared-connected-mailboxes) and counts toward the organization's shared
 limit. Owners and admins unassign one mailbox with `DELETE /v1/external-mail-connections/:id` or the

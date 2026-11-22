@@ -277,7 +277,11 @@ func gmailBackfillAfter(request ExternalMailFetchRequest) int64 {
 		days = domain.DefaultExternalMailBackfillDays
 	}
 	days = min(days, domain.MaxExternalMailBackfillDays)
-	return now.AddDate(0, 0, -days).Unix()
+	after := now.AddDate(0, 0, -days).Unix()
+	if !request.NotBefore.IsZero() && request.NotBefore.Unix() > after {
+		after = request.NotBefore.Unix()
+	}
+	return after
 }
 
 // backfillPage lists one page of the backfill window, newest first.

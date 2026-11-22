@@ -61,6 +61,7 @@ type ExternalMailConnectionPO struct {
 	PurgeRetryAt          *time.Time
 	TenantID              *uint
 	TenantDirectoryID     string `gorm:"size:255;not null;default:''"`
+	ReceivedNotBefore     *time.Time
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 }
@@ -77,7 +78,7 @@ func (po *ExternalMailConnectionPO) toDomain() *domain.ExternalMailConnection {
 		Status: domain.ExternalMailStatus(po.Status), LastSyncedAt: po.LastSyncedAt,
 		EncryptedRefreshToken: po.EncryptedRefreshToken, SyncCursor: po.SyncCursor, BackfillDays: po.BackfillDays,
 		NextSyncAt: po.NextSyncAt, ConsecutiveFailures: po.ConsecutiveFailures, ConsecutiveMore: po.ConsecutiveMore, RevokedAt: po.RevokedAt,
-		TenantID: po.TenantID, TenantDirectoryID: po.TenantDirectoryID,
+		TenantID: po.TenantID, TenantDirectoryID: po.TenantDirectoryID, ReceivedNotBefore: po.ReceivedNotBefore,
 		CreatedAt: po.CreatedAt, UpdatedAt: po.UpdatedAt,
 	}
 	if po.LastErrorCode != nil {
@@ -100,6 +101,7 @@ func (r *repository) CreateExternalMailConnection(ctx context.Context, connectio
 		EncryptedRefreshToken: connection.EncryptedRefreshToken, SyncCursor: connection.SyncCursor,
 		BackfillDays: connection.BackfillDays, NextSyncAt: connection.NextSyncAt,
 		TenantID: connection.TenantID, TenantDirectoryID: connection.TenantDirectoryID,
+		ReceivedNotBefore: connection.ReceivedNotBefore,
 	}
 	if po.BackfillDays == 0 {
 		po.BackfillDays = domain.DefaultExternalMailBackfillDays

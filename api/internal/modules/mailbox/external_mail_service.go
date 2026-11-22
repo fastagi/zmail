@@ -108,6 +108,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 			fetched, err = connector.Source.Fetch(fetchCtx, ExternalMailFetchRequest{
 				Token: token, Cursor: connection.SyncCursor,
 				AccountAddress: connection.AccountAddress, BackfillDays: connection.BackfillDays, Now: now,
+				NotBefore: timeOrZero(connection.ReceivedNotBefore),
 			})
 		}
 		timedOut = errors.Is(fetchCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
@@ -224,6 +225,14 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	return nil
 }
 
+// timeOrZero is the time, or the zero time for nil.
+func timeOrZero(value *time.Time) time.Time {
+	if value == nil {
+		return time.Time{}
+	}
+	return *value
+}
+
 // externalCopies turns fetched messages into inbound copies for the connection's mailbox. A
 // message without a usable external id cannot be deduplicated and is skipped.
 func (s *service) externalCopies(connection *domain.ExternalMailConnection, fetched []ExternalMessage, now time.Time) []*domain.MailMessage {
@@ -235,6 +244,11 @@ func (s *service) externalCopies(connection *domain.ExternalMailConnection, fetc
 		receivedAt := external.ReceivedAt.UTC()
 		if external.ReceivedAt.IsZero() {
 			receivedAt = now
+		}
+		if connection.ReceivedNotBefore != nil && receivedAt.Before(*connection.ReceivedNotBefore) {
+			// Mail an earlier personal holder received is never stored for a later reader, whatever
+			// the connector returned.
+			continue
 		}
 		copies = append(copies, &domain.MailMessage{
 			MailboxID: connection.MailboxID, Direction: domain.MailDirectionInbound, Status: domain.MailStatusReceived,

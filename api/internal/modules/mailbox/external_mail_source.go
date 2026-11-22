@@ -74,6 +74,9 @@ type ExternalMailFetchRequest struct {
 	BackfillDays int
 	// Now is the sync time, so the backfill window does not depend on the wall clock.
 	Now time.Time
+	// NotBefore, when set, is a privacy boundary: the source should not read mail received before
+	// it. The sync drops any such copy all the same, so a source that ignores it leaks nothing.
+	NotBefore time.Time
 }
 
 // ExternalMailFetch is one page of new mail and the cursor after it.

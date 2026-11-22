@@ -292,7 +292,7 @@ func (r *repository) ListTenantPersonalConnections(ctx context.Context, organiza
 	return connections, nil
 }
 
-func (r *repository) RestoreTenantConnection(ctx context.Context, connectionID, tenantID uint, directoryID string, now time.Time) (*domain.ExternalMailConnection, error) {
+func (r *repository) RestoreTenantConnection(ctx context.Context, connectionID, tenantID uint, directoryID string, notBefore *time.Time, now time.Time) (*domain.ExternalMailConnection, error) {
 	if r.db == nil {
 		return nil, domain.ErrServiceUnavailable
 	}
@@ -301,7 +301,7 @@ func (r *repository) RestoreTenantConnection(ctx context.Context, connectionID, 
 		Where("id = ? AND tenant_id = ? AND status = ?", connectionID, tenantID, string(domain.ExternalMailStatusRevoked)).
 		Updates(map[string]any{
 			"status": string(domain.ExternalMailStatusActive), "sync_cursor": "", "last_error_code": nil,
-			"tenant_directory_id": directoryID, "next_sync_at": now, "updated_at": now,
+			"tenant_directory_id": directoryID, "received_not_before": notBefore, "next_sync_at": now, "updated_at": now,
 			// A restore before the retention ends keeps the copies: the purge is canceled.
 			"consecutive_failures": 0, "consecutive_more": 0, "revoked_at": nil, "purge_retry_at": nil,
 		}).Error
@@ -314,7 +314,7 @@ func (r *repository) RestoreTenantConnection(ctx context.Context, connectionID, 
 	return rows[0].toDomain(), nil
 }
 
-func (r *repository) ShareTenantConnection(ctx context.Context, mailboxID uint) error {
+func (r *repository) ShareTenantConnection(ctx context.Context, mailboxID uint, boundary time.Time) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
@@ -325,11 +325,13 @@ func (r *repository) ShareTenantConnection(ctx context.Context, mailboxID uint) 
 			Updates(map[string]any{"shared": true, "owner_user_id": nil, "updated_at": time.Now().UTC()}).Error; err != nil {
 			return err
 		}
-		// The address changed hands through the handover: it is no longer any member's.
+		// The address changed hands through the handover: it is released, and nothing received before
+		// the seal boundary ever reaches a later holder. The record itself is kept.
 		for _, row := range rows {
-			if err := tx.Exec(`DELETE FROM external_mail_personal_assignments
+			if err := tx.Exec(`UPDATE external_mail_personal_assignments
+				SET released = true, boundary_at = GREATEST(COALESCE(boundary_at, ?), ?)
 				WHERE organization_id = ? AND provider = ? AND address_key = lower(?)`,
-				row.OrganizationID, row.Provider, row.AccountAddress).Error; err != nil {
+				boundary, boundary, row.OrganizationID, row.Provider, row.AccountAddress).Error; err != nil {
 				return err
 			}
 		}
@@ -363,44 +365,78 @@ func (r *repository) LockActiveExternalMailTenant(ctx context.Context, tenantID 
 }
 
 // ExternalMailPersonalAssignmentPO remembers the member an organization address was last personally
-// assigned to.
+// assigned to, and the privacy boundary after them.
 type ExternalMailPersonalAssignmentPO struct {
 	OrganizationID uint   `gorm:"primaryKey;autoIncrement:false"`
 	Provider       string `gorm:"primaryKey;size:16"`
 	AddressKey     string `gorm:"primaryKey;size:320"`
-	UserID         uint   `gorm:"not null"`
-	TenantID       uint   `gorm:"not null"`
+	DirectoryID    string `gorm:"size:255;not null;default:''"`
+	UserID         *uint
+	TenantID       uint `gorm:"not null"`
 	AssignedAt     time.Time
+	BoundaryAt     *time.Time
+	Released       bool `gorm:"not null;default:false"`
 }
 
 func (ExternalMailPersonalAssignmentPO) TableName() string {
 	return "external_mail_personal_assignments"
 }
 
-func (r *repository) RecordPersonalAssignment(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string, userID, tenantID uint, at time.Time) error {
+func (r *repository) RecordPersonalAssignment(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string, userID, tenantID uint, at time.Time) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
-	return r.conn(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "organization_id"}, {Name: "provider"}, {Name: "address_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"user_id", "tenant_id", "assigned_at"}),
-	}).Create(&ExternalMailPersonalAssignmentPO{
-		OrganizationID: organizationID, Provider: string(provider), AddressKey: strings.ToLower(address),
-		UserID: userID, TenantID: tenantID, AssignedAt: at,
-	}).Error
+	return r.conn(ctx).Transaction(func(tx *gorm.DB) error {
+		// One record per directory user too: an older record of the same user under another address
+		// keeps its boundary but no longer names a holder of this address.
+		if directoryID != "" {
+			if err := tx.Exec(`UPDATE external_mail_personal_assignments SET directory_id = ''
+				WHERE organization_id = ? AND provider = ? AND directory_id = ? AND address_key <> lower(?)`,
+				organizationID, string(provider), directoryID, address).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Exec(`INSERT INTO external_mail_personal_assignments
+			(organization_id, provider, address_key, directory_id, user_id, tenant_id, assigned_at, boundary_at, released)
+			VALUES (?, ?, lower(?), ?, ?, ?, ?, NULL, false)
+			ON CONFLICT (organization_id, provider, address_key) DO UPDATE SET
+			  directory_id = EXCLUDED.directory_id, user_id = EXCLUDED.user_id, tenant_id = EXCLUDED.tenant_id,
+			  assigned_at = EXCLUDED.assigned_at, boundary_at = NULL, released = false`,
+			organizationID, string(provider), address, directoryID, userID, tenantID, at).Error
+	})
 }
 
-func (r *repository) FindPersonalAssignee(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string) (uint, error) {
+func (r *repository) FindPersonalAssignment(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address, directoryID string) (*domain.ExternalMailPersonalAssignment, error) {
 	if r.db == nil {
-		return 0, domain.ErrServiceUnavailable
+		return nil, domain.ErrServiceUnavailable
+	}
+	query := r.conn(ctx).Where("organization_id = ? AND provider = ?", organizationID, string(provider))
+	if directoryID != "" {
+		query = query.Where("(address_key = lower(?) OR directory_id = ?)", address, directoryID)
+	} else {
+		query = query.Where("address_key = lower(?)", address)
 	}
 	var rows []ExternalMailPersonalAssignmentPO
-	if err := r.conn(ctx).Where("organization_id = ? AND provider = ? AND address_key = ?", organizationID,
-		string(provider), strings.ToLower(address)).Limit(1).Find(&rows).Error; err != nil {
-		return 0, err
+	// The holder of the address itself wins over a record found by directory user.
+	if err := query.Order(clause.Expr{SQL: "(address_key = lower(?)) DESC, assigned_at DESC", Vars: []any{address}}).
+		Limit(1).Find(&rows).Error; err != nil {
+		return nil, err
 	}
 	if len(rows) == 0 {
-		return 0, nil
+		return nil, nil
 	}
-	return rows[0].UserID, nil
+	record := &domain.ExternalMailPersonalAssignment{BoundaryAt: rows[0].BoundaryAt, Released: rows[0].Released}
+	if rows[0].UserID != nil {
+		record.UserID = *rows[0].UserID
+	}
+	return record, nil
+}
+
+func (r *repository) MarkPersonalBoundary(ctx context.Context, organizationID, userID uint, at time.Time) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Exec(`UPDATE external_mail_personal_assignments
+		SET boundary_at = GREATEST(COALESCE(boundary_at, ?), ?)
+		WHERE organization_id = ? AND user_id = ?`, at, at, organizationID, userID).Error
 }
