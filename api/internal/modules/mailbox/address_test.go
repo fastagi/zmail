@@ -48,10 +48,16 @@ func TestNormalizeRecipients(t *testing.T) {
 		t.Fatalf("normalizeRecipients = %v, %v", got, ok)
 	}
 
-	for _, bad := range []string{"", "not-an-address", "Bob <bob@example.com>", "bob@localhost", "bob@example.com\r\nBcc: x@y.z"} {
+	for _, bad := range []string{"", "not-an-address", "Bob <bob@example.com>", "bob@localhost", "bob@example.com\r\nBcc: x@y.z",
+		strings.Repeat("a", 65) + "@example.com", "a@" + strings.Repeat("b", 64) + ".com",
+		"a@" + strings.Repeat(strings.Repeat("b", 60)+".", 5) + "com", "bob@example..com"} {
 		if _, ok := normalizeRecipients([]string{bad}, map[string]struct{}{}); ok {
 			t.Fatalf("normalizeRecipients accepted %q", bad)
 		}
+	}
+	longest := strings.Repeat("a", 64) + "@" + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 57) + ".com"
+	if got, ok := normalizeRecipients([]string{longest}, map[string]struct{}{}); !ok || len(got[0]) != 254 {
+		t.Fatalf("normalizeRecipients rejected a 254-character address: %v, %v", got, ok)
 	}
 }
 

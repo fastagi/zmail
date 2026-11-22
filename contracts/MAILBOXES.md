@@ -2067,7 +2067,7 @@ up to 50 string `properties`, a `status`, and the lists it belongs to. An organi
 
 | Field | Rule |
 |---|---|
-| `email` | A bare address, lowercased. Set when the contact is created and never changed. |
+| `email` | A bare address, lowercased, within the RFC 5321 limits (local part 64 characters, each domain label 63, the whole address 254). Set when the contact is created and never changed. |
 | `first_name`, `last_name` | Whitespace collapsed; at most 100 characters each; may be empty. |
 | `properties` | Names follow the template variable rules and cannot be `email`, `first_name`, or `last_name`. Values are trimmed, at most 500 characters; an empty value removes the property. |
 | `status` | `subscribed`, `unsubscribed`, or `suppressed`. Members set the first two; a new contact is subscribed. Zmail sets `suppressed` after a permanent bounce or a complaint (with the broadcasts slice). |
