@@ -101,6 +101,7 @@ func NewStarterManifest(handler *Handler) assembly.StarterManifest {
 			"2026_12_08_090000_add_connected_mailbox_send",
 			"2026_12_09_090000_add_mail_signatures",
 			"2026_12_10_090000_add_mail_drafts",
+			"2026_12_11_090000_add_mail_thread_assignments",
 		),
 	)
 }

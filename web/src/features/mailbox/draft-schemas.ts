@@ -26,7 +26,7 @@ export function draftPreview(body: string): string {
 export function draftRecipientLine(value: string): string {
   return value
     .split(/[\r\n]+/u)
-    .map(line => line.replace(/\s+/gu, ' ').trim())
+    .map(line => line.replace(/\s+/gu, ' ').replace(/^[\s,]+|[\s,]+$/gu, ''))
     .filter(Boolean)
     .join(',');
 }

@@ -414,6 +414,14 @@ TABLE mail_templates
   COLUMN from_name character varying(100) NOT NULL DEFAULT ''::character varying
   COLUMN variable_definitions jsonb NOT NULL DEFAULT '[]'::jsonb
 
+TABLE mail_thread_assignments
+  COLUMN mailbox_id bigint NOT NULL
+  COLUMN thread_id bigint NOT NULL
+  COLUMN assignee_user_id bigint
+  COLUMN status text NOT NULL
+  COLUMN updated_by_user_id bigint
+  COLUMN updated_at timestamp with time zone NOT NULL
+
 TABLE mail_triage
   COLUMN message_id bigint NOT NULL
   COLUMN mailbox_id bigint NOT NULL
@@ -1000,6 +1008,11 @@ CONSTRAINT mail_templates.chk_mail_templates_kind CHECK (((kind)::text = ANY ((A
 CONSTRAINT mail_templates.chk_mail_templates_transactional_fields CHECK (((((kind)::text = 'transactional'::text) AND (template_key IS NOT NULL) AND (from_address IS NOT NULL)) OR (((kind)::text = 'standard'::text) AND (template_key IS NULL) AND (from_address IS NULL) AND ((from_name)::text = ''::text) AND (variable_definitions = '[]'::jsonb))))
 CONSTRAINT mail_templates.fk_mail_templates_organization FOREIGN KEY (organization_id) REFERENCES organizations(id) ON UPDATE CASCADE ON DELETE CASCADE
 CONSTRAINT mail_templates.mail_templates_pkey PRIMARY KEY (id)
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_assignee_user_id_fkey FOREIGN KEY (assignee_user_id) REFERENCES users(id) ON DELETE SET NULL
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_mailbox_id_fkey FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_pkey PRIMARY KEY (mailbox_id, thread_id)
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_status_check CHECK ((status = ANY (ARRAY['open'::text, 'closed'::text])))
+CONSTRAINT mail_thread_assignments.mail_thread_assignments_updated_by_user_id_fkey FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 CONSTRAINT mail_triage.mail_triage_attempts_check CHECK ((attempts >= 0))
 CONSTRAINT mail_triage.mail_triage_category_check CHECK (((category)::text = ANY ((ARRAY['reply'::character varying, 'deadline'::character varying, 'fyi'::character varying, 'review'::character varying])::text[])))
 CONSTRAINT mail_triage.mail_triage_decided_by_fkey FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
@@ -1304,6 +1317,9 @@ INDEX CREATE UNIQUE INDEX mail_suppressions_pkey ON mail_suppressions USING btre
 INDEX CREATE UNIQUE INDEX idx_mail_templates_name ON mail_templates USING btree (organization_id, name)
 INDEX CREATE UNIQUE INDEX mail_templates_key_idx ON mail_templates USING btree (organization_id, template_key) WHERE (template_key IS NOT NULL)
 INDEX CREATE UNIQUE INDEX mail_templates_pkey ON mail_templates USING btree (id)
+INDEX CREATE INDEX idx_mail_thread_assignments_assignee ON mail_thread_assignments USING btree (assignee_user_id)
+INDEX CREATE INDEX idx_mail_thread_assignments_updated_by ON mail_thread_assignments USING btree (updated_by_user_id)
+INDEX CREATE UNIQUE INDEX mail_thread_assignments_pkey ON mail_thread_assignments USING btree (mailbox_id, thread_id)
 INDEX CREATE INDEX idx_mail_triage_overrides ON mail_triage USING btree (mailbox_id, updated_at) WHERE ((source)::text = 'manual'::text)
 INDEX CREATE INDEX idx_mail_triage_pending ON mail_triage USING btree (next_attempt_at, message_id) WHERE ((status)::text = 'pending'::text)
 INDEX CREATE INDEX idx_mail_triage_results ON mail_triage USING btree (mailbox_id, category) WHERE ((status)::text = ANY ((ARRAY['done'::character varying, 'failed'::character varying])::text[]))

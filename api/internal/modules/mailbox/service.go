@@ -276,6 +276,10 @@ type Service interface {
 	MailDrafts(ctx context.Context, viewer domain.OrganizationContext) ([]domain.MailDraft, error)
 	// CreateMailDraft saves a new draft from a mailbox the viewer may send from.
 	MailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint) (domain.MailDraft, error)
+	// MailThreadAssignment reads who works a shared mailbox's thread.
+	MailThreadAssignment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint) (MailThreadAssignmentView, error)
+	// SaveMailThreadAssignment assigns a shared mailbox's thread and sets its status.
+	SaveMailThreadAssignment(ctx context.Context, viewer domain.OrganizationContext, mailboxID, threadID uint, input MailThreadAssignmentInput) (MailThreadAssignmentView, error)
 	CreateMailDraft(ctx context.Context, viewer domain.OrganizationContext, input MailDraftInput) (domain.MailDraft, error)
 	// UpdateMailDraft replaces what one of the viewer's drafts holds.
 	UpdateMailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint, input MailDraftInput) (domain.MailDraft, error)
@@ -387,6 +391,8 @@ type service struct {
 	signatures domain.MailSignatureRepository
 	// drafts stores members' drafts; nil when repo does not implement it.
 	drafts domain.MailDraftRepository
+	// assignments stores thread assignments; nil when repo does not implement it.
+	assignments domain.MailThreadAssignmentRepository
 	// triageModel classifies and drafts; settings.Triage selects it.
 	triageModel TriageModel
 	// externalMail stores external mail connections; nil when repo does not implement it.
@@ -450,6 +456,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailDraftRepository); ok {
 		drafts = seam
 	}
+	var assignments domain.MailThreadAssignmentRepository
+	if seam, ok := repo.(domain.MailThreadAssignmentRepository); ok {
+		assignments = seam
+	}
 	var externalMail domain.ExternalMailRepository
 	if seam, ok := repo.(domain.ExternalMailRepository); ok {
 		externalMail = seam
@@ -474,6 +484,7 @@ func NewService(
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
 		recordAudit: auditstarter.RecordChange,
 		triage:      triage, triageModel: newTriageModel(settings.Triage), signatures: signatures, drafts: drafts,
+		assignments:  assignments,
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
 		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),
