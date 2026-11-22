@@ -41,6 +41,29 @@ shared connection exists. `EXTERNAL_MAIL_MAX_SHARED_CONNECTIONS` (default 20, 1 
 invalid value stops startup) bounds the live shared connections of one organization; add it to your
 environment if you template it.
 
+## Unreleased — Mail connector acceptance fixes
+
+### Medium — Restoring a revoked connection counts toward the limit of 10
+
+Binding an account again whose connection the member revoked makes that connection live, so it now
+answers `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT` (and hands the grant back) while the member already
+holds 10 live connections, on both `POST /v1/external-mail-authorizations/completions` and
+`POST /v1/external-mail-credentials`. Reconnecting a live connection is unchanged. Bindings of one
+member now run one at a time, so two at once never both pass the limit.
+
+### Low — An out-of-range `backfill_days` is `MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`
+
+`POST /v1/external-mail-authorizations` and `POST /v1/external-mail-credentials` answer a
+`backfill_days` outside 1 to 90 with `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`, as the contract
+states, instead of `422 COMMON.VALIDATION_FAILED`.
+
+### Medium — Run `mail:external:sync` where connectors are on
+
+Nothing ran the sync worker before. `make dev` now starts it when `EXTERNAL_MAIL_PROVIDERS` is set,
+and `deploy/self-host` passes the `EXTERNAL_MAIL_*` settings and `MAILBOX_SECRET_ENCRYPTION_KEY` and
+adds the `external-mail-worker` service in the `external-mail` Compose profile. A deployment of your
+own adds the worker as `api/docs/DEPLOYMENT.md` describes.
+
 ## Unreleased — Mail agent grants and the agent mail feed
 
 A person can let an API key (an agent) receive one mailbox's new mail through a replayable feed,
@@ -75,29 +98,6 @@ batches; `mail:agent-events:prune [--before=<RFC3339>]` deletes old events at on
 `MAIL_AGENT_READS_PER_MINUTE` (default 600) limits each key's agent requests. The mailbox
 repository reads `api_keys` (never writes it) to check a key when a grant is issued and when it
 decides which grants still receive mail.
-
-## Unreleased — Mail connector acceptance fixes
-
-### Medium — Restoring a revoked connection counts toward the limit of 10
-
-Binding an account again whose connection the member revoked makes that connection live, so it now
-answers `409 MAILBOX.EXTERNAL_CONNECTION_LIMIT` (and hands the grant back) while the member already
-holds 10 live connections, on both `POST /v1/external-mail-authorizations/completions` and
-`POST /v1/external-mail-credentials`. Reconnecting a live connection is unchanged. Bindings of one
-member now run one at a time, so two at once never both pass the limit.
-
-### Low — An out-of-range `backfill_days` is `MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`
-
-`POST /v1/external-mail-authorizations` and `POST /v1/external-mail-credentials` answer a
-`backfill_days` outside 1 to 90 with `422 MAILBOX.EXTERNAL_AUTHORIZATION_INVALID`, as the contract
-states, instead of `422 COMMON.VALIDATION_FAILED`.
-
-### Medium — Run `mail:external:sync` where connectors are on
-
-Nothing ran the sync worker before. `make dev` now starts it when `EXTERNAL_MAIL_PROVIDERS` is set,
-and `deploy/self-host` passes the `EXTERNAL_MAIL_*` settings and `MAILBOX_SECRET_ENCRYPTION_KEY` and
-adds the `external-mail-worker` service in the `external-mail` Compose profile. A deployment of your
-own adds the worker as `api/docs/DEPLOYMENT.md` describes.
 
 ## Unreleased — Mailbox origin: connected mailboxes and manager connection controls
 
