@@ -11,6 +11,23 @@ has an impact level:
 Newest changes come first. Merge the upstream branch, run `make check`, then work through the
 entries in order.
 
+## Unreleased — Connector acceptance round 3 fixes
+
+### Low — Provider releases keep their owner
+
+Migration `2026_12_17_090000_add_external_mail_release_owner` adds `owner_scope` (`unknown`,
+`member`, `shared`) and `owner_user_id` (`ON DELETE SET NULL`) to `external_mail_provider_releases`
+and backfills them from each row's connection when it still exists. A purged member's connection
+now waits only for that member's pending sign-in, not anyone's; a shared one still waits for
+anyone's. Rows left `unknown` keep the earlier rule and expire within 24 hours.
+`domain.ExternalMailProviderRelease` gains `OwnerScope` and `OwnerUserID`.
+
+### Low — Fake connector tenants
+
+With `EXTERNAL_MAIL_PROVIDERS=fake` (development only; production refuses it) the fake connector now
+accepts a synthetic tenant credential, so tenant connect can be exercised on a running stack. See
+`api/docs/EXTERNAL_MAIL_DEVELOPMENT.md`.
+
 ## Unreleased — Copy invitation link
 
 ### High — Deploy the Web before the API

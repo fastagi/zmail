@@ -16,6 +16,39 @@ refuses `fake` with `APP_ENV=production` and refuses combining it with a real pr
   `mail:external:sync` worker (started by `make dev` when `EXTERNAL_MAIL_PROVIDERS` is set) each have
   their own, empty source, so the worker records sync runs but never fetches mail.
 
+## Fake Tenants
+
+With `EXTERNAL_MAIL_TENANTS_ENABLED=true` the fake connector also serves tenant connect
+(`contracts/MAILBOXES.md`, Tenant Connections) without a provider. It accepts one synthetic
+credential, `fake-tenant-dev-only`, which no real connector accepts, for a tenant identifier that is
+a lowercase domain under `.invalid` (letters, digits, `-`, `.`; at most 63 characters). Everything
+about such a tenant is derived from its identifier, so the API and the separate sync worker, each
+with its own in-memory fake, agree on it. As the organization owner:
+
+```http
+POST /v1/external-mail-tenants
+Authorization: Bearer <session of the organization owner>
+Organization-Id: <organization>
+Content-Type: application/json
+
+{ "provider": "gmail", "service_account_key": "fake-tenant-dev-only", "admin_subject": "it@acme.invalid" }
+```
+
+or the Microsoft form, `{ "provider": "outlook", "tenant_id": "acme.invalid", "client_id": "fake",
+"client_secret": "fake-tenant-dev-only" }`. Both answer `201` with `tenant_identifier`
+`acme.invalid` (`200` when the organization authorizes it again). Any other key or secret, or an
+identifier outside `.invalid`, answers `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED` as before.
+
+| Part | Behavior |
+|---|---|
+| Directory | 31 mailboxes in a fixed order: `user01@<tenant>` to `user30@<tenant>` ("Fake User 01" …), then `refused@<tenant>`; directory ids `fake-<local>-<tenant>`. `per_page=10` gives four pages |
+| Mail | An assigned mailbox starts empty. Deliver to it with the route below, as the member it is assigned to (personal) or a manager of the shared mailbox; the copy is subject to the tenure rules like synced mail |
+| Losing access | `refused@<tenant>`: its mailbox token is always refused while the tenant works, so its assignment stops syncing alone (as a mailbox whose license was removed) |
+| Revoking | `DELETE /v1/external-mail-tenants/:id` as usual; there is nothing to hand back at the fake |
+
+Losing the whole tenant credential (a deleted key) cannot be simulated on a running stack; the
+automated tests cover it with `RefuseTenant`.
+
 ## Delivering Mail To A Fake Account
 
 While `fake` is the active source, and only then, the API registers one more route:

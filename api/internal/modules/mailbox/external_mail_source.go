@@ -343,6 +343,8 @@ type FakeExternalMailSource struct {
 type fakeTenant struct {
 	directory []ExternalMailDirectoryEntry
 	refused   bool
+	// refusedMailbox is a mailbox whose token is always refused; set for development tenants.
+	refusedMailbox string
 }
 
 var _ ExternalMailSource = (*FakeExternalMailSource)(nil)
