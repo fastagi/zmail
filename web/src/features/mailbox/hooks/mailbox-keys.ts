@@ -110,6 +110,7 @@ export const mailboxKeys = {
       filters.roleId ?? '',
       filters.mailboxId ?? 0,
       filters.unread ?? '',
+      filters.hasAttachments ?? '',
       filters.q ?? '',
       filters.group ?? '',
       filters.triage?.join(',') ?? '',
