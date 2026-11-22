@@ -2,9 +2,11 @@
 
 import { useEffect, useSyncExternalStore } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
 
 import { useOrganizations } from '@/features/organization/hooks/use-organizations';
 import type { Organization } from '@/features/organization/types';
+import { useT } from '@/i18n';
 
 import { MAIL_ORGANIZATION_PARAM } from '@/features/mailbox/components/mailbox-params';
 
@@ -105,18 +107,22 @@ export function useChosenMailOrganization(): Organization | undefined {
 export function useMailOrganization(): MailOrganizationScope {
   const router = useRouter();
   const pathname = usePathname();
+  const t = useT('mailbox');
   const { organizations, hydrated, items, requestedId, selected } = useOrganizationChoice();
   const selectedId = selected?.id;
+  // The URL names an organization the user is no longer in: its mailbox and message ids are stale.
+  const lost = requestedId !== null && items !== undefined && !items.some(item => item.id === requestedId);
 
   useEffect(() => {
     if (selectedId === undefined) return;
     writeStoredOrganizationId(selectedId);
     if (selectedId === requestedId) return;
-    const next = new URLSearchParams(window.location.search);
+    if (lost) toast.error(t('errors.organizationNotFound'));
+    const next = new URLSearchParams(lost ? '' : window.location.search);
     if (next.get(MAIL_ORGANIZATION_PARAM) === String(selectedId)) return;
     next.set(MAIL_ORGANIZATION_PARAM, String(selectedId));
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-  }, [pathname, requestedId, router, selectedId]);
+  }, [lost, pathname, requestedId, router, selectedId, t]);
 
   if (!hydrated || organizations.isPending) return { status: 'loading' };
   if (organizations.error || !items) {

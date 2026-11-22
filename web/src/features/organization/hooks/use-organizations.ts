@@ -228,6 +228,8 @@ export function useRemoveOrganizationMember(organizationId: number) {
       queryClient.invalidateQueries({
         queryKey: organizationKeys.members(organizationId),
       });
+      // Leaving removes the organization from the caller's own list and switcher.
+      queryClient.invalidateQueries({ queryKey: organizationKeys.list() });
     },
   });
 }

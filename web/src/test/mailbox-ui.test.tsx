@@ -357,6 +357,22 @@ describe('mailbox workspace', () => {
     expect(window.location.search).toBe('?other=1&org=4');
   });
 
+  // Issue #106: a link into an organization the user left drops its stale ids and says why.
+  it('a link to an organization the user is not in drops its other parameters and says so', () => {
+    state.organizations.data = organizations(
+      organization(4, 'Acme', 'owner'),
+      organization(5, 'Globex', 'member')
+    );
+    window.sessionStorage.clear();
+    window.history.replaceState(null, '', '/console/mailboxes?org=9&mailbox=3&message=12');
+    renderWorkspace();
+
+    expect(window.location.search).toBe('?org=4');
+    expect(toast.error).toHaveBeenCalledWith(
+      'This organization does not exist or you are no longer a member of it. Choose another organization.'
+    );
+  });
+
   it('restores the last chosen organization from sessionStorage when navigating without ?org=', () => {
     state.organizations.data = organizations(
       organization(1, 'Acme', 'owner'),
