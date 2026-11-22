@@ -504,8 +504,12 @@ func TestExternalMailPushStopsWithItsConnection(t *testing.T) {
 		}
 	}
 	for name, revoke := range map[string]func(f *externalFixture) error{
-		"owner revoke": func(f *externalFixture) error { return f.service.RevokeExternalMailConnection(ctx, f.b, f.connection.ID) },
-		"forced":       func(f *externalFixture) error { return f.service.RevokeExternalMailConnection(ctx, f.admin, f.connection.ID) },
+		"owner revoke": func(f *externalFixture) error {
+			return f.service.RevokeExternalMailConnection(ctx, f.b, f.connection.ID)
+		},
+		"forced": func(f *externalFixture) error {
+			return f.service.RevokeExternalMailConnection(ctx, f.admin, f.connection.ID)
+		},
 		"member left": func(f *externalFixture) error {
 			return f.service.MemberRemoved(ctx, domain.NewOrganizationMemberRemovedEvent(accessOrg, accessB, f.b.MembershipID, f.service.now()))
 		},
