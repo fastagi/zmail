@@ -9,6 +9,7 @@ const messages = {
   retryLater: '请稍后重试',
   save: '保存',
   cancel: '取消',
+  close: '关闭',
   confirm: '确认',
   delete: '删除',
   edit: '编辑',

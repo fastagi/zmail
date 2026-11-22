@@ -835,7 +835,8 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
   // Rows name their mailbox, tinted by its role, unless the list is one mailbox.
   const roleTags = new Map<number, MailRole>(roleList.map(role => [role.id, role]));
   // A date or attachment filter that hides every row is not an empty mailbox.
-  const narrowed = urlState.q === '' && (urlState.date !== null || urlState.attachments);
+  const dateOrFiles = urlState.date !== null || urlState.attachments;
+  const narrowed = urlState.q === '' && dateOrFiles;
   const emptyTitle =
     urlState.q !== ''
       ? t('inbox.empty.search')
@@ -850,7 +851,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
               : t(`inbox.empty.${urlState.view}`);
   const emptyHint =
     urlState.q !== ''
-      ? t('inbox.empty.searchHint')
+      ? t(dateOrFiles ? 'inbox.empty.searchFilteredHint' : 'inbox.empty.searchHint')
       : narrowed
         ? t('inbox.empty.filteredHint')
         : urlState.assignment
@@ -960,7 +961,7 @@ function UnifiedInbox({ canManage, scope }: { canManage: boolean; scope: ReadySc
           title={emptyTitle}
           description={emptyHint}
           action={
-            narrowed ? (
+            dateOrFiles ? (
               <Button
                 size="sm"
                 variant="outline"

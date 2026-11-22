@@ -178,7 +178,7 @@ export function ComposeDialog({
     const block = mailSignatureBlock(signature.data.body);
     const previous = signed?.block ?? '';
     setSigned({ mailboxId: from.id, block });
-    if (body === '' || (previous !== '' && body.endsWith(previous))) {
+    if (body.endsWith(previous)) {
       setBody(body.slice(0, body.length - previous.length) + block);
     }
   }
