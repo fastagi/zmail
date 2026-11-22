@@ -1426,6 +1426,7 @@ const messages = {
     scheduledFor: 'Scheduled for {time}',
     startedAt: 'Started {time}',
     finishedAt: 'Finished {time}',
+    canceledAt: 'Canceled {time}',
     createdAt: 'Created {time}',
     open: 'Open {name}',
     back: 'Back to broadcasts',

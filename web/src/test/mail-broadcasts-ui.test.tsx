@@ -341,6 +341,21 @@ describe('mail broadcasts console', () => {
   });
 
   // Issue #143: a resumed test wave waiting on its window is not shown as paused.
+  it('labels when a canceled broadcast ended as canceled, not finished (#192)', () => {
+    state.broadcast.data = broadcast({
+      id: 9,
+      name: 'Launch',
+      status: 'canceled',
+      finished_at: now(),
+      counts: counts({ total: 2, canceled: 2 }),
+    });
+    renderBroadcasts();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Launch' }));
+
+    expect(screen.getAllByText(/^Canceled /u).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^Finished /u)).toBeNull();
+  });
+
   it('labels a test wave waiting on its window apart from a manual pause', () => {
     state.broadcast.data = broadcast({
       id: 9,
