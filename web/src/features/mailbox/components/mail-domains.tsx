@@ -125,6 +125,7 @@ export function ConnectedDomains({ enabled, canManage }: { enabled: boolean; can
           )}
           {canManage ? (
             <>
+              <p className="text-sm text-muted-foreground">{t('domain.methodsIntro')}</p>
               <CloudflareConnectionForm key={organizationId} organizationId={organizationId} />
               <ConnectDomainForm />
             </>
@@ -135,6 +136,20 @@ export function ConnectedDomains({ enabled, canManage }: { enabled: boolean; can
       )}
     </section>
   );
+}
+
+/**
+ * This form needs no token: the API connects the domain with the server's own Cloudflare account,
+ * so a refusal there says so instead of pointing at a token the user never entered (#130).
+ */
+export function connectDomainErrorKey(failure: unknown) {
+  if (
+    failure instanceof ApiError &&
+    failure.errorCode === ApiErrorCode.MAILBOX_DOMAIN_PROVIDER_FAILED
+  ) {
+    return 'domain.connectProviderFailed' as const;
+  }
+  return resolveMailboxErrorKey(failure);
 }
 
 function ConnectDomainForm() {
@@ -243,7 +258,7 @@ function ConnectDomainForm() {
         )
       );
     } catch (failure) {
-      setError(t(resolveMailboxErrorKey(failure)));
+      setError(t(connectDomainErrorKey(failure)));
     } finally {
       submitting.current = false;
       setBusy(false);
@@ -264,7 +279,17 @@ function ConnectDomainForm() {
   ];
 
   return (
-    <form className="space-y-3 border-t pt-4" onSubmit={submit}>
+    <form
+      className="space-y-3 border-t pt-4"
+      aria-labelledby="mail-domain-connect-title"
+      onSubmit={submit}
+    >
+      <div className="space-y-1">
+        <h3 id="mail-domain-connect-title" className="font-semibold">
+          {t('domain.connectTitle')}
+        </h3>
+        <p className="text-xs text-muted-foreground">{t('domain.connectWhen')}</p>
+      </div>
       <div className="space-y-2">
         <Label htmlFor="mail-domain-name-input">{t('domain.connectLabel')}</Label>
         <div className="flex flex-wrap items-center gap-2">

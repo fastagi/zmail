@@ -514,7 +514,6 @@ const messages = {
     cfReadable: '可读取',
     cfUnverified: '尚未验证',
     cfCheckHint: '要验证实际投递，请向外部邮箱发信，并从该邮箱回复。',
-    cfFailed: '请求失败',
     cfLoading: '正在读取连接…',
     cfUnavailable: 'Cloudflare 设置暂不可用，请检查 API 连接。',
     cfWorker: '安装收信 Worker',
@@ -531,6 +530,18 @@ const messages = {
     cfCancel: '取消',
     cfDisconnect: '解绑',
     cfToken: 'Cloudflare API Token',
+    cfTitle: '方式一：使用你自己的 Cloudflare 账号',
+    cfWhen:
+      '如果域名的 DNS 已经托管在你自己的 Cloudflare 账号中并希望继续留在那里，请选择此方式。请粘贴一个 API Token：对该区域具备 Zone Read、DNS Edit 和 Email Routing Rules Edit 权限，对所属账号具备 Email Sending Edit 权限。Zmail 会加密保存该 Token。',
+    cfTokenRefused:
+      'Cloudflare 不接受你填写的 Token。请确认 Token 已完整复制、仍然有效、具备 Zone Read 权限，且其 IP 限制允许本服务器访问。',
+    cfTokenMissingPermission:
+      'Cloudflare 拒绝了你的 Token 读取此域名 DNS 记录的请求。请为该 Token 授予 {zone} 的 DNS Edit 和 Zone Read 权限后重试。',
+    cfZoneNotVisible: '你的 Token 已无法看到所选区域。请重新读取可接入域名并选择一个。',
+    cfDomainOutsideZone: '请使用 {zone} 或它的子域名，例如 mail.{zone}。',
+    cfAlreadyConnected: '此组织已经连接了一个 Cloudflare 账号。请刷新页面查看。',
+    methodsIntro:
+      '有两种方式连接域名。大多数域名使用方式二，无需 Token。只有当你在自己的 Cloudflare 账号中管理 DNS 时才使用方式一。',
     cfList: '读取可接入域名',
     cfEmpty: '此 Token 没有可见的活动域名。',
     cfZone: 'Cloudflare 域名',
@@ -541,6 +552,11 @@ const messages = {
     connectedDisabled:
       '此服务器未开启自有域名。管理员可以通过 MAILBOX_CUSTOM_DOMAINS_ENABLED 开启。',
     connectedEmpty: '还没有连接域名。',
+    connectTitle: '方式二：由 Zmail 配置 DNS（无需 Token）',
+    connectWhen:
+      '适用于新域名，或 DNS 托管在其他服务商的域名。Zmail 使用本服务器的 Cloudflare 账号，必要时会给出需要在域名注册商处设置的 DNS 服务器地址。',
+    connectProviderFailed:
+      'Cloudflare 拒绝了 Zmail 使用本服务器 Cloudflare 账号发出的请求（未使用你的 Token）。请确认域名拼写正确且已注册；.example、.test 等保留域名无法使用。如果持续失败，请稍后重试或联系服务器管理员。',
     connectLabel: '域名',
     connectPlaceholder: 'example.com',
     connectHint:
@@ -1582,7 +1598,8 @@ const messages = {
     domainInUse: '请先删除此域名上的邮箱，再移除域名。',
     domainNotVerified: '该域名尚未验证。请在“域名”页面检查它的 DNS 记录。',
     domainsDisabled: '此服务器未开启自有域名。',
-    domainProviderFailed: 'Cloudflare 拒绝了请求。请检查 API 令牌是否具备 DNS 和 Email 权限。',
+    domainProviderFailed:
+      'Cloudflare 拒绝了请求。如果此域名使用的是你自己的 Cloudflare Token，请确认该 Token 仍具备 DNS 和 Email 权限；否则请稍后重试。',
     zoneNotFound: '该区域不存在，或属于其他组织。',
     zonePending: '此域名的 DNS 服务器还没有指向 Cloudflare。请先到域名注册商处修改，然后再检查。',
     zoneInUse: '请先移除此区域中的域名，再移除区域。',
