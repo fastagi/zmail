@@ -112,6 +112,8 @@ function useMailSearch(organizationId: number, timeZone: string, q: string): Mai
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Puts focus back where the palette was opened from. */
+  onCloseAutoFocus?: (event: Event) => void;
   organizationId: number;
   timeZone: string;
   /** Every listed mailbox; those without `view` show locked. */
@@ -128,13 +130,19 @@ interface CommandPaletteProps {
  * roles match on the client; mail is searched on the server after a pause and only ever lists
  * what the caller reads.
  */
-export function CommandPalette({ open, onOpenChange, ...props }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  onOpenChange,
+  onCloseAutoFocus,
+  ...props
+}: CommandPaletteProps) {
   const t = useT('mailbox');
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         hideCloseButton
         aria-describedby={undefined}
+        onCloseAutoFocus={onCloseAutoFocus}
         overlayClassName="bg-[oklch(from_var(--shadow-color)_l_c_h/0.18)] backdrop-blur-[2px]"
         className="top-[140px] max-h-[calc(100vh-180px)] max-w-[min(600px,calc(100vw-2rem))] translate-y-0 gap-0 overflow-hidden rounded-[14px] border-border-main bg-bg-surface p-0 shadow-[0_30px_80px_oklch(from_var(--shadow-color)_l_c_h/0.22)] data-[state=closed]:slide-out-to-top-0 data-[state=open]:slide-in-from-top-0 sm:rounded-[14px]"
       >

@@ -905,6 +905,17 @@ describe('unified inbox', () => {
     expect(screen.getByText('No mail yet')).toBeInTheDocument();
   });
 
+  it('a date or attachment filter that hides every row says so and offers to clear it', async () => {
+    state.inbox.data = listing([[]]);
+    window.history.replaceState(null, '', '/console/mailboxes?date=older');
+    renderRoute();
+
+    expect(screen.getByText('No mail matches these filters')).toBeInTheDocument();
+    expect(screen.queryByText('No mail yet')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await waitFor(() => expect(window.location.search).not.toContain('date='));
+  });
+
   it('each empty listing says what would show there', () => {
     state.inbox.data = listing([[]]);
     const cases: [string, string, string][] = [
@@ -2457,6 +2468,23 @@ describe('command palette', () => {
       expect(className).toContain('var(--shadow-color)');
       expect(className).not.toMatch(/rgba\(|#[0-9a-f]{3,8}\b/i);
     }
+  });
+
+  it('Esc puts focus back where the palette and the shortcuts dialog opened from', async () => {
+    renderRoute();
+    const shortcuts = await screen.findByRole('button', { name: 'Shortcuts' });
+    shortcuts.focus();
+    press('k', shortcuts, { metaKey: true });
+    const palette = await screen.findByRole('dialog', { name: 'Command palette' });
+    fireEvent.keyDown(within(palette).getByRole('combobox'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(shortcuts).toHaveFocus();
+
+    fireEvent.click(shortcuts);
+    const help = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' });
+    fireEvent.keyDown(help, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(shortcuts).toHaveFocus();
   });
 
   it('⌘K and Ctrl+K open the palette with its actions', async () => {

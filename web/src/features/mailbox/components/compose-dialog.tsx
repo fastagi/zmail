@@ -534,7 +534,8 @@ export function ComposeDialog({
         : 'compose.title';
 
   const form = (
-    <form onSubmit={submit}>
+    // In the dialog the body scrolls and Send stays in view, even on a phone.
+    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
       <DialogBody className="space-y-4">
         {fromOptions ? (
           <div className="space-y-2">
@@ -814,6 +815,7 @@ export function ComposeDialog({
   return (
     <Dialog open onOpenChange={open => !open && dismiss()}>
       <DialogContent
+        closeLabel={t('actions.close')}
         onOpenAutoFocus={event => {
           event.preventDefault();
           toInput.current?.focus();
