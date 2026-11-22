@@ -2,16 +2,21 @@
 
 import { useEffect, useState } from 'react';
 import { useLocale } from 'next-intl';
+
+import { useCurrentUser } from '@/features/auth/store/auth-store';
+import type { AuthUser } from '@/features/auth/types';
 import { useT } from '@/i18n';
 
 /**
- * Small client island for the console greeting + wall-clock.
- * Keeps the parent page a pure Server Component.
+ * Small client island for the console greeting + wall-clock. The name comes from the signed-in
+ * user in the request's auth store, which every auth mode fills, so the page stays a pure Server
+ * Component.
  */
-export function GreetingClock({ name }: { name: string }) {
+export function GreetingClock() {
   const [now, setNow] = useState<Date | null>(null);
   const locale = useLocale();
-  const t = useT('console.greeting');
+  const t = useT('console');
+  const name = greetingName(useCurrentUser()) ?? t('home.defaultUser');
 
   useEffect(() => {
     const update = () => setNow(new Date());
@@ -31,7 +36,7 @@ export function GreetingClock({ name }: { name: string }) {
 
   return (
     <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
-      {t(greetingKey, { name })}
+      {t(`greeting.${greetingKey}`, { name })}
       {time ? (
         <>
           {' '}
@@ -51,4 +56,12 @@ function pickGreeting(now: Date | null): GreetingKey {
   if (h < 12) return 'morning';
   if (h < 18) return 'afternoon';
   return 'evening';
+}
+
+/** The name the user gave at sign-up, else the part of their address before the @. */
+export function greetingName(user: AuthUser | null | undefined): string | null {
+  const name = user?.name?.trim();
+  if (name) return name;
+  const local = user?.email?.split('@')[0]?.trim();
+  return local || null;
 }

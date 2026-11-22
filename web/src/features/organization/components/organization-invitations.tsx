@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useLocale } from 'next-intl';
-import { AlertCircle, RefreshCw, Send, Trash2 } from 'lucide-react';
+import { AlertCircle, RefreshCw, RotateCcw, Send, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -30,6 +30,7 @@ import {
 import { CreateOrganizationInvitationDialog } from '@/features/organization/components/create-organization-invitation-dialog';
 import { InvitationLinkPanel } from '@/features/organization/components/invitation-link-panel';
 import {
+  useCreateOrganizationInvitation,
   useOrganizationInvitations,
   useResendOrganizationInvitation,
   useRevokeOrganizationInvitation,
@@ -51,7 +52,9 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
   const query = useOrganizationInvitations(organizationId);
   const mutation = useRevokeOrganizationInvitation(organizationId);
   const resend = useResendOrganizationInvitation(organizationId);
+  const reinvite = useCreateOrganizationInvitation(organizationId);
   const cooldown = useResendCooldowns();
+  const overview = summarizeInvitations(query.data?.items ?? []);
   // The one-time link of the latest resend; component state only, dropped when its dialog closes.
   const [reissued, setReissued] = useState<ReissuedInvitationLink>();
 
@@ -76,6 +79,27 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
   };
   const [selected, setSelected] = useState<OrganizationInvitation>();
 
+  // An expired or revoked invitation cannot be resent; a new one goes to the same person instead.
+  const inviteAgain = (invitation: OrganizationInvitation) => {
+    reinvite.mutate(
+      { email: invitation.email, role: invitation.role },
+      {
+        onSuccess: ({ email_send_status: status, invitation_url: url }) => {
+          if (url) {
+            setReissued({ email: invitation.email, url, status });
+            return;
+          }
+          if (status === 'accepted_by_provider') {
+            toast.success(t('reinviteSent', { email: invitation.email }));
+          } else {
+            toast.warning(t(`emailSendStatus.${status}`));
+          }
+        },
+        onError: error => toast.error(t(resolveOrganizationErrorKey(error))),
+      }
+    );
+  };
+
   const revoke = () => {
     if (!selected) return;
     mutation.mutate(selected.id, {
@@ -97,6 +121,19 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
         </div>
         <CreateOrganizationInvitationDialog organizationId={organizationId} />
       </div>
+
+      {overview.total > 0 ? (
+        <ul
+          aria-label={t('summaryLabel')}
+          className="mb-4 flex flex-wrap gap-2 text-sm"
+        >
+          <SummaryChip tone="success">{t('summaryJoined', { count: overview.joined })}</SummaryChip>
+          <SummaryChip tone="warning">{t('summaryWaiting', { count: overview.waiting })}</SummaryChip>
+          {overview.expired > 0 ? (
+            <SummaryChip tone="muted">{t('summaryExpired', { count: overview.expired })}</SummaryChip>
+          ) : null}
+        </ul>
+      ) : null}
 
       {query.isPending ? <InvitationTableSkeleton /> : null}
       {query.error ? (
@@ -136,7 +173,7 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
               </TableRow>
             </TableHeader>
             <TableBody>
-              {query.data.items.map(invitation => (
+              {overview.ordered.map(invitation => (
                 <TableRow key={invitation.id}>
                   <TableCell className="font-medium">{invitation.email}</TableCell>
                   <TableCell>{t(`roles.${invitation.role}`)}</TableCell>
@@ -145,7 +182,7 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
                     {invitation.status === 'pending' ? (
                       <>
                         <InvitationEmailState invitation={invitation} />
-                        <p className="mt-1 max-w-xs text-xs text-muted-foreground">
+                        <p className="mt-1 max-w-[20rem] text-xs text-muted-foreground">
                           {invitation.email_send_status === 'accepted_by_provider' ||
                           invitation.email_send_status === 'failed'
                             ? t('invitationLink.rowHint')
@@ -187,6 +224,25 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
                           }}
                         >
                           {t('revokeInvitation')}
+                        </Button>
+                      </div>
+                    ) : overview.canInviteAgain(invitation) ? (
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          icon={<RotateCcw className="size-3.5" />}
+                          aria-label={t('reinviteLabel', { email: invitation.email })}
+                          loading={
+                            reinvite.isPending &&
+                            (reinvite.variables as { email?: string } | undefined)?.email ===
+                              invitation.email
+                          }
+                          disabled={reinvite.isPending}
+                          onClick={() => inviteAgain(invitation)}
+                        >
+                          {t('reinvite')}
                         </Button>
                       </div>
                     ) : null}
@@ -271,6 +327,64 @@ export function OrganizationInvitations({ organizationId }: { organizationId: nu
         </DialogContent>
       </Dialog>
     </section>
+  );
+}
+
+const statusOrder: Record<OrganizationInvitationStatus, number> = {
+  pending: 0,
+  expired: 1,
+  accepted: 2,
+  revoked: 3,
+};
+
+/**
+ * Where each invited person stands, from their latest invitation: joined, still waiting, or
+ * expired. An older invitation to someone invited again since is history and counts for nothing.
+ * Rows list people still waiting first, newest first within a status.
+ */
+export function summarizeInvitations(items: OrganizationInvitation[]) {
+  const newest = (a: OrganizationInvitation, b: OrganizationInvitation) =>
+    b.created_at.localeCompare(a.created_at) || b.id - a.id;
+  const latest = new Map<string, OrganizationInvitation>();
+  for (const item of [...items].sort(newest)) {
+    if (!latest.has(item.email)) latest.set(item.email, item);
+  }
+  const current = [...latest.values()];
+  const count = (status: OrganizationInvitationStatus) =>
+    current.filter(item => item.status === status).length;
+  return {
+    total: items.length,
+    joined: count('accepted'),
+    waiting: count('pending'),
+    expired: count('expired'),
+    ordered: [...items].sort(
+      (a, b) => statusOrder[a.status] - statusOrder[b.status] || newest(a, b)
+    ),
+    canInviteAgain: (item: OrganizationInvitation) =>
+      (item.status === 'expired' || item.status === 'revoked') &&
+      latest.get(item.email)?.id === item.id,
+  };
+}
+
+function SummaryChip({
+  tone,
+  children,
+}: {
+  tone: 'success' | 'warning' | 'muted';
+  children: React.ReactNode;
+}) {
+  return (
+    <li
+      className={
+        tone === 'success'
+          ? 'rounded-full bg-success-subtle px-2.5 py-0.5 text-success'
+          : tone === 'warning'
+            ? 'rounded-full bg-warning-subtle px-2.5 py-0.5 text-warning'
+            : 'rounded-full bg-muted px-2.5 py-0.5 text-muted-foreground'
+      }
+    >
+      {children}
+    </li>
   );
 }
 

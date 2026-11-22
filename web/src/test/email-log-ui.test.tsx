@@ -1223,10 +1223,10 @@ describe('mail domain console', () => {
 
     expect(screen.getByRole('heading', { name: 'mail.example.com' })).toBeInTheDocument();
     const provider = screen.getByTestId('mail-domain-provider');
-    expect(provider).toHaveTextContent('Cloudflare — delivering');
+    expect(provider).toHaveTextContent('Delivering');
     expect(provider).toHaveAttribute('data-state', 'on');
     const inbound = screen.getByTestId('mail-domain-inbound');
-    expect(inbound).toHaveTextContent('Enabled');
+    expect(inbound).toHaveTextContent('Receiving');
     expect(inbound).toHaveAttribute('data-state', 'on');
     expect(screen.getByRole('heading', { name: 'Domain' })).toBeInTheDocument();
     expect(screen.getByTestId('mail-organization-name')).toHaveTextContent('Acme');
@@ -1234,86 +1234,40 @@ describe('mail domain console', () => {
     expect(screen.getByText('50 per organization')).toBeInTheDocument();
     expect(screen.getByText('200 messages per organization in any 24 hours')).toBeInTheDocument();
     expect(new Set(state.organizationIds)).toEqual(new Set([1]));
-    expect(stepStates()).toEqual({
-      routing: 'manual',
-      rule: 'manual',
-      sending: 'done',
-      inbound: 'done',
-      config: 'done',
-    });
+    expect(screen.getByText(/team addresses end in @mail\.example\.com/u)).toBeInTheDocument();
   });
 
-  it('warns that the log provider does not deliver and that inbound mail is off', () => {
+  it('warns that a test environment does not deliver and that inbound mail is off', () => {
     state.domains.data = [domain({ provider: 'log', inbound_enabled: false })];
     renderDomain();
 
     const provider = screen.getByTestId('mail-domain-provider');
-    expect(provider).toHaveTextContent('Log — not delivering; development only');
+    expect(provider).toHaveTextContent('Not delivering (test environment)');
     expect(provider).toHaveAttribute('data-state', 'off');
     expect(screen.getByText(/Nothing reaches a recipient/u)).toBeInTheDocument();
     const inbound = screen.getByTestId('mail-domain-inbound');
-    expect(inbound).toHaveTextContent('Disabled');
+    expect(inbound).toHaveTextContent('Off');
     expect(inbound).toHaveAttribute('data-state', 'off');
-    expect(stepStates()).toEqual({
-      routing: 'manual',
-      rule: 'manual',
-      sending: 'pending',
-      inbound: 'pending',
-      config: 'manual',
-    });
   });
 
-  it('derives sending and receiving independently', () => {
-    state.domains.data = [domain({ provider: 'cloudflare', inbound_enabled: false })];
-    const view = renderDomain();
-    expect(stepStates()).toMatchObject({ sending: 'done', inbound: 'pending', config: 'manual' });
-    expect(screen.getByTestId('mail-domain-inbound')).toHaveTextContent('Disabled');
-    view.unmount();
-
-    state.domains.data = [domain({ provider: 'log', inbound_enabled: true })];
-    renderDomain();
-    expect(stepStates()).toMatchObject({ sending: 'pending', inbound: 'done', config: 'manual' });
-    expect(screen.getByTestId('mail-domain-inbound')).toHaveTextContent('Enabled');
-  });
-
-  it('names the checklist steps and the API settings with the real domain', () => {
-    renderDomain();
-
-    expect(screen.getByText('Enable Email Routing for mail.example.com')).toBeInTheDocument();
-    expect(screen.getByText('Enable Email Sending for mail.example.com')).toBeInTheDocument();
-    expect(
-      screen.getByText(/catch-all address that sends mail for mail\.example\.com/u)
-    ).toBeInTheDocument();
-    for (const setting of [
-      'MAILBOX_PROVIDER=cloudflare',
-      'MAILBOX_CLOUDFLARE_ACCOUNT_ID',
-      'MAILBOX_CLOUDFLARE_API_TOKEN',
-      'MAILBOX_INBOUND_SECRET',
-    ]) {
-      expect(screen.getByText(setting)).toBeInTheDocument();
+  it('never shows operator settings, Cloudflare account steps, or placeholders', () => {
+    for (const provider of ['cloudflare', 'log']) {
+      state.domains.data = [domain({ provider, inbound_enabled: provider === 'cloudflare' })];
+      const view = renderDomain();
+      const page = document.body.textContent ?? '';
+      expect(page).not.toMatch(/MAILBOX_|YOUR_API_HOST|Email Worker|Cloudflare setup/u);
+      expect(screen.queryByLabelText('Example request')).toBeNull();
+      view.unmount();
     }
   });
 
-  it('shows an API key example from an owned address and links to the API keys', () => {
-    const view = renderDomain();
-    const example = screen.getByLabelText('Example request');
-    expect(example).toHaveTextContent('POST https://YOUR_API_HOST/v1/outbound-mail-messages');
-    expect(example).toHaveTextContent('X-API-Key:');
-    expect(example).toHaveTextContent('Organization-Id: 1');
-    expect(example).toHaveTextContent('Idempotency-Key:');
-    expect(example).toHaveTextContent('"from": "hello@mail.example.com"');
-    expect(screen.getByRole('link', { name: 'Manage API keys' })).toHaveAttribute(
-      'href',
-      '/console/settings'
-    );
-    view.unmount();
-
-    // Without a mailbox the example still uses the configured domain.
-    state.mailboxes.data = [];
-    state.domains.data = [domain({ domain: 'post.example.org' })];
+  it('points developers to the developer center for sending with the API', () => {
     renderDomain();
-    expect(screen.getByLabelText('Example request')).toHaveTextContent(
-      '"from": "hello@post.example.org"'
+
+    expect(screen.getByRole('heading', { name: 'Send from your own systems' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Open developer center' })).toHaveAttribute(
+      'href',
+      '/console/developers'
     );
   });
 
@@ -1342,7 +1296,6 @@ describe('mail domain console', () => {
     const view = renderDomain();
     expect(screen.getByLabelText('Organization')).toHaveValue('2');
     expect(new Set(state.organizationIds)).toEqual(new Set([2]));
-    expect(screen.getByLabelText('Example request')).toHaveTextContent('Organization-Id: 2');
     view.unmount();
 
     state.domains.data = undefined;
@@ -1366,15 +1319,6 @@ describe('mail domain console', () => {
 /** Radix tabs activate on mouse down, as a real pointer does. */
 function selectTab(name: string) {
   fireEvent.mouseDown(screen.getByRole('tab', { name }), { button: 0 });
-}
-
-function stepStates(): Record<string, string | null> {
-  return Object.fromEntries(
-    [...document.querySelectorAll('[data-step]')].map(step => [
-      step.getAttribute('data-step'),
-      step.getAttribute('data-state'),
-    ])
-  );
 }
 
 function domain(overrides: Record<string, unknown> = {}) {

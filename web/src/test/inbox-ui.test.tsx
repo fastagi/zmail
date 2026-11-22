@@ -851,6 +851,14 @@ describe('unified inbox', () => {
     expect(new URLSearchParams(window.location.search).has('new')).toBe(false);
   });
 
+  it('opens mailbox creation from the setup guide when the team has mailboxes already', async () => {
+    window.history.replaceState(null, '', '/console/mailboxes?new=mailbox');
+    renderRoute();
+
+    expect(await screen.findByRole('dialog', { name: 'Manage mailboxes' })).toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).has('new')).toBe(false);
+  });
+
   it('offers to name a team when the user has none', async () => {
     state.organizations.data = page([]);
     renderRoute();
