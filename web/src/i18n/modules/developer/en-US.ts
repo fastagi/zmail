@@ -244,7 +244,8 @@ const messages = {
   disabled: {
     title: 'Transactional mail is not enabled',
     description:
-      'An operator turns it on for this instance. Until then your backend cannot send transactional mail.',
+      'An operator turns it on for this instance. Until then your backend cannot send transactional mail, but it can still send from your mailboxes with an API key.',
+    apiKeyAction: 'Send with an API key',
   },
   templates: {
     list: 'Transactional templates',

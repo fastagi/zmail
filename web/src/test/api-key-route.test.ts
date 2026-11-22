@@ -57,17 +57,17 @@ describe('API key browser route boundary', () => {
     const createdResponse = await createApiKeyRoute(
       request('/api/api-keys', {
         method: 'POST',
-        body: JSON.stringify({ name: 'Deploy', scopes: [' Models:Read '] }),
+        body: JSON.stringify({ name: 'Deploy', scopes: [' Mail:Read '] }),
       })
     );
     const created = await createdResponse.json();
     const apiKeyId = created.data.api_key.id as number;
     expect(createdResponse.status).toBe(201);
-    expect(created.data.plaintext_key).toMatch(/^fastbuild_/);
+    expect(created.data.plaintext_key).toMatch(/^zmail_/);
 
     const listedResponse = await listApiKeysRoute(request('/api/api-keys'));
     const listed = await listedResponse.json();
-    expect(listed.data[0]).toMatchObject({ id: apiKeyId, scopes: ['models:read'] });
+    expect(listed.data[0]).toMatchObject({ id: apiKeyId, scopes: ['mail:read'] });
     expect(JSON.stringify(listed)).not.toContain(created.data.plaintext_key);
     expect(JSON.stringify(listed)).not.toContain('key_hash');
 
@@ -183,8 +183,22 @@ describe('API key browser route boundary', () => {
     const created = await response.json();
     expect(response.status).toBe(201);
     expect(created.data.api_key.mode).toBe('test');
-    expect(created.data.plaintext_key).toMatch(/^fastbuild_test_/);
+    expect(created.data.plaintext_key).toMatch(/^zmail_test_/);
   });
+
+  it.each([[[]], [['models:read']], [['mail:send', 'mail:write']]])(
+    'refuses a key without a known scope: %j',
+    async scopes => {
+      process.env.MOCK_BFF_ENABLED = 'true';
+      getSessionUser.mockResolvedValue(mockUser());
+      const { createApiKeyRoute } = await import('@/features/api-key/server/api-key-route');
+
+      const response = await createApiKeyRoute(
+        request('/api/api-keys', { method: 'POST', body: JSON.stringify({ name: 'CI', scopes }) })
+      );
+      expect(response.status).toBe(422);
+    }
+  );
 
   it('returns the canonical error for an oversized create body', async () => {
     process.env.MOCK_BFF_ENABLED = 'true';

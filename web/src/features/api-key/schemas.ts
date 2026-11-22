@@ -22,6 +22,8 @@ import {
   trim,
 } from 'zod/mini';
 
+import { CREATABLE_API_KEY_SCOPES } from '@/features/api-key/scopes';
+
 const apiKeyScopePattern = /^(?:\*|[a-z][a-z0-9_-]{0,31}:[a-z][a-z0-9_-]{0,31})$/;
 const safeIdSchema = number().check(int(), positive(), maximum(Number.MAX_SAFE_INTEGER));
 const timestampSchema = iso.datetime({ offset: true });
@@ -30,7 +32,11 @@ const canonicalApiKeyNameSchema = string().check(
 );
 const apiKeyNameInputSchema = string().check(trim(), refine(hasValidNameLength));
 const canonicalApiKeyScopeSchema = string().check(regex(apiKeyScopePattern));
-const apiKeyScopeInputSchema = string().check(trim(), toLowerCase(), regex(apiKeyScopePattern));
+// A new key carries only scopes some route checks: Zmail's mail scopes, or `*`.
+const apiKeyScopeInputSchema = pipe(
+  string().check(trim(), toLowerCase()),
+  zEnum(CREATABLE_API_KEY_SCOPES)
+);
 const positiveIntegerSchema = number().check(int(), positive());
 const nonnegativeIntegerSchema = number().check(int(), nonnegative());
 const apiKeyModeSchema = zEnum(['live', 'test']);
@@ -85,7 +91,7 @@ export const createApiKeyResultSchema = strictObject({
 
 export const createApiKeySchema = strictObject({
   name: apiKeyNameInputSchema,
-  scopes: array(apiKeyScopeInputSchema).check(maxLength(32)),
+  scopes: array(apiKeyScopeInputSchema).check(minLength(1), maxLength(32)),
   expires_at: optional(timestampSchema),
   mode: optional(apiKeyModeSchema),
 });
