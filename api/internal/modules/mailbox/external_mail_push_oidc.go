@@ -172,7 +172,8 @@ func (v *googleOIDCVerifier) key(ctx context.Context, keyID string, now time.Tim
 	}
 	if v.lastAttempt.IsZero() || now.Sub(v.lastAttempt) >= jwksRefetchSpacing {
 		v.lastAttempt = now
-		fetchCtx, cancel := context.WithTimeout(ctx, jwksTimeout)
+		// A caller that hangs up must not make the shared fetch fail for everyone else.
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), jwksTimeout)
 		keys, err := v.fetch(fetchCtx)
 		cancel()
 		if err == nil {
