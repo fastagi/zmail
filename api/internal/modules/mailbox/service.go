@@ -1134,7 +1134,7 @@ func (s *service) buildOutbound(mailbox *domain.Mailbox, input SendInput) (*doma
 	}
 
 	subject := strings.TrimSpace(input.Subject)
-	if subject == "" || len(subject) > domain.MaxMailSubjectLength || strings.ContainsAny(subject, "\r\n\x00") {
+	if subject == "" || utf8.RuneCountInString(subject) > domain.MaxMailSubjectLength || strings.ContainsAny(subject, "\r\n\x00") {
 		return nil, fmt.Errorf("%w: subject", ErrMailMessageInvalid)
 	}
 	text, html := cleanText(input.Text), cleanText(input.HTML)

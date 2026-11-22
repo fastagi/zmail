@@ -594,7 +594,7 @@ func (m outlookMessage) message() (ExternalMessage, bool) {
 	}
 	message := ExternalMessage{
 		ExternalID: m.ID,
-		Subject:    strings.Join(strings.Fields(truncateText(cleanText(m.Subject), domain.MaxMailSubjectLength)), " "),
+		Subject:    strings.Join(strings.Fields(truncateRunes(cleanText(m.Subject), domain.MaxMailSubjectLength)), " "),
 		To:         outlookAddresses(m.ToRecipients), Cc: outlookAddresses(m.CcRecipients),
 	}
 	if m.From != nil {

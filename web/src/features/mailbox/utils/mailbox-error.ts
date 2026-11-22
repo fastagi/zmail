@@ -68,6 +68,7 @@ export type MailboxErrorKey =
   | 'errors.folderLimitReached'
   | 'errors.labelLimitReached'
   | 'errors.searchTooBroad'
+  | 'errors.sessionEnded'
   | 'errors.roleNotFound'
   | 'errors.roleNameTaken'
   | 'errors.roleLimitReached'
@@ -79,6 +80,8 @@ export type MailboxErrorKey =
 
 const errorKeys: Partial<Record<string, MailboxErrorKey>> = {
   [ClientErrorCode.INVALID_RESPONSE]: 'errors.invalidResponse',
+  // The session ended or was revoked: the page says so instead of a generic failure.
+  [ApiErrorCode.AUTH_UNAUTHORIZED]: 'errors.sessionEnded',
   [ClientErrorCode.NETWORK_ERROR]: 'errors.unavailable',
   [ClientErrorCode.TIMEOUT]: 'errors.unavailable',
   [ApiErrorCode.COMMON_TIMEOUT]: 'errors.unavailable',

@@ -9,6 +9,8 @@ import {
   stashPendingInvitation,
   takePendingInvitation,
 } from '@/features/organization/utils/pending-invitation';
+import { CLIENT_MESSAGE_NAMESPACES } from '@/i18n/client-message-namespaces';
+import { selectMessageNamespaces } from '@/i18n/message-selection';
 import { messages } from '@/i18n/modules';
 
 const nav = vi.hoisted(() => ({
@@ -76,6 +78,24 @@ describe('onboarding a new user into a team', () => {
     );
     succeed(state.create, { id: 7 });
     expect(nav.push).toHaveBeenCalledWith('/console/mailboxes?org=7&new=mailbox');
+  });
+
+  it('has its copy on the console routes that show it (home and inbox)', () => {
+    const consoleMessages = selectMessageNamespaces(messages, [
+      ...CLIENT_MESSAGE_NAMESPACES.global,
+      ...CLIENT_MESSAGE_NAMESPACES.console,
+    ]);
+    render(
+      <NextIntlClientProvider
+        locale="en-US"
+        messages={consoleMessages as unknown as AbstractIntlMessages}
+      >
+        <TeamSetupCard />
+      </NextIntlClientProvider>
+    );
+
+    expect(screen.getByLabelText('Team name')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create team' })).toBeInTheDocument();
   });
 
   it('refuses a one-letter team name without calling the API', () => {

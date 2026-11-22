@@ -443,7 +443,7 @@ func (s *service) sendTransactional(ctx context.Context, send *transactionalSend
 		}
 	}
 	subjectMasked := send.parsed.render(masked).Subject
-	if len(rendered.Subject) > domain.MaxMailSubjectLength || len(subjectMasked) > domain.MaxMailSubjectLength {
+	if utf8.RuneCountInString(rendered.Subject) > domain.MaxMailSubjectLength || utf8.RuneCountInString(subjectMasked) > domain.MaxMailSubjectLength {
 		return nil, false, &FieldsError{Err: ErrMailMessageInvalid, Fields: map[string][]string{"variables": {"make the subject too long"}}}
 	}
 	suppressed := false

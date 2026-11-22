@@ -3,6 +3,29 @@ const messages = {
   tabs: {
     preferences: 'Preferences',
     api: 'API',
+    security: 'Security',
+  },
+  security: {
+    passwordTitle: 'Change password',
+    passwordDescription:
+      'Changing your password signs you out on every device, this one included. Sign in again with the new password afterwards.',
+    currentPassword: 'Current password',
+    newPassword: 'New password',
+    newPasswordHint: '6 to 50 characters, different from the current password.',
+    confirmPassword: 'Confirm new password',
+    submit: 'Change password',
+    changed: 'Password changed. Every session has been signed out; sign in with your new password.',
+    errors: {
+      currentRequired: 'Enter your current password.',
+      currentIncorrect: 'The current password is incorrect.',
+      newLength: 'Use 6 to 50 characters.',
+      newUnchanged: 'Choose a password different from the current one.',
+      newInvalid: 'This password cannot be used. Use 6 to 50 characters that differ from the current password.',
+      mismatch: 'The passwords do not match.',
+      sessionEnded: 'Your session has ended. Sign in again to change your password.',
+      rateLimited: 'Too many attempts. Wait a moment and try again.',
+      failed: 'The password could not be changed. Try again.',
+    },
   },
   api: {
     title: 'API settings',

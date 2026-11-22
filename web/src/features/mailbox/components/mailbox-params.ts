@@ -4,6 +4,19 @@ export const MAIL_ORGANIZATION_PARAM = 'org';
 /** Query parameter naming the open mailbox; the organization stays in `org`. */
 export const MAILBOX_PARAM = 'mailbox';
 
+/**
+ * Query parameter that opens a new message as the page loads, on the draft kept in this browser:
+ * the composer's way back after signing in again (`compose=new`).
+ */
+export const COMPOSE_PARAM = 'compose';
+export const COMPOSE_RESUME = 'new';
+
+/**
+ * Query parameters naming mail of one organization: the open message, the narrowed mailbox or
+ * role, and the open mailbox. A link moved to another organization drops them.
+ */
+export const ORGANIZATION_SCOPED_PARAMS = ['open', 'box', 'role', MAILBOX_PARAM] as const;
+
 const storedMailboxPattern = /^[1-9]\d{0,15}$/u;
 
 function storageKey(organizationId: number): string {

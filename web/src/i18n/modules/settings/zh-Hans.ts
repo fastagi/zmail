@@ -6,6 +6,28 @@ const messages = {
   tabs: {
     preferences: '偏好',
     api: 'API',
+    security: '安全',
+  },
+  security: {
+    passwordTitle: '修改密码',
+    passwordDescription: '修改密码后，所有设备上的登录都会退出，包括当前设备。之后请用新密码重新登录。',
+    currentPassword: '当前密码',
+    newPassword: '新密码',
+    newPasswordHint: '6 到 50 个字符，且不能与当前密码相同。',
+    confirmPassword: '确认新密码',
+    submit: '修改密码',
+    changed: '密码已修改，所有会话都已退出，请用新密码登录。',
+    errors: {
+      currentRequired: '请输入当前密码。',
+      currentIncorrect: '当前密码不正确。',
+      newLength: '请使用 6 到 50 个字符。',
+      newUnchanged: '新密码不能与当前密码相同。',
+      newInvalid: '无法使用这个密码。请使用 6 到 50 个字符，且不能与当前密码相同。',
+      mismatch: '两次输入的密码不一致。',
+      sessionEnded: '会话已结束，请重新登录后再修改密码。',
+      rateLimited: '尝试次数过多，请稍后再试。',
+      failed: '密码修改失败，请重试。',
+    },
   },
   api: {
     title: 'API 设置',
