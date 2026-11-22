@@ -169,6 +169,9 @@ type ExternalMailConnector struct {
 	Capabilities ExternalMailCapabilities
 	Source       ExternalMailSource
 	Tenant       ExternalMailTenantSource
+	// Push is set when the connector can subscribe to new-mail notifications and the instance
+	// configured its push settings; nil otherwise (IMAP has none).
+	Push ExternalMailPushSource
 }
 
 // ExternalMailTenantGrant is what an owner hands over to authorize a tenant. Each provider reads
@@ -283,9 +286,15 @@ func fakeExternalMailRegistry(source ExternalMailSource) *externalMailRegistry {
 	if serves, ok := source.(ExternalMailTenantSource); ok {
 		tenant = serves
 	}
+	// A fake that serves push subscriptions is the push source too; the service uses it only while
+	// push is on.
+	var push ExternalMailPushSource
+	if serves, ok := source.(ExternalMailPushSource); ok {
+		push = serves
+	}
 	return &externalMailRegistry{connectors: []ExternalMailConnector{
-		{ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant},
-		{ID: domain.ExternalMailProviderOutlook, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant},
+		{ID: domain.ExternalMailProviderGmail, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant, Push: push},
+		{ID: domain.ExternalMailProviderOutlook, AuthKind: ExternalMailAuthOAuth2, Capabilities: read, Source: source, Tenant: tenant, Push: push},
 	}}
 }
 
@@ -323,6 +332,8 @@ type FakeExternalMailSource struct {
 	tenants map[string]*fakeTenant
 	// refusedMailboxes are tenant mailboxes whose token is refused while the tenant still works.
 	refusedMailboxes map[string]bool
+	// push is the fake's push subscription state; see external_mail_push_fake.go.
+	push fakePushState
 }
 
 // fakeTenant is one tenant a fake source serves.

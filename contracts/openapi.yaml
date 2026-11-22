@@ -10082,6 +10082,111 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+  /v1/external-mail-notifications/gmail:
+    post:
+      operationId: receiveGmailPushNotification
+      summary: Accept a Gmail new-mail notification from Cloud Pub/Sub
+      description: "Called by the operator's Cloud Pub/Sub push subscription, not by browsers, and only
+        while `EXTERNAL_MAIL_PUSH_ENABLED` is on with `EXTERNAL_MAIL_GMAIL_PUSH_TOPIC`,
+        `EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE`, and `EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT` set. No
+        session or API key: the request is authenticated by the push subscription's Google-signed
+        OIDC token (RS256 against Google's published keys, issuer `accounts.google.com`, the
+        configured audience, unexpired, and issued to the configured, verified service account). The
+        message only names a Gmail address; it is a hint that marks the connections of that address
+        due, never mail. Every authenticated request is answered `204`, whether or not a connection
+        matches, and spends the provider's budget; a refused one spends only the sender IP's budget
+        and is answered `429` past it."
+      tags:
+        - Mailboxes
+      security: []
+      parameters:
+        - name: Authorization
+          in: header
+          required: true
+          description: '`Bearer <OIDC token>` added by Pub/Sub.'
+          schema:
+            type: string
+            maxLength: 4103
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A Pub/Sub push request. Only `message.data`, base64 JSON with `emailAddress`,
+                is read. At most 64 KiB.
+      responses:
+        '204':
+          description: Acknowledged. Pub/Sub does not redeliver it.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Push is off or Gmail push is not configured (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /v1/external-mail-notifications/outlook:
+    post:
+      operationId: receiveOutlookPushNotification
+      summary: Accept a Microsoft Graph change or lifecycle notification
+      description: "Called by Microsoft Graph, not by browsers, and only while `EXTERNAL_MAIL_PUSH_ENABLED`
+        is on with `EXTERNAL_MAIL_OUTLOOK_PUSH_NOTIFICATION_URL` set. No session or API key. With a
+        `validationToken` query parameter it is Graph's validation handshake: the token is echoed as
+        `text/plain` within the request. Otherwise the body is a Graph notification collection; a
+        notification counts only when its `clientState` matches the subscription's, compared in
+        constant time against the stored hash, and only marks that connection due. Lifecycle
+        notifications (`reauthorizationRequired`, `subscriptionRemoved`, `missed`) also make the
+        subscription's renewal due. Every readable request is answered `202`, whether or not a
+        subscription matches. Only a request with at least one matching notification spends the
+        provider's budget; any other (handshakes included) spends only the sender IP's budget and is
+        answered `429` past it."
+      tags:
+        - Mailboxes
+      security: []
+      parameters:
+        - name: validationToken
+          in: query
+          required: false
+          description: Graph's handshake token, at most 1,024 printable ASCII characters.
+          schema:
+            type: string
+            maxLength: 1024
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A Graph notification collection. Only `value[].subscriptionId`,
+                `value[].clientState`, and `value[].lifecycleEvent` are read, at most 20 items. At most
+                64 KiB.
+      responses:
+        '200':
+          description: The validation handshake; the body is the token.
+          content:
+            text/plain:
+              schema:
+                type: string
+                maxLength: 1024
+        '202':
+          description: Acknowledged.
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '404':
+          description: Push is off or Outlook push is not configured (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /v1/external-mail-tenants:
     get:
       operationId: listExternalMailTenants
@@ -16663,11 +16768,18 @@ components:
         - last_synced_at
         - last_error_code
         - created_at
+        - push
       properties:
         id:
           $ref: '#/components/schemas/PositiveID'
         provider:
           $ref: '#/components/schemas/ExternalMailConnectorID'
+        push:
+          description: The connection's push subscription while `EXTERNAL_MAIL_PUSH_ENABLED` is on; null
+            when push is off or the connection has none.
+          oneOf:
+            - $ref: '#/components/schemas/ExternalMailPushState'
+            - type: 'null'
         tenant_id:
           description: The authorized tenant the mailbox was assigned from; null for an account bound with
             its own grant.
@@ -16711,6 +16823,54 @@ components:
         created_at:
           type: string
           format: date-time
+    ExternalMailPushState:
+      type: object
+      additionalProperties: false
+      description: A connection's push subscription. It never carries the provider's subscription id
+        or secret.
+      required:
+        - status
+        - expires_at
+        - last_notified_at
+        - last_error_code
+      properties:
+        status:
+          type: string
+          description: '`active` is a live subscription shown to work, so new mail syncs within seconds
+            and the poll slows to `EXTERNAL_MAIL_PUSH_POLL_INTERVAL`; `quiet` is live without a
+            notification within `EXTERNAL_MAIL_PUSH_QUIET_LIMIT`; `degraded` is live but a poll found
+            mail no notification announced, until an authenticated notification arrives; `pending`
+            has no live subscription yet (or it expired, or the provider removed it) while the next
+            attempt backs off; `unsupported` means the provider cannot push for this connection (a
+            Gmail mailbox assigned from a Workspace tenant); `stopped` ended with its connection. Every
+            status but `active` polls every two minutes.'
+          enum:
+            - active
+            - quiet
+            - degraded
+            - pending
+            - unsupported
+            - stopped
+        expires_at:
+          description: When the provider ends the subscription unless it is renewed; null before the
+            first success and once stopped.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        last_notified_at:
+          description: When the latest authenticated notification for it arrived.
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+        last_error_code:
+          description: The latest failed subscribe or renewal, `external.auth_failed` or
+            `external.fetch_failed`; null after a success. It never changes the connection's status.
+          oneOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
     ExternalMailConnectionListResponse:
       type: object
       additionalProperties: false
@@ -16743,7 +16903,14 @@ components:
         - error_code
         - timed_out
         - throttled
+        - trigger
       properties:
+        trigger:
+          type: string
+          description: '`poll` ran on the schedule; `push` answered a provider notification.'
+          enum:
+            - poll
+            - push
         id:
           $ref: '#/components/schemas/PositiveID'
         started_at:

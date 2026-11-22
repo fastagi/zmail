@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/fastagi/zmail/api/internal/domain"
 	"github.com/fastagi/zmail/api/pkg/response"
 )
 
@@ -20,6 +21,8 @@ type ExternalMailSyncRunResponse struct {
 	ErrorCode    *string   `json:"error_code"`
 	TimedOut     bool      `json:"timed_out"`
 	Throttled    bool      `json:"throttled"`
+	// Trigger is why the sync ran: poll, or push for a sync a provider notification asked for.
+	Trigger string `json:"trigger"`
 }
 
 // ListExternalMailSyncRuns lists the latest sync runs of the caller's own connection, newest
@@ -40,7 +43,7 @@ func (h *Handler) ListExternalMailSyncRuns(c *gin.Context) {
 		items = append(items, ExternalMailSyncRunResponse{
 			ID: run.ID, StartedAt: run.StartedAt.UTC(), FinishedAt: run.FinishedAt.UTC(), Outcome: string(run.Outcome),
 			FetchedCount: run.Fetched, StoredCount: run.Stored, More: run.More, ErrorCode: optionalText(run.ErrorCode),
-			TimedOut: run.TimedOut, Throttled: run.Throttled,
+			TimedOut: run.TimedOut, Throttled: run.Throttled, Trigger: string(externalMailSyncTrigger(run.Trigger)),
 		})
 	}
 	privateResponse(c)
@@ -72,4 +75,12 @@ func (h *Handler) PurgeExternalMailCopies(c *gin.Context) {
 		return
 	}
 	response.Accepted(c, body)
+}
+
+// externalMailSyncTrigger reads an empty trigger as a poll.
+func externalMailSyncTrigger(trigger domain.ExternalMailSyncTrigger) domain.ExternalMailSyncTrigger {
+	if trigger == "" {
+		return domain.ExternalMailSyncTriggerPoll
+	}
+	return trigger
 }

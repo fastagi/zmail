@@ -76,13 +76,18 @@ func buildOutlookConnector(cfg config.ExternalMailConfig) (ExternalMailConnector
 	if !cfg.Provides(config.ExternalMailProviderOutlook) || !client.Configured() {
 		return ExternalMailConnector{}, false
 	}
-	return ExternalMailConnector{
+	source := newOutlookMailSource(client)
+	connector := ExternalMailConnector{
 		ID:           domain.ExternalMailProviderOutlook,
 		AuthKind:     ExternalMailAuthOAuth2,
 		Capabilities: ExternalMailCapabilities{Read: true},
-		Source:       newOutlookMailSource(client),
+		Source:       source,
 		Tenant:       newOutlookTenantSource(client),
-	}, true
+	}
+	if cfg.Push.OutlookConfigured() {
+		connector.Push = newOutlookPushSource(source, cfg.Push)
+	}
+	return connector, true
 }
 
 // outlookMailSource speaks Microsoft identity platform OAuth and Microsoft Graph.

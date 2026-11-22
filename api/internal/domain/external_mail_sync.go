@@ -53,6 +53,8 @@ type ExternalMailSyncRun struct {
 	// Throttled means the next page waits the spacing because the connection already fetched
 	// the most pages in a row allowed at once.
 	Throttled bool
+	// Trigger is why the sync ran; empty reads as poll.
+	Trigger ExternalMailSyncTrigger
 }
 
 // ExternalMailClaim asks for due connections, round-robin across providers.

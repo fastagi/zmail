@@ -179,6 +179,12 @@ type ExternalMailConnection struct {
 	ReceivedNotBefore *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	// Push is the connection's push subscription, filled in by the read models that show it; nil
+	// otherwise and when it has none.
+	Push *ExternalMailSubscription
+	// PushStatus is the status owners see for Push: its stored status, or quiet or degraded for a
+	// live one not shown to work.
+	PushStatus ExternalMailSubscriptionStatus
 }
 
 // ExternalMailPersonalAssignment is the record of an organization address assigned from a tenant. It

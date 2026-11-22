@@ -43,6 +43,9 @@ func (s *service) SyncExternalMail(ctx context.Context, limit int) (int, error) 
 		return 0, nil
 	}
 	now := s.now().UTC()
+	// Subscriptions of ended connections stop, and notifications that arrived during a fetch make
+	// their connection due, before the claim picks due connections.
+	s.maintainExternalMailPush(ctx, now)
 	connections, err := s.externalMail.ClaimExternalMailConnections(ctx, domain.ExternalMailClaim{
 		Now: now, LeaseUntil: now.Add(externalMailSyncInterval), Limit: limit,
 		PerProvider: s.settings.ExternalMail.Sync.FetchesPerPass(),
@@ -88,12 +91,26 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	// The claim lease covers the wait in this pass; before the fetch it is moved past the fetch
 	// deadline, so no other worker can claim the connection, and use its grant, while the fetch
 	// may still run. A connection another worker took meanwhile is skipped.
-	held, err := s.externalMail.RenewExternalMailLease(ctx, connection.ID, connection.NextSyncAt,
-		maxTime(connection.NextSyncAt, s.now().UTC().Add(budget.Timeout()+externalMailLeaseMargin)))
+	lease := maxTime(connection.NextSyncAt, s.now().UTC().Add(budget.Timeout()+externalMailLeaseMargin))
+	held, err := s.externalMail.RenewExternalMailLease(ctx, connection.ID, connection.NextSyncAt, lease)
 	if err != nil || !held {
 		return err
 	}
 	connector, registered := s.externalConnectors.lookup(connection.Provider)
+	// A notification received before the fetch starts is answered by it; one received later keeps
+	// the connection pending for another sync.
+	push := s.pushSource(connector)
+	var subscription *domain.ExternalMailSubscription
+	if push != nil {
+		if subscription, err = s.pushStore.FindExternalMailSubscription(ctx, connection.ID); err != nil {
+			return err
+		}
+	}
+	trigger := domain.ExternalMailSyncTriggerPoll
+	if subscription != nil && subscription.PendingAt != nil && !subscription.PendingAt.After(startedAt) {
+		trigger = domain.ExternalMailSyncTriggerPush
+		metrics.ObserveExternalMailPushDelay(string(connection.Provider), startedAt.Sub(*subscription.PendingAt))
+	}
 	var fetched ExternalMailFetch
 	var token ExternalMailToken
 	var tenant *domain.ExternalMailTenant
@@ -125,6 +142,33 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		}
 	}
 	latency := time.Since(started)
+	var upkeep pushUpkeep
+	degraded := false
+	if push != nil && err == nil && !fetched.More && subscriptionDue(subscription, now) {
+		// The subscription is started or renewed under the lease, moved past the call's deadline,
+		// with the grant the fetch used; a grant the provider rotates on the way is saved below.
+		renewed, renewErr := s.externalMail.RenewExternalMailLease(ctx, connection.ID, lease,
+			maxTime(lease, s.now().UTC().Add(externalMailPushCallTimeout+externalMailLeaseMargin)))
+		if renewErr != nil {
+			return renewErr
+		}
+		if renewed {
+			pushToken := token
+			if fetched.RefreshToken != "" {
+				pushToken.RefreshToken = fetched.RefreshToken
+			}
+			var rotated string
+			upkeep, rotated = s.upkeepPush(ctx, push, connection, subscription, pushToken, now)
+			if rotated != "" {
+				fetched.RefreshToken = rotated
+			}
+		}
+	} else {
+		upkeep = pushUpkeep{after: subscription}
+	}
+	if push == nil {
+		upkeep = pushUpkeep{}
+	}
 	outcome := domain.ExternalMailSyncOK
 	if errors.Is(err, ErrExternalMailCursorExpired) && connection.SyncCursor == "" {
 		// An empty cursor cannot expire: a source that says so would restart forever.
@@ -144,6 +188,21 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		result.Cursor, result.SyncedAt, result.ConsecutiveFailures = fetched.Cursor, &now, 0
 		result.Messages = s.externalCopies(connection, fetched.Messages, now)
 		result.ConsecutiveMore = 0
+		if push != nil && trigger == domain.ExternalMailSyncTriggerPoll &&
+			pushMissedMail(subscription, result.Messages, startedAt, s.settings.ExternalMail.Push.Quiet()) {
+			// The poll found mail the live subscription never announced: push is not working for
+			// this connection, so it polls at the regular interval until a notification arrives.
+			degraded = true
+			if upkeep.after != nil {
+				after := *upkeep.after
+				after.DegradedAt = &now
+				upkeep.after = &after
+			}
+		}
+		if !fetched.More {
+			// A live subscription announces new mail, so the poll is only the safety net.
+			result.NextSyncAt = s.pushPollAt(upkeep, now)
+		}
 		if fetched.More {
 			// Another page is ready: fetch it at once, until the connection has fetched the most
 			// pages in a row allowed; then each further page waits the spacing, so one backfill
@@ -177,7 +236,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	result.Run = &domain.ExternalMailSyncRun{
 		ConnectionID: connection.ID, StartedAt: startedAt, FinishedAt: s.now().UTC(), Outcome: outcome,
 		Fetched: len(fetched.Messages), More: err == nil && fetched.More, ErrorCode: result.LastErrorCode,
-		TimedOut: timedOut, Throttled: throttled,
+		TimedOut: timedOut, Throttled: throttled, Trigger: trigger,
 	}
 	var stored []*domain.MailMessage
 	applied := false
@@ -187,6 +246,9 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		var notifications []MailNotification
 		var err error
 		if stored, applied, err = s.externalMail.SaveExternalMailSync(tx, result); err != nil {
+			return nil, err
+		}
+		if err = s.savePushUpkeep(tx, connection, applied, result.LastErrorCode == "", upkeep, degraded, trigger, startedAt); err != nil {
 			return nil, err
 		}
 		for _, message := range stored {
@@ -201,6 +263,11 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 	if saveErr != nil {
 		return saveErr
 	}
+	if !applied && push != nil && upkeep.subscribed != nil {
+		// The connection was revoked while the sync subscribed: its revocation found no live
+		// subscription to stop, so this one is stopped here.
+		s.unsubscribeOrphan(ctx, push, connection, *upkeep.subscribed)
+	}
 	if tenant != nil && result.Run.Outcome == domain.ExternalMailSyncAuthFailed {
 		s.checkTenantAfterRefusal(ctx, connector, tenant, connection.ID, budget.Timeout())
 	}
@@ -210,7 +277,7 @@ func (s *service) syncExternalConnection(ctx context.Context, connection *domain
 		slog.String("provider", string(connection.Provider)), slog.String("status", string(result.Status)),
 		slog.String("outcome", string(result.Run.Outcome)), slog.Int64("latency_ms", latency.Milliseconds()),
 		slog.Int("page_size", result.Run.Fetched), slog.Bool("more", result.Run.More),
-		slog.Bool("timed_out", timedOut), slog.Bool("throttled", throttled),
+		slog.Bool("timed_out", timedOut), slog.Bool("throttled", throttled), slog.String("trigger", string(trigger)),
 		slog.Int("fetched", len(result.Messages)), slog.Int("stored", len(stored)), slog.Bool("applied", applied),
 	}
 	if result.LastErrorCode != "" && result.Run.Outcome != domain.ExternalMailSyncDropped {
@@ -283,15 +350,19 @@ func (s *service) ListExternalMailConnections(ctx context.Context, viewer domain
 	}
 	connections = append(connections, assigned...)
 	manager := viewer.Role.CanManageOrganization()
-	if !manager && viewer.MembershipID == 0 {
-		return connections, nil
+	if manager || viewer.MembershipID != 0 {
+		shared, err := s.externalMail.ListSharedExternalMailConnections(ctx, viewer.OrganizationID, viewer.MembershipID, manager,
+			domain.MaxSharedExternalMailConnectionsCeiling)
+		if err != nil {
+			return nil, err
+		}
+		connections = append(connections, shared...)
 	}
-	shared, err := s.externalMail.ListSharedExternalMailConnections(ctx, viewer.OrganizationID, viewer.MembershipID, manager,
-		domain.MaxSharedExternalMailConnectionsCeiling)
-	if err != nil {
+	// Each listed connection shows its push subscription where its sync health is shown.
+	if err := s.attachPushState(ctx, connections); err != nil {
 		return nil, err
 	}
-	return append(connections, shared...), nil
+	return connections, nil
 }
 
 // RevokeExternalMailConnection unbinds an account: its owner may, and so may owners and admins for
@@ -371,7 +442,9 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 	if connection.Status == domain.ExternalMailStatusRevoked {
 		return nil
 	}
-	s.handBackExternalGrant(ctx, connection)
+	// The provider is called only once the revocation committed: it stops the push subscription,
+	// then takes the grant back. The row is stopped in the revocation's transaction either way.
+	release := s.prepareProviderRelease(ctx, connection)
 	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
 		if err := s.externalMail.RevokeExternalMailConnection(tx, connection.OrganizationID, connection.ID, s.now().UTC()); err != nil {
 			return err
@@ -381,6 +454,7 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 	if err != nil {
 		return err
 	}
+	releaseAfterCommit(ctx, release)
 	slog.InfoContext(ctx, "external_mail.revoked",
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
 		slog.String("event", string(event)))
@@ -407,13 +481,19 @@ func (s *service) afterConnectionRevoked(tx context.Context, connection *domain.
 	}); err != nil {
 		return err
 	}
+	// Its notifications are ignored from now on.
+	if err := s.stopPushRow(tx, connection.ID); err != nil {
+		return err
+	}
 	return s.recordConnectionEventWith(tx, connection, event, actorUserID, extra)
 }
 
 // deleteConnectedMailbox revokes the mailbox's connection, then soft-deletes the mailbox, in one
 // transaction. A mailbox without a connection is deleted as it is.
 func (s *service) deleteConnectedMailbox(ctx context.Context, viewer domain.OrganizationContext, mailbox *domain.Mailbox) error {
-	return s.repo.InTransaction(ctx, func(tx context.Context) error {
+	// The revocation's provider calls wait until the deletion has committed.
+	ctx, releases := withDeferredReleases(ctx)
+	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
 		if s.externalMail != nil {
 			connection, err := s.externalMail.FindExternalMailConnectionByMailbox(tx, mailbox.OrganizationID, mailbox.ID)
 			switch {
@@ -428,6 +508,11 @@ func (s *service) deleteConnectedMailbox(ctx context.Context, viewer domain.Orga
 		}
 		return s.repo.DeleteMailbox(tx, mailbox.OrganizationID, mailbox.ID)
 	})
+	if err != nil {
+		return err
+	}
+	releases.run(ctx)
+	return nil
 }
 
 // recordConnectionEvent writes a connection event to its mailbox's access history. The detail names

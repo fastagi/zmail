@@ -37,6 +37,39 @@ type ExternalMailConnectionResponse struct {
 	LastSyncedAt  *time.Time `json:"last_synced_at"`
 	LastErrorCode *string    `json:"last_error_code"`
 	CreatedAt     time.Time  `json:"created_at"`
+	// Push is the connection's push subscription while push is on; null when it has none.
+	Push *ExternalMailPushStateResponse `json:"push"`
+}
+
+// ExternalMailPushStateResponse is a connection's push subscription. It never carries the
+// provider's subscription id or secret.
+type ExternalMailPushStateResponse struct {
+	// Status is active (push shown to work), quiet (no notification within the quiet limit), degraded
+	// (a poll found mail no notification announced), pending (no live subscription), unsupported (the
+	// provider cannot push for this connection), or stopped.
+	Status         string     `json:"status"`
+	ExpiresAt      *time.Time `json:"expires_at"`
+	LastNotifiedAt *time.Time `json:"last_notified_at"`
+	LastErrorCode  *string    `json:"last_error_code"`
+}
+
+// toExternalMailPushState is the public form of a connection's subscription, with the status the
+// service derived for it (active only while push is shown to work).
+func toExternalMailPushState(subscription *domain.ExternalMailSubscription, status domain.ExternalMailSubscriptionStatus) *ExternalMailPushStateResponse {
+	if subscription == nil {
+		return nil
+	}
+	if status == "" {
+		status = subscription.Status
+	}
+	state := &ExternalMailPushStateResponse{Status: string(status), LastErrorCode: optionalText(subscription.LastErrorCode)}
+	if subscription.ExpiresAt != nil && subscription.Status == domain.ExternalMailSubscriptionActive {
+		state.ExpiresAt = new(subscription.ExpiresAt.UTC())
+	}
+	if subscription.LastNotifiedAt != nil {
+		state.LastNotifiedAt = new(subscription.LastNotifiedAt.UTC())
+	}
+	return state
 }
 
 func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnection) []ExternalMailConnectionResponse {
@@ -50,6 +83,7 @@ func toExternalMailConnectionResponses(connections []*domain.ExternalMailConnect
 		if connection.LastSyncedAt != nil {
 			item.LastSyncedAt = new(connection.LastSyncedAt.UTC())
 		}
+		item.Push = toExternalMailPushState(connection.Push, connection.PushStatus)
 		responses = append(responses, item)
 	}
 	return responses

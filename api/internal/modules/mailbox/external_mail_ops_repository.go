@@ -28,6 +28,7 @@ type ExternalMailSyncRunPO struct {
 	ErrorCode    *string   `gorm:"size:64"`
 	TimedOut     bool      `gorm:"not null;default:false"`
 	Throttled    bool      `gorm:"not null;default:false"`
+	TriggeredBy  string    `gorm:"size:8;not null;default:'poll'"`
 }
 
 func (ExternalMailSyncRunPO) TableName() string {
@@ -38,12 +39,20 @@ func (po *ExternalMailSyncRunPO) toDomain() *domain.ExternalMailSyncRun {
 	run := &domain.ExternalMailSyncRun{
 		ID: po.ID, ConnectionID: po.ConnectionID, StartedAt: po.StartedAt, FinishedAt: po.FinishedAt,
 		Outcome: domain.ExternalMailSyncOutcome(po.Outcome), Fetched: po.FetchedCount, Stored: po.StoredCount, More: po.More,
-		TimedOut: po.TimedOut, Throttled: po.Throttled,
+		TimedOut: po.TimedOut, Throttled: po.Throttled, Trigger: domain.ExternalMailSyncTrigger(po.triggerOrPoll()),
 	}
 	if po.ErrorCode != nil {
 		run.ErrorCode = *po.ErrorCode
 	}
 	return run
+}
+
+// triggerOrPoll reads an empty trigger as a poll.
+func (po *ExternalMailSyncRunPO) triggerOrPoll() string {
+	if po.TriggeredBy == "" {
+		return string(domain.ExternalMailSyncTriggerPoll)
+	}
+	return po.TriggeredBy
 }
 
 var _ domain.ExternalMailOpsRepository = (*repository)(nil)
@@ -61,6 +70,10 @@ func recordExternalMailSyncRun(tx *gorm.DB, run *domain.ExternalMailSyncRun) err
 		ConnectionID: run.ConnectionID, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
 		Outcome: string(run.Outcome), FetchedCount: run.Fetched, StoredCount: run.Stored, More: run.More,
 		ErrorCode: optionalText(run.ErrorCode), TimedOut: run.TimedOut, Throttled: run.Throttled,
+		TriggeredBy: string(domain.ExternalMailSyncTriggerPoll),
+	}
+	if run.Trigger == domain.ExternalMailSyncTriggerPush {
+		po.TriggeredBy = string(domain.ExternalMailSyncTriggerPush)
 	}
 	if err := tx.Create(po).Error; err != nil {
 		return err

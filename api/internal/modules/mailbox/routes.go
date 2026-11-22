@@ -290,6 +290,12 @@ func (h *Handler) RegisterRoutes(r *router.Router) {
 	r.POST("/cloudflare-connections/:connection_id/inbound-mail-messages", h.ReceiveInbound).Name("cloudflare_connections.inbound.store")
 	r.POST("/inbound-mail-messages", h.ReceiveInbound).Name("inbound_mail_messages.store")
 	r.POST("/mail-delivery-events", h.ReceiveDeliveryEvent).Name("mail_delivery_events.store")
+	// Provider notifications are authenticated by the provider's own proof (a Google-signed token,
+	// a Graph subscription's clientState), never by a session or key; they only mark a connection due.
+	r.POST("/external-mail-notifications/gmail", h.ReceiveGmailPush).Name("external_mail_notifications.gmail.store").
+		Middleware(middleware.BodyLimit(maxExternalMailPushBodyBytes))
+	r.POST("/external-mail-notifications/outlook", h.ReceiveOutlookPush).Name("external_mail_notifications.outlook.store").
+		Middleware(middleware.BodyLimit(maxExternalMailPushBodyBytes))
 	// A signed token authenticates an unsubscribe; recipients and mail clients have no session.
 	r.POST("/mail-unsubscribes/:token", h.Unsubscribe).Name("mail_unsubscribes.store")
 }

@@ -259,6 +259,13 @@ mailbox; turning the switch off again hides the tenant routes but keeps syncing 
 tenants use the organization's own application only; the operator's OAuth application is never used
 for them.
 
+Push subscriptions are off until `EXTERNAL_MAIL_PUSH_ENABLED=true`. With them, Gmail (through the
+operator's Cloud Pub/Sub topic) and Outlook (Graph change notifications) call
+`POST /v1/external-mail-notifications/gmail` and `.../outlook` on the API's public origin, and the
+worker syncs that connection within seconds; run it with `--poll=5s` then. The worker also creates
+and renews the subscriptions. What to create at Google Cloud and in Entra, with least-privilege
+notes, is in [EXTERNAL_MAIL_PUSH.md](EXTERNAL_MAIL_PUSH.md).
+
 ## Transactional Mail
 
 `MAILBOX_TRANSACTIONAL_ENABLED=true` turns on `POST /v1/transactional-messages` and the console's

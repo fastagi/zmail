@@ -548,6 +548,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/external-mail-notifications/gmail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept a Gmail new-mail notification from Cloud Pub/Sub
+         * @description Called by the operator's Cloud Pub/Sub push subscription, not by browsers, and only while `EXTERNAL_MAIL_PUSH_ENABLED` is on with `EXTERNAL_MAIL_GMAIL_PUSH_TOPIC`, `EXTERNAL_MAIL_GMAIL_PUSH_AUDIENCE`, and `EXTERNAL_MAIL_GMAIL_PUSH_SERVICE_ACCOUNT` set. No session or API key: the request is authenticated by the push subscription's Google-signed OIDC token (RS256 against Google's published keys, issuer `accounts.google.com`, the configured audience, unexpired, and issued to the configured, verified service account). The message only names a Gmail address; it is a hint that marks the connections of that address due, never mail. Every authenticated request is answered `204`, whether or not a connection matches, and spends the provider's budget; a refused one spends only the sender IP's budget and is answered `429` past it.
+         */
+        post: operations["receiveGmailPushNotification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/external-mail-notifications/outlook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept a Microsoft Graph change or lifecycle notification
+         * @description Called by Microsoft Graph, not by browsers, and only while `EXTERNAL_MAIL_PUSH_ENABLED` is on with `EXTERNAL_MAIL_OUTLOOK_PUSH_NOTIFICATION_URL` set. No session or API key. With a `validationToken` query parameter it is Graph's validation handshake: the token is echoed as `text/plain` within the request. Otherwise the body is a Graph notification collection; a notification counts only when its `clientState` matches the subscription's, compared in constant time against the stored hash, and only marks that connection due. Lifecycle notifications (`reauthorizationRequired`, `subscriptionRemoved`, `missed`) also make the subscription's renewal due. Every readable request is answered `202`, whether or not a subscription matches. Only a request with at least one matching notification spends the provider's budget; any other (handshakes included) spends only the sender IP's budget and is answered `429` past it.
+         */
+        post: operations["receiveOutlookPushNotification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/external-mail-tenants": {
         parameters: {
             query?: never;
@@ -4310,6 +4350,8 @@ export interface components {
             /** @description The connected mailbox synced mail is stored in. */
             mailbox_id: components["schemas"]["PositiveID"];
             provider: components["schemas"]["ExternalMailConnectorID"];
+            /** @description The connection's push subscription while `EXTERNAL_MAIL_PUSH_ENABLED` is on; null when push is off or the connection has none. */
+            push: components["schemas"]["ExternalMailPushState"] | null;
             /** @description True for the organization's connection of a shared connected mailbox, false for a member's own account. */
             shared: boolean;
             /**
@@ -4399,6 +4441,20 @@ export interface components {
             };
             message: string;
         };
+        /** @description A connection's push subscription. It never carries the provider's subscription id or secret. */
+        ExternalMailPushState: {
+            /** @description When the provider ends the subscription unless it is renewed; null before the first success and once stopped. */
+            expires_at: string | null;
+            /** @description The latest failed subscribe or renewal, `external.auth_failed` or `external.fetch_failed`; null after a success. It never changes the connection's status. */
+            last_error_code: string | null;
+            /** @description When the latest authenticated notification for it arrived. */
+            last_notified_at: string | null;
+            /**
+             * @description `active` is a live subscription shown to work, so new mail syncs within seconds and the poll slows to `EXTERNAL_MAIL_PUSH_POLL_INTERVAL`; `quiet` is live without a notification within `EXTERNAL_MAIL_PUSH_QUIET_LIMIT`; `degraded` is live but a poll found mail no notification announced, until an authenticated notification arrives; `pending` has no live subscription yet (or it expired, or the provider removed it) while the next attempt backs off; `unsupported` means the provider cannot push for this connection (a Gmail mailbox assigned from a Workspace tenant); `stopped` ended with its connection. Every status but `active` polls every two minutes.
+             * @enum {string}
+             */
+            status: "active" | "quiet" | "degraded" | "pending" | "unsupported" | "stopped";
+        };
         /** @description Binds the account as the organization's team account into a new `shared` mailbox with `origin` `connected`, as `POST /v1/mailboxes` creates a shared mailbox. `owner` and `admin` only; never with `connection_id`. The connection belongs to the organization, not to the caller. */
         ExternalMailSharingRequest: {
             /** @description The mailbox's display name, at most 120 characters (not bytes) after whitespace is collapsed; the account address, cut to 120 characters, when empty or absent. */
@@ -4430,6 +4486,11 @@ export interface components {
             throttled: boolean;
             /** @description The fetch hit its deadline (`EXTERNAL_MAIL_FETCH_TIMEOUT`); the outcome is `fetch_failed`. */
             timed_out: boolean;
+            /**
+             * @description `poll` ran on the schedule; `push` answered a provider notification.
+             * @enum {string}
+             */
+            trigger: "poll" | "push";
         };
         ExternalMailSyncRunListResponse: {
             /** @constant */
@@ -9226,6 +9287,89 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    receiveGmailPushNotification: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description `Bearer <OIDC token>` added by Pub/Sub. */
+                Authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Acknowledged. Pub/Sub does not redeliver it. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Push is off or Gmail push is not configured (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    receiveOutlookPushNotification: {
+        parameters: {
+            query?: {
+                /** @description Graph's handshake token, at most 1,024 printable ASCII characters. */
+                validationToken?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The validation handshake; the body is the token. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Acknowledged. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["InvalidInput"];
+            /** @description Push is off or Outlook push is not configured (`MAILBOX.EXTERNAL_PROVIDER_UNAVAILABLE`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["RateLimited"];
         };
     };
     listExternalMailTenants: {
