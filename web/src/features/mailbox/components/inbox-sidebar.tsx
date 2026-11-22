@@ -4,6 +4,7 @@ import { lazy, Suspense, useState, type ReactNode } from 'react';
 import {
   ArrowDownWideNarrow,
   CalendarDays,
+  FileText,
   Inbox,
   Lock,
   PenLine,
@@ -98,6 +99,7 @@ export function InboxSidebar({
   onCompose,
   onShortcuts,
   external = null,
+  drafts = null,
 }: {
   /** The organization's name, or its picker. */
   organization: ReactNode;
@@ -122,6 +124,8 @@ export function InboxSidebar({
   onShortcuts: () => void;
   /** The external mailboxes section; it shows while the viewer has one or may add one. */
   external?: InboxSidebarExternal | null;
+  /** The caller's saved drafts: how many, and opening their list; null when none may send. */
+  drafts?: { count: number | undefined; onOpen: () => void } | null;
 }) {
   const t = useT('mailbox');
   const views = counts?.views;
@@ -272,6 +276,31 @@ export function InboxSidebar({
             </button>
           );
         })}
+        {drafts ? (
+          <button
+            type="button"
+            aria-label={
+              drafts.count ? t('drafts.sidebarCount', { count: drafts.count }) : undefined
+            }
+            title={rail ? t('drafts.sidebar') : undefined}
+            className={navRowClass(false, rail)}
+            onClick={drafts.onOpen}
+          >
+            <FileText className={railIcon} aria-hidden="true" />
+            <span className={label}>{t('drafts.sidebar')}</span>
+            {drafts.count ? (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'shrink-0 text-xs text-text-faint tabular-nums',
+                  rail && 'hidden lg:inline'
+                )}
+              >
+                {drafts.count}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
       </nav>
 
       <nav aria-label={t('inbox.groups.label')} className="flex flex-col gap-0.5">

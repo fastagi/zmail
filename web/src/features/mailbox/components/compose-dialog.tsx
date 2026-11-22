@@ -32,6 +32,7 @@ import { authConfig } from '@/config/auth';
 import { AuthStoreContext } from '@/features/auth/store/auth-store';
 import { withReturnUrl } from '@/features/auth/utils/return-url';
 import {
+  type StoredComposeDraft,
   composeDraftKey,
   draftToKeep,
   readComposeDraft,
@@ -63,6 +64,7 @@ import {
   type MailboxErrorKey,
 } from '@/features/mailbox/utils/mailbox-error';
 import { useMailSignature } from '@/features/mailbox/hooks/use-mail-signature';
+import { useDeleteMailDraft, useSaveMailDraft } from '@/features/mailbox/hooks/use-mail-drafts';
 import {
   flushPendingSend,
   markReopenedCompose,
@@ -119,7 +121,13 @@ export function ComposeDialog({
   // A draft kept when the dialog last closed takes the place of the starting text.
   // Drafts belong to the signed-in user; the composer reads them once as it opens.
   const userId = useContext(AuthStoreContext)?.getState().user?.id ?? 'anonymous';
-  const draftKey = composeDraftKey(userId, organizationId, draft);
+  // A saved draft this browser still keeps as its new message (with its files) continues there.
+  const [draftKey] = useState(() => {
+    const own = composeDraftKey(userId, organizationId, draft);
+    if (draft.savedId === undefined) return own;
+    const fresh = composeDraftKey(userId, organizationId, { ...draft, savedId: undefined });
+    return readComposeDraft(fresh)?.savedId === draft.savedId ? fresh : own;
+  });
   // A send of this draft still waiting to be undone goes now, and this composer starts afresh.
   const [flushed] = useState(() => flushPendingSend(draftKey));
   const [restored] = useState(() => takeReopenedCompose(draftKey));
@@ -134,15 +142,27 @@ export function ComposeDialog({
   // Replies and forwards quote an existing message, so they are always written by hand.
   const isReplyOrForward = draft.reply || draft.mode === 'reply' || draft.mode === 'forward';
   const templates = useMailTemplates(isReplyOrForward ? 0 : organizationId, 'standard');
+  // New messages are also kept by the API as drafts, so they show in the list on every device.
+  const saveDraft = useSaveMailDraft(organizationId);
+  const removeDraft = useDeleteMailDraft(organizationId).mutateAsync;
+  /** A sent message is no longer a draft. */
+  const forgetSaved = () => {
+    const id = knownSavedId;
+    if (id !== undefined) void removeDraft(id).catch(() => undefined);
+  };
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const template = templates.data?.find(candidate => candidate.id === templateId) ?? null;
   const templateHintId = useId();
   const [kept] = useState(() => restored?.draft ?? (flushed ? null : readComposeDraft(draftKey)));
-  const [to, setTo] = useState(kept?.to ?? draft.to);
-  const [cc, setCc] = useState(kept?.cc ?? draft.cc ?? '');
-  const [subject, setSubject] = useState(kept?.subject ?? draft.subject);
-  const [body, setBody] = useState(kept?.body ?? draft.body ?? '');
+  const knownSavedId = draft.savedId ?? kept?.savedId;
+  // A draft opened from the list starts from the API's text, which another device may have changed;
+  // this browser's copy still lends it its files.
+  const keptText = draft.savedId !== undefined && !restored ? null : kept;
+  const [to, setTo] = useState(keptText?.to ?? draft.to);
+  const [cc, setCc] = useState(keptText?.cc ?? draft.cc ?? '');
+  const [subject, setSubject] = useState(keptText?.subject ?? draft.subject);
+  const [body, setBody] = useState(keptText?.body ?? draft.body ?? '');
   // A new message starts with the writer's signature for the sending mailbox; choosing another
   // mailbox swaps it while the signature is still the last thing written.
   const startsBlank = !isReplyOrForward && !kept && !draft.body;
@@ -188,25 +208,26 @@ export function ComposeDialog({
   });
   useEffect(() => {
     if (sentRef.current) return;
+    const keep = draftToKeep(
+      {
+        to,
+        cc,
+        subject,
+        body,
+        ...(files.length > 0
+          ? { attachments: files.map(file => file.name) }
+          : lostFiles.length > 0
+            ? { attachments: lostFiles }
+            : {}),
+      },
+      startingDraft
+    );
     writeComposeDraft(
       draftKey,
-      draftToKeep(
-        {
-          to,
-          cc,
-          subject,
-          body,
-          ...(files.length > 0
-            ? { attachments: files.map(file => file.name) }
-            : lostFiles.length > 0
-              ? { attachments: lostFiles }
-              : {}),
-        },
-        startingDraft
-      )
+      keep && knownSavedId !== undefined ? { ...keep, savedId: knownSavedId } : keep
     );
     writeComposeDraftFiles(draftKey, files);
-  }, [draftKey, startingDraft, to, cc, subject, body, files, lostFiles]);
+  }, [draftKey, startingDraft, to, cc, subject, body, files, lostFiles, knownSavedId]);
   // The forwarded message's files, carried along unless removed; read only when sending.
   const [carried, setCarried] = useState<readonly MailAttachment[]>(
     () => draft.forwarded?.attachments ?? []
@@ -342,6 +363,7 @@ export function ComposeDialog({
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       sentRef.current = true;
+      forgetSaved();
       writeComposeDraft(draftKey, null);
       writeComposeDraftFiles(draftKey, null);
       onStored?.();
@@ -378,6 +400,7 @@ export function ComposeDialog({
             toast.success(
               t(result.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent')
             );
+            forgetSaved();
             // A composer opened meanwhile may have kept a draft of its own; that one stays.
             if (JSON.stringify(readComposeDraft(draftKey)) === stored) {
               writeComposeDraft(draftKey, null);
@@ -439,6 +462,7 @@ export function ComposeDialog({
       // At the send limit the message waits; nobody is shown how much of the limit is used.
       toast.success(t(stored.queued_reason === 'send_limit' ? 'messages.queued' : 'messages.sent'));
       sentRef.current = true;
+      forgetSaved();
       writeComposeDraft(draftKey, null);
       writeComposeDraftFiles(draftKey, null);
       onStored?.();
@@ -450,14 +474,53 @@ export function ComposeDialog({
   };
 
   /**
+   * Saves a closed new message as a draft of the API too. The browser copy remembers the saved
+   * id, so closing again updates that draft rather than adding another one.
+   */
+  const keepOnServer = (keep: StoredComposeDraft) => {
+    saveDraft
+      .mutateAsync({
+        input: {
+          mailbox_id: from.id,
+          to: keep.to,
+          cc: keep.cc,
+          subject: keep.subject,
+          body: keep.body,
+          in_reply_to: draft.inReplyTo,
+        },
+        id: knownSavedId ?? null,
+      })
+      .then(
+        saved => {
+          const current = readComposeDraft(draftKey);
+          const textOf = (value: StoredComposeDraft | null) =>
+            JSON.stringify({ ...value, savedId: undefined });
+          if (textOf(current) === textOf(keep)) {
+            writeComposeDraft(draftKey, { ...keep, savedId: saved.id });
+          }
+        },
+        () => toast.error(t('drafts.saveFailed'))
+      );
+  };
+
+  /**
    * Closing never asks: what was written is kept as this browser's draft and the dialog says so.
    * Nothing written, or only the starting text, keeps no draft.
    */
   const dismiss = () => {
     if (send.isPending) return;
-    const keep = draftToKeep(written(), startingDraft);
+    const found = draftToKeep(written(), startingDraft);
+    const known = knownSavedId;
+    const keep = found && known !== undefined ? { ...found, savedId: known } : found;
     writeComposeDraft(draftKey, keep);
+    const blank =
+      files.length === 0 &&
+      lostFiles.length === 0 &&
+      [to, cc, subject, body].every(value => value.trim() === '');
+    // Clearing a saved draft and closing it discards it everywhere.
+    if (blank && !isReplyOrForward) forgetSaved();
     writeComposeDraftFiles(draftKey, files);
+    if (keep && !isReplyOrForward) keepOnServer(keep);
     if (keep)
       toast.success(t(files.length > 0 ? 'compose.draftSavedWithFiles' : 'compose.draftSaved'));
     onClose();

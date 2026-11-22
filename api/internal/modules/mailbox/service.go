@@ -272,6 +272,15 @@ type Service interface {
 	// SaveMailSignature replaces the viewer's own signature for a mailbox they may send from; an
 	// empty body removes it.
 	SaveMailSignature(ctx context.Context, viewer domain.OrganizationContext, mailboxID uint, body string) (domain.MailSignature, error)
+	// MailDrafts lists the viewer's own drafts in the organization, the latest change first.
+	MailDrafts(ctx context.Context, viewer domain.OrganizationContext) ([]domain.MailDraft, error)
+	// CreateMailDraft saves a new draft from a mailbox the viewer may send from.
+	MailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint) (domain.MailDraft, error)
+	CreateMailDraft(ctx context.Context, viewer domain.OrganizationContext, input MailDraftInput) (domain.MailDraft, error)
+	// UpdateMailDraft replaces what one of the viewer's drafts holds.
+	UpdateMailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint, input MailDraftInput) (domain.MailDraft, error)
+	// DeleteMailDraft removes one of the viewer's drafts.
+	DeleteMailDraft(ctx context.Context, viewer domain.OrganizationContext, id uint) error
 	// ExternalMailService lists and revokes the caller's connected mailboxes.
 	ExternalMailService
 	// ExternalMailBindingService binds and reconnects outside accounts.
@@ -376,6 +385,8 @@ type service struct {
 	triage domain.MailTriageRepository
 	// signatures stores members' signatures; nil when repo does not implement it.
 	signatures domain.MailSignatureRepository
+	// drafts stores members' drafts; nil when repo does not implement it.
+	drafts domain.MailDraftRepository
 	// triageModel classifies and drafts; settings.Triage selects it.
 	triageModel TriageModel
 	// externalMail stores external mail connections; nil when repo does not implement it.
@@ -435,6 +446,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailSignatureRepository); ok {
 		signatures = seam
 	}
+	var drafts domain.MailDraftRepository
+	if seam, ok := repo.(domain.MailDraftRepository); ok {
+		drafts = seam
+	}
 	var externalMail domain.ExternalMailRepository
 	if seam, ok := repo.(domain.ExternalMailRepository); ok {
 		externalMail = seam
@@ -458,7 +473,7 @@ func NewService(
 		background: func(run func()) { go run() },
 		mxResolver: net.DefaultResolver, nsResolver: net.DefaultResolver,
 		recordAudit: auditstarter.RecordChange,
-		triage:      triage, triageModel: newTriageModel(settings.Triage), signatures: signatures,
+		triage:      triage, triageModel: newTriageModel(settings.Triage), signatures: signatures, drafts: drafts,
 		externalMail: externalMail, externalConnectors: newExternalMailRegistry(settings.ExternalMail),
 		externalCredentialLimits: newExternalMailCredentialLimits(limits),
 		agents:                   agents, agentReads: newAgentReadLimit(limits, settings),

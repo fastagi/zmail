@@ -38,6 +38,8 @@ var (
 	ErrMailDeliveryEventInvalid     = errors.New("mail delivery event is invalid")
 	ErrMailRecipientNotFound        = errors.New("inbound mail recipient not found")
 	ErrMailTemplateNotFound         = errors.New("mail template not found")
+	ErrMailDraftNotFound            = errors.New("mail draft not found")
+	ErrMailDraftLimitReached        = errors.New("mail draft limit reached")
 	ErrMailTemplateInvalid          = errors.New("mail template is invalid")
 	ErrMailTemplateNameTaken        = errors.New("mail template name is already taken")
 	ErrMailTemplateLimitReached     = errors.New("mail template limit reached")

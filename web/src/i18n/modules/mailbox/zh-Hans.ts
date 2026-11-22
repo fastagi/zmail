@@ -26,8 +26,7 @@ const messages = {
     title: '新建邮箱',
     localPart: '地址',
     localPartPlaceholder: 'hello',
-    sharedDomainRules:
-      '@{domain} 是 Zmail 的共享域名：地址全平台唯一、先到先得，删除后不能再用。',
+    sharedDomainRules: '@{domain} 是 Zmail 的共享域名：地址全平台唯一、先到先得，删除后不能再用。',
     ownDomainLink: '绑定自己的域名',
     localPartHint: '使用小写字母和数字，中间可以有单个点、下划线或连字符。',
     displayName: '显示名称（可选）',
@@ -386,6 +385,25 @@ const messages = {
   deleteMessage: {
     title: '删除邮件',
     description: '删除“{subject}”？此操作无法撤销。',
+  },
+  drafts: {
+    title: '草稿',
+    description: '关闭但未发送的邮件，只有你自己能看到。',
+    sidebar: '草稿',
+    sidebarCount: '草稿：{count}',
+    loading: '正在加载草稿…',
+    loadFailed: '草稿加载失败。',
+    retry: '重试',
+    empty: '没有草稿。新邮件没发送就关闭时，会保存在这里。',
+    noSubject: '（无主题）',
+    noRecipients: '还没有收件人',
+    toLine: '收件人 {to}',
+    fromLine: '发件邮箱 {from}',
+    delete: '删除草稿 {subject}',
+    openFailed: '草稿打开失败，请重试。',
+    deleted: '草稿已删除',
+    deleteFailed: '草稿删除失败，请重试。',
+    saveFailed: '草稿没能保存到草稿箱，仍保留在这个浏览器里。',
   },
   compose: {
     from: '发件邮箱',
@@ -923,7 +941,8 @@ const messages = {
       key: 'Agent 密钥',
       chooseKey: '选择密钥',
       keyHint: '只列出你自己的、带 mail:agent 权限范围的正式密钥。',
-      noKeys: '你还没有带 mail:agent 权限范围的正式 API 密钥。先到"设置"的 API 密钥里创建一个，再回来。',
+      noKeys:
+        '你还没有带 mail:agent 权限范围的正式 API 密钥。先到"设置"的 API 密钥里创建一个，再回来。',
       createKey: '打开 API 密钥',
       keysFailed: '无法加载你的 API 密钥。',
       scope: '收到哪些信',
@@ -931,7 +950,8 @@ const messages = {
       scopeFiltered: '只收符合过滤条件的信',
       senders: '发件人',
       sendersHint: '地址或域名，每行一个或用逗号分隔。域名也匹配其子域名。最多 {max} 个。',
-      sendersWarning: '过滤只缩小投递范围，不是身份验证。发件地址可以伪造，Agent 不能把匹配的发件人当作对方身份的证明。',
+      sendersWarning:
+        '过滤只缩小投递范围，不是身份验证。发件地址可以伪造，Agent 不能把匹配的发件人当作对方身份的证明。',
       labels: '标签',
       labelsHint: '到达时带有其中任一标签的邮件。最多 {max} 个。',
       noLabels: '这个邮箱还没有标签。',
@@ -942,7 +962,8 @@ const messages = {
       draftConnected: '接入的邮箱是只读的，Agent 不能为它起草回复。',
       draftNoSend: '起草需要这个邮箱的"回复"权限。',
       reveal: '读取验证码和登录链接',
-      revealWarning: '验证码和登录链接默认遮罩。开启后，每次显示它们的读取都会单独记录为"显示验证码的读取"。',
+      revealWarning:
+        '验证码和登录链接默认遮罩。开启后，每次显示它们的读取都会单独记录为"显示验证码的读取"。',
       expiry: '有效期',
       days: '{count} 天',
       expiryHint: '授权总会到期，最长 {max} 天。',
@@ -1581,6 +1602,8 @@ const messages = {
     templateKindImmutable: '模板不能在普通与事务之间切换。',
     templateKindMismatch: '事务模板只能通过开发者 API 发送。',
     templateNotFound: '这个模板不存在或已被删除。',
+    draftNotFound: '这份草稿已发送或已删除。',
+    draftLimitReached: '你已有 200 份草稿，删除一份后才能再保存。',
     templateVariablesMissing: '模板中有变量既没有值也没有默认值。请填写后重新发送。',
     attachmentsInvalid: '最多添加 10 个非空文件，合计不超过 4 MB。',
     addressInvalid:
@@ -1814,7 +1837,8 @@ const messages = {
       connecting: '正在登录…',
       slow: '仍在连接。较慢的邮件服务器最多可能需要一分钟才能响应。',
       errors: {
-        timedOut: '邮件服务器响应时间过长。账号可能已经连接成功：请先查看已连接的邮箱，再决定是否重试。',
+        timedOut:
+          '邮件服务器响应时间过长。账号可能已经连接成功：请先查看已连接的邮箱，再决定是否重试。',
         offline: '你当前处于离线状态。请连接网络后重试。',
         mismatch: '这些信息登录的是另一个账号，而不是你要恢复的账号。',
         notFound: '此连接已不存在。请重新添加该账号。',
@@ -1823,8 +1847,10 @@ const messages = {
         smtpHostFormat: '请输入服务器名称，例如 smtp.example.com，不要包含 https:// 或端口。',
         usernameRequired: '请输入用户名。',
         passwordRequired: '请输入应用专用密码。',
-        unreachable: '无法通过 993 端口的 TLS 连接到邮件服务器。请检查服务器名称，并确认该服务支持 IMAP。',
-        refused: '服务器拒绝了用户名或应用专用密码。请检查填写内容，并使用应用专用密码而不是账号密码。',
+        unreachable:
+          '无法通过 993 端口的 TLS 连接到邮件服务器。请检查服务器名称，并确认该服务支持 IMAP。',
+        refused:
+          '服务器拒绝了用户名或应用专用密码。请检查填写内容，并使用应用专用密码而不是账号密码。',
         taken: '组织中的其他成员已连接此账号。',
         limit: '你已连接了允许的最多账号数（10 个）。请先断开一个。',
         rateLimited: '尝试次数过多，请在 {minutes} 分钟后重试。',
@@ -1854,7 +1880,8 @@ const messages = {
     purge: {
       action: '立即删除已同步邮件',
       confirmTitle: '删除从 {address} 同步的邮件？',
-      confirm: '从此账号同步的所有副本及此邮箱将立即从 Zmail 删除，且无法撤销。原账号中的邮件不受影响。',
+      confirm:
+        '从此账号同步的所有副本及此邮箱将立即从 Zmail 删除，且无法撤销。原账号中的邮件不受影响。',
       confirmAction: '永久删除',
       done: '已删除从 {address} 同步的 {count} 封邮件',
       continuing: '已删除从 {address} 同步的 {count} 封邮件，其余邮件稍后删除',
@@ -1879,14 +1906,16 @@ const messages = {
       },
       team: '组织',
       sharedBadge: '团队邮箱',
-      confirmShared: '同步将立即停止。共享邮箱及其成员会保留，管理其成员的人可以重新连接此账号。此操作会记录在审计日志中。',
+      confirmShared:
+        '同步将立即停止。共享邮箱及其成员会保留，管理其成员的人可以重新连接此账号。此操作会记录在审计日志中。',
       never: '从未',
       formerMember: '已离开的成员',
       memberId: '成员 #{id}',
       disconnect: '断开连接',
       disconnectLabel: '断开 {address}',
       confirmTitle: '为 {owner} 断开 {address}？',
-      confirm: '同步将立即停止。成员保留已同步的邮件，并可以重新连接此账号。此操作会记录在审计日志中。',
+      confirm:
+        '同步将立即停止。成员保留已同步的邮件，并可以重新连接此账号。此操作会记录在审计日志中。',
       confirmAction: '断开连接',
       disconnected: '已断开 {address}',
       disconnectFailed: '无法断开该账号，请重试。',

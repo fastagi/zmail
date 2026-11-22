@@ -11,6 +11,8 @@ export interface StoredComposeDraft {
   subject: string;
   body: string;
   attachments?: string[];
+  /** The API draft this browser copy also saved as, so the next close updates it. */
+  savedId?: number;
 }
 
 const composeDraftPrefix = 'zmail.compose-draft';
@@ -49,6 +51,9 @@ export function composeDraftKey(
   draft: ComposeDraft
 ): string {
   const mode = draft.mode ?? (draft.reply ? 'reply' : 'compose');
+  if (draft.savedId !== undefined) {
+    return `${composeDraftPrefix}.${userId}.${String(organizationId)}.saved.${String(draft.savedId)}`;
+  }
   const subject = mode === 'forward' ? draft.subject : draft.inReplyTo;
   return `${composeDraftPrefix}.${userId}.${String(organizationId)}.${mode}.${subject || 'new'}`;
 }
@@ -60,7 +65,7 @@ export function readComposeDraft(key: string): StoredComposeDraft | null {
     if (raw === null) return null;
     const value: unknown = JSON.parse(raw);
     if (typeof value !== 'object' || value === null) return null;
-    const { to, cc, subject, body, attachments } = value as Record<string, unknown>;
+    const { to, cc, subject, body, attachments, savedId } = value as Record<string, unknown>;
     if (
       typeof to !== 'string' ||
       typeof cc !== 'string' ||
@@ -73,7 +78,16 @@ export function readComposeDraft(key: string): StoredComposeDraft | null {
       Array.isArray(attachments) && attachments.every(name => typeof name === 'string')
         ? (attachments as string[])
         : [];
-    return { to, cc, subject, body, ...(names.length > 0 ? { attachments: names } : {}) };
+    return {
+      to,
+      cc,
+      subject,
+      body,
+      ...(names.length > 0 ? { attachments: names } : {}),
+      ...(typeof savedId === 'number' && Number.isSafeInteger(savedId) && savedId > 0
+        ? { savedId }
+        : {}),
+    };
   } catch {
     return null;
   }

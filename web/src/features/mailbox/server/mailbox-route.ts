@@ -103,6 +103,8 @@ import {
   normalizeMailSignature,
 } from '@/features/mailbox/signature-schemas';
 import { mockSignatureStore } from '@/features/mailbox/server/mock-signature-store';
+import { mockDraftStore } from '@/features/mailbox/server/mock-draft-store';
+import { MAIL_DRAFT_LIMITS, draftRecipientLine } from '@/features/mailbox/draft-schemas';
 import { mockTriageStore } from '@/features/mailbox/server/mock-triage-store';
 import { mailAgentGrantInput } from '@/features/mailbox/server/agent-grant-input';
 import {
@@ -5576,4 +5578,164 @@ export async function updateMailSignatureRoute(
   return success(
     mockSignatureStore.save(target.organizationId, mailbox.id, viewer.userId, signature)
   );
+}
+
+/* Drafts (`contracts/MAILBOXES.md`, Drafts): each visible to its writer only. */
+
+const maxDraftBodyBytes = 512 * 1024;
+
+/** Lists the caller's drafts in the organization, the latest change first. */
+export async function listMailDraftsRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: 'mail-drafts',
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  return success(mockDraftStore.list(target.organizationId, viewerOf(target).userId));
+}
+
+/** One of the caller's drafts in full. */
+export async function showMailDraftRoute(
+  request: Request,
+  rawDraftId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxReadRoute(request);
+  if (!target.available) return target.response;
+  const draftId = parseRouteId(rawDraftId);
+  if (!draftId.ok) return draftId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'GET',
+      path: `mail-drafts/${draftId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  const draft = mockDraftStore.get(target.organizationId, viewerOf(target).userId, draftId.value);
+  return draft ? success(draft) : draftNotFound();
+}
+
+/** Saves a new draft from a mailbox the caller may send from. */
+export async function createMailDraftRoute(request: Request): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  return saveMailDraft(request, target, null);
+}
+
+/** Replaces one of the caller's drafts. */
+export async function updateMailDraftRoute(
+  request: Request,
+  rawDraftId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const draftId = parseRouteId(rawDraftId);
+  if (!draftId.ok) return draftId.response;
+  return saveMailDraft(request, target, draftId.value);
+}
+
+/** Deletes one of the caller's drafts. */
+export async function deleteMailDraftRoute(
+  request: Request,
+  rawDraftId: string
+): Promise<NextResponse> {
+  const target = await resolveMailboxMutationRoute(request);
+  if (!target.available) return target.response;
+  const draftId = parseRouteId(rawDraftId);
+  if (!draftId.ok) return draftId.response;
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: 'DELETE',
+      path: `mail-drafts/${draftId.value}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+    });
+  }
+  if (!mockDraftStore.remove(target.organizationId, viewerOf(target).userId, draftId.value)) {
+    return draftNotFound();
+  }
+  return new NextResponse(null, { status: 204, headers: privateMailboxHeaders() });
+}
+
+async function saveMailDraft(
+  request: Request,
+  target: Extract<MailboxTarget, { available: true }>,
+  id: number | null
+): Promise<NextResponse> {
+  const body = await jsonObject(request, maxDraftBodyBytes);
+  if (!body.ok) return body.response;
+  const raw = body.value;
+  const errors: Record<string, string[]> = {};
+  const mailboxId = raw.mailbox_id;
+  if (typeof mailboxId !== 'number' || !Number.isSafeInteger(mailboxId) || mailboxId < 1) {
+    errors.mailbox_id = ['The mailbox_id field is required'];
+  }
+  const text = (field: keyof typeof MAIL_DRAFT_LIMITS): string => {
+    const value = raw[field] ?? '';
+    if (typeof value !== 'string') {
+      errors[field] = ['must be a string'];
+      return '';
+    }
+    if ([...value].length > MAIL_DRAFT_LIMITS[field]) errors[field] = ['is too long'];
+    return value;
+  };
+  const input = {
+    mailbox_id: mailboxId as number,
+    to: text('to'),
+    cc: text('cc'),
+    subject: text('subject'),
+    body: text('body'),
+    in_reply_to: text('in_reply_to'),
+  };
+  if (Object.keys(errors).length > 0) return validationFailed(errors);
+
+  if (target.backend === 'go-api') {
+    return forwardAuthenticatedGoApi(request, {
+      method: id === null ? 'POST' : 'PUT',
+      path: id === null ? 'mail-drafts' : `mail-drafts/${id}`,
+      accessToken: target.accessToken,
+      organizationId: String(target.organizationId),
+      body: input,
+      fieldMap: {
+        mailbox_id: 'mailbox_id',
+        to: 'to',
+        cc: 'cc',
+        subject: 'subject',
+        body: 'body',
+        in_reply_to: 'in_reply_to',
+      },
+    });
+  }
+  const viewer = viewerOf(target);
+  const mailbox = mockMailboxStore
+    .list(target.organizationId, viewer)
+    .find(item => item.id === input.mailbox_id);
+  if (!mailbox) return mailboxNotFound();
+  if (!mailbox.access.send) return forbidden();
+  const saved = mockDraftStore.save(
+    target.organizationId,
+    viewer.userId,
+    {
+      ...input,
+      to: draftRecipientLine(input.to),
+      cc: draftRecipientLine(input.cc),
+      body: input.body.replace(/\r\n?/g, '\n'),
+      in_reply_to: input.in_reply_to.trim(),
+    },
+    id
+  );
+  if (saved === 'limit') {
+    return failure(409, ApiErrorCode.MAILBOX_DRAFT_LIMIT_REACHED, 'Draft limit reached');
+  }
+  if (saved === null) return draftNotFound();
+  return success(saved, id === null ? 201 : 200);
+}
+
+function draftNotFound(): NextResponse {
+  return failure(404, ApiErrorCode.MAILBOX_DRAFT_NOT_FOUND, 'Mail draft not found');
 }

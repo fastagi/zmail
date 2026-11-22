@@ -124,6 +124,16 @@ vi.mock('@/features/mailbox/hooks/use-inbox', () => ({
   useMailRoles: () => ({ data: [], isPending: false, error: null }),
   useAssignMailboxRole: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));
+vi.mock('@/features/mailbox/hooks/use-mail-drafts', () => ({
+  useMailDrafts: () => ({ data: [], isPending: false, isError: false }),
+  useOpenMailDraft: () => ({ mutate: () => undefined }),
+  useSaveMailDraft: () => ({ mutateAsync: () => Promise.resolve({ id: 1 }) }),
+  useDeleteMailDraft: () => ({
+    mutate: () => undefined,
+    mutateAsync: () => Promise.resolve(),
+    isPending: false,
+  }),
+}));
 vi.mock('@/features/mailbox/hooks/use-mail-signature', () => ({
   useMailSignature: () => ({ data: undefined, isPending: false, isError: false }),
   useSaveMailSignature: () => ({ mutateAsync: vi.fn(), isPending: false }),

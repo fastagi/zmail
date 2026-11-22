@@ -15,6 +15,8 @@ export interface ComposeDraft {
    * and, on send, reads each one and attaches it again.
    */
   forwarded?: { mailboxId: number; messageId: number; attachments: readonly MailAttachment[] };
+  /** The saved draft this new message continues (`contracts/MAILBOXES.md`, Drafts). */
+  savedId?: number;
 }
 
 export interface QuotedReplyCopy {
