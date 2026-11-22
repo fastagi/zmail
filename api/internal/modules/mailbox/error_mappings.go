@@ -104,6 +104,7 @@ var mailboxErrorCodes = []struct {
 	{ErrExternalMailProviderUnavailable, http.StatusNotFound, domain.CodeExternalMailProviderUnavailable},
 	{ErrExternalMailPushUnauthenticated, http.StatusUnauthorized, response.ErrorCodeUnauthorized},
 	{ErrExternalMailPushRateLimited, http.StatusTooManyRequests, domain.CodeRateLimited},
+	{domain.ErrExternalMailPushBusy, http.StatusServiceUnavailable, domain.CodeServiceUnavailable},
 	{ErrExternalMailServerUnreachable, http.StatusUnprocessableEntity, domain.CodeExternalMailServerUnreachable},
 	{ErrExternalMailCredentialsRateLimited, http.StatusTooManyRequests, domain.CodeRateLimited},
 	{ErrExternalMailConnectionNotRevoked, http.StatusConflict, domain.CodeExternalMailConnectionNotRevoked},

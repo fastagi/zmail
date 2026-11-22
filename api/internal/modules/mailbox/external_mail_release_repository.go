@@ -117,13 +117,13 @@ func (r *repository) DeleteExpiredExternalMailProviderReleases(ctx context.Conte
 	return int(result.RowsAffected), result.Error
 }
 
-func (r *repository) DeleteExternalMailProviderReleasesForAccount(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string) error {
+func (r *repository) DeleteExternalMailProviderReleasesForAccount(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, address string, stopOnly bool) error {
 	if r.db == nil {
 		return domain.ErrServiceUnavailable
 	}
 	return r.conn(ctx).Exec(`DELETE FROM external_mail_provider_releases
-		WHERE organization_id = ? AND provider = ? AND lower(account_address) = lower(?)`,
-		organizationID, string(provider), address).Error
+		WHERE organization_id = ? AND provider = ? AND lower(account_address) = lower(?) AND (NOT ? OR encrypted_grant = '')`,
+		organizationID, string(provider), address, stopOnly).Error
 }
 
 func (r *repository) CountLiveExternalMailAccountGrants(ctx context.Context, provider domain.ExternalMailProvider, address string, exceptConnectionID uint) (int, error) {
@@ -134,5 +134,16 @@ func (r *repository) CountLiveExternalMailAccountGrants(ctx context.Context, pro
 	err := r.conn(ctx).Raw(`SELECT count(*) FROM external_mail_connections
 		WHERE provider = ? AND lower(account_address) = lower(?) AND status <> 'revoked' AND tenant_id IS NULL AND id <> ?`,
 		string(provider), address, exceptConnectionID).Scan(&count).Error
+	return int(count), err
+}
+
+func (r *repository) CountPendingExternalMailAuthorizations(ctx context.Context, organizationID uint, provider domain.ExternalMailProvider, userID, connectionID uint, now time.Time) (int, error) {
+	if r.db == nil {
+		return 0, domain.ErrServiceUnavailable
+	}
+	var count int64
+	err := r.conn(ctx).Raw(`SELECT count(*) FROM external_mail_authorizations
+		WHERE organization_id = ? AND provider = ? AND expires_at > ? AND (? = 0 OR user_id = ? OR connection_id = ?)`,
+		organizationID, string(provider), now, userID, userID, connectionID).Scan(&count).Error
 	return int(count), err
 }

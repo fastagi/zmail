@@ -9324,6 +9324,15 @@ export interface operations {
             };
             413: components["responses"]["RequestTooLarge"];
             429: components["responses"]["RateLimited"];
+            /** @description A sync was saving one of the named subscriptions at that moment (`COMMON.SERVICE_UNAVAILABLE`, `Retry-After`); the provider delivers the notification again. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     receiveOutlookPushNotification: {
@@ -9370,6 +9379,15 @@ export interface operations {
             };
             413: components["responses"]["RequestTooLarge"];
             429: components["responses"]["RateLimited"];
+            /** @description A sync was saving one of the named subscriptions at that moment (`COMMON.SERVICE_UNAVAILABLE`, `Retry-After`); the provider delivers the notification again. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     listExternalMailTenants: {

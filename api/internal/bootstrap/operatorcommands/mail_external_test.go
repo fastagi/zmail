@@ -42,6 +42,22 @@ func TestMailExternalSyncWorkerDefaultsAndOnce(t *testing.T) {
 	assert.Equal(t, []int{5}, worker.limits)
 }
 
+// TestMailExternalSyncPollsQuicklyForPush: with push on for a connector that can receive it and no
+// --poll, the worker waits two seconds between idle passes; an explicit --poll wins; without push, or
+// with push on but no connector configured for it, the default stays 30 seconds.
+func TestMailExternalSyncPollsQuicklyForPush(t *testing.T) {
+	gmail := config.ExternalMailConfig{Providers: []string{config.ExternalMailProviderGmail}, Push: config.ExternalMailPushConfig{
+		Enabled: true, GmailTopic: "projects/zmail-project/topics/gmail", GmailAudience: "https://zmail.example/push",
+		GmailServiceAccount: "push@zmail-project.iam.gserviceaccount.com",
+	}}
+	assert.Equal(t, 2*time.Second, externalMailWorkerPoll(nil, 30*time.Second, gmail))
+	assert.Equal(t, 10*time.Second, externalMailWorkerPoll([]string{"--poll=10s"}, 10*time.Second, gmail))
+	assert.Equal(t, 30*time.Second, externalMailWorkerPoll(nil, 30*time.Second, config.ExternalMailConfig{}))
+	unconfigured := config.ExternalMailConfig{Providers: []string{config.ExternalMailProviderOutlook},
+		Push: config.ExternalMailPushConfig{Enabled: true}}
+	assert.Equal(t, 30*time.Second, externalMailWorkerPoll(nil, 30*time.Second, unconfigured))
+}
+
 // TestMailExternalSyncDoesNotStartWhenOff: with EXTERNAL_MAIL_PROVIDERS empty the command exits
 // cleanly before it initializes the application or opens the database.
 func TestMailExternalSyncDoesNotStartWhenOff(t *testing.T) {

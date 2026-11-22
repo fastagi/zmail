@@ -10130,6 +10130,13 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
+        '503':
+          description: A sync was saving one of the named subscriptions at that moment
+            (`COMMON.SERVICE_UNAVAILABLE`, `Retry-After`); the provider delivers the notification again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/external-mail-notifications/outlook:
     post:
       operationId: receiveOutlookPushNotification
@@ -10187,6 +10194,13 @@ paths:
           $ref: '#/components/responses/RequestTooLarge'
         '429':
           $ref: '#/components/responses/RateLimited'
+        '503':
+          description: A sync was saving one of the named subscriptions at that moment
+            (`COMMON.SERVICE_UNAVAILABLE`, `Retry-After`); the provider delivers the notification again.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/external-mail-tenants:
     get:
       operationId: listExternalMailTenants

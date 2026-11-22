@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -94,6 +95,10 @@ func (s *ExternalMailSubscription) Proven(now time.Time, quiet time.Duration) bo
 	return now.Sub(heard) < quiet
 }
 
+// ErrExternalMailPushBusy means a notification could not be recorded on every subscription it names
+// because a sync was saving one of them at that moment; the provider is asked to deliver it again.
+var ErrExternalMailPushBusy = errors.New("external mail notification could not be recorded yet")
+
 // ExternalMailPushHit is a notification matched to subscription rows of active connections.
 type ExternalMailPushHit struct {
 	LookupKey      string
@@ -158,8 +163,10 @@ type ExternalMailPushRepository interface {
 	// renewal due, and brings the connection's next sync no later than pollBy; it reports whether it
 	// changed anything.
 	MarkExternalMailPushDegraded(ctx context.Context, connectionID uint, now, pollBy time.Time) (bool, error)
-	// MarkExternalMailPush records a notification on the rows and marks their connections due as
-	// the mark allows; it returns how many connections it made due sooner.
+	// MarkExternalMailPush records a notification on the subscription rows only, without waiting for
+	// a lock and without touching a connection row; the worker's promotion makes the connections due.
+	// It returns how many rows it recorded, and ErrExternalMailPushBusy when a row was held by a sync's
+	// save at that moment and could not be recorded.
 	MarkExternalMailPush(ctx context.Context, mark ExternalMailPushMark) (int, error)
 	// PromotePendingExternalMailPush marks due up to limit connections whose notification arrived
 	// while they were being fetched.
