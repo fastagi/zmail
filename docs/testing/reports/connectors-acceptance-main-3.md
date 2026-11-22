@@ -563,3 +563,109 @@ grant meanwhile.
   `next dev` on 3065) were stopped. The browser pane was signed out and its language set back to
   English.
 - `pnpm install --frozen-lockfile` populated `node_modules` in this worktree only.
+
+## Round 3 Follow-up
+
+- **Branch:** `fix/connector-acceptance-3`, commit `e2c593c` (D2 fix `e716ecf`, D1 fix `e2c593c`),
+  on top of `7d0c7c2`.
+- **Date:** 2026-11-22 (UTC). Run by the agent that wrote the fixes (not independent).
+
+### Fixes
+
+| Id | Fix | Proving tests |
+|---|---|---|
+| D1 | The `fake` connector accepts the synthetic credential `fake-tenant-dev-only` (Google `service_account_key` or Microsoft `client_secret`) for a tenant identifier under `.invalid`, and derives the tenant from the identifier alone, so the API and the sync worker agree without shared state: 31 directory rows (`user01@`…`user30@`, then `refused@`, whose token is always refused). Documented in `api/docs/EXTERNAL_MAIL_DEVELOPMENT.md` (Fake Tenants). | `TestFakeDevTenantAuthorization`, `TestFakeDevTenantDirectoryPages`, `TestFakeDevTenantMailboxReceivesFakeDeliveries`, `TestFakeDevTenantUnreachableInProduction` (real-connector registry has no fake source, no delivery route, and refuses the synthetic credential; production refusal of `fake` stays covered by `TestExternalMailFakeRefusedInProduction`) |
+| D2 | `external_mail_provider_releases` gains `owner_scope` (`member`, `shared`, `unknown`) and `owner_user_id` (`ON DELETE SET NULL`), set when the release is recorded (migration `2026_12_17_090000_add_external_mail_release_owner`, backfilled from live connections; rows whose connection is gone stay `unknown` and keep the old rule). A member's release waits only for that member's sign-in, a shared one for anyone's, with or without the connection row; a deleted member's waits for nobody. | `TestExternalMailPurgedReleaseIgnoresOtherMembersSignIns` (failed before the fix: `Attempts:1`, postponed by user 3's sign-in), `TestExternalMailPurgedReleaseWaitsForItsMembersSignIn`, `TestExternalMailSharedReleaseWaitsForAnyonesSignIn` (with and without the row), `TestExternalMailReleaseOfADeletedMember`, `TestExternalMailReleaseOfUnknownOwnerKeepsTheConservativeRule`, `TestExternalMailReleaseRecordsItsOwner`; migration `TestExternalMailReleaseOwnerUpDown` (backfill) and `TestExternalMailReleaseOwnerConstraints` |
+
+### Stack
+
+Binary built from `e2c593c`; disposable database `zmail_r3fix_disposable` on `zmail-dev-postgres-1`
+(created for this run, dropped at the end); API on `127.0.0.1:8075` with `EXTERNAL_MAIL_PROVIDERS=fake`,
+`EXTERNAL_MAIL_TENANTS_ENABLED=true`, a local `MAILBOX_SECRET_ENCRYPTION_KEY`, otherwise the
+`scripts/dev.sh` environment; `mail:external:sync --poll=5s` as a separate process. Organization 1:
+owner U (user 2), admin A (user 1), members M1 (user 3), M2 (4), M3 (5), all joined through
+invitation links. Tenant: owner `POST /v1/external-mail-tenants`
+`{"provider":"gmail","service_account_key":"fake-tenant-dev-only","admin_subject":"it@acme-r3.invalid"}`
+→ `201` tenant 1 `acme-r3.invalid`; the Microsoft form (`tenant_id` `globex-r3.invalid`) → `201`
+tenant 2. A → `403`; a JSON key or a non-`.invalid` domain → `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILED`.
+
+### B4 (case 1) — Directory paging, personal and shared assignment, privacy: Pass
+
+- `GET …/1/directory?per_page=10` (A): pages of 10, 10, 10, 1 (`user01`…`user10`, `user11`…`user20`,
+  `user21`…`user30`, `refused@`), cursors `MTA`, `MjA`, `MzA`, then none. M1 → `403`.
+- Assignments (A): `user01` personal M1, `user02` shared "R3F Support" (M1 `manage`, M2 `view`),
+  `user03` personal M1 → `created` (connections 1–3); `nobody@` → `failed`
+  `MAILBOX.EXTERNAL_ACCOUNT_MISMATCH`. The directory then shows them `assigned`, `available false`.
+- Fake deliveries: M1 to 1 (`R3FPRIVATE`) and 2 (`R3FSHARED`) → `201`; M2 to 1 → `404`.
+- Reads: M1 sees both; M2 sees `R3FSHARED` only (mailbox 1 → `404 MAILBOX.NOT_FOUND`); M3 neither
+  (`404`); U and A → `403 PERMISSION.DENIED` on both mailboxes and 0 matches in `/inbox-messages`.
+- The sync worker (its own, empty fake) synced connections 1–3 `ok` and the tenant stayed `active`:
+  the development tenant works across processes. `refused@` assigned to M2 became
+  `needs_reconnect` (`external.auth_failed`) on the worker's first pass while the tenant stayed `active`.
+
+### B5 (case 2) — Leave, awaiting handover, handover seals: Pass
+
+- `user10` personal M3 (connection 5); M3's delivery `R3FLEAVE` → `201`; M3 leaves → `204`.
+  Connection 5 stays `active` (keeps syncing), owner 5; the mailbox records the departure.
+- A and U: `DELETE /external-mail-connections/5` and `DELETE /external-mail-connection-directory/5`
+  → `409 MAILBOX.ACCESS_CONFLICT`; `POST …/5/purges` → `409 MAILBOX.EXTERNAL_CONNECTION_NOT_REVOKED`
+  (it cannot be revoked first); `DELETE /mailboxes/5` → `409 MAILBOX.ACCESS_CONFLICT`; reassigning
+  `user10` to M2 → `failed` `MAILBOX.EXTERNAL_ACCOUNT_TAKEN`.
+- A delivers `R3FWAIT` while it waits → `201` (stored for the successor).
+- Handover: M2 → `404`; A to departed M3 → `422 MAILBOX.ACCESS_INVALID`; A to M2 → `201`, mailbox
+  `shared` + `connected`, `sealed_before` = the departure time; connection 5 `shared`, no owner.
+  M2 reads only `R3FWAIT` (`R3FLEAVE` sealed). Access events: `created`, `connection_bound`,
+  `owner_left`, `handed_over`. M2 sending from it → `403`.
+
+### B6 (case 3) — Only mail from one's own tenure on reassignment: Pass
+
+- Holder still a member: A disconnects `user01` (M1) → `204`; assigning it to M2 personal or as
+  shared → `MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; back to M1 → `restored`, M1 keeps `R3FPRIVATE`.
+- Handed-over address: A disconnects connection 5 → `204`; assigning `user10` to M1 while the
+  revoked shared mailbox exists → `MAILBOX.EXTERNAL_ACCOUNT_TAKEN`; A deletes mailbox 5 → `204`;
+  assigning `user10` to M1 → `created` (connection 6, `received_not_before` 16:51:35, the moment of
+  the assignment).
+- M1 delivers `R3FAFTER` to 6. The fake account still held `R3FLEAVE`, `R3FWAIT`, `R3FAFTER`; the
+  sync run of connection 6 reads `fetched 3 stored 1`: only `R3FAFTER` is stored. M1's inbox holds
+  `R3FAFTER`, `R3FPRIVATE`, `R3FSHARED`, nothing from M3's tenure or the waiting period; M2's only
+  `R3FSHARED`.
+
+### B7 (case 4) — Tenant revoke stops every sync; tenant mailboxes never send: Pass
+
+- Before revoking, M1 `POST /mailboxes/{6,1,2}/messages` (new and reply with `in_reply_to`) →
+  `403 PERMISSION.DENIED`; every tenant mailbox lists `access.send false` (also mailbox 2, where M1
+  is `manage`).
+- A `DELETE /external-mail-tenants/1` → `403`; U → `204`, again `204`. Tenant 1 `revoked`,
+  credential length 0; connections 1, 2, 3, 4, 6 `revoked` at the same instant; audit `delete
+  external_mail_tenants` with `connections_revoked 5`, `reason tenant_revoked`. Tenant 2 untouched.
+- Fake deliveries to 1, 2, 6 → `404 MAILBOX.EXTERNAL_CONNECTION_NOT_FOUND`.
+- No sync run of tenant 1's connections after the revocation, also after every one was made due
+  (`next_sync_at` in the past) and three worker passes (15 s at a 5 s poll).
+
+### D4 — Purged connection's release (live re-check of D2): Pass
+
+M1 binds `r3fbob` (connection 7), starts another Gmail sign-in (pending), unbinds: the release is
+recorded `owner_scope member`, `owner_user_id 3`, and postponed (`provider_release_postponed`,
+`sign_in_pending`, M1's own). M1 purges (connection row gone). M1's sign-in is expired in the
+database; M2 starts a Gmail sign-in (pending); the release is made due. The worker's next pass
+performs it: no row left, no further postponement, no expiry.
+
+### New Defects
+
+None.
+
+### Observations (not defects)
+
+- A departed member's tenant mailbox awaiting handover is not in the owner's or admin's
+  `GET /v1/mailboxes` (they find it through the connection directory's `mailbox_id`); the contract
+  says `awaiting_handover` is never `true` for a connected mailbox, so this matches it, but a Web
+  handover flow for tenant mailboxes would have to start from the directory.
+- The development delivery route accepts a tenant assignment from owners and admins, who manage
+  every assignment; it stores mail and shows the caller nothing. Now documented.
+
+### Cleanup
+
+Database `zmail_r3fix_disposable` dropped; the API and the sync worker stopped; `fastbuild`, the
+`zmail` dev data, and `zmail_test` were not touched by the stack (Go tests used `zmail_test` through
+`FASTBUILD_TEST_POSTGRES_DSN`, which creates and drops its own schemas). No real provider was
+contacted.

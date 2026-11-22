@@ -42,7 +42,7 @@ identifier outside `.invalid`, answers `422 MAILBOX.EXTERNAL_AUTHORIZATION_FAILE
 | Part | Behavior |
 |---|---|
 | Directory | 31 mailboxes in a fixed order: `user01@<tenant>` to `user30@<tenant>` ("Fake User 01" …), then `refused@<tenant>`; directory ids `fake-<local>-<tenant>`. `per_page=10` gives four pages |
-| Mail | An assigned mailbox starts empty. Deliver to it with the route below, as the member it is assigned to (personal) or a manager of the shared mailbox; the copy is subject to the tenure rules like synced mail |
+| Mail | An assigned mailbox starts empty. Deliver to it with the route below, as the member it is assigned to (personal), a manager of the shared mailbox, or an owner or admin (who manage every tenant assignment, also one awaiting handover); the copy is subject to the tenure rules like synced mail. Delivering stores it; it never shows it to the caller |
 | Losing access | `refused@<tenant>`: its mailbox token is always refused while the tenant works, so its assignment stops syncing alone (as a mailbox whose license was removed) |
 | Revoking | `DELETE /v1/external-mail-tenants/:id` as usual; there is nothing to hand back at the fake |
 
