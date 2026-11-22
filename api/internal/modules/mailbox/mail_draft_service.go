@@ -115,7 +115,7 @@ func (s *service) checkedDraft(ctx context.Context, viewer domain.OrganizationCo
 }
 
 // normalizeDraftLine keeps a recipient field on one line; a line break between addresses becomes
-// a comma, so the addresses stay apart.
+// a comma, so the addresses stay apart and the field never grows.
 func normalizeDraftLine(value string) string {
 	lines := strings.FieldsFunc(value, func(r rune) bool { return r == '\r' || r == '\n' })
 	kept := make([]string, 0, len(lines))
@@ -124,7 +124,7 @@ func normalizeDraftLine(value string) string {
 			kept = append(kept, line)
 		}
 	}
-	return strings.Join(kept, ", ")
+	return strings.Join(kept, ",")
 }
 
 func checkDraftField(invalid *ValidationError, field, value string, maxLength int, multiline bool) {

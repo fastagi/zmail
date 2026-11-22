@@ -22,13 +22,13 @@ export function draftPreview(body: string): string {
   return [...body.replace(/\s+/gu, ' ').trim()].slice(0, MAIL_DRAFT_PREVIEW_LENGTH).join('');
 }
 
-/** A recipient field on one line; a line break between addresses becomes a comma. */
+/** A recipient field on one line; a line break between addresses becomes a comma, never longer. */
 export function draftRecipientLine(value: string): string {
   return value
     .split(/[\r\n]+/u)
     .map(line => line.replace(/\s+/gu, ' ').trim())
     .filter(Boolean)
-    .join(', ');
+    .join(',');
 }
 
 const bounded = (max: number) =>

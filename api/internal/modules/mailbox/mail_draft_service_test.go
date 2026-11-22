@@ -78,8 +78,8 @@ func TestMailDraftRejectsOversizedAndControlCharacters(t *testing.T) {
 
 func TestMailDraftRecipientLinesStaySeparateAddresses(t *testing.T) {
 	cases := map[string]string{
-		"a@example.com\nb@example.com":      "a@example.com, b@example.com",
-		"a@example.com,\r\n  b@example.com": "a@example.com,, b@example.com",
+		"a@example.com\nb@example.com":      "a@example.com,b@example.com",
+		"a@example.com,\r\n  b@example.com": "a@example.com,,b@example.com",
 		"  Ann  <a@example.com>  ":          "Ann <a@example.com>",
 		"\n\n":                              "",
 	}

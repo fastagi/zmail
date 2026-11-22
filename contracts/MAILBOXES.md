@@ -2142,7 +2142,7 @@ where `preview` is at most the first 200 characters of the body on one line.
 `POST` saves a new one and `PUT /v1/mail-drafts/:draft_id` replaces all of one with
 `{ "mailbox_id", "to", "cc", "subject", "body", "in_reply_to" }`. `mailbox_id` is the sender and
 needs `send` (`403`; `404 MAILBOX.NOT_FOUND` without any access). `to` and `cc` are kept as
-written, one line each (a line break between addresses becomes `, `), and checked only when the
+written, one line each (a line break between addresses becomes `,`), and checked only when the
 message is sent; `body` line breaks become `\n`.
 Limits are 4000 characters for `to` and `cc`, 998 for `subject` and `in_reply_to`, and 100000 for
 `body`, with no control characters other than tabs and body line breaks
