@@ -125,6 +125,19 @@ TABLE external_mail_connections
   COLUMN tenant_directory_id character varying(255) NOT NULL DEFAULT ''::character varying
   COLUMN received_not_before timestamp with time zone
 
+TABLE external_mail_provider_releases
+  COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_provider_releases_id_seq'::regclass)
+  COLUMN connection_id bigint NOT NULL
+  COLUMN organization_id bigint NOT NULL
+  COLUMN provider character varying(16) NOT NULL
+  COLUMN encrypted_grant text NOT NULL DEFAULT ''::text
+  COLUMN stop_push boolean NOT NULL DEFAULT false
+  COLUMN stop_subscription_id character varying(255) NOT NULL DEFAULT ''::character varying
+  COLUMN attempts smallint NOT NULL DEFAULT 0
+  COLUMN next_attempt_at timestamp with time zone NOT NULL
+  COLUMN expires_at timestamp with time zone NOT NULL
+  COLUMN created_at timestamp with time zone NOT NULL
+
 TABLE external_mail_subscriptions
   COLUMN id bigint NOT NULL DEFAULT nextval('external_mail_subscriptions_id_seq'::regclass)
   COLUMN connection_id bigint NOT NULL
@@ -983,6 +996,12 @@ CONSTRAINT external_mail_connections.external_mail_connections_owner_user_id_fke
 CONSTRAINT external_mail_connections.external_mail_connections_pkey PRIMARY KEY (id)
 CONSTRAINT external_mail_connections.external_mail_connections_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'needs_reconnect'::character varying, 'revoked'::character varying])::text[])))
 CONSTRAINT external_mail_connections.external_mail_connections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES external_mail_tenants(id)
+CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_attempts CHECK ((attempts >= 0))
+CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_deadline CHECK ((expires_at > created_at))
+CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
+CONSTRAINT external_mail_provider_releases.chk_external_mail_provider_releases_work CHECK ((stop_push OR (encrypted_grant <> ''::text)))
+CONSTRAINT external_mail_provider_releases.external_mail_provider_releases_connection_id_fkey FOREIGN KEY (connection_id) REFERENCES external_mail_connections(id) ON DELETE CASCADE
+CONSTRAINT external_mail_provider_releases.external_mail_provider_releases_pkey PRIMARY KEY (id)
 CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_active CHECK ((((status)::text <> 'active'::text) OR (((lookup_key)::text <> ''::text) AND (expires_at IS NOT NULL))))
 CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_failures CHECK ((consecutive_failures >= 0))
 CONSTRAINT external_mail_subscriptions.chk_external_mail_subscriptions_provider CHECK (((provider)::text ~ '^[a-z][a-z0-9_]{1,15}$'::text))
@@ -1330,6 +1349,9 @@ INDEX CREATE INDEX idx_external_mail_connections_owner ON external_mail_connecti
 INDEX CREATE INDEX idx_external_mail_connections_revoked ON external_mail_connections USING btree (revoked_at, id) WHERE ((status)::text = 'revoked'::text)
 INDEX CREATE INDEX idx_external_mail_connections_shared ON external_mail_connections USING btree (organization_id) WHERE shared
 INDEX CREATE INDEX idx_external_mail_connections_tenant ON external_mail_connections USING btree (tenant_id, status) WHERE (tenant_id IS NOT NULL)
+INDEX CREATE UNIQUE INDEX external_mail_provider_releases_pkey ON external_mail_provider_releases USING btree (id)
+INDEX CREATE INDEX idx_external_mail_provider_releases_connection ON external_mail_provider_releases USING btree (connection_id)
+INDEX CREATE INDEX idx_external_mail_provider_releases_due ON external_mail_provider_releases USING btree (next_attempt_at, id)
 INDEX CREATE UNIQUE INDEX external_mail_subscriptions_pkey ON external_mail_subscriptions USING btree (id)
 INDEX CREATE INDEX idx_external_mail_subscriptions_lookup ON external_mail_subscriptions USING btree (provider, lookup_key) WHERE ((status)::text <> 'stopped'::text)
 INDEX CREATE INDEX idx_external_mail_subscriptions_open ON external_mail_subscriptions USING btree (connection_id) WHERE ((status)::text <> 'stopped'::text)

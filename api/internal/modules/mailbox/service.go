@@ -425,6 +425,8 @@ type service struct {
 	// pushHandshakes bounds validation handshakes apart from them.
 	pushRefusals   ratelimit.Store
 	pushHandshakes ratelimit.Store
+	// releases keeps the provider calls revocations leave to do; nil when repo does not implement it.
+	releases domain.ExternalMailReleaseRepository
 	// pushRefusalLog samples the log lines of refused notification requests.
 	pushRefusalLog *pushRefusalLog
 }
@@ -493,6 +495,10 @@ func NewService(
 	if seam, ok := repo.(domain.MailAgentRepository); ok {
 		agents = seam
 	}
+	var releases domain.ExternalMailReleaseRepository
+	if seam, ok := repo.(domain.ExternalMailReleaseRepository); ok {
+		releases = seam
+	}
 	var pushStore domain.ExternalMailPushRepository
 	if seam, ok := repo.(domain.ExternalMailPushRepository); ok {
 		pushStore = seam
@@ -521,7 +527,7 @@ func NewService(
 		pushStore:    pushStore,
 		pushLimits:   newExternalMailPushLimit(limits, settings.ExternalMail.Push.RequestsPerMinute()),
 		pushRefusals: newExternalMailPushRefusals(), pushHandshakes: newExternalMailPushHandshakes(),
-		pushRefusalLog: &pushRefusalLog{},
+		pushRefusalLog: &pushRefusalLog{}, releases: releases,
 	}
 }
 

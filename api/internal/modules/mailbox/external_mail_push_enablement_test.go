@@ -113,3 +113,83 @@ func TestExternalMailPushIgnoresMailItAlreadyHas(t *testing.T) {
 		})
 	}
 }
+
+// releaseRows reads the pending provider releases of a connection.
+func (f *externalFixture) releaseRows(t *testing.T, connectionID uint) []ExternalMailProviderReleasePO {
+	t.Helper()
+	var rows []ExternalMailProviderReleasePO
+	if err := f.repo.(*repository).db.Where("connection_id = ?", connectionID).Find(&rows).Error; err != nil {
+		t.Fatalf("read releases: %v", err)
+	}
+	return rows
+}
+
+// TestExternalMailProviderReleaseSurvivesACrash: a process that stops right after a revocation
+// committed, before it called the provider, leaves the release in the database; the worker then
+// stops the subscription and hands the grant back, and deletes the release with its sealed grant.
+func TestExternalMailProviderReleaseSurvivesACrash(t *testing.T) {
+	f := newPushFixture(t)
+	f.sync(t)
+	id, _, _ := f.source.PushSubscription(externalTestToken)
+	// The provider calls are collected for after the commit and never made: the process stopped.
+	crashed, _ := withDeferredReleases(context.Background())
+	if err := f.service.revokeConnection(crashed, f.reload(t), accessB, domain.MailboxAccessConnectionRevoked); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	rows := f.releaseRows(t, f.connection.ID)
+	if len(rows) != 1 || !rows[0].StopPush || rows[0].StopSubscriptionID != id || rows[0].EncryptedGrant == "" ||
+		strings.Contains(rows[0].EncryptedGrant, externalTestToken) {
+		t.Fatalf("release rows = %+v", rows)
+	}
+	if grant, err := f.service.encryptor.DecryptString(rows[0].EncryptedGrant); err != nil || grant != externalTestToken {
+		t.Fatalf("the release holds no sealed copy of the grant (%v)", err)
+	}
+	if f.source.Revoked(externalTestToken) || len(f.source.Unsubscribed()) != 0 {
+		t.Fatal("the provider was called although the process stopped")
+	}
+	f.advance(externalMailReleaseGrace + time.Second)
+	f.sync(t)
+	if !f.source.Revoked(externalTestToken) {
+		t.Fatal("the worker did not hand the grant back")
+	}
+	if stopped := f.source.Unsubscribed(); len(stopped) != 1 || stopped[0] != id {
+		t.Fatalf("the worker stopped %v, want %q", stopped, id)
+	}
+	if rows = f.releaseRows(t, f.connection.ID); len(rows) != 0 {
+		t.Fatalf("a done release was kept: %+v", rows)
+	}
+}
+
+// refusingRevokeSource cannot hand grants back.
+type refusingRevokeSource struct{ *FakeExternalMailSource }
+
+func (refusingRevokeSource) Revoke(context.Context, ExternalMailToken) error {
+	return errors.New("provider unavailable")
+}
+
+// TestExternalMailProviderReleaseRetriesThenExpires: a release the provider keeps refusing is retried
+// with backoff, and deleted with its sealed grant at its deadline.
+func TestExternalMailProviderReleaseRetriesThenExpires(t *testing.T) {
+	f := newPushFixture(t)
+	f.service.externalConnectors = fakeExternalMailRegistry(refusingRevokeSource{f.source})
+	f.sync(t)
+	if err := f.service.RevokeExternalMailConnection(context.Background(), f.b, f.connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	rows := f.releaseRows(t, f.connection.ID)
+	if len(rows) != 1 || rows[0].Attempts != 1 {
+		t.Fatalf("after the failed call right after the commit: %+v", rows)
+	}
+	for range 6 {
+		f.advance(externalMailMaxBackoff)
+		f.sync(t)
+	}
+	if rows = f.releaseRows(t, f.connection.ID); len(rows) != 1 || rows[0].Attempts < 3 {
+		t.Fatalf("the release was not retried: %+v", rows)
+	}
+	f.advance(externalMailReleaseDeadline)
+	f.sync(t)
+	if rows = f.releaseRows(t, f.connection.ID); len(rows) != 0 {
+		t.Fatalf("a release past its deadline kept its sealed grant: %+v", rows)
+	}
+}

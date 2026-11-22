@@ -43,8 +43,10 @@ func (s *service) SyncExternalMail(ctx context.Context, limit int) (int, error) 
 		return 0, nil
 	}
 	now := s.now().UTC()
-	// Subscriptions of ended connections stop, and notifications that arrived during a fetch make
-	// their connection due, before the claim picks due connections.
+	// Provider calls left by revocations are made, subscriptions of ended connections stop, and
+	// notifications that arrived during a fetch make their connection due, before the claim picks
+	// due connections.
+	s.processProviderReleases(ctx, now)
 	s.maintainExternalMailPush(ctx, now)
 	connections, err := s.externalMail.ClaimExternalMailConnections(ctx, domain.ExternalMailClaim{
 		Now: now, LeaseUntil: now.Add(externalMailSyncInterval), Limit: limit,
@@ -438,10 +440,14 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 		return nil
 	}
 	// The provider is called only once the revocation committed: it stops the push subscription,
-	// then takes the grant back. The row is stopped in the revocation's transaction either way.
-	release := s.prepareProviderRelease(ctx, connection)
+	// then takes the grant back. What is left to do is recorded in the revocation's transaction, so a
+	// process that stops after the commit leaves it to the worker; the row is stopped either way.
+	release := s.planProviderRelease(ctx, connection)
 	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
 		if err := s.externalMail.RevokeExternalMailConnection(tx, connection.OrganizationID, connection.ID, s.now().UTC()); err != nil {
+			return err
+		}
+		if err := s.recordProviderRelease(tx, release); err != nil {
 			return err
 		}
 		return s.afterConnectionRevoked(tx, connection, actorUserID, event, nil)
@@ -449,7 +455,10 @@ func (s *service) revokeConnection(ctx context.Context, connection *domain.Exter
 	if err != nil {
 		return err
 	}
-	releaseAfterCommit(ctx, release)
+	if release != nil {
+		held := *connection
+		releaseAfterCommit(ctx, func(ctx context.Context) { s.performProviderRelease(ctx, &held, release) })
+	}
 	slog.InfoContext(ctx, "external_mail.revoked",
 		slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)),
 		slog.String("event", string(event)))
@@ -541,21 +550,33 @@ func (s *service) recordConnectionEventWith(ctx context.Context, connection *dom
 // provider that is down or no longer enabled leaves the grant to expire there, and the token is
 // erased here either way.
 func (s *service) handBackExternalGrant(ctx context.Context, connection *domain.ExternalMailConnection) {
-	if connection.EncryptedRefreshToken == "" || s.encryptor == nil {
+	if err := s.returnExternalGrant(ctx, connection); err != nil {
+		// Logged by returnExternalGrant; the grant lapses at the provider.
 		return
+	}
+}
+
+// returnExternalGrant revokes the connection's sealed grant at its provider. It answers an error
+// only when trying again may help: no grant, a grant this instance cannot open, or a connector the
+// instance no longer runs end it.
+func (s *service) returnExternalGrant(ctx context.Context, connection *domain.ExternalMailConnection) error {
+	if connection.EncryptedRefreshToken == "" || s.encryptor == nil {
+		return nil
 	}
 	token, err := s.encryptor.DecryptString(connection.EncryptedRefreshToken)
 	if err != nil {
-		return
+		return nil
 	}
 	connector, registered := s.externalConnectors.lookup(connection.Provider)
 	if !registered {
 		slog.WarnContext(ctx, "external_mail.provider_revoke_skipped",
 			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
-		return
+		return nil
 	}
 	if err := connector.Source.Revoke(ctx, ExternalMailToken{RefreshToken: token}); err != nil {
 		slog.WarnContext(ctx, "external_mail.provider_revoke_failed",
 			slog.Uint64("connection_id", uint64(connection.ID)), slog.String("provider", string(connection.Provider)))
+		return err
 	}
+	return nil
 }
