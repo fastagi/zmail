@@ -35,9 +35,12 @@ func (m *addMailboxOrigin) Up(db *gorm.DB) error {
 		`ALTER TABLE mailboxes DROP CONSTRAINT chk_mailboxes_type,
 		  ADD COLUMN origin varchar(16) NOT NULL DEFAULT 'zmail',
 		  ADD CONSTRAINT chk_mailboxes_origin CHECK (origin IN ('zmail','connected'))`,
+		// The old index is unique over every mailbox that is not external, so it goes before the
+		// update: two members who bound the same outside account hold two external mailboxes with
+		// one address, and turning the first into a personal one under the old index would collide.
+		`DROP INDEX idx_mailboxes_address`,
 		`UPDATE mailboxes SET type = 'personal', origin = 'connected' WHERE type = 'external'`,
 		`ALTER TABLE mailboxes ADD CONSTRAINT chk_mailboxes_type CHECK (type IN ('personal','shared'))`,
-		`DROP INDEX idx_mailboxes_address`,
 		`CREATE UNIQUE INDEX idx_mailboxes_address ON mailboxes (address) WHERE origin = 'zmail'`,
 	)
 }
