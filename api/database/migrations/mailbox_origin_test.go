@@ -18,6 +18,7 @@ func TestMailboxOriginConvertsExternalMailboxes(t *testing.T) {
 		VALUES (5, 10, 901, 'riley@mail.example', 'personal', 901, now(), now())`)
 
 	require.NoError(t, (&addExternalMailTenants{}).Down(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Down(db))
 	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	rolledBack := dumpSchema(t, db)
 	assert.NotContains(t, rolledBack, "chk_mailboxes_origin")
@@ -27,6 +28,7 @@ func TestMailboxOriginConvertsExternalMailboxes(t *testing.T) {
 		VALUES (3, 10, 901, 'old@outlook.example', 'external', 901, now(), now(), now())`)
 
 	require.NoError(t, (&addMailboxOrigin{}).Up(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Up(db))
 	require.NoError(t, (&addExternalMailTenants{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 
@@ -44,6 +46,7 @@ func TestMailboxOriginConvertsExternalMailboxes(t *testing.T) {
 
 	// Down restores the external type for the connected personal mailboxes.
 	require.NoError(t, (&addExternalMailTenants{}).Down(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Down(db))
 	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	var external int64
 	require.NoError(t, db.Raw(`SELECT COUNT(*) FROM mailboxes WHERE type = 'external'`).Scan(&external).Error)

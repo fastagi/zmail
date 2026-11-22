@@ -48,6 +48,7 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 	require.NoError(t, (&addExternalMailTenants{}).Down(db))
 	require.NoError(t, (&addSharedExternalMail{}).Down(db))
 	require.NoError(t, (&addExternalMailSyncOps{}).Down(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Down(db))
 	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	require.NoError(t, (&openMailConnectors{}).Down(db))
 	require.NoError(t, (&addMailOutboundTimeIndex{}).Down(db))
@@ -60,6 +61,7 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 	require.NoError(t, (&addMailOutboundTimeIndex{}).Up(db))
 	require.NoError(t, (&openMailConnectors{}).Up(db))
 	require.NoError(t, (&addMailboxOrigin{}).Up(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Up(db))
 	require.NoError(t, (&addExternalMailSyncOps{}).Up(db))
 	require.NoError(t, (&addSharedExternalMail{}).Up(db))
 	require.NoError(t, (&addExternalMailTenants{}).Up(db))
@@ -70,6 +72,8 @@ func TestExternalMailMigrationUpDown(t *testing.T) {
 // the older schema does not know.
 func TestExternalMailDownRefusesExternalMailboxes(t *testing.T) {
 	db, exec := externalMailFixture(t)
+	require.NoError(t, (&addExternalMailTenants{}).Down(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Down(db))
 	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
 		VALUES (2, 10, 901, 'owner@gmail.example', 'external', 901, now(), now())`)

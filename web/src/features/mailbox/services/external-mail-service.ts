@@ -8,6 +8,8 @@ import {
   EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE,
   EXTERNAL_MAIL_HOST_MAX_LENGTH,
   EXTERNAL_MAIL_IMAP_PORT,
+  EXTERNAL_MAIL_SMTP_PORTS,
+  EXTERNAL_MAIL_DEFAULT_SMTP_PORT,
   EXTERNAL_MAIL_PASSWORD_MAX_LENGTH,
   EXTERNAL_MAIL_USERNAME_MAX_LENGTH,
   externalMailAuthorizationSchema,
@@ -141,6 +143,12 @@ export const externalMailService = {
       port: input.port,
       username: input.username,
       password: input.password,
+      ...(input.smtp_host === undefined
+        ? {}
+        : {
+            smtp_host: input.smtp_host,
+            smtp_port: input.smtp_port ?? EXTERNAL_MAIL_DEFAULT_SMTP_PORT,
+          }),
       ...(input.backfill_days === undefined ? {} : { backfill_days: input.backfill_days }),
     };
     const response = await request.post<AxiosResponse<unknown>, BindExternalMailCredentialsInput>(
@@ -250,10 +258,7 @@ export function isNavigableUrl(value: string): boolean {
   if (url.protocol !== 'http:') return false;
   const host = url.hostname.toLowerCase();
   return (
-    host === 'localhost' ||
-    host.endsWith('.localhost') ||
-    host === '127.0.0.1' ||
-    host === '[::1]'
+    host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1' || host === '[::1]'
   );
 }
 
@@ -276,6 +281,10 @@ function validCredentials(input: BindExternalMailCredentialsInput): boolean {
     boundedText(input.username, EXTERNAL_MAIL_USERNAME_MAX_LENGTH) &&
     boundedText(input.password, EXTERNAL_MAIL_PASSWORD_MAX_LENGTH) &&
     input.port === EXTERNAL_MAIL_IMAP_PORT &&
+    (input.smtp_host === undefined ||
+      boundedText(input.smtp_host, EXTERNAL_MAIL_HOST_MAX_LENGTH)) &&
+    (input.smtp_port === undefined ||
+      (EXTERNAL_MAIL_SMTP_PORTS as readonly number[]).includes(input.smtp_port)) &&
     (input.connection_id === undefined ||
       (Number.isSafeInteger(input.connection_id) && input.connection_id > 0)) &&
     (days === undefined || (Number.isSafeInteger(days) && days >= 1 && days <= 90))

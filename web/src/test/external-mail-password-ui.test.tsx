@@ -147,6 +147,8 @@ describe('app password connect step', () => {
         port: 993,
         username: 'me@example.com',
         password: SECRET,
+        smtp_host: 'smtp.example.com',
+        smtp_port: 465,
         backfill_days: 30,
       })
     );
@@ -157,6 +159,42 @@ describe('app password connect step', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
 
     expectSecretNowhere();
+  });
+
+  it('suggests the SMTP server, and binds read-only once it is cleared', async () => {
+    service.bindCredentials.mockResolvedValue({
+      outcome: 'created',
+      connection: connectionOf({ id: 9, provider: 'imap', mailbox_id: 77 }),
+    });
+    renderWith(<ConnectDialog onOpenChange={vi.fn()} />);
+    const form = await openForm();
+    fillForm(form);
+    const smtp = within(form).getByLabelText('SMTP server (optional)');
+    expect(smtp).toHaveValue('smtp.example.com');
+    fireEvent.click(within(form).getByRole('radio', { name: '587' }));
+    fireEvent.change(smtp, { target: { value: 'mail.example.com' } });
+    fireEvent.change(within(form).getByLabelText('IMAP server'), {
+      target: { value: 'imap.other.com' },
+    });
+    // Edited by hand, it no longer follows the IMAP server.
+    expect(smtp).toHaveValue('mail.example.com');
+    fireEvent.change(smtp, { target: { value: 'not a host' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Connect' }));
+    expect(
+      await within(form).findByText(
+        'Enter a server name such as smtp.example.com, without https:// or a port.'
+      )
+    ).toBeInTheDocument();
+    expect(service.bindCredentials).not.toHaveBeenCalled();
+
+    // The field remounts with its message, so it is found again.
+    fireEvent.change(within(form).getByLabelText('SMTP server (optional)'), {
+      target: { value: '' },
+    });
+    fireEvent.change(within(form).getByLabelText('App password'), { target: { value: SECRET } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(service.bindCredentials).toHaveBeenCalledTimes(1));
+    expect(service.bindCredentials.mock.calls[0][1]).not.toHaveProperty('smtp_host');
   });
 
   it('says it reconnected when the server restores the member’s own account', async () => {

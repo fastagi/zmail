@@ -117,8 +117,8 @@ func (a MailboxAccess) Any() bool {
 // shared member gets what the member row grants. A mailbox of another organization grants
 // nothing.
 //
-// A connected mailbox holds read-only copies of an outside account: whatever the type and the
-// permission, it never grants send or organize. A connected personal mailbox is the owner's own
+// A connected mailbox holds copies of an outside account: whatever the type and the permission, it
+// never grants organize, and grants send only when the account was bound with its SMTP server. A connected personal mailbox is the owner's own
 // outside account, so the organization role grants nothing on it at all: owners and admins
 // neither see nor administer it, and disconnect it through the connection directory instead. A
 // personal mailbox assigned from the organization's tenant is at the organization's own address, so
@@ -155,7 +155,8 @@ func MailboxAccessFor(m *Mailbox, viewer OrganizationContext, member *MailboxMem
 		}
 	}
 	if m.Connected() {
-		access.Send = false
+		// A mailbox assigned from a tenant reads through a token that reads only: never send.
+		access.Send = access.Send && m.ConnectedSend && !m.TenantAssigned()
 		access.Organize = false
 	}
 	return access

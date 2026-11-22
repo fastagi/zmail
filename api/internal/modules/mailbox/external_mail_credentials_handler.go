@@ -24,6 +24,9 @@ type bindExternalMailCredentialsRequest struct {
 	Port     int    `json:"port" binding:"omitempty,min=1,max=65535"`
 	Username string `json:"username" binding:"required,max=320"`
 	Password string `json:"password" binding:"required,max=320"`
+	// SMTPHost and SMTPPort optionally name the outgoing server, verified with the same login.
+	SMTPHost string `json:"smtp_host" binding:"omitempty,max=253"`
+	SMTPPort int    `json:"smtp_port" binding:"omitempty,oneof=465 587"`
 	// BackfillDays is checked by the service, which answers MAILBOX.EXTERNAL_AUTHORIZATION_INVALID
 	// out of range, as the OAuth start route does.
 	BackfillDays int `json:"backfill_days"`
@@ -47,6 +50,7 @@ func (h *Handler) BindExternalMailCredentials(c *gin.Context) {
 	connection, created, err := h.service.BindExternalMailCredentials(c.Request.Context(), viewer, ExternalMailCredentialsInput{
 		Provider: domain.ExternalMailProvider(req.Provider), Host: req.Host, Port: req.Port,
 		Username: req.Username, Password: req.Password, BackfillDays: req.BackfillDays,
+		SMTPHost: req.SMTPHost, SMTPPort: req.SMTPPort,
 		ConnectionID: req.ConnectionID, Sharing: req.Sharing.input(),
 	})
 	if err != nil {

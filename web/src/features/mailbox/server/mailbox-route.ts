@@ -92,6 +92,8 @@ import {
   EXTERNAL_MAIL_DIRECTORY_PAGE_SIZE,
   EXTERNAL_MAIL_HOST_MAX_LENGTH,
   EXTERNAL_MAIL_IMAP_PORT,
+  EXTERNAL_MAIL_SMTP_PORTS,
+  EXTERNAL_MAIL_DEFAULT_SMTP_PORT,
   EXTERNAL_MAIL_PASSWORD_MAX_LENGTH,
   EXTERNAL_MAIL_USERNAME_MAX_LENGTH,
 } from '@/features/mailbox/external-mail-schemas';
@@ -5171,6 +5173,8 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
     port,
     username,
     password,
+    smtp_host: smtpHost,
+    smtp_port: smtpPort,
     backfill_days: backfillDays,
     connection_id: connectionId,
   } = body.value;
@@ -5187,6 +5191,12 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
   }
   if (port !== undefined && port !== EXTERNAL_MAIL_IMAP_PORT) {
     errors.port = [`must be ${EXTERNAL_MAIL_IMAP_PORT}`];
+  }
+  if (smtpHost !== undefined && !credentialText(smtpHost, EXTERNAL_MAIL_HOST_MAX_LENGTH)) {
+    errors.smtp_host = ['must be a server name'];
+  }
+  if (smtpPort !== undefined && !(EXTERNAL_MAIL_SMTP_PORTS as readonly unknown[]).includes(smtpPort)) {
+    errors.smtp_port = ['must be 465 or 587'];
   }
   if (
     backfillDays !== undefined &&
@@ -5208,6 +5218,12 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
     port: EXTERNAL_MAIL_IMAP_PORT,
     username: username as string,
     password: password as string,
+    ...(smtpHost === undefined
+      ? {}
+      : {
+          smtp_host: smtpHost as string,
+          smtp_port: (smtpPort as number | undefined) ?? EXTERNAL_MAIL_DEFAULT_SMTP_PORT,
+        }),
     ...(backfillDays === undefined ? {} : { backfill_days: backfillDays as number }),
   };
 
@@ -5226,6 +5242,8 @@ export async function bindExternalMailCredentialsRoute(request: Request): Promis
         port: 'port',
         username: 'username',
         password: 'password',
+        smtp_host: 'smtp_host',
+        smtp_port: 'smtp_port',
         backfill_days: 'backfill_days',
         connection_id: 'connection_id',
       },

@@ -16024,6 +16024,10 @@ components:
             read:
               type: boolean
               description: The connector syncs the account's mail into its connected mailbox.
+            send:
+              type: boolean
+              description: The connector can send mail written in Zmail through the account's own server,
+                when the binding names it (`smtp_host` for `imap`).
             tenant:
               type: boolean
               description: An organization owner may authorize a whole tenant of the provider
@@ -16162,6 +16166,19 @@ components:
           description: An app password issued by the provider. Never returned.
           minLength: 1
           maxLength: 320
+        smtp_host:
+          type: string
+          description: The account's outgoing server, such as `smtp.mail.me.com`. The same login is
+            verified there before anything is stored; the connected mailbox then sends through it.
+            Omitted, the mailbox only syncs.
+          minLength: 1
+          maxLength: 253
+        smtp_port:
+          type: integer
+          description: 465 for implicit TLS (used when omitted) or 587 for a required STARTTLS.
+          enum:
+            - 465
+            - 587
         backfill_days:
           type: integer
           description: How far back the first sync reads INBOX; 14 when omitted.

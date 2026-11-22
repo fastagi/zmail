@@ -170,16 +170,20 @@ func (s *service) MemberRemoved(ctx context.Context, event domain.OrganizationMe
 		at = s.now().UTC()
 	}
 	err := s.repo.InTransaction(ctx, func(tx context.Context) error {
+		if s.externalMail != nil {
+			// The organization's binding lock comes before any mailbox row, in the order handovers,
+			// assignments, and restores take them, so none of them deadlocks with a departure.
+			if err := s.externalMail.LockSharedExternalMailBindings(tx, event.OrganizationID); err != nil {
+				return err
+			}
+		}
 		owned, err := s.repo.MarkOwnerLeft(tx, event.OrganizationID, event.UserID, at)
 		if err != nil {
 			return err
 		}
 		if s.externalMail != nil {
 			// Addresses personally assigned to the leaver from a tenant: whoever reads them later never
-			// gets mail received before now. In turn with assignments, under the same lock.
-			if err = s.externalMail.LockSharedExternalMailBindings(tx, event.OrganizationID); err != nil {
-				return err
-			}
+			// gets mail received before now.
 			if err = s.externalMail.MarkPersonalBoundary(tx, event.OrganizationID, event.UserID, at); err != nil {
 				return err
 			}

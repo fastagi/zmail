@@ -402,6 +402,17 @@ func (r *repository) RebindExternalMailConnection(ctx context.Context, rebind do
 	return rows[0].toDomain(), nil
 }
 
+// SetConnectedMailboxSend records whether a connected mailbox sends through its account's SMTP
+// server. A Zmail mailbox is never changed.
+func (r *repository) SetConnectedMailboxSend(ctx context.Context, organizationID, mailboxID uint, enabled bool) error {
+	if r.db == nil {
+		return domain.ErrServiceUnavailable
+	}
+	return r.conn(ctx).Model(&MailboxPO{}).
+		Where("id = ? AND organization_id = ? AND origin = ?", mailboxID, organizationID, string(domain.MailboxOriginConnected)).
+		Updates(map[string]any{"connected_send": enabled, "updated_at": time.Now().UTC()}).Error
+}
+
 // ExternalMailAuthorizationPO is the persistent object of one pending sign-in.
 type ExternalMailAuthorizationPO struct {
 	ID             uint   `gorm:"primaryKey"`

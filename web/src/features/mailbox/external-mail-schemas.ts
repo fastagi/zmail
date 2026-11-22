@@ -41,7 +41,7 @@ export const externalMailConnectorIdSchema = string().check(
 export const externalMailConnectorSchema = looseObject({
   id: externalMailConnectorIdSchema,
   auth_kind: string(),
-  capabilities: looseObject({ read: boolean() }),
+  capabilities: looseObject({ read: boolean(), send: optional(boolean()) }),
 });
 export const externalMailConnectorListSchema = array(externalMailConnectorSchema);
 
@@ -87,6 +87,10 @@ export const EXTERNAL_MAIL_CREDENTIALS_UPSTREAM_TIMEOUT_MS = 60_000;
 export const EXTERNAL_MAIL_CREDENTIALS_REQUEST_TIMEOUT_MS = 65_000;
 /** Implicit-TLS IMAP; the contract accepts this port only. */
 export const EXTERNAL_MAIL_IMAP_PORT = 993;
+/** SMTP submission: implicit TLS on 465 (the default) or STARTTLS on 587. */
+export const EXTERNAL_MAIL_SMTP_PORTS = [465, 587] as const;
+export type ExternalMailSmtpPort = (typeof EXTERNAL_MAIL_SMTP_PORTS)[number];
+export const EXTERNAL_MAIL_DEFAULT_SMTP_PORT: ExternalMailSmtpPort = 465;
 /** Bounds the form checks before sending; the server stays the authority. */
 export const EXTERNAL_MAIL_HOST_MAX_LENGTH = 253;
 export const EXTERNAL_MAIL_USERNAME_MAX_LENGTH = 320;
@@ -184,13 +188,15 @@ export interface BindExternalMailCredentialsInput {
   port: number;
   username: string;
   password: string;
+  /** The outgoing server verified with the same login; the connected mailbox then sends through it. */
+  smtp_host?: string;
+  smtp_port?: ExternalMailSmtpPort;
   backfill_days?: number;
 }
 
 /** Start a new binding with a connector, or reconnect one of the caller's connections. */
 export type StartExternalMailAuthorizationInput =
-  | { provider: string; backfill_days?: number }
-  | { connection_id: number };
+  { provider: string; backfill_days?: number } | { connection_id: number };
 
 export interface CompleteExternalMailAuthorizationInput {
   state: string;

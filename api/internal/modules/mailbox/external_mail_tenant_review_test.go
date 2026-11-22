@@ -257,3 +257,28 @@ func TestTenantSharedRestoreReplacesMembers(t *testing.T) {
 		t.Fatalf("member_removed events = %d, want D's", len(removed))
 	}
 }
+
+// TestTenantMailboxNeverSends: a mailbox assigned from a tenant stays read-only even if its record
+// claims an SMTP server of its own, as an IMAP binding may have; so does it after a handover.
+func TestTenantMailboxNeverSends(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := context.Background()
+	alice := f.mustAssign(t, personalRow("alice", accessB))[0]
+	if err := f.repo.(*repository).db.Exec(`UPDATE mailboxes SET connected_send = true WHERE id = ?`, alice.MailboxID).Error; err != nil {
+		t.Fatalf("mark connected send: %v", err)
+	}
+	mailbox, err := f.service.authorizeMailbox(ctx, f.b, alice.MailboxID, nil)
+	if err != nil || mailbox.Access.Send || !mailbox.Access.View {
+		t.Fatalf("B on alice@ = %+v, err %v; want read only", mailbox, err)
+	}
+	send := SendInput{To: []string{"x@example.com"}, Subject: "Hi", Text: "Hi"}
+	if _, _, err = f.service.SendMessage(ctx, f.b, alice.MailboxID, send); err == nil {
+		t.Fatal("B sent from a tenant-assigned mailbox")
+	}
+	if _, err = f.service.HandOverMailbox(ctx, f.admin, alice.MailboxID, accessC); err != nil {
+		t.Fatalf("handover: %v", err)
+	}
+	if _, _, err = f.service.SendMessage(ctx, f.c, alice.MailboxID, send); err == nil {
+		t.Fatal("the successor sent from a handed-over tenant mailbox")
+	}
+}

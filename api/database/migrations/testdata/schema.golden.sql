@@ -503,6 +503,7 @@ TABLE mailboxes
   COLUMN role_id bigint
   COLUMN ai_triage_enabled boolean NOT NULL DEFAULT false
   COLUMN origin character varying(16) NOT NULL DEFAULT 'zmail'::character varying
+  COLUMN connected_send boolean NOT NULL DEFAULT false
   COLUMN external_mail_tenant_id bigint
 
 TABLE migrations

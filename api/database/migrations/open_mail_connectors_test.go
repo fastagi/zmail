@@ -15,6 +15,7 @@ func TestOpenMailConnectorsUpDown(t *testing.T) {
 	migrated := dumpSchema(t, db)
 	// Later migrations that build on these tables roll back first.
 	require.NoError(t, (&addExternalMailTenants{}).Down(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Down(db))
 	require.NoError(t, (&addSharedExternalMail{}).Down(db))
 	require.NoError(t, (&addMailboxOrigin{}).Down(db))
 	exec(`INSERT INTO mailboxes (id, organization_id, created_by, address, type, owner_user_id, created_at, updated_at)
@@ -28,6 +29,7 @@ func TestOpenMailConnectorsUpDown(t *testing.T) {
 	require.NoError(t, (&openMailConnectors{}).Up(db))
 	require.NoError(t, (&addMailboxOrigin{}).Up(db))
 	require.NoError(t, (&addSharedExternalMail{}).Up(db))
+	require.NoError(t, (&addConnectedMailboxSend{}).Up(db))
 	require.NoError(t, (&addExternalMailTenants{}).Up(db))
 	assert.Equal(t, migrated, dumpSchema(t, db), "up after down must leave the golden schema")
 }

@@ -94,6 +94,7 @@ type ExternalMailConnectorResponse struct {
 // ExternalMailCapabilitiesResponse says what a connector does with a bound account.
 type ExternalMailCapabilitiesResponse struct {
 	Read bool `json:"read"`
+	Send bool `json:"send"`
 	// Tenant means an owner may authorize a whole tenant of the provider (POST /v1/external-mail-tenants).
 	Tenant bool `json:"tenant"`
 }
@@ -110,7 +111,9 @@ func (h *Handler) ListExternalMailConnectors(c *gin.Context) {
 	for _, connector := range connectors {
 		items = append(items, ExternalMailConnectorResponse{
 			ID: string(connector.ID), AuthKind: string(connector.AuthKind),
-			Capabilities: ExternalMailCapabilitiesResponse{Read: connector.Capabilities.Read, Tenant: connector.Tenant != nil},
+			Capabilities: ExternalMailCapabilitiesResponse{
+				Read: connector.Capabilities.Read, Send: connector.Capabilities.Send, Tenant: connector.Tenant != nil,
+			},
 		})
 	}
 	privateResponse(c)

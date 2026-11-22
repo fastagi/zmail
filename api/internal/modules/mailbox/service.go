@@ -889,8 +889,8 @@ func (s *service) GetOutboundMessage(ctx context.Context, viewer domain.Organiza
 // when the window has room. A broadcast recipient (not queueAtLimit) counts in the broadcast lane
 // and gets ErrMailSendLimitReached there, which pauses the broadcast.
 func (s *service) send(ctx context.Context, mailbox *domain.Mailbox, input SendInput, queueAtLimit bool) (*domain.MailMessage, bool, error) {
-	// A connected mailbox holds read-only copies of an outside account; no path sends from it.
-	if mailbox.Connected() {
+	// A connected mailbox sends only through its account's own SMTP server, verified at binding.
+	if mailbox.Connected() && (!mailbox.ConnectedSend || mailbox.TenantAssigned()) {
 		return nil, false, domain.ErrPermissionDenied
 	}
 	var templateID uint
@@ -997,7 +997,13 @@ func (s *service) deliver(
 	headers map[string]string,
 ) (*domain.MailMessage, bool, error) {
 	metrics.RecordSendLaneAttempt(string(message.SendLane))
-	outcome, sendErr := s.sendWithConnection(ctx, mailbox.OrganizationID, mailtransport.Message{
+	send := s.sendWithConnection
+	if mailbox.Connected() {
+		send = func(ctx context.Context, _ uint, mail mailtransport.Message) (mailtransport.Result, error) {
+			return s.sendThroughAccount(ctx, mailbox, mail)
+		}
+	}
+	outcome, sendErr := send(ctx, mailbox.OrganizationID, mailtransport.Message{
 		FromAddress: message.FromAddress,
 		FromName:    message.FromName,
 		To:          message.To,
