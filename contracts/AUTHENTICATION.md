@@ -21,6 +21,14 @@ The Web feature service and development mock BFF use a browser-oriented, same-or
 | Logout | `POST /api/auth/logout` | none | `{ success: true }` |
 | Request a password reset | `POST /api/auth/password-reset` | `{ email }` | `{ success: true }`, whether or not the address has an account |
 | Reset the password | `POST /api/auth/password-reset/confirm` | `{ token, password }` (6 to 50 characters) | `{ success: true }`; an unknown or used token is `401 AUTH.PASSWORD_RESET_TOKEN_INVALID`, an expired one `401 AUTH.PASSWORD_RESET_TOKEN_EXPIRED` |
+| Change the password | `PUT /api/auth/password` | `{ currentPassword, newPassword }` (`newPassword`: 6 to 50 characters, different from `currentPassword`) | `{ success: true }`; every session of the account ends, this browser's included |
+
+Changing the password answers `401 AUTH.INVALID_CREDENTIALS` when `currentPassword` is wrong; the
+session stays valid, so clients show a field error rather than treating it as a lost session.
+`401 AUTH.UNAUTHORIZED` means the session itself is missing or ended. An unchanged password is
+`422 COMMON.VALIDATION_FAILED` with a `newPassword` field error before any upstream call. Neither the Go API nor
+the browser contract lets a user list their sessions or end one of them; the only other way to end
+every session of an account is the operator route `POST /v1/operator/users/{user_id}/sessions/revoke`.
 
 The browser user view deliberately has no `role` or permission field. The optional permission
 starter is organization-scoped and resolves current grants through its own context endpoint;
@@ -230,6 +238,7 @@ and documentation must use the `API_*` names because the adapter now serves more
 | Request a registration code | Sends `{ email }` to `POST /v1/register/email-codes` and answers `{ success: true }`. |
 | Register | Sends a non-identifying generated username plus `{ email, nickname: name, password, email_code: code }` to `POST /v1/register`, then logs in by email and sets the cookie. |
 | Current session | Reads the server-only opaque session cookie, sends `Authorization: Bearer ...` to `GET /v1/users/profile`, and maps the API user to `{ id, email, name }`. |
+| Change the password | Sends `{ old_password: currentPassword, new_password: newPassword }` with the opaque credential to `PUT /v1/users/password`. On success it expires the cookie, because the API revoked every session. `AUTH.UNAUTHORIZED` also expires it; `AUTH.INVALID_CREDENTIALS` keeps it. `old_password` and `new_password` field errors map to `currentPassword` and `newPassword`. |
 | Logout | Sends the opaque credential to `POST /v1/logout`, then expires the exact-scope cookie. An upstream `401` is idempotent success because the server session is already absent; an availability failure is reported while local credential custody is still removed. |
 
 The generated username has the form `user_<random-id>` and exists only to satisfy the API starter's
@@ -250,7 +259,7 @@ issuance should add that capability to the API contract instead of hiding compen
 - The Web adapter validates only the bounded opaque credential shape and positive `expires_in`
   value before accepting login success. It does not decode identity or authorization claims from
   the credential; the Go API resolves current session and account state from persistence.
-- Login, registration, registration codes, and logout require exact same-origin browser mutations. The adapter forwards
+- Login, registration, registration codes, password change, and logout require exact same-origin browser mutations. The adapter forwards
   no incoming cookies, authorization headers, or arbitrary paths to Go. The allowed browser origin
   comes from validated `NEXT_PUBLIC_APP_URL`, not a proxy-normalized internal request URL.
 - `API_CLIENT_IP_HEADER` names the ingress-owned header from which one validated IP is forwarded as

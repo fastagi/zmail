@@ -1458,6 +1458,40 @@ describe('unified inbox', () => {
     expect(screen.getByRole('list', { name: 'Conversation' })).toBeInTheDocument();
   });
 
+  // Issue #115: forwarding carries the original's files, shown in the composer and removable.
+  it('forwarding a message carries its attachments into the composer and the send', async () => {
+    const proof = { id: 5, filename: 'proof.txt', content_type: 'text/plain', size: 5 };
+    const notes = { id: 6, filename: 'notes.txt', content_type: 'text/plain', size: 2 };
+    state.detail.data = { ...message({ id: 12, mailbox_id: 1 }), attachments: [proof, notes] };
+    const fetched = vi
+      .spyOn(mailboxService, 'fetchAttachment')
+      .mockImplementation((_org, _mailbox, _message, attachment) =>
+        Promise.resolve(new Blob([attachment.id === 5 ? 'hello' : 'hi']))
+      );
+    state.send.mutateAsync.mockResolvedValue(message({ id: 40, direction: 'outbound' }));
+    window.history.replaceState(null, '', '/console/mailboxes?open=12');
+    renderRoute();
+
+    const toolbar = await screen.findByRole('toolbar', { name: 'Conversation actions' });
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Forward' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('proof.txt')).toBeInTheDocument();
+    expect(within(dialog).getByText('notes.txt')).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove notes.txt' }));
+    fireEvent.change(within(dialog).getByLabelText('To'), { target: { value: 'ann@example.com' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(state.send.mutateAsync).toHaveBeenCalledTimes(1));
+    expect(fetched).toHaveBeenCalledTimes(1);
+    expect(fetched).toHaveBeenCalledWith(1, 1, 12, proof);
+    expect(state.send.mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [{ filename: 'proof.txt', content_type: 'text/plain', content: 'aGVsbG8=' }],
+      })
+    );
+  });
+
   it('rows expose listbox and option roles with aria-selected', () => {
     window.history.replaceState(null, '', '/console/mailboxes?open=31');
     renderRoute();
@@ -1925,6 +1959,42 @@ describe('inbox keyboard shortcuts', () => {
     const from = await screen.findByLabelText('From');
     expect(from).toHaveValue('1');
     expect(within(from).queryByRole('option', { name: 'me@gmail.com' })).toBeNull();
+  });
+
+  // Issue #117: a send refused because the session ended keeps the draft and offers sign-in.
+  it('a send refused for an ended session keeps the draft and links to sign in and back', async () => {
+    state.send.mutateAsync.mockRejectedValue(
+      new ApiError('unauthorized', ApiErrorCode.AUTH_UNAUTHORIZED, 401)
+    );
+    window.history.replaceState(null, '', '/console/mailboxes?box=1');
+    const first = renderRoute();
+
+    press('c');
+    fireEvent.change(await screen.findByLabelText('To'), { target: { value: 'ann@example.com' } });
+    fireEvent.change(screen.getByLabelText('Subject'), { target: { value: 'Quarterly numbers' } });
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Draft body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText(/Your session ended/u)).toBeInTheDocument();
+    const signIn = screen.getByRole('link', { name: 'Sign in' });
+    const target = new URL(signIn.getAttribute('href') ?? '', 'https://zmail.test');
+    expect(target.pathname).toBe('/login');
+    const back = new URL(target.searchParams.get('returnUrl') ?? '', 'https://zmail.test');
+    expect(back.pathname).toBe('/console/mailboxes');
+    expect(back.searchParams.get('box')).toBe('1');
+    expect(back.searchParams.get('compose')).toBe('new');
+    // The composer stays open with what was written.
+    expect(screen.getByLabelText('Subject')).toHaveValue('Quarterly numbers');
+    first.unmount();
+
+    // Back from signing in, the composer opens again on the draft and the marker leaves the URL.
+    window.history.replaceState(null, '', '/console/mailboxes?box=1&compose=new');
+    renderRoute();
+    expect(await screen.findByLabelText('Subject')).toHaveValue('Quarterly numbers');
+    expect(screen.getByLabelText('Message')).toHaveValue('Draft body');
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).has('compose')).toBe(false)
+    );
   });
 
   it('c defaults the sender to the narrowed mailbox', async () => {

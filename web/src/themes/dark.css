@@ -55,7 +55,8 @@
   --text-main: var(--night-100);
   --text-subtle: var(--night-300);
   --text-muted: var(--night-400);
-  --text-faint: var(--night-500);
+  /* Timestamps and counts are small text: 4.5:1 on every surface and selected row (WCAG 1.4.3). */
+  --text-faint: var(--night-450);
   --text-on-brand: var(--paper-0);
 
   /* Borders & Dividers */

@@ -2,8 +2,9 @@
 //
 // Resolves the design tokens the way the browser cascades them: every stylesheet imported by
 // src/themes/index.css, in order, where :root applies in both modes and .dark only in dark mode.
-// Readable text/surface pairs must meet WCAG AA 4.5:1 in light and dark mode; faint secondary text
-// (timestamps, counts, group labels) must meet 3:1. When the repository
+// Readable text/surface pairs must meet WCAG AA 4.5:1 in light and dark mode. Faint secondary text
+// (timestamps, counts, group labels) is small text too, so it meets the same 4.5:1 on every surface
+// and selected row it sits on. When the repository
 // registry is present, every registry theme's Web preset is also layered on the core tokens and
 // checked, so a theme plugin cannot ship unreadable pairs or leak light values into dark mode.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -18,11 +19,16 @@ const presetRoot = join(themeRoot, 'presets');
 const sourceRoot = join(webRoot, 'src');
 const registryPlugins = resolve(webRoot, '../registry/plugins');
 const minimumTextContrast = 4.5;
-const minimumFaintTextContrast = 3;
+const minimumFaintTextContrast = 4.5;
 
 const faintChecks = [
   ['text-faint', 'bg-canvas'],
   ['text-faint', 'bg-surface'],
+  ['text-faint', 'bg-subtle'],
+  ['text-faint', 'row-hover'],
+  ['text-faint', 'row-selected'],
+  ['text-faint', 'nav-hover'],
+  ['text-faint', 'nav-selected'],
 ];
 
 const textChecks = [

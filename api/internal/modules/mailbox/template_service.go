@@ -271,7 +271,7 @@ func buildTemplate(input TemplateInput) (*domain.MailTemplate, *parsedTemplate, 
 		return nil, nil, fmt.Errorf("%w: name", ErrMailTemplateInvalid)
 	}
 	subject := strings.TrimSpace(input.Subject)
-	if subject == "" || len(subject) > domain.MaxMailSubjectLength || strings.ContainsAny(subject, "\r\n\x00") {
+	if subject == "" || utf8.RuneCountInString(subject) > domain.MaxMailSubjectLength || strings.ContainsAny(subject, "\r\n\x00") {
 		return nil, nil, fmt.Errorf("%w: subject", ErrMailTemplateInvalid)
 	}
 	html, text := cleanText(input.HTML), cleanText(input.Text)

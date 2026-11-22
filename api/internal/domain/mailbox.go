@@ -13,7 +13,8 @@ const (
 	MailboxesPerOrganizationCeiling = 5000
 	// MaxMailRecipients matches the provider limit across to and cc.
 	MaxMailRecipients = 50
-	// MaxMailSubjectLength is the RFC 5322 line limit for a subject.
+	// MaxMailSubjectLength is the most characters (Unicode code points) a subject holds, counted
+	// before any RFC 2047 encoding; the PostgreSQL columns are varchar(998), which count characters.
 	MaxMailSubjectLength = 998
 	// MaxMailBodyBytes bounds each stored body representation.
 	MaxMailBodyBytes = 256 * 1024
