@@ -50,6 +50,7 @@ import {
   EmptyState,
   ErrorAlert,
   MailHtmlFrame,
+  mailEventKey,
   nativeSelectClassName,
   useDateTimeFormat,
 } from '@/features/mailbox/components/mail-shared';
@@ -1473,6 +1474,7 @@ function RecipientTable({ broadcastId, live }: { broadcastId: number; live: bool
                 <TableRow>
                   <TableHead>{t('broadcasts.email')}</TableHead>
                   <TableHead>{t('broadcasts.status')}</TableHead>
+                  <TableHead>{t('broadcasts.delivery')}</TableHead>
                   <TableHead>{t('broadcasts.reason')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1486,6 +1488,24 @@ function RecipientTable({ broadcastId, live }: { broadcastId: number; live: bool
                         <Badge variant={recipient.status === 'sent' ? 'secondary' : 'outline'}>
                           {t(recipientKey[recipient.status])}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        <span className="flex flex-wrap gap-1">
+                          {recipient.last_event ? (
+                            <Badge
+                              variant={
+                                recipient.last_event === 'delivered' ? 'secondary' : 'outline'
+                              }
+                            >
+                              {t(mailEventKey[recipient.last_event])}
+                            </Badge>
+                          ) : null}
+                          {recipient.contact_status === 'unsubscribed' ? (
+                            <Badge variant="outline">{t('broadcasts.contactUnsubscribed')}</Badge>
+                          ) : recipient.contact_status === 'suppressed' ? (
+                            <Badge variant="outline">{t('broadcasts.contactSuppressed')}</Badge>
+                          ) : null}
+                        </span>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {knownReason(code) ? (

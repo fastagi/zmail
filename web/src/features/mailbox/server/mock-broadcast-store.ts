@@ -181,6 +181,8 @@ export class MockBroadcastStore {
       status: 'pending',
       message_id: null,
       failure_code: '',
+      last_event: '',
+      contact_status: contact.status,
       updated_at: now.toISOString(),
       wave: index < testSize ? 1 : 2,
     }));
@@ -362,6 +364,8 @@ function publicRecipient(recipient: StoredBroadcast['recipients'][number]): Mail
     status: recipient.status,
     message_id: recipient.message_id,
     failure_code: recipient.failure_code,
+    last_event: recipient.last_event,
+    contact_status: recipient.contact_status,
     updated_at: recipient.updated_at,
   };
 }

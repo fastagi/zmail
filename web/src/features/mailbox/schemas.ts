@@ -963,6 +963,8 @@ export const mailBroadcastRecipientSchema = strictObject({
   status: mailRecipientStatusSchema,
   message_id: nullable(safeIdSchema),
   failure_code: string(),
+  last_event: mailEventSummarySchema,
+  contact_status: nullable(mailContactStatusSchema),
   updated_at: timestampSchema,
 });
 

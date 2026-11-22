@@ -74,13 +74,15 @@ type MailBroadcastResponse struct {
 
 // MailBroadcastRecipientResponse is one recipient of a broadcast.
 type MailBroadcastRecipientResponse struct {
-	ID          uint      `json:"id"`
-	ContactID   uint      `json:"contact_id"`
-	Email       string    `json:"email"`
-	Status      string    `json:"status"`
-	MessageID   *uint     `json:"message_id"`
-	FailureCode string    `json:"failure_code"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            uint      `json:"id"`
+	ContactID     uint      `json:"contact_id"`
+	Email         string    `json:"email"`
+	Status        string    `json:"status"`
+	MessageID     *uint     `json:"message_id"`
+	FailureCode   string    `json:"failure_code"`
+	LastEvent     string    `json:"last_event"`
+	ContactStatus *string   `json:"contact_status"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func toMailBroadcastResponse(broadcast *domain.MailBroadcast) MailBroadcastResponse {
@@ -268,7 +270,12 @@ func (h *Handler) ListBroadcastRecipients(c *gin.Context) {
 			Email:       recipient.Email,
 			Status:      string(recipient.Status),
 			FailureCode: recipient.FailureCode,
+			LastEvent:   string(recipient.LastEvent),
 			UpdatedAt:   recipient.UpdatedAt,
+		}
+		if recipient.ContactStatus != "" {
+			contactStatus := string(recipient.ContactStatus)
+			item.ContactStatus = &contactStatus
 		}
 		if recipient.MessageID != 0 {
 			messageID := recipient.MessageID

@@ -17850,6 +17850,8 @@ components:
         - status
         - message_id
         - failure_code
+        - last_event
+        - contact_status
         - updated_at
       properties:
         id:
@@ -17870,6 +17872,14 @@ components:
           type: string
           description: Why a recipient failed or was skipped, such as `contact_not_subscribed` or a provider code.
           maxLength: 120
+        last_event:
+          $ref: '#/components/schemas/MailEventSummary'
+        contact_status:
+          description: The contact's current status, which can change after the send, such as `unsubscribed`
+            after the recipient used the link; null once the contact is deleted.
+          oneOf:
+            - $ref: '#/components/schemas/MailContactStatus'
+            - type: 'null'
         updated_at:
           type: string
           format: date-time

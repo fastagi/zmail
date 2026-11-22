@@ -145,7 +145,13 @@ describe('mail broadcasts console', () => {
     ]);
     state.broadcast.data = broadcast({ id: 8, name: 'Draft idea' });
     state.recipients.data = page([
-      recipient({ id: 1, email: 'ann@example.com', status: 'sent' }),
+      recipient({
+        id: 1,
+        email: 'ann@example.com',
+        status: 'sent',
+        last_event: 'delivered',
+        contact_status: 'unsubscribed',
+      }),
       recipient({
         id: 2,
         email: 'bob@example.com',
@@ -320,6 +326,9 @@ describe('mail broadcasts console', () => {
     const bob = screen.getByText('bob@example.com').closest('tr') as HTMLElement;
     expect(within(bob).getByText('Bounced')).toBeInTheDocument();
     expect(screen.getByText('provider.custom')).toBeInTheDocument();
+    const ann = screen.getByText('ann@example.com').closest('tr') as HTMLElement;
+    expect(within(ann).getByText('Delivered')).toBeInTheDocument();
+    expect(within(ann).getByText('Unsubscribed')).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Recipient status'), { target: { value: 'failed' } });
     expect(state.recipientCalls.at(-1)).toEqual({ status: 'failed', live: true });
@@ -554,6 +563,8 @@ function recipient(overrides: Record<string, unknown> = {}) {
     status: 'sent',
     message_id: null,
     failure_code: '',
+    last_event: '',
+    contact_status: 'subscribed',
     queued_reason: null,
     updated_at: now(),
     ...overrides,

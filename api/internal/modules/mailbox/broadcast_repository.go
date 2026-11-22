@@ -326,21 +326,37 @@ func (r *repository) ListRecipients(
 	if _, err := r.FindBroadcast(ctx, organizationID, broadcastID); err != nil {
 		return nil, 0, err
 	}
-	query := r.conn(ctx).Model(&MailBroadcastRecipientPO{}).Where("broadcast_id = ?", broadcastID)
+	query := r.conn(ctx).Model(&MailBroadcastRecipientPO{}).Where("mail_broadcast_recipients.broadcast_id = ?", broadcastID)
 	if status != "" {
-		query = query.Where("status = ?", string(status))
+		query = query.Where("mail_broadcast_recipients.status = ?", string(status))
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []MailBroadcastRecipientPO
-	if err := query.Order("id ASC").Offset((page - 1) * perPage).Limit(perPage).Find(&rows).Error; err != nil {
+	var rows []struct {
+		MailBroadcastRecipientPO
+		LastEvent     *string
+		ContactStatus *string
+	}
+	if err := query.
+		Select(`mail_broadcast_recipients.*, mail_messages.last_event AS last_event, mail_contacts.status AS contact_status`).
+		Joins("LEFT JOIN mail_messages ON mail_messages.id = mail_broadcast_recipients.message_id").
+		Joins("LEFT JOIN mail_contacts ON mail_contacts.id = mail_broadcast_recipients.contact_id").
+		Order("mail_broadcast_recipients.id ASC").Offset((page - 1) * perPage).Limit(perPage).
+		Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	recipients := make([]*domain.MailBroadcastRecipient, 0, len(rows))
 	for i := range rows {
-		recipients = append(recipients, rows[i].toDomain())
+		recipient := rows[i].toDomain()
+		if rows[i].LastEvent != nil {
+			recipient.LastEvent = domain.MailEventType(*rows[i].LastEvent)
+		}
+		if rows[i].ContactStatus != nil {
+			recipient.ContactStatus = domain.MailContactStatus(*rows[i].ContactStatus)
+		}
+		recipients = append(recipients, recipient)
 	}
 	return recipients, total, nil
 }

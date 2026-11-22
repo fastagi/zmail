@@ -2002,7 +2002,9 @@ webhooks apply to it.
 
 The broadcast reports `counts` of its recipients by status. `GET
 /v1/mail-broadcasts/{id}/recipients` pages them, with an optional `status` filter, each with the
-stored `message_id` and a `failure_code`.
+stored `message_id`, a `failure_code`, the message's `last_event` (see [Delivery Events](#delivery-events),
+so `delivered`, `bounced`, or `complained`), and the contact's current `contact_status` (`unsubscribed`
+once the recipient used the link; null once the contact is deleted).
 
 #### Unsubscribe And Suppression
 

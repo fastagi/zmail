@@ -627,7 +627,11 @@ type MailBroadcastRecipient struct {
 	// MessageID is the stored message once it was sent or failed.
 	MessageID   uint
 	FailureCode string
-	UpdatedAt   time.Time
+	// LastEvent summarizes the delivery events of the recipient's message; empty when none arrived.
+	LastEvent MailEventType
+	// ContactStatus is the contact's current status, empty once the contact is deleted.
+	ContactStatus MailContactStatus
+	UpdatedAt     time.Time
 }
 
 // MailBroadcastRepository stores broadcasts and their recipients. Every member call is scoped

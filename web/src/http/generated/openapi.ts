@@ -4894,10 +4894,13 @@ export interface components {
         };
         MailBroadcastRecipient: {
             contact_id: components["schemas"]["PositiveID"];
+            /** @description The contact's current status, which can change after the send, such as `unsubscribed` after the recipient used the link; null once the contact is deleted. */
+            contact_status: components["schemas"]["MailContactStatus"] | null;
             email: string;
             /** @description Why a recipient failed or was skipped, such as `contact_not_subscribed` or a provider code. */
             failure_code: string;
             id: components["schemas"]["PositiveID"];
+            last_event: components["schemas"]["MailEventSummary"];
             /** @description The stored message once the recipient was sent or failed at the provider. */
             message_id: components["schemas"]["PositiveID"] | null;
             status: components["schemas"]["MailBroadcastRecipientStatus"];
