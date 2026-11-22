@@ -110,6 +110,11 @@ vi.mock('@/features/mailbox/hooks/use-thread-assignment', () => ({
   useThreadAssignment: () => ({ data: undefined, isSuccess: false }),
   useSaveThreadAssignment: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
 }));
+vi.mock('@/features/mailbox/hooks/use-thread-notes', () => ({
+  useThreadNotes: () => ({ data: undefined, isSuccess: false }),
+  useAddThreadNote: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useDeleteThreadNote: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+}));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('next/navigation', async () => {
   const { useSyncExternalStore } = await import('react');

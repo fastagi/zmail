@@ -165,7 +165,7 @@ export function ThreadView({
             </ol>
             {reader.shared ? (
               <ThreadNotes
-                key={threadId}
+                key={`notes-${threadId}`}
                 mailboxId={reader.mailboxId}
                 threadId={threadId}
                 canSend={reader.canSend}
@@ -211,7 +211,7 @@ export function MessageDetail({
           />
           {reader.shared ? (
             <ThreadNotes
-              key={message.thread_id}
+              key={`notes-${message.thread_id}`}
               mailboxId={reader.mailboxId}
               threadId={message.thread_id}
               canSend={reader.canSend}
